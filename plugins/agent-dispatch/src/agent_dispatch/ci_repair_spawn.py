@@ -27,6 +27,18 @@ def validate_admission_command(command: object) -> None:
         raise AdmissionRefused("launch admission command must be a non-empty argv list")
 
 
+def cli_bindings(bindings: object, command: object) -> tuple[list[dict], list[str]]:
+    """Parse CLI JSON once and report malformed configuration without a traceback."""
+    try:
+        parsed_bindings = json.loads(bindings) if isinstance(bindings, str) else bindings
+        parsed_command = json.loads(command) if isinstance(command, str) else command
+        validate_bindings(parsed_bindings)
+        validate_admission_command(parsed_command)
+        return parsed_bindings, parsed_command
+    except (ValueError, TypeError) as exc:
+        raise SystemExit(f"Invalid CI repair bindings/admission command: {exc}") from exc
+
+
 def make_ci_repair_spawn(
     bindings: list[dict],
     *,

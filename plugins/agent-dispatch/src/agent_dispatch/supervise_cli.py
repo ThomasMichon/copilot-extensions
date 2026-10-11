@@ -137,10 +137,9 @@ def _validate_spec_charter_mode(spec: dict) -> None:
     registration the daemon can never actually start (agent-worktrees embody
     has no charter-binding flag)."""
     if spec.get("ci_repair_bindings") is not None:
-        from .ci_repair_spawn import validate_admission_command, validate_bindings
+        from .ci_repair_spawn import cli_bindings
 
-        validate_bindings(spec["ci_repair_bindings"])
-        validate_admission_command(spec.get("ci_repair_admission_command"))
+        cli_bindings(spec["ci_repair_bindings"], spec.get("ci_repair_admission_command"))
         if spec.get("fleet") or spec.get("embody_backend", "headless") != "headless":
             raise SystemExit("CI repair bindings require a local headless lane")
         if spec.get("cli_labels") or spec.get("script_labels") or spec.get("labels") != ["ci-repair"]:
@@ -690,10 +689,9 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     ]
     charter = getattr(args, "charter", None)
     if getattr(args, "ci_repair_bindings", None):
-        from .ci_repair_spawn import validate_admission_command, validate_bindings
+        from .ci_repair_spawn import cli_bindings
 
-        validate_bindings(json.loads(args.ci_repair_bindings))
-        validate_admission_command(json.loads(args.ci_repair_admission_command or "null"))
+        ci_bindings, ci_command = cli_bindings(args.ci_repair_bindings, args.ci_repair_admission_command)
         if getattr(args, "pool", None) or backend != "headless" or cli_labels or script_labels or args.label != ["ci-repair"]:
             raise SystemExit("CI repair bindings require a local label-gated headless lane")
     if charter and (backend in ("cli", "script") or cli_labels or script_labels):
@@ -800,8 +798,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             from .ci_repair_spawn import make_ci_repair_spawn
 
             headless_spawn = make_ci_repair_spawn(
-                json.loads(args.ci_repair_bindings), route=route,
-                admission_command=json.loads(args.ci_repair_admission_command),
+                ci_bindings, route=route, admission_command=ci_command,
             )
         script_spawn = make_script_spawn(
             route=route,

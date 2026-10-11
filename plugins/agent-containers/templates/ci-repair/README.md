@@ -2,7 +2,9 @@
 
 This is a buildable, inert image/fleet template, not a repair charter or an
 activated worker. Build with Docker's `--build-arg COPILOT_VERSION=<reviewed-version>`
-and tag `ci-repair:local`. Load the adjacent `containers.yaml` through the
+and `--build-arg UV_IMAGE=ghcr.io/astral-sh/uv@sha256:<reviewed-digest>`;
+tag `ci-repair:local`. The uv binaries are copied from that adopter-reviewed
+immutable image, never a fetched install script. Load the adjacent `containers.yaml` through the
 ordinary `agent-containers` config surface; provisioning uses its existing
 image-backed fleet lifecycle. Building/provisioning requires separate operator
 authorization and is not part of offline regression validation.

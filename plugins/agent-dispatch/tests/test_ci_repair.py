@@ -309,12 +309,35 @@ def test_invalid_admission_argv_is_refused_at_config_boundary(command):
 
     with pytest.raises(ci_repair.AdmissionRefused):
         validate_admission_command(command)
-    with pytest.raises(ci_repair.AdmissionRefused):
+    with pytest.raises(SystemExit):
         _validate_spec_charter_mode(
             {
                 "labels": ["ci-repair"],
                 "ci_repair_bindings": [EXECUTION],
                 "ci_repair_admission_command": command,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "bindings,command", [("bad", '["adapter"]'), ("[]", "bad"), ("[]", "null")]
+)
+def test_cli_json_errors_are_concise(bindings, command):
+    from agent_dispatch.ci_repair_spawn import cli_bindings
+
+    with pytest.raises(SystemExit, match="Invalid CI repair"):
+        cli_bindings(bindings, command)
+
+
+def test_registrar_refuses_missing_admission_before_serialization():
+    from agent_dispatch.supervisor_registration import build_command
+
+    with pytest.raises(ci_repair.AdmissionRefused, match="admission command"):
+        build_command(
+            {
+                "id": "repair",
+                "kind": "supervised-lane",
+                "spec": {"ci_repair_bindings": [EXECUTION], "labels": ["ci-repair"]},
             }
         )
 

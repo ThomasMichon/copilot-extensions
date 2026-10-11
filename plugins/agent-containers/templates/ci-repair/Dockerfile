@@ -1,5 +1,8 @@
+ARG UV_IMAGE
 FROM node:22-bookworm AS node-tools
+FROM ${UV_IMAGE} AS uv-tools
 FROM mcr.microsoft.com/devcontainers/python:3.12-bookworm
+COPY --from=uv-tools /uv /uvx /usr/local/bin/
 COPY --from=node-tools /usr/local/bin/ /usr/local/bin/
 COPY --from=node-tools /usr/local/lib/node_modules/ /usr/local/lib/node_modules/
 
@@ -10,6 +13,5 @@ RUN test -n "$COPILOT_VERSION" \
     && apt-get install -y --no-install-recommends gh \
     && npm install --global "@github/copilot@$COPILOT_VERSION" \
     && apt-get clean
-RUN curl -fsSL https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 USER vscode
 WORKDIR /workspace

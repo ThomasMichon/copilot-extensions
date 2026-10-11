@@ -418,8 +418,12 @@ def _lane_flags(spec: dict) -> list[str]:
     if spec.get("charter"):
         argv += ["--charter", str(spec["charter"])]
     if spec.get("ci_repair_bindings") is not None:
+        from .ci_repair_spawn import validate_admission_command, validate_bindings
+
+        validate_bindings(spec["ci_repair_bindings"])
+        validate_admission_command(spec.get("ci_repair_admission_command"))
         argv += ["--ci-repair-bindings", json.dumps(spec["ci_repair_bindings"])]
-        argv += ["--ci-repair-admission-command", json.dumps(spec.get("ci_repair_admission_command"))]
+        argv += ["--ci-repair-admission-command", json.dumps(spec["ci_repair_admission_command"])]
     argv += ["--interval", str(spec.get("interval", 30.0))]
     # Full supervise surface (a declaration is a lossless superset of the legacy env
     # profile): these keys are absent in older store-backed specs -- emitted only
