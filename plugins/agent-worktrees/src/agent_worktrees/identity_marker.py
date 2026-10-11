@@ -144,7 +144,7 @@ def load_identity_key() -> bytes | None:
     """
     from .identity_vault import ARGV_ENV, load_cached_vault_key
 
-    if ARGV_ENV in os.environ and KEY_ENV_VAR not in os.environ:
+    if ARGV_ENV in os.environ and not os.environ.get(KEY_ENV_VAR):
         return load_cached_vault_key()
     path = identity_key_path()
     if path is None:

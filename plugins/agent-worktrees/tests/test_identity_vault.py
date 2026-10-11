@@ -54,6 +54,13 @@ def test_explicit_file_override_preserves_shared_key_compatibility(monkeypatch, 
     assert not (tmp_path / "different.key").exists()
 
 
+def test_empty_file_override_still_uses_common_vault_key(monkeypatch):
+    monkeypatch.setenv(identity_marker.KEY_ENV_VAR, "")
+    monkeypatch.setenv(identity_vault.ARGV_ENV, json.dumps([sys.executable]))
+    monkeypatch.setattr(identity_vault, "_read_key_output", lambda argv: base64.b64encode(b"s"*32))
+    assert identity_marker.load_identity_key() == b"s" * 32
+
+
 def test_real_cache_adapter_output_boundary():
     value = base64.b64encode(b"s" * 32)
     assert identity_vault._read_key_output([

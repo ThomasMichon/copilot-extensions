@@ -133,10 +133,14 @@ store, and no network access needed:
 python -m agent_worktrees.identity_marker decode "<token>"
 ```
 
-The key resolves from `AGENT_WORKTREES_IDENTITY_KEY` (an explicit path) or,
-by default, a OneDrive-rooted location (`<OneDrive root>/Apps/agent-worktrees/identity.key`)
-so the SAME key file works from any of the key holder's machines --
-provision one with `python -m agent_worktrees.identity_marker generate`.
+### Existing file-key compatibility
+
+With no configured vault argv, the key resolves from
+`AGENT_WORKTREES_IDENTITY_KEY` or the legacy OneDrive location
+(`<OneDrive root>/Apps/agent-worktrees/identity.key`). Existing file-key adopters
+may provision once with `python -m agent_worktrees.identity_marker generate`;
+that command refuses generation when a vault source is configured. Vault
+users provision the common entry and populate the cache as described above.
 Generation publishes a complete key file without replacing an existing key,
 including when another process creates it concurrently. Keep the old key
 before using `generate --force`: replacing it prevents old markers from
@@ -144,7 +148,7 @@ decrypting. Local atomic creation cannot serialize two machines before
 their sync client reconciles; provision once and wait for synchronization
 before generating markers on another machine. A malformed or unreadable
 key omits encryption with a sanitized warning, rather than regenerating it.
-This is a lighter-weight, lower-assurance mechanism than a real secrets
+The legacy file-key alternative is a lighter-weight, lower-assurance mechanism than a real secrets
 vault (a plain file, not machine-bound, not MFA-gated) -- a convenience for
 low-stakes reverse lookup, not a security boundary. Without a configured
 key, the `enc=` field is simply absent from every marker; nothing else
