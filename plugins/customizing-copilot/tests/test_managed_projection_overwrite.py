@@ -305,3 +305,13 @@ def test_final_write_rechecks_safety_and_rolls_back(
     monkeypatch.setattr(projections, "_atomic_write", write)
     assert projections.sync_repository(repo, [source], overwrite_existing_managed=True).blocking
     assert fallback.read_bytes() == before
+
+
+def test_empty_transaction_final_recheck_returns_original_error() -> None:
+    def fail() -> None:
+        raise OSError("consent withdrawn")
+
+    with pytest.raises(OSError, match="empty transaction.*consent withdrawn"):
+        projections.transaction.write(
+            [], read=lambda p: None, atomic_write=lambda p, c: None, after_write=fail
+        )

@@ -102,7 +102,8 @@ def write(
                     atomic_write(path, previous_content)
             except OSError as rollback_exc:
                 rollback_errors.append(f"{path.as_posix()}: {rollback_exc}")
-        detail = f"transaction failed at {path.as_posix()}: {exc}"
+        location = path.as_posix() if changes else "<empty transaction>"
+        detail = f"transaction failed at {location}: {exc}"
         if rollback_errors:
             detail += "; rollback also failed: " + "; ".join(rollback_errors)
         raise OSError(detail) from exc
