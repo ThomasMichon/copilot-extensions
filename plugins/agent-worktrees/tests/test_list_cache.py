@@ -30,7 +30,7 @@ def _args(**kw):
     {},
     None,
 ])
-def test_cache_only_mux_details_use_one_snapshot_without_enrichment(monkeypatch, snapshot):
+def test_cache_only_mux_details_use_one_snapshot_without_enrichment(monkeypatch, snapshot, capsys):
     from agent_worktrees import __main__ as core, list_cli, sessions
     from agent_worktrees import delegate_cli
     from agent_worktrees.picker_support import data_local
@@ -63,6 +63,9 @@ def test_cache_only_mux_details_use_one_snapshot_without_enrichment(monkeypatch,
     args = _args(json=True, cache_only=True, stream=False, glance=False,
                  worktree_id=None, codename=None, refresh=False)
     assert list_cli.cmd_list(args) == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert ("Mux enumeration unavailable" in captured.err) == (snapshot is None)
     assert calls == ["enumerate"]
     rows = results[0]["worktrees"]
     if snapshot is None:

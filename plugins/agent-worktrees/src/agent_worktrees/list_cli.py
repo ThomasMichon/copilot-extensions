@@ -458,7 +458,8 @@ def cmd_list(args: argparse.Namespace) -> int:
             if getattr(args, "mux_details", False):
                 mux_snapshot = sessions._list_mux_sessions()
                 if mux_snapshot is None:
-                    output.warn("Mux enumeration unavailable; cached listing has no live mux observation.")
+                    with output.stdout_to_stderr():
+                        output.warn("Mux enumeration unavailable; cached listing has no live mux observation.")
             worktrees = []
             with cfg.cached_load_config_scope():
                 for rec in records:
