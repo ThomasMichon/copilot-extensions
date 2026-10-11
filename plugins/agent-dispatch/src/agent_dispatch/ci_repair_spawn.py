@@ -17,6 +17,16 @@ def validate_bindings(bindings: list[dict]) -> None:
         execution(binding)
 
 
+def validate_admission_command(command: object) -> None:
+    """Reject missing or malformed launch-time adapter argv."""
+    if (
+        not isinstance(command, list)
+        or not command
+        or any(not isinstance(part, str) or not part for part in command)
+    ):
+        raise AdmissionRefused("launch admission command must be a non-empty argv list")
+
+
 def make_ci_repair_spawn(
     bindings: list[dict],
     *,
@@ -28,12 +38,8 @@ def make_ci_repair_spawn(
     from . import bridge, embody
 
     validate_bindings(bindings)
-    if admission_command is not None and (
-        not isinstance(admission_command, list)
-        or not admission_command
-        or any(not isinstance(part, str) or not part for part in admission_command)
-    ):
-        raise AdmissionRefused("launch admission command must be an argv list")
+    if admission_command is not None:
+        validate_admission_command(admission_command)
 
     def spawn(task: dict) -> tuple[bool, dict]:
         try:
@@ -71,7 +77,7 @@ def make_ci_repair_spawn(
             for key in ("policy_ref", "inference_auth_ref", "repository_auth_ref", "source_ref"):
                 if not isinstance(verdict.get(key), str) or not verdict[key].strip():
                     raise AdmissionRefused(f"CI repair launch missing {key}")
-        except (ValueError, TypeError, AttributeError) as exc:
+        except (ValueError, TypeError, AttributeError, OSError, subprocess.TimeoutExpired) as exc:
             return False, {"error": str(exc)}
         worker_id = f"ci-repair-{uuid.uuid4().hex[:8]}"
         seed = embody.autopilot_worker_prompt(
@@ -92,7 +98,7 @@ def make_ci_repair_spawn(
                 wait=False,
                 json_output=True,
             )
-        except bridge.BridgeUnavailable as exc:
+        except (bridge.BridgeUnavailable, OSError, subprocess.TimeoutExpired) as exc:
             return False, {"error": str(exc)}
         if result.returncode != 0:
             return False, {"error": result.stderr.strip() or "CI repair spawn failed"}

@@ -137,15 +137,13 @@ def _validate_spec_charter_mode(spec: dict) -> None:
     registration the daemon can never actually start (agent-worktrees embody
     has no charter-binding flag)."""
     if spec.get("ci_repair_bindings") is not None:
-        from .ci_repair_spawn import validate_bindings
+        from .ci_repair_spawn import validate_admission_command, validate_bindings
 
         validate_bindings(spec["ci_repair_bindings"])
-        command = spec.get("ci_repair_admission_command")
-        if not isinstance(command, list) or not command or any(not isinstance(p, str) or not p for p in command):
-            raise SystemExit("CI repair bindings require an independent admission command")
+        validate_admission_command(spec.get("ci_repair_admission_command"))
         if spec.get("fleet") or spec.get("embody_backend", "headless") != "headless":
             raise SystemExit("CI repair bindings require a local headless lane")
-        if spec.get("cli_labels") or spec.get("script_labels") or not spec.get("labels"):
+        if spec.get("cli_labels") or spec.get("script_labels") or spec.get("labels") != ["ci-repair"]:
             raise SystemExit("CI repair bindings require a dedicated label-gated headless lane")
     if not spec.get("charter"):
         return
@@ -692,12 +690,11 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     ]
     charter = getattr(args, "charter", None)
     if getattr(args, "ci_repair_bindings", None):
-        from .ci_repair_spawn import validate_bindings
+        from .ci_repair_spawn import validate_admission_command, validate_bindings
 
         validate_bindings(json.loads(args.ci_repair_bindings))
-        if not getattr(args, "ci_repair_admission_command", None):
-            raise SystemExit("CI repair bindings require an independent admission command")
-        if getattr(args, "pool", None) or backend != "headless" or cli_labels or script_labels or not args.label:
+        validate_admission_command(json.loads(args.ci_repair_admission_command or "null"))
+        if getattr(args, "pool", None) or backend != "headless" or cli_labels or script_labels or args.label != ["ci-repair"]:
             raise SystemExit("CI repair bindings require a local label-gated headless lane")
     if charter and (backend in ("cli", "script") or cli_labels or script_labels):
         print(

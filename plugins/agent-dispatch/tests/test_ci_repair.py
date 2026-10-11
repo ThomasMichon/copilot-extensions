@@ -2,6 +2,7 @@
 
 import importlib
 import json
+import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -290,9 +291,49 @@ def test_registration_preserves_bindings_and_refuses_incompatible_modes():
     argv = build_command({"id": "repair-lane", "kind": "supervised-lane", "spec": spec})
     assert json.loads(argv[argv.index("--ci-repair-bindings") + 1]) == [EXECUTION]
     assert json.loads(argv[argv.index("--ci-repair-admission-command") + 1]) == ["fake-admission"]
-    for extra in ({"fleet": {"pool": ["host"]}}, {"embody_backend": "cli"}, {"labels": []}):
+    for extra in (
+        {"fleet": {"pool": ["host"]}},
+        {"embody_backend": "cli"},
+        {"labels": []},
+        {"labels": ["other"]},
+        {"labels": ["ci-repair", "other"]},
+    ):
         with pytest.raises(SystemExit):
             _validate_spec_charter_mode({**spec, **extra})
+
+
+@pytest.mark.parametrize("command", [None, [], "adapter", [""], [None]])
+def test_invalid_admission_argv_is_refused_at_config_boundary(command):
+    from agent_dispatch.ci_repair_spawn import validate_admission_command
+    from agent_dispatch.supervise_cli import _validate_spec_charter_mode
+
+    with pytest.raises(ci_repair.AdmissionRefused):
+        validate_admission_command(command)
+    with pytest.raises(ci_repair.AdmissionRefused):
+        _validate_spec_charter_mode(
+            {
+                "labels": ["ci-repair"],
+                "ci_repair_bindings": [EXECUTION],
+                "ci_repair_admission_command": command,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "error", [OSError("adapter missing"), subprocess.TimeoutExpired("adapter", 30)]
+)
+def test_spawn_adapter_failure_returns_failed_reservation_result(tmp_path, error):
+    task = ci_repair.run_tick(Client(tmp_path), config(enabled=True), runner=adapters)["created"][
+        0
+    ]
+
+    def failing_adapter(*args, **kwargs):
+        raise error
+
+    ok, result = make_ci_repair_spawn(
+        [EXECUTION], admission_command=["fake-adapter"], admission_runner=failing_adapter
+    )(task)
+    assert not ok and result["error"]
 
 
 def test_forged_task_or_revoked_authority_cannot_launch(tmp_path, monkeypatch):

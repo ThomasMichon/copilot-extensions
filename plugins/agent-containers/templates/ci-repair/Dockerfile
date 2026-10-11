@@ -9,7 +9,7 @@ RUN test -n "$COPILOT_VERSION" \
     && apt-get update \
     && apt-get install -y --no-install-recommends gh \
     && npm install --global "@github/copilot@$COPILOT_VERSION" \
-    && pip install --no-cache-dir uv \
     && apt-get clean
+RUN curl -fsSL https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 USER vscode
 WORKDIR /workspace
