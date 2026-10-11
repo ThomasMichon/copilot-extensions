@@ -135,3 +135,81 @@ async def test_valid_local_notifications_never_produce_responses_or_start_target
     assert await core.handle({"method": method, "params": {}}) is None
     assert not core._sessions
     await core.aclose()
+
+
+@pytest.mark.parametrize("policy", [{"allow": ["action"]}, {"deny": ["read"]}])
+async def test_name_authorization_denial_is_method_not_found_without_start(policy):
+    data = definition()
+    data["routing"]["targets"]["beta"]["tools"] = policy
+    core = RoutedCore(parse_config(data))
+    response = await core.handle({"id": 1, "method": "tools/call", "params": {
+        "name": "read", "arguments": {"organization": "beta"}}})
+    assert response["error"]["code"] == -32601
+    assert "authorization" in response["error"]["message"]
+    assert not core._sessions
+    await core.aclose()
+
+
+@pytest.mark.parametrize("failure_phase", ["policy", "session"])
+@pytest.mark.parametrize("failure", [RuntimeError("close failed"), asyncio.CancelledError()])
+async def test_cleanup_drains_every_target_and_preserves_failure(failure_phase, failure):
+    core = RoutedCore(parse_config(definition()))
+    closed = []
+
+    class Policy:
+        def __init__(self, name):
+            self.name = name
+
+        async def aclose(self):
+            closed.append(("policy", self.name))
+            if failure_phase == "policy" and self.name == "alpha":
+                raise failure
+
+    class Session:
+        def __init__(self, name):
+            self.name = name
+
+        async def __aexit__(self, *args):
+            closed.append(("session", self.name))
+            if failure_phase == "session" and self.name == "alpha":
+                raise failure
+
+    core._policies = {key: Policy(key) for key in ("alpha", "beta")}
+    core._sessions = {key: Session(key) for key in ("alpha", "beta")}
+    core._session_configs = {"alpha": object(), "beta": object()}
+    with pytest.raises(type(failure)) as error:
+        await core.aclose()
+    if not isinstance(failure, asyncio.CancelledError):
+        assert error.value is failure
+    assert set(closed) == {
+        ("policy", "alpha"), ("policy", "beta"), ("session", "alpha"), ("session", "beta")}
+    assert not core._sessions and not core._session_configs
+
+
+async def test_caller_cancellation_still_drains_sessions_then_propagates():
+    core = RoutedCore(parse_config(definition()))
+    entered, release = asyncio.Event(), asyncio.Event()
+    closed = []
+
+    class Policy:
+        async def aclose(self):
+            entered.set()
+            await release.wait()
+
+    class Session:
+        async def __aexit__(self, *args):
+            closed.append("session")
+
+    core._policies = {"alpha": Policy()}
+    core._sessions = {"alpha": Session()}
+    core._session_configs = {"alpha": object()}
+    task = asyncio.create_task(core.aclose())
+    await entered.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert closed == ["session"]
+    assert not core._sessions and not core._session_configs

@@ -176,7 +176,8 @@ class RoutedCore:
                 if not isinstance(name, str) or not tool_visible(
                     name, self.cfg.tools
                 ) or not tool_visible(name, self.spec.targets[target].tools):
-                    return error_response(msg, "tool denied by routing target authorization") \
+                    return error_response(msg, "tool denied by routing target authorization",
+                                          code=-32601) \
                         if is_request(msg) else None
                 stripped = {k: v for k, v in args.items() if k != self.spec.parameter}
                 routed = {**msg, "_routing_target": target,
@@ -219,8 +220,28 @@ class RoutedCore:
             return response
 
     async def aclose(self) -> None:
-        await asyncio.gather(*(policy.aclose() for policy in self._policies.values()))
-        await asyncio.gather(*(session.__aexit__(None, None, None)
-                               for session in self._sessions.values()))
-        self._sessions.clear()
-        self._session_configs.clear()
+        cleanup = asyncio.create_task(self._close_all())
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            # Caller cancellation cannot skip teardown of owned targets.
+            await asyncio.gather(cleanup, return_exceptions=True)
+            raise
+
+    async def _close_all(self) -> None:
+        errors = await asyncio.gather(
+            *(policy.aclose() for policy in self._policies.values()),
+            return_exceptions=True,
+        )
+        try:
+            errors.extend(await asyncio.gather(
+                *(session.__aexit__(None, None, None)
+                  for session in self._sessions.values()),
+                return_exceptions=True,
+            ))
+        finally:
+            self._sessions.clear()
+            self._session_configs.clear()
+        for error in errors:
+            if isinstance(error, BaseException):
+                raise error
