@@ -5,6 +5,8 @@ import pytest
 from fleet_contracts import (
     ConnectorRegistration,
     ContractError,
+    CredentialParameters,
+    CredentialResult,
     DriverSnapshot,
     DriverTarget,
     HealthResult,
@@ -19,6 +21,8 @@ from fleet_contracts import (
 )
 from fleet_contracts.records import (
     MAX_CONTENT_BYTES,
+    MAX_CREDENTIAL_FIELDS,
+    MAX_CREDENTIAL_VALUE_BYTES,
     MAX_HITS,
     MAX_MESSAGE_BYTES,
     MAX_QUERY_BYTES,
@@ -369,3 +373,127 @@ def test_health_result_is_typed_and_bounded(change):
 def test_health_result_allows_blank_or_missing_detail():
     assert HealthResult(True).detail is None
     assert HealthResult(False, "").detail == ""
+
+
+# --- vault-v1 (CredentialParameters / CredentialResult / credential.get) ---
+
+def vault_registration(operations=("health", "credential.get")):
+    return ConnectorRegistration(
+        "lab", TargetRef("static-ssh", "ssh-a", "worker-a"), "connector-a", 4, 1500,
+        (ServiceOffer("vault", "vault-install-a", "vault-v1", operations),),
+    )
+
+
+def credential_request(**overrides):
+    reg = vault_registration()
+    base = {
+        "fleet_id": reg.fleet_id, "target": reg.target, "connector_id": reg.connector_id,
+        "generation": reg.generation, "service_id": "vault", "installation_id": "vault-install-a",
+        "request_id": "request-a", "operation": "credential.get",
+        "parameters": CredentialParameters("get-azure-token", resource="https://management.azure.com/"),
+    }
+    base.update(overrides)
+    return RouteRequest(**base)
+
+
+def credential_response(**overrides):
+    base = {
+        "request_id": "request-a", "service_id": "vault", "installation_id": "vault-install-a",
+        "operation": "credential.get",
+        "credential": CredentialResult(True, (("token", "secret-token"), ("expires_on", "1700000000"))),
+    }
+    base.update(overrides)
+    return RouteResponse(**base)
+
+
+@pytest.mark.parametrize("change", [
+    {"action": "get"}, {"action": "store"}, {"action": "capabilities"}, {"action": ""},
+    {"action": 1}, {"host": "two\nvalues"}, {"host": ""}, {"resource": "x" * 257},
+])
+def test_credential_parameters_are_typed_and_bounded(change):
+    base = {"action": "get-azure-token", "resource": "https://management.azure.com/"}
+    base.update(change)
+    with pytest.raises(ContractError):
+        CredentialParameters.from_dict(base)
+
+
+def test_credential_parameters_cover_known_dedicated_actions():
+    CredentialParameters("get-azure-token", resource="https://management.azure.com/", tenant="t")
+    CredentialParameters("get-github-token", host="github.com")
+    CredentialParameters("get-access-token", host="dev.azure.com")
+    assert CredentialParameters("get-azure-token").host is None
+
+
+def test_route_request_accepts_credential_get_bound_to_vault_offer():
+    request = credential_request()
+    offer = request.check_offer(vault_registration(), 1499)
+    assert offer.adapter == "vault-v1"
+    # The vault offer doesn't support index.search -- check_offer (not
+    # construction) is what must reject a mismatched operation/offer pairing.
+    mismatched = replace(
+        request, service_id="index", installation_id="index-install-a",
+        operation="index.search", parameters=SearchParameters("q"),
+    )
+    with pytest.raises(ContractError):
+        mismatched.check_offer(vault_registration(), 1499)
+    with pytest.raises(ContractError):
+        replace(request, parameters=None)
+
+
+@pytest.mark.parametrize("record,reader", [
+    (credential_request(), RouteRequest),
+    (credential_response(), RouteResponse),
+])
+def test_credential_wire_roundtrip(record, reader):
+    encoded = encode_json(record.to_dict())
+    assert reader.from_dict(decode_json(encoded)) == record
+    assert len(encoded) < MAX_MESSAGE_BYTES
+
+
+@pytest.mark.parametrize("change", [
+    {"available": True, "fields": ()},  # available credential needs >=1 field
+    {"available": False, "fields": (("token", "x"),)},  # unavailable cannot carry fields
+    {"available": True, "fields": (("token", "x"), ("token", "y"))},  # duplicate field name
+    {"available": True, "fields": (("password", "x"),)},  # unknown field name
+    {"available": True, "fields": [("token", "x")]},  # mutable collection
+    {"available": True, "fields": (("token", "x" * (MAX_CREDENTIAL_VALUE_BYTES + 1)),)},
+    {"available": True, "fields": (("token", "x"),), "reason": "cache_miss"},  # available + reason
+    {"available": False, "reason": "x" * 129},
+    {"available": "yes", "fields": ()},
+])
+def test_credential_result_is_typed_and_bounded(change):
+    base = {"available": True, "fields": (("token", "x"),), "reason": None}
+    base.update(change)
+    with pytest.raises(ContractError):
+        CredentialResult(**base)
+
+
+def test_credential_result_bounds_field_count():
+    too_many = tuple((f"field-{i}", "x") for i in range(MAX_CREDENTIAL_FIELDS + 1))
+    with pytest.raises(ContractError):
+        CredentialResult(True, tuple(("token", "x") for _ in too_many))
+
+
+def test_credential_result_unavailable_carries_only_a_reason():
+    denied = CredentialResult(False, reason="cache_miss")
+    assert denied.available is False
+    assert denied.fields == ()
+    assert denied.reason == "cache_miss"
+
+
+@pytest.mark.parametrize("change", [
+    {"operation": "credential.get", "credential": None},
+    {"operation": "credential.get", "hits": ()},
+    {"operation": "credential.get", "health": HealthResult(True)},
+    {"operation": "health", "credential": CredentialResult(False, reason="n/a"), "health": HealthResult(True)},
+    {"operation": "index.search", "credential": CredentialResult(False, reason="n/a"), "hits": ()},
+])
+def test_route_response_credential_shape_is_exclusive(change):
+    base = {
+        "request_id": "request-a", "service_id": "vault", "installation_id": "vault-install-a",
+        "operation": "credential.get",
+        "credential": CredentialResult(True, (("token", "x"),)),
+    }
+    base.update(change)
+    with pytest.raises(ContractError):
+        RouteResponse(**base)

@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Distribution name is namespaced (agent-fleet-vault-adapter) to prevent
+# dependency-confusion; the import module is ``fleet_vault_adapter``.
+name = "agent-fleet-vault-adapter"
+version = "0.1.0-dev1"
+description = "machine-fleet routing-foundation service adapter: shuttles a scoped credential-relay response from a registered vault/controller machine through the Gateway"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Michon" }
+]
+dependencies = [
+    "agent-fleet-contracts",
+]
+
+[tool.uv.sources]
+# Always resolve the sibling data-contract lib from the local path, never an
+# index -- same canonical pointer pattern every other consumer uses.
+agent-fleet-contracts = { path = "../fleet-contracts", editable = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use `assert` (pytest); the fixed-backend URL built from
+# locally-resolved loopback host/port is not user input (no SSRF surface).
+"tests/**" = ["S101", "S310"]
+# The real backend URL is always locally resolved (the connector's own
+# approved configuration), never client-supplied -- not an SSRF sink despite
+# the generic `urlopen` lint signature.
+"src/fleet_vault_adapter/adapter.py" = ["S310"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

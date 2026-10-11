@@ -13,13 +13,34 @@ MAX_QUERY_BYTES = 4096
 MAX_HITS = 100
 MAX_PATH_BYTES = 1024
 MAX_CONTENT_BYTES = 4096
+MAX_CREDENTIAL_FIELDS = 8
+MAX_CREDENTIAL_FIELD_BYTES = 256
+MAX_CREDENTIAL_VALUE_BYTES = 8192
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", re.ASCII)
 _REVISION = re.compile(r"sha256:[a-f0-9]{64}", re.ASCII)
 _CAPABILITIES = frozenset({"ssh", "create", "delete", "lease", "bootstrap"})
 _OPERATIONS = {
     "health-v1": frozenset({"health"}),
     "index-v1": frozenset({"health", "index.search"}),
+    "vault-v1": frozenset({"health", "credential.get"}),
 }
+# The closed set of credential actions this contract permits -- matches
+# `libs/credential-relay`'s own dedicated, hostless-or-host-scoped token
+# actions (`server.py`'s `_KNOWN_ACTIONS`/`_HOSTLESS_ACTIONS`), deliberately
+# excluding its generic git-credential `get`/`store`/`erase`/`fill`/`approve`/
+# `reject` verbs: those accept an open-ended `protocol`/`path`/`username`
+# field set shaped for git's own credential-helper protocol, which is a much
+# larger surface than a typed, bounded fleet route should expose. A future
+# adapter kind can add a narrower `git-credential-v1` contract for that case
+# if/when a real consumer needs it.
+_CREDENTIAL_ACTIONS = frozenset({"get-azure-token", "get-github-token", "get-access-token"})
+# Response field names a backend may return (e.g. `token`, `expires_on`,
+# `resource` for an Azure token; `token`, `host` for a GitHub token). Bounded
+# to a known set for the same reason as `_CREDENTIAL_ACTIONS` above -- this is
+# a typed contract, not an arbitrary key=value passthrough.
+_CREDENTIAL_FIELDS = frozenset({
+    "token", "resource", "tenant", "scope", "host", "expires_on", "username",
+})
 
 
 class ContractError(ValueError):
@@ -330,6 +351,40 @@ class SearchParameters:
 
 
 @dataclass(frozen=True)
+class CredentialParameters:
+    """A bounded request for one credential-relay action.
+
+    Mirrors `libs/credential-relay`'s own dedicated token actions
+    (`get-azure-token`, `get-github-token`, `get-access-token`) and the
+    request fields their sources actually read (`az_login.py`'s
+    `scope`/`resource`/`tenant`, `gh_auth.py`'s `host`) -- a closed,
+    explicitly named field set, never an open `fields: dict` passthrough
+    (see `_CREDENTIAL_ACTIONS`'s docstring for why).
+    """
+
+    action: str
+    host: str | None = None
+    resource: str | None = None
+    tenant: str | None = None
+    scope: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.action not in _CREDENTIAL_ACTIONS:
+            raise ContractError("unsupported credential action")
+        for name in ("host", "resource", "tenant", "scope"):
+            value = getattr(self, name)
+            if value is not None:
+                _bounded_text(value, name, MAX_CREDENTIAL_FIELD_BYTES)
+                if any(ord(c) < 32 for c in value):
+                    raise ContractError(f"{name} cannot contain control characters")
+
+    @classmethod
+    def from_dict(cls, value: object) -> CredentialParameters:
+        data = _object(value, {"action"}, {"host", "resource", "tenant", "scope"})
+        return cls(**data)
+
+
+@dataclass(frozen=True)
 class RouteRequest(_WireRecord):
     SCHEMA: ClassVar[str] = "agent-fleet.route-request"
     fleet_id: str
@@ -340,7 +395,7 @@ class RouteRequest(_WireRecord):
     installation_id: str
     request_id: str
     operation: str
-    parameters: SearchParameters | None
+    parameters: SearchParameters | CredentialParameters | None
 
     def __post_init__(self) -> None:
         for name in ("fleet_id", "connector_id", "service_id", "installation_id", "request_id"):
@@ -354,6 +409,9 @@ class RouteRequest(_WireRecord):
         elif self.operation == "index.search":
             if not isinstance(self.parameters, SearchParameters):
                 raise ContractError("index.search requires validated search parameters")
+        elif self.operation == "credential.get":
+            if not isinstance(self.parameters, CredentialParameters):
+                raise ContractError("credential.get requires validated credential parameters")
         else:
             raise ContractError("unsupported routing operation")
 
@@ -382,7 +440,10 @@ class RouteRequest(_WireRecord):
         })
         parameters = data["parameters"]
         if parameters is not None:
-            parameters = SearchParameters.from_dict(parameters)
+            if data["operation"] == "credential.get":
+                parameters = CredentialParameters.from_dict(parameters)
+            else:
+                parameters = SearchParameters.from_dict(parameters)
         return cls(
             data["fleet_id"], TargetRef.from_dict(data["target"]), data["connector_id"],
             data["generation"], data["service_id"], data["installation_id"],
@@ -455,6 +516,59 @@ class HealthResult:
 
 
 @dataclass(frozen=True)
+class CredentialResult:
+    """A bounded credential-relay response: either a resolved credential's
+    fields (e.g. ``token``, ``expires_on``) or an explicit, wire-visible
+    unavailable state (expired/not-cached/denied) -- `available=False` is
+    not an error; a cache miss or expiry is the backend's ordinary, honest
+    answer (see `credential_relay`'s own fail-fast/fail-closed semantics),
+    never silently coerced into an empty-but-"successful" credential.
+    """
+
+    available: bool
+    fields: tuple[tuple[str, str], ...] = ()
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.available) is not bool:
+            raise ContractError("available must be a boolean")
+        if type(self.fields) is not tuple:
+            raise ContractError("fields must be an immutable collection")
+        values = _tuple(self.fields, "fields", MAX_CREDENTIAL_FIELDS, empty=True)
+        names = []
+        for item in values:
+            if (
+                not isinstance(item, tuple) or len(item) != 2
+                or not isinstance(item[0], str) or not isinstance(item[1], str)
+            ):
+                raise ContractError("fields must contain (name, value) string pairs")
+            name, value = item
+            if name not in _CREDENTIAL_FIELDS:
+                raise ContractError("unsupported credential field name")
+            _bounded_text(value, name, MAX_CREDENTIAL_VALUE_BYTES, allow_empty=True)
+            names.append(name)
+        _distinct(tuple(names), "fields")
+        if not self.available and values:
+            raise ContractError("an unavailable credential cannot carry fields")
+        if self.available and not values:
+            raise ContractError("an available credential must carry at least one field")
+        if self.reason is not None:
+            _bounded_text(self.reason, "reason", 128)
+            if self.available:
+                raise ContractError("an available credential cannot carry a reason")
+
+    @classmethod
+    def from_dict(cls, value: object) -> CredentialResult:
+        data = _object(value, {"available", "fields", "reason"})
+        fields = _tuple(data["fields"], "fields", MAX_CREDENTIAL_FIELDS, empty=True)
+        normalized = tuple(
+            (item[0], item[1]) if isinstance(item, (list, tuple)) else item
+            for item in fields
+        )
+        return cls(data["available"], normalized, data["reason"])
+
+
+@dataclass(frozen=True)
 class RouteResponse(_WireRecord):
     """The typed, bounded counterpart to :class:`RouteRequest`.
 
@@ -472,6 +586,7 @@ class RouteResponse(_WireRecord):
     operation: str
     health: HealthResult | None = None
     hits: tuple[SearchHit, ...] | None = None
+    credential: CredentialResult | None = None
 
     def __post_init__(self) -> None:
         for name in ("request_id", "service_id", "installation_id"):
@@ -479,16 +594,21 @@ class RouteResponse(_WireRecord):
         if self.operation == "health":
             if not isinstance(self.health, HealthResult):
                 raise ContractError("health operation requires a health result")
-            if self.hits is not None:
-                raise ContractError("health operation cannot carry hits")
+            if self.hits is not None or self.credential is not None:
+                raise ContractError("health operation cannot carry hits or a credential")
         elif self.operation == "index.search":
-            if self.health is not None:
-                raise ContractError("index.search operation cannot carry a health result")
+            if self.health is not None or self.credential is not None:
+                raise ContractError("index.search operation cannot carry a health result or credential")
             if type(self.hits) is not tuple:
                 raise ContractError("hits must be an immutable collection")
             values = _tuple(self.hits, "hits", MAX_HITS, empty=True)
             if any(not isinstance(item, SearchHit) for item in values):
                 raise ContractError("hits must contain search hit records")
+        elif self.operation == "credential.get":
+            if self.health is not None or self.hits is not None:
+                raise ContractError("credential.get operation cannot carry hits or a health result")
+            if not isinstance(self.credential, CredentialResult):
+                raise ContractError("credential.get operation requires a credential result")
         else:
             raise ContractError("unsupported routing operation")
         # Per-field/count bounds above do not guarantee the record fits the
@@ -509,19 +629,21 @@ class RouteResponse(_WireRecord):
         *,
         health: HealthResult | None = None,
         hits: tuple[SearchHit, ...] | None = None,
+        credential: CredentialResult | None = None,
     ) -> RouteResponse:
         """Build a response correlated to its originating ``request`` --
         the request's own validated identity fields, never a value an
         adapter would otherwise have to re-assert by hand."""
         return cls(
             request.request_id, request.service_id, request.installation_id,
-            request.operation, health, hits,
+            request.operation, health, hits, credential,
         )
 
     @classmethod
     def from_dict(cls, value: object) -> RouteResponse:
         data = _wire(value, cls.SCHEMA, {
-            "request_id", "service_id", "installation_id", "operation", "health", "hits",
+            "request_id", "service_id", "installation_id", "operation",
+            "health", "hits", "credential",
         })
         health = data["health"]
         if health is not None:
@@ -532,7 +654,10 @@ class RouteResponse(_WireRecord):
                 SearchHit.from_dict(item)
                 for item in _tuple(hits, "hits", MAX_HITS, empty=True)
             )
+        credential = data["credential"]
+        if credential is not None:
+            credential = CredentialResult.from_dict(credential)
         return cls(
             data["request_id"], data["service_id"], data["installation_id"],
-            data["operation"], health, hits,
+            data["operation"], health, hits, credential,
         )
