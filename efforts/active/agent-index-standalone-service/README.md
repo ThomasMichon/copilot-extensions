@@ -371,3 +371,13 @@ boundaries from implementation decisions and deployment-specific policy.
   ordinary Win32 limits; the standalone runner now uses owned extended-length
   cleanup with bounded transient-lock retries and explicit permanent failure.
   Deep-path cleanup and runner regressions passed 15 tests.
+- Staging review repaired process-identity fencing, success-path build scratch
+  removal, post-build executable hash revalidation and extended-length owned
+  failed-slot cleanup. Updated contained Windows suite passed 337 tests with
+  two Linux-specific cases skipped for their separate fresh-container proof.
+- Development monitoring later found the existing native API nonresponsive
+  despite a listening process and idle event-loop stack. A supported same-version
+  non-forced cutover completed with clean drain and restored process health
+  after the management command exited; the existing warm engine was not
+  restarted. Detailed corpus status remains slow, so no rollout-readiness claim
+  or standalone-service migration follows from the restored liveness probe.

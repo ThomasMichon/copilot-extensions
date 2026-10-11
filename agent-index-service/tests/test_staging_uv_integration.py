@@ -48,6 +48,7 @@ def test_real_uv_first_touch_and_replay_preserve_host_and_activation_markers(tmp
     }
     first = stage_candidate(Path(fixture["descriptor"]), **arguments)
     slot = Path(first["slot"])
+    assert not (slot / "build-state").exists()
     before = _snapshot(slot)
     second = stage_candidate(Path(fixture["descriptor"]), **arguments)
     assert first["state"] == "staged"
