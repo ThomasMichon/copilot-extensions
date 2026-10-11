@@ -363,9 +363,10 @@ class GitHubProvider:
                 env=self._env(token),
             )
             if proc.returncode != 0:
+                detail = proc.stderr.strip() or proc.stdout.strip()
                 raise ProviderError(
-                    f"GitHub review page {page} failed: {proc.stderr.strip()}",
-                    transient=True,
+                    f"GitHub review page {page} failed: {detail}",
+                    transient=_gh_detail_is_transient(detail),
                 )
             try:
                 batch = json.loads(proc.stdout or "[]")

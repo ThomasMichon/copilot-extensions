@@ -218,6 +218,25 @@ def test_incomplete_review_pages_and_unknown_conclusions_fail_closed(monkeypatch
         assert provider._combined_checks_state("owner/repo", "head", "") == ""
 
 
+@pytest.mark.parametrize("detail,transient", [
+    ("HTTP 401: Bad credentials", False),
+    ("HTTP 403: Resource not accessible", False),
+    ("HTTP 404: Not Found", False),
+    ("HTTP 503: Service Unavailable", True),
+    ("connection reset", True),
+])
+def test_review_page_errors_preserve_provider_retry_policy(monkeypatch, detail, transient):
+    from agent_worktrees.providers import github
+    monkeypatch.setattr(
+        github, "run_cli",
+        lambda *a, **k: subprocess.CompletedProcess([], 1, "", detail),
+    )
+    with pytest.raises(ProviderError) as error:
+        github.GitHubProvider()._all_review_objs("owner/repo", 42, "")
+    assert error.value.transient is transient
+    assert detail in str(error.value)
+
+
 def test_fetch_errors_do_not_invent_actionable_state():
     def fetch():
         raise ProviderError("unavailable", transient=True)

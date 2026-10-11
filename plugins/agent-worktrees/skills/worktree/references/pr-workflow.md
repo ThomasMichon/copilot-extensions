@@ -210,6 +210,11 @@ success or no checks, rejects unknown completed conclusions, and raises a
 provider error rather than returning incomplete review pages. Approval commit
 IDs must exactly match the current head for this wake. Self-merge and
 human-merge profiles do not receive updates.
+Azure DevOps currently omits authoritative checks and approval commit evidence
+from its snapshots, so this immediate state wake is unsupported there and fails
+closed. Its existing review transitions, timeout state, and explicit
+`pr-merge` auto-complete path remain unchanged; do not expect a merged-only ADO
+wait to substitute for explicitly requesting auto-complete after approval.
 
 Exit **0** means a selected transition **or** an actionable consent update, not
 proof of merge. Both text and `--json` expose the same result; text also prints
