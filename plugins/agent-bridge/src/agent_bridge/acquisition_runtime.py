@@ -73,6 +73,8 @@ class AcquisitionRuntime:
             await mark_dispatch_acquisition(req, self.resolver)
         row, head = await verify_worktree(req)
         await self._reconcile_prior(req, row, head)
+        venue = await verify_dispatch(req, self.resolver)
+        row, head = await verify_worktree(req)
         try:
             claim = self.store.journal.claim(req)
         except AcquisitionRefused as exc:

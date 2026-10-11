@@ -336,6 +336,28 @@ async def test_exact_owned_native_recovers_after_crash_before_ledger_registratio
 
 
 @pytest.mark.asyncio
+async def test_new_attempt_refreshes_native_head_after_prior_reconciliation(rig, monkeypatch):
+    original = acquisition_runtime.worktree_command
+    async def interrupted(args, project):
+        if args[0] == "register-session":
+            raise RuntimeError("crash before register")
+        return await original(args, project)
+    monkeypatch.setattr(acquisition_runtime, "worktree_command", interrupted)
+    with pytest.raises(RuntimeError):
+        await rig.runtime.acquire(req())
+    native = rig.manager.list_sessions()[0].acp_session_id
+    monkeypatch.setattr(acquisition_runtime, "worktree_command", original)
+    rig.source["acquisition_reservation"].update(key="reservation-b", worktree_ownership="reused")
+    result = await rig.runtime.acquire(req(
+        allocation="reused", reservation_key="reservation-b", delivery_id="delivery-b",
+    ))
+    assert result.native_session_id == native
+    session = rig.manager.get_session(result.session_id)
+    if session._prompt_task:
+        await session._prompt_task
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["cli", "acp"])
 async def test_interrupted_launch_reconciles_before_new_attempt_without_second_process(rig, mode):
     original = rig.runtime._deliver
