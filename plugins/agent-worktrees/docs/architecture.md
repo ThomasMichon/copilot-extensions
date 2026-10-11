@@ -1428,7 +1428,8 @@ does.
   flows **only** through the contributing plugin's CLI -- never a cross-venv
   import -- so the seam stays generic for future pivots (Bridges, Containers, ...).
 - **Worktree-row actions (cross-plugin, #B).** Beyond contributing a *pivot*, a
-  manifest may declare `worktree_actions` -- a list of `{label, run, when?}` that
+  manifest may declare `worktree_actions` -- a list of `{label, run, when?,
+  confirm?}` that
   augment a **worktree's** Enter sub-menu on the built-in Worktrees view. This is
   how a layer reaches *into* the core view (a bridge's "Send message", a
   dispatcher's "Dispatch task here") without owning a pivot. `run` is an argv
@@ -1439,6 +1440,8 @@ does.
   `list`**, so a manifest may contribute only worktree actions (no pivot). A
   contributed label never shadows a built-in verb; the action runs as a
   subprocess (`tasks.run_worktree_action`) and the picker rescans after.
+  `confirm: true` gates the run behind a native `ActionConfirmScreen`
+  are-you-sure, the same gate every `confirm`-bearing action kind shares.
 - **Configuration sections (cross-plugin, #B slice 2).** A manifest may also
   declare `config_sections` -- a list of `{label, run, confirm?}` that augment
   the right-aligned **⚙ Configuration** menu (which hosts built-in Profiles).
@@ -1452,7 +1455,8 @@ does.
   is always listed first; contributed sections follow in stable
   (filename, declared) order. Selecting a section runs it as a subprocess
   (`tasks.run_config_section`) and the picker rescans after; selecting Profiles
-  still switches to that pivot as before.
+  still switches to that pivot as before. `confirm: true` gates the run behind
+  the same `ActionConfirmScreen` are-you-sure as a worktree/task action.
 - **Dispatch is kind-keyed, not index-keyed.** Built-in pivot logic switches on
   the pivot *kind* (`worktrees`/`maintenance`/`profiles`/`registered`), so an
   inserted pivot never renumbers the built-ins.
@@ -1470,7 +1474,9 @@ An `actions` entry is one of two shapes:
 
 - **External (default)** -- `{"label": …, "run": [argv…], "confirm": false}`.
   The `run` template is spawned as a subprocess (as above). This is the right
-  choice for anything that *does work* (open, abandon, retry, …).
+  choice for anything that *does work* (open, abandon, retry, …). `confirm:
+  true` gates the run behind a native `ActionConfirmScreen` are-you-sure
+  (Cancel is the gate's initial choice) rather than running on Enter.
 - **Internal (picker navigation)** --
   `{"label": …, "kind": "internal", "verb": "jump-host", "args": ["{worktree}"]}`.
   No subprocess is spawned; the picker handles the `verb` itself against its own

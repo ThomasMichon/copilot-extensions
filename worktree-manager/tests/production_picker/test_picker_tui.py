@@ -83,6 +83,17 @@ async def _open_task_menu_and_wait(scr, pilot, *, row: int) -> None:
             return
 
 
+async def _wait_for_confirm_screen(app, pilot) -> None:
+    """Poll briefly for ``ActionConfirmScreen`` to actually mount -- the same
+    pre-existing load-sensitive mount-timing class ``_open_task_menu_and_wait``
+    documents; one ``pilot.pause()`` is not always enough under load."""
+    from worktree_manager.production_picker.picker_tui.engine import ActionConfirmScreen
+    for _ in range(50):
+        await pilot.pause()
+        if isinstance(app.screen, ActionConfirmScreen):
+            return
+
+
 def _cfg_menu(scr):
     """The F4 CfgMenuScreen instance on the app's screen stack, or None."""
     from worktree_manager.production_picker.picker_tui.engine import CfgMenuScreen
@@ -9302,8 +9313,8 @@ def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch
             from textual.widgets import OptionList
             assert menu.query_one(OptionList).has_focus
 
-            # Select "Abandon" (idx 1): it declares `confirm: true` (#6044), so
-            # it must NOT run yet -- an ActionConfirmScreen gate opens first.
+            # Select "Abandon" (idx 1): it declares `confirm: true`, so it
+            # must NOT run yet -- an ActionConfirmScreen gate opens first.
             from worktree_manager.production_picker.picker_tui.engine import (
                 ActionConfirmScreen,
                 FocusGroup,
@@ -9311,13 +9322,7 @@ def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch
 
             await pilot.press("down")
             await pilot.press("enter")
-            # Same pre-existing load-sensitive flake _open_task_menu_and_wait
-            # documents: poll briefly for the confirm modal to actually mount
-            # rather than assuming one pump always suffices.
-            for _ in range(50):
-                await pilot.pause()
-                if isinstance(app.screen, ActionConfirmScreen):
-                    break
+            await _wait_for_confirm_screen(app, pilot)
             assert isinstance(app.screen, ActionConfirmScreen)
             assert not rt.actions
             group = app.screen.query_one(FocusGroup)
@@ -9374,7 +9379,7 @@ def test_registered_pivot_action_confirm_gate_cancel_is_noop(tmp_path, monkeypat
 
             await pilot.press("down")        # highlight "Abandon"
             await pilot.press("enter")
-            await pilot.pause()
+            await _wait_for_confirm_screen(app, pilot)
             assert isinstance(app.screen, ActionConfirmScreen)
 
             await pilot.press("enter")       # activate the initial "Cancel"
@@ -10719,7 +10724,7 @@ def test_contributed_config_section_confirm_gate(tmp_path, monkeypatch):
             for _ in range(labels.index("SSH")):
                 await pilot.press("down")
             await pilot.press("enter")
-            await pilot.pause()
+            await _wait_for_confirm_screen(app, pilot)
             # confirm:true -- SSH must NOT have run yet; the cfg menu is gone,
             # replaced by the confirm gate.
             assert not _cfg_menu_open(scr)
@@ -10742,7 +10747,7 @@ def test_contributed_config_section_confirm_gate(tmp_path, monkeypatch):
             for _ in range(labels.index("SSH")):
                 await pilot.press("down")
             await pilot.press("enter")
-            await pilot.pause()
+            await _wait_for_confirm_screen(app, pilot)
             assert isinstance(app.screen, ActionConfirmScreen)
             await pilot.press("left")        # Cancel -> Confirm
             await pilot.press("enter")
@@ -10798,7 +10803,7 @@ def test_contributed_worktree_action_confirm_gate(tmp_path, monkeypatch):
             for _ in range(acts.index("Send message")):
                 await pilot.press("down")
             await pilot.press("enter")
-            await pilot.pause()
+            await _wait_for_confirm_screen(app, pilot)
             assert not _sub_menu_open(scr)
             assert isinstance(app.screen, ActionConfirmScreen)
             assert ran == []

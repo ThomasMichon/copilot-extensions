@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Shared confirm-before-run gate for a ``confirm: true`` contributed action
-(#6044).
+"""Shared confirm-before-run gate for a ``confirm: true`` contributed action.
 
 Split into its own module (rather than living in ``engine_dialogs.py``
 alongside its sibling modal screens) purely to keep every touched module
@@ -11,20 +10,16 @@ other in ``engine_dialogs.py``; it has no dependency of its own on living
 here.
 
 Three independent dispatch paths each accept a manifest-declared ``confirm``
-field -- :class:`~picker_tui.pivot_manifest.PivotAction` (a registered
-pivot's Enter sub-menu task action, run via ``engine_pivot_actions``'s
-``_run_task_action``), :class:`~picker_tui.pivot_actions.WorktreeAction` (a
-worktree row's contributed Enter sub-menu verb, run via
-``engine_worktree_actions``'s ``_run_wt_action``), and
-:class:`~picker_tui.pivot_actions.ConfigSection` (a ⚙ Configuration menu
-entry, run via ``engine_pivot_actions``'s ``_run_config_section``). All three
-dataclasses parse and schema-validate ``confirm``, but historically no
-dispatch path actually enforced it before running the action -- a plugin
-author declaring ``confirm: true`` on a destructive verb (e.g.
-``plugins/agent-dispatch/pivots/agent-dispatch.json``'s own
-pause/unpause/force-stop/abandon actions) got silent, false protection; the
-action ran immediately on Enter. :func:`confirm_then` is the single shared
-enforcement point all three call sites funnel through.
+field, coerced to ``bool`` -- :class:`~picker_tui.pivot_manifest.PivotAction`
+(a registered pivot's Enter sub-menu task action, run via
+``engine_pivot_actions``'s ``_run_task_action``),
+:class:`~picker_tui.pivot_actions.WorktreeAction` (a worktree row's
+contributed Enter sub-menu verb, run via ``engine_worktree_actions``'s
+``_run_wt_action``), and :class:`~picker_tui.pivot_actions.ConfigSection` (a
+⚙ Configuration menu entry, run via ``engine_pivot_actions``'s
+``_run_config_section``). :func:`confirm_then` is the single shared
+enforcement point all three call sites funnel through: when ``confirm`` is
+true, the action runs only after the operator confirms this modal.
 """
 from __future__ import annotations
 

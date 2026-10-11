@@ -55,9 +55,7 @@ class PickerScreenPivotActionsMixin:
             if target["kind"] == "section":
                 # A cross-plugin contributed Configuration section (#B slice 2):
                 # run it and rescan (it may have changed config/session state).
-                # ``confirm: true`` gates the run behind an explicit
-                # are-you-sure (#6044) -- the manifest schema has always
-                # accepted this field, but no dispatch path enforced it.
+                # ``confirm: true`` gates the run behind an explicit are-you-sure.
                 section = target["section"]
                 confirm_then(self.app, section,
                              lambda section=section: self._run_config_section(section))
@@ -129,11 +127,7 @@ class PickerScreenPivotActionsMixin:
             if choice is None:
                 return
             action = actions[choice]
-            # ``confirm: true`` gates the run behind an explicit are-you-sure
-            # (#6044) -- ``PivotAction.confirm`` has always been parsed and
-            # schema-validated, but no dispatch path enforced it, so e.g.
-            # agent-dispatch's pause/unpause/force-stop/abandon actions ran
-            # immediately on Enter despite declaring it.
+            # ``confirm: true`` gates the run behind an explicit are-you-sure.
             confirm_then(self.app, action,
                          lambda action=action: self._run_task_action(reg, action, rec))
         self.app.push_screen(TaskMenuScreen(reg, rec, actions), _after)
