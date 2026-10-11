@@ -157,3 +157,19 @@ def test_finalized_display_requires_explicit_settled_session_count():
     descriptor = cli._worktree_to_dict(rec, state_info=info)["closure"]
     del descriptor["display"]["settled_sessions"]
     assert not prune.interpret_descriptor_payload(descriptor)["supported"]
+
+
+@pytest.mark.parametrize("condition", ["open-pr", "handoff", "drift", "effort"])
+def test_finalized_display_rejects_contradictory_serialized_evidence(condition):
+    descriptor = cli._worktree_to_dict(
+        _rec(), state_info=git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED),
+    )["closure"]
+    if condition == "open-pr":
+        descriptor["blockers"] = [{"code": "open-pr", "count": 1}]
+    elif condition == "handoff":
+        descriptor["facts"]["pending_handoff"]["count"] = 1
+    elif condition == "drift":
+        descriptor["git"]["branch_drift"] = True
+    else:
+        descriptor["git"]["active_effort"] = True
+    assert not prune.interpret_descriptor_payload(descriptor)["supported"]

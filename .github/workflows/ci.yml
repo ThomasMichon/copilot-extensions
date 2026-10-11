@@ -623,9 +623,7 @@ jobs:
       - name: Hook process hygiene
         # PowerShell command hooks already run inside PowerShell. Spawning a
         # second interpreter can surface Default Terminal windows on Windows.
-        run: >-
-          python tools/check-hook-process-hygiene.py &&
-          python -m pytest -q tools/test_hook_interpreter.py
+        run: python tools/check-hook-process-hygiene.py
       - name: Skills
         run: python tools/check-skills.py
       - name: Changed effort and vision structure

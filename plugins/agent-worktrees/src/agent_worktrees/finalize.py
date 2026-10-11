@@ -1979,7 +1979,7 @@ def validate_and_finalize(
         if record:
             from .finalized_checkout import snapshot
 
-            record.finalized_checkout = snapshot(worktree_path) if inside_worktree or has_live_session else None
+            record.finalized_checkout = snapshot(worktree_path) if inside_worktree or has_live_session or not checkout_managed else None
             # Release settled outbound resources; children keep their prune gates.
             released = tracking.release_all_resources(record, save=False)
             tracking.update_status(record, "finalized")

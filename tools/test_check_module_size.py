@@ -19,15 +19,15 @@ import pytest
 SCRIPT = Path(__file__).resolve().parent / "check-module-size.py"
 
 
-def test_pre_push_scopes_module_size_to_contribution_trunk():
+def test_module_size_stays_in_ci_not_publication_hook():
     hook = (SCRIPT.parent / "hooks" / "pre-push").read_text(encoding="utf-8")
     calls = [
         line for line in hook.splitlines()
         if line.startswith('"${PY[@]}"') and "check-module-size.py" in line
     ]
-    assert calls == [
-        '"${PY[@]}" "$ROOT/tools/check-module-size.py" --changed-since origin/dev'
-    ]
+    assert calls == []
+    ci = (SCRIPT.parent.parent / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "check-module-size.py --changed-since ${{ github.event.pull_request.base.sha }}" in ci
 
 
 def _git(repo: Path, *args: str) -> None:

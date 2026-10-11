@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import re
+import subprocess
 
 from . import git_ops, tracking
 
 
 def snapshot(path: str) -> dict[str, str]:
-    head = git_ops.git("rev-parse", "--verify", "HEAD", cwd=path).stdout.strip()
+    head = git_ops.git("rev-parse", "--verify", "HEAD", cwd=path, timeout=5).stdout.strip()
     if not re.fullmatch(r"[0-9a-f]{40,64}", head):
         raise ValueError("Cannot record finalized checkout: invalid HEAD")
-    branch = git_ops.current_branch(path)
-    return {"head": head, "branch": branch or ""}
+    branch = git_ops.git("rev-parse", "--abbrev-ref", "HEAD", cwd=path, timeout=5).stdout.strip()
+    return {"head": head, "branch": "" if branch == "HEAD" else branch}
 
 
 def matches(record: tracking.WorktreeRecord) -> bool:
@@ -28,5 +29,5 @@ def matches(record: tracking.WorktreeRecord) -> bool:
         return False
     try:
         return snapshot(record.worktree_path) == stamp
-    except (git_ops.GitError, OSError, ValueError):
+    except (git_ops.GitError, OSError, ValueError, subprocess.TimeoutExpired):
         return False

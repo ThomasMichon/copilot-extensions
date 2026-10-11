@@ -401,6 +401,7 @@ def assemble_closure_descriptor(
         and not info.branch_drift
         and held_claims == settled_sessions
         and open_follow_ups == 0
+        and not rec.active_effort
         and not rec.has_live_pr()
         and not rec.pending_handoffs
     )
@@ -424,6 +425,8 @@ def assemble_closure_descriptor(
             "upstream_complete": upstream_complete,
             "dirty": info.dirty,
             "ahead": info.ahead,
+            "branch_drift": info.branch_drift,
+            "active_effort": bool(rec.active_effort),
         },
         claims={"held": held_claims},
         follow_ups={"open": open_follow_ups},
@@ -523,6 +526,14 @@ def interpret_descriptor_payload(payload: dict | None) -> dict:
                 or open_follow_ups != 0
                 or not isinstance(git, dict)
                 or _non_negative_int(git.get("dirty")) != 0
+                or git.get("branch_drift") is not False
+                or git.get("active_effort") is not False
+                or not isinstance(payload.get("blockers"), list)
+                or any(b.get("code") not in ("held-claims", "paired-pending") for b in payload["blockers"] if isinstance(b, dict))
+                or any(not isinstance(b, dict) for b in payload["blockers"])
+                or not isinstance(payload.get("facts"), dict)
+                or not isinstance(payload["facts"].get("pending_handoff"), dict)
+                or _non_negative_int(payload["facts"]["pending_handoff"].get("count")) != 0
             ):
                 return _unsupported_descriptor("unsupported-descriptor:invalid-finalized-display")
         elif any(display[k] != value for k, value in (

@@ -114,6 +114,14 @@ def interpret_descriptor_payload(payload: dict | None) -> dict:
                 or open_follow_ups != 0
                 or not isinstance(git, dict)
                 or _non_negative_int(git.get("dirty")) != 0
+                or git.get("branch_drift") is not False
+                or git.get("active_effort") is not False
+                or not isinstance(payload.get("blockers"), list)
+                or any(b.get("code") not in ("held-claims", "paired-pending") for b in payload["blockers"] if isinstance(b, dict))
+                or any(not isinstance(b, dict) for b in payload["blockers"])
+                or not isinstance(payload.get("facts"), dict)
+                or not isinstance(payload["facts"].get("pending_handoff"), dict)
+                or _non_negative_int(payload["facts"]["pending_handoff"].get("count")) != 0
             ):
                 return _unsupported_descriptor("unsupported-descriptor:invalid-finalized-display")
         elif any(display[k] != value for k, value in (
