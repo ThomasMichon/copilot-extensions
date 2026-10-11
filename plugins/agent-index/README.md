@@ -252,6 +252,8 @@ non-mutating `inactive` result; before setup in an active repository it returns
 - Host unavailable: run `agent-index status`, `agent-index deploy --recover`,
   or the installer `start`/`update` path that owns the service cutover. Routine
   service updates do not rebuild the durable engine.
+  Native recovery refusal (including conditional-owner state or transition-lock
+  contention) returns nonzero; it never reports a skipped repair as success.
 - Namespaced mode: `cell-recover` retains installation-transaction recovery, and
   the local service/runtime still remain installation-owned.
 - Legacy mode: `~/.agent-index/deploy-manifest.json`, `active.json`, and
