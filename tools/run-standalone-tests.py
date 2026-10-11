@@ -20,6 +20,14 @@ from standalone_consumers import STANDALONE_CONSUMERS
 REPO = Path(__file__).resolve().parent.parent
 
 
+def extended_windows_path(path: str) -> str:
+    if path.startswith("\\\\?\\"):
+        return path
+    if path.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + path[2:]
+    return "\\\\?\\" + path
+
+
 def cleanup_sandbox(temporary: tempfile.TemporaryDirectory) -> None:
     deadline = time.monotonic() + 15
     while True:
@@ -27,7 +35,7 @@ def cleanup_sandbox(temporary: tempfile.TemporaryDirectory) -> None:
             if os.name == "nt" and isinstance(temporary, tempfile.TemporaryDirectory):
                 root = Path(temporary.name).resolve()
                 if root.exists():
-                    shutil.rmtree("\\\\?\\" + str(root))
+                    shutil.rmtree(extended_windows_path(str(root)))
             temporary.cleanup()
             return
         except OSError as exc:

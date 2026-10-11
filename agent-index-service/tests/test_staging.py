@@ -384,6 +384,20 @@ def test_inspect_missing_root_readonly(case):
     assert not case.root.exists()
 
 
+@pytest.mark.parametrize("layout", ["root-only", "empty-versions", "incomplete"])
+def test_inspection_without_receipts_does_not_require_built_primitive(case, monkeypatch, layout):
+    case.root.mkdir()
+    if layout != "root-only":
+        (case.root / "versions").mkdir()
+    if layout == "incomplete":
+        (case.root / "versions" / "0.1.0.dev1").mkdir()
+    monkeypatch.setattr(staging, "_primitive", lambda: pytest.fail("unneeded primitive import"))
+    result = inspect_candidates(case.root, host_config_path=case.host)
+    assert len(result["candidates"]) == (1 if layout == "incomplete" else 0)
+    if layout == "incomplete":
+        assert result["candidates"][0]["state"] == "incomplete"
+
+
 def test_inspect_complete_and_incomplete_readonly(case):
     stage(case)
     other = case.root / "versions" / "unfinished"
