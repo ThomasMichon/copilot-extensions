@@ -21,7 +21,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_worktrees import resolve_cli
+from agent_worktrees import config as cfg, resolve_cli
 
 pytestmark = pytest.mark.guard
 
@@ -35,6 +35,13 @@ def _args(**overrides):
     )
     base.update(overrides)
     return argparse.Namespace(**base)
+
+
+def _config(tmp_path, machine):
+    return cfg.Config(
+        machine=machine, platform="windows", repo_name="example", srcroot=str(tmp_path),
+        repos={"example": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path))},
+    )
 
 
 def test_resolve_new_with_machine_and_seed_is_rejected_json(capfd):
@@ -58,11 +65,11 @@ def test_resolve_new_with_machine_and_seed_is_rejected_non_json(capfd):
     assert "machine" in out.lower()
 
 
-def test_resolve_new_with_machine_and_no_seed_is_unaffected(monkeypatch, capfd):
+def test_resolve_new_with_machine_and_no_seed_is_unaffected(monkeypatch, capfd, tmp_path):
     """The rejection is seed-specific -- an ordinary remote --new (no
     --seed) must still reach the existing remote-dispatch path untouched."""
     state = resolve_cli.ResolveCommandState.from_args(_args(seed=None))
-    state.config = SimpleNamespace(machine="", default_repo=SimpleNamespace(anchor=""))
+    state.config = _config(tmp_path, "")
     monkeypatch.setattr(resolve_cli.cfg, "load_machines_yaml", lambda _: {})
     called = []
     monkeypatch.setattr(
@@ -152,13 +159,12 @@ def test_resolve_machine_matching_local_and_environment_matches_current_platform
     assert not called  # same machine, same platform -- must stay local
 
 
-def test_resolve_machine_differing_from_the_local_machine_still_dispatches_remotely(monkeypatch):
+def test_resolve_machine_differing_from_the_local_machine_still_dispatches_remotely(monkeypatch, tmp_path):
     """Sibling of the self-match regression above: a genuinely different
     `--machine` must still reach `_emit_remote_plan_for_env` -- the new guard
     is specific to the self-match case, not a blanket skip."""
     state = resolve_cli.ResolveCommandState.from_args(_args(seed=None))
-    state.config = SimpleNamespace(machine="a-different-machine")
-    state.config.default_repo = SimpleNamespace(anchor="")
+    state.config = _config(tmp_path, "a-different-machine")
     monkeypatch.setattr(resolve_cli.cfg, "load_machines_yaml", lambda _: {})
     called = []
     monkeypatch.setattr(
@@ -177,16 +183,11 @@ def test_resolve_machine_differing_from_the_local_machine_still_dispatches_remot
 def test_json_launch_canonicalizes_self_target_before_selecting_transport(
     monkeypatch, tmp_path, target, environment, remote,
 ):
-    from agent_worktrees import config as cfg
-
     entry = cfg.MachineEntry(
         key="example-host", hostname="raw-host", alias="local-alias",
         display_name="Example Host",
     )
-    config = cfg.Config(
-        machine="example-host", platform="windows", repo_name="example", srcroot=str(tmp_path),
-        repos={"example": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path))},
-    )
+    config = _config(tmp_path, "example-host")
     state = resolve_cli.ResolveCommandState.from_args(
         _args(new_worktree=False, base=True, machine=target, environment=environment)
     )
@@ -214,6 +215,16 @@ def test_json_launch_canonicalizes_self_target_before_selecting_transport(
     dispatch_remote = remote and bool(target)
     assert resolve_cli._resolve_json_mode(state) == (7 if dispatch_remote else 0)
     assert calls == ["remote" if dispatch_remote else "local"]
+
+
+def test_self_identity_fast_path_does_not_read_topology(monkeypatch, tmp_path):
+    def unexpected_read(_):
+        pytest.fail("a direct configured identity must not read topology")
+
+    monkeypatch.setattr(cfg, "load_machines_yaml", unexpected_read)
+    assert resolve_cli.machine_identity.is_local_machine(
+        "EXAMPLE-HOST", _config(tmp_path, "example-host")
+    )
 
 
 def test_resolve_worktree_id_with_machine_and_seed_is_rejected_json(capfd):
