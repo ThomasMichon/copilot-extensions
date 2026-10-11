@@ -110,6 +110,24 @@ def copilot_cli_config_path() -> Path:
     return Path.home() / ".copilot" / "config.json"
 
 
+def _auth_token_for_account(data: object, account: str) -> str | None:
+    """Pull ``account``'s token out of an already-parsed config.json body.
+
+    Defensive against a syntactically valid but structurally wrong document
+    (e.g. a top-level list, or ``authTokens`` itself not an object) -- both
+    must return None, never raise, so callers' shared missing-login error
+    fires instead of an unhandled AttributeError.
+    """
+    if not isinstance(data, dict):
+        return None
+    auth_tokens = data.get("authTokens")
+    if not isinstance(auth_tokens, dict):
+        return None
+    entry = auth_tokens.get(f"https://github.com:{account}")
+    token = entry.get("token") if isinstance(entry, dict) else None
+    return token or None
+
+
 def host_copilot_cli_token(
     account: str, config_path: Path | str | None = None
 ) -> str | None:
@@ -127,9 +145,10 @@ def host_copilot_cli_token(
     only ever reads the live current value, never mints or refreshes one.
 
     The file is JSONC (``//``-prefixed comment lines); those are stripped
-    before parsing. Returns None on any missing file, parse failure, or
-    absent/empty entry for ``account`` -- callers should fail closed rather
-    than launch a container with no Copilot inference auth.
+    before parsing. Returns None on any missing file, parse failure,
+    malformed document shape, or absent/empty entry for ``account`` --
+    callers should fail closed rather than launch a container with no
+    Copilot inference auth.
     """
     path = Path(config_path) if config_path is not None else copilot_cli_config_path()
     try:
@@ -143,9 +162,7 @@ def host_copilot_cli_token(
         data = json.loads(cleaned)
     except json.JSONDecodeError:
         return None
-    entry = data.get("authTokens", {}).get(f"https://github.com:{account}")
-    token = entry.get("token") if isinstance(entry, dict) else None
-    return token or None
+    return _auth_token_for_account(data, account)
 
 
 def copilot_cli_account_missing_hint(account: str, container_name: str) -> str:
@@ -174,8 +191,7 @@ def resolve_copilot_cli_token_or_raise(config, fleet, container_name: str) -> st
     configured but :func:`host_copilot_cli_token` finds nothing. Used by
     EVERY launch site, with no soft-fail variant: silently falling back to
     GH_TOKEN's identity when a separate inference identity was explicitly
-    configured would defeat the entire purpose of this setting (PR #6128
-    review).
+    configured would defeat the entire purpose of this setting.
     """
     account = config.copilot_cli_account_for(fleet)
     if not account:
@@ -202,9 +218,7 @@ def copilot_cli_token_from_json_text(account: str, raw: str) -> str | None:
         data = json.loads(cleaned)
     except json.JSONDecodeError:
         return None
-    entry = data.get("authTokens", {}).get(f"https://github.com:{account}")
-    token = entry.get("token") if isinstance(entry, dict) else None
-    return token or None
+    return _auth_token_for_account(data, account)
 
 
 def import_copilot_cli_token(

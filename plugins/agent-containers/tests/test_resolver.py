@@ -138,6 +138,25 @@ def test_host_copilot_cli_token_malformed_json_returns_none(tmp_path):
     assert host_copilot_cli_token("inference-user", config_path) is None
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        "[1, 2, 3]",
+        '{"authTokens": [1, 2, 3]}',
+        '{"authTokens": {"https://github.com:inference-user": "not-an-object"}}',
+    ],
+)
+def test_host_copilot_cli_token_malformed_shape_returns_none_not_raises(tmp_path, body):
+    """A syntactically valid but structurally wrong document must return
+    None (so the shared missing-login error fires), never raise an
+    unhandled AttributeError."""
+    from agent_containers.resolver import host_copilot_cli_token
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(body, encoding="utf-8")
+    assert host_copilot_cli_token("inference-user", config_path) is None
+
+
 def test_copilot_cli_token_from_json_text_matches_file_based_reader():
     from agent_containers.resolver import copilot_cli_token_from_json_text
 

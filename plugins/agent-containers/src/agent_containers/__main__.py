@@ -1054,8 +1054,6 @@ def _launch_container_agent(
             )
 
     copilot_token = resolve_copilot_cli_token_or_raise(config, fleet, args.name)
-    if copilot_token:
-        env["COPILOT_GITHUB_TOKEN"] = copilot_token
 
     # On-demand credential relay. Trusted SSH carries a reverse forward from the
     # container's loopback relay port to agent-bridge's live host-loopback port;
@@ -1102,8 +1100,8 @@ def _launch_container_agent(
     launch_env = container_environment(args.name, user)
     if forward and "GH_TOKEN" in env:
         launch_env["GH_TOKEN"] = env["GH_TOKEN"]
-    if "COPILOT_GITHUB_TOKEN" in env:
-        launch_env["COPILOT_GITHUB_TOKEN"] = env["COPILOT_GITHUB_TOKEN"]
+    if copilot_token:
+        launch_env["COPILOT_GITHUB_TOKEN"] = copilot_token
     launch_env.update({
         name: env[name]
         for name in relay_env

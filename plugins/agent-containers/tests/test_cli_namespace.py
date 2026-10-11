@@ -257,8 +257,7 @@ def test_session_host_prepare_forwards_a_separate_copilot_cli_account_token(caps
 
 def test_session_host_prepare_fails_closed_with_no_matching_copilot_cli_login(capsys):
     """A configured copilot_cli_account with no live host login must abort
-    the launch entirely -- never silently fall back to GH_TOKEN's identity
-    (PR #6128 review)."""
+    the launch entirely -- never silently fall back to GH_TOKEN's identity."""
     from agent_containers.session_host_context import TrustedContext
 
     config = types.SimpleNamespace(
