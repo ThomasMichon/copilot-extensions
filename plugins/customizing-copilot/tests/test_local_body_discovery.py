@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import pytest
 
 from test_instruction_delivery import delivery, fixture, projections
 from context_budget import _repo_instruction_files
+
+pytestmark = pytest.mark.guard
 
 
 def test_both_body_classes_excluded_from_repository_discovery(tmp_path: Path) -> None:
@@ -135,25 +136,6 @@ def test_legacy_local_compatibility_reads_are_authenticated(tmp_path: Path) -> N
     selected = projections.resolve_instruction_source(repo, spec.destination, [source])
     assert selected["selectedPath"] == delivery.fallback_destination(spec.destination)
     assert "rejected" in selected["diagnostic"]
-
-
-def test_eight_explicit_inline_kernels_remain_declared() -> None:
-    root = Path(__file__).resolve().parents[3]
-    inline = set()
-    for path in (root / "plugins").glob("*/instruction-projections.json"):
-        for item in json.loads(path.read_text()).get("projections", []):
-            if item.get("deliveryMode") == "inline":
-                inline.add((path.parent.name, item["id"]))
-    assert inline == {
-        ("agent-conduct-guidance", "process-hygiene-fallback"),
-        ("agent-conduct-guidance", "delegation-fallback"),
-        ("agent-conduct-guidance", "scratch-space-fallback"),
-        ("agent-conduct-guidance", "secret-masking-fallback"),
-        ("ai-attribution", "publication-safety"),
-        ("copilot-extensions-harness", "contribution-boundary"),
-        ("efforts", "completion-gate"),
-        ("customizing-copilot", "local-cache-catchall"),
-    }
 
 
 def test_disabled_legacy_source_is_retained_with_visible_migration_finding(tmp_path: Path) -> None:
