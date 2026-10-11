@@ -44,10 +44,29 @@ def repo(tmp_path: Path) -> Path:
     # purely to keep it under this repo's per-module line-count cap) --
     # an isolated tree carrying only the script itself would otherwise
     # fail every subprocess invocation with ModuleNotFoundError.
-    for sibling in ("uv_editable_ref.py", "standalone_consumers.py"):
+    for sibling in (
+        "uv_editable_ref.py", "standalone_consumers.py", "vendored_lib_inventory.py",
+    ):
         src = SCRIPT.parent / sibling
         (r / "tools" / sibling).write_bytes(src.read_bytes())
     return r
+
+
+def test_sync_does_not_recreate_retired_cache_only_vendor(repo: Path):
+    _seed_two_copies_in_sync(repo)
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 1\n")
+    _lib_pyproject(repo, "libs/shared-lib/pyproject.toml", "0.1.0-dev1")
+    remnant = repo / "plugins/retired/libs/shared-lib"
+    _write(repo, str(remnant.relative_to(repo) / ".ruff_cache/CACHEDIR.TAG"), "cache")
+    _write(repo, str(remnant.relative_to(repo) / "src/shared.egg-info/PKG-INFO"), "metadata")
+
+    result = _run(repo, "--check")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    result = _run(repo, "--materialize")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (remnant / "pyproject.toml").exists()
+    assert not (remnant / "src/shared_lib/__init__.py").exists()
 
 
 def _seed_two_copies_in_sync(repo: Path, *, version: str = "0.1.0-dev1") -> None:

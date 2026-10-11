@@ -77,6 +77,24 @@ longitudinal ledgers and detailed cost attribution.
 > expose the same posture as machine-readable status without depending on a
 > private service.
 
+### Follow-up — agent-owned quota and advisory pacing
+
+**Public-safe summary of operator intent:** add an on-demand skill and helper
+that reads Copilot allowance, consumption, and next reset for the requesting
+agent's account. Use run-rate projections to advise autonomous background-worker
+and parallel-fleet concurrency. Warn about projected overages at session launch,
+but generally do not block operator-directed work on harness pacing grounds.
+Cooperative sleeps and suspensions are sparing options, not automatic remedies.
+Monthly entitlement can change; one period's increased allowance must not become
+a permanent default.
+
+**Agent-recommended constraints:** prefer supported, in-session SDK surfaces;
+retain runtime/version, account provenance, quantity kind, source acquisition
+status, and reset-source diagnostics. Do not call a new client's current-account
+quota the requesting session's quota without verifying the identity. Keep
+credentials and unrelated account metadata out of helper output. An SDK read
+timestamp is not proof that the provider metadata was refreshed.
+
 ## Plan
 
 ### Phase 0 - Reviewed intent and architecture
@@ -151,9 +169,44 @@ longitudinal ledgers and detailed cost attribution.
 - [ ] Keep marketplace, manifest, package, and runtime versions aligned.
 - [ ] Publish through the repository's normal review and self-merge flow.
 - [ ] Deploy through the unified update path and verify source/runtime identity.
-- [ ] Record evidence, close #2137, and archive this effort.
+
+### Phase 6 - Agent-owned quota helper and pacing advice
+
+- [ ] Add a reusable helper and discoverable on-demand skill for Copilot runtime
+  quota acquisition on behalf of the requesting session.
+- [ ] Preserve exact session/account attribution; report missing session context,
+  mismatched account, unsupported RPCs, and cached provider metadata explicitly.
+- [ ] Read raw account next-reset metadata separately from normalized category
+  snapshots. Reject missing, zero-epoch, or past reset values for current
+  forecasting; diagnose disagreements instead of silently selecting a date.
+- [ ] Distinguish token-based credits from premium-request quantities and
+  unlimited entitlements before interpreting numeric values.
+- [ ] Calculate sustainable remaining pace and projection from attributable
+  same-period rate evidence. Label assumed period starts and cycle-average
+  estimates; do not manufacture measured daily/weekly rates from one snapshot.
+- [ ] Emit advice for autonomous worker/fleet aggressiveness and overrun warnings,
+  without blocking operator-directed work or mutating worker state.
+- [ ] Document explicit, sparing cooperative pacing separately from read-only
+  quota acquisition. Do not add automatic sleeps or suspension control in this
+  slice.
+- [ ] Add regressions for changing allowance, selected-account mismatch,
+  malformed/missing/stale reset, unit ambiguity, cached metadata, and advice-only
+  behavior.
+
+### Phase 7 - Completion
+
+- [ ] Resolve every Plan and Validation Plan item, including quota-helper and
+  pacing validation; record evidence, close #2137, and archive this effort.
 
 ## Validation Plan
+
+- [ ] The quota skill/helper identifies the requesting session's account rather
+  than silently reading a fresh runtime's global default.
+- [ ] Acquisition time and provider-observation freshness are distinct; cached
+  metadata is not advertised as a confirmed fresh provider reading.
+- [ ] Monthly allocations are read per period, not carried forward as constants.
+- [ ] Advice neither blocks operator work nor sleeps, suspends, or changes
+  autonomous workers.
 
 - [x] The posture contract is provider-neutral and contains no real account,
   allowance, organization, host, or private service.

@@ -25,7 +25,8 @@ SCRIPT = TOOLS_DIR / "check-changefile-presence.py"
 # test in this file (and was never caught, because this suite isn't wired
 # into CI at all; see the ci.yml note added alongside this fix).
 DEP_SCRIPTS = ["check-version-bump.py", "changefile.py", "uv_editable_ref.py",
-               "installer_engine_ref.py", "standalone_consumers.py"]
+               "installer_engine_ref.py", "standalone_consumers.py",
+               "vendored_lib_inventory.py"]
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -84,6 +85,29 @@ def repo(tmp_path: Path) -> Path:
 def test_no_changes_passes(repo: Path):
     result = _run(repo)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_changefile_gate_does_not_charge_retired_artifact_only_consumer(repo: Path):
+    _write(repo, ".gitignore", ".ruff_cache/\n*.egg-info/\n")
+    _write(repo, "plugins/alpha/libs/shared-lib/src/shared_lib/__init__.py", "shared = 1\n")
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "library baseline")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write(repo, "plugins/retired/libs/shared-lib/.ruff_cache/CACHEDIR.TAG", "cache")
+    _write(repo, "plugins/retired/libs/shared-lib/src/shared.egg-info/PKG-INFO", "metadata")
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 2\n")
+    _write(
+        repo, ".changefiles/library.json",
+        json.dumps({"comment": "library fix", "changes": [{"plugin": "alpha", "type": "patch"}]}),
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "library fix with changefile for real consumer")
+
+    result = _run(repo)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "retired" not in result.stdout + result.stderr
 
 
 def test_touched_plugin_without_changefile_fails(repo: Path):

@@ -61,6 +61,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import installer_engine_ref as ier  # noqa: E402
 import uv_editable_ref as uer  # noqa: E402
+from vendored_lib_inventory import is_artifact_only  # noqa: E402
 
 try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
     # 3.10 support floor -- mirrors uv_editable_ref's own identical fallback.
@@ -177,7 +178,8 @@ def _vendored_consumers() -> dict[str, list[str]]:
             libs = plugin / "libs"
             if libs.is_dir():
                 for lib in sorted(x for x in libs.iterdir() if x.is_dir()):
-                    consumers.setdefault(lib.name, []).append(plugin.name)
+                    if not is_artifact_only(lib):
+                        consumers.setdefault(lib.name, []).append(plugin.name)
     # Out-of-plugin consumer trees (e.g. `worktree-manager`) can carry
     # real vendored copies under their own top-level `libs/` too -- the
     # `plugins/*` scan above never reaches them, so a canonical lib
@@ -188,7 +190,8 @@ def _vendored_consumers() -> dict[str, list[str]]:
         extra_libs = REPO / extra / "libs"
         if extra_libs.is_dir():
             for lib in sorted(x for x in extra_libs.iterdir() if x.is_dir()):
-                consumers.setdefault(lib.name, []).append(extra)
+                if not is_artifact_only(lib):
+                    consumers.setdefault(lib.name, []).append(extra)
     # `iter_consumer_dirs()` filters candidates by `pyproject.toml.is_file()`,
     # which returns False for a symlink to a directory OR a dangling symlink
     # (broken target) -- both would silently vanish from its results before
