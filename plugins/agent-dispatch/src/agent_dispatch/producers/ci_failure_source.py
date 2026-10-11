@@ -14,6 +14,7 @@ import json
 import re
 import subprocess
 import sys
+from agent_procutil import no_window_kwargs
 
 from . import ci_failure_signatures as watchdog
 
@@ -93,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
                 capture_output=True,
                 text=True,
                 timeout=30,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                **no_window_kwargs(),
             )
 
         response = request(["api", f"repos/{args.repo}/actions/runs/{args.run_id}"])
