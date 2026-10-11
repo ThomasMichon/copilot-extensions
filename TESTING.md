@@ -10,6 +10,10 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 ## The turn-key runner
 
 The pre-push agent-bridge contract guard (`tools/check-agent-bridge-contracts.py`)
+requires Git 2.45+ for enforced `GIT_NO_LAZY_FETCH` support; older versions
+fail before object reads, including in partial clones. This contributor
+validation requirement is stricter than the general installation minimum.
+It
 uses only local Git evidence. It does not fetch history or access credential
 helpers: unavailable historical commits remain opportunistic, while available
 commit and content-addressed blob cross-checks remain enforced. Local Git

@@ -481,6 +481,7 @@ def test_local_git_probe_is_bounded_headless_and_fail_closed(
 ) -> None:
     checker = _load_checker()
     checker._eg.git.cache_clear()
+    monkeypatch.setattr(checker._eg, "require_local_object_reads", lambda: None)
     observed = {}
 
     def timed_out(args, **kwargs):
@@ -502,6 +503,7 @@ def test_repeated_local_evidence_is_read_once_per_validation(
 ) -> None:
     checker = _load_checker()
     checker._eg.git.cache_clear()
+    monkeypatch.setattr(checker._eg, "require_local_object_reads", lambda: None)
     calls = []
 
     def read(args, **kwargs):
@@ -512,6 +514,31 @@ def test_repeated_local_evidence_is_read_once_per_validation(
     for _ in range(20):
         assert checker._ensure_commit_available("b" * 40)
     assert len(calls) == 1
+    checker._eg.git.cache_clear()
+
+
+@pytest.mark.parametrize("version", ["2.44.9", "2.45.0", "2.55.0.windows.5"])
+def test_local_only_guard_refuses_unsupported_git_before_object_reads(
+    monkeypatch: pytest.MonkeyPatch, version: str,
+) -> None:
+    checker = _load_checker()
+    checker._eg.require_local_object_reads.cache_clear()
+    checker._eg.git.cache_clear()
+    calls = []
+
+    def read(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, f"git version {version}\n", "")
+
+    monkeypatch.setattr(checker._eg.subprocess, "run", read)
+    if version.startswith("2.44"):
+        with pytest.raises(RuntimeError, match="Git 2.45"):
+            checker._eg.git("cat-file", "-e", "a" * 40)
+        assert calls == [["git", "--version"]]
+    else:
+        checker._eg.git("cat-file", "-e", "a" * 40)
+        assert len(calls) == 2
+    checker._eg.require_local_object_reads.cache_clear()
     checker._eg.git.cache_clear()
 
 

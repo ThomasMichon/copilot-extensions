@@ -6,6 +6,8 @@ validates its structure, path confinement, hashes, source provenance, production
 protocol constants, and optional diff-scoped source coverage.
 
 Validation reads local Git objects only; it never fetches missing history.
+Git 2.45+ is required for GIT_NO_LAZY_FETCH support; older versions fail
+before any object read rather than risking a partial-clone lazy fetch.
 Available commits still receive every provenance cross-check, and available
 source blobs still receive content-hash checks when a commit is unavailable.
 Refresh history explicitly before validation if additional historical evidence
