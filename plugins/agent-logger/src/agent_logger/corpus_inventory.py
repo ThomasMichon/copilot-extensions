@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import tarfile
+import zipfile
+import zlib
 from pathlib import Path
 from typing import TypedDict
 
@@ -77,7 +80,9 @@ def inventory_corpus(root: Path, *, include_sessions: bool = False) -> CorpusInv
                         row["live"] += 1
                     if row["sessions"] is not None:
                         row["sessions"].append({"session_id": ref.id, "kind": ref.kind})
-            except (OSError, ValueError) as exc:
+            except (
+                OSError, ValueError, tarfile.TarError, zipfile.BadZipFile, zlib.error, EOFError,
+            ) as exc:
                 row["error"] = str(exc)
                 result["complete"] = False
                 result["errors"].append(f"{source.key}: {exc}")

@@ -93,6 +93,20 @@ def test_inventory_archive_only_and_divergent_formats(tmp_path):
     assert "divergent" in result["errors"][0]
 
 
+def test_inventory_cli_corrupt_overlap_is_incomplete_json(tmp_path, capsys):
+    store = tmp_path / "a-broken" / "archived"
+    store.mkdir(parents=True)
+    (store / "session-1.tar.gz").write_bytes(b"invalid gzip archive")
+    (store / "session-1.zip").write_bytes(b"invalid zip archive")
+    _session(tmp_path / "b-valid", "good-session")
+    assert main(["corpus", "inventory", "--root", str(tmp_path)]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert not result["complete"]
+    assert result["sources"][0]["error"]
+    assert result["sources"][1]["live"] == 1
+    assert result["session_count"] == 1
+
+
 def test_inventory_permission_error_is_not_an_empty_success(tmp_path, monkeypatch):
     from agent_logger import corpus_inventory
 
