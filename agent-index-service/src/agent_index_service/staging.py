@@ -128,11 +128,11 @@ def _host_root(install_root: Path, host_config_path: Path) -> Path:
     return root
 
 
-def _bytes(path: Path) -> bytes:
+def _bytes(path: Path, *, label: str = "policy/receipt") -> bytes:
     with path.open("rb") as stream:
         value = stream.read(_LIMIT + 1)
     if len(value) > _LIMIT:
-        raise CandidateError("policy/receipt exceeds the 1 MiB limit")
+        raise CandidateError(f"{label} exceeds the 1 MiB limit")
     return value
 
 
@@ -416,7 +416,7 @@ def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) ->
                     " (descendant supervision failure)" if supervised and code == 125 else ""
                 )
                 raise CandidateError(f"{operation}: exit status {code}{classification}")
-        return _bytes(output).decode("utf-8")
+        return _bytes(output, label=f"{operation} output").decode("utf-8")
     finally:
         if job is not None:
             try:

@@ -497,6 +497,14 @@ def test_run_expired_deadline_never_spawns(case, monkeypatch):
 original_run = staging._run
 
 
+def test_bounded_read_reports_output_context(case, monkeypatch):
+    path = case.tmp / "oversized-output"
+    path.write_bytes(b"x" * 17)
+    monkeypatch.setattr(staging, "_LIMIT", 16)
+    with pytest.raises(CandidateError, match="build output exceeds"):
+        staging._bytes(path, label="build output")
+
+
 def test_windows_job_assignment_failure_is_unconfirmed_and_preserves_candidate(case, monkeypatch):
     import agent_procutil
 
