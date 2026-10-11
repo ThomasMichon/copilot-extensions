@@ -818,6 +818,15 @@ def test_terminal_managed_record_rejects_new_session_activation(
 ):
     repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
     _conclude(record_path, repo)
+    config = cli.cfg.Config(
+        srcroot=str(tmp_path), machine="host", platform="linux", repo_name="demo",
+        repos={"demo": cli.cfg.RepoConfig(
+            anchor=repo.anchor, worktree_root=repo.worktree_root,
+            remote=repo.remote, default_branch=repo.default_branch,
+        )},
+    )
+    monkeypatch.setattr(cli.cfg, "load_project_config", lambda project: config)
+    monkeypatch.setattr(cli.cfg, "load_machines_yaml", lambda anchor: {})
     monkeypatch.setattr(
         tracking.cfg,
         "tracking_dir",
