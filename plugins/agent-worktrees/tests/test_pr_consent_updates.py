@@ -53,6 +53,9 @@ def test_approved_baselines_wake_even_merged_only_and_deduplicate():
             assert result.payload["merge"]["consent_command"] == (
                 "agent-worktrees pr-merge owner/repo 42"
             )
+            assert result.payload["merge"]["consent_argv"] == [
+                "agent-worktrees", "pr-merge", "owner/repo", "42",
+            ]
             cursor = pc.Baseline.from_cursor(result.payload["cursor"])
             assert cursor.consent_update
             repeated = _wait(snap, baseline=cursor, until=until)
@@ -205,8 +208,10 @@ def test_incomplete_review_pages_and_unknown_conclusions_fail_closed(monkeypatch
     ):
         responses = iter([subprocess.CompletedProcess([], 0, json.dumps(page), ""), second])
         monkeypatch.setattr(github, "run_cli", lambda *a, **k: next(responses))
-        with pytest.raises(ProviderError):
+        with pytest.raises(ProviderError) as error:
             provider._all_review_objs("owner/repo", 42, "")
+        if second.returncode == 0:
+            assert error.value.transient
     for conclusion in (None, "", "unrecognized"):
         responses = iter([
             subprocess.CompletedProcess([], 0, '{"statuses":[]}', ""),

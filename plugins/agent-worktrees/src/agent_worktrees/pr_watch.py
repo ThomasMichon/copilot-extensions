@@ -25,7 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 from . import pr_contract as pc
-from .pr_consent import consent_command, consent_update_key
+from .pr_consent import consent_argv, consent_command, consent_update_key
 from .pr_occupancy import occupancy_from_readiness
 from .providers import ProviderError, account_token_for_slug, get_provider
 
@@ -178,6 +178,7 @@ def run_wait(
         )
         if key:
             payload["merge"]["consent_command"] = consent_command(repo, pr)
+            payload["merge"]["consent_argv"] = consent_argv(repo, pr)
             if key != acknowledged:
                 payload["updates"] = ["consent_required"]
         else:

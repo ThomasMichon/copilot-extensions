@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from . import pr_contract as pc
-from .pr_consent import consent_command
+from .pr_consent import consent_argv, consent_command
 from .pr_occupancy import occupancy_from_readiness, occupancy_from_state
 from .providers import account_token_for_slug, get_provider
 
@@ -142,6 +142,7 @@ def merge_one(
             )
         if readiness["needs_consent"]:
             readiness["consent_command"] = consent_command(repo, number)
+            readiness["consent_argv"] = consent_argv(repo, number)
         row["merge"] = occupancy_from_readiness(readiness)
         row["occupancy"] = row["merge"]["occupancy"]
         return row

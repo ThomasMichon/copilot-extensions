@@ -14,6 +14,11 @@ def consent_command(repo: str, number: int) -> str:
     return f"agent-worktrees pr-merge {shlex.quote(repo)} {number}"
 
 
+def consent_argv(repo: str, number: int) -> list[str]:
+    """Shell-independent follow-up for structured consumers."""
+    return ["agent-worktrees", "pr-merge", repo, str(number)]
+
+
 def consent_update_key(
     snap: pc.PRSnapshot,
     readiness: dict,

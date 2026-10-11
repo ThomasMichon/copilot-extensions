@@ -371,17 +371,17 @@ class GitHubProvider:
             try:
                 batch = json.loads(proc.stdout or "[]")
             except json.JSONDecodeError as exc:
-                raise ProviderError(f"Malformed GitHub review page {page}: {exc}") from exc
+                raise ProviderError(f"Malformed GitHub review page {page}: {exc}", transient=True) from exc
             if not isinstance(batch, list):
-                raise ProviderError(f"GitHub review page {page} is not a list")
+                raise ProviderError(f"GitHub review page {page} is not a list", transient=True)
             if not batch:
                 break
             for r in batch:
                 if not isinstance(r, dict):
-                    raise ProviderError(f"Malformed GitHub review on page {page}")
+                    raise ProviderError(f"Malformed GitHub review on page {page}", transient=True)
                 rid = r.get("id")
                 if not isinstance(rid, int):
-                    raise ProviderError(f"GitHub review on page {page} has no integer id")
+                    raise ProviderError(f"GitHub review on page {page} has no integer id", transient=True)
                 state = str(r.get("state", "")).upper()
                 reviews.append(
                     Review(

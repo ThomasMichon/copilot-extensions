@@ -195,7 +195,9 @@ the caller selected `--until merged`. This is a **state update**, reported as
 `updates: ["consent_required"]`, not a fabricated `approved` event; `events` and
 `transitions` still contain only selected provider transitions.
 `merge.consent_command` gives the exact single-PR follow-up command. The watcher
-does not grant consent or authorize consenting for another author.
+also supplies `merge.consent_argv` for shell-independent execution; the display
+command uses POSIX quoting, so non-POSIX consumers should execute the argv array.
+The watcher does not grant consent or authorize consenting for another author.
 An unchanged update is acknowledged only by the cursor returned with that
 update: re-arm with it to deduplicate; `pr-watch cursor` does not acknowledge
 an update it never delivered. A new head/authoritative approval or an observed
