@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,11 @@ def test_actual_hook_killswitch_precedes_all_runtime_writes(tmp_path, shell, fau
     state.write_text(json.dumps({"active": True, "reason": "fixture-only pause"}))
     state_before = state.stat()
     home = Path(environment["HOME"])
+    if os.name == "nt":
+        # Windows shell startup initializes its profile directories independently
+        # of APPDATA overrides; establish them before observing Index writes.
+        (home / "AppData/Roaming").mkdir(parents=True)
+    before_paths = set(p.relative_to(home) for p in home.rglob("*"))
     before = {p.relative_to(home): p.read_bytes() for p in home.rglob("*") if p.is_file()}
     payload = Path(environment["AGENT_INDEX_PAYLOAD_ROOT"])
     suffix = "sh" if shell == "bash" else "ps1"
@@ -48,9 +54,7 @@ def test_actual_hook_killswitch_precedes_all_runtime_writes(tmp_path, shell, fau
     assert not Path(environment["AGENT_INDEX_HOME"]).exists()
     assert not (home / ".local").exists()
     assert {p.relative_to(home): p.read_bytes() for p in home.rglob("*") if p.is_file()} == before
-    assert set(p.relative_to(home) for p in home.rglob("*")) == {
-        Path(".copilot-extensions"), Path(".copilot-extensions/bootstrap-killswitch.json"),
-    }
+    assert set(p.relative_to(home) for p in home.rglob("*")) == before_paths
     after = state.stat()
     assert (after.st_ino, after.st_mtime_ns, after.st_mode) == (
         state_before.st_ino, state_before.st_mtime_ns, state_before.st_mode,
