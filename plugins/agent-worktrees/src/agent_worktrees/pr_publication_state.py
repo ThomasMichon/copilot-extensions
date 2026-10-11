@@ -51,6 +51,9 @@ def require_current(record: tracking.WorktreeRecord, expected: tracking.PRRecord
         raise ValueError("No live tracked PR remains; reload the publication target before retrying.")
     with tracking._RecordLock(record.yaml_path, require_sidecar=True):
         fresh = tracking.load_record(record.yaml_path)
+        if (fresh.worktree_id, fresh.repo, fresh.branch, fresh.worktree_path) != (
+                record.worktree_id, record.repo, record.branch, record.worktree_path):
+            raise ValueError("Owning worktree identity changed before publication; reload it before retrying.")
         if not matches(pr_publish._publication_pr(fresh, expected), expected):
             raise ValueError("Tracked PR authority changed before publication; reload it before retrying.")
 

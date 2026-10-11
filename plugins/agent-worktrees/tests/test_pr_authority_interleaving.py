@@ -166,3 +166,19 @@ def test_unregister_blockers_use_named_ledger(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: selected if name == "selected" else ambient)
     assert "1 open PR(s)" in unregister_cli._unregister_blockers("selected")
     assert unregister_cli._unregister_blockers("ambient") == []
+
+
+@pytest.mark.parametrize("field,value", [
+    ("worktree_path", "relocated"), ("repo", "other"), ("branch", "worktree/other"),
+])
+def test_publication_revalidates_owning_record_after_wait(tmp_path, field, value):
+    from agent_worktrees import pr_publication_state
+
+    rec = tracking.create_new_record("owner", "worktree/owner", str(tmp_path), "ext", "test", "linux", tmp_path)
+    rec.prs = [tracking.PRRecord(state="open", branch="pr/example", number=42)]
+    tracking.save_record(rec)
+    stale = tracking.load_record(rec.yaml_path)
+    setattr(rec, field, value)
+    tracking.save_record(rec)
+    with pytest.raises(ValueError, match="Owning worktree identity changed"):
+        pr_publication_state.require_current(stale, stale.active_pr())
