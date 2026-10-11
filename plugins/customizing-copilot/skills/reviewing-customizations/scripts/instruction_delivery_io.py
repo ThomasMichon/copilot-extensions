@@ -235,6 +235,29 @@ def retire_legacy_local(
         result.add("warning", "projection-local-cache-legacy", legacy, str(exc))
 
 
+def report_unmanaged_legacy_locals(
+    root: Path, destinations: set[str], io: DeliveryIO, result: object
+) -> None:
+    try:
+        directory = io.safe(root, PurePosixPath(".github/instructions"))
+        expected = {delivery.legacy_local_destination(path) for path in destinations}
+        for current, directories, names in os.walk(directory):
+            directories[:] = [
+                name for name in directories if not io.indirect(Path(current) / name)
+            ]
+            for name in names:
+                if not name.endswith(".local.instructions.md"):
+                    continue
+                relative = (Path(current) / name).relative_to(root).as_posix()
+                if relative not in expected:
+                    result.add(
+                        "warning", "projection-local-cache-legacy", relative,
+                        "legacy auto-discovered body has no enabled canonical migration owner; retained",
+                    )
+    except (OSError, ValueError) as exc:
+        result.add("warning", "projection-local-cache-legacy", ".github/instructions", str(exc))
+
+
 def new_source_admission(
     root: Path, spec: delivery.Projection, io: DeliveryIO
 ) -> tuple[bool, str]:

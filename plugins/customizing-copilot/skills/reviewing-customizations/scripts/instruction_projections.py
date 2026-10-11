@@ -1255,6 +1255,10 @@ def _render_local_cache_locked(
                 root, spec, _delivery_io(), result,
                 lambda paths: _resolve_git_tracked_paths(root, paths),
             )
+    delivery_io.report_unmanaged_legacy_locals(
+        root, {spec.destination for local, spec, _ in accepted if local in valid_destinations},
+        _delivery_io(), result,
+    )
 
     for path in existing_local_cache_files:
         try:

@@ -154,3 +154,17 @@ def test_eight_explicit_inline_kernels_remain_declared() -> None:
         ("efforts", "completion-gate"),
         ("customizing-copilot", "local-cache-catchall"),
     }
+
+
+def test_disabled_legacy_source_is_retained_with_visible_migration_finding(tmp_path: Path) -> None:
+    repo, source, spec = fixture(tmp_path)
+    old = repo / delivery.legacy_local_destination(spec.destination)
+    old.parent.mkdir(parents=True)
+    raw = projections.render_projection(spec, include_prefer_local=False).content
+    old.write_bytes(raw)
+    result = projections.render_local_cache(repo, lambda: [])
+    assert old.read_bytes() == raw
+    assert any(
+        f.check == "projection-local-cache-legacy" and old.name in f.path
+        for f in result.findings
+    )
