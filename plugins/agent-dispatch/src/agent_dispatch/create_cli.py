@@ -376,7 +376,7 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
                             worktree=str(spawn_task["spawn_worktree"]),
                             session_id=handle.get("session"),
                             detail=detail,
-                            body_absent=False,
+                            body_absent=bool(handle.get("not_started")),
                         )
                     else:
                         c.fail_spawn(key, detail=detail)
@@ -537,7 +537,7 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
     return (
         result,
         "agent-bridge",
-        session_acquisition.handle(result) if result.returncode == 0 else {},
+        session_acquisition.handle(result) if result.returncode == 0 else {"not_started": True},
     )
 
 def _report_spawn_result(result, task_id: str, via: str) -> None:

@@ -176,7 +176,13 @@ class AcquisitionRuntime:
             retired_native_ids=sorted(retired),
             creation_authorized=decision.creation_authorized,
         )
-        session_id, native = await self._launch(req, decision, row, target, request_env)
+        try:
+            session_id, native = await self._launch(req, decision, row, target, request_env)
+        except AcquisitionRefused as exc:
+            if exc.code == "acquisition_draining":
+                self.store.journal.refuse(req, token, exc.code)
+                self.store.release_gate(req)
+            raise
         output = self._result(req, decision.acquired, session_id, native)
         validate_result(req, output, decision=decision, retired_native_ids=retired)
         self.store.bind(req, session_id, native)

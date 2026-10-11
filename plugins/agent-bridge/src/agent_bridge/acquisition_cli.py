@@ -23,7 +23,7 @@ def acquire(client: Any, request: AcquisitionRequest) -> AcquisitionResult:
         })
     payload = request.model_dump(mode="json")
     payload["protocol_version"] = ACQUISITION_PROTOCOL_VERSION
-    result = client._request("POST", "/api/v1/acquisitions", payload, request_timeout=240)
+    result = client._request("POST", "/api/v1/acquisitions", payload, request_timeout=max(240, request.verify_timeout + 240))
     return AcquisitionResult.model_validate(result)
 
 
