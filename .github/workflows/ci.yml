@@ -851,6 +851,7 @@ jobs:
         run: >-
           uv run --with pytest --with pyyaml python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
+          tools/test_environment_admission.py
           tools/test_run_plugin_tests.py
           tools/test_run_standalone_tests.py
           tools/test_run_tests_in_devcontainer.py
@@ -911,6 +912,7 @@ jobs:
         run: >-
           uv run --with pytest --with pyyaml python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
+          tools/test_environment_admission.py
           tools/test_run_plugin_tests.py
           tools/test_run_standalone_tests.py
 
