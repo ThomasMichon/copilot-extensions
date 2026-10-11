@@ -116,7 +116,11 @@ allowlist when operating under a restrictive role.
 Top-level `decorators` wrap routing exactly once and remain common to all
 targets. Only `input_gate` is supported in target `decorators`: target-specific
 renaming, filtering, preflights, and catalog shaping are rejected. Targets
-own `server` and `auth`; routed configs cannot also declare those at the top
+using a shared `gate` must bind its preflight selector explicitly via
+`args_from: {organization: "$args.organization"}` (substitute the configured
+parameter). Missing, literal, or different-field selector mappings are rejected
+even with `on_error: allow`; discovery never supplies an execution default.
+Targets own `server` and `auth`; routed configs cannot also declare those at the top
 level. Shared `headers`, `timeout`, `retries`, and `idle_timeout` are inherited,
 with target overrides. `routing` accepts only `parameter`, `catalog`, `targets`;
 external registries should project ordinary bridge configs rather than imply
@@ -1354,8 +1358,10 @@ answers `call`/`list` requests over a local IPC socket (default handle
   `--no-serve` / `AGENT_MCP_NO_SERVE=1`; point elsewhere with
   `AGENT_MCP_SERVE_SOCKET`.
 - **Warm pool** — sessions open lazily on first use, are reused, serialized
-  per-bridge, evicted after `--idle-timeout` (default 300s), and reopened if the
-  upstream dies.
+  per-bridge for single-server configurations, evicted after `--idle-timeout`
+  (default 300s), and reopened if the upstream dies. Routed calls to distinct
+  targets run concurrently; active entry leases prevent eviction or config
+  replacement from closing connections while calls are in flight.
 - **Attach liveness** — a pending attach reserves the host before upstream
   startup, so a slow connect cannot trigger idle eviction. Failed starts release
   the reservation and close partially-open sessions.

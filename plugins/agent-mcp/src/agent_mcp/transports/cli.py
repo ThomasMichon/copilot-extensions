@@ -27,6 +27,7 @@ from .._exec import no_window_creationflags, resolve_spawn
 from ..auth.base import AuthInjector
 from ..cli_tools import CliTool, CliToolError, build_argv, load_cli_tools, tool_in_scope
 from ..config import BridgeConfig
+from ..routing_errors import RoutingError
 from .base import Transport
 
 log = logging.getLogger("agent-mcp.transport.cli")
@@ -110,7 +111,7 @@ class CliTransport(Transport):
             env.update(await self.injector.child_env())
         except Exception as exc:
             if self.cfg.routed_target:
-                raise RuntimeError("routing target authentication failed") from exc
+                raise RoutingError("routing target authentication failed") from exc
             log.warning("cli transport: auth injection failed (%s); "
                         "spawning with ambient environment", exc)
         return env

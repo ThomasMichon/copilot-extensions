@@ -20,6 +20,10 @@ def isolated_config(cfg: BridgeConfig) -> BridgeConfig:
     """Qualify even explicit cache keys by endpoint and complete auth identity."""
     cfg = copy.deepcopy(cfg)
     endpoint = asdict(cfg.server)
+    endpoint["url_secret_env_values"] = {
+        key: os.environ.get(secret.source_env) for key, secret in cfg.server.url_secrets.items()
+        if secret.source_env
+    }
     for auth in (*cfg.auths, *cfg.server.url_secrets.values()):
         identity = {"endpoint": endpoint, "headers": cfg.headers, "auth": asdict(auth)}
         if auth.source_env:

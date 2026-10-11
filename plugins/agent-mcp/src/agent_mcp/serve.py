@@ -116,21 +116,23 @@ __all__ = [
 class _WarmEntry:
     """One warm upstream session plus its serialization lock + idle clock."""
 
-    __slots__ = ("last_used", "lock", "session")
+    __slots__ = ("last_used", "lock", "session", "active", "idle")
 
     def __init__(self, session: OneShotSession) -> None:
         self.session = session
         self.lock = asyncio.Lock()
         self.last_used = time.monotonic()
+        self.active = 0
+        self.idle = asyncio.Event()
+        self.idle.set()
 
 
 class WarmPool:
     """A pool of warm :class:`OneShotSession`s keyed by bridge config path.
 
-    Calls to a given bridge are **serialized** by a per-entry lock (an MCP stdio
-    session is a single JSON-RPC pipe; serializing is correct without request
-    multiplexing). Distinct bridges run concurrently. A session that errors at
-    the transport level is evicted so the next call transparently reopens it.
+    Single-server calls are serialized. Routed calls lease a live entry while
+    the routing core isolates per-target execution; distinct targets can overlap.
+    Config replacement and eviction wait for active leases to drain.
     """
 
     def __init__(self, *, idle_timeout: float = _DEFAULT_IDLE_TIMEOUT) -> None:
@@ -150,6 +152,7 @@ class WarmPool:
             if entry is not None and entry.session.cfg != cfg:
                 self._entries.pop(key, None)
         if entry is not None and entry.session.cfg != cfg:
+            await entry.idle.wait()
             await entry.session.__aexit__(None, None, None)
             log.info("warm session replaced after config change: %s", key)
             entry = None
@@ -169,6 +172,28 @@ class WarmPool:
                 code=-32601,
             )
         key_lock = await self._key_lock(key)
+        if cfg.routing is not None:
+            async with key_lock:
+                entry = await self._entry_for_locked(key, cfg)
+                entry.active += 1
+                entry.idle.clear()
+                entry.last_used = time.monotonic()
+            failed = False
+            try:
+                return await entry.session.call_tool(tool, arguments)
+            except UpstreamError:
+                raise
+            except Exception:
+                failed = True
+                raise
+            finally:
+                entry.active -= 1
+                entry.last_used = time.monotonic()
+                if not entry.active:
+                    entry.idle.set()
+                if failed:
+                    async with key_lock:
+                        await self._evict_locked(key, entry)
         async with key_lock:
             entry = await self._entry_for_locked(key, cfg)
             entry.last_used = time.monotonic()
@@ -205,6 +230,7 @@ class WarmPool:
                 return
             entry = self._entries.pop(key, None)
         if entry is not None:
+            await entry.idle.wait()
             with contextlib.suppress(Exception):
                 await entry.session.__aexit__(None, None, None)
             log.info("warm session closed: %s", key)
@@ -218,7 +244,7 @@ class WarmPool:
         now = time.monotonic()
         stale = [
             key for key, e in list(self._entries.items())
-            if now - e.last_used > self._idle_timeout
+            if not e.active and now - e.last_used > self._idle_timeout
         ]
         for key in stale:
             await self._evict(key)

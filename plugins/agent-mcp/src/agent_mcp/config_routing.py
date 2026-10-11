@@ -79,5 +79,11 @@ def _parse_routing(data: dict[str, Any], *, name: str | None,
          "tools": data.get("tools"), "decorators": data.get("decorators")},
         name=name, source_path=source_path,
     )
+    for decorator in outer.decorators:
+        if decorator.type == "gate":
+            mapping = decorator.options["preflight"].get("args_from") or {}
+            if mapping.get(parameter) != f"$args.{parameter}":
+                raise ConfigError("routed gate preflight must map the same selector "
+                                  f"with args_from: {{{parameter}: '$args.{parameter}'}}")
     outer.routing = RoutingSpec(parameter, catalog, parsed)
     return outer
