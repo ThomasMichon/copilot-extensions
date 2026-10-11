@@ -24,6 +24,8 @@ def test_post_hook_uses_same_shell_and_installs_the_client():
     command = hooks["hooks"]["postToolUse"][0]["powershell"]
     assert ". $s; Invoke-PostToolHook -Raw $raw" in command
     assert "ReadToEnd()" in command
+    assert "OpenStandardInput()" in command
+    assert "$OutputEncoding = $utf8" in command
     assert "post-tool-hook.ps1" in command
     assert "$raw | & $py $fallback postToolUse" in command
     for name in ("install.ps1", "install.sh"):
@@ -84,6 +86,8 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path)
             return {}
         if payload.get("toolName") == "deny":
             return {"permissionDecision": "deny", "permissionDecisionReason": "policy"}
+        if payload.get("toolName") == "manifest":
+            return {"additionalContext": payload["text"]}
         return {"additionalContext": "resident"}
 
     server = HookIpcServer(decide)
@@ -132,7 +136,7 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path)
         env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
         result = subprocess.run(
             [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
-            capture_output=True, text=True, env=env, timeout=15,
+            capture_output=True, text=True, encoding="utf-8", env=env, timeout=15,
             **no_window_kwargs(),
         )
         assert result.returncode == 0, result.stderr
@@ -160,16 +164,38 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path)
             + command,
             encoding="utf-8",
         )
+        payload = {"toolName": "manifest", "text": "\u00e9\u4e2d\U0001f680"}
         manifest_result = subprocess.run(
             [shell, "-NoProfile", "-NonInteractive", "-File", str(manifest_harness)],
-            input='{"toolName":"manifest"}',
-            capture_output=True, text=True, env=env, timeout=15,
+            input=json.dumps(payload, ensure_ascii=False),
+            capture_output=True, text=True, encoding="utf-8", env=env, timeout=15,
             **no_window_kwargs(),
         )
         assert manifest_result.returncode == 0, manifest_result.stderr
         assert manifest_result.stderr == ""
-        assert json.loads(manifest_result.stdout) == {"additionalContext": "resident"}
-        assert seen[-1] == ("postToolUse", {"toolName": "manifest"})
+        assert json.loads(manifest_result.stdout) == {"additionalContext": payload["text"]}
+        assert seen[-1] == ("postToolUse", payload)
+        (bin_dir / SCRIPT.name).unlink()
+        (bin_dir / "hook_client.py").write_text(
+            "import json,sys\n"
+            "payload=json.loads(sys.stdin.buffer.read().decode('utf-8'))\n"
+            "sys.stdout.buffer.write(json.dumps(payload,ensure_ascii=False).encode('utf-8'))\n",
+            encoding="utf-8",
+        )
+        python = sys.executable.replace("'", "''")
+        manifest_harness.write_text(
+            f"function Get-Command {{ [pscustomobject]@{{Source='{python}'}} }}\n" + command,
+            encoding="utf-8",
+        )
+        fallback_result = subprocess.run(
+            [shell, "-NoProfile", "-NonInteractive", "-File", str(manifest_harness)],
+            input=json.dumps(payload, ensure_ascii=False),
+            capture_output=True, text=True, encoding="utf-8", env=env, timeout=15,
+            **no_window_kwargs(),
+        )
+        assert fallback_result.returncode == 0, fallback_result.stderr
+        assert fallback_result.stderr == ""
+        assert json.loads(fallback_result.stdout) == payload
     finally:
         server.close()
 

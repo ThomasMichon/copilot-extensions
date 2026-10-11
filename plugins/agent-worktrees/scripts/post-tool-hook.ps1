@@ -69,6 +69,9 @@ function Invoke-ResidentPostTool {
 
 function Invoke-PostToolHook {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw)
+    $utf8 = [Text.UTF8Encoding]::new($false, $true)
+    $OutputEncoding = $utf8
+    [Console]::OutputEncoding = $utf8
     try {
         Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop
     } catch {
