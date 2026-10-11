@@ -1,0 +1,9 @@
+{
+  "comment": "Add RouteResponse/SearchHit/HealthResult response contracts to the vendored agent-fleet-contracts lib (machine-fleet routing foundation, Phase 3 prep)",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

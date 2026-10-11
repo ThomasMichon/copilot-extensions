@@ -7,14 +7,24 @@ from fleet_contracts import (
     ContractError,
     DriverSnapshot,
     DriverTarget,
+    HealthResult,
     RouteRequest,
+    RouteResponse,
+    SearchHit,
     SearchParameters,
     ServiceOffer,
     TargetRef,
     decode_json,
     encode_json,
 )
-from fleet_contracts.records import MAX_MESSAGE_BYTES, MAX_QUERY_BYTES, MAX_SERVICES, MAX_TARGETS
+from fleet_contracts.records import (
+    MAX_CONTENT_BYTES,
+    MAX_HITS,
+    MAX_MESSAGE_BYTES,
+    MAX_QUERY_BYTES,
+    MAX_SERVICES,
+    MAX_TARGETS,
+)
 
 
 def registration():
@@ -220,3 +230,130 @@ def test_driver_states_do_not_imply_live_health_or_managed_capabilities():
     ):
         with pytest.raises(ContractError):
             replace(target, **change)
+
+
+def hit(**overrides):
+    base = {
+        "chunk_id": "chunk-1", "score": 0.5, "file_path": "docs/example.md", "source": "git:repo",
+        "chunk_type": "markdown", "language": "markdown", "content": "example content",
+        "line_start": 10, "line_end": 12,
+    }
+    base.update(overrides)
+    return SearchHit(**base)
+
+
+def search_response(**overrides):
+    base = {
+        "request_id": "request-a", "service_id": "index", "installation_id": "index-install-a",
+        "operation": "index.search", "hits": (hit(),),
+    }
+    base.update(overrides)
+    return RouteResponse(**base)
+
+
+def health_response(**overrides):
+    base = {
+        "request_id": "request-a", "service_id": "index", "installation_id": "index-install-a",
+        "operation": "health", "health": HealthResult(True, "ok"),
+    }
+    base.update(overrides)
+    return RouteResponse(**base)
+
+
+@pytest.mark.parametrize("record,reader", [
+    (search_response(), RouteResponse), (health_response(), RouteResponse),
+    (search_response(hits=()), RouteResponse),
+])
+def test_response_wire_roundtrip(record, reader):
+    encoded = encode_json(record.to_dict())
+    assert reader.from_dict(decode_json(encoded)) == record
+    assert len(encoded) < MAX_MESSAGE_BYTES
+
+
+@pytest.mark.parametrize("mutation", ["unknown", "missing", "version", "bool-version", "schema"])
+def test_response_wire_rejects_unknown_or_incompatible_record(mutation):
+    data = search_response().to_dict()
+    if mutation == "unknown":
+        data["executable"] = "never-logged-secret"
+    elif mutation == "missing":
+        del data["schema"]
+    elif mutation == "version":
+        data["version"] = 2
+    elif mutation == "bool-version":
+        data["version"] = True
+    else:
+        data["schema"] = "other"
+    with pytest.raises(ContractError) as error:
+        RouteResponse.from_dict(data)
+    assert "never-logged-secret" not in str(error.value)
+
+
+def test_route_response_for_request_echoes_originating_identity():
+    req = request()
+    response = RouteResponse.for_request(req, hits=(hit(),))
+    assert response.request_id == req.request_id
+    assert response.service_id == req.service_id
+    assert response.installation_id == req.installation_id
+    assert response.operation == req.operation
+    health_req = replace(req, operation="health", parameters=None)
+    health = RouteResponse.for_request(health_req, health=HealthResult(True))
+    assert health.operation == "health"
+
+
+@pytest.mark.parametrize("change", [
+    {"operation": "execute"},
+    {"operation": "health", "hits": (hit(),), "health": None},
+    {"operation": "health", "health": None},
+    {"operation": "index.search", "hits": None, "health": HealthResult(True)},
+    {"operation": "index.search", "health": HealthResult(True)},
+    {"operation": "index.search", "hits": [hit()]},
+])
+def test_route_response_operation_shape_is_exclusive(change):
+    base = {
+        "request_id": "request-a", "service_id": "index", "installation_id": "index-install-a",
+        "operation": "index.search", "hits": (hit(),),
+    }
+    base.update(change)
+    with pytest.raises(ContractError):
+        RouteResponse(**base)
+
+
+def test_route_response_bounds_hit_count():
+    with pytest.raises(ContractError):
+        search_response(hits=tuple(hit(chunk_id=f"c-{i}") for i in range(MAX_HITS + 1)))
+    search_response(hits=tuple(hit(chunk_id=f"c-{i}") for i in range(MAX_HITS)))
+
+
+@pytest.mark.parametrize("change", [
+    {"chunk_id": ""}, {"chunk_id": 1},
+    {"score": float("nan")}, {"score": float("inf")}, {"score": "0.5"}, {"score": True},
+    {"file_path": 1}, {"source": None},
+    {"content": "x" * (MAX_CONTENT_BYTES + 1)},
+    {"line_start": -1}, {"line_start": 1.5}, {"line_end": True},
+])
+def test_search_hit_is_typed_and_bounded(change):
+    with pytest.raises(ContractError):
+        hit(**change)
+
+
+def test_search_hit_allows_blank_body_fields_but_not_blank_identity():
+    allowed = hit(file_path="", source="", chunk_type="", language="", content="",
+                  line_start=None, line_end=None)
+    assert allowed.content == ""
+    assert allowed.line_start is None
+
+
+@pytest.mark.parametrize("change", [
+    {"available": "yes"}, {"available": 1}, {"detail": 1},
+    {"detail": "x" * 513},
+])
+def test_health_result_is_typed_and_bounded(change):
+    base = {"available": True, "detail": "ok"}
+    base.update(change)
+    with pytest.raises(ContractError):
+        HealthResult(**base)
+
+
+def test_health_result_allows_blank_or_missing_detail():
+    assert HealthResult(True).detail is None
+    assert HealthResult(False, "").detail == ""
