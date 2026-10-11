@@ -328,7 +328,9 @@ def test_canonical_os_profile_never_substitutes_home_on_posix(monkeypatch):
 
 
 def test_canonical_os_profile_uses_userprofile_on_windows(monkeypatch):
-    monkeypatch.setattr(apr.os, "name", "nt")
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(apr, "os", SimpleNamespace(**{**vars(apr.os), "name": "nt"}))
     assert apr._canonical_os_profile({"USERPROFILE": "C:\\Users\\someone"}) == Path(
         "C:\\Users\\someone"
     )

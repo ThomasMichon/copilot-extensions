@@ -1922,7 +1922,12 @@ def test_spawn_detached_windows_kwargs_avoid_console_flash(monkeypatch):
         return _Proc()
 
     monkeypatch.setattr(subprocess, "Popen", _fake_popen)
-    monkeypatch.setattr(os, "name", "nt")
+    import agent_procutil
+
+    monkeypatch.setattr(agent_procutil, "_is_windows", lambda: True)
+    monkeypatch.setattr(
+        mux_daemon.mux_daemon_process, "direct_daemon_python", lambda executable: (executable, {}),
+    )
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
 
     assert mux_daemon._spawn_detached(["python", "-m", "worktree_manager"]) is True
