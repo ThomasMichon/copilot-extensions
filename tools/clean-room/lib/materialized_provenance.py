@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import stat
 import subprocess
 import tarfile
@@ -14,6 +15,33 @@ import tempfile
 
 RECEIPT = "MATERIALIZED.json"
 SCHEMA = "copilot-extensions.materialized-source"
+
+
+def extract_source(tree: tarfile.TarFile, root: Path) -> None:
+    """Extract regular Git archive bytes without version-specific tar filters."""
+    members = tree.getmembers()
+    for member in members:
+        parts = member.name.rstrip("/").split("/")
+        if (not member.name or member.name.startswith(("/", "\\"))
+                or any(part in ("", ".", "..") or "\\" in part or ":" in part for part in parts)
+                or not (member.isdir() or member.isfile())):
+            raise ValueError(f"unsafe source archive member: {member.name}")
+        destination = root.joinpath(*parts)
+        if not destination.resolve().is_relative_to(root.resolve()):
+            raise ValueError(f"source archive member escapes root: {member.name}")
+    for member in members:
+        destination = root / member.name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if member.isdir():
+            destination.mkdir(exist_ok=True)
+            continue
+        stream = tree.extractfile(member)
+        if stream is None:
+            raise ValueError(f"source archive member has no data: {member.name}")
+        # The private temporary root contains only validated directories/files.
+        with stream, destination.open("xb") as output:
+            shutil.copyfileobj(stream, output)
+        destination.chmod(0o755 if member.mode & 0o111 else 0o644)
 
 
 def content_manifest(root: Path) -> dict[str, dict]:
@@ -76,7 +104,7 @@ def build(dest: Path, *, source_root: Path) -> list[str]:
     with tempfile.TemporaryDirectory(prefix="materialized-source-") as temporary:
         source = Path(temporary)
         with tarfile.open(fileobj=io.BytesIO(archive)) as tree:
-            tree.extractall(source, filter="data")
+            extract_source(tree, source)
         if (source / RECEIPT).exists() or (source / RECEIPT).is_symlink():
             raise ValueError("source must not contain a generated materialized receipt")
         log = materialize_main.build(dest, source_root=source)

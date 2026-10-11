@@ -26,6 +26,11 @@ plugin. Missing, wrong-HEAD, stale, added/removed-path or tampered-byte evidence
 fails closed. The receipt binds an honestly built artifact to its source claim;
 it is not a signature authenticating an untrusted builder that can forge both
 the receipt and bytes. Do not replace the verifier with code from the candidate.
+Archive extraction supports the repository's Python 3.10 floor without the
+version-specific `TarFile.extractall(filter=...)` API. It validates all members
+before extraction, accepts only regular files/directories, rejects traversal,
+links and device entries, and refuses destinations resolving outside its private
+temporary root. There is no unfiltered-extraction fallback.
 
 The scenario copies the candidate into its own filesystem and records
 `product_kind=materialized-candidate-not-shipped`. It never treats raw `dev` or

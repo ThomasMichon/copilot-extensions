@@ -100,7 +100,7 @@ def test_actual_session_hook_stamps_only_metadata(
     gate, environment = gate_fixture(tmp_path / "fixture", shell)
     scripts = gate.parent
     payload = scripts.parent
-    for name in ("session-stamp.py", "versioned_runtime.py"):
+    for name in ("session-stamp.py", "stamp_paths.py", "versioned_runtime.py"):
         shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     (payload / "plugin.json").write_text('{"name":"agent-index","version":"9.9.9"}')
     suffix = "sh" if shell == "bash" else "ps1"
@@ -144,9 +144,7 @@ def test_actual_session_hook_stamps_only_metadata(
     if role is None:
         assert not root.exists()
     else:
-        expected = {"payload-dir", "stamped-version"}
-        if shell == "bash":
-            expected.add(".publication.lock")
+        expected = {"payload-dir", "stamped-version", ".publication.lock"}
         assert set(p.name for p in root.iterdir()) == expected
         assert (root / "stamped-version").read_text().strip() == "9.9.9"
         assert not list(root.rglob("pyvenv.cfg"))

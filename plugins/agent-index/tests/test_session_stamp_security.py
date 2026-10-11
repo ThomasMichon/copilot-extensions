@@ -1,0 +1,262 @@
+"""Actual hook refusal precedes any write through an unowned filesystem link."""
+from __future__ import annotations
+
+import errno
+import importlib.util
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
+
+from test_ensure_service_hooks import PLUGIN, _shell_command
+from test_runtime_gate import _fixture
+
+
+def _hook(tmp_path: Path, shell: str = "bash") -> tuple[list[str], dict[str, str], Path]:
+    repo = tmp_path / "repo"
+    gate, environment = _fixture(repo, shell)
+    scripts = gate.parent
+    for name in ("session-stamp.py", "stamp_paths.py", "versioned_runtime.py"):
+        shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
+    suffix = "sh" if shell == "bash" else "ps1"
+    shutil.copy2(PLUGIN / "scripts" / f"bootstrap-check.{suffix}", scripts)
+    (scripts.parent / "plugin.json").write_text('{"version":"9.9.9"}')
+    environment.pop("TEST_PYTHON", None)
+    environment["AGENT_INDEX_REPO"] = str(repo)
+    environment["HOME"] = environment["USERPROFILE"] = str(tmp_path / "home")
+    Path(environment["HOME"]).mkdir()
+    environment["COPILOT_PLUGIN_ROOT"] = str(scripts.parent)
+    environment["AGENT_INDEX_PAYLOAD_ROOT"] = str(scripts.parent)
+    hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["sessionStart"][1]
+    executable = _shell_command(shell, scripts / f"bootstrap-check.{suffix}")[0]
+    command = ([executable, "-c", hook["bash"]] if shell == "bash" else
+               [executable, "-NoProfile", "-Command", hook["powershell"]])
+    return command, environment, repo
+
+
+def _run(command: list[str], environment: dict[str, str], repo: Path):
+    return subprocess.run(command, cwd=repo, env=environment, capture_output=True,
+                          text=True, timeout=20)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX link and inode adversaries")
+@pytest.mark.parametrize("fault", [
+    "root-link", "ancestor-link", "lock-link", "lock-hardlink", "lock-directory",
+    "root-file",
+])
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_actual_hook_refuses_links_before_external_mutation(tmp_path, fault, shell):
+    command, environment, repo = _hook(tmp_path, shell)
+    external = tmp_path / "external"
+    external.mkdir()
+    sentinel = external / ".publication.lock"
+    sentinel.write_bytes(b"external sentinel must not be truncated\n")
+    before = sentinel.stat()
+    entries = sorted(p.name for p in external.iterdir())
+    root = Path(environment["AGENT_INDEX_HOME"])
+    if fault == "root-link":
+        root.symlink_to(external, target_is_directory=True)
+    elif fault == "ancestor-link":
+        link = tmp_path / "ancestor"
+        link.symlink_to(external, target_is_directory=True)
+        root = link / "uncreated-root"
+        environment["AGENT_INDEX_HOME"] = str(root)
+    elif fault == "root-file":
+        root.write_bytes(b"not a directory")
+    else:
+        root.mkdir()
+        lock = root / ".publication.lock"
+        if fault == "lock-link":
+            lock.symlink_to(sentinel)
+        elif fault == "lock-hardlink":
+            os.link(sentinel, lock)
+        else:
+            lock.mkdir()
+    # No external flock executable is needed, even on a no-flock host.
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    flock = tools / "flock"
+    flock.write_text("#!/bin/sh\nexit 99\n")
+    flock.chmod(0o755)
+    environment["PATH"] = str(tools) + os.pathsep + environment["PATH"]
+    result = _run(command, environment, repo)
+    assert result.returncode != 0
+    assert result.stdout == "{}"
+    assert "session stamp failed" in result.stderr
+    after = sentinel.stat()
+    assert sentinel.read_bytes() == b"external sentinel must not be truncated\n"
+    assert (before.st_ino, before.st_size, before.st_mtime_ns) == (
+        after.st_ino, after.st_size, after.st_mtime_ns,
+    )
+    assert sorted(p.name for p in external.iterdir()) == entries
+    if fault.startswith("lock-"):
+        assert set(p.name for p in root.iterdir()) == {".publication.lock"}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX flock interoperability")
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_actual_hook_preserves_lock_inode_bytes_and_contended_noop(tmp_path, shell):
+    import fcntl
+
+    command, environment, repo = _hook(tmp_path, shell)
+    root = Path(environment["AGENT_INDEX_HOME"])
+    root.mkdir()
+    path = root / ".publication.lock"
+    path.write_bytes(b"installer publication lock sentinel")
+    before = path.stat()
+    with path.open("rb") as held:
+        fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = _run(command, environment, repo)
+        assert result.returncode == 0, result.stderr
+        assert set(p.name for p in root.iterdir()) == {".publication.lock"}
+    result = _run(command, environment, repo)
+    assert result.returncode == 0, result.stderr
+    assert (root / "stamped-version").read_text() == "9.9.9\n"
+    after = path.stat()
+    assert path.read_bytes() == b"installer publication lock sentinel"
+    assert (before.st_ino, before.st_mtime_ns, before.st_mode) == (
+        after.st_ino, after.st_mtime_ns, after.st_mode,
+    )
+
+
+def _stamp_module():
+    spec = importlib.util.spec_from_file_location("secure_stamp", PLUGIN / "scripts/session-stamp.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX lock failure injection")
+def test_unknown_lock_error_is_not_contention(tmp_path, monkeypatch):
+    import fcntl
+
+    module = _stamp_module()
+    def fail(*args):
+        raise OSError(errno.EIO, "injected lock I/O failure")
+    monkeypatch.setattr(fcntl, "flock", fail)
+    with pytest.raises(OSError, match="injected lock I/O failure"):
+        module.stamp(tmp_path / "root", PLUGIN, "legacy")
+    assert set(p.name for p in (tmp_path / "root").iterdir()) == {".publication.lock"}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX lock identity race")
+def test_lock_swapped_after_open_is_refused_without_external_write(tmp_path, monkeypatch):
+    module = _stamp_module()
+    root = tmp_path / "root"
+    root.mkdir()
+    sentinel = tmp_path / "sentinel"
+    sentinel.write_bytes(b"untouched")
+    before = sentinel.stat()
+    original = os.open
+    def swap(name, flags, *args, **kwargs):
+        fd = original(name, flags, *args, **kwargs)
+        if name == ".publication.lock":
+            (root / name).unlink()
+            (root / name).symlink_to(sentinel)
+        return fd
+    monkeypatch.setattr(os, "open", swap)
+    with pytest.raises(ValueError, match="identity changed|single-link regular"):
+        module.stamp(root, PLUGIN, "legacy")
+    assert sentinel.read_bytes() == b"untouched"
+    assert sentinel.stat().st_mtime_ns == before.st_mtime_ns
+    assert set(p.name for p in root.iterdir()) == {".publication.lock"}
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+def test_actual_hook_unknown_lock_io_error_exits_nonzero(tmp_path, shell):
+    command, environment, repo = _hook(tmp_path, shell)
+    helper = Path(environment["AGENT_INDEX_PAYLOAD_ROOT"]) / "scripts/stamp_paths.py"
+    with helper.open("a") as stream:
+        stream.write('\ndef lock(fd):\n    raise OSError(5, "fixture lock I/O failure")\n')
+    result = _run(command, environment, repo)
+    assert result.returncode != 0
+    assert result.stdout == "{}"
+    assert "session stamp failed" in result.stderr
+    assert "fixture lock I/O failure" in result.stderr
+    root = Path(environment["AGENT_INDEX_HOME"])
+    assert set(p.name for p in root.iterdir()) == {".publication.lock"}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX ancestor identity race")
+def test_root_replaced_after_admission_never_writes_external_tree(tmp_path, monkeypatch):
+    module = _stamp_module()
+    root = tmp_path / "root"
+    root.mkdir()
+    external = tmp_path / "external"
+    external.mkdir()
+    sentinel = external / "payload-dir"
+    sentinel.write_bytes(b"untouched")
+    before = sentinel.stat()
+    original = module.lock
+    def swap(fd):
+        held = original(fd)
+        root.rename(tmp_path / "admitted-root")
+        root.symlink_to(external, target_is_directory=True)
+        return held
+    monkeypatch.setattr(module, "lock", swap)
+    with pytest.raises(ValueError, match="directory identity changed"):
+        module.stamp(root, PLUGIN, "legacy")
+    assert sentinel.read_bytes() == b"untouched"
+    assert sentinel.stat().st_mtime_ns == before.st_mtime_ns
+    assert set(p.name for p in external.iterdir()) == {"payload-dir"}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX read-only deployed marker")
+def test_deployed_readonly_marker_remains_untouched(tmp_path):
+    module = _stamp_module()
+    marker = tmp_path / "current-version"
+    marker.write_text("0.0.1\n")
+    marker.chmod(0o444)
+    before = marker.stat()
+    module.stamp(tmp_path, PLUGIN, "legacy")
+    after = marker.stat()
+    assert (before.st_ino, before.st_mtime_ns, before.st_mode) == (
+        after.st_ino, after.st_mtime_ns, after.st_mode,
+    )
+    assert set(p.name for p in tmp_path.iterdir()) == {"current-version", ".publication.lock"}
+
+
+def test_parent_traversal_is_refused_before_directory_creation(tmp_path):
+    module = _stamp_module()
+    with pytest.raises(ValueError, match="parent traversal"):
+        module.stamp(tmp_path / "not-created/../root", PLUGIN, "legacy")
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows handle/reparse contract")
+@pytest.mark.parametrize("fault", ["root-link", "ancestor-link", "lock-link", "lock-hardlink"])
+def test_native_windows_actual_hook_refuses_unowned_links(tmp_path, fault):
+    command, environment, repo = _hook(tmp_path, "powershell")
+    root = Path(environment["AGENT_INDEX_HOME"])
+    external = tmp_path / "external"
+    external.mkdir()
+    sentinel = external / ".publication.lock"
+    sentinel.write_bytes(b"native Windows sentinel")
+    try:
+        if fault == "root-link":
+            root.symlink_to(external, target_is_directory=True)
+        elif fault == "ancestor-link":
+            link = tmp_path / "ancestor"
+            link.symlink_to(external, target_is_directory=True)
+            environment["AGENT_INDEX_HOME"] = str(link / "uncreated")
+        else:
+            root.mkdir()
+            if fault == "lock-hardlink":
+                os.link(sentinel, root / ".publication.lock")
+            else:
+                (root / ".publication.lock").symlink_to(sentinel)
+    except OSError as error:
+        if error.winerror == 1314:
+            pytest.skip("fixture symlink creation needs Windows developer mode or privilege")
+        raise
+    before = sentinel.stat()
+    result = _run(command, environment, repo)
+    assert result.returncode != 0
+    assert "session stamp failed" in result.stderr
+    assert sentinel.read_bytes() == b"native Windows sentinel"
+    assert sentinel.stat().st_mtime_ns == before.st_mtime_ns
+    assert set(p.name for p in external.iterdir()) == {".publication.lock"}

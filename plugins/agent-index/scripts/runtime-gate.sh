@@ -322,28 +322,7 @@ if [ "$COMMAND" = __session-stamp ]; then
         printf '%s\n' '[agent-index] pending installation cannot stamp session metadata.' >&2
         exit 126
     fi
-    # Match the installer's publication lock, but never wait through a deployment.
-    mkdir -p "$ROOT"
-    exec 9>"$ROOT/.publication.lock"
-    if command -v flock >/dev/null 2>&1; then
-        flock -n -E 75 9
-        lock_rc=$?
-    else
-        "$PY_GATE" -I -c '
-import fcntl
-import sys
-try:
-    fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
-except BlockingIOError:
-    sys.exit(75)
-except OSError as error:
-    print(f"[agent-index] stamp lock failed: {error}", file=sys.stderr)
-    sys.exit(1)
-'
-        lock_rc=$?
-    fi
-    [ "$lock_rc" -ne 75 ] || exit 0
-    [ "$lock_rc" -eq 0 ] || exit "$lock_rc"
+    # Python owns the no-follow lock descriptor through every metadata write.
     "$PY_GATE" -I -X utf8 "$SCRIPT_DIR/session-stamp.py" "$ROOT" "$PAYLOAD_ROOT" "$ACTUAL_MODE"
     exit $?
 fi

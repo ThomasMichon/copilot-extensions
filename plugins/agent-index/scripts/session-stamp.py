@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish only session metadata/binstubs under the runtime gate's admission lock."""
+"""Publish only session metadata/binstubs under a no-follow admission lock."""
 from __future__ import annotations
 
 import importlib.util
@@ -8,33 +8,28 @@ import os
 from pathlib import Path
 import shlex
 import sys
-import tempfile
+
+sys.path.insert(0, str(Path(__file__).parent))
+sys.dont_write_bytecode = True
+from stamp_paths import Directory, lock  # noqa: E402
 
 
 def publish(path: Path, data: bytes, *, executable: bool = False) -> None:
-    for parent in (path, *path.parents):
-        if parent.is_symlink() or (
-            hasattr(parent, "is_junction") and parent.is_junction()
-        ):
-            raise ValueError(f"refusing linked stamp destination: {parent}")
-    if path.is_file() and path.read_bytes() == data:
-        if executable:
-            path.chmod(0o755)
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(prefix=".session-stamp-", dir=path.parent)
-    temporary = Path(name)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(data)
-        if executable:
-            temporary.chmod(0o755)
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    with Directory(path.parent) as directory:
+        directory.publish(path.name, data, executable=executable)
 
 
 def stamp(root: Path, payload: Path, mode: str) -> None:
+    with Directory(root) as directory:
+        fd = directory.open(".publication.lock", create=True)
+        try:
+            if lock(fd):
+                _stamp(directory, payload, mode)
+        finally:
+            os.close(fd)
+
+
+def _stamp(root: Directory, payload: Path, mode: str) -> None:
     manifest = json.loads((payload / "plugin.json").read_text(encoding="utf-8"))
     version = manifest["version"]
     spec = importlib.util.spec_from_file_location(
@@ -46,16 +41,16 @@ def stamp(root: Path, payload: Path, mode: str) -> None:
     sys.dont_write_bytecode = True
     spec.loader.exec_module(comparator)
     for marker in ("current-version", "stamped-version"):
-        path = root / marker
-        if path.is_file() and comparator._version_key(
-            path.read_text(encoding="utf-8").strip()
+        data = root.read(marker)
+        if data is not None and comparator._version_key(
+            data.decode("utf-8").strip()
         ) > comparator._version_key(version):
             return
     # A deployed launcher's snapshot pointer is not session metadata to replace.
-    if (root / "current-version").exists():
+    if root.read("current-version") is not None:
         return
-    publish(root / "payload-dir", (str(payload) + "\n").encode())
-    publish(root / "stamped-version", (version + "\n").encode())
+    root.publish("payload-dir", (str(payload) + "\n").encode())
+    root.publish("stamped-version", (version + "\n").encode())
     if mode == "legacy":
         home = Path(os.environ.get("USERPROFILE") or str(Path.home())) if os.name == "nt" else Path.home()
         bin_dir = home / ".local/bin"

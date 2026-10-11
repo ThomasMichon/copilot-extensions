@@ -42,6 +42,14 @@ supervision.
   silently chooses a host. Direct installer invocation via `<repo> update`
   remains an explicit deployment path. `ensure-service` compatibility scripts
   remain no-ops.
+  The shared Python stamp transaction pins every root ancestor with no-follow
+  directory handles, validates file identity/type and current-user ownership,
+  and keeps the installer's existing `.publication.lock` inode open without
+  truncation throughout metadata publication. POSIX uses nonblocking `fcntl`
+  locking even without the `flock` executable. Windows rejects reparse points
+  using opened handles, denies delete sharing to pin ancestors, checks owner
+  SIDs and retains the installer's publication mutex. Only genuine contention
+  is a successful no-op; unsafe paths and I/O/lock errors fail explicitly.
 - **Installation cells:** namespaced installation cells build and reconcile the
   host runtime with the same local slot/cutover primitives as legacy mode. They
   remain self-contained and do not require `agent-dispatch`.

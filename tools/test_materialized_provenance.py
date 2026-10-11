@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tarfile
 
 import pytest
 
@@ -54,6 +56,10 @@ def test_canonical_entrypoint_builds_committed_standalone_tree(
     source: tuple[Path, str], tmp_path: Path, monkeypatch, capsys,
 ) -> None:
     root, head = source
+    # Older supported tarfile APIs have no filter keyword; never call extractall.
+    def old_extractall(self, path=".", members=None, *, numeric_owner=False):
+        raise AssertionError("candidate builder must not use extractall")
+    monkeypatch.setattr(tarfile.TarFile, "extractall", old_extractall)
     (root / "docs/shared.md").write_text("uncommitted tamper\n")
     (root / "untracked").write_text("not committed\n")
     monkeypatch.setattr(mm, "REPO", root)
@@ -134,3 +140,47 @@ def test_unresolved_materialization_never_emits_receipt(
     with pytest.raises(ValueError, match="unresolved"):
         PROVENANCE.build(dest, source_root=root)
     assert not (dest / PROVENANCE.RECEIPT).exists()
+
+
+@pytest.mark.parametrize("fault", [
+    "../escape", "/absolute", "safe/../../escape", "safe\\escape",
+    "C:/escape", "safe/./escape", "safe//escape", "symlink", "hardlink",
+    "character", "block", "fifo",
+])
+def test_archive_validation_rejects_unsafe_members_before_extraction(tmp_path, fault):
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w") as tree:
+        good = tarfile.TarInfo("good")
+        good.size = 4
+        tree.addfile(good, io.BytesIO(b"good"))
+        member = tarfile.TarInfo(fault)
+        types = {"symlink": tarfile.SYMTYPE, "hardlink": tarfile.LNKTYPE,
+                 "character": tarfile.CHRTYPE, "block": tarfile.BLKTYPE,
+                 "fifo": tarfile.FIFOTYPE}
+        member.type = types.get(fault, tarfile.REGTYPE)
+        member.linkname = "../sentinel"
+        tree.addfile(member)
+    root = tmp_path / "root"
+    root.mkdir()
+    sentinel = tmp_path / "sentinel"
+    sentinel.write_bytes(b"unchanged")
+    with tarfile.open(fileobj=io.BytesIO(archive.getvalue())) as tree:
+        with pytest.raises(ValueError, match="unsafe source archive"):
+            PROVENANCE.extract_source(tree, root)
+    assert not list(root.iterdir())
+    assert sentinel.read_bytes() == b"unchanged"
+
+
+def test_archive_validation_rejects_preexisting_root_escape(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "linked").symlink_to(outside, target_is_directory=True)
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w") as tree:
+        tree.addfile(tarfile.TarInfo("linked/escape"))
+    with tarfile.open(fileobj=io.BytesIO(archive.getvalue())) as tree:
+        with pytest.raises(ValueError, match="escapes root"):
+            PROVENANCE.extract_source(tree, root)
+    assert not list(outside.iterdir())
