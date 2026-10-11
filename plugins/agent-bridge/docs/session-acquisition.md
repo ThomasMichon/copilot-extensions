@@ -79,7 +79,8 @@ when the dispatch provider supplies the complete consecutive same-task
 reservation history (bounded to 256 attempts), beginning with `created`
 allocation, and every predecessor has a matching positive
 `refused/prepared` bridge receipt. Worktree, task, mode, target, project,
-generation, retirement and request digests must agree. No predecessor may
+retirement and request digests must agree; a predecessor generation may be
+older than the current admitted generation, never newer. No predecessor may
 have a session handle, a spawned/unknown outcome, a launch-stage receipt,
 or a binding; current native head, holder, continuation intent and task
 attachments still block first-conversation creation. This preserves allocation
