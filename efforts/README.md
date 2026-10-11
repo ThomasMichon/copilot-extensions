@@ -28,6 +28,7 @@ that pattern to this repository.
 | [Lean Session Lifecycle](active/lean-session-lifecycle/README.md) | Draft | #5579, #5664, #2619 |
 | [Session Intelligence and Accounting](active/session-intelligence-and-accounting/README.md) | Active | #5665 |
 | [Operator Attention Contract ("what needs you")](active/operator-attention-contract/README.md) | Active (Phases 1-3 built; `bridge` + `pr` sources in review) | #5668 (core + `dispatch`, merged), #5813 (`bridge` + `pr` with their sibling commands); clients separately |
+| [Supervised-Lane Process Discipline](active/supervised-lane-process-discipline/README.md) | Draft | #5301 |
 | [Worker-Status Observability Hooks](active/worker-status-observability-hooks/README.md) | Draft | #5257 |
 | [Compatibility-Root Decoupling](active/compatibility-root-decoupling/README.md) | Draft | #5293 |
 | [Retire Dead-Letter Status](active/retire-dead-letter-status/README.md) | Draft | #4744 |
