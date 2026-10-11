@@ -74,8 +74,9 @@ def test_native_snapshot_health_client_uses_captured_token_not_caller_env(monkey
 
 
 @pytest.mark.parametrize("recover", [False, True])
+@pytest.mark.parametrize("phase", ["recovery", "reap"])
 def test_ordinary_dispatch_deploy_refuses_conditional_recovery(
-    tmp_path, monkeypatch, capsys, recover
+    tmp_path, monkeypatch, capsys, recover, phase
 ):
     from agent_dispatch.config import Config
 
@@ -102,6 +103,14 @@ def test_ordinary_dispatch_deploy_refuses_conditional_recovery(
     monkeypatch.setattr(coordinator_cli._urllib, "urlopen", forbidden)
     monkeypatch.setattr(coordinator_cli, "_core_helper", lambda name, local: forbidden)
     breadcrumb.write_breadcrumb(tmp_path, state="conditional-draining", new_pid=123)
+    if phase == "reap":
+        monkeypatch.setattr(breadcrumb, "recover_stale_cutover", lambda *_a, **_k: {})
+        monkeypatch.setattr(
+            coordinator_cli, "_core_helper",
+            lambda *_a: lambda *_b: {
+                "refused": True, "reason": "conditional cutover requires owner-led recovery"
+            },
+        )
     before = breadcrumb.breadcrumb_path(tmp_path).read_bytes()
     args = argparse.Namespace(
         json=True, force=False, recover=recover, health_timeout=0, drain_timeout=0

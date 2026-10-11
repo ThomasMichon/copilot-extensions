@@ -300,6 +300,12 @@ def _cmd_deploy(
             print(f"[FAIL] {recovery['reason']}", file=sys.stderr)
         sys.exit(1)
     passive_reap = core._reap_abandoned_passive(config_dir(), _pre_recovery_breadcrumb)
+    if passive_reap.get("refused"):
+        if getattr(args, "json", False):
+            core._json_out({"ok": False, "error": passive_reap["reason"], "passive_reap": passive_reap})
+        else:
+            print(f"[FAIL] {passive_reap['reason']}", file=sys.stderr)
+        sys.exit(1)
     if getattr(args, "recover", False):
         recovery["passive_reap"] = passive_reap
         if args.json:

@@ -1592,6 +1592,12 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     recovery = breadcrumb.recover_stale_cutover(
         routing_dir(), make_recovery_client, health_check=liveness_check
     )
+    if recovery.get("refused"):
+        if args.json:
+            _emit({"ok": False, "error": recovery["reason"], "recovery": recovery})
+        else:
+            print(f"[FAIL] {recovery['reason']}", file=sys.stderr)
+        return 1
     if getattr(args, "recover", False):
         if args.json:
             _emit(recovery)

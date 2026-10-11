@@ -143,8 +143,9 @@ def test_native_bridge_cutover_health_probe_remains_anonymous(tmp_path, monkeypa
 
 
 @pytest.mark.parametrize("recover", [False, True])
+@pytest.mark.parametrize("phase", ["recovery", "reap"])
 def test_ordinary_deploy_refuses_unresolved_conditional_owner(
-    tmp_path, monkeypatch, capsys, recover
+    tmp_path, monkeypatch, capsys, recover, phase
 ):
     from types import SimpleNamespace
 
@@ -162,6 +163,12 @@ def test_ordinary_deploy_refuses_unresolved_conditional_owner(
     monkeypatch.setattr(core, "_reap_abandoned_passive", forbidden)
     monkeypatch.setattr(venue_cli.urllib.request, "urlopen", forbidden)
     breadcrumb.write_breadcrumb(tmp_path, state="conditional-draining", new_pid=123)
+    if phase == "reap":
+        monkeypatch.setattr(breadcrumb, "recover_stale_cutover", lambda *_a, **_k: {})
+        monkeypatch.setattr(
+            core, "_reap_abandoned_passive",
+            lambda *_a: {"refused": True, "reason": "conditional cutover requires owner-led recovery"},
+        )
     before = breadcrumb.breadcrumb_path(tmp_path).read_bytes()
     args = argparse.Namespace(
         json=True, force=False, recover=recover, health_timeout=0, drain_timeout=0
