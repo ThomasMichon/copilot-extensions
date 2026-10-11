@@ -13,6 +13,15 @@ control of an agent, or the decision to delegate a bounded subtask. Use
 agent-bridge for live cross-boundary conversation and steering, and
 `delegation-guidance:delegating-work` for runtime task decomposition.
 
+Internal coordinator deployment accepts optional `conditional`/`routing_dir`
+keyword arguments using the shared
+[conditional cutover contract](../../libs/zdd/README.md#conditional-owner-operation-partial-lifecycle-support).
+Only adopter-captured effective configuration and credentials may drive this
+operation; it does not overlay caller environment or infer compatibility from
+`service.env`. Production capture/attestation remains unwired, so a legacy
+coordinator correctly refuses conditional auto-retirement. Ordinary deployment
+is unchanged, and health attestation must honor configured coordinator auth.
+
 > **Status: installable runtime.** This ships the queue **engine**
 > (`agent_dispatch.queue`), the per-host **coordinator daemon**
 > (`agent-dispatch serve`), the **`agent-dispatch` CLI**, **local MCP tools**

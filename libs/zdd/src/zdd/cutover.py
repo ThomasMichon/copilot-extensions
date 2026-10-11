@@ -39,12 +39,15 @@ import socket
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 from zdd import breadcrumb, routing
 from zdd.routing import Endpoint
 
 log = logging.getLogger("zdd")
+
+if TYPE_CHECKING:
+    from .conditional import ConditionalCutover, PreparedCutover
 
 
 class CutoverError(Exception):
@@ -87,9 +90,12 @@ class CutoverResult:
     committed: bool = False
     error: str | None = None
     drain: dict[str, Any] | None = None
+    serving_endpoint: Endpoint | None = None
+    retirement_requested: bool = False
+    conditional: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "ok": self.ok,
             "new_port": self.new_port,
             "old_port": self.old_endpoint.port if self.old_endpoint else None,
@@ -99,6 +105,12 @@ class CutoverResult:
             "error": self.error,
             "drain": self.drain,
         }
+        if self.conditional:
+            data["serving_endpoint"] = (
+                self.serving_endpoint.to_dict() if self.serving_endpoint else None
+            )
+            data["retirement_requested"] = self.retirement_requested
+        return data
 
 
 class _NeverRaised(Exception):
@@ -189,18 +201,22 @@ class CutoverOrchestrator:
     def _base_url(self, port: int) -> str:
         return f"http://{routing.format_authority(self._client_host(), port)}"
 
-    def _await_health(self, port: int, timeout: float, poll: float) -> bool:
+    def _await_health(
+        self, port: int, timeout: float, poll: float,
+        check: Callable[[str, int], bool] | None = None,
+    ) -> bool:
+        check = check or self.health_check
         deadline = self.clock() + timeout
         while self.clock() < deadline:
             try:
-                if self.health_check(self._client_host(), port):
+                if check(self._client_host(), port):
                     return True
             except Exception:
                 pass
             self.sleep(poll)
         # one last probe at the deadline
         try:
-            return bool(self.health_check(self._client_host(), port))
+            return bool(check(self._client_host(), port))
         except Exception:
             return False
 
@@ -246,6 +262,7 @@ class CutoverOrchestrator:
         force: bool = False,
         poll: float = 0.5,
         lock_timeout: float | None = None,
+        conditional: ConditionalCutover | None = None,
     ) -> CutoverResult:
         """Drive one cutover attempt, serialized against concurrent attempts.
 
@@ -276,16 +293,30 @@ class CutoverOrchestrator:
             lock = CutoverLock(self.config_dir)
             lock.acquire(timeout=lock_timeout)
             try:
+                prepared = None
+                if conditional is not None:
+                    from .conditional import PreparedCutover
+
+                    try:
+                        if force:
+                            raise CutoverError("conditional repair cannot force predecessor retirement")
+                        prepared = PreparedCutover(self, conditional)
+                    except (CutoverError, routing.ActivePublicationRefused, routing.RoutingLockTimeout) as exc:
+                        log.warning("Conditional cutover refused: %s", exc)
+                        return CutoverResult(
+                            ok=False, error=str(exc), steps=[f"refused: {exc}"], conditional=True,
+                        )
                 return self._run_locked(
                     health_timeout=health_timeout,
                     drain_timeout=drain_timeout,
                     force=force,
                     poll=poll,
+                    conditional=prepared,
                 )
             finally:
                 lock.release()
         except CutoverLockedError as exc:
-            result = CutoverResult(ok=False, error=str(exc))
+            result = CutoverResult(ok=False, error=str(exc), conditional=conditional is not None)
             result.steps.append(f"refused: {exc}")
             log.warning("Cutover refused -- already in progress: %s", exc)
             return result
@@ -297,10 +328,14 @@ class CutoverOrchestrator:
         drain_timeout: float = 300.0,
         force: bool = False,
         poll: float = 0.5,
+        conditional: PreparedCutover | None = None,
     ) -> CutoverResult:
         from zdd import lifecycle
 
-        result = CutoverResult(ok=False)
+        result = CutoverResult(ok=False, conditional=conditional is not None)
+        spawn_passive = conditional.spawn if conditional else self.spawn_passive
+        health_check = conditional.healthy if conditional else self.health_check
+        make_client = conditional.snapshot.make_client if conditional else self.make_client
         if self._refuse_current_old(result):
             return result
         # Dead-port watchdog: before standing up the new daemon, retire any
@@ -308,10 +343,11 @@ class CutoverOrchestrator:
         # behind (the state that wedged the pipeline). Best-effort -- it only acts
         # when the active endpoint has no listener *and* a dead pid, so a healthy
         # or still-starting daemon is never disturbed. Logs its own reap.
-        try:
-            self.routing.reap_stale_active(self.config_dir, service=self.service)
-        except Exception:  # noqa: BLE001 -- watchdog is best-effort, never fatal
-            pass
+        if conditional is None:
+            try:
+                self.routing.reap_stale_active(self.config_dir, service=self.service)
+            except Exception:  # noqa: BLE001 -- watchdog is best-effort, never fatal
+                pass
         if self._refuse_current_old(result):
             return result
         # The CAS expectation is the raw ``active`` row only: a clean shutdown
@@ -319,14 +355,20 @@ class CutoverOrchestrator:
         # the guarded publish compares against the raw row. Only the guarded
         # flip uses it, so an unguarded routing stand-in needs no read_table.
         old_for_cas = None
-        if self.refuse_old is not None:
+        if conditional is not None:
+            old_for_cas = conditional.old
+        elif self.refuse_old is not None:
             raw_active = self._raw_active()
             old_for_cas = Endpoint.from_dict(raw_active) if raw_active else None
-        old = self.routing.read_active_endpoint(self.config_dir)
+        old = conditional.old if conditional else self.routing.read_active_endpoint(self.config_dir)
         result.old_endpoint = old
 
         new_port = self.pick_free_port()
         result.new_port = new_port
+        if conditional and new_port == conditional.old.port:
+            result.error = "candidate port must differ from predecessor"
+            result.steps.append(f"refused: {result.error}")
+            return result
 
         # Durable breadcrumb (#1756): written *before* the drain gate is ever
         # touched, so if this orchestrator dies mid-cutover the aborted attempt
@@ -334,6 +376,7 @@ class CutoverOrchestrator:
         # undrain the stranded old daemon). started_at is threaded through every
         # later update so the record keeps its original timestamp.
         old_dict = (
+            old.to_dict() if conditional and old is not None else
             {"bind": old.bind, "port": old.port} if old is not None else None
         )
         started_at = breadcrumb.write_breadcrumb(
@@ -344,7 +387,7 @@ class CutoverOrchestrator:
             detail={"old_port": old.port if old is not None else None},
         )
 
-        handle = self.spawn_passive(new_port)
+        handle = spawn_passive(new_port)
         new_pid = getattr(handle, "pid", None)
         result.steps.append(f"spawned passive pid={new_pid if new_pid is not None else '?'} "
                             f"port={new_port}")
@@ -354,15 +397,14 @@ class CutoverOrchestrator:
         # breadcrumb naming the passive to reap if it is never promoted
         # (#5195, reap_abandoned_passive). Threaded through every later update
         # like started_at.
-        if isinstance(new_pid, int):
-            breadcrumb.write_breadcrumb(
-                self.config_dir, state="started", old=old_dict,
-                new_port=new_port, new_pid=new_pid, started_at=started_at,
-            )
-
         flipped = False
         try:
-            if not self._await_health(new_port, health_timeout, poll):
+            if isinstance(new_pid, int):
+                breadcrumb.write_breadcrumb(
+                    self.config_dir, state="started", old=old_dict,
+                    new_port=new_port, new_pid=new_pid, started_at=started_at,
+                )
+            if not self._await_health(new_port, health_timeout, poll, health_check):
                 # The durable signal that is otherwise missing: a record that
                 # the new daemon never bound its port -- the failure that, left
                 # untraced, strands a client re-dialing a dead advertised port.
@@ -393,7 +435,7 @@ class CutoverOrchestrator:
             # otherwise the cutover refuses rather than flip unguarded.
             refused = _NeverRaised
             try:
-                if self.refuse_old is None:
+                if self.refuse_old is None and conditional is None:
                     self.routing.publish_active(
                         self.config_dir, bind=self.bind, port=new_port,
                         pid=getattr(handle, "pid", None), version=self.version,
@@ -410,15 +452,39 @@ class CutoverOrchestrator:
                             "a route that must be re-checked first"
                         )
                     refused = self.routing.ActivePublicationRefused
-                    self.routing.publish_active_with_previous_guarded(
+                    conditional_kwargs = {}
+                    if conditional:
+                        candidate = conditional.new
+                        if candidate is None or not candidate.process_start_time:
+                            raise CutoverError("candidate publication identity unavailable")
+                        conditional_kwargs = {
+                            "lock_deadline": conditional.deadline(),
+                            "process_start_time": candidate.process_start_time,
+                        }
+                    published, _ = self.routing.publish_active_with_previous_guarded(
                         self.config_dir, bind=self.bind, port=new_port,
                         pid=getattr(handle, "pid", None), version=self.version,
                         demote_existing=True, expected_active=old_for_cas,
-                        refuse_current=self.refuse_old,
+                        refuse_current=conditional.refuse_current if conditional else self.refuse_old,
+                        **conditional_kwargs,
                     )
-            except (refused, _UnguardedRouting) as exc:
+                    if conditional:
+                        conditional.new = published
+                        result.serving_endpoint = published
+            except (refused, _UnguardedRouting, routing.RoutingLockTimeout) as exc:
                 result.error = str(exc)
                 result.steps.append(f"refused: {exc}")
+                if conditional:
+                    conditional.rollback(handle, result, flipped=False)
+                    if result.rolled_back:
+                        breadcrumb.clear_breadcrumb(self.config_dir)
+                    else:
+                        breadcrumb.write_breadcrumb(
+                            self.config_dir, state="started", old=old_dict,
+                            new_port=new_port, new_pid=new_pid,
+                            error=result.error, started_at=started_at,
+                        )
+                    return result
                 terminated = False
                 try:
                     handle.terminate()
@@ -459,7 +525,7 @@ class CutoverOrchestrator:
             )
 
             if old is not None and old.port != new_port:
-                old_client = self.make_client(old.base_url)
+                old_client = make_client(old.base_url)
                 # About to open the old daemon's drain gate -- record it first
                 # so an abort during the (possibly long) drain is traceable.
                 breadcrumb.write_breadcrumb(
@@ -501,7 +567,7 @@ class CutoverOrchestrator:
                 new_live = False
                 try:
                     new_live = bool(
-                        self.health_check(self._client_host(), new_port)
+                        health_check(self._client_host(), new_port)
                     )
                 except Exception:  # noqa: BLE001 -- verification is observational
                     new_live = False
@@ -516,15 +582,21 @@ class CutoverOrchestrator:
                         f"verify-before-retire gate; refusing to retire the old "
                         f"daemon (rolling back to keep it serving)"
                     )
+                if conditional:
+                    conditional.verify_before_retire()
 
                 # COMMIT POINT: retire the old daemon. Past here the new daemon
                 # is the only one, so we never roll back.
                 result.committed = True
                 breadcrumb.write_breadcrumb(
-                    self.config_dir, state="committed", old=old_dict,
+                    self.config_dir, state="draining" if conditional else "committed", old=old_dict,
                     new_port=new_port, new_pid=new_pid, started_at=started_at,
                 )
-                old_client.shutdown()
+                if conditional:
+                    conditional.retire_predecessor()
+                else:
+                    old_client.shutdown()
+                result.retirement_requested = conditional is not None
                 result.steps.append("old daemon shutdown requested")
                 # The retired daemon is the OLD one, so log its port (matching
                 # `drain`); the new port is carried in detail for correlation.
@@ -547,7 +619,7 @@ class CutoverOrchestrator:
 
             # Best-effort: hand the credential relay (9857) to the new daemon
             # once the old one has released it.
-            self._adopt_relay(new_port, result)
+            self._adopt_relay(new_port, result, make_client=make_client)
 
             result.ok = True
             # Clean cutover: retire the breadcrumb so no stale trace lingers.
@@ -558,17 +630,33 @@ class CutoverOrchestrator:
             if result.committed:
                 # Should not happen (commit is the last fallible step), but if a
                 # post-commit error escapes, the new daemon still owns the route.
-                result.error = f"post-commit error (new daemon is live): {exc}"
-                result.ok = True
-                log.error("Cutover post-commit error: %s", exc)
-                breadcrumb.clear_breadcrumb(self.config_dir)
+                result.error = (
+                    f"post-commit conditional error ({type(exc).__name__})" if conditional
+                    else f"post-commit error (new daemon is live): {exc}"
+                )
+                result.ok = conditional is None
+                log.error("Cutover post-commit error: %s", result.error)
+                if conditional and not result.retirement_requested:
+                    breadcrumb.write_breadcrumb(
+                        self.config_dir, state="draining", old=old_dict,
+                        new_port=new_port, new_pid=new_pid, started_at=started_at,
+                        error=result.error,
+                    )
+                else:
+                    breadcrumb.clear_breadcrumb(self.config_dir)
                 self._emit(
                     lifecycle.ROLLBACK, lifecycle.OK, port=new_port,
-                    detail={"committed_forward": True, "error": str(exc)},
+                    detail={"committed_forward": True, "error": result.error},
                 )
                 return result
-            result.error = str(exc)
-            self._rollback(old, handle, new_port, result, flipped=flipped)
+            result.error = (
+                str(exc) if not conditional or isinstance(exc, CutoverError)
+                else f"conditional cutover failed ({type(exc).__name__})"
+            )
+            if conditional:
+                conditional.rollback(handle, result, flipped=flipped)
+            else:
+                self._rollback(old, handle, new_port, result, flipped=flipped)
             # Record the terminal outcome durably. On a clean rollback (or
             # commit-forward) no daemon is left stranded; the breadcrumb marks
             # the attempt as resolved rather than lingering as "aborted".
@@ -576,7 +664,9 @@ class CutoverOrchestrator:
                 breadcrumb.clear_breadcrumb(self.config_dir)
             else:
                 breadcrumb.write_breadcrumb(
-                    self.config_dir, state="rolled_back", old=old_dict,
+                    self.config_dir,
+                    state="rolled_back" if not conditional or result.rolled_back else "flipped" if flipped else "started",
+                    old=old_dict,
                     new_port=new_port, new_pid=new_pid, error=result.error,
                     started_at=started_at,
                 )
@@ -592,10 +682,10 @@ class CutoverOrchestrator:
             if not serving:
                 try:
                     active = self.routing.read_active_endpoint(self.config_dir)
-                    serving = bool(
-                        active
-                        and self.health_check(active.client_host, active.port)
-                    )
+                    serving = bool(active and (
+                        conditional.matches(active) if conditional else
+                        self.health_check(active.client_host, active.port)
+                    ))
                 except Exception:  # noqa: BLE001 -- availability probe is best-effort
                     serving = False
             self._emit(
@@ -607,10 +697,13 @@ class CutoverOrchestrator:
             )
             return result
 
-    def _adopt_relay(self, new_port: int, result: CutoverResult) -> None:
+    def _adopt_relay(
+        self, new_port: int, result: CutoverResult,
+        *, make_client: Callable[[str], _Client] | None = None,
+    ) -> None:
         """Best-effort: bind the credential relay on the new daemon (non-fatal)."""
         try:
-            new_client = self.make_client(self._base_url(new_port))
+            new_client = (make_client or self.make_client)(self._base_url(new_port))
             adopt = new_client.adopt_relay()
             result.steps.append(f"relay adopt: {adopt.get('adopted')}")
         except Exception as exc:  # noqa: BLE001 -- relay is non-fatal

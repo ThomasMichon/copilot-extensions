@@ -60,6 +60,77 @@ retire it. The sequence is reversible up to an explicit commit point, with
 rollback and commit-forward (if the old endpoint is unreachable, it commits to
 the healthy new one rather than stranding clients).
 
+#### Conditional owner operation (partial lifecycle support)
+
+`CutoverOrchestrator.run(conditional=ConditionalCutover(...))` adds an opt-in
+stale-runtime repair contract without changing ordinary callers. It acquires
+the existing cutover lock **before** validating the exact raw active endpoint
+(PID, publication-time start token, generation, version and address). Missing
+identity, changed ownership, unresolved breadcrumbs, equal/older selected
+versions or unprovable ordering refuse before spawn or routing/breadcrumb
+mutation. The adopter supplies `selected_is_newer(selected, serving)` using
+its own version scheme; unknown order must refuse, never use lexical ordering.
+
+`ConditionalCutover.capture_runtime(old_endpoint)` runs under that authority.
+It returns a `RuntimeSnapshot`, or `None` when authoritative effective state is
+unavailable. Snapshot callbacks hold the **same resolved** database, install/
+configuration roots, configured executable, persistent service settings and
+sensitive environment in memory. They implement passive spawn, health
+attestation and control clients. Neither ambient caller environment,
+`service.env` alone nor `/proc` environment is an authoritative snapshot.
+Capture must derive effective state from the serving owner, including in-memory
+configuration overrides. The snapshot's nonsecret `identity` covers every
+compatibility-relevant setting; credentials must not be included in it.
+Callbacks must redact credential-bearing errors before raising `CutoverError`.
+
+`RuntimeAttestation` binds that identity to the actual PID/start token/version
+and readiness. The predecessor must attest before spawn; the successor must
+attest both before flip and before predecessor shutdown. Sensitive environment
+stays in callbacks, never in public health, routing, breadcrumbs or result JSON.
+Bridge health is anonymous; Dispatch health may require its configured token.
+Each adopter owns those distinct authentication contracts and the authenticated
+capture channel; there is no generic health-based configuration fabrication.
+
+`routing_lock_timeout` bounds each native `active.lock` acquisition, including
+the process-local lock. Pre-spawn contention refuses unchanged; publication
+contention attempts disposal only of a verified never-promoted candidate;
+unavailable cleanup authority retains it with a nonterminal breadcrumb.
+Disposal rechecks publication and process identity under the routing lock.
+After publication,
+rollback CAS-restores only the attempt's own route, revalidates the predecessor,
+and undrains it through captured credentials. Changed ownership or inability to
+restore under the bounded lock leaves both processes alive and retains the
+nonterminal breadcrumb for owner-led recovery. It never overwrites a later
+winner, forces retirement, or converts failed repair into success. Ordinary
+unconditional callers retain their existing unbounded routing-lock behavior.
+Restoration must attest ready after undrain. A previously promoted successor
+may have admitted work, so rollback retains it with unresolved recovery state
+rather than terminating it. Only never-promoted candidates can be disposed.
+The snapshot's required `retire(endpoint)` callback must enforce expected
+PID/start identity at the receiving daemon or through an identity-bound native
+handle, with a bounded operation. Address-based shutdown alone is insufficient.
+Failed retirement requests preserve a nonterminal breadcrumb and the successor
+route; later conditional repair refuses until owner-led recovery resolves it.
+
+The supported in-process adapter is `run_conditional_cutover(config_dir,
+version=..., request=...)`. Bridge deployment/service restart and Dispatch
+deployment accept the request plus the **observed** `routing_dir` as keyword
+arguments, bypassing ambient configuration, legacy recovery preludes and
+post-cutover force-reaping. These are internal owner operations, not JSON/argv
+serialization of sensitive callbacks. Conditional results add
+`serving_endpoint` and `retirement_requested`; shutdown request is **not**
+confirmed process exit.
+
+**Remaining adapter obligation:** production daemons do not yet implement
+authoritative effective-config capture and matching health attestation.
+Legacy daemons must therefore return no snapshot and refuse conditional
+auto-retirement. This primitive and adapter threading do not finish automatic
+stale-runtime repair, service-manager adoption or a watchdog apply path.
+Explicit unconditional cutover remains supported. Linux lock behavior is
+directly tested; Windows uses bounded native byte-lock retries but still needs
+real Windows process-boundary validation. macOS uses flock; native process
+identity availability remains required and unverified identity refuses.
+
 ### `zdd.diagnostics` -- daemon-health audit + repair
 
 An unavailable native/process census is reported as `census_unavailable`,

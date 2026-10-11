@@ -1,0 +1,9 @@
+{
+  "comment": "Ship shared owner-checked conditional cutover foundation and recovery safety fixes.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

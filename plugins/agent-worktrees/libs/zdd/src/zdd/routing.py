@@ -41,6 +41,7 @@ propagating; a failed replacement leaves the previous route intact.
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
@@ -66,6 +67,10 @@ _PROBE_TIMEOUT_S = 0.25
 
 class ActivePublicationRefused(RuntimeError):
     """Raised when a guarded route publication refuses the current active row."""
+
+
+class RoutingLockTimeout(TimeoutError):
+    """The routing mutation lock could not be acquired before the deadline."""
 
 
 def format_authority(host: str, port: int) -> str:
@@ -135,20 +140,28 @@ def routing_table_path(config_dir: str | os.PathLike[str]) -> Path:
 
 
 @contextmanager
-def _file_routing_lock(config_dir: str | os.PathLike[str]):
+def _file_routing_lock(
+    config_dir: str | os.PathLike[str], *, deadline: float | None = None,
+):
     path = Path(config_dir) / _LOCK_FILENAME
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as handle:
         if sys.platform == "win32":
             import msvcrt
 
-            handle.seek(0)
-            if not handle.read(1):
+            # Reading byte zero can itself hit another holder's mandatory lock.
+            if os.fstat(handle.fileno()).st_size == 0:
                 handle.seek(0)
                 handle.write(b"\0")
                 handle.flush()
             handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            if deadline is None:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                _wait_for_lock(
+                    lambda: msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1),
+                    deadline,
+                )
             try:
                 yield
             finally:
@@ -157,19 +170,50 @@ def _file_routing_lock(config_dir: str | os.PathLike[str]):
         else:
             import fcntl
 
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            if deadline is None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            else:
+                _wait_for_lock(
+                    lambda: fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB),
+                    deadline,
+                )
             try:
                 yield
             finally:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def _wait_for_lock(acquire: Callable[[], object], deadline: float) -> None:
+    while True:
+        try:
+            acquire()
+            return
+        except OSError as exc:
+            if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                raise
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RoutingLockTimeout("routing lock acquisition deadline expired") from exc
+            time.sleep(min(0.05, remaining))
+
+
 @contextmanager
-def _routing_lock(config_dir: str | os.PathLike[str]):
+def _routing_lock(
+    config_dir: str | os.PathLike[str], *, deadline: float | None = None,
+):
     """Serialize routing mutations across threads and processes."""
-    with _PROCESS_ROUTING_LOCK:
-        with _file_routing_lock(config_dir):
+    acquired = (
+        _PROCESS_ROUTING_LOCK.acquire()
+        if deadline is None
+        else _PROCESS_ROUTING_LOCK.acquire(timeout=max(0.0, deadline - time.monotonic()))
+    )
+    if not acquired:
+        raise RoutingLockTimeout("routing thread lock acquisition deadline expired")
+    try:
+        with _file_routing_lock(config_dir, deadline=deadline):
             yield
+    finally:
+        _PROCESS_ROUTING_LOCK.release()
 
 
 def read_table(config_dir: str | os.PathLike[str], *, strict: bool = False) -> dict | None:
@@ -479,6 +523,7 @@ def publish_active_with_previous_guarded(
     refuse_current: Callable[[dict | None], str | None] | None = None,
     require_expected_active: bool = True,
     process_start_time: str | None = None,
+    lock_deadline: float | None = None,
 ) -> tuple[Endpoint, Endpoint | None]:
     """Publish active while validating the current active row under the lock.
 
@@ -487,7 +532,7 @@ def publish_active_with_previous_guarded(
     Re-read and validate that row under the same routing lock that writes the
     replacement, so a caller never flips over a newly-published route.
     """
-    with _routing_lock(config_dir):
+    with _routing_lock(config_dir, deadline=lock_deadline):
         current = read_table(config_dir) or {}
         current_raw = current.get("active") if isinstance(current, dict) else None
         if not isinstance(current_raw, dict):
@@ -510,6 +555,27 @@ def publish_active_with_previous_guarded(
             demote_existing=demote_existing,
             process_start_time=process_start_time,
         )
+
+
+def validate_active(
+    config_dir: str | os.PathLike[str],
+    expected: Endpoint,
+    *,
+    refuse_current: Callable[[dict | None], str | None] | None = None,
+    lock_deadline: float | None = None,
+) -> None:
+    """Validate an exact raw owner under the native routing lock, without writing."""
+    with _routing_lock(config_dir, deadline=lock_deadline):
+        table = read_table(config_dir, strict=True) or {}
+        raw = table.get("active")
+        refusal = _refuse_or_changed(
+            raw if isinstance(raw, dict) else None,
+            expected_active=expected,
+            refuse_current=refuse_current,
+            require_expected_active=True,
+        )
+        if refusal:
+            raise ActivePublicationRefused(refusal)
 
 
 def restore_previous_if_owner(

@@ -111,6 +111,15 @@ result = orch.run(health_timeout=60, drain_timeout=300, force=False)
 
 A consumer owns three things `zdd` cannot know:
 
+For conditionally authorized stale-runtime repair, the shared primitive also
+requires an adopter-owned authoritative effective-runtime snapshot and matching
+PID/start/version/config-identity health attestation. The optional contract is
+documented in [`libs/zdd/README.md`](../../libs/zdd/README.md#conditional-owner-operation-partial-lifecycle-support).
+It validates expected ownership inside native cutover authority and uses
+bounded routing-lock acquisitions. It is partial lifecycle support: production
+capture/attestation and automatic repair remain adapter obligations, not facts
+established by HTTP health or installer configuration alone.
+
 1. **The drain endpoint + its SAFE CUTOVER POINT** — the crux. "Drain" means
    *stop accepting new work and wait for in-flight work to reach a boundary
    where retiring the old daemon loses nothing.* Each daemon defines that

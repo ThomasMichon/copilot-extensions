@@ -7,6 +7,14 @@ container venues.
 
 Supports **Windows** and **Linux/WSL** (macOS planned).
 
+Internal owner-driven deployment and service restart accept optional
+`conditional`/`routing_dir` keyword arguments using the shared
+[conditional cutover contract](../../libs/zdd/README.md#conditional-owner-operation-partial-lifecycle-support).
+This bypasses caller configuration, legacy recovery and force-reaping, and
+refuses legacy daemons without an authoritative effective-config snapshot.
+Production capture/attestation is not yet wired; ordinary explicit cutover is
+unchanged. Anonymous health and authenticated control remain distinct contracts.
+
 [Session preference authority](docs/session-preferences.md) documents optional
 execution-user defaults, the unchanged caller-settings default, and the
 execution/ACP capability limits.
