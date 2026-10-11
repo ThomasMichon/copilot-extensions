@@ -1467,6 +1467,17 @@ def _worktree_branch(
     return f"worktree/{worktree_id}"
 
 
+def _authority_still_holds(yaml_path: Path, config: Config) -> bool:
+    """Reload fresh and re-verify authority right before a best-effort
+    write -- an earlier check only proves the record was local at load time."""
+    from .execution_spaces import require_record_mutation
+    try:
+        require_record_mutation(tracking.load_record(yaml_path), config)
+        return True
+    except Exception:
+        return False
+
+
 def validate_and_finalize(
     worktree_id: str,
     config: Config,
@@ -1554,15 +1565,14 @@ def validate_and_finalize(
 
     # Seal the worktree's durable identity (title + session registry) from
     # session-state BEFORE any teardown, so a finalized/pruned worktree never
-    # reads as "(untitled)" with no session linkage -- even when the
-    # best-effort register/deregister-session hooks were bypassed (a dispatched
-    # or crashed session, a bare-resume cwd). Gap-filling + silent; mutates the
-    # in-memory ``record`` so the later update_status(save) preserves it.
-    try:
-        tracking.seal_worktree_identity(record)
-    except Exception:
-        pass
-
+    # reads as "(untitled)" with no session linkage -- even with a bypassed
+    # register/deregister-session hook (dispatched/crashed session, bare-resume
+    # cwd). Gap-filling + silent; mutates ``record`` for the later save.
+    if record is not None and _authority_still_holds(yaml_path, config):
+        try:
+            tracking.seal_worktree_identity(record)
+        except Exception:
+            pass
     # Settle only the invoking session's claim before the obligation gate.
     # The post-exit launcher lacks its child's session id, so missed sessionEnd
     # claims remain active for the reclaim sweep; session claims do not block
@@ -1577,22 +1587,19 @@ def validate_and_finalize(
         output.err(str(exc))
         return False
     _advise_other_live_sessions(record, current_session_ref)
-
     # pr-merge-obligation-gate defense 2: refresh the tracked PR(s) against
     # the provider RIGHT BEFORE the obligation gate reads the local ledger.
     # `_reconcile_active_pr` is the one shared observation path every other
     # PR-workflow verb already funnels through (create-pr, pr-ready,
     # pr-status, the Picker's background sweep, pr-reconcile); calling it
     # here too means finalize never trusts a stale/never-verified local
-    # ``pr.state`` -- in particular an out-of-band ``set-pr`` (which
-    # persists state with NO provider read at all) gets its first real
-    # provider confirmation right here, so its `pr`-kind claim is created
-    # (still open) or released (confirmed merged) before the gate below
-    # ever runs. Best-effort: a provider failure/timeout degrades to the
-    # local state exactly as every other caller of this function already
-    # tolerates -- finalize is never blocked BY the reconcile itself, only
-    # by whatever obligation the ledger already (or now) records.
-    if record is not None and repo.pr.enabled:
+    # ``pr.state`` -- an out-of-band ``set-pr`` (no provider read at all)
+    # gets its first real confirmation right here, so its `pr`-kind claim
+    # is created (still open) or released (confirmed merged) before the
+    # gate below runs. Best-effort: degrades to local state like every
+    # other caller already tolerates -- never blocks on the reconcile
+    # itself, only on whatever obligation the ledger already records.
+    if record is not None and repo.pr.enabled and _authority_still_holds(yaml_path, config):
         try:
             from . import pr_ops as _pr_ops
 

@@ -183,7 +183,14 @@ def require_project_record_mutation(record: Any) -> None:
 
 
 def require_cleanup_identity(record: Any, anchor: str | Path) -> None:
-    """Cleanup has only repo metadata; require config only for scoped registries."""
+    """Cleanup has only repo metadata; require config only for scoped registries.
+
+    Resolves authority for ``record.repo`` (receiving-side), never ambient
+    ``cfg.load_config()`` (PR #5988 review): the caller's own active project
+    can differ from the record being cleaned, and an ambient config pointing
+    at an unscoped/legacy registry would make ``require_record_mutation``
+    silently no-op, letting a foreign record be reaped.
+    """
     from . import config as cfg
 
     try:
@@ -194,8 +201,4 @@ def require_cleanup_identity(record: Any, anchor: str | Path) -> None:
         raise ExecutionSpaceError(f"execution-space registry is invalid: {exc}") from exc
     if not any(entry.execution_platform for entry in entries.values()):
         return
-    try:
-        config = cfg.load_config()
-    except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as exc:
-        raise ExecutionSpaceError(f"cannot establish cleanup authority: {exc}") from exc
-    require_record_mutation(record, config)
+    require_project_record_mutation(record)

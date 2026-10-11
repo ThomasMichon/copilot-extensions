@@ -174,12 +174,65 @@ def test_cross_space_owned_create_stops_before_readiness_or_source_fetch(
 def test_cleanup_identity_cannot_be_bypassed_by_current_physical_host(
     scoped_config, monkeypatch,
 ):
-    monkeypatch.setattr(cfg, "load_config", lambda: scoped_config)
     record = SimpleNamespace(
         machine="workstation-wsl", worktree_id="wt-other", owner_ref=None,
+        repo="project", platform="wsl",
     )
     with pytest.raises(execution_spaces.ExecutionSpaceError, match="different execution space"):
         execution_spaces.require_cleanup_identity(record, scoped_config.default_repo.anchor)
+
+
+def test_cleanup_resolves_authority_from_record_repo_not_ambient_config(
+    scoped_config, tmp_path, monkeypatch,
+):
+    """Regression (PR #5988 review): cleanup must resolve authority for
+    ``record.repo`` (receiving-side), never the caller's own ambient active
+    project. An ambient config pointing at an unscoped/legacy project (no
+    ``execution_platform`` registry entries of its own) must never make a
+    cleanup of a DIFFERENT, scoped project's record silently no-op --
+    ``require_record_mutation`` would see no scoped entries in the wrong
+    project's own config and let a foreign record be reaped."""
+    from agent_worktrees import config as _cfg
+
+    ambient = _cfg.Config(
+        machine="workstation-windows", platform="windows", repo_name="unscoped-project",
+        srcroot=str(tmp_path), repos={"unscoped-project": _cfg.RepoConfig(
+            anchor=str(tmp_path / "unscoped"), worktree_root=str(tmp_path / "unscoped-trees"),
+        )},
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda: ambient)
+    record = SimpleNamespace(
+        machine="workstation-wsl", worktree_id="wt-other", owner_ref=None,
+        repo="project", platform="wsl",
+    )
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="different execution space"):
+        execution_spaces.require_cleanup_identity(record, scoped_config.default_repo.anchor)
+
+
+def test_finalize_authority_recheck_catches_a_record_gone_foreign(
+    scoped_config, tmp_path,
+):
+    """Regression (PR #5988 review, finding r4240301749): ``finalize``'s
+    best-effort ``seal_worktree_identity``/``_reconcile_active_pr`` writes
+    relied on a single, stale, unlocked authority snapshot taken at the top
+    of ``validate_and_finalize``. ``_authority_still_holds`` reloads the
+    record fresh and re-verifies immediately before each such write,
+    catching a record that became foreign (or unreadable) in between."""
+    from agent_worktrees import finalize
+
+    record = tracking.create_new_record(
+        "wt-authority", "worktree/wt-authority", str(tmp_path), "project",
+        scoped_config.machine, "windows", tmp_path,
+    )
+    assert finalize._authority_still_holds(record.yaml_path, scoped_config) is True
+
+    raw = yaml.safe_load(record.yaml_path.read_text(encoding="utf-8"))
+    raw["machine"], raw["platform"] = "workstation-wsl", "wsl"
+    record.yaml_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    assert finalize._authority_still_holds(record.yaml_path, scoped_config) is False
+
+    record.yaml_path.write_text("not: [valid", encoding="utf-8")
+    assert finalize._authority_still_holds(record.yaml_path, scoped_config) is False
 
 
 def test_handoff_equal_physical_labels_do_not_bypass_space_selection(scoped_config, monkeypatch):
@@ -350,7 +403,7 @@ def test_malformed_parent_record_reports_unconfirmed_settlement(
 
 
 @pytest.mark.parametrize("error", [KeyError("machine"), TypeError("malformed config")])
-@pytest.mark.parametrize("loader", ["load_machines_yaml", "load_config"])
+@pytest.mark.parametrize("loader", ["load_machines_yaml", "load_project_config"])
 def test_cleanup_known_format_failure_is_structured_refusal(
     error, loader, scoped_config, monkeypatch,
 ):
@@ -360,7 +413,7 @@ def test_cleanup_known_format_failure_is_structured_refusal(
     monkeypatch.setattr(cfg, loader, malformed)
     with pytest.raises(execution_spaces.ExecutionSpaceError) as result:
         execution_spaces.require_cleanup_identity(
-            SimpleNamespace(), scoped_config.default_repo.anchor,
+            SimpleNamespace(repo="project"), scoped_config.default_repo.anchor,
         )
     assert result.value.__cause__ is error
 
@@ -378,7 +431,7 @@ def test_cleanup_malformed_registry_parser_is_structured_refusal(tmp_path, monke
     assert isinstance(result.value.__cause__, TypeError)
 
 
-@pytest.mark.parametrize("loader", ["load_machines_yaml", "load_config"])
+@pytest.mark.parametrize("loader", ["load_machines_yaml", "load_project_config"])
 def test_cleanup_does_not_suppress_execution_space_error(loader, scoped_config, monkeypatch):
     error = execution_spaces.ExecutionSpaceError("authority refused")
 
@@ -387,7 +440,9 @@ def test_cleanup_does_not_suppress_execution_space_error(loader, scoped_config, 
 
     monkeypatch.setattr(cfg, loader, refused)
     with pytest.raises(execution_spaces.ExecutionSpaceError) as result:
-        execution_spaces.require_cleanup_identity(SimpleNamespace(), scoped_config.default_repo.anchor)
+        execution_spaces.require_cleanup_identity(
+            SimpleNamespace(repo="project"), scoped_config.default_repo.anchor,
+        )
     assert result.value is error
 
 

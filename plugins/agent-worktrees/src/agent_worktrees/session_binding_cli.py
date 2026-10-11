@@ -944,7 +944,11 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
 
 
 def _capture_session_title(worktree_id: str, session_id: str) -> bool:
-    """Read summary/name from the session's workspace.yaml and persist it."""
+    """Read summary/name from the session's workspace.yaml and persist it.
+
+    Re-reads and re-authorizes under its own sidecar lock immediately before
+    the write (PR #5988 review): a race after deregistration's own check
+    could still make the record foreign before this unlocked write ran."""
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return False
@@ -978,9 +982,19 @@ def _capture_session_title(worktree_id: str, session_id: str) -> bool:
         name = ws_data.get("name", "")
         if isinstance(name, str) and name.strip() and name not in _placeholder:
             display_text = name.strip()
+    if not display_text:
+        return False
 
-    if display_text:
-        rec.title = display_text
-        tracking.save_record(rec)
+    from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
+    with tracking._RecordLock(yaml_path):
+        fresh = tracking.load_record(yaml_path)
+        try:
+            require_project_record_mutation(fresh)
+        except ExecutionSpaceError as exc:
+            output.err(f"Rejecting session title capture for {worktree_id}: {exc}")
+            return False
+        if fresh.title and fresh.title != "null":
+            return False
+        fresh.title = display_text
+        tracking.save_record(fresh, yaml_path)
         return True
-    return False
