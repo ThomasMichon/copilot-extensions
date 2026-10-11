@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from _devcontainer_host_admission import acquire
+from _admission_protocol import AlreadyRunningError, acquire
 from plugin_test_containment import ContainmentError, Limits, isolated_environment, run_contained
 from standalone_consumers import STANDALONE_CONSUMERS
 
@@ -21,6 +21,19 @@ REPO = Path(__file__).resolve().parent.parent
 def default_python(component: str) -> Path:
     root = REPO / ".test-venvs" / sys.platform / component
     return root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def interpreter_environment(python: Path) -> Path:
+    """Ask custom interpreters for their real prefix, not their launcher location."""
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    result = subprocess.run(
+        [str(python), "-I", "-c", "import sys; print(sys.prefix)"],
+        check=True, capture_output=True, text=True, timeout=30, **flags,
+    )
+    prefix = Path(result.stdout.strip())
+    if not result.stdout.strip() or not prefix.is_absolute():
+        raise ValueError("test interpreter did not report an absolute environment prefix")
+    return prefix.resolve()
 
 
 def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
@@ -72,9 +85,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("--timeout must be finite and positive")
+    if not math.isfinite(args.admission_wait) or args.admission_wait < 0:
+        parser.error("--admission-wait must be a non-negative, finite number")
     if args.smoke and args.component != "agent-index-service":
         parser.error("--smoke is only defined for agent-index-service")
-    python = (args.python or default_python(args.component)).resolve()
+    # Resolving bin/python itself follows a POSIX venv symlink to the base
+    # interpreter and bypasses the venv. Resolve only its containing directory.
+    requested_python = args.python or default_python(args.component)
+    python = requested_python.parent.resolve() / requested_python.name
     root = REPO / args.component
     if args.prepare and not python.is_relative_to((REPO / ".test-venvs").resolve()):
         parser.error("--prepare may only provision an interpreter under repository .test-venvs")
@@ -85,7 +103,25 @@ def main(argv: list[str] | None = None) -> int:
         limits.validate()
     except ValueError as exc:
         parser.error(str(exc))
-    lease = acquire(args.admission_wait)
+    try:
+        environment_root = (
+            interpreter_environment(python)
+            if (args.python or args.prepare) and python.is_file()
+            else python.parent.parent.resolve()
+        )
+        if args.prepare and not environment_root.is_relative_to((REPO / ".test-venvs").resolve()):
+            parser.error("--prepare may only provision an environment under repository .test-venvs")
+        lease = acquire(args.admission_wait, environment_root)
+    except AlreadyRunningError as exc:
+        print(
+            f"[BUSY] Test environment {environment_root} is in use: {exc}. "
+            "Use --admission-wait SECONDS to wait for it.",
+            file=sys.stderr,
+        )
+        return 3
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        print(f"standalone tests: {exc}", file=sys.stderr)
+        return 1
     try:
         if args.prepare:
             prepare(args.component, python, smoke=args.smoke)

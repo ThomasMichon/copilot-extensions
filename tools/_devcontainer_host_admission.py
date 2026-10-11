@@ -1,70 +1,20 @@
-"""Host-wide admission-lease coordination for ``run_tests_in_devcontainer.py``.
+"""Validate environment-wait passthrough before any container work.
 
-Closes the third Phase 2 residual gap: ``tools/run-plugin-tests.py``'s own
-``--admission-wait`` lease lives under ``$HOME``/``$XDG_CACHE_HOME``, which
-is a fresh per-container tmpfs for every wrapped invocation -- so two
-wrapped runs (or a wrapped run and a bare ``run-plugin-tests.py``
-invocation) never actually contend for the same host-wide heavy-test
-slot the way two bare invocations would. This module acquires that SAME
-lease on the HOST, before the container does any real work, and holds it
-for the run's entire lifetime -- so the two invocation styles correctly
-serialize against each other. The lock dir/service name come from
-``tools/_admission_protocol.py``, a shared module both this file and
-``run-plugin-tests.py`` import, so neither duplicates that contract by
-hand.
+Each wrapper invocation owns an isolated workspace and environment. Exclusion
+of preparation and use belongs to the inner runner, not a host-global lease.
 """
 
 from __future__ import annotations
 
 import math
-import sys
-import time
-from pathlib import Path
-
-REPO = Path(__file__).resolve().parents[1]
-LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"
-sys.path.insert(0, str(LEASE_LIB))
-from single_instance_lease import AlreadyRunningError, SingleInstance  # noqa: E402
-
-from _admission_protocol import ADMISSION_SERVICE as _ADMISSION_SERVICE  # noqa: E402
-from _admission_protocol import admission_dir  # noqa: E402
-
-# Every mode that reaches `_ensure_venv()` -- a real run, `--guards`,
-# `--collect-only`, and `--prepare-only` alike -- can rebuild or delete
-# the SHARED on-disk venv (via `--reinstall` or a drifted dependency
-# fingerprint) a concurrent admitted run may depend on, so all of them
-# take the host-wide lease in `run-plugin-tests.py` itself. Only `--list`
-# skips it, because it returns before that script ever reaches its own
-# admission check (and never touches a venv at all).
-_SKIPS_ADMISSION = frozenset({"--list"})
-
-
-def needs_admission(passthrough: list[str], canonicalize) -> bool:
-    """Mirrors `run-plugin-tests.py`'s own admission-skip logic (see
-    `_SKIPS_ADMISSION`) -- never gate a run that script wouldn't gate
-    either."""
-    return not any(
-        canonicalize(arg.partition("=")[0]) in _SKIPS_ADMISSION
-        for arg in passthrough
-    )
 
 
 def resolve_admission_wait(passthrough: list[str], canonicalize) -> float:
-    """Last-occurrence-wins `--admission-wait` value (matching argparse
-    semantics) -- default 0.0 (fail fast), the same default
-    `run-plugin-tests.py` itself uses. Rejects a malformed, negative, OR
-    non-finite value immediately (`SystemExit`), same as that script's
-    own argparse plus `acquire()`'s own range check would -- silently
-    falling back to the default here would let a bad value reach
-    `acquire()` (and so start real container work, or get masked by an
-    unrelated `[BUSY]` error) before the inner runner ever gets a chance
-    to reject it itself; validating only in `acquire()` would miss it
-    entirely for `--list`, which never calls `acquire()` at all. `inf`
-    and `nan` both parse as valid floats and neither is `< 0`, so each
-    needs its own explicit `math.isfinite` check: `inf` would otherwise
-    poll forever under contention despite the documented bounded-wait
-    contract, and `nan` makes every later comparison against it False,
-    silently defeating both the deadline math and this very check."""
+    """Match argparse's last-occurrence-wins value, defaulting to fail fast.
+
+    Reject malformed, negative, or non-finite waits before starting container
+    work, including --list. Inner-runner validation alone would be too late.
+    """
     value = 0.0
     for i, arg in enumerate(passthrough):
         name, eq, value_str = arg.partition("=")
@@ -79,36 +29,3 @@ def resolve_admission_wait(passthrough: list[str], canonicalize) -> float:
     if not math.isfinite(value) or value < 0:
         raise SystemExit(f"--admission-wait must be a non-negative, finite number, got {value:g}")
     return value
-
-
-def acquire(wait_seconds: float) -> SingleInstance:
-    """Acquire the host-wide test-runner lease, waiting up to
-    `wait_seconds` (0 = fail fast, matching `run-plugin-tests.py`'s own
-    semantics). `wait_seconds` is expected to already be validated (see
-    `resolve_admission_wait`); this re-check only guards a caller that
-    bypasses that helper. Raises `SystemExit` for every caller-facing
-    failure, so the caller needs no extra except clause and never sees a
-    raw traceback for a bad CLI value -- except the busy-contention path,
-    which preserves `run-plugin-tests.py`'s own documented exit code 3 by
-    printing to stderr itself and exiting with that integer directly (a
-    string `SystemExit` payload, as every OTHER failure here uses, prints
-    to stderr but always exits 1)."""
-    if not math.isfinite(wait_seconds) or wait_seconds < 0:
-        raise SystemExit(f"--admission-wait must be a non-negative, finite number, got {wait_seconds:g}")
-    lease = SingleInstance(admission_dir(), service=_ADMISSION_SERVICE)
-    deadline = time.monotonic() + wait_seconds
-    while True:
-        try:
-            lease.acquire()
-            return lease
-        except AlreadyRunningError as exc:
-            remaining = deadline - time.monotonic()
-            if remaining > 0:
-                time.sleep(min(0.25, remaining))
-                continue
-            print(
-                f"[BUSY] Another heavy plugin test run is active on the "
-                f"host: {exc}. Use --admission-wait SECONDS to wait for it.",
-                file=sys.stderr,
-            )
-            raise SystemExit(3) from exc
