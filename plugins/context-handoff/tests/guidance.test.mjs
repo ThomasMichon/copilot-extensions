@@ -43,6 +43,7 @@ function assertOrdered(text, before, after, message) {
 test("already-claimed recovery verifies lineage before offering a consent-gated bind", () => {
   const skill = readFileSync(join(plugin, "skills", "context-handoff", "SKILL.md"), "utf8");
   assert.match(skill, /references\/already-claimed-recovery\.md/);
+  assert.match(skill.replace(/\s+/g, " "), /transient `busy`.*do not offer head recovery/);
   const recovery = readFileSync(
     join(plugin, "skills", "context-handoff", "references", "already-claimed-recovery.md"),
     "utf8",

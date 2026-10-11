@@ -252,6 +252,10 @@ worktree's own state first rather than doing a global search.
 
 ### Already-claimed handoffs
 
+A transient `busy` file-lock result reports the shared consume/abort lock
+holder, not necessarily a baton claimant. Wait for that operation to finish
+before retrying pickup; do not use that holder as a head-repair target.
+
 A consume attempt that fails because the handoff was already consumed (or is
 currently being consumed elsewhere) always reports the claimant's session id,
 via `result.claimedBySession` and inline in the message text -- for both the

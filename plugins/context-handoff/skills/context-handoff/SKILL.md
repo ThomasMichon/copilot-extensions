@@ -465,6 +465,11 @@ read it in full before this Resume flow's first handoff of a session.
 already consumed, or is currently being consumed, by another session
 (`result.claimedBySession` / the message text). When this happens:
 
+For a transient `busy` file-lock result, this field identifies only the shared
+consume/abort lock holder, not a baton claimant. Report the contention and wait
+for that operation to finish before retrying pickup; do not offer head recovery.
+The steps below apply to an actual completed or checkpointed claim.
+
 1. **State the claimant session id to the user.** Never silently treat this
    as "nothing to do" or reconstruct a different objective from session
    history.
