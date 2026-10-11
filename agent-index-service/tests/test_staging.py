@@ -564,8 +564,9 @@ def test_windows_job_teardown_uncertainty_preserves_candidate(case, monkeypatch,
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows direct process exit confirmation")
 def test_process_wait_timeout_preserves_candidate(case, monkeypatch):
-    import agent_procutil
     import subprocess
+
+    import agent_procutil
 
     class Process:
         pid = 123
@@ -751,9 +752,8 @@ time.sleep(120)
     assert "isolated runtime probe" in str(error.value)
     assert "password" not in str(error.value)
     assert "secret.invalid" not in str(error.value)
-    assert "exit status 7" in str(error.value) if failure == "exit" else (
-        "timeout" in str(error.value)
-    )
+    expected = "exit status 7" if failure == "exit" else "timeout"
+    assert expected in str(error.value), str(error.value)
     assert not list(case.tmp.glob(".build-output-*"))
 
 
@@ -880,3 +880,106 @@ def test_real_deep_windows_owned_cache_cleanup(case, kind):
                                root=case.root, version="0.1.1.dev1")
     assert not target.exists()
     assert (slot / ".stage-owner.json").exists() is (kind == "scratch")
+
+
+def test_minimal_environment_excludes_all_host_authority(case, monkeypatch):
+    sentinels = ["GH_TOKEN", "GITHUB_TOKEN", "AZURE_CLIENT_SECRET", "AWS_SECRET_ACCESS_KEY",
+                 "HTTP_PROXY", "HTTPS_PROXY", "LD_PRELOAD", "SSL_CERT_FILE", "CC", "PATH"]
+    for name in sentinels:
+        monkeypatch.setenv(name, "host-authority-sentinel")
+    env = staging._environment(case.tmp / "scratch", tool_paths=(case.build.python.parent,))
+    assert all(name not in env for name in sentinels if name != "PATH")
+    assert env["PATH"] == str(case.build.python.parent)
+    assert "host-authority-sentinel" not in env.values()
+
+
+def test_windows_platform_allowlist_retained_and_bound(case, monkeypatch):
+    platform = {"SystemRoot": "C:\\Windows", "WINDIR": "C:\\Windows",
+                "COMSPEC": "C:\\Windows\\System32\\cmd.exe", "PATHEXT": ".EXE;.CMD"}
+    monkeypatch.setattr(staging, "_platform_environment", lambda: platform.copy())
+    stage(case)
+    for key, value in platform.items():
+        assert case.calls[0][1][key] == value
+    platform["PATHEXT"] = ".EXE"
+    with pytest.raises(CandidateError, match="conflict"):
+        stage(case)
+
+
+def test_posix_lib64_alias_owned_failure_cleanup(case, monkeypatch):
+    proxy = SimpleNamespace(**{name: getattr(os, name) for name in dir(os)})
+    proxy.name = "posix"
+    monkeypatch.setattr(staging, "os", proxy)
+    slot, target, owner = _cleanup_case(case)
+    (slot / "lib").mkdir()
+    try:
+        (slot / "lib64").symlink_to("lib", target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"unprivileged symlinks unavailable: {exc}")
+    staging._remove_owned_tree(slot, slot=slot, owner=owner, primitive=case.primitive,
+                               root=case.root, version="0.1.1.dev1")
+    assert not slot.exists()
+
+
+@pytest.mark.parametrize("error", [TypeError("ctypes"), KeyboardInterrupt(), OSError("native")])
+def test_every_job_teardown_exception_is_unconfirmed(case, monkeypatch, error):
+    def run(argv, *, cwd, **kwargs):
+        job = SimpleNamespace(terminate_and_wait=lambda seconds: (_ for _ in ()).throw(error))
+        process = SimpleNamespace(poll=lambda: 0, wait=lambda timeout: 0)
+        staging._teardown(process, job, None, False, "probe")
+    monkeypatch.setattr(staging, "_run", run)
+    with pytest.raises(staging._CleanupUnconfirmed) as raised:
+        stage(case)
+    assert raised.value.__cause__ is error
+    assert (case.root / "versions" / "0.1.1.dev1").exists()
+
+
+@pytest.mark.parametrize("operation", ["terminate", "wait"])
+def test_posix_teardown_oserror_preserves_candidate(case, monkeypatch, operation):
+    error = OSError("owned supervisor failure")
+    def run(argv, *, cwd, **kwargs):
+        process = SimpleNamespace(
+            pid=123, poll=lambda: None, returncode=None,
+            terminate=lambda: None, wait=lambda timeout: 124,
+        )
+        setattr(process, operation, lambda *a, **kw: (_ for _ in ()).throw(error))
+        staging._teardown(process, None, "token", True, "probe")
+    monkeypatch.setattr(staging, "_start_token", lambda pid: "token")
+    monkeypatch.setattr(staging, "_run", run)
+    with pytest.raises(staging._CleanupUnconfirmed):
+        stage(case)
+    assert (case.root / "versions" / "0.1.1.dev1").exists()
+
+
+@pytest.mark.parametrize("layout,state", [
+    ("receipt-only", "incomplete"), ("marker-only", "invalid"),
+    ("malformed-marker", "invalid"),
+])
+def test_inspection_marker_first_classification(case, layout, state):
+    slot = case.root / "versions" / "unfinished"
+    slot.mkdir(parents=True)
+    if layout != "marker-only":
+        (slot / "candidate.json").write_text("{}")
+    if layout != "receipt-only":
+        (slot / ".install-complete.json").write_text(
+            "{" if layout == "malformed-marker" else "{}",
+        )
+    before = tree(case.root)
+    result = inspect_candidates(case.root, host_config_path=case.host)
+    assert result["candidates"][0]["state"] == state
+    assert tree(case.root) == before
+
+
+@pytest.mark.parametrize("link,target_name", [("lib64", "../outside"), ("other-link", "lib")])
+def test_owned_cleanup_rejects_nonstandard_symlinks(case, monkeypatch, link, target_name):
+    proxy = SimpleNamespace(**{name: getattr(os, name) for name in dir(os)})
+    proxy.name = "posix"
+    monkeypatch.setattr(staging, "os", proxy)
+    slot, target, owner = _cleanup_case(case)
+    try:
+        (slot / link).symlink_to(target_name, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"unprivileged symlinks unavailable: {exc}")
+    with pytest.raises(CandidateError, match="symlink"):
+        staging._remove_owned_tree(slot, slot=slot, owner=owner, primitive=case.primitive,
+                                   root=case.root, version="0.1.1.dev1")
+    assert (slot / ".stage-owner.json").exists()

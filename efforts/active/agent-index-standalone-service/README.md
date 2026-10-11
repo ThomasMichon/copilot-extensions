@@ -401,3 +401,10 @@ boundaries from implementation decisions and deployment-specific policy.
   its assertion now includes captured fixture diagnostics instead of hiding the
   inner cause behind exit 18. No passing expectation or visibility check is
   relaxed.
+- Current-head staging review tightened build isolation to a minimal bound
+  platform environment, admitted only the exact POSIX `lib64 -> lib` scaffold
+  for owned failed-slot deletion, made teardown uncertainty exhaustive
+  (including unexpected failures/interrupts), and based candidate reporting on
+  canonical completion markers rather than receipt presence. The updated full
+  installed Windows suite and real offline uv fixture passed 359 tests with
+  two Linux-specific process cases delegated to fresh-container validation.

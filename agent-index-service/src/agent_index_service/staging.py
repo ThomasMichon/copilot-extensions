@@ -97,7 +97,8 @@ def _path(value: Path, *, file: bool = False) -> Path:
         except FileNotFoundError:
             continue
         if stat.S_ISLNK(info.st_mode) or (
-            getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            getattr(info, "st_file_attributes", 0)
+            & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
         ):
             raise CandidateError("symlink/reparse ancestors are not allowed")
         if ancestor != path and not stat.S_ISDIR(info.st_mode):
@@ -232,18 +233,34 @@ def _uv_policy(data: bytes) -> None:
         raise CandidateError("explicit uv configuration must not be empty")
 
 
-def _environment(scratch: Path) -> dict[str, str]:
-    env = {
+def _platform_environment() -> dict[str, str]:
+    """Only Windows OS execution prerequisites; no credentials/proxies/loaders."""
+    if os.name != "nt":
+        return {}
+    return {
         key: value for key, value in os.environ.items()
-        if not key.upper().startswith(("AGENT_", "COPILOT_", "UV_", "PIP_", "PYTHON"))
-        and key.upper() not in {"VIRTUAL_ENV", "__PYVENV_LAUNCHER__"}
+        if key.upper() in {"SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT"}
     }
+
+
+def _environment(
+    scratch: Path, *, tool_paths: tuple[Path, ...] = (),
+    platform: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """No ambient credential/proxy/CA support: explicitly configured policy must suffice.
+
+    Hosts needing additional authenticated/proxy/CA environment injection are not
+    supported by this API; fail rather than inheriting unbound host authority.
+    """
+    env = dict(_platform_environment() if platform is None else platform)
+    env["PATH"] = os.pathsep.join(dict.fromkeys(str(path) for path in tool_paths))
     env.update({
         "HOME": str(scratch), "USERPROFILE": str(scratch),
         "XDG_CONFIG_HOME": str(scratch / "config"), "XDG_CACHE_HOME": str(scratch / "cache"),
         "APPDATA": str(scratch / "config"), "LOCALAPPDATA": str(scratch / "cache"),
         "TMPDIR": str(scratch), "TMP": str(scratch), "TEMP": str(scratch),
         "PYTHONDONTWRITEBYTECODE": "1", "UV_PYTHON_DOWNLOADS": "never",
+        "PYTHONUTF8": "1", "LANG": "C", "LC_ALL": "C",
         "AGENT_INDEX_HOME": str(scratch / "index"),
         "AGENT_INDEX_DATA_DIR": str(scratch / "index" / "data"),
         "AGENT_INDEX_ROUTING_DIR": str(scratch / "index" / "routing"),
@@ -363,6 +380,30 @@ def _terminate_supervisor(process, token: str | None, operation: str) -> None:
         raise _CleanupUnconfirmed(f"{operation}: supervisor cleanup not confirmed")
 
 
+def _teardown(process, job, token: str | None, supervised: bool, operation: str) -> None:
+    """Only a fully completed teardown authorizes removal of candidate files."""
+    try:
+        if job is not None:
+            job.terminate_and_wait(15.0)
+        elif process is not None and supervised:
+            _terminate_supervisor(process, token, operation)
+        elif process is not None:
+            raise _CleanupUnconfirmed(f"{operation}: Windows Job containment unavailable")
+        if process is not None:
+            try:
+                process.wait(timeout=15)
+            except subprocess.TimeoutExpired as exc:
+                raise _CleanupUnconfirmed(
+                    f"{operation}: direct process exit could not be confirmed"
+                ) from exc
+    except BaseException as exc:
+        if isinstance(exc, _CleanupUnconfirmed):
+            raise
+        raise _CleanupUnconfirmed(
+            f"{operation}: descendant cleanup could not be confirmed ({type(exc).__name__})"
+        ) from exc
+
+
 def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) -> str:
     from agent_procutil import (
         contained_test_mode,
@@ -393,10 +434,16 @@ def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) ->
     try:
         fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as stream:
-            process, job = spawn_sync_in_kill_on_close_job(
-                command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
-                stdout=stream, stderr=subprocess.DEVNULL, **kwargs,
-            )
+            try:
+                process, job = spawn_sync_in_kill_on_close_job(
+                    command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                    stdout=stream, stderr=subprocess.DEVNULL, **kwargs,
+                )
+            except BaseException as exc:
+                # A shared spawn helper can raise after creating a suspended child.
+                raise _CleanupUnconfirmed(
+                    f"{operation}: child creation/ownership could not be confirmed"
+                ) from exc
             if supervised:
                 token = _start_token(process.pid)
             if os.name == "nt" and job is None:
@@ -418,35 +465,21 @@ def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) ->
                 raise CandidateError(f"{operation}: exit status {code}{classification}")
         return _bytes(output, label=f"{operation} output").decode("utf-8")
     finally:
-        if job is not None:
-            try:
-                job.terminate_and_wait(15.0)
-            except (OSError, RuntimeError, ValueError) as exc:
-                raise _CleanupUnconfirmed(
-                    f"{operation}: Windows Job descendant cleanup could not be confirmed"
-                ) from exc
-        elif process is not None and supervised:
-            _terminate_supervisor(process, token, operation)
-        if process is not None and process.poll() is None:
-            process.kill()
-        if process is not None:
-            try:
-                process.wait(timeout=15)
-            except subprocess.TimeoutExpired as exc:
-                raise _CleanupUnconfirmed(
-                    f"{operation}: direct process exit could not be confirmed"
-                ) from exc
-        cleanup_deadline = time.monotonic() + 5
-        while True:
-            try:
-                output.unlink(missing_ok=True)
-                break
-            except PermissionError:
-                if time.monotonic() >= cleanup_deadline:
-                    raise _CleanupUnconfirmed(
-                        f"{operation}: output handles remained open after cleanup"
-                    ) from None
-                time.sleep(0.05)
+        _teardown(process, job, token, supervised, operation)
+        try:
+            cleanup_deadline = time.monotonic() + 5
+            while True:
+                try:
+                    output.unlink(missing_ok=True)
+                    break
+                except PermissionError:
+                    if time.monotonic() >= cleanup_deadline:
+                        raise _CleanupUnconfirmed(
+                            f"{operation}: output handles remained open after cleanup"
+                        ) from None
+                    time.sleep(0.05)
+        except BaseException as exc:
+            raise _CleanupUnconfirmed(f"{operation}: output cleanup unconfirmed") from exc
 
 
 def _long_path(path: Path) -> str:
@@ -482,6 +515,14 @@ def _remove_owned_tree(
                 if not owner_removed:
                     for entry in slot.iterdir():
                         if entry.name == _OWNER:
+                            continue
+                        if (
+                            os.name != "nt" and entry == slot / "lib64"
+                            and stat.S_ISLNK(entry.lstat().st_mode)
+                            and os.readlink(entry) == "lib"
+                        ):
+                            _path(slot / "lib")  # Target stays within the owned slot.
+                            os.unlink(entry)  # Do not traverse the standard venv alias.
                             continue
                         _path(entry, file=entry.is_file())
                         if entry.is_dir():
@@ -621,10 +662,12 @@ def stage_candidate(
         lock_bytes, config_bytes = _bytes(lock_path), _bytes(config_path)
         pins = _lock_requirements(lock_bytes)
         _uv_policy(config_bytes)
+        platform = _platform_environment()
         policy = {
             "python": str(python), "uv": str(uv), "uv_config_sha256": _hash(config_bytes),
             "python_sha256": _file_hash(python), "uv_sha256": _file_hash(uv),
             "native_extras": ["native", "server", "store"],
+            "platform_environment": platform, "locale": "C",
         }
         receipt = {
             "schema": _SCHEMA, "schema_version": 1, "version": descriptor["service_version"],
@@ -679,7 +722,9 @@ def stage_candidate(
                 (artifacts / "third-party.txt").write_bytes(lock_bytes)
                 scratch = slot / "build-state"
                 scratch.mkdir()
-                env = _environment(scratch)
+                env = _environment(
+                    scratch, tool_paths=(python.parent, uv.parent), platform=platform,
+                )
                 if time.monotonic() >= deadline:
                     raise CandidateError("candidate build timeout")
                 base = [str(uv), "--config-file", str(config_path),
@@ -698,6 +743,9 @@ def stage_candidate(
                 interpreter = primitive.slot_python(root, version)
                 if interpreter is None:
                     raise CandidateError("venv did not create a slot interpreter")
+                env["PATH"] = os.pathsep.join(dict.fromkeys((
+                    str(interpreter.parent), str(python.parent), str(uv.parent),
+                )))
                 pip = [*base, "pip", "install", "--python", str(interpreter), "--no-deps",
                        "--only-binary", ":all:"]
                 _run([*pip, "--require-hashes", "-r", str(artifacts / "third-party.txt")],
@@ -776,15 +824,18 @@ def inspect_candidates(install_root: Path, *, host_config_path: Path) -> dict:
                     _path(slot)
                     version = slot.name
                     try:
-                        if not (slot / _RECEIPT).exists():
+                        if not (slot / ".install-complete.json").exists():
                             value, state = None, "incomplete"
                         else:
                             if primitive is None:
                                 primitive = _primitive()
-                            value = _receipt(slot, primitive, root, version)
+                            value = (
+                                _receipt(slot, primitive, root, version)
+                                if primitive.read_marker(root, version) is not None else None
+                            )
                             state = "staged" if value else "invalid"
                     except FileNotFoundError:
-                        value, state = None, "incomplete"
+                        value, state = None, "invalid"
                     except (CandidateError, ValueError):
                         value, state = None, "invalid"
                     candidates.append({

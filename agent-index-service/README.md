@@ -62,7 +62,13 @@ more SHA-256 hashes per requirement; no includes, VCS/editable/direct URLs,
 environment markers, duplicate pins or replacements of bundled distributions.
 Feed policy comes from the explicitly supplied operator-owned uv TOML, not a
 hardcoded public registry. An offline wheelhouse is supported through that
-policy. The isolated probe checks dependency/extras closure, native imports,
+policy. Build/probe environments use a minimal platform allowlist and only the
+explicit Python/uv/runtime directories on PATH. Ambient tokens, proxies, CA
+overrides, compiler flags and loader injections are not inherited. Additional
+proxy/CA environment injection is not supported by this adapter; required
+transport settings must be expressible in the supplied policy or staging fails.
+The allowed platform environment is bound into the candidate identity.
+The isolated probe checks dependency/extras closure, native imports,
 package versions and the explicit-source core seam without contacting an engine.
 
 Builds reserve the permanent `versions/<service-version>` path so POSIX venv
@@ -79,6 +85,8 @@ not accepted as proof that every descendant has exited; any teardown uncertainty
 preserves the incomplete candidate and fails explicitly.
 
 `candidates` is read-only, including when the root does not exist. Completion
+marker absence is reported as incomplete, including a crash after receipt
+publication; a present marker with missing/invalid receipt is invalid. Completion
 means **built and import-validated**, not passive service readiness or migration
 safety. There is no active marker, stable launcher, autostart registration,
 activation, rollback or pruning in this slice. Those operations require their
