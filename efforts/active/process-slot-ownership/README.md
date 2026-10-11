@@ -35,6 +35,13 @@ and [work-coalescing singleton pattern](../../../docs/patterns/work-coalescing-s
 
 ## Coordination
 
+- **Topology:** independent per-slice worktrees, serial PRs targeting `dev`.
+- **Host/PR owner:** Process ownership driver owns this effort's continuation
+  PRs; the two sibling drivers own only their separately tracked efforts.
+- **Slice ownership:** announce one continuation slice at a time on #3963
+  before editing; do not overlap another driver's claimed slice.
+- **Handoff:** the successor reads this Plan, validation, journal, and any
+  open PR obligation before starting the next slice.
 - One writer per implementation slice; use #3963 to announce the slice.
 - Do not build another process registry or take over the separately claimed
   launch/handoff work.
@@ -76,7 +83,24 @@ The execution decomposition and acceptance details below are
 
 ## Plan
 
-### Phase 1 - Consolidate current contracts and evidence
+### Historical phase mapping
+
+Existing pattern/source references keep their original meanings. The
+continuation slices below do not renumber or erase that historical sequence.
+Published mechanisms are prior art; full acceptance remains independently
+verified by this effort's Validation Plan.
+
+| Historical phase | Meaning and current disposition |
+|------------------|---------------------------------|
+| Phase 0 | Spawn-site audit and shared primitive design; current caller inventory is reconciled in Continuation A |
+| Phase 1 | Launcher/mux slot and tether; pane-lifetime work landed in #712 |
+| Phase 2 | Status-query debounce; discovery coalescing landed in #714 and remains prior art |
+| Phase 3 | Status-daemon and stdio ownership tethers; preserve rather than rewrite these contracts |
+| Phase 4 | Generation tether and backstop unification; the graceful-daemon-cutover pattern owns the published mechanism |
+| Phase 5 | Slot observability and pattern documentation; health descriptors/pattern are published, broader inventory presentation belongs to #5559 |
+| Phase 6 | Reader budgets, circuit-first admission, and ownership-safe cleanup; the continuing implementation scope below |
+
+### Continuation A - Consolidate current contracts and evidence
 
 - [x] Identify existing leases, crawl/probe coalescing, and namespace readers.
 - [x] Separate operational registry presentation (#5559) and lean launch
@@ -85,7 +109,7 @@ The execution decomposition and acceptance details below are
 - [ ] Inventory remaining status/list/discovery caller seams and record
       already-satisfied versus unverified requirements.
 
-### Phase 2 - Preserve outstanding reader ownership
+### Continuation B - Preserve outstanding reader ownership (Phase 6)
 
 - [ ] Reproduce cancellation-resistant same-provider namespace admission:
       bound the caller wait without starting a second underlying reader.
@@ -96,7 +120,7 @@ The execution decomposition and acceptance details below are
 - [ ] Land the smallest correction with deterministic async regressions,
       documentation, and an agent-bridge changefile.
 
-### Phase 3 - Reader budgets and circuit-first admission
+### Continuation C - Reader budgets and circuit-first admission (Phase 6)
 
 - [ ] Define role keys, expected wall/CPU cost, fan-out limits, and provenance.
 - [ ] Open admission circuits on repeated budget overruns without reclaiming
@@ -106,7 +130,7 @@ The execution decomposition and acceptance details below are
 - [ ] Expose role accounting through existing observability/registry seams;
       distinguish unknown from dead and stale from current.
 
-### Phase 4 - Release and validate adoption
+### Continuation D - Release and validate adoption
 
 - [ ] Complete the validation matrix, release through normal promotion, and
       verify authorized consumer behavior.
@@ -146,5 +170,5 @@ and leave shared registry presentation to #5559.
 
 Confirmed the slug and mapped current prior art before implementation.
 Existing coalescing and registry/lifecycle efforts prevent a greenfield
-rewrite. Phase 2's first slice is deliberately a deterministic reader-lifetime
+rewrite. Continuation B's first slice is deliberately a deterministic reader-lifetime
 regression, not a live reaper, service restart, or fleet-wide rollout.
