@@ -184,6 +184,27 @@ class TestBuildIdentityPayload:
 
 @_requires_crypto
 class TestEncryptDecryptRoundTrip:
+    @pytest.mark.parametrize("origin", [
+        {"worktree_id": "control-tree", "machine": "sample-host", "project": "control"},
+        {"machine": "sample-host", "project": "control"},
+        {"worktree_id": "control-tree", "machine": "sample-host", "project": "control", "x": "x"},
+        {"worktree_id": "", "machine": "sample-host", "project": "control"},
+        {"worktree_id": 42, "machine": "sample-host", "project": "control"},
+    ])
+    def test_authenticated_origin_schema(self, key, monkeypatch, origin):
+        monkeypatch.setattr(identity_marker, "load_identity_key", lambda: key)
+        payload = identity_marker.build_identity_payload(worktree_id="product-tree")
+        payload["origin"] = origin
+        token = identity_marker.encrypt_identity_payload(payload)
+        assert token is not None
+        if set(origin) == {"worktree_id", "machine", "project"} and all(
+            isinstance(value, str) and value for value in origin.values()
+        ):
+            assert identity_marker.decrypt_identity_payload(token, key)["origin"] == origin
+        else:
+            with pytest.raises(identity_marker.IdentityMarkerError):
+                identity_marker.decrypt_identity_payload(token, key)
+
     def test_authenticated_invalid_payload_is_rejected(self, key, monkeypatch):
         monkeypatch.setattr(identity_marker, "load_identity_key", lambda: key)
         token = identity_marker.encrypt_identity_payload({"v": 99, "worktree_id": "wt-1"})

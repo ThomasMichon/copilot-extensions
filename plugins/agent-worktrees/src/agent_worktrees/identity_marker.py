@@ -54,6 +54,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from . import tracking
+    from .origin_identity import OriginIdentity
 
 #: Raw symmetric key size (AES-256).
 KEY_BYTES = 32
@@ -220,6 +221,7 @@ def build_identity_payload(
     session: str = "",
     head: str = "",
     project: str = "",
+    origin: OriginIdentity | None = None,
 ) -> dict:
     """Build the full-identity payload dict (operator-confirmed Piece 2
     scope: the raw marker's identity fields plus project and UTC timestamp,
@@ -242,6 +244,8 @@ def build_identity_payload(
         payload["head"] = head
     if project:
         payload["project"] = project
+    if origin is not None:
+        payload["origin"] = dict(origin)
     return payload
 
 
@@ -316,6 +320,14 @@ def decrypt_identity_payload(token_b64: str, key: bytes | None = None) -> dict:
             )
         ):
             raise ValueError("invalid identity payload")
+        if "origin" in payload:
+            origin = payload["origin"]
+            if (
+                not isinstance(origin, dict)
+                or set(origin) != {"worktree_id", "machine", "project"}
+                or any(not isinstance(value, str) or not value for value in origin.values())
+            ):
+                raise ValueError("invalid origin identity")
         return payload
     except IdentityMarkerError:
         raise
@@ -330,6 +342,7 @@ def identity_marker_field(
     session: str = "",
     head: str = "",
     project: str = "",
+    origin: OriginIdentity | None = None,
 ) -> str | None:
     """One-call convenience for a PR-marker publish site: build the
     full-identity payload and encrypt it, returning the ciphertext ready to
@@ -344,12 +357,14 @@ def identity_marker_field(
         session=session,
         head=head,
         project=project,
+        origin=origin,
     )
     return encrypt_identity_payload(payload)
 
 
 def identity_marker_field_for_record(
     record: tracking.WorktreeRecord, *, project: str = "", head: str = "",
+    this_machine: str = "",
 ) -> str | None:
     """``identity_marker_field`` convenience wrapper for a PR-marker publish
     site already holding a :class:`~agent_worktrees.tracking.WorktreeRecord`
@@ -359,6 +374,9 @@ def identity_marker_field_for_record(
     raises -- any failure degrades to omitting the field.
     """
     try:
+        from .origin_identity import resolve_origin_identity
+
+        origin = resolve_origin_identity(record, project=project, this_machine=this_machine)
         session = ""
         if record.sessions:
             live = [item for item in record.sessions if not item.ended_at]
@@ -369,6 +387,7 @@ def identity_marker_field_for_record(
             session=session,
             head=head,
             project=project,
+            origin=origin,
         )
     except (AttributeError, TypeError, ValueError):
         log.warning("Encrypted PR attribution omitted: source record is invalid.")

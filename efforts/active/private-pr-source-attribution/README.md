@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice PRs targeting `dev`
 - **Created:** 2026-10-10
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** below-altitude completion of existing encrypted attribution and credential-cache contracts
 - **Umbrella issue:** #6068
 
@@ -73,7 +73,7 @@ remain compatible, but this workflow must not create independent machine keys.
 ## Plan
 
 ### Phase 1 — Reviewed completion contract
-- [ ] Review and land this proposal before implementing new behavior.
+- [x] Review and land this proposal before implementing new behavior (#6072).
 
 ### Phase 2 — Originating identity
 - [ ] Include the root/control worktree's machine, project and worktree ID
@@ -142,6 +142,15 @@ obligations, not a preselected encryption implementation or a deployment action.
 No production secret is read or written by the planning slice.
 
 ## Journal
+
+### 2026-10-10 — Reviewed plan and origin implementation
+
+- Proposal #6072 cleared review and merged. Implementation starts with private
+  local-root capture; shared vault-key custody/cache and provider fallback remain
+  separate upcoming slices.
+- Origin metadata is an optional nested payload field. Each publication captures
+  the validated current ownership chain; unresolved ancestry or root opt-out
+  omits it. Earlier tokens remain historical snapshots.
 
 ### 2026-10-10 — Continuation
 
