@@ -115,7 +115,7 @@ The execution decomposition and acceptance details below are
 ## Validation Plan
 
 - [ ] N same-role concurrent requests perform one underlying read.
-- [ ] A timed-out/cancelled waiter cannot release or cancel another waiter’s
+- [ ] A timed-out/cancelled waiter cannot release or cancel another waiter's
       shared holder; a cancellation-resistant holder cannot multiply.
 - [ ] Failed publication cannot overwrite a newer provider/generation.
 - [ ] Provider replacement preserves old-holder accounting without serving
@@ -131,6 +131,14 @@ The execution decomposition and acceptance details below are
       detach, lock release, and crash backstops.
 - [ ] Bounded targeted tests and applicable isolated scenarios pass; release
       and running-state evidence are recorded separately from merge evidence.
+
+## Proposal
+
+Retain holder accounting independently from publication eligibility. First
+characterize the namespace cache's cancellation-resistant paths with
+deterministic event-gated readers, then make the smallest lifetime correction.
+Later budget/circuit design must preserve existing inline fallback contracts
+and leave shared registry presentation to #5559.
 
 ## Journal
 
