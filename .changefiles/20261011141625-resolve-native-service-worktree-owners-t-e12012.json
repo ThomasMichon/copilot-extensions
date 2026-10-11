@@ -1,5 +1,5 @@
 {
-  "comment": "Resolve native-service worktree owners through completed installed runtimes and refuse missing pre-effect prerequisites without busy deferrals.",
+  "comment": "Resolve native-service worktree owners through completed installed runtimes and check owner availability before acquisition marking.",
   "changes": [
     {
       "plugin": "agent-bridge",

@@ -60,11 +60,11 @@ did not supply one; explicit and derived contexts use the existing validated
 same-cell peer launcher and never fall back to a global command. Retired legacy
 ownership refuses rather than crossing installation cells.
 Owner availability is checked before marking dispatch acquisition. A missing
-owner with no historical acquisition attempt on the worktree reports
-`worktrees_unavailable` with `effect: not_started`, so dispatch fails the
-unsupported prerequisite instead of indefinitely treating it as busy. Prior
-attempts retain ambiguous-effect reconciliation; absence never proves that an
-earlier launch did not happen.
+owner reports the existing `worktrees_unavailable` refusal without certifying
+`effect: not_started`: neither owner absence nor an empty local journal proves
+that an earlier launch did not happen. Historical and unknown effects retain
+their existing reconciliation requirement. No acquisition wire capability or
+protocol change is introduced by installed-owner resolution.
 A bridge binding from an older generation of the same task remains resumable
 when current owner facts authorize it. A future/stale admission generation
 refuses. Historical expired registrations that are not the current native head

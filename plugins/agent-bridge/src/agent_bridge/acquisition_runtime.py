@@ -70,15 +70,7 @@ class AcquisitionRuntime:
             self.store.release_gate(req)
             return replay.result
         venue = await verify_dispatch(req, self.resolver)
-        try:
-            row, head = await verify_worktree(req)
-        except AcquisitionRefused as exc:
-            if exc.code == "worktrees_unavailable" and not self.db.execute_read(
-                "SELECT 1 FROM acquisition_attempts WHERE worktree_id=? LIMIT 1",
-                (req.worktree_id,),
-            ):
-                exc.effect = "not_started"
-            raise
+        row, head = await verify_worktree(req)
         if venue["acquisition_reservation"]["state"] == "reserving":
             await mark_dispatch_acquisition(req, self.resolver)
         await self._reconcile_prior(req, row, head)
