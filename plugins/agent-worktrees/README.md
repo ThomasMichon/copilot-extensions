@@ -16,6 +16,9 @@ CodeSpace/container resolvers), but their absence only disables those features.
 Completed numbered runtime slots are immutable. An unchanged completed slot
 is reused; a same-version payload mismatch is refused before venv or package
 mutation, including forced updates. Publish a new version for ordinary changes.
+Failed activation quarantines readiness as `.install-complete.failed.json`
+without erasing completion evidence. The resolver no longer sees a ready
+marker, and subsequent installer admission still refuses rebuilding that slot.
 Repair of a broken completed slot requires a distinct, health-checked generation,
 not an in-place dependency reinstall into a running CLI/monitor's files.
 

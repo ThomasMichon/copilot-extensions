@@ -712,22 +712,13 @@ function Invoke-VersionedActivateInner {
     if (-not $slotOk) {
         Write-ServiceErr "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         if ($healthOut) { Write-ServiceErr "  $healthOut" }
-        # This slot may already carry a completion marker from an OLDER,
-        # less-strict installer run (dotfiles #7561): Test-SlotAlreadyComplete
-        # trusts a valid marker + matching payload hash and skips reinstalling,
-        # so without this the same stale-but-broken slot would keep failing
-        # this gate forever on every future run. Remove just the marker file
-        # (never the slot's other files -- safe even if this happens to be the
-        # CURRENTLY ACTIVE slot, since a JSON marker is never held open by a
-        # running interpreter the way its own module files can be) so a future
-        # run stops trusting it and either rebuilds it fresh or falls back to
-        # last-known-good (resolve_python's tiered fallback in
-        # versioned_runtime.py already treats a markerless slot as unhealthy).
-        # Filename matches versioned_runtime.py's own COMPLETE_MARKER constant.
+        # Quarantine health readiness without erasing immutable completion
+        # evidence. The resolver rejects the markerless slot; admission still
+        # refuses rebuilding this numbered generation on the next run.
         $staleMarker = Join-Path $VenvDir '.install-complete.json'
-        if (Test-Path $staleMarker) {
-            Remove-Item $staleMarker -Force -ErrorAction SilentlyContinue
-            Write-ServiceChanged "Invalidated stale completion marker (versions/$SrcVersion)"
+        if (Test-Path -LiteralPath $staleMarker) {
+            Move-Item -LiteralPath $staleMarker -Destination (Join-Path $VenvDir '.install-complete.failed.json') -Force -ErrorAction Stop
+            Write-ServiceChanged "Quarantined completion marker (versions/$SrcVersion); repair requires a distinct generation"
         }
         return $false
     }
@@ -2365,7 +2356,8 @@ function Deploy-Venv {
         return $true
     }
     if ($VersionedRuntime -and $SrcVersion -ne 'dev' -and
-        (Test-Path -LiteralPath (Join-Path $VenvDir '.install-complete.json'))) {
+        ((Test-Path -LiteralPath (Join-Path $VenvDir '.install-complete.json')) -or
+         (Test-Path -LiteralPath (Join-Path $VenvDir '.install-complete.failed.json')))) {
         Write-ServiceErr "Completed runtime slot $SrcVersion cannot be rebuilt in place. Publish a new version or use the owned dev-slot workflow; repair requires a distinct healthy generation."
         return $false
     }

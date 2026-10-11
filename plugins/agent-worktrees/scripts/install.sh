@@ -699,22 +699,15 @@ _versioned_activate_inner() {
     if ! health_out="$(PYTHONPATH= "$VENV_PYTHON" -I -c 'import agent_worktrees.__main__ as m; m._load_full_command_surface()' 2>&1)"; then
         err "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         [[ -n "$health_out" ]] && err "  $health_out"
-        # This slot may already carry a completion marker from an OLDER,
-        # less-strict installer run (dotfiles #7561): _test_slot_already_complete
-        # trusts a valid marker + matching payload hash and skips reinstalling,
-        # so without this the same stale-but-broken slot would keep failing this
-        # gate forever on every future run. Remove just the marker file (never
-        # the slot's other files -- safe even if this happens to be the
-        # CURRENTLY ACTIVE slot, since a JSON marker is never held open by a
-        # running interpreter the way its own module files can be) so a future
-        # run stops trusting it and either rebuilds it fresh or falls back to
-        # last-known-good (resolve_python's tiered fallback in
-        # versioned_runtime.py already treats a markerless slot as unhealthy).
-        # Filename matches versioned_runtime.py's own COMPLETE_MARKER constant.
+        # Quarantine readiness but retain immutable completion evidence.
+        # Resolution rejects the markerless slot; admission refuses rebuilding.
         local stale_marker="$VENV_DIR/.install-complete.json"
         if [[ -f "$stale_marker" ]]; then
-            rm -f "$stale_marker"
-            ok "Invalidated stale completion marker (versions/$SRC_VERSION)"
+            if ! mv -f "$stale_marker" "$VENV_DIR/.install-complete.failed.json"; then
+                err "Could not quarantine completion marker -- refusing activation"
+                return 1
+            fi
+            ok "Quarantined completion marker (versions/$SRC_VERSION); repair requires a distinct generation"
         fi
         return 1
     fi
@@ -1810,7 +1803,8 @@ deploy_venv() {
         return 2
     fi
     if [[ "$VERSIONED_RUNTIME" == 1 && "$SRC_VERSION" != dev &&
-          -e "$VENV_DIR/.install-complete.json" ]]; then
+          ( -e "$VENV_DIR/.install-complete.json" ||
+            -e "$VENV_DIR/.install-complete.failed.json" ) ]]; then
         err "Completed runtime slot $SRC_VERSION cannot be rebuilt in place. Publish a new version or use the owned dev-slot workflow; repair requires a distinct healthy generation."
         return 1
     fi
