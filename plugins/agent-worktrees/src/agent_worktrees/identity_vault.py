@@ -17,6 +17,7 @@ log = logging.getLogger("agent-worktrees")
 ARGV_ENV = "AGENT_WORKTREES_IDENTITY_VAULT_ARGV"
 ENTRY_ENV = "AGENT_WORKTREES_IDENTITY_VAULT_ENTRY"
 DEFAULT_ENTRY = "Identity/PR-attribution"
+_READ_TIMEOUT = 15
 
 
 def _read_key_output(argv: list[str]) -> bytes:
@@ -37,7 +38,7 @@ def _read_key_output(argv: list[str]) -> bytes:
     reader = threading.Thread(target=read, daemon=True)
     reader.start()
     try:
-        if not done.wait(15) or not output or len(output[0]) > 128:
+        if not done.wait(_READ_TIMEOUT) or not output or len(output[0]) > 128:
             raise ValueError("vault key output invalid or timed out")
         if process.wait(timeout=2):
             raise ValueError("vault cache read failed")
@@ -67,7 +68,7 @@ def load_cached_vault_key() -> bytes | None:
     containing credentials is ever included in diagnostics.
     """
     encoded = os.environ.get(ARGV_ENV)
-    if not encoded:
+    if encoded is None:
         return None
     try:
         argv = json.loads(encoded)

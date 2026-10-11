@@ -132,15 +132,13 @@ def identity_key_path() -> Path | None:
 
 
 def load_identity_key() -> bytes | None:
-    """Load the raw 32-byte symmetric identity key, or ``None`` if no key
-    file is configured, resolvable, or readable as a valid key.
+    """Load the shared owner key from an explicit file or vault cache.
 
-    Never auto-creates one -- unlike a machine-bound KEK, this key must be
-    the IDENTICAL file on every machine (see :func:`generate_identity_key`),
-    so silently generating a fresh one here would fragment it across
-    machines instead of sharing it. Any failure (missing file, bad base64,
-    wrong length) returns ``None`` rather than raising -- this is the
-    hot-path reader used by every PR publish.
+    A nonempty explicit file override wins; otherwise a configured vault
+    source uses cache-only retrieval without unlocking. The same logical
+    key must serve every owner machine; this reader never creates one.
+    Configured source failures return None with sanitized diagnostics.
+    Without explicit sources, legacy shared-file discovery remains available.
     """
     from .identity_vault import ARGV_ENV, load_cached_vault_key
 

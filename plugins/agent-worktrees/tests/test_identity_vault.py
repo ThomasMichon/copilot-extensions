@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import sys
+import time
 
 import pytest
 
@@ -35,7 +36,7 @@ def test_common_vault_key_decodes_multiple_machine_tokens(monkeypatch):
     assert all("--prompt" not in call for call in calls)
 
 
-@pytest.mark.parametrize("encoded", ["[]", '["relative-vault"]', "{}", '[""]'])
+@pytest.mark.parametrize("encoded", ["", "[]", '["relative-vault"]', "{}", '[""]'])
 def test_invalid_vault_command_does_not_fall_back(monkeypatch, encoded, caplog):
     monkeypatch.delenv(identity_marker.KEY_ENV_VAR, raising=False)
     monkeypatch.setenv(identity_vault.ARGV_ENV, encoded)
@@ -70,6 +71,29 @@ def test_real_cache_adapter_output_boundary():
         identity_vault._read_key_output([
             sys.executable, "-c", "print('x'*1000)",
         ])
+
+
+def test_timeout_reaps_adapter_and_stdout_holding_descendant(monkeypatch, tmp_path):
+    from agent_worktrees.locks import pid_alive
+
+    pid_file = tmp_path / "descendant.pid"
+    script = (
+        "import subprocess,sys,time,pathlib;"
+        "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']);"
+        f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid));"
+        "time.sleep(60)"
+    )
+    monkeypatch.setattr(identity_vault, "_READ_TIMEOUT", 5)
+    started = time.monotonic()
+    with pytest.raises(ValueError, match="timed out"):
+        identity_vault._read_key_output([sys.executable, "-c", script])
+    assert time.monotonic() - started < 15
+    assert pid_file.exists()
+    child_pid = int(pid_file.read_text())
+    deadline = time.monotonic() + 3
+    while pid_alive(child_pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not pid_alive(child_pid)
 
 
 def test_failed_cache_does_not_publish_secret_diagnostics(monkeypatch, caplog):
