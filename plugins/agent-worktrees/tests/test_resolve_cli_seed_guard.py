@@ -256,6 +256,8 @@ def test_interactive_self_alias_honors_explicit_environment(
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(cfg, "peek_base_repo", lambda: False)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    for name in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(
         resolve_cli.machine_identity, "is_local_machine",
         lambda name, config: name == "local-alias",
@@ -271,6 +273,34 @@ def test_interactive_self_alias_honors_explicit_environment(
     )
     assert rc == expected
     assert calls == (["remote"] if environment != "Bogus" else [])
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_ambiguous_self_alias_never_launches_locally(monkeypatch, tmp_path, capfd, reverse):
+    entries = [
+        cfg.MachineEntry(key="example-host", alias="shared", display_name="Local"),
+        cfg.MachineEntry(key="remote-host", alias="shared", display_name="Remote"),
+    ]
+    if reverse:
+        entries.reverse()
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _: {e.key: e for e in entries})
+    state = resolve_cli.ResolveCommandState.from_args(
+        _args(new_worktree=False, base=True, machine="shared", environment="Win")
+    )
+    state.config = _config(tmp_path, "example-host")
+    assert resolve_cli._resolve_json_mode(state) != 0
+    assert "ambig" in json.loads(capfd.readouterr().out)["error"].lower()
+
+
+def test_interactive_environment_handoff_rejects_nested_ssh(monkeypatch, tmp_path):
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _config(tmp_path, "example-host"))
+    monkeypatch.setattr(cfg, "peek_base_repo", lambda: False)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(resolve_cli.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setenv("SSH_CONNECTION", "192.0.2.1 1234 192.0.2.2 22")
+    assert resolve_cli.cmd_resolve(
+        _args(json=False, new_worktree=False, machine="example-host", environment="WSL")
+    ) != 0
 
 
 def test_resolve_worktree_id_with_machine_and_seed_is_rejected_json(capfd):
