@@ -367,7 +367,7 @@ def iter_archive_sources(
                 _component(entry.name.removesuffix(suffix))
             candidates = _entries(_directory(entry)) if layout != "flat" else [entry]
         except (OSError, ValueError) as exc:
-            if on_error is None:
+            if grouped or on_error is None:
                 raise
             on_error(entry.relative_to(root).as_posix(), exc)
             continue

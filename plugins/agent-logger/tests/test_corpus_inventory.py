@@ -146,6 +146,15 @@ def test_inventory_empty_root_succeeds(tmp_path):
     assert result["source_count"] == result["session_count"] == 0
 
 
+def test_inventory_invalid_provider_group_is_not_counted_as_a_source(tmp_path):
+    (tmp_path / "bad!.codespaces").mkdir()
+    result = inventory_corpus(tmp_path)
+    assert not result["complete"]
+    assert result["source_count"] == 0
+    assert result["sources"] == []
+    assert result["errors"]
+
+
 @pytest.mark.parametrize("layout", ["missing", "file"])
 def test_inventory_cli_explicit_failure_is_nonzero(tmp_path, capsys, layout):
     root = tmp_path / "corpus"
