@@ -18,6 +18,8 @@ def publish(path: Path, data: bytes, *, executable: bool = False) -> None:
         ):
             raise ValueError(f"refusing linked stamp destination: {parent}")
     if path.is_file() and path.read_bytes() == data:
+        if executable:
+            path.chmod(0o755)
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(prefix=".session-stamp-", dir=path.parent)

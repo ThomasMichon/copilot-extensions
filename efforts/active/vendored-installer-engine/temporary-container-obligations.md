@@ -41,12 +41,12 @@ unrelated fleet policy. Do not claim to intercept arbitrary external
 ## Architectural alignment
 
 **Classification: vision-closing.** This realizes
-[`agent-fabric` resource-accountability](../../../../visions/agent-fabric/README.md#resource-accountability):
+[`agent-fabric` resource-accountability](../../../visions/agent-fabric/README.md#resource-accountability):
 answer for allocated resources, settle incrementally and assert locally.
 An unknown Docker status cannot erase an already-acknowledged active obligation.
 It does not redefine the cleanliness verdict of a reusable borrowed resource.
 
-Follow [`a-la-carte independence`](../../../../docs/patterns/a-la-carte-independence.md)
+Follow [`a-la-carte independence`](../../../docs/patterns/a-la-carte-independence.md)
 and the existing claim-provider registry: ledger authority stays below venue
 providers, optional composition does not install siblings, and callback commands
 remain provenance-qualified. No new daemon, Docker SDK dependency in

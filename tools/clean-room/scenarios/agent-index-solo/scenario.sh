@@ -52,7 +52,8 @@ _no_runtime fresh
 phase 1 "install ONLY agent-index from a released marketplace"
 if [ -n "${CR_HARNESS_MOUNT:-}" ]; then
     _run candidate-copy cp -a "$CR_HARNESS_MOUNT" "$RELEASE"
-    RELEASE_SHA="${CR_CANDIDATE_HEAD:?candidate source HEAD is required}"
+    _run candidate-source python3 "$WITNESS" candidate "$RELEASE" "${CR_CANDIDATE_HEAD:-}"
+    RELEASE_SHA="$CR_CANDIDATE_HEAD"
     cr_meta product_kind materialized-candidate-not-shipped
 else
 _run release-clone git clone --quiet --depth 1 --branch main "https://github.com/$MARKETPLACE_REPO.git" "$RELEASE"

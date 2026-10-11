@@ -11,6 +11,37 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX executable-mode contract")
+def test_identical_stamp_repairs_launcher_without_republishing_metadata(tmp_path: Path) -> None:
+    import importlib.util
+    import stat
+
+    spec = importlib.util.spec_from_file_location("session_stamp", PLUGIN / "scripts/session-stamp.py")
+    assert spec and spec.loader
+    stamp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(stamp)
+    launcher = tmp_path / "agent-index"
+    data = b"#!/bin/sh\nprintf callable\n"
+    stamp.publish(launcher, data, executable=True)
+    launcher.chmod(0o644)
+    metadata = tmp_path / "stamped-version"
+    stamp.publish(metadata, b"9.9.9\n")
+    metadata.chmod(0o640)
+    before = metadata.stat()
+    stamp.publish(launcher, data, executable=True)
+    stamp.publish(metadata, b"9.9.9\n")
+    assert subprocess.run([str(launcher)], capture_output=True, check=True).stdout == b"callable"
+    assert stat.S_IMODE(launcher.stat().st_mode) == 0o755
+    after = metadata.stat()
+    assert (after.st_mode, after.st_ino, after.st_mtime_ns) == (
+        before.st_mode, before.st_ino, before.st_mtime_ns,
+    )
+    link = tmp_path / "linked-launcher"
+    link.symlink_to(launcher)
+    with pytest.raises(ValueError, match="linked stamp"):
+        stamp.publish(link, data, executable=True)
+
+
 def test_session_entrypoints_never_invoke_installers_or_service_ensure() -> None:
     bootstrap_sh = (PLUGIN / "scripts" / "bootstrap-check.sh").read_text(
         encoding="utf-8"

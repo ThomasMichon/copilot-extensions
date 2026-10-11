@@ -11,6 +11,12 @@ import sys
 import time
 import urllib.request
 
+sys.path.insert(0, str(
+    Path(os.environ["CR_LIB"]).parent if os.environ.get("CR_LIB")
+    else Path(__file__).resolve().parents[2] / "lib"
+))
+from materialized_provenance import verify as verify_candidate  # noqa: E402
+
 
 def read_object(path: Path) -> dict:
     text = path.read_text(encoding="utf-8")
@@ -146,6 +152,8 @@ def main(args: list[str]) -> None:
         assert data["role"] == values[1], data
     elif action == "version":
         assert reports_version(Path(values[0]).read_text(), values[1])
+    elif action == "candidate":
+        print(verify_candidate(Path(values[0]), values[1]))
     elif action == "dormant":
         assert_dormant(Path(values[0]), Path(values[1]) if values[1] else None,
                        stamped=len(values) > 2 and values[2] == "stamped")

@@ -94,5 +94,37 @@ def test_manifest_and_execution_keep_release_and_safety_contract() -> None:
     assert source.index('export AGENT_INDEX_REPO="$REPO"') < source.index("_state status-inactive")
     assert "::agent-provisioning::" in source
     assert "materialized-candidate-not-shipped" in source
+    assert source.index("_run candidate-source") < source.index("_run marketplace-add")
     assert 'printf \'{"version"' not in source
     assert "|| true" not in source
+
+
+def test_candidate_witness_uses_trusted_whole_tree_receipt(tmp_path: Path, capsys) -> None:
+    from materialized_provenance import content_manifest, RECEIPT, SCHEMA
+
+    head = "a" * 40
+    (tmp_path / "plugin.json").write_text('{"version":"test"}')
+    receipt = {"schema": SCHEMA, "version": 1, "source_commit": head,
+               "paths": content_manifest(tmp_path)}
+    (tmp_path / RECEIPT).write_text(json.dumps(receipt))
+    WITNESS.main(["candidate", str(tmp_path), head])
+    assert capsys.readouterr().out.strip() == head
+    with pytest.raises(ValueError, match="expected HEAD"):
+        WITNESS.main(["candidate", str(tmp_path), "b" * 40])
+    (tmp_path / "plugin.json").write_text('{"version":"tampered"}')
+    with pytest.raises(ValueError, match="content manifest"):
+        WITNESS.main(["candidate", str(tmp_path), head])
+
+
+def test_proposal_links_resolve_and_scenario_docs_are_timeless() -> None:
+    root = SCENARIO.parents[3]
+    proposal = root / "efforts/active/vendored-installer-engine/temporary-container-obligations.md"
+    text = proposal.read_text()
+    for target in ("../../../visions/agent-fabric/README.md",
+                   "../../../docs/patterns/a-la-carte-independence.md"):
+        assert target in text
+        assert (proposal.parent / target).is_file()
+    assert "../../../../" not in text
+    readme = (SCENARIO / "README.md").read_text()
+    assert "| Contract area | Required behavior and coverage |" in readme
+    assert "Previous expectation" not in readme

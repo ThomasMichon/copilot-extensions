@@ -12,7 +12,7 @@
     "CR_MARKETPLACE_NAME": "copilot-extensions",
     "CR_RELEASE_REF": "main (or exact released commit SHA)",
     "CR_EXPECT_VERSION": "(optional exact released or candidate plugin version)",
-    "CR_CANDIDATE_HEAD": "(required source HEAD when using a materialized candidate harness mount)",
+    "CR_CANDIDATE_HEAD": "(required exact source HEAD; matched against the canonical builder's MATERIALIZED.json and whole-tree hashes before candidate installation)",
     "CR_UV_INDEX": "(runner-provided opt-in uv-index fixture)"
   },
   "expected_artifacts": [

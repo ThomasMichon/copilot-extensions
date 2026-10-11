@@ -32,12 +32,15 @@ under `worktree-manager/bin/`; promotion copies the files listed in
 Usage::
 
     python tools/materialize_main.py --dest /path/to/main-snapshot
+    python tools/materialize_main.py --candidate --dest /path/to/candidate
 """
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -680,10 +683,27 @@ def main(argv: list[str] | None = None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dest", type=Path, required=True,
                      help="directory to build the materialized 'main' snapshot into")
+    ap.add_argument("--candidate", action="store_true",
+                    help="build committed HEAD with a verified whole-tree source receipt")
     args = ap.parse_args(argv)
 
     print(f"Snapshotting {REPO} -> {args.dest} ...")
-    log = build(args.dest, source_root=REPO)
+    if args.candidate:
+        spec = importlib.util.spec_from_file_location(
+            "materialized_provenance",
+            Path(__file__).resolve().parent / "clean-room/lib/materialized_provenance.py",
+        )
+        assert spec and spec.loader
+        provenance = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(provenance)
+
+        try:
+            log = provenance.build(args.dest, source_root=REPO)
+        except (OSError, ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            print(f"candidate materialization failed: {error}", file=sys.stderr)
+            return 1
+    else:
+        log = build(args.dest, source_root=REPO)
     for line in log:
         print(line)
     ok = sum(1 for line in log if line.startswith("OK"))

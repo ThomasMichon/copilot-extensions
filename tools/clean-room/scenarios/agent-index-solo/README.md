@@ -8,7 +8,26 @@ that release. `CR_EXPECT_VERSION` optionally pins the plugin version. Neither
 the development checkout nor a host runtime is mounted as the product.
 For an unshipped candidate, pass a **materialized public release-form directory**
 with `--harness-mount`, `--pass-env CR_CANDIDATE_HEAD` and the exact source HEAD.
-The scenario copies it into its own filesystem and records
+Build it after committing, using the canonical whole-marketplace materializer:
+
+```bash
+python tools/materialize_main.py --candidate --dest <new-outside-repository-directory>
+```
+
+This archives committed HEAD (not uncommitted checkout bytes), applies the same
+file/lib/installer-engine/launch-wrapper expansions as promotion and plugin
+preview, and writes `MATERIALIZED.json`. The receipt uses the existing preview
+`source_commit` vocabulary and inventories every materialized path, file SHA-256,
+executable bit and in-tree symlink target. No `.git` is needed in the resulting
+standalone marketplace; no hand-written receipt or preview overlay is required.
+The scenario's separately mounted trusted library compares the receipt with
+`CR_CANDIDATE_HEAD` and verifies the complete copied tree before installing any
+plugin. Missing, wrong-HEAD, stale, added/removed-path or tampered-byte evidence
+fails closed. The receipt binds an honestly built artifact to its source claim;
+it is not a signature authenticating an untrusted builder that can forge both
+the receipt and bytes. Do not replace the verifier with code from the candidate.
+
+The scenario copies the candidate into its own filesystem and records
 `product_kind=materialized-candidate-not-shipped`. It never treats raw `dev` or
 a candidate as a shipped release.
 The Copilot CLI installs a directory marketplace live from the cloned release;
@@ -28,18 +47,18 @@ Auth is borrowed through the runner; do not commit images containing it.
 Only the existing one-word Copilot session witnesses the session hook. The
 remaining checks are direct CLI/API calls, not Tier-E agent evaluation.
 
-## Documented contract replacements
+## Contract areas and coverage
 
-| Previous expectation | Current released contract and preserved coverage |
+| Contract area | Required behavior and coverage |
 |---|---|
-| No config reports `setup_required` | Non-opted-in repositories report `inactive`; no runtime or service may appear. A canonical corpus-only repo config then reports `setup_required`/`absent`. |
-| Session start deploys or stamps a runtime | Non-opted-in startup remains inactive/dormant. Opted-in startup may stamp only metadata/binstubs; `setup_required`/`stamped` is not runtime readiness. No venv, deployment manifest, service, engine or autostart may appear. |
-| Global binstub on login PATH | The installed payload's documented `bin/agent-index` is invoked by exact path on stock login PATH. No PATH injection or expectation of machine-global command ownership. |
-| Copy system Python and forge completion | A materialized payload snapshot with genuine provenance precedes the shipped owned-slot primitive; `uv venv` makes a real incomplete venv with no Index import, completion or selected marker. Status must report `setup_required`/`broken`, never ready or absent. First-use setup must repair/build it through the actual cell installer. |
-| Role from legacy machine config | Canonical repo designations prove client/host roles before runtime creation. Corpus-only config proves no-role setup refusal. This does not claim a remote client's transport or installed client profile. |
-| Complete/no-role reports ready runtime | The current immutable host dependency profile rejects no-role dispatch with exit 126 and the specific dependency-profile mismatch. The genuine completion remains intact; no fake receipt is accepted as deployment evidence. |
-| Legacy `ensure` starts the host | Explicit OS-profile installation-mode opt-in and generation-pinned activation precede first-use setup, which must reach the real runtime gate's cell installer. Default policy retains legacy mode without activation. Existing legacy metadata is truthfully retained inert, not declared absent. No authorization override or legacy-probe bypass. |
-| Endpoint exists, or health returns anything | The real venv must import from its slot and report the exact released version. `/health` and `/status` must identify that installed host profile, one live owned instance, PID and token; health must be promoted, non-passive and `ok`. |
+| Repository admission | Non-opted-in repositories report `inactive`; no runtime or service may appear. A canonical corpus-only repo config reports `setup_required`/`absent`. |
+| Metadata-only session startup | Non-opted-in startup remains inactive/dormant. Opted-in startup may stamp only metadata/binstubs; `setup_required`/`stamped` is not runtime readiness. No venv, deployment manifest, service, engine or autostart may appear. |
+| Payload-local command ownership | The installed payload's documented `bin/agent-index` is invoked by exact path on stock login PATH. No PATH injection or expectation of machine-global command ownership. |
+| Genuine incomplete owned slot | A materialized payload snapshot with genuine provenance precedes the shipped owned-slot primitive; `uv venv` makes a real incomplete venv with no Index import, completion or selected marker. Status must report `setup_required`/`broken`, never ready or absent. First-use setup must repair/build it through the actual cell installer. |
+| Explicit repository roles | Canonical repo designations prove client/host roles before runtime creation. Corpus-only config proves no-role setup refusal. This does not claim a remote client's transport or installed client profile. |
+| Immutable dependency profile | The immutable host dependency profile rejects no-role dispatch with exit 126 and the specific dependency-profile mismatch. The genuine completion remains intact; no fake receipt is accepted as deployment evidence. |
+| Governed first-use provisioning | Explicit OS-profile installation-mode opt-in and generation-pinned activation precede first-use setup, which must reach the real runtime gate's cell installer. Default policy retains legacy mode without activation. Existing legacy metadata is truthfully retained inert, not declared absent. No authorization override or legacy-probe bypass. |
+| Owned runtime and promoted health | The real venv must import from its slot and report the exact released version. `/health` and `/status` must identify that installed host profile, one live owned instance, PID and token; health must be promoted, non-passive and `ok`. |
 
 The direct MCP check registers the five shipped tools but never invokes reindex.
 No embedding engine, torch, model cache, GPU access, scheduler or production
