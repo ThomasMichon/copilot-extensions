@@ -34,7 +34,8 @@ def test_pinned_transport_survives_remote_repoint_and_retains_hook(tmp_path, mon
     git(root, "init", "--bare", "-q", str(other))
     marker = tmp_path / "hook-ran"
     hook = root / ".git" / "hooks" / "pre-push"
-    hook.write_text(f"#!/bin/sh\necho ran > '{marker.as_posix()}'\n", encoding="utf8")
+    hook.write_text(f"#!/bin/sh\n[ \"$1\" = origin ] || exit 1\n"
+                    f"echo ran > '{marker.as_posix()}'\n", encoding="utf8")
     hook.chmod(0o755)
     original = git_ops.push
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import subprocess
-import uuid
 import logging
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -40,9 +39,9 @@ def push(
         target = target if separator else "refs/heads/" + source.removeprefix("refs/heads/")
         branch = f"{sha}:{target}"
     destination = pinned[1] if pinned and pinned[0] == remote else remote
-    transport_remote = f"agent-worktrees-pinned-{uuid.uuid4().hex}" if pinned and pinned[0] == remote else remote
+    transport_remote = remote
     destination_args = ([
-        "-c", f"remote.{transport_remote}.url={destination}",
+        "-c", f"remote.{transport_remote}.pushurl=",
         "-c", f"remote.{transport_remote}.pushurl={destination}",
         "-c", f"url.{destination}.insteadOf={destination}",
     ] if pinned and pinned[0] == remote else [])
@@ -63,7 +62,8 @@ def push(
             warning = ""
             if pinned and pinned[0] == remote:
                 try:
-                    _refresh_tracking(remote, destination, branch, cwd, timeout)
+                    _refresh_tracking(remote, destination, branch, cwd, timeout,
+                                      force_with_lease_expect)
                 except (OSError, git_ops.GitError, TimeoutError) as exc:
                     warning = f"Push succeeded, but local remote-tracking refresh failed: {type(exc).__name__}."
                     logging.getLogger("agent-worktrees").warning(warning)
@@ -73,7 +73,7 @@ def push(
 
 
 def _refresh_tracking(remote: str, destination: str, refspec: str, cwd: str | Path,
-                      timeout: float | None) -> None:
+                      timeout: float | None, expected: str | None = None) -> None:
     """Preserve Git's named-remote tracking update only for the still-matching remote."""
     from . import pr_publish
 
@@ -101,7 +101,7 @@ def _refresh_tracking(remote: str, destination: str, refspec: str, cwd: str | Pa
             sha = git_ops.git("rev-parse", "--verify", source, cwd=cwd).stdout.strip()
             previous = git_ops.git("rev-parse", "--verify", tracked, cwd=cwd,
                                    check=False).stdout.strip()
-            if previous and not git_ops.is_commit_ancestor(previous, sha, cwd=cwd):
+            if previous and previous != expected and not git_ops.is_commit_ancestor(previous, sha, cwd=cwd):
                 # Another completed publication may already have advanced this
                 # tracking ref. Never roll it back to an older successful push.
                 return

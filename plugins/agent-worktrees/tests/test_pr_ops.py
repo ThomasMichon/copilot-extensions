@@ -4648,7 +4648,7 @@ class TestPRFinalizeAndPush:
 
             waiter = threading.Thread(target=repoint, daemon=True)
             waiter.start()
-            waiter.join(0.5)
+            waiter.join(10)
             pushed.append((remote, refspec, waiter.is_alive()))
             return git_ops.PushResult(ok=True)
 

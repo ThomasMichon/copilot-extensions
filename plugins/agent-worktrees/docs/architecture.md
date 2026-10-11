@@ -6,10 +6,11 @@ The clone-wide `agent-worktrees-publish.lock` protects shared remote
 configuration and destination verification, not the duration of a push.
 Publication captures the expanded, verified push URL under that lock, then
 releases it before authentication, pre-push hooks, and network transfer.
-Transport uses a unique process-local remote with an explicit captured push URL;
+Transport uses process-local push-URL overrides on the original logical remote;
 authentication uses that destination rather than resolving the mutable remote
 name again. Per-command URL rules prevent a later rewrite
-rule from redirecting the captured URL. No remote is persisted or repointed.
+rule from redirecting the captured URL. Hook `$1` remains the original remote
+name, preserving remote-scoped validation. No remote is persisted or repointed.
 A changed fork identity before capture
 is still refused.
 
