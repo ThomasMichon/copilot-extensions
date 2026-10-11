@@ -196,7 +196,11 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ### 2026-10-10 - Independently recoverable transfer health merged
 - #6067 merged as `cb1f9772ac40b41829920622f67228f3f9ef8989` after exact-head
-  approval with zero open findings and successful required CI. Session-state
+  approval with zero open findings. Final-head CI run `38098437985` was still
+  pending when the merge occurred; the earlier completed successful run was
+  on `a39aba135`, two source commits earlier. The watcher's aggregate success
+  field was not exact-head CI proof. Final-head completion remains owed.
+  Session-state
   and process-log legs retain independent status, partial streaks, freshness,
   bounded failure reasons and filename-only deferred samples. Retry success
   clears only its own leg; sustained log failures reach the existing health
@@ -211,7 +215,8 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
   The broader ancestor containment obligation is not closed.
 - Final bounded, network-disconnected Linux selection passed 88 tests.
   Mypy of health/metadata, Ruff, install-contract and changed-module guards
-  passed. Required Windows archive-source CI passed, but native Windows
+  passed. Earlier-head Windows archive-source CI passed, but final-head CI
+  remained pending at merge and native Windows
   execution of the new health regressions is not claimed.
 - #5727 remains open for ancestor containment. Scheduled settled-log compaction,
   complete transports/admission, catalog/accounting extraction, daily products,
