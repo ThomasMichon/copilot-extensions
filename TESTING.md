@@ -95,6 +95,18 @@ and live holder; `--admission-wait` allows a non-negative, finite, bounded wait
 python tools/run-plugin-tests.py agent-worktrees --admission-wait 900
 ```
 
+Environment setup failures are recorded per target without aborting later
+targets; genuine busy contention retains exit code 3. Junction detection is
+guarded for Python versions without `Path.is_junction`.
+
+The existing Linux/Windows runner-contract CI jobs are path-gated to runner
+sources, supporting libraries, tests, and their workflow/documentation. Required
+PR/push runs exclude the `runner_exhaustive` marker, retaining representative
+real-process contention, cleanup, missing-executable, and uv rebuild checks.
+The same jobs run every marked scenario on `workflow_dispatch`, with no
+additional matrix. `tools/test_environment_admission.py` is present in both
+platforms' selectors.
+
 Tests may declare `@pytest.mark.portfolio_tier("T0" ... "T4")` and repeatable
 `@pytest.mark.effect(...)` markers. The injected policy rejects effects that do
 not belong in the declared tier. T3 clean-room and T4 end-to-end families are

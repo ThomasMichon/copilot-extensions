@@ -272,7 +272,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
         for child in venv.iterdir():
             if child.is_symlink():
                 child.unlink()
-            elif child.is_junction():
+            elif callable(getattr(child, "is_junction", None)) and child.is_junction():
                 child.rmdir()
             elif child.is_dir():
                 shutil.rmtree(child)
@@ -651,6 +651,12 @@ def main(argv: list[str] | None = None) -> int:
                 rc = 1
             if rc != 0:
                 failed.append(name)
+        except Exception as exc:
+            print(
+                f"[FAIL] {name}: runner setup failed ({type(exc).__name__}: {exc})",
+                file=sys.stderr,
+            )
+            failed.append(name)
         finally:
             if lease is not None:
                 lease.release()

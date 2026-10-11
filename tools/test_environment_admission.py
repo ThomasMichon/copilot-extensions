@@ -61,7 +61,13 @@ def probe(root: Path, wait: float = 0) -> int:
     ).returncode
 
 
-@pytest.mark.parametrize("other", ["same", "other-plugin", "other-checkout", "dotdot", "alias", "case"])
+EXHAUSTIVE = pytest.mark.runner_exhaustive
+
+
+@pytest.mark.parametrize("other", [
+    "same", "other-plugin",
+    *[pytest.param(value, marks=EXHAUSTIVE) for value in ("other-checkout", "dotdot", "alias", "case")],
+])
 def test_separate_processes_contend_only_for_concrete_environment(cache, other):
     root = cache / "checkout-a" / "plugin-a"
     root.mkdir(parents=True)
@@ -119,7 +125,11 @@ def load_runner(filename: str):
     return module
 
 
-@pytest.mark.parametrize("mode", [[], ["--guards"], ["--collect-only"], ["--prepare-only"]])
+@pytest.mark.parametrize("mode", [
+    [], *[pytest.param(value, marks=EXHAUSTIVE) for value in (
+        ["--guards"], ["--collect-only"], ["--prepare-only"],
+    )],
+])
 def test_plugin_main_protects_preparation_and_use_in_every_mode(cache, monkeypatch, mode):
     runner = load_runner("run-plugin-tests.py")
     monkeypatch.setattr(runner, "VENV_ROOT", cache / "venvs")
@@ -150,7 +160,11 @@ def test_plugin_main_protects_preparation_and_use_in_every_mode(cache, monkeypat
     assert probe(environment) == 0
 
 
-@pytest.mark.parametrize("failure", [RuntimeError("setup failed"), SystemExit(9), KeyboardInterrupt()])
+@pytest.mark.parametrize("failure", [
+    RuntimeError("setup failed"),
+    pytest.param(SystemExit(9), marks=EXHAUSTIVE),
+    pytest.param(KeyboardInterrupt(), marks=EXHAUSTIVE),
+])
 def test_plugin_main_releases_environment_on_exception(cache, monkeypatch, failure):
     runner = load_runner("run-plugin-tests.py")
     monkeypatch.setattr(runner, "VENV_ROOT", cache / "venvs")
@@ -193,7 +207,9 @@ def test_busy_main_names_environment_and_keeps_exit_code(cache, monkeypatch, cap
     assert str(environment) in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("failure", [None, "prepare", "use"])
+@pytest.mark.parametrize("failure", [
+    None, pytest.param("prepare", marks=EXHAUSTIVE), pytest.param("use", marks=EXHAUSTIVE),
+])
 def test_standalone_managed_environment_protects_prepare_and_use(cache, monkeypatch, failure):
     runner = load_runner("run-standalone-tests.py")
     monkeypatch.setattr(runner, "REPO", cache)
@@ -222,6 +238,7 @@ def test_standalone_managed_environment_protects_prepare_and_use(cache, monkeypa
     assert probe(environment) == 0
 
 
+@EXHAUSTIVE
 def test_custom_venv_discovery_does_not_follow_launcher_to_base_interpreter(cache, monkeypatch):
     runner = load_runner("run-standalone-tests.py")
     environment = cache / "custom-environment"
@@ -247,7 +264,7 @@ def test_custom_venv_discovery_does_not_follow_launcher_to_base_interpreter(cach
     assert probe(environment) == 0
 
 
-@pytest.mark.parametrize("custom", [False, True], ids=["managed", "custom-venv"])
+@pytest.mark.parametrize("custom", [False, pytest.param(True, marks=EXHAUSTIVE)], ids=["managed", "custom-venv"])
 @pytest.mark.parametrize("wait", [0, 3], ids=["busy", "bounded-wait"])
 def test_missing_interpreter_during_rebuild_obeys_environment_lease(cache, custom, wait):
     environment = cache / ".test-venvs" / sys.platform / "agent-index-service"
@@ -361,7 +378,10 @@ def test_absent_or_unidentifiable_environment_never_uses_path_fallback(cache, mo
         admission.admission_dir(root)
 
 
-@pytest.mark.parametrize("mode", ["fresh", "reinstall", "drift", "partial", "root-alias"])
+@pytest.mark.parametrize("mode", [
+    "reinstall",
+    *[pytest.param(value, marks=EXHAUSTIVE) for value in ("fresh", "drift", "partial", "root-alias")],
+])
 def test_real_uv_rebuild_preserves_leased_directory_and_exclusion(cache, monkeypatch, mode):
     import shutil
 
@@ -453,6 +473,7 @@ def test_real_uv_rebuild_preserves_leased_directory_and_exclusion(cache, monkeyp
     assert probe(root) == 0
 
 
+@EXHAUSTIVE
 def test_standalone_real_uv_preparation_preserves_environment_identity(cache, monkeypatch):
     import shutil
 
@@ -495,3 +516,96 @@ def test_standalone_real_uv_preparation_preserves_environment_identity(cache, mo
         lease.release()
     assert calls == ["uv"]
     assert probe(root) == 0
+
+
+@pytest.mark.parametrize("failure", ["file-root", "stat-error", "acquire-error"])
+def test_environment_setup_failure_does_not_abort_other_targets(cache, monkeypatch, failure):
+    runner = load_runner("run-plugin-tests.py")
+    monkeypatch.setattr(runner, "VENV_ROOT", cache / "venvs")
+    monkeypatch.setattr(runner.shutil, "which", lambda _: "uv")
+    runner.VENV_ROOT.mkdir()
+    if failure == "file-root":
+        (runner.VENV_ROOT / "alpha").touch()
+    original_acquire = runner._acquire_admission
+    acquired = []
+    ran = []
+
+    def acquire(wait, root):
+        if root.name == "alpha":
+            if failure == "stat-error":
+                raise OSError("cannot stat environment")
+            if failure == "acquire-error":
+                raise ValueError("unidentifiable environment")
+        acquired.append(root)
+        return original_acquire(wait, root)
+
+    def run(name, *args, **kwargs):
+        assert probe(runner.VENV_ROOT / name) == 3
+        ran.append(name)
+        return 0
+
+    monkeypatch.setattr(runner, "_acquire_admission", acquire)
+    monkeypatch.setattr(runner, "run_plugin", run)
+    assert runner.main(["alpha", "beta"]) == 1
+    assert ran == ["beta"]
+    assert acquired == [runner.VENV_ROOT / "beta"]
+    assert probe(runner.VENV_ROOT / "beta") == 0
+
+
+def test_contents_cleanup_without_python312_junction_api(cache, monkeypatch):
+    runner = load_runner("run-plugin-tests.py")
+    monkeypatch.setattr(runner, "VENV_ROOT", cache / "venvs")
+    root = runner.VENV_ROOT / "alpha"
+    (root / "ordinary-directory").mkdir(parents=True)
+    (root / "ordinary-directory" / "file").touch()
+    (root / "ordinary-file").touch()
+    monkeypatch.delattr(Path, "is_junction", raising=False)
+    monkeypatch.setattr(runner, "_dep_fingerprint", lambda _: "new")
+    monkeypatch.setattr(runner, "_has_pyproject", lambda _: False)
+    before = root.stat()
+
+    def run(command, **kwargs):
+        if command[1] == "venv":
+            assert list(root.iterdir()) == []
+            python = runner._venv_python("alpha")
+            python.parent.mkdir()
+            python.touch()
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    lease = admission.acquire(0, root)
+    try:
+        runner._ensure_venv("alpha", "uv", reinstall=True)
+        after = root.stat()
+        assert (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
+    finally:
+        lease.release()
+
+
+def test_ci_runner_portfolio_keeps_smoke_path_gated_and_manual_exhaustive():
+    import re
+    import yaml
+
+    workflow = yaml.safe_load(
+        (TOOLS.parent / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
+    )
+    for platform in ("linux", "windows"):
+        job = workflow["jobs"][f"test-runner-{platform}"]
+        detector = next(step for step in job["steps"] if step.get("id") == "runner-contracts")
+        tests = next(step for step in job["steps"] if step.get("name") == "Test runner admission and isolation")
+        assert tests["run"].split().count("tools/test_environment_admission.py") == 1
+        assert tests["if"] == "steps.runner-contracts.outputs.run == 'true'"
+        assert tests["env"]["PYTEST_ADDOPTS"] == (
+            """${{ github.event_name != 'workflow_dispatch' && '-m "not runner_exhaustive"' || '' }}"""
+        )
+        assert '"$EVENT_NAME" = "workflow_dispatch"' in detector["run"]
+        assert "run=true" in detector["run"] and "run=false" in detector["run"]
+        assert "github.event.pull_request.head.sha" in detector["env"]["HEAD_SHA"]
+        pattern = re.search(r"'(\^\(.*)'", detector["run"]).group(1)
+        for path in (
+            "tools/run-plugin-tests.py", "tools/test_environment_admission.py",
+            "tools/_admission_protocol.py", "tools/conftest.py",
+            "libs/single-instance-lease/src/single_instance_lease/lease.py",
+            ".github/workflows/ci.yml",
+        ):
+            assert re.search(pattern, path)
+        assert not re.search(pattern, "plugins/voice-announcer/README.md")
