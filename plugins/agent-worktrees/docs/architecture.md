@@ -514,7 +514,7 @@ state change, and head transition atomically.
 
 Resident session discovery preserves the head read from the authoritative
 record under its lock, not a head cached earlier in the catalog cycle. Observing
-an old process cannot adopt a yielded or concluded session as head. Cancelling
+an old process cannot adopt any non-active session as head. Cancelling
 an unclaimed handoff restores only its latest rightful predecessor; rebinding
 that same session must not displace a newer yielded lineage. Historical damage
 to that lineage is repaired through explicit `link-succession` with both known

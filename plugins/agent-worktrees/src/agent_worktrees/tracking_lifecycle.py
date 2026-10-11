@@ -15,7 +15,7 @@ def _tracking():
 
 
 class SessionLifecycleError(ValueError):
-    """Raised when an asserted session transition names an unknown session."""
+    """Raised when a session transition violates identity or lifecycle authority."""
 
 
 def yielded_head_session(record: tracking.WorktreeRecord) -> str | None:
