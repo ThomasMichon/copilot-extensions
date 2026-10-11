@@ -85,3 +85,37 @@ start. Unsupported CLI overrides fail as proven `not_started` capability
 mismatches rather than being deferred and repeatedly retried.
 Post-launch task-fence refusal defers;
 it never authorizes created-worktree teardown as a pre-effect failure.
+
+## Explicit operator fresh-conversation recovery
+
+When historical initial-launch evidence is missing, no automated absence
+inference is permitted. After independently verifying that the exact worktree
+has no active or unknown native holder, an operator may authorize a new
+conversation instead of claiming the old launch never happened:
+
+```text
+agent-dispatch reservations authorize-fresh <task-id> \
+  --reservation-key <latest-concluded-reservation> --worktree <worktree-id> \
+  --expected-generation <generation> --permit --confirm-no-live-holder \
+  --reason "<operator authorization and verified liveness evidence>"
+```
+
+The client uses its configured control identity, not the worker credential.
+The coordinator atomically requires the exact generation, queued/unowned/
+unheld task, a handle-less latest deferred/failed created-or-reused allocation,
+and an exclusive-key carry chain whose latest allocation is that exact row,
+no pending cleanup, no active same-task reservation and no other task's active
+reservation on that worktree. It advances task generation and marks the exact
+latest allocation's conversation retirement authorization, retaining original
+reservation details, receipts and transcripts and writing a task audit event.
+Stale/replayed authorization refuses. This only grants fresh intent; it neither
+starts a worker nor proves historical absence.
+
+The next reservation carries this retirement authorization through the existing
+owner-verified acquisition boundary. Bridge still independently refuses live
+or unknown holders and native heads, revalidates task/reservation/retirement
+after preparation, and applies existing launch/executor fences. A holder racing
+the operator's check blocks launch; permission never authorizes stopping it.
+An active reservation must finish its normal defer/conclusion before this verb;
+never force-clear it or directly edit the database. Deploy the promoted
+bridge and dispatch fixes through normal immutable-runtime activation first.

@@ -156,12 +156,12 @@ class AcquisitionRuntime:
         except AcquisitionRefused as exc:
             self.store.journal.refuse(req, token, exc.code)
             raise
-        if initial_creation:
+        if initial_creation or req.conversation_retired is True:
             try:
                 venue = await verify_dispatch(req, self.resolver)
                 row, head = await verify_worktree(req)
                 evidence = self._evidence(req, venue, head)
-                if (
+                if initial_creation and (
                     head is not None or evidence.conversations
                     or not initial_creation_proven(req, venue, self.store)
                 ):

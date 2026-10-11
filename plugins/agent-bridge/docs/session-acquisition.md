@@ -91,6 +91,16 @@ replacement and legacy attempts that failed before journaling do not authorize
 creation. `acquisition-inspect "<reservation-key>:acquire"` reads individual
 stages; `acquisition_not_found` is unknown history, not a no-launch receipt.
 No blanket fresh or rearm operation repairs missing proof.
+
+An explicitly authorized operator may instead choose a new conversation via
+dispatch's control-only `reservations authorize-fresh` operation. This is
+audited fresh-generation/retirement authority, not retroactive proof of
+historical absence. It preserves old records and transcripts and authorizes no
+takeover. Bridge independently refuses live/unknown holder and head evidence,
+then revalidates the exact task/reservation/generation/retirement fence after
+target preparation and before launch. Revocation or a changed holder prevents
+creation. See the dispatch acquisition guide for the exact permission,
+concluded-reservation, liveness-attestation and deployment requirements.
 A bridge binding from an older generation of the same task remains resumable
 when current owner facts authorize it. A future/stale admission generation
 refuses. Historical expired registrations that are not the current native head

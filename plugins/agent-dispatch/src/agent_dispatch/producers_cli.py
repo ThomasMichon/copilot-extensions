@@ -306,6 +306,12 @@ def _cmd_reservations(args: argparse.Namespace) -> int:
                     min_failures=args.min_failures,
                 )
             )
+        if args.reservations_command == "authorize-fresh":
+            return _emit(c.authorize_fresh_acquisition(
+                args.task, reservation_key=args.reservation_key, worktree=args.worktree,
+                expected_generation=args.expected_generation, permitted=args.permit,
+                confirmed_no_live_holder=args.confirm_no_live_holder, reason=args.reason,
+            ))
     return 2
 
 
@@ -471,6 +477,17 @@ def register_reservations_command(subparsers: Any) -> None:
     rp.add_argument("--task", help="filter by task id")
     rp.add_argument("--state", help="filter by state (comma-list ok)")
     rp.add_argument("--limit", type=int, default=200)
+    rp.set_defaults(func=_cmd_reservations)
+    rp = res_sub.add_parser(
+        "authorize-fresh", help="control-authorized new conversation after verified holder absence; preserves history",
+    )
+    rp.add_argument("task")
+    rp.add_argument("--reservation-key", required=True)
+    rp.add_argument("--worktree", required=True)
+    rp.add_argument("--expected-generation", required=True, type=int)
+    rp.add_argument("--permit", action="store_true")
+    rp.add_argument("--confirm-no-live-holder", action="store_true")
+    rp.add_argument("--reason", required=True)
     rp.set_defaults(func=_cmd_reservations)
     rp = res_sub.add_parser(
         "fail", help="mark a reservation failed (releases the task for a fresh attempt)"
