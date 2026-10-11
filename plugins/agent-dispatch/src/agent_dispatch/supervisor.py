@@ -446,8 +446,7 @@ class Supervisor:
         return out
 
     def _matches_pool(self, task: dict) -> bool:
-        if (self.repo is not None and task.get("repo") != self.repo) or (
-            task.get("source") == "ci-repair" and task.get("origin_ref") != self.supervisor_id):
+        if (self.repo is not None and task.get("repo") != self.repo) or (task.get("source") == "ci-repair" and task.get("origin_ref") != self.supervisor_id):
             return False
         if self.labels is not None and not (self.labels & set(task.get("labels") or [])):
             return False
