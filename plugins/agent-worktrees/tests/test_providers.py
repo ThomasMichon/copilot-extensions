@@ -3583,7 +3583,8 @@ class TestRerunAutoOpen:
         assert rec.prs[1].attribution_explicit is False
         assert rec.prs[1].pr_id
         assert rec.prs[1].pr_id != rec.prs[0].pr_id
-        assert rec.prs[1].pr_revision == 1
+        assert rec.prs[1].pr_revision == 4  # attribution, lease, ownership, provider identity
+        assert rec.prs[1].rewrite_owner == f"{wid}:{rec.prs[1].branch}"
 
 
 # ---------------------------------------------------------------------------
@@ -4062,4 +4063,3 @@ def test_no_pr_opened_is_explained_even_without_a_tracked_pr():
         pr_ops._finish_auto_open(result, None, None, None, open_pr=open_pr,
                                  prcfg=SimpleNamespace(auto_open=auto_open), **kw)
         assert result == {"pr_open_skipped": why}
-

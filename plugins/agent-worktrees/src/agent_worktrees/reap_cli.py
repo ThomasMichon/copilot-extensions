@@ -610,7 +610,7 @@ def sweep_managed_worktrees(
                         or latest.resolved_head_session is not None
                         or latest.worktree_path != current.worktree_path
                         or latest.branch != current.branch
-                        or any(pr.state in {"creating", "open"} for pr in latest.prs)
+                        or latest.has_live_pr()
                     ):
                         result["skipped"].append(
                             {

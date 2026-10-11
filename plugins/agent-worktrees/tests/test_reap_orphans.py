@@ -395,6 +395,7 @@ def _managed_sweep(
     activity=None,
     now=None,
     session_scans=None,
+    before_recheck=None,
 ):
     """Invoke ``sweep_managed_worktrees`` with the fleet's I/O fully patched.
 
@@ -429,6 +430,8 @@ def _managed_sweep(
 
         def _scan(_records):
             nonlocal scan_index
+            if scan_index and before_recheck is not None:
+                before_recheck(tracking_dir)
             value = scans[min(scan_index, len(scans) - 1)]
             scan_index += 1
             return types.SimpleNamespace(active_sessions=value)
@@ -618,6 +621,22 @@ def test_managed_sweep_owner_resumed_between_probe_and_lock_is_caught():
     assert report["skipped"] == [
         {"id": "owned-resumed", "reason": "recheck-record-changed"}
     ]
+
+
+def test_managed_sweep_recheck_preserves_new_legacy_active_pr():
+    rec = _mgd("legacy-pr-race")
+
+    def add_pr(directory):
+        path = directory / f"{rec.worktree_id}.yaml"
+        fresh = tracking.load_record(path)
+        fresh.pr = tracking.PRRecord(state="active", branch="feature/legacy", number=7)
+        tracking.save_record(fresh, path)
+
+    with patch("agent_worktrees.__main__._remove_managed_worktree",
+               side_effect=AssertionError("must not remove a live PR worktree")):
+        report = _managed_sweep([rec], dry_run=False, before_recheck=add_pr)
+    assert report["removed"] == []
+    assert report["skipped"] == [{"id": rec.worktree_id, "reason": "recheck-record-changed"}]
 
 
 def test_managed_sweep_missing_checkout_does_not_fake_owner_content_merged():

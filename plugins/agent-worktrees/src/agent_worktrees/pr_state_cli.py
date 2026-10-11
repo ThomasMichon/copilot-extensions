@@ -189,7 +189,7 @@ def cmd_set_pr(args: argparse.Namespace) -> int:
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
         return output._json_error(msg) if use_json else (output.err(msg) or 1)
-    worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
+    worktree_id = worktree_identity._resolve_worktree_id(worktree_id, project=config.repo_name)
 
     result = pr_ops.set_pr(
         worktree_id,
@@ -209,7 +209,7 @@ def cmd_set_pr(args: argparse.Namespace) -> int:
         and result.get("head_sha")
     ):
         try:
-            record = tracking.load_record(cfg.tracking_dir() / f"{worktree_id}.yaml")
+            record = tracking.load_record(cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml")
             target_pr = next(
                 (
                     pr

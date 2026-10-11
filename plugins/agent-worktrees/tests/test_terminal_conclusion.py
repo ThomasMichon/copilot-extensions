@@ -162,10 +162,11 @@ def test_follow_up_preserves_session_and_worktree(tmp_path, monkeypatch):
     assert record.session_entry("session-exact").state == "active"
 
 
-def test_open_pr_preserves_session_and_worktree(tmp_path, monkeypatch):
+@pytest.mark.parametrize("state", ["open", "active"])
+def test_open_pr_preserves_session_and_worktree(tmp_path, monkeypatch, state):
     repo, record_path, _worktree = _worker(tmp_path, monkeypatch)
     record = tracking.load_record(record_path)
-    record.pr = tracking.PRRecord(state="open", branch="feature/example", number=7)
+    record.pr = tracking.PRRecord(state=state, branch="feature/example", number=7)
     tracking.save_record(record, record_path)
 
     result = _conclude(record_path, repo)
