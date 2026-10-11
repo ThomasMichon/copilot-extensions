@@ -13,9 +13,11 @@ def test_stale_lease_retries_only_fast_forward(monkeypatch, ancestor):
     monkeypatch.setattr(pr_publish, "publish_lock", lambda *args, **kwargs: nullcontext())
     monkeypatch.setattr(pr_publish, "_pr_for", lambda *args: None)
     monkeypatch.setattr(pr_publish, "_tip", lambda *args: "remote-tip")
-    monkeypatch.setattr(
-        git_ops, "git", lambda *args, **kwargs: SimpleNamespace(returncode=0 if ancestor else 1),
-    )
+    def ancestry(*args, **kwargs):
+        assert kwargs["check"] is False
+        return SimpleNamespace(returncode=0 if ancestor else 1)
+
+    monkeypatch.setattr(git_ops, "git", ancestry)
     calls = []
 
     def push(*args, **kwargs):

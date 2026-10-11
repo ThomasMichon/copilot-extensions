@@ -446,7 +446,7 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                 tip = _tip(remote, destination.removeprefix("refs/heads/"), cwd)
                 if tip:
                     descendant = git_ops.git(
-                        "merge-base", "--is-ancestor", tip, source, cwd=cwd,
+                        "merge-base", "--is-ancestor", tip, source, cwd=cwd, check=False,
                     )
                     if descendant.returncode == 0:
                         result = git_ops.push(remote, refspec, cwd=cwd, timeout=timeout)

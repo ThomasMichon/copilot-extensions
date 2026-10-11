@@ -49,11 +49,16 @@ def _read_key_output(argv: list[str]) -> bytes:
         elif os.name != "nt":
             try:
                 os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            except OSError:
+                log.warning("Vault key reader process-group cleanup failed.")
+                if process.poll() is None:
+                    process.kill()
         elif process.poll() is None:
             process.kill()
-        process.wait(timeout=5)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            log.warning("Vault key reader did not exit within cleanup deadline.")
         reader.join(timeout=2)
         if not reader.is_alive():
             process.stdout.close()
