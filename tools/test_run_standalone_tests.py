@@ -78,10 +78,13 @@ def test_run_is_contained_and_releases_shared_host_lease(tmp_path, monkeypatch, 
         captured.update(kwargs)
         assert command[1:4] == ["-I", "-m", "pytest"]
         if smoke:
-            assert command[5:9] == [
+            assert command[5:12] == [
                 str(root / "tests" / "test_cli.py"), str(root / "tests" / "test_config.py"),
                 str(root / "tests" / "test_release.py"),
                 str(root / "tests" / "test_release_cli.py"),
+                str(root / "tests" / "test_staging.py"),
+                str(root / "tests" / "test_staging_cli.py"),
+                str(root / "tests" / "test_staging_processes.py"),
             ]
         else:
             assert command[5] == str(root / "tests")
@@ -169,3 +172,45 @@ def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
         assert "workflow_dispatch" in command
         full = next(step["run"] for step in promotion[name]["steps"] if "run-standalone-tests" in step.get("run", ""))
         assert "--smoke" not in full
+
+
+def test_sandbox_cleanup_retries_only_transient_windows_lock(monkeypatch):
+    monkeypatch.setattr(runner.os, "name", "nt")
+    monkeypatch.setattr(runner.time, "sleep", lambda delay: None)
+    attempts = []
+
+    class Temporary:
+        def cleanup(self):
+            attempts.append(True)
+            if len(attempts) == 1:
+                error = OSError("directory not empty")
+                error.winerror = 145
+                raise error
+
+    runner.cleanup_sandbox(Temporary())
+    assert len(attempts) == 2
+
+
+def test_sandbox_cleanup_does_not_hide_permanent_failure(monkeypatch):
+    monkeypatch.setattr(runner.os, "name", "nt")
+
+    class Temporary:
+        def cleanup(self):
+            raise OSError("permanent failure")
+
+    with pytest.raises(OSError, match="permanent failure"):
+        runner.cleanup_sandbox(Temporary())
+
+
+@pytest.mark.skipif(runner.os.name != "nt", reason="Windows extended-length cleanup")
+def test_sandbox_cleanup_removes_deep_owned_paths():
+    temporary = runner.tempfile.TemporaryDirectory(prefix="standalone-cleanup-test-")
+    root = Path(temporary.name)
+    deep = root
+    for index in range(8):
+        deep = deep / (f"nested-{index}-" + "a" * 30)
+    extended = Path("\\\\?\\" + str(deep.resolve()))
+    extended.mkdir(parents=True)
+    (extended / "fixture.txt").write_text("fixture")
+    runner.cleanup_sandbox(temporary)
+    assert not root.exists()

@@ -38,6 +38,40 @@ reports this before starting a cutover.
 Explicit-source mode keeps successors in the current complete native interpreter
 and bypasses legacy sibling server-venv discovery/foreground redispatch.
 
+## Stage an immutable native candidate
+
+`stage` provisions a candidate but never selects it, starts a service or changes
+the host configuration/data/routing. The install root must be an explicit
+absolute dedicated directory, disjoint from the host home/data/routing, bundle,
+tools and policy inputs. No default `~/.agent-index` installation is inferred.
+
+```console
+agent-index-service stage --config /absolute/host.yaml --install-root /absolute/service-runtime --descriptor /absolute/bundle/release.json --expected-source-commit <commit> --python /absolute/python --uv /absolute/uv --third-party-lock /absolute/native-lock.txt --uv-config /absolute/uv.toml
+agent-index-service candidates --config /absolute/host.yaml --install-root /absolute/service-runtime
+```
+
+The platform-resolved third-party lock requires one exact `==` pin and one or
+more SHA-256 hashes per requirement; no includes, VCS/editable/direct URLs,
+environment markers, duplicate pins or replacements of bundled distributions.
+Feed policy comes from the explicitly supplied operator-owned uv TOML, not a
+hardcoded public registry. An offline wheelhouse is supported through that
+policy. The isolated probe checks dependency/extras closure, native imports,
+package versions and the explicit-source core seam without contacting an engine.
+
+Builds reserve the permanent `versions/<service-version>` path so POSIX venv
+shebangs remain valid. Verified wheels are snapshotted and reverified, build
+processes are bounded/owned, and canonical completion is published last. A
+completed same-version identical request is idempotent; conflicting completed
+or preexisting incomplete slots fail and remain inspectable. Failure cleanup
+removes only the current transaction's proven-owned incomplete slot; unconfirmed
+descendant cleanup preserves it.
+
+`candidates` is read-only, including when the root does not exist. Completion
+means **built and import-validated**, not passive service readiness or migration
+safety. There is no active marker, stable launcher, autostart registration,
+activation, rollback or pruning in this slice. Those operations require their
+own reviewed readiness, queue/data-schema and retained-rollback gates.
+
 ## Explicit host configuration (schema 1)
 
 ```yaml
@@ -156,8 +190,8 @@ assignment/progress/cancellation and query embedding/storage composition.
 Future authenticated remote adapters need identity/role/job/source authorization
 tests; a shared SQLite mount is not such an adapter.
 
-Version-slot installation, authenticated release acquisition/build provenance,
-candidate validation, durable supervision and rollback/schema policy belong to
+Health-gated slot activation, authenticated release acquisition/build provenance,
+durable supervision and rollback/schema policy belong to
 the coordinator's next lifecycle/release slice. `deploy` is not an installer
 or continuous restart authority. Never infer rollback safety from executable
 version slots alone.
@@ -179,6 +213,20 @@ lack the explicit-source seam. The test runner alone overrides the core's frozen
 relax wheel metadata or the runtime compatibility check for ordinary installs.
 Smoke preparation installs only the base core and test extra; native storage
 and hosting extras are reserved for full/manual/promotion execution.
+
+The wheel carries the unchanged canonical stdlib versioned-runtime primitive as
+a build-generated package resource. A source build requires the full released
+checkout, or the complete sdist containing that resource. Sdist-to-wheel builds
+work outside the repository; missing or conflicting copies fail explicitly.
+No extra maintained source mirror or plugin dependency is introduced.
+Editable/source-only imports remain suitable for read-only development, but
+are not an installer runtime: staging requires a built, installed wheel.
+
+The optional real staging integration test consumes an explicitly prepared
+`STANDALONE_STAGING_TEST_FIXTURE` JSON containing descriptor, source commit,
+Python/uv paths, hash-lock and uv-config paths. Its wheels must come from the
+approved package source for that host. Run it with the installed package's
+isolated interpreter; a source-only import intentionally lacks the built resource.
 
 In an already provisioned test environment:
 

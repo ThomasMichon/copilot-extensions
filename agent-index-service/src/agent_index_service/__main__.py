@@ -31,6 +31,19 @@ def build_parser() -> argparse.ArgumentParser:
     verify = release_commands.add_parser("verify")
     verify.add_argument("--descriptor", required=True, type=Path)
     verify.add_argument("--expected-source-commit", required=True)
+    stage = commands.add_parser("stage", help="build an immutable native candidate without activation")
+    stage.add_argument("--config", required=True, type=Path)
+    stage.add_argument("--install-root", required=True, type=Path)
+    stage.add_argument("--descriptor", required=True, type=Path)
+    stage.add_argument("--expected-source-commit", required=True)
+    stage.add_argument("--python", required=True, type=Path)
+    stage.add_argument("--uv", required=True, type=Path)
+    stage.add_argument("--third-party-lock", required=True, type=Path)
+    stage.add_argument("--uv-config", required=True, type=Path)
+    stage.add_argument("--timeout", type=_timeout, default=600.0)
+    candidates = commands.add_parser("candidates", help="inspect candidates without selecting a runtime")
+    candidates.add_argument("--config", required=True, type=Path)
+    candidates.add_argument("--install-root", required=True, type=Path)
     for name in ("serve", "start", "status", "deploy", "config"):
         sub = commands.add_parser(name)
         sub.add_argument("--config", required=True, type=Path, help="explicit host YAML file")
@@ -60,6 +73,22 @@ def main(argv: list[str] | None = None) -> int:
                         args.descriptor, expected_source_commit=args.expected_source_commit,
                     ),
                 }
+            print(json.dumps(payload, sort_keys=True))
+            return 0
+        if args.command in {"stage", "candidates"}:
+            from .staging import NativeBuildConfig, inspect_candidates, stage_candidate
+
+            if args.command == "stage":
+                payload = stage_candidate(
+                    args.descriptor, expected_source_commit=args.expected_source_commit,
+                    install_root=args.install_root, host_config_path=args.config,
+                    build=NativeBuildConfig(
+                        python=args.python, uv=args.uv, third_party_lock=args.third_party_lock,
+                        uv_config=args.uv_config, timeout_seconds=args.timeout,
+                    ),
+                )
+            else:
+                payload = inspect_candidates(args.install_root, host_config_path=args.config)
             print(json.dumps(payload, sort_keys=True))
             return 0
         config = load_config(args.config)

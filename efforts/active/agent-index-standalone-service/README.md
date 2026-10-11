@@ -337,3 +337,47 @@ boundaries from implementation decisions and deployment-specific policy.
   for all five agent-worktrees projections. Its test expectation is corrected
   without changing runtime behavior, so service promotion is not left blocked
   behind a known regression.
+- #6053 merged after zero-finding approval and required CI; the promotion fixture
+  repair is now on `dev`. Native candidate staging is the next reviewed lifecycle
+  slice. Canonical slot logic will be delivered by standard wheel/sdist build
+  resource copying, preserving one maintained stdlib primitive and unchanged
+  self-contained plugin bootstrap scripts. No over-cap source mirror, renamed
+  code or baseline exemption is introduced. Actual wheel/sdist byte equality,
+  standalone sdist-to-wheel construction and missing/conflicting-source failures
+  passed five packaging integration tests.
+- First-touch immutable native candidate staging now builds a verified bundle
+  in its final venv path under an exclusive lifecycle lease, snapshots the
+  selected artifacts/policy, validates native dependency closure and publishes
+  canonical completion last. It does not select, serve, migrate, activate,
+  roll back or supervise a host. Existing incomplete/conflicting slots remain
+  preserved; failed owned builds clean only their proven-owned incomplete slot.
+- Real governed-package/offline uv proof succeeded: first stage, idempotent
+  replay, native import/seam probe and candidate inspection, with no active
+  markers or host-state creation. The installed-wheel opt-in regression passed
+  separately. The full contained suite passed 321 tests with the two Linux-only
+  process cases and opt-in fixture initially skipped; actual Linux process
+  cleanup validation is being executed in a fresh network-disabled container.
+- Fresh Windows clean-room execution is unavailable because local Docker is in
+  Linux mode with no cached Windows image. No Docker mode change, image pull,
+  production indexer install or migration is inferred from validation.
+- Fresh network-disabled Linux clean-room evidence: real subreaper failure and
+  timeout descendant cleanup passed two cases, preserving the outer group;
+  241 pure release/staging contracts also passed. Approved binary test wheels
+  were downloaded on the governed host, then installed offline in the fresh
+  box. Its exact owned container and preparation artifacts were cleaned.
+- Complete installed Windows suite including real uv first-touch/replay passed
+  322 tests, with only the two Linux-specific process cases skipped (covered
+  above). Windows temporary-tree cleanup encountered uv cache paths beyond
+  ordinary Win32 limits; the standalone runner now uses owned extended-length
+  cleanup with bounded transient-lock retries and explicit permanent failure.
+  Deep-path cleanup and runner regressions passed 15 tests.
+- Staging review repaired process-identity fencing, success-path build scratch
+  removal, post-build executable hash revalidation and extended-length owned
+  failed-slot cleanup. Updated contained Windows suite passed 337 tests with
+  two Linux-specific cases skipped for their separate fresh-container proof.
+- Development monitoring later found the existing native API nonresponsive
+  despite a listening process and idle event-loop stack. A supported same-version
+  non-forced cutover completed with clean drain and restored process health
+  after the management command exited; the existing warm engine was not
+  restarted. Detailed corpus status remains slow, so no rollout-readiness claim
+  or standalone-service migration follows from the restored liveness probe.

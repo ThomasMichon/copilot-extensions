@@ -1,0 +1,9 @@
+{
+  "comment": "Stage immutable native service candidates with pinned wheel snapshots, governed hash-locked dependencies, canonical completion-last validation and no activation.",
+  "changes": [
+    {
+      "plugin": "agent-index-service",
+      "type": "patch"
+    }
+  ]
+}
