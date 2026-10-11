@@ -39,7 +39,7 @@ class TestDispositionGlyph:
     def test_state_stays_pure_for_bucketing(self):
         # The glyph never leaks into ``state`` (bucket()/prune key off it).
         n = derive.norm(_raw(follow_up=True, summary="x"), "anomalous-potato", "win")
-        assert n["state"] == "FINAL"
+        assert n["state"] == derive.norm(_raw(), "anomalous-potato", "win")["state"]
 
 
 class TestPausedGlyph:
@@ -59,7 +59,7 @@ class TestPausedGlyph:
 
     def test_paused_state_stays_pure_for_bucketing(self):
         n = derive.norm(_raw(paused=True), "anomalous-potato", "win")
-        assert n["state"] == "FINAL"
+        assert n["state"] == derive.norm(_raw(), "anomalous-potato", "win")["state"]
 
     def test_paused_and_follow_up_glyphs_compose(self):
         n = derive.norm(
@@ -107,7 +107,7 @@ class TestPairMarker:
         n = derive.norm(
             _raw(pair_id="p", pair_role="harness"), "anomalous-potato", "win"
         )
-        assert n["state"] == "FINAL"
+        assert n["state"] == derive.norm(_raw(), "anomalous-potato", "win")["state"]
 
 
 class TestAnnotatePairs:
