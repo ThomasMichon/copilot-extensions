@@ -354,6 +354,12 @@ fine-grained PAT minted under the maintainer's own account, not the
 default `GITHUB_TOKEN`/Actions-bot identity). To confirm a change actually shipped rather than
 assuming the `dev` merge itself was the release:
 
+The promotion job retains the workflow's exclusive concurrency slot while
+waiting for its exact generated PR to merge. Enabling auto-merge alone is not
+delivery: the waiter verifies the PR identity and reports a bounded timeout,
+closed-unmerged state or provider error as a failure. The release tag uses that
+PR's actual merge commit, even if `main` advances again before tagging.
+
 ```bash
 gh pr list --repo ThomasMichon/copilot-extensions --search "is:merged head:release/promote-" --limit 5
 ```
