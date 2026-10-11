@@ -69,6 +69,7 @@ async function run(options = {}) {
       assert.equal(method, "reviews");
       reviewReads += 1;
       if (reviewReads === 1) return options.existingReviews ?? [];
+      if (options.baselineReviews && writes.length === 0) return options.baselineReviews;
       return writes.length === 0
         ? options.reviewsAfterPending ?? [] : options.newReviews ?? [];
     },
@@ -174,6 +175,38 @@ test("review after retarget suppresses a duplicate queued request", async () => 
       state: "APPROVED", submitted_at: new Date(NOW - 60_000).toISOString() }],
   });
   assert.equal(result.writes.length, 0);
+});
+
+test("same-second new review confirms request by ID delta", async () => {
+  const stamp = new Date(NOW).toISOString();
+  const result = await run({
+    events: [{ event: "base_ref_changed", created_at: stamp }],
+    existingReviews: [{ user: { login: BOT }, commit_id: "latest-head", id: 1,
+      state: "COMMENTED", submitted_at: stamp }],
+    baselineReviews: [{ user: { login: BOT }, commit_id: "latest-head", id: 1,
+      state: "COMMENTED", submitted_at: stamp }],
+    pending: false,
+    newReviews: [
+      { user: { login: BOT }, commit_id: "latest-head", id: 1,
+        state: "COMMENTED", submitted_at: stamp },
+      { user: { login: BOT }, commit_id: "latest-head", id: 2,
+        state: "COMMENTED", submitted_at: stamp },
+    ],
+  });
+  assert.equal(result.writes.length, 1);
+  assert.equal(result.failures.length, 0);
+});
+
+test("same-second preexisting review alone cannot confirm a new request", async () => {
+  const stamp = new Date(NOW).toISOString();
+  const review = { user: { login: BOT }, commit_id: "latest-head", id: 1,
+    state: "COMMENTED", submitted_at: stamp };
+  const result = await run({
+    events: [{ event: "reopened", created_at: stamp }],
+    existingReviews: [review], baselineReviews: [review],
+    pending: false, newReviews: [review],
+  });
+  assert.equal(result.failures.length, 1);
 });
 
 test("pending or dismissed reviews do not suppress an automatic request", async () => {

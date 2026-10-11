@@ -346,7 +346,7 @@ jobs:
           # intervening dev commit too, so an unrelated change to any listed
           # file could wrongly trigger this subprocess-heavy suite.
           if git diff --name-only "$base...$head" | grep -Eq \
-            '^tools/(check-version-bump\.py|test_check_version_bump\.py|installer_engine_ref\.py|uv_editable_ref\.py|standalone_consumers\.py|check-changefile-presence\.py|accumulate_bumps\.py)$'; then
+            '^tools/(check-version-bump\.py|test_check_version_bump\.py|vendored_lib_inventory\.py|installer_engine_ref\.py|uv_editable_ref\.py|standalone_consumers\.py|check-changefile-presence\.py|accumulate_bumps\.py)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -625,7 +625,7 @@ jobs:
           fi
           changed="$(git diff --name-only "$base...$head")"
           if printf '%s\n' "$changed" | grep -Eq \
-            '^(\.github/workflows/ci\.yml|tools/(sync-vendored-libs|check-vendored-libs-sync|check-version-bump|check-changefile-presence|vendored_lib_inventory|uv_editable_ref|standalone_consumers|installer_engine_ref|changefile|test_sync_vendored_libs|test_check_vendored_libs_sync|test_check_version_bump|test_check_changefile_presence)\.py)$'; then
+            '^(\.github/workflows/ci\.yml|tools/(sync-vendored-libs|check-vendored-libs-sync|check-version-bump|check-changefile-presence|vendored_lib_inventory|uv_editable_ref|standalone_consumers|installer_engine_ref|changefile|test_sync_vendored_libs|test_check_vendored_libs_sync|test_check_version_bump|test_check_changefile_presence|test_vendor_publication_inventory)\.py)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -634,7 +634,7 @@ jobs:
         if: steps.vendored-library-tools.outputs.run == 'true'
         run: >-
           python -m pytest -q tools/test_sync_vendored_libs.py
-          tools/test_check_version_bump.py tools/test_check_changefile_presence.py
+          tools/test_vendor_publication_inventory.py
       - name: Vendored library synchronization
         run: >-
           python tools/check-vendored-libs-sync.py &&
