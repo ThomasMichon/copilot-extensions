@@ -79,6 +79,9 @@ def _pr_watch_usage() -> None:
     print("                    will NOT merge on its own).", file=out)
     print("    consent_action  apply | already | skip  (+ 'reason').", file=out)
     print("    clear_to_merge  true when only consent stands in the way.", file=out)
+    print("  Missing author consent wakes even --until merged with exit 0:", file=out)
+    print("  updates=['consent_required'], merge.consent_command names the action.", file=out)
+    print("  Re-arm with the returned cursor to deduplicate that state update.", file=out)
 
 
 def _pr_parse_repo(value: str) -> str:
@@ -597,6 +600,8 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             stale_approval_head_observed_at=head_observed_at,
             review_blocking=review_blocking,
             dismiss_stale_reviews=getattr(prcfg, "dismiss_stale_reviews", None),
+            flow_profile=actor_flow.flow.profile,
+            default_branch=repo_cfg.default_branch,
             on_error=lambda e: print(f"pr-watch: poll error (will retry): {e}", file=sys.stderr),
         )
         # A single, one-time live read, taken only now that the (potentially
@@ -680,7 +685,8 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
         print(_json.dumps(result.payload))
         if not args.json:
             print(
-                f"pr-watch: {args.repo}#{args.pr} -> {', '.join(result.payload['transitions'])}",
+                f"pr-watch: {args.repo}#{args.pr} -> "
+                f"{', '.join(result.payload['transitions'] + result.payload.get('updates', []))}",
                 file=sys.stderr,
             )
             # Surface the next action so a woken caller doesn't assume "approved
@@ -694,6 +700,8 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                     f"({merge.get('reason', '')})",
                     file=sys.stderr,
                 )
+                if merge.get("consent_command"):
+                    print(f"pr-watch: NEXT -> {merge['consent_command']}", file=sys.stderr)
             elif merge.get("consent_action") == "already":
                 print(
                     "pr-watch: merge consent already granted; the merge gate will proceed",

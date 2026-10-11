@@ -1,0 +1,9 @@
+{
+  "comment": "Wake approved PR waiters with actionable, cursor-deduplicated missing-consent updates and clarify merge consent output.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
