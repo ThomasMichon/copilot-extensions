@@ -89,10 +89,10 @@ def apply_session_deregister(args: dict) -> dict:
                         record.machine, record.repo, record.worktree_id,
                         session=session_id,
                     )
-                tracking.release_resource_claim(record, self_session_ref, save=False)
-                tracking.save_record(record, yaml_path)
-                if not _record_has_open_session(record):
-                    stop_fsmonitor_daemon(record.worktree_path)
+                    tracking.release_resource_claim(record, self_session_ref, save=False)
+                    tracking.save_record(record, yaml_path)
+                    if not _record_has_open_session(record):
+                        stop_fsmonitor_daemon(record.worktree_path)
                 break
     except TimeoutError as exc:
         logging.getLogger(__name__).warning(

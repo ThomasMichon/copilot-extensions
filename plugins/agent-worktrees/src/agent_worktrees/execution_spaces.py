@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,15 @@ from machine_transport.registry import MachineEntry, find_machine_entry, machine
 
 class ExecutionSpaceError(RuntimeError):
     """An ownership mutation has no unambiguous local execution-space identity."""
+
+
+# Serializes ``require_project_record_mutation``'s resolution of a NAMED
+# project's config: ``cfg.load_project_config`` temporarily mutates the
+# process-global active-project state (set, load, restore). Concurrent
+# resident-daemon verb handlers calling this for DIFFERENT projects could
+# otherwise interleave their set/restore and leave the daemon bound to the
+# wrong project, contaminating later ambient config/ledger lookups.
+_project_config_lock = threading.Lock()
 
 
 def detect_legacy_machine(entries: dict[str, MachineEntry], hostname: str) -> str:
@@ -171,7 +181,8 @@ def require_project_record_mutation(record: Any) -> None:
     from . import config as cfg
 
     try:
-        config = cfg.load_project_config(record.repo)
+        with _project_config_lock:
+            config = cfg.load_project_config(record.repo)
         if record.repo not in config.repos:
             raise ValueError("requested project is not registered in receiving-side configuration")
         config = replace(config, repo_name=record.repo)

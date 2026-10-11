@@ -69,6 +69,18 @@ def test_apply_session_deregister_ends_the_matching_session(record_path):
     assert entry.ended_at is not None
 
 
+def test_apply_session_deregister_is_idempotent_on_an_already_ended_session(record_path):
+    """Regression (PR #5988 review): a repeated deregistration for an
+    already-ended matching session must stay idempotent, not raise
+    UnboundLocalError from referencing a claim ref only ever assigned in
+    the first (state-changing) call's ``if changed:`` branch."""
+    args = {"worktree_id": "wt-dereg", "yaml_path": str(record_path), "session_id": "sess-1"}
+    first = tracking_session_deregistration_write.apply_session_deregister(args)
+    assert first == {"ok": True}
+    second = tracking_session_deregistration_write.apply_session_deregister(args)
+    assert second == {"ok": True}
+
+
 def test_apply_session_deregister_is_a_noop_for_an_unknown_session(record_path):
     result = tracking_session_deregistration_write.apply_session_deregister(
         {"worktree_id": "wt-dereg", "yaml_path": str(record_path), "session_id": "sess-ghost"}

@@ -924,12 +924,7 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
     if not wt_id:
         return 0
     try:
-        tracking.deregister_session(
-            wt_id,
-            session_id,
-            ended_at=event_at,
-            source=source,
-        )
+        tracking.deregister_session(wt_id, session_id, ended_at=event_at, source=source)
         _capture_session_title(wt_id, session_id)
     except Exception as e:
         output.err(f"Failed to deregister session: {e}")
@@ -944,11 +939,10 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
 
 
 def _capture_session_title(worktree_id: str, session_id: str) -> bool:
-    """Read summary/name from the session's workspace.yaml and persist it.
-
-    Re-reads and re-authorizes under its own sidecar lock immediately before
-    the write: a race after deregistration's own check could still make the
-    record foreign before this unlocked write ran."""
+    """Read summary/name from workspace.yaml and persist it, re-reading and
+    re-authorizing under a required sidecar lock immediately before the
+    write (a race after deregistration's own check could otherwise still
+    make the record foreign before an unlocked write ran)."""
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return False
@@ -986,15 +980,19 @@ def _capture_session_title(worktree_id: str, session_id: str) -> bool:
         return False
 
     from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
-    with tracking._RecordLock(yaml_path):
-        fresh = tracking.load_record(yaml_path)
-        try:
-            require_project_record_mutation(fresh)
-        except ExecutionSpaceError as exc:
-            output.err(f"Rejecting session title capture for {worktree_id}: {exc}")
-            return False
-        if fresh.title and fresh.title != "null":
-            return False
-        fresh.title = display_text
-        tracking.save_record(fresh, yaml_path)
-        return True
+    try:
+        with tracking._RecordLock(yaml_path, require_sidecar=True):
+            fresh = tracking.load_record(yaml_path)
+            try:
+                require_project_record_mutation(fresh)
+            except ExecutionSpaceError as exc:
+                output.err(f"Rejecting session title capture for {worktree_id}: {exc}")
+                return False
+            if fresh.title and fresh.title != "null":
+                return False
+            fresh.title = display_text
+            tracking.save_record(fresh, yaml_path)
+            return True
+    except TimeoutError as exc:
+        output.err(f"Session title capture for {worktree_id} contended: {exc}")
+        return False

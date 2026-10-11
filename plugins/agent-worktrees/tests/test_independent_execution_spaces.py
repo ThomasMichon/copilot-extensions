@@ -209,6 +209,46 @@ def test_cleanup_resolves_authority_from_record_repo_not_ambient_config(
         execution_spaces.require_cleanup_identity(record, scoped_config.default_repo.anchor)
 
 
+def test_project_record_mutation_holds_a_lock_around_active_project_mutation(
+    monkeypatch,
+):
+    """Regression (PR #5988 review): ``load_project_config`` temporarily
+    mutates the process-global active-project state (set, load, restore).
+    Concurrent resident-daemon verb handlers calling
+    ``require_project_record_mutation`` for DIFFERENT projects could
+    otherwise interleave their set/restore and leave the daemon bound to
+    the wrong project. Proves the serializing lock is actually held for
+    the full duration of the ``load_project_config`` call, not merely
+    declared."""
+    import threading
+    import time
+
+    from agent_worktrees import config as _cfg
+
+    def fake_load_project_config(name, **_kwargs):
+        time.sleep(0.1)
+        return _cfg.Config(
+            machine="m", platform="wsl", repo_name=name,
+            srcroot="", repos={name: _cfg.RepoConfig(anchor="/tmp/a", worktree_root="/tmp/a")},
+        )
+
+    monkeypatch.setattr(_cfg, "load_project_config", fake_load_project_config)
+
+    def run():
+        execution_spaces.require_project_record_mutation(
+            SimpleNamespace(repo="a", machine="m", platform="wsl", owner_ref=None),
+        )
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    time.sleep(0.03)
+    held_during_call = execution_spaces._project_config_lock.locked()
+    thread.join(timeout=5)
+
+    assert held_during_call is True
+    assert not execution_spaces._project_config_lock.locked()
+
+
 def test_finalize_authority_fenced_write_catches_a_record_gone_foreign(
     scoped_config, tmp_path,
 ):
