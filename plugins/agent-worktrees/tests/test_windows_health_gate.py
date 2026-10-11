@@ -26,7 +26,7 @@ function and runs it under a REAL, isolated pwsh subprocess against:
   ``agent_worktrees`` installed at all) -- the gate must reject it, and
 - a marker pre-written by ``versioned_runtime.py``'s own ``mark_complete``
   (simulating an older, less-strict installer run) -- the gate must still
-  reject the broken payload AND remove that stale marker.
+  reject the broken payload AND quarantine that stale readiness marker.
 
 This never touches the real ``~/.agent-worktrees`` and never dot-sources
 the full install.ps1 (which would run its own top-level ``switch``/prereq
@@ -170,13 +170,13 @@ def test_windows_health_gate_rejects_a_broken_slot(
     assert "ERR: Fresh runtime slot failed its health gate" in output, output
 
 
-def test_windows_health_gate_invalidates_a_stale_marker_on_a_broken_slot(
+def test_windows_health_gate_quarantines_a_stale_marker_on_a_broken_slot(
     tmp_path: Path, bare_venv_python: Path
 ) -> None:
     """The exact real-world scenario (dotfiles #7561): an OLDER, less-strict
     installer already wrote a valid completion marker for this slot, but the
     payload is still broken. The (now-strict) gate must still reject it AND
-    remove the stale marker so a future run stops trusting it.
+    quarantine readiness while retaining immutable completion evidence.
     """
     gate_passed, output, marker, existed_before = _run_health_gate(
         tmp_path, venv_python=bare_venv_python, pre_mark_complete=True
@@ -185,5 +185,7 @@ def test_windows_health_gate_invalidates_a_stale_marker_on_a_broken_slot(
 
     assert not gate_passed, output
     assert "ERR: Fresh runtime slot failed its health gate" in output, output
-    assert "CHG: Invalidated stale completion marker" in output, output
-    assert not marker.exists(), "the stale marker must be removed on gate failure"
+    assert "CHG: Quarantined completion marker" in output, output
+    assert not marker.exists(), "the stale marker must no longer signal readiness"
+    failed = marker.with_name(".install-complete.failed.json")
+    assert failed.exists(), "completed-generation evidence must survive health failure"
