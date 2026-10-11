@@ -324,6 +324,18 @@ def test_route_response_bounds_hit_count():
     search_response(hits=tuple(hit(chunk_id=f"c-{i}") for i in range(MAX_HITS)))
 
 
+def test_route_response_bounds_aggregate_wire_size_even_when_every_field_is_valid():
+    # Every individual hit, and the hit count, independently satisfy their own
+    # bounds (MAX_HITS, MAX_CONTENT_BYTES) -- but MAX_HITS * MAX_CONTENT_BYTES
+    # vastly exceeds MAX_MESSAGE_BYTES, so the aggregate wire-size check must
+    # catch what the per-field/count checks above cannot.
+    oversized = tuple(
+        hit(chunk_id=f"c-{i}", content="x" * MAX_CONTENT_BYTES) for i in range(MAX_HITS)
+    )
+    with pytest.raises(ContractError):
+        search_response(hits=oversized)
+
+
 @pytest.mark.parametrize("change", [
     {"chunk_id": ""}, {"chunk_id": 1},
     {"score": float("nan")}, {"score": float("inf")}, {"score": "0.5"}, {"score": True},

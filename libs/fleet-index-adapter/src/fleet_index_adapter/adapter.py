@@ -22,9 +22,12 @@ import urllib.parse
 import urllib.request
 
 from fleet_contracts import ContractError, HealthResult, RouteRequest, RouteResponse, SearchHit
-from fleet_contracts.records import ServiceOffer
+from fleet_contracts.records import MAX_MESSAGE_BYTES, ServiceOffer
 
 DEFAULT_TIMEOUT = 5.0
+# One byte past the contract's own wire-size limit: enough to detect overflow
+# without ever buffering an actually-unbounded backend body.
+_MAX_READ_BYTES = MAX_MESSAGE_BYTES + 1
 
 
 class BackendUnavailable(RuntimeError):
@@ -39,14 +42,21 @@ class BackendUnavailable(RuntimeError):
 def _get(base_url: str, path: str, params: dict[str, str | None], timeout: float) -> dict:
     """A plain, dependency-free ``GET`` against a locally-resolved, trusted
     fixed backend. ``base_url`` is never client-supplied (see module/README
-    docstring), so this is not an SSRF sink despite the generic signature."""
+    docstring), so this is not an SSRF sink despite the generic signature.
+
+    Reads at most ``_MAX_READ_BYTES`` of the response body -- a faulty or
+    compromised backend cannot force this adapter to buffer an unbounded
+    body merely by sending one, independent of any later field-level bound.
+    """
     query = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
     url = f"{base_url.rstrip('/')}{path}"
     if query:
         url = f"{url}?{query}"
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:
-            payload = response.read()
+            payload = response.read(_MAX_READ_BYTES)
+            if len(payload) >= _MAX_READ_BYTES:
+                raise BackendUnavailable(f"backend response at {path} exceeds the wire-size limit")
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise BackendUnavailable(f"backend did not answer at {path}") from exc
     try:
@@ -104,7 +114,14 @@ def _route_search(request: RouteRequest, base_url: str, timeout: float) -> Route
     if not isinstance(raw_hits, list):
         raise BackendUnavailable("backend search response did not include a hit list")
     hits = tuple(_hit_from_backend(item) for item in raw_hits)
-    return RouteResponse.for_request(request, hits=hits)
+    try:
+        return RouteResponse.for_request(request, hits=hits)
+    except ContractError as exc:
+        # Every individual hit already passed SearchHit's own bounds in
+        # _hit_from_backend; a ContractError here can only be the aggregate
+        # wire-size check (e.g. MAX_HITS large-but-individually-valid hits) --
+        # the backend's fault, not this already-validated request's.
+        raise BackendUnavailable("backend search response exceeds the wire-size limit") from exc
 
 
 def route(

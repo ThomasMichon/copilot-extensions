@@ -1,10 +1,11 @@
 # agent-fleet-contracts
 
 Portable, standard-library-only schema-v1 records for driver snapshots,
-connector registrations, locally approved service offers and health/index-search
-request envelopes. No Copilot, marketplace, server, model, provider or process
-dependency is required. Controller and connector distributions can consume this
-package without importing each other.
+connector registrations, locally approved service offers, and
+health/index-search request **and response** envelopes. No Copilot,
+marketplace, server, model, provider or process dependency is required.
+Controller and connector distributions can consume this package without
+importing each other.
 
 The canonical tests live in this library and are also collected by the
 `agent-ssh` consumer's thin test projection, so its required test lane exercises
@@ -14,9 +15,14 @@ both the wire contract and the real static-driver CLI.
 identities and invalid types; JSON arrays become immutable tuples. Direct
 constructors reject mutable collections. `decode_json` additionally
 rejects duplicate JSON keys, nonfinite numbers, excessive nesting and messages
-over 64 KiB. Limits: 256 selected targets, 32 offered services, 4 KiB UTF-8 query
-and 1-100 search results. Records are frozen and use immutable collections.
-`encode_json` enforces the same message bound.
+over 64 KiB. Limits: 256 selected targets, 32 offered services, 4 KiB UTF-8 query,
+1-100 search results, 4 KiB per hit's body content and 1 KiB per file path.
+Records are frozen and use immutable collections. `encode_json` enforces the
+same message bound, and `RouteResponse` additionally validates at
+**construction** time that its own encoded wire form fits that bound -- a
+response with many large, individually-valid hits can still exceed the
+aggregate 64 KiB limit even though every per-field bound passed, so this is a
+distinct check from the field-level ones above.
 
 ```python
 from fleet_contracts import ConnectorRegistration, RouteRequest, decode_json
@@ -46,9 +52,18 @@ execute it.
 `health-v1` permits only `health`; `index-v1` additionally permits `index.search`.
 Search parameters match the existing index query API (`q`, `limit`, `source`,
 `language`, `repo`); filters do not grant source access. There is no method, URL,
-path, shell, environment, credentials or generic execute field. The response
-adapter, authentication, service/backend identity checks, state persistence,
-controller/connector runtime and standalone lifecycle are subsequent effort
+path, shell, environment, credentials or generic execute field.
+
+`RouteResponse.for_request(request, health=..., hits=...)` builds a response
+correlated to its originating request's own validated identity fields
+(`request_id`, `service_id`, `installation_id`, `operation`) -- never a value an
+adapter would otherwise have to re-assert by hand. `HealthResult` and
+`SearchHit` are its operation-typed payloads, mirroring `RouteRequest`'s own
+`parameters` field. This package defines the **shape** of a response only: an
+adapter still owns converting one specific backend's actual data into these
+records (see `agent-fleet-index-adapter` for the `index-v1` adapter), and
+authentication, service/backend identity checks, state persistence, the
+controller/connector runtime and standalone lifecycle remain subsequent effort
 slices, not features implemented by this data-contract package.
 
 See `efforts/active/machine-fleet-routing-foundation/` and

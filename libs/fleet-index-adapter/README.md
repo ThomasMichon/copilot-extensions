@@ -35,9 +35,15 @@ It does not:
   eventual connector does).
 
 A malformed or oversized backend response raises `BackendUnavailable` rather
-than being relayed as-is -- the point of a typed adapter is that a backend
-defect cannot become an unbounded or malformed wire response merely by being
-forwarded.
+than being relayed as-is. The adapter reads at most the contract's own
+wire-size limit (`fleet_contracts.records.MAX_MESSAGE_BYTES`) plus one byte
+from the backend's HTTP body, so a faulty or compromised backend cannot force
+this adapter to buffer an unbounded response merely by sending one. A
+response whose every individual field is in-bounds can still exceed the
+aggregate wire-size limit (e.g. `MAX_HITS` hits each near
+`MAX_CONTENT_BYTES`); `RouteResponse` itself validates that aggregate bound at
+construction, and this adapter maps that failure to `BackendUnavailable` too
+-- it is the backend's fault, never this already-validated request's.
 
 See `tests/test_adapter.py` for both a minimal stand-in HTTP backend (fast,
 deterministic unit coverage of every bound and error path) and a genuine

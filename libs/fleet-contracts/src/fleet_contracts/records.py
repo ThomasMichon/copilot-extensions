@@ -491,6 +491,16 @@ class RouteResponse(_WireRecord):
                 raise ContractError("hits must contain search hit records")
         else:
             raise ContractError("unsupported routing operation")
+        # Per-field/count bounds above do not guarantee the record fits the
+        # 64 KiB wire limit: e.g. MAX_HITS (100) hits each near
+        # MAX_CONTENT_BYTES (4 KiB) pass every individual check yet encode to
+        # several hundred KiB. Validate the aggregate, encoded size here too,
+        # so an otherwise "valid" RouteResponse can never become an unsendable
+        # message discovered only later at `encode_json` time.
+        try:
+            encode_json(self.to_dict())
+        except ContractError as exc:
+            raise ContractError("response exceeds the aggregate wire-size limit") from exc
 
     @classmethod
     def for_request(

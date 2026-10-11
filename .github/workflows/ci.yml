@@ -543,8 +543,18 @@ jobs:
         # too (rather than waiting for its own full conversion) since its
         # canonical suite is the one this step is designed to keep testing,
         # independent of which pointer form any particular consumer uses.
+        # `fleet-contracts` is agent-ssh's uv-editable reference (same
+        # category). `fleet-index-adapter` has no consumer yet (a
+        # machine-fleet-routing-foundation Phase 3 prototype) but is included
+        # here on the same no-install sys.path pattern for the same reason:
+        # its suite is what keeps the adapter contract itself enforced. Its
+        # live-integration tests additionally need `fastapi`/`uvicorn` (to
+        # serve the real, unmodified `agent_index.server.build_app()` over a
+        # real TCP port, not a mocked transport) -- both are already runtime
+        # dependencies of the `agent-index` plugin this adapter proves itself
+        # against, so installing them here adds no new supply-chain surface.
         run: >-
-          python -m pip install pytest-asyncio &&
+          python -m pip install pytest-asyncio fastapi uvicorn &&
           python -m pytest -q libs/work-coalescing-singleton/tests &&
           python -m pytest -q libs/lazy-cli-dispatch/tests &&
           python -m pytest -q libs/credential-relay/tests &&
@@ -556,7 +566,9 @@ jobs:
           python -m pytest -q libs/plugin-resolve/tests &&
           python -m pytest -q libs/plugin-activation/tests &&
           python -m pytest -q libs/session-liveness-probe/tests &&
-          python -m pytest -q libs/venue-copilot/tests
+          python -m pytest -q libs/venue-copilot/tests &&
+          python -m pytest -q libs/fleet-contracts/tests &&
+          python -m pytest -q libs/fleet-index-adapter/tests
       - id: zdd-singleton
         name: Detect zdd singleton changes
         shell: bash

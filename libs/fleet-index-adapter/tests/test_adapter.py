@@ -200,10 +200,20 @@ def test_route_rejects_operation_not_in_offer(fake_backend):
 # reached without a packaged runtime dependency on it) ---------------------
 
 uvicorn = pytest.importorskip("uvicorn")
+pytest.importorskip("fastapi")
+pytest.importorskip("agent_index")
 
 
 @pytest.fixture
-def live_agent_index(monkeypatch):
+def live_agent_index(monkeypatch, tmp_path):
+    # Isolate every runtime path (data/run/routing/cache/log dirs all derive
+    # from install_dir()) under tmp_path -- without this, build_app()'s
+    # lifespan creates data_dir() under the real ~/.agent-index and may start
+    # background indexing against whatever a developer's or runner's own
+    # installation happens to have, exactly like agent-index's own
+    # test_drain_gate.py isolates it.
+    monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))
+
     from agent_index.search import engine as search_engine
     from agent_index.server import build_app
 
