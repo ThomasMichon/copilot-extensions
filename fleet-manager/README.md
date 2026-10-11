@@ -66,7 +66,10 @@ inventing or silently stamping a prior template identity.
 
 Inputs are limited to 1 MiB, depth 12 and 256-object/collection items. Duplicate
 JSON keys, invalid types, identity mismatches, unknown wire fields and nonfinite
-numbers are rejected; diagnostics omit input values. Output limits are separately
+numbers are rejected; planner and input-file diagnostics omit document values.
+Command-line syntax diagnostics use argparse's standard messages, which can
+include supplied arguments; never pass credentials or secrets as CLI values.
+Output limits are separately
 enforced: plans allow 4 MiB, depth 15 and 513-object/collection items to
 accommodate preserved config plus joined recommendations and observations.
 Output hashing, saved-plan verification and CLI serialization use these output
