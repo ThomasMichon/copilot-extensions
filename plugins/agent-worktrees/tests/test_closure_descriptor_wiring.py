@@ -5,9 +5,16 @@ the canonical closure descriptor, additive alongside the legacy
 
 from __future__ import annotations
 
+import pytest
+
 from agent_worktrees import __main__ as cli
 from agent_worktrees import git_ops, tracking
 from agent_worktrees import prune
+
+
+@pytest.fixture(autouse=True)
+def confirmed_fixture_checkout(monkeypatch):
+    monkeypatch.setattr("agent_worktrees.finalized_checkout.matches", lambda record: True)
 
 
 def _rec(**kw):

@@ -43,6 +43,7 @@ def _wire(monkeypatch, target, *, state, turns, rec=None):
         rec = _record(worktree_path=target)
     monkeypatch.setattr(m, "_detect_upstream_branch", lambda *a, **k: "master")
     monkeypatch.setattr(m, "_find_record_for_path", lambda _p: rec)
+    monkeypatch.setattr("agent_worktrees.finalized_checkout.matches", lambda record: True)
     # Reflect the real classify_worktree contract: fetch_requested mirrors
     # whether THIS call actually passed fetch=True, so a test's --fetch flag
     # (ns.fetch) genuinely drives evidence_mode the same way it would for

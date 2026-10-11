@@ -197,6 +197,7 @@ def assemble_closure_descriptor(
     turn_count: int = 0,
     repo_fetch_fresh: bool = False,
     cross_machine_claims: int = 0,
+    finalized_checkout_current: bool = False,
     now: str | None = None,
 ) -> ClosureDescriptor:
     """Assemble the canonical closure descriptor from already-computed facts.
@@ -393,6 +394,7 @@ def assemble_closure_descriptor(
     )
     finalized_display = (
         rec.status == "finalized"
+        and finalized_checkout_current
         and evidence_complete
         and info.state in (S.COMPLETED, S.ACTIVE)
         and info.dirty == 0
