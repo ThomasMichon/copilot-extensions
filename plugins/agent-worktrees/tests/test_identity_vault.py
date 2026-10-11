@@ -62,15 +62,40 @@ def test_empty_file_override_still_uses_common_vault_key(monkeypatch):
     assert identity_marker.load_identity_key() == b"s" * 32
 
 
-def test_real_cache_adapter_output_boundary():
+def test_real_cache_adapter_output_boundary(caplog):
     value = base64.b64encode(b"s" * 32)
     assert identity_vault._read_key_output([
         sys.executable, "-c", f"import sys;sys.stdout.buffer.write({value!r})",
     ]) == value
+    assert "cleanup failed" not in caplog.text
     with pytest.raises(ValueError):
         identity_vault._read_key_output([
             sys.executable, "-c", "print('x'*1000)",
         ])
+
+
+@pytest.mark.parametrize("error", [ProcessLookupError, PermissionError])
+def test_posix_cleanup_warns_only_on_actual_failure(monkeypatch, caplog, error):
+    from io import BytesIO
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    value = base64.b64encode(b"s" * 32)
+    process = Mock(pid=123, stdout=BytesIO(value))
+    process.wait.return_value = 0
+    process.poll.return_value = 0
+    monkeypatch.setattr(identity_vault, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(identity_vault, "signal", SimpleNamespace(SIGKILL=9))
+    monkeypatch.setattr(
+        identity_vault, "spawn_sync_in_kill_on_close_job",
+        lambda *args, **kwargs: (process, None),
+    )
+    killpg = Mock(side_effect=error())
+    monkeypatch.setattr(identity_vault.os, "killpg", killpg, raising=False)
+    assert identity_vault._read_key_output(["fixture-vault"]) == value
+    killpg.assert_called_once_with(process.pid, identity_vault.signal.SIGKILL)
+    assert ("cleanup failed" in caplog.text) == (error is PermissionError)
+    process.kill.assert_not_called()
 
 
 def test_timeout_reaps_adapter_and_stdout_holding_descendant(monkeypatch, tmp_path):
