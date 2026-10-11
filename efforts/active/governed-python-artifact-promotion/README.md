@@ -283,6 +283,21 @@ answer against the actual repository/CI configuration:
   build a platform-specific artifact -- not solved speculatively here, per
   this effort's own established pattern of naming real gaps rather than
   pre-solving unneeded generality.
+- **Public-runner toolchain resolution -- resolved (2026-10-10):**
+  `validate-and-promote.yml` runs on public GitHub-hosted runners, which
+  cannot reach the corporate governed feed `resolve_toolchain_lock`
+  otherwise requires (it fails closed without one, by design, correct for
+  every OTHER caller of this tool on a managed machine). Raised to the
+  operator rather than silently decided. Resolution: the public runner
+  resolves the build toolchain (`setuptools`/`wheel`/`packaging` -- build
+  tooling, not a plugin's own distributed runtime dependency closure)
+  through public PyPI directly, but pinned to a **seasoned** (minimum-age)
+  version rather than unqualified "latest" -- approximating what a real
+  governed feed would likely already carry by the time a managed device
+  consumes a release built this way, not an exact substitute for querying
+  one directly. See `tools/seasoned_public_feed.py` and this Journal's
+  2026-10-10 entry. Still open: wiring this resolver into
+  `resolve_toolchain_lock`/the CLI and the actual workflow job.
 
 ## Validation Plan
 
@@ -379,6 +394,79 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-10 - Phase 2 slice 3: seasoned public-PyPI version resolution for public CI runners
+
+- Identified and resolved a real infrastructure conflict before wiring
+  `build_python_artifacts.py` into the actual promotion pipeline (the next
+  item in Phase 2's checklist): `resolve_toolchain_lock` requires an
+  affirmatively trusted GOVERNED feed and fails closed without one -- by
+  design, and correct for every other caller of this tool (a managed
+  machine, always governed-feed-reachable) -- but `validate-and-promote.yml`
+  runs on **public GitHub-hosted runners**, which have no network path to
+  the corporate governed feed (`packagefeedproxy.microsoft.io`) at all.
+  Raised this to the operator rather than silently picking a resolution
+  myself. Decision: the public runner resolves the build toolchain
+  (`setuptools`/`wheel`/`packaging` -- build tooling, not a plugin's own
+  distributed runtime dependency closure) through **public PyPI directly**,
+  but pinned to a **seasoned** version (at least a configurable minimum age
+  old, never unqualified "latest") specifically to approximate what a real
+  governed feed would likely already carry by the time a managed device
+  actually consumes a release built this way -- never an exact substitute
+  for querying a real governed feed directly (that stays Phase 3's
+  consumer-side install-time design, which has its own real feed to query).
+- Implemented `tools/seasoned_public_feed.py`:
+  `resolve_seasoned_public_version(package, *, min_age_days=7, now=None,
+  fetch=...)` queries PyPI's JSON API (`https://pypi.org/pypi/<package>/json`)
+  and returns the newest release whose EARLIEST uploaded file is at least
+  `min_age_days` old, excluding any release PyPI reports as yanked or that
+  parses as a pre/dev release. `min_age_days=7` is a deliberately modest
+  default floor for the toolchain specifically -- not derived from Phase 1's
+  own measured per-package lag (0 to 65+ days across just 3 dependencies of
+  one plugin), which Phase 1 itself found too package-specific to
+  generalize into one constant; this is a cheaper, narrower approximation
+  for foundational packaging tooling only.
+- Deliberately stdlib-only (`urllib.request`, no third-party `packaging`
+  import): `build_toolchain_lock.py` already applies this exact constraint
+  to itself (`_assert_toolchain_satisfies_build_requires`'s own
+  `packaging`-dependent logic runs as an inline script executed THROUGH the
+  locked toolchain venv's own interpreter, never imported into the host
+  process, so this tool keeps working on a genuinely clean machine with no
+  `packaging` installed anywhere yet) -- this module honors the same rule,
+  via a narrow, self-contained `_parse_release_version` (recognizes only a
+  clean, unsuffixed numeric release segment, optionally with a PEP 440
+  epoch; anything else, including every genuine pre/post/dev release, is
+  excluded rather than guessed at).
+- Age is measured from a release's EARLIEST uploaded file, not its latest
+  -- a version later re-uploaded (e.g. to add a missing wheel tag) is still
+  measured from when it first became available, not artificially
+  refreshed. The real network fetch is isolated behind an injectable
+  `fetch` parameter so tests exercise the actual selection logic against
+  fixed, synthetic responses rather than real (slow, flaky, not
+  reproducible) calls to pypi.org.
+- 26 unit tests (`tools/test_seasoned_public_feed.py`): newest-seasoned
+  selection, yanked/pre-release exclusion (including when they'd otherwise
+  be the newest-and-old-enough candidate), earliest-file age measurement,
+  the exact min-age-days boundary, empty/no-qualifying-release and
+  malformed-JSON/missing-`releases`-key fail-closed paths, HTTP/URL error
+  wrapping, a naive (non-timezone-aware) `now` rejection, the real
+  `_default_fetch`'s request/timeout construction (stubbed at
+  `urllib.request.urlopen`, never touching the real network), and
+  `_parse_release_version`'s own parametrized accept/reject cases. `ruff
+  check` and `tools/check-module-size.py` both pass; no changefile
+  required (this diff touches no `plugins/<name>/` tree).
+- **Still open (this effort's own next slice):** actually wire this
+  resolver into `resolve_toolchain_lock`/`build_python_artifacts.py`'s CLI
+  (a caller-selectable "seasoned public" mode, distinct from and never
+  silently substituting the existing governed-feed-only default), then wire
+  THAT into a new `validate-and-promote.yml` job that builds, attests
+  (`actions/attest-build-provenance`, in a job scoped with only
+  `id-token: write`/`attestations: write`/`contents: read` -- never
+  `APERTURE_RELEASE_TOKEN`, per the Trust root/Credential separation Open
+  Design Questions below), and hands the result to `promote` for
+  publication as a GitHub Release asset -- mirroring the existing
+  coverage-baseline download/gate/publish pattern already in that
+  workflow's `promote` job.
 
 ### 2026-10-02 - Phase 2 slice 2: shared build-toolchain lock
 

@@ -1,0 +1,216 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parents[1]
+MODULE_PATH = REPO / "tools" / "seasoned_public_feed.py"
+
+_SPEC = importlib.util.spec_from_file_location("seasoned_public_feed", MODULE_PATH)
+assert _SPEC is not None and _SPEC.loader is not None
+spf = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(spf)
+
+_NOW = datetime(2026, 10, 10, tzinfo=timezone.utc)
+
+
+def _releases_payload(releases: dict) -> bytes:
+    return json.dumps({"releases": releases}).encode("utf-8")
+
+
+def _file(upload_time: str, *, yanked: bool = False) -> dict:
+    return {"upload_time_iso_8601": upload_time, "yanked": yanked}
+
+
+class TestResolveSeasonedPublicVersion:
+    def test_picks_newest_seasoned_release(self):
+        payload = _releases_payload(
+            {
+                "1.0.0": [_file("2026-01-01T00:00:00.000000Z")],
+                "1.5.0": [_file("2026-09-20T00:00:00.000000Z")],  # 20 days old
+                "2.0.0": [_file("2026-10-05T00:00:00.000000Z")],  # 5 days old, too new
+            }
+        )
+        got = spf.resolve_seasoned_public_version(
+            "pkg", min_age_days=7, now=_NOW, fetch=lambda url: payload
+        )
+        assert got == "1.5.0"
+
+    def test_excludes_yanked_release_even_if_old_enough(self):
+        payload = _releases_payload(
+            {
+                "1.0.0": [_file("2026-01-01T00:00:00.000000Z")],
+                "2.0.0": [_file("2026-01-01T00:00:00.000000Z", yanked=True)],
+            }
+        )
+        got = spf.resolve_seasoned_public_version(
+            "pkg", min_age_days=7, now=_NOW, fetch=lambda url: payload
+        )
+        assert got == "1.0.0"
+
+    def test_excludes_prerelease_even_if_old_enough(self):
+        payload = _releases_payload(
+            {
+                "1.0.0": [_file("2026-01-01T00:00:00.000000Z")],
+                "2.0.0rc1": [_file("2026-01-01T00:00:00.000000Z")],
+                "2.0.0.dev0": [_file("2026-01-01T00:00:00.000000Z")],
+                "2.0.0b2": [_file("2026-01-01T00:00:00.000000Z")],
+            }
+        )
+        got = spf.resolve_seasoned_public_version(
+            "pkg", min_age_days=7, now=_NOW, fetch=lambda url: payload
+        )
+        assert got == "1.0.0"
+
+    def test_age_measured_from_earliest_file_not_latest(self):
+        # A version re-uploaded recently (e.g. to add a missing wheel tag)
+        # must still be measured from when it FIRST became available, not
+        # artificially refreshed by the later upload.
+        payload = _releases_payload(
+            {
+                "1.0.0": [
+                    _file("2026-01-01T00:00:00.000000Z"),
+                    _file("2026-10-09T00:00:00.000000Z"),  # re-upload, 1 day old
+                ],
+            }
+        )
+        got = spf.resolve_seasoned_public_version(
+            "pkg", min_age_days=7, now=_NOW, fetch=lambda url: payload
+        )
+        assert got == "1.0.0"
+
+    def test_exact_boundary_age_is_accepted(self):
+        exactly_seven_days_ago = "2026-10-03T00:00:00.000000Z"
+        payload = _releases_payload({"1.0.0": [_file(exactly_seven_days_ago)]})
+        got = spf.resolve_seasoned_public_version(
+            "pkg", min_age_days=7, now=_NOW, fetch=lambda url: payload
+        )
+        assert got == "1.0.0"
+
+    def test_no_qualifying_release_raises(self):
+        payload = _releases_payload({"1.0.0": [_file("2026-10-09T00:00:00.000000Z")]})
+        with pytest.raises(spf.SeasonedVersionError, match="no release at least"):
+            spf.resolve_seasoned_public_version(
+                "pkg", min_age_days=7, now=_NOW, fetch=lambda url: payload
+            )
+
+    def test_empty_releases_raises(self):
+        payload = _releases_payload({})
+        with pytest.raises(spf.SeasonedVersionError, match="no release at least"):
+            spf.resolve_seasoned_public_version(
+                "pkg", min_age_days=7, now=_NOW, fetch=lambda url: payload
+            )
+
+    def test_version_with_no_uploaded_files_is_skipped(self):
+        payload = _releases_payload(
+            {
+                "1.0.0": [],
+                "0.9.0": [_file("2026-01-01T00:00:00.000000Z")],
+            }
+        )
+        got = spf.resolve_seasoned_public_version(
+            "pkg", min_age_days=7, now=_NOW, fetch=lambda url: payload
+        )
+        assert got == "0.9.0"
+
+    def test_unparseable_version_string_is_skipped_not_guessed(self):
+        payload = _releases_payload(
+            {
+                "not-a-version": [_file("2026-01-01T00:00:00.000000Z")],
+                "1.0.0": [_file("2026-01-01T00:00:00.000000Z")],
+            }
+        )
+        got = spf.resolve_seasoned_public_version(
+            "pkg", min_age_days=7, now=_NOW, fetch=lambda url: payload
+        )
+        assert got == "1.0.0"
+
+    def test_malformed_json_raises(self):
+        with pytest.raises(spf.SeasonedVersionError, match="not valid JSON"):
+            spf.resolve_seasoned_public_version(
+                "pkg", now=_NOW, fetch=lambda url: b"not json at all {"
+            )
+
+    def test_missing_releases_key_raises(self):
+        payload = json.dumps({"info": {}}).encode("utf-8")
+        with pytest.raises(spf.SeasonedVersionError, match="no 'releases' object"):
+            spf.resolve_seasoned_public_version("pkg", now=_NOW, fetch=lambda url: payload)
+
+    def test_http_error_raises_seasoned_version_error(self):
+        import urllib.error
+
+        def failing_fetch(url):
+            raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+
+        with pytest.raises(spf.SeasonedVersionError, match="HTTP 404"):
+            spf.resolve_seasoned_public_version("pkg", now=_NOW, fetch=failing_fetch)
+
+    def test_url_error_raises_seasoned_version_error(self):
+        import urllib.error
+
+        def failing_fetch(url):
+            raise urllib.error.URLError("network unreachable")
+
+        with pytest.raises(spf.SeasonedVersionError, match="could not reach"):
+            spf.resolve_seasoned_public_version("pkg", now=_NOW, fetch=failing_fetch)
+
+    def test_naive_now_rejected(self):
+        payload = _releases_payload({"1.0.0": [_file("2026-01-01T00:00:00.000000Z")]})
+        with pytest.raises(spf.SeasonedVersionError, match="naive datetime"):
+            spf.resolve_seasoned_public_version(
+                "pkg", now=datetime(2026, 10, 10), fetch=lambda url: payload  # noqa: DTZ001 -- deliberately naive, exercising the rejection path
+            )
+
+    def test_real_default_fetch_sets_user_agent_and_timeout(self, monkeypatch):
+        # Doesn't hit the real network -- stubs urllib.request.urlopen to
+        # prove `_default_fetch` builds the request/timeout correctly,
+        # without this test depending on pypi.org being reachable.
+        captured = {}
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc_info):
+                return False
+
+            def read(self):
+                return b'{"releases": {}}'
+
+        def fake_urlopen(request, timeout=None):
+            captured["url"] = request.full_url
+            captured["headers"] = dict(request.header_items())
+            captured["timeout"] = timeout
+            return _FakeResponse()
+
+        monkeypatch.setattr(spf.urllib.request, "urlopen", fake_urlopen)
+        result = spf._default_fetch("https://pypi.org/pypi/pkg/json")
+        assert result == b'{"releases": {}}'
+        assert captured["url"] == "https://pypi.org/pypi/pkg/json"
+        assert captured["timeout"] == spf._REQUEST_TIMEOUT_SECONDS
+        assert any(k.lower() == "user-agent" for k in captured["headers"])
+
+
+class TestParseReleaseVersion:
+    @pytest.mark.parametrize(
+        "version_str,expected",
+        [
+            ("1.0.0", (0, (1, 0, 0))),
+            ("2.3", (0, (2, 3))),
+            ("1!2.3.4", (1, (2, 3, 4))),
+            ("10.20.30", (0, (10, 20, 30))),
+        ],
+    )
+    def test_parses_clean_release_versions(self, version_str, expected):
+        assert spf._parse_release_version(version_str) == expected
+
+    @pytest.mark.parametrize(
+        "version_str",
+        ["1.0.0rc1", "1.0.0.dev0", "1.0.0b2", "1.0.0a1", "1.0.0.post1", "not-a-version", ""],
+    )
+    def test_rejects_non_clean_versions(self, version_str):
+        assert spf._parse_release_version(version_str) is None
