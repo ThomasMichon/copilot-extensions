@@ -156,6 +156,26 @@ test("skips duplicate completed reviews of live head", async () => {
   assert.equal(result.writes.length, 0);
 });
 
+for (const event of ["base_ref_changed", "reopened"]) {
+  test(`${event} requires a review newer than the current diff epoch`, async () => {
+    const result = await run({
+      events: [{ event, created_at: new Date(NOW - 60_000).toISOString() }],
+      existingReviews: [{ user: { login: BOT }, commit_id: "latest-head", id: 1,
+        state: "APPROVED", submitted_at: new Date(NOW - 120_000).toISOString() }],
+    });
+    assert.equal(result.writes.length, 1);
+  });
+}
+
+test("review after retarget suppresses a duplicate queued request", async () => {
+  const result = await run({
+    events: [{ event: "base_ref_changed", created_at: new Date(NOW - 120_000).toISOString() }],
+    existingReviews: [{ user: { login: BOT }, commit_id: "latest-head", id: 1,
+      state: "APPROVED", submitted_at: new Date(NOW - 60_000).toISOString() }],
+  });
+  assert.equal(result.writes.length, 0);
+});
+
 test("pending or dismissed reviews do not suppress an automatic request", async () => {
   for (const state of ["PENDING", "DISMISSED"]) {
     const result = await run({

@@ -87,7 +87,9 @@ before that first promotion completes.
 Automatic requests are serialized per PR with a **five-minute cooldown** from
 the most recent native Copilot `review_requested` timeline event. Rapid pushes
 coalesce to the live head; a queued run skips a head already reviewed, or a PR
-that is closed, draft, or retargeted away from `dev`. Independent PRs do not
+that is closed, draft, or retargeted away from `dev`. Reused reviews must be
+newer than the latest base-retarget or reopen timeline event, so a same-head
+review of an earlier diff cannot suppress a required new request. Independent PRs do not
 share a cooldown, and manual requests remain available. Metadata and confirmation
 reads use `GITHUB_TOKEN`; the licensed owner credential performs only the request
 write. An already-pending Copilot review is awaited for up to five minutes before

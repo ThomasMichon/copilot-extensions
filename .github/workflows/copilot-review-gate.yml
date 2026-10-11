@@ -186,6 +186,7 @@ jobs:
             const reader = require("@actions/github").getOctokit(process.env.REVIEW_READ_TOKEN);
             const author = context.payload.pull_request.user.login;
             const pull_number = context.payload.pull_request.number;
+            let reviewEpochAt = 0;
 
             function sleep(ms) {
               return new Promise((resolve) => setTimeout(resolve, ms));
@@ -219,6 +220,7 @@ jobs:
                       review.user?.login === "copilot-pull-request-reviewer[bot]" &&
                       ["APPROVED", "COMMENTED", "CHANGES_REQUESTED"].includes(review.state) &&
                       review.submitted_at &&
+                      Date.parse(review.submitted_at) > reviewEpochAt &&
                       review.commit_id === headSha,
                   )
                   .map((review) => review.id),
@@ -260,6 +262,13 @@ jobs:
             });
             let lastRequestAt = 0;
             for (const event of events) {
+              if (["base_ref_changed", "reopened"].includes(event.event)) {
+                const timestamp = Date.parse(event.created_at);
+                if (!Number.isFinite(timestamp) || timestamp > Date.now()) {
+                  throw new Error("Review epoch event has an invalid or future timestamp.");
+                }
+                reviewEpochAt = Math.max(reviewEpochAt, timestamp);
+              }
               if (event.event === "review_requested" &&
                   event.requested_reviewer?.login === "copilot-pull-request-reviewer[bot]") {
                 const timestamp = Date.parse(event.created_at);
