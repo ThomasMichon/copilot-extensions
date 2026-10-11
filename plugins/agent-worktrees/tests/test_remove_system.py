@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import types
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +13,14 @@ import pytest
 from agent_worktrees import __main__ as cli
 from agent_worktrees import git_ops
 from agent_worktrees import tracking
+
+
+@pytest.fixture(autouse=True)
+def receiving_project_authority(monkeypatch, tmp_path):
+    config = _config(tmp_path / "receiving")
+    monkeypatch.setattr(cli.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(cli.cfg, "load_project_config", lambda project: cli.cfg.load_config())
+    monkeypatch.setattr(cli.cfg, "load_machines_yaml", lambda anchor: {})
 
 
 def _record(tmp_path: Path) -> tuple[tracking.WorktreeRecord, Path]:
@@ -42,14 +51,13 @@ def _record(tmp_path: Path) -> tuple[tracking.WorktreeRecord, Path]:
 
 def _config(tmp_path: Path):
     anchor = tmp_path / "anchor"
-    anchor.mkdir()
-    return types.SimpleNamespace(
-        default_repo=types.SimpleNamespace(
+    anchor.mkdir(parents=True, exist_ok=True)
+    return cli.cfg.Config(
+        srcroot=str(tmp_path), machine="machine", platform="windows", repo_name="demo",
+        repos={"demo": cli.cfg.RepoConfig(
             anchor=str(anchor), remote="origin", default_branch="master",
             worktree_root=str(tmp_path / "worktree_root"),
-        ),
-        repos={},
-        repo_name="demo",
+        )},
     )
 
 
@@ -661,16 +669,16 @@ def test_remove_system_resolves_record_repo_not_default(tmp_path):
     default_anchor.mkdir()
     other_anchor = tmp_path / "other-anchor"
     other_anchor.mkdir()
-    other_repo = types.SimpleNamespace(
+    other_repo = cli.cfg.RepoConfig(
         anchor=str(other_anchor), remote="origin", default_branch="master",
         worktree_root=str(tmp_path / "other-worktree-root"),
     )
-    config = types.SimpleNamespace(
-        default_repo=types.SimpleNamespace(
+    config = cli.cfg.Config(
+        srcroot=str(tmp_path), machine="machine", platform="windows", repo_name="demo",
+        repos={"demo": cli.cfg.RepoConfig(
             anchor=str(default_anchor), remote="origin", default_branch="master",
             worktree_root=str(tmp_path / "default-worktree-root"),
-        ),
-        repos={"other-repo": other_repo},
+        ), "other-repo": other_repo},
     )
 
     with patch("agent_worktrees.config.load_config", return_value=config), \
@@ -879,8 +887,7 @@ def test_remove_system_fails_closed_on_unknown_record_repo(tmp_path):
     args = argparse.Namespace(worktree_id=record.worktree_id, json=True, force=True)
 
     config = _config(tmp_path)
-    config.repos = {}
-    config.repo_name = "demo"
+    config = replace(config, repos={})
     with patch("agent_worktrees.config.load_config", return_value=config), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
          patch("agent_worktrees.output._json_error") as json_error:
