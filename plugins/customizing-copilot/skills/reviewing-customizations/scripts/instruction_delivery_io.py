@@ -228,14 +228,18 @@ def plan_fallback_change(
 def resolve_unpaired(
     root: Path, destination: str, expected: bytes, legacy: bytes, io: DeliveryIO
 ) -> dict[str, object]:
-    local = delivery.local_destination(destination)
-    if not io.safe(root, PurePosixPath(local)).exists():
-        local = delivery.legacy_local_destination(destination)
-    raw = io.read(io.safe(root, PurePosixPath(local)), 2 * 1024 * 1024)
-    if raw not in (expected, legacy):
+    for local in [delivery.local_destination(destination), delivery.legacy_local_destination(destination)]:
+        try:
+            raw = io.read(io.safe(root, PurePosixPath(local)), 2 * 1024 * 1024)
+            if raw not in (expected, legacy):
+                continue
+            marker = delivery.parse_marker(raw)
+            delivery.validate_local_template(raw, marker)
+            break
+        except (OSError, ValueError):
+            continue
+    else:
         raise ValueError("unpaired local source differs from its enabled canonical template")
-    marker = delivery.parse_marker(raw)
-    delivery.validate_local_template(raw, marker)
     return {
         "schema": "copilot-extensions.instruction-source-selection",
         "version": 1, "selectedPath": local, "identity": delivery.identity(marker),
@@ -251,6 +255,7 @@ def resolve_unpaired(
 def retire_legacy_local(
     root: Path, spec: delivery.Projection, io: DeliveryIO, result: object,
     tracked_paths: set[str], inconclusive: bool,
+    recheck_tracking: Callable[[list[str]], tuple[set[str], bool]],
 ) -> None:
     legacy = delivery.legacy_local_destination(spec.destination)
     try:
@@ -273,6 +278,9 @@ def retire_legacy_local(
         path = io.safe(root, PurePosixPath(legacy))
         if io.read(path, 2 * 1024 * 1024) != raw:
             raise ValueError("legacy local changed after validation")
+        latest_tracked, latest_inconclusive = recheck_tracking([legacy])
+        if legacy in latest_tracked or latest_inconclusive:
+            raise ValueError("legacy local became tracked or tracking status is unknown")
         path.unlink()
         result.changed.append(legacy)
         result.removed.append(legacy)

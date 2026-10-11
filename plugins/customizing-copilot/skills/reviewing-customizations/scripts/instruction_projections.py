@@ -1263,6 +1263,7 @@ def _render_local_cache_locked(
             delivery_io.retire_legacy_local(
                 root, spec, _delivery_io(), result,
                 legacy_tracking, legacy_inconclusive,
+                lambda paths: _resolve_git_tracked_paths(root, paths),
             )
     delivery_io.report_unmanaged_legacy_locals(
         root, {spec.destination for local, spec, _ in accepted if local in valid_destinations},

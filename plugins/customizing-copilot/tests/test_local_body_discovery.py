@@ -180,3 +180,34 @@ def test_ignore_probe_permission_failure_is_not_non_git_directory(
         a[0], 128, stdout=b"", stderr=b"fatal: permission denied"
     ))
     assert not io.ignored_local_paths(tmp_path, [".github/copilot/context-locals/policy/a.local.md"])
+
+
+def test_invalid_new_unpaired_local_falls_back_to_authenticated_legacy(tmp_path: Path) -> None:
+    repo, source, spec = fixture(tmp_path)
+    old = repo / delivery.legacy_local_destination(spec.destination)
+    old.parent.mkdir(parents=True)
+    old.write_bytes(projections.render_projection(spec, include_prefer_local=False).content)
+    new = repo / delivery.local_destination(spec.destination)
+    new.parent.mkdir(parents=True)
+    new.write_bytes(b"foreign new file")
+    selected = projections.resolve_instruction_source(repo, spec.destination, [source])
+    assert selected["selectedPath"] == delivery.legacy_local_destination(spec.destination)
+
+
+def test_legacy_index_race_is_rechecked_before_retirement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo, source, spec = fixture(tmp_path)
+    old = repo / delivery.legacy_local_destination(spec.destination)
+    old.parent.mkdir(parents=True)
+    raw = projections.render_projection(spec, include_prefer_local=False).content
+    old.write_bytes(raw)
+    calls = 0
+
+    def tracked(root: Path, paths: list[str]) -> tuple[set[str], bool]:
+        nonlocal calls
+        calls += 1
+        return ({old.relative_to(root).as_posix()} if calls >= 3 else set()), False
+
+    monkeypatch.setattr(projections, "_resolve_git_tracked_paths", tracked)
+    result = projections.render_local_cache(repo, lambda: [source])
+    assert old.read_bytes() == raw and calls == 3
+    assert any("became tracked" in f.message for f in result.findings)
