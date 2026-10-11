@@ -5,8 +5,11 @@ import io
 import json
 import os
 import shutil
+import socketserver
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -65,7 +68,8 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path)
     from agent_procutil import no_window_kwargs
     from agent_worktrees.hook_ipc import HookIpcServer
 
-    shell = shutil.which("pwsh") or shutil.which("powershell")
+    shell = shutil.which(os.environ.get("AGENT_WORKTREES_TEST_SHELL", "pwsh"))
+    shell = shell or shutil.which("powershell")
     if shell is None:
         pytest.skip("PowerShell unavailable in explicit integration venue")
     seen = []
@@ -137,3 +141,69 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path)
         ]
     finally:
         server.close()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("network")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(
+    os.environ.get("AGENT_WORKTREES_SHELL_HOOK_INTEGRATION") != "1",
+    reason="explicit native shell/daemon integration",
+)
+def test_real_shell_rejects_invalid_or_unbounded_responses(tmp_path):
+    from agent_procutil import no_window_kwargs
+
+    shell = shutil.which(os.environ.get("AGENT_WORKTREES_TEST_SHELL", "pwsh"))
+    shell = shell or shutil.which("powershell")
+    if shell is None:
+        pytest.skip("PowerShell unavailable in explicit integration venue")
+
+    class Handler(socketserver.StreamRequestHandler):
+        def handle(self):
+            request = json.loads(self.rfile.readline())
+            mode = request["payload"]["mode"]
+            responses = {
+                "version": b'{"version":2,"result":{}}\n',
+                "fallback": b'{"version":1,"fallback":true}\n',
+                "shape": b'{"version":1,"result":[]}\n',
+                "oversized": b"x" * 65536 + b"\n",
+                "unterminated": b'{"version":1,"result":{}}',
+            }
+            if mode == "timeout":
+                time.sleep(0.8)
+                return
+            self.wfile.write(responses[mode])
+
+    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        harness = tmp_path / "responses.ps1"
+        escaped = str(SCRIPT).replace("'", "''")
+        harness.write_text(
+            f". '{escaped}'\n"
+            f"$endpoint=@{{hook_transport='tcp';hook_endpoint='127.0.0.1:{server.server_address[1]}';hook_token='fixture'}}\n"
+            "foreach($mode in @('version','fallback','shape','oversized','unterminated')) {\n"
+            "  $payload=ConvertTo-Json @{mode=$mode} -Compress\n"
+            "  if($null -ne (Invoke-ResidentPostTool $endpoint $payload)){throw \"$mode accepted\"}\n"
+            "}\n"
+            "$timer=[Diagnostics.Stopwatch]::StartNew()\n"
+            "try { $null=Invoke-ResidentPostTool $endpoint '{\"mode\":\"timeout\"}' } catch [IO.IOException] {}\n"
+            "if($timer.Elapsed.TotalSeconds -gt 2){throw 'unbounded response wait'}\n"
+            "$endpoint.installReceipt='another-cell'\n"
+            "if($null -ne (Invoke-ResidentPostTool $endpoint '{}')){throw 'foreign cell accepted'}\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+            capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == ""
+        assert result.stderr == ""
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

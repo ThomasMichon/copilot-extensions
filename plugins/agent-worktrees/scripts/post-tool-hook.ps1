@@ -69,6 +69,12 @@ function Invoke-ResidentPostTool {
 
 function Invoke-PostToolHook {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw)
+    try {
+        Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop
+    } catch {
+        Set-Location -LiteralPath ([IO.Path]::GetPathRoot($PSScriptRoot)) -ErrorAction Stop
+    }
+    [IO.Directory]::SetCurrentDirectory((Get-Location).Path)
     $contextual = -not [string]::IsNullOrWhiteSpace($env:COPILOT_EXTENSIONS_CONTEXT)
     if (-not $contextual) {
         try {
