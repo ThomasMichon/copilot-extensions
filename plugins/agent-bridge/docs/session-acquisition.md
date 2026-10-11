@@ -67,6 +67,29 @@ owner reports the existing `worktrees_unavailable` refusal without certifying
 that an earlier launch did not happen. Historical and unknown effects retain
 their existing reconciliation requirement. No acquisition wire capability or
 protocol change is introduced by installed-owner resolution.
+
+For an admitted new delivery, the bridge records the complete request in its
+`prepared` journal stage before the worktree-owner preflight. A preflight
+refusal therefore leaves a request-digest-bound `refused/prepared` receipt,
+including when owner capability is unavailable. Existing pending operations
+retain the normal reconciliation path; absence never settles an old attempt.
+
+An automatic reused allocation can create its first native conversation only
+when the dispatch provider supplies the complete consecutive same-task
+reservation history (bounded to 256 attempts), beginning with `created`
+allocation, and every predecessor has a matching positive
+`refused/prepared` bridge receipt. Worktree, task, mode, target, project,
+generation, retirement and request digests must agree. No predecessor may
+have a session handle, a spawned/unknown outcome, a launch-stage receipt,
+or a binding; current native head, holder, continuation intent and task
+attachments still block first-conversation creation. This preserves allocation
+provenance without retiring or discarding a transcript.
+
+Missing/truncated provider history, gaps, missing original receipts, database
+replacement and legacy attempts that failed before journaling do not authorize
+creation. `acquisition-inspect "<reservation-key>:acquire"` reads individual
+stages; `acquisition_not_found` is unknown history, not a no-launch receipt.
+No blanket fresh or rearm operation repairs missing proof.
 A bridge binding from an older generation of the same task remains resumable
 when current owner facts authorize it. A future/stale admission generation
 refuses. Historical expired registrations that are not the current native head

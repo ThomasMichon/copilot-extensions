@@ -25,6 +25,7 @@ from .acquisition_policy import (
 )
 from .acquisition_store import AcquisitionStore
 from .acquisition_executor import executor
+from .acquisition_initial_creation import initial_creation_proven
 from .db_core import live_session_is_fresh, local_pid_alive
 from .models import SessionStatus, StartSessionRequest
 from .preference_requests import apply_request_preferences
@@ -70,14 +71,22 @@ class AcquisitionRuntime:
             self.store.release_gate(req)
             return replay.result
         venue = await verify_dispatch(req, self.resolver)
-        row, head = await verify_worktree(req)
+        preflight_claim = None
+        if not completed and not self.store.pending(req.worktree_id):
+            preflight_claim = self.store.journal.claim(req)
+        try:
+            row, head = await verify_worktree(req)
+        except AcquisitionRefused as exc:
+            if preflight_claim and preflight_claim.token:
+                self.store.journal.refuse(req, preflight_claim.token, exc.code)
+            raise
         if venue["acquisition_reservation"]["state"] == "reserving":
             await mark_dispatch_acquisition(req, self.resolver)
         await self._reconcile_prior(req, row, head)
         venue = await verify_dispatch(req, self.resolver)
         row, head = await verify_worktree(req)
         try:
-            claim = self.store.journal.claim(req)
+            claim = preflight_claim or self.store.journal.claim(req)
         except AcquisitionRefused as exc:
             if exc.code != "acquisition_pending":
                 raise
@@ -91,6 +100,13 @@ class AcquisitionRuntime:
         try:
             evidence = self._evidence(req, venue, head)
             selected_req = req
+            initial_creation = False
+            if (
+                not evidence.conversations and head is None
+                and initial_creation_proven(req, venue, self.store)
+            ):
+                selected_req = req.model_copy(update={"intent": "fresh"})
+                initial_creation = True
             if req.intent == "fresh" and not (
                 req.conversation_retired is True
                 or venue["acquisition_reservation"].get("attempt") == 1
@@ -140,6 +156,22 @@ class AcquisitionRuntime:
         except AcquisitionRefused as exc:
             self.store.journal.refuse(req, token, exc.code)
             raise
+        if initial_creation:
+            try:
+                venue = await verify_dispatch(req, self.resolver)
+                row, head = await verify_worktree(req)
+                evidence = self._evidence(req, venue, head)
+                if (
+                    head is not None or evidence.conversations
+                    or not initial_creation_proven(req, venue, self.store)
+                ):
+                    raise AcquisitionRefused(
+                        "initial_creation_fence_changed", "first-conversation authority changed before launch",
+                    )
+                select_acquisition(selected_req, evidence)
+            except AcquisitionRefused as exc:
+                self.store.journal.refuse(req, token, exc.code)
+                raise
         if req.mode == "cli" and decision.acquired != "reused":
             existing = self.db.get_cli_mode_reservation(req.worktree_id)
             if existing and existing["expires_at"] > time.time():

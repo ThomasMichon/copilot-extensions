@@ -87,6 +87,20 @@ def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
             task = c.get(task_id)
             attachments = c.attachments(task_id)
             reservations = c.list_reservations(task_id=task_id, latest_only=True, limit=1)
+            reservation_history = None
+            latest = reservations[0] if reservations else {}
+            attempt = latest.get("attempt")
+            if (
+                latest.get("state") == "reserving"
+                and latest.get("worktree_ownership") == "reused"
+                and type(attempt) is int and 2 <= attempt <= 256
+            ):
+                reservation_history = {
+                    "version": 1,
+                    "reservations": c.list_reservations(
+                        task_id=task_id, latest_only=False, limit=256,
+                    ),
+                }
     except DispatchError as exc:
         if exc.status_code == 404:
             print(f"dispatch task {task_id} not found", file=sys.stderr)
@@ -164,6 +178,7 @@ def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
                 "task": task,
                 "attachments": attachments,
                 "acquisition_reservation": acquisition_reservation,
+                "acquisition_reservation_history": reservation_history,
             },
         }
         print(json.dumps(spec))
@@ -195,6 +210,7 @@ def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
             "task": task,
             "attachments": attachments,
             "acquisition_reservation": acquisition_reservation,
+            "acquisition_reservation_history": reservation_history,
         },
     }
     print(json.dumps(spec))

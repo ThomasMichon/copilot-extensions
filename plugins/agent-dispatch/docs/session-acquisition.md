@@ -13,6 +13,15 @@ current generation/reservation, recorded worktree provenance, explicit
 retirement (including unknown), carried identity, charter, project, driver and
 verification timeout. The `dispatch:` namespace exposes current owner facts
 and the latest acquisition reservation for bridge verification.
+For a reserving reused allocation with 2–256 attempts, the provider also supplies
+a versioned bounded reservation-history snapshot. Bridge requires the complete
+consecutive same-task chain and a request-bound `refused/prepared` receipt for
+every predecessor, starting with a created allocation, before creating a first
+conversation in the reused directory. A missing receipt, truncated/gapped
+history, prior native handle, spawned outcome or unknown launch never grants
+fresh authority. Bridge revalidates that proof after target preparation and
+before entering its native launch gate. Older providers omit the snapshot and
+retain strict refusal; no caller-supplied history grants permission.
 Only an active task (`queued`, `claimed`, `started`, or `suspended`) with a
 `reserving`/`spawned` reservation that has not requested release may use that
 reservation as its namespace worktree fallback. Historical reservations remain

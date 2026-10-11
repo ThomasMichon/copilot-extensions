@@ -54,7 +54,7 @@ class _FakeClient:
         return self._attachments
 
     def list_reservations(self, **kwargs):
-        return self._reservations
+        return self._reservations[:1] if kwargs.get("latest_only") else self._reservations
 
 
 def _args(argv):
@@ -65,6 +65,33 @@ def test_namespace_list_is_empty(capsys):
     rc = m.main(["namespace-list"])
     assert rc == 0
     assert json.loads(capsys.readouterr().out) == []
+
+
+def test_namespace_resolve_supplies_bounded_retry_reservation_history(monkeypatch, capsys):
+    current = {
+        "key": "reservation-b", "task_id": "task-a", "attempt": 2,
+        "worktree": "wt-active", "state": "reserving", "worktree_ownership": "reused",
+    }
+    previous = {**current, "key": "reservation-a", "attempt": 1, "state": "deferred",
+                "worktree_ownership": "created"}
+    calls = []
+    client = _FakeClient({"id": "task-a", "status": "queued"}, reservations=[current, previous])
+    original = client.list_reservations
+    def list_rows(**kwargs):
+        calls.append(kwargs)
+        return original(**kwargs)
+    client.list_reservations = list_rows
+    monkeypatch.setattr(m, "_client", lambda *_args, **_kwargs: client)
+    assert m.main(["namespace-resolve", "task-a"]) == 0
+    spec = json.loads(capsys.readouterr().out)
+    assert spec["venue"]["acquisition_reservation"] == current
+    assert spec["venue"]["acquisition_reservation_history"] == {
+        "version": 1, "reservations": [current, previous],
+    }
+    assert calls == [
+        {"task_id": "task-a", "latest_only": True, "limit": 1},
+        {"task_id": "task-a", "latest_only": False, "limit": 256},
+    ]
 
 
 def test_namespace_resolve_claimed_task_returns_worktree_spec(monkeypatch, capsys):
