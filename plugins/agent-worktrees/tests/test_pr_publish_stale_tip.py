@@ -9,12 +9,22 @@ from agent_worktrees import git_ops, pr_publish
 
 
 @pytest.mark.parametrize("ancestor", [True, False])
-def test_stale_lease_retries_only_fast_forward(monkeypatch, ancestor):
+@pytest.mark.parametrize("refspec", ["HEAD:refs/heads/pr/example", "pr/example"])
+def test_stale_lease_retries_only_fast_forward(monkeypatch, ancestor, refspec):
     monkeypatch.setattr(pr_publish, "publish_lock", lambda *args, **kwargs: nullcontext())
     monkeypatch.setattr(pr_publish, "_pr_for", lambda *args: None)
-    monkeypatch.setattr(pr_publish, "_tip", lambda *args: "remote-tip")
+    def tip(remote, branch, cwd):
+        assert branch == "pr/example"
+        return "remote-tip"
+
+    monkeypatch.setattr(pr_publish, "_tip", tip)
     def ancestry(*args, **kwargs):
+        assert args == (
+            "--no-replace-objects", "merge-base", "--is-ancestor", "remote-tip",
+            refspec.partition(":")[0],
+        )
         assert kwargs["check"] is False
+        assert kwargs["isolated_repository"] is True
         return SimpleNamespace(returncode=0 if ancestor else 1)
 
     monkeypatch.setattr(git_ops, "git", ancestry)
@@ -26,7 +36,7 @@ def test_stale_lease_retries_only_fast_forward(monkeypatch, ancestor):
 
     monkeypatch.setattr(git_ops, "push", push)
     result = pr_publish.push_checked(
-        None, "origin", "HEAD:refs/heads/pr/example", cwd=".", force_with_lease_expect="old",
+        None, "origin", refspec, cwd=".", force_with_lease_expect="old",
     )
     assert result.ok == ancestor
     assert len(calls) == (2 if ancestor else 1)

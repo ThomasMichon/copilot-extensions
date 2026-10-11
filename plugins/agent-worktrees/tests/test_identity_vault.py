@@ -62,6 +62,14 @@ def test_empty_file_override_still_uses_common_vault_key(monkeypatch):
     assert identity_marker.load_identity_key() == b"s" * 32
 
 
+def test_decode_reports_configured_vault_cache_miss(monkeypatch):
+    monkeypatch.delenv(identity_marker.KEY_ENV_VAR, raising=False)
+    monkeypatch.setenv(identity_vault.ARGV_ENV, json.dumps([sys.executable]))
+    monkeypatch.setattr(identity_vault, "_read_key_output", lambda argv: b"")
+    with pytest.raises(identity_marker.IdentityMarkerError, match="refresh its protected cache"):
+        identity_marker.decrypt_identity_payload("unused")
+
+
 def test_real_cache_adapter_output_boundary(caplog):
     value = base64.b64encode(b"s" * 32)
     assert identity_vault._read_key_output([

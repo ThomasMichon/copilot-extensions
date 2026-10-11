@@ -303,6 +303,13 @@ def decrypt_identity_payload(token_b64: str, key: bytes | None = None) -> dict:
             raise IdentityMarkerError("identity decoding requires the cryptography package") from exc
     resolved_key = key if key is not None else load_identity_key()
     if resolved_key is None:
+        from .identity_vault import ARGV_ENV
+
+        if not os.environ.get(KEY_ENV_VAR) and ARGV_ENV in os.environ:
+            raise IdentityMarkerError(
+                "configured shared vault key unavailable -- explicitly populate or "
+                "refresh its protected cache with agent-vault cache-populate"
+            )
         raise IdentityMarkerError(
             "no identity key configured -- set "
             f"{KEY_ENV_VAR} or place one at {identity_key_path()}"
