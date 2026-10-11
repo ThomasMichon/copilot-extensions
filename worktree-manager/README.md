@@ -61,6 +61,10 @@ treated as confirmed drift.
 
 ## Resume prompt
 
+The initial loading tab is labelled `Local` with its environment until the
+machine roster resolves its canonical name. It does not present the OS hostname
+as a configured machine or add roster/configuration I/O to first paint.
+
 The Picker's fast worktree listing joins cached rows with one mux-session
 enumeration on the target machine. Mux presence and attached-client counts
 therefore make Open available before git and transcript enrichment completes.

@@ -719,6 +719,41 @@ def test_get_keys_lists_swapped_keys(adopted_repo, capsys):
     assert "worktrees-root" in out
 
 
+def test_get_project_scalars_skip_worktree_identity(
+    adopted_repo, active_myproj, monkeypatch, capsys,
+):
+    anchor, wt_root, wt_path, _wt_id, conf = adopted_repo
+    monkeypatch.chdir(wt_path)
+    config_dir = wt_root / "config"
+    monkeypatch.setattr(cfg, "project_dir", lambda: config_dir)
+    calls = []
+
+    def load_config(*_args, **kwargs):
+        calls.append(kwargs["include_control_plane_related_pr"])
+        return conf
+
+    def unexpected_lookup(*_args, **_kwargs):
+        raise AssertionError("project-only scalars must not scan worktree identity")
+
+    monkeypatch.setattr(cfg, "load_config", load_config)
+    monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", unexpected_lookup)
+    monkeypatch.setattr(m, "_worktree_path_for_id", unexpected_lookup)
+    monkeypatch.setattr(m, "_cwd_is_inside_project", unexpected_lookup)
+    expected = {
+        "repo-dir": anchor,
+        "worktrees-root": wt_root,
+        "src-dir": conf.srcroot,
+        "config-dir": config_dir,
+        "machine": conf.machine,
+        "platform": conf.platform,
+        "project": conf.repo_name,
+    }
+    for key, value in expected.items():
+        assert m.cmd_get(types.SimpleNamespace(key=key)) == 0
+        assert capsys.readouterr().out.strip() == str(value)
+    assert calls == [False] * len(expected)
+
+
 def test_get_non_pr_key_skips_control_plane_related_pr(
     adopted_repo, active_myproj, monkeypatch, capsys,
 ):

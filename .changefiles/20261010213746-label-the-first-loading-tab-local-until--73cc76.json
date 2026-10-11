@@ -1,0 +1,9 @@
+{
+  "comment": "Label the first loading tab Local until the canonical machine roster resolves",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
