@@ -144,7 +144,7 @@ def _state(w):
 
     interpreted = prune.interpret_descriptor_payload(w.get("closure"))
     if interpreted.get("finalized_display"):
-        return "MERGED"
+        return "FINAL"
     # A live process owns the worktree regardless of a cached or concurrently
     # derived git/tracking state. Check this before the explicit ``state`` field
     # so a first-paint WIP/FINAL cannot hide a live PID lock.

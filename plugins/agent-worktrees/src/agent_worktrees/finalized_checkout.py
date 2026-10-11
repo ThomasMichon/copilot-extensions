@@ -38,3 +38,12 @@ def matches(record: tracking.WorktreeRecord) -> bool:
         return snapshot(record.worktree_path) == stamp
     except (git_ops.GitError, OSError, ValueError, subprocess.TimeoutExpired):
         return False
+
+
+def optional_snapshot(path: str) -> dict[str, str] | None:
+    try:
+        return snapshot(path)
+    except (git_ops.GitError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        from . import output
+        output.warn(f"Finalized checkout display could not be recorded: {exc}")
+        return None
