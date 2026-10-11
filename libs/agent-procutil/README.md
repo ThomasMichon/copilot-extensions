@@ -71,6 +71,14 @@ escaping this Job. With nested Jobs, Windows may accept a breakaway launch
 while retaining the child in the strict Job; cleanup, not launch failure,
 is the required witness.
 
+Callers that must prove cleanup before deleting owned runtime files use
+`job.terminate_and_wait(timeout_seconds)` rather than best-effort `close()`.
+The strict operation terminates the exact owned Job, checks native API results,
+waits for its active-process count to reach zero, and only then closes the handle.
+Native failure, invalid/expired timeout or an already-closed handle is an
+explicit error; uncertainty retains the handle for retry. This API grants no
+authority over unrelated processes and never substitutes a name-based kill.
+
 ## Vendoring
 
 **In dev**, most consumers' `pyproject.toml` reference this library through

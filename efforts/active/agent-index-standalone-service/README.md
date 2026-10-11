@@ -385,3 +385,10 @@ boundaries from implementation decisions and deployment-specific policy.
   after the management command exited; the existing warm engine was not
   restarted. Detailed corpus status remains slow, so no rollout-readiness claim
   or standalone-service migration follows from the restored liveness probe.
+- Final Windows cleanup review requires strict Job empty confirmation rather
+  than best-effort handle closure. The shared process library now exposes
+  explicit terminate/wait/close errors and retains uncertain handles; staging
+  preserves candidates on any teardown uncertainty. Shared helper tests passed
+  51 cases including real owned child/grandchild termination. Updated complete
+  installed staging suite passed 343 tests with two separately covered Linux
+  process cases skipped. Existing best-effort close semantics remain unchanged.

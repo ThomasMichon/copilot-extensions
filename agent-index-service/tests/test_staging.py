@@ -525,6 +525,34 @@ def test_windows_job_assignment_failure_is_unconfirmed_and_preserves_candidate(c
     assert not (slot / ".install-complete.json").exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows strict Job teardown")
+def test_windows_job_teardown_uncertainty_preserves_candidate(case, monkeypatch):
+    import agent_procutil
+
+    class Process:
+        pid = 123
+        returncode = 7
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout):
+            return self.returncode
+
+    class Job:
+        def terminate_and_wait(self, timeout_seconds):
+            raise OSError("native Job teardown failed")
+
+    monkeypatch.setattr(agent_procutil, "spawn_sync_in_kill_on_close_job",
+                        lambda *args, **kwargs: (Process(), Job()))
+    monkeypatch.setattr(staging, "_run", original_run)
+    with pytest.raises(staging._CleanupUnconfirmed, match="could not be confirmed"):
+        stage(case)
+    slot = case.root / "versions" / "0.1.1.dev1"
+    assert slot.exists()
+    assert not (slot / ".install-complete.json").exists()
+
+
 def test_darwin_staging_refuses_spawn_until_owned_supervision_is_supported(case, monkeypatch):
     import agent_procutil
 
@@ -576,7 +604,8 @@ def test_build_runner_reaps_owned_job_on_all_failure_paths(case, monkeypatch, re
     class Job:
         closed = False
 
-        def close(self):
+        def terminate_and_wait(self, timeout_seconds):
+            assert timeout_seconds == 15.0
             self.closed = True
             process.returncode = -1
 

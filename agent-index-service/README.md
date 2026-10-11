@@ -73,6 +73,11 @@ or preexisting incomplete slots fail and remain inspectable. Failure cleanup
 removes only the current transaction's proven-owned incomplete slot; unconfirmed
 descendant cleanup preserves it.
 
+Windows staging requires strict owned Job termination and an empty-Job
+confirmation before candidate deletion. Best-effort handle closure alone is
+not accepted as proof that every descendant has exited; any teardown uncertainty
+preserves the incomplete candidate and fails explicitly.
+
 `candidates` is read-only, including when the root does not exist. Completion
 means **built and import-validated**, not passive service readiness or migration
 safety. There is no active marker, stable launcher, autostart registration,

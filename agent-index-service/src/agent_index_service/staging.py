@@ -413,7 +413,12 @@ def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) ->
         return _bytes(output).decode("utf-8")
     finally:
         if job is not None:
-            job.close()
+            try:
+                job.terminate_and_wait(15.0)
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise _CleanupUnconfirmed(
+                    f"{operation}: Windows Job descendant cleanup could not be confirmed"
+                ) from exc
         elif process is not None and supervised:
             _terminate_supervisor(process, token, operation)
         if process is not None and process.poll() is None:
