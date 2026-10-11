@@ -108,6 +108,12 @@ provision or reactivate. Namespaced state/routing/log/cache roots remain
 installation-local; engine `start`/`run` remains blocked there. Session hook
 compatibility `ensure-service` entry points are inert in both installation modes.
 `bootstrap-check` only invokes the dependency-light session stamp adapter.
+Before that adapter can mutate the default installation, the vendored machine
+bootstrap-killswitch guard must admit it. An active switch leaves payload pointers,
+binstubs and publication locks untouched and still emits exactly `{}`. Missing,
+malformed or failed guard scripts report an error without stamping; malformed
+switch state retains the canonical fail-open policy. Namespaced cells do not
+read the default installation's machine switch.
 Absent/default/explicit-false installation policy keeps
 the legacy client layout, not legacy host provisioning authority.
 

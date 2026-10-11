@@ -23,10 +23,6 @@ block (accidentally, or in a future edit that doesn't touch the vendored
 guard file at all) would otherwise leave this check green while silently
 disabling the switch for that plugin -- the file being present and correct
 says nothing about whether anything actually invokes it.
-``agent-index`` ships a deliberate no-op sessionStart stub that never
-reconciles anything and is intentionally excluded from the call-site check
-(though it still receives the vendored, unused guard files, for a simple
-opt-in criterion -- see README.md).
 
 Usage::
 
@@ -48,12 +44,6 @@ REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
 CANONICAL_DIR = REPO / "libs" / "bootstrap-killswitch"
 GUARD_NAMES = ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1")
-
-# A plugin whose bootstrap-check.* deliberately never reconciles anything
-# (a no-op sessionStart stub) has nothing for the killswitch to guard --
-# excluded from the call-site check, though it still receives the vendored
-# (unused) guard files for a simple, uniform opt-in criterion.
-NO_RECONCILE_STUBS = frozenset({"agent-index"})
 
 # The exact, distinctive invocation each wired bootstrap-check.* must contain
 # -- not just the marker comment (which could survive a careless edit that
@@ -77,12 +67,9 @@ def _sha(data: bytes) -> str:
 
 
 def _call_site_gaps(plugins: list[Path]) -> list[str]:
-    """Adopters (excluding deliberate no-reconcile stubs) whose
-    bootstrap-check.sh/.ps1 does not actually call its vendored guard."""
+    """Adopters whose bootstrap-check.sh/.ps1 does not call its vendored guard."""
     gaps: list[str] = []
     for plugin in plugins:
-        if plugin.name in NO_RECONCILE_STUBS:
-            continue
         for hook_name, marker in CALL_SITE_MARKERS.items():
             hook = plugin / "scripts" / hook_name
             if not hook.exists():
@@ -169,8 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         if not ok:
             return 1
         print(f"bootstrap-killswitch guard files in sync across {scope}.")
-        wired_count = sum(1 for p in plugins if p.name not in NO_RECONCILE_STUBS)
-        print(f"All {wired_count} wired adopters call their guard.")
+        print(f"All {len(plugins)} wired adopters call their guard.")
         return 0
 
     if written:

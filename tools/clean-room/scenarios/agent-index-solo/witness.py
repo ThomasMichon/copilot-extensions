@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -129,7 +130,24 @@ def adopt(release: Path, payload: Path, key: str, version: str) -> None:
 def interpreter(root: Path) -> Path:
     manifest = read_object(root / "deploy-manifest.json")
     python = Path(manifest["runtime"]["interpreter"])
-    assert python.is_relative_to(root / "versions")
+    assert root.is_absolute() and python.is_absolute(), "runtime paths must be absolute"
+    assert ".." not in root.parts and ".." not in python.parts, "runtime path traversal"
+    assert stat.S_ISDIR(root.lstat().st_mode), "runtime root is not an unlinked directory"
+    resolved_root = root.resolve(strict=True)
+    assert python.is_relative_to(root / "versions"), "interpreter is outside runtime versions"
+    relative = python.relative_to(root / "versions")
+    assert len(relative.parts) == 3 and relative.parts[1:] in {
+        ("bin", "python"), ("Scripts", "python.exe"),
+    }, "interpreter must name a version slot's venv python"
+    expected = resolved_root
+    directory = root
+    for component in ("versions", *relative.parts[:-1]):
+        directory /= component
+        expected /= component
+        assert stat.S_ISDIR(directory.lstat().st_mode), "runtime directory link or non-directory"
+        assert directory.resolve(strict=True) == expected, "runtime directory identity escaped"
+    # A genuine venv may link only its final python executable to the base runtime.
+    assert python.is_file(), "runtime interpreter is missing or not a file"
     return python
 
 

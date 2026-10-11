@@ -78,3 +78,7 @@ binstub. Subsequent status reads may record only validated resolver boot-trace
 metadata. Any venv/deployment/service/engine/autostart artifact fails the witness.
 The first admitted operational invocation must perform actual provisioning;
 there is no separate hand-install step to conceal a broken runtime gate.
+Interpreter evidence requires an existing venv python beneath real, identity-
+checked root/versions/slot directories, with no parent traversal or directory
+symlinks. A genuine venv's final python symlink to its base runtime is allowed;
+lexical containment or a nonexistent interpreter is not ownership evidence.

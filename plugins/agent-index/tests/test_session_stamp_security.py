@@ -19,7 +19,8 @@ def _hook(tmp_path: Path, shell: str = "bash") -> tuple[list[str], dict[str, str
     repo = tmp_path / "repo"
     gate, environment = _fixture(repo, shell)
     scripts = gate.parent
-    for name in ("session-stamp.py", "stamp_paths.py", "versioned_runtime.py"):
+    for name in ("session-stamp.py", "stamp_paths.py", "versioned_runtime.py",
+                 "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1"):
         shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     suffix = "sh" if shell == "bash" else "ps1"
     shutil.copy2(PLUGIN / "scripts" / f"bootstrap-check.{suffix}", scripts)
@@ -27,6 +28,9 @@ def _hook(tmp_path: Path, shell: str = "bash") -> tuple[list[str], dict[str, str
     environment.pop("TEST_PYTHON", None)
     environment["AGENT_INDEX_REPO"] = str(repo)
     environment["HOME"] = environment["USERPROFILE"] = str(tmp_path / "home")
+    environment["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(
+        tmp_path / "home/.copilot-extensions/bootstrap-killswitch.json"
+    )
     Path(environment["HOME"]).mkdir()
     environment["COPILOT_PLUGIN_ROOT"] = str(scripts.parent)
     environment["AGENT_INDEX_PAYLOAD_ROOT"] = str(scripts.parent)

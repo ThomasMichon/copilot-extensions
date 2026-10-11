@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
+import venv
 
 import pytest
 
@@ -34,7 +36,9 @@ def test_version_is_exact_and_only_normalizes_dev_spelling() -> None:
 
 
 def test_interpreter_action_returns_only_owned_runtime(tmp_path: Path, capsys) -> None:
-    python = tmp_path / "versions/test/bin/python"
+    slot = tmp_path / "versions/test"
+    venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(slot)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     manifest = tmp_path / "deploy-manifest.json"
     manifest.write_text(json.dumps({"runtime": {"interpreter": str(python)}}))
     WITNESS.main(["interpreter", str(tmp_path)])
@@ -42,6 +46,50 @@ def test_interpreter_action_returns_only_owned_runtime(tmp_path: Path, capsys) -
     manifest.write_text(json.dumps({"runtime": {"interpreter": str(tmp_path / "outside")}}))
     with pytest.raises(AssertionError):
         WITNESS.main(["interpreter", str(tmp_path)])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX venv executable/directory links")
+@pytest.mark.parametrize("fault", ["traversal", "versions-link", "slot-link", "bin-link"])
+def test_interpreter_rejects_escaping_directory_identity(tmp_path: Path, fault: str) -> None:
+    root = tmp_path / "owned"
+    root.mkdir()
+    foreign = tmp_path / "foreign"
+    venv.EnvBuilder(with_pip=False, symlinks=True).create(foreign)
+    versions = root / "versions"
+    if fault == "versions-link":
+        versions.symlink_to(tmp_path, target_is_directory=True)
+        python = versions / "foreign/bin/python"
+    else:
+        versions.mkdir()
+        if fault == "traversal":
+            python = versions / "../../foreign/bin/python"
+        elif fault == "slot-link":
+            (versions / "test").symlink_to(foreign, target_is_directory=True)
+            python = versions / "test/bin/python"
+        else:
+            (versions / "test").mkdir()
+            (versions / "test/bin").symlink_to(foreign / "bin", target_is_directory=True)
+            python = versions / "test/bin/python"
+    assert python.is_file(), "adversary must name a genuine, reachable interpreter"
+    (root / "deploy-manifest.json").write_text(
+        json.dumps({"runtime": {"interpreter": str(python)}})
+    )
+    with pytest.raises(AssertionError, match="traversal|directory link"):
+        WITNESS.main(["interpreter", str(root)])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX venv final executable link")
+def test_interpreter_accepts_real_venv_final_python_link(tmp_path: Path, capsys) -> None:
+    slot = tmp_path / "versions/test"
+    venv.EnvBuilder(with_pip=False, symlinks=True).create(slot)
+    python = slot / "bin/python"
+    assert python.is_symlink()
+    assert not python.resolve(strict=True).is_relative_to(tmp_path)
+    (tmp_path / "deploy-manifest.json").write_text(
+        json.dumps({"runtime": {"interpreter": str(python)}})
+    )
+    WITNESS.main(["interpreter", str(tmp_path)])
+    assert capsys.readouterr().out.strip() == str(python)
 
 
 def test_setup_parser_uses_final_role_not_provisioning_receipt(tmp_path: Path) -> None:

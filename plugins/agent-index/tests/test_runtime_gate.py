@@ -574,6 +574,7 @@ def test_bootstrap_does_not_import_any_runtime_or_repo_shadow(
     suffix = "sh" if shell == "bash" else "ps1"
     bootstrap = scripts / f"bootstrap-check.{suffix}"
     shutil.copy2(PLUGIN / "scripts" / bootstrap.name, bootstrap)
+    shutil.copy2(PLUGIN / "scripts" / f"bootstrap-killswitch-guard.{suffix}", scripts)
     shutil.copy2(PLUGIN / "scripts" / f"runtime-gate.{suffix}", scripts)
     shutil.copy2(PLUGIN / "scripts" / "resolve_effective_config.py", scripts)
     plugin_name = "agent-index-bootstrap-probe"
