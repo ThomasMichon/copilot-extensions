@@ -86,3 +86,23 @@ def test_runtime_scope_and_spawn_request_are_not_successor_readiness(tmp_path):
     assert events[1]["detail"]["machine"] == "host-a"
     assert events[1]["detail"]["environment"] == "example"
     assert "successor_ready" not in events[1]["detail"]
+
+
+def test_failed_spawn_attempt_has_structured_failure(tmp_path, monkeypatch):
+    from tests.test_supervisor_daemon import FakeClient, FakeLauncher, FakeLock, _daemon
+    monkeypatch.delenv("AGENT_DISPATCH_SUPERVISOR_SYSTEMD_UNIT", raising=False)
+
+    def fail(*_args):
+        raise OSError("fixture spawn failed")
+
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(), lock=FakeLock(granted=True),
+        self_update_enabled=True, self_update_argv=["supervise", "serve"],
+        self_update_install_dir=lambda: tmp_path, self_update_running_version="1.0.0",
+        self_update_stale_target=lambda *_: tmp_path / "new/bin/python",
+        self_update_spawn=fail,
+    )
+    assert not daemon._maybe_self_update()
+    events = [json.loads(line) for line in (tmp_path / "lifecycle.log").read_text().splitlines()]
+    assert events[-1]["outcome"] == "fail"
+    assert events[-1]["detail"]["reason"] == "spawn-request-returned"

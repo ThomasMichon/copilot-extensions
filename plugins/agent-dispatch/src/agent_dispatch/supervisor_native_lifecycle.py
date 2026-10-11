@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import logging
 import re
 import sys
 from pathlib import Path
@@ -12,7 +11,6 @@ from typing import TYPE_CHECKING
 from .supervisor_lifecycle import daemon_audit
 if TYPE_CHECKING:
     from .supervisor_daemon import SupervisorDaemon
-log = logging.getLogger("agent-dispatch.supervisor-native-lifecycle")
 
 
 class NativeOwnershipUnconfirmed(RuntimeError):
@@ -30,7 +28,6 @@ def native_restart_unit() -> str | None:
     try:
         lines = Path("/proc/self/cgroup").read_text().splitlines()
     except OSError as exc:
-        log.warning("native supervisor cgroup identity unavailable; native restart ownership is unconfirmed")
         raise NativeOwnershipUnconfirmed("native cgroup identity unavailable") from exc
     if not any(line.rsplit("/", 1)[-1] == unit for line in lines):
         raise NativeOwnershipUnconfirmed("native cgroup identity does not match")

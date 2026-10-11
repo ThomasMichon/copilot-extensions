@@ -2024,11 +2024,8 @@ class SupervisorDaemon:
         try:
             self._self_update_spawn(target, self._self_update_argv)
         except Exception:
-            log.warning(
-                "supervisor self-update: failed to spawn a successor daemon "
-                "at %s; reclaiming the singleton lease to stay on this version",
-                target, exc_info=True,
-            )
+            daemon_audit(self, "handoff", "spawn-request-returned", outcome="fail")
+            log.warning("supervisor self-update: spawn failed at %s; reclaiming singleton lease", target, exc_info=True)
             if not self.acquire_singleton():
                 log.error(
                     "supervisor self-update: spawn failed AND could not "
