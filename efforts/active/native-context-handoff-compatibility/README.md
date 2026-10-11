@@ -7,7 +7,8 @@
 - **Vision:** `visions/plugins/context-handoff/README.md`; native-convergence
 - **Umbrella issue:** #6028
 - **Branch(es):** independent implementation branches off `dev`; coordinator owns publication.
-- **Implementation:** capability-contract investigation; runtime behavior unchanged.
+- **Implementation:** native selection, checkpoint guidance and pressure backoff
+  implemented in the open implementation PR; review, release and live acceptance pending.
 
 ## Guiding Intent
 
@@ -70,7 +71,7 @@ Unrelated repository lifecycle work is intentionally outside this scope.
 - [x] Define precedence for effective true/false/absent settings, detected native
   capability, stale/unknown evidence, and confirmed unavailable implementation.
   Enabled settings select native guidance; they do not manufacture tool support.
-- [ ] _(agent-recommended)_ Distinguish supported-but-not-viable transitions,
+- [x] _(agent-recommended)_ Distinguish supported-but-not-viable transitions,
   missing/stale checkpoints, policy caps, static-context limits, and errors
   after a successful clear. Do not collapse all failures into session cutover.
 
@@ -140,7 +141,8 @@ Unrelated repository lifecycle work is intentionally outside this scope.
 ## Proposal
 
 [design.md](design.md) separates selection, semantic guidance, operational
-backoff, and recovery. It is proposed behavior, not an implemented API.
+backoff, and recovery. The implementation realizes these plugin behaviors without
+adding a host API; live acceptance and deployment remain open.
 
 ## Completion Gate
 
@@ -150,6 +152,24 @@ Plan/Validation Plan item is resolved or transferred by name. Planning publicati
 alone does not complete the update.
 
 ## Journal
+
+### 2026-10-10 - Native compatibility implementation slice
+
+- Reviewed settings/offered-tool selection contract merged through #6035;
+  implementation begins on top of its merged state. Recovered the squash-merged
+  journal branch by preserving it under a backup ref and selecting current dev;
+  no uncommitted work was discarded.
+- Added bounded JSONC settings and read-only offered-tool observation, explicit
+  false/unavailable precedence, native checkpoint pressure prompts, custom force
+  suppression, root-only window resets and stale-window asynchronous guards.
+- Updated static/consumed-baton guidance, both platform emitters, skill and
+  checkpoint template together. Native tools are never invoked by the observer.
+- Synthetic extension-host integration covers flag/unknown metadata, offered
+  tools, explicit false, mutating-tool allowance, repeated root clears, and
+  subagent isolation. Contained platform writer/guidance coverage passed.
+- This is not deployed acceptance: live CLI/ACP checkpoint/terminal rollover,
+  promotion, deployment and the remaining validation items are still open.
+  No real operator session was cleared; lifecycle remains private proposal-only.
 
 ### 2026-10-10 - Independent compatibility plan
 

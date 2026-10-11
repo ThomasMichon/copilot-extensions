@@ -33,6 +33,44 @@ as the boundary of the objective**.
 
 ## The core rule
 
+**Select continuity before following the custom transfer instructions below.**
+When `contextManagementTools: true` is selected in applicable Copilot settings,
+or all four context tools are offered without explicit false, use native
+context-only rollover. Confirmed unavailable tools override that selection.
+Unknown metadata does not undo explicit opt-in: check availability and diagnose
+failure, never invent a tool. The extension reports its selection and substitutes
+native checkpoint pressure prompts; explicit new-owner/process handoffs remain
+available in every mode. The remaining custom quiesce/sync/save/trigger flow is
+for actual responsibility transfer or diagnosed unsupported-native recovery,
+not a mandatory response to native token pressure.
+
+### Native checkpoint flow
+
+1. Use `get_context_remaining` to inspect the current window. Discover the
+   offered `session_artifacts`, `session_history`, and `new_context` tools through
+   the host's tool catalog; do not infer argument schemas or internal file paths.
+2. Write a compact checkpoint using `session_artifacts` for the **current owner**,
+   preserving its expected revision and host-required snapshot binding. Include
+   the parent objective/completion gate, canonical effort pointer, current slice,
+   unresolved requests, settled evidence/decisions, live background/external
+   obligations and recovery references, and **exactly one next action**.
+   Use bounded `session_history` reads only to repair missing evidence. Empty
+   boilerplate is not a checkpoint. Do not mutate another agent's artifact.
+3. Verify persistence and revision before terminal `new_context` using its
+   actual offered schema. Respect tool-in-flight and terminal ordering. No timer,
+   raw clear RPC, arbitrary artifact file writes, or concurrent checkpoint store.
+   Native context rollover keeps the logical owner/workspace; do not stop its
+   live watchers/agents merely to rotate context or signal custom pickup.
+4. Read the bound checkpoint in the new window, refresh durable applicable
+   session guidance and the targeted skill, then execute the one next action.
+   A root clear resets pressure accounting, not effort completion or ownership.
+5. Diagnose missing/stale checkpoint and static-load limits in place. A policy
+   cap is not permission for an alternate session. A clear may succeed despite
+   a persistence error: inspect the actual current window and checkpoint before
+   retrying; never blindly double-roll over. Confirmed missing implementation/
+   tools permits explicit custom recovery under existing mode/consent gates.
+   Emergency compaction remains the host's safety mechanism.
+
 Context-handoff is **process-manager agnostic**.
 
 - It tracks context pressure.
