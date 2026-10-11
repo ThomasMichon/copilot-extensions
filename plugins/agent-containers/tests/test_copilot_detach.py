@@ -328,10 +328,10 @@ def test_launch_env_forwards_a_separate_copilot_cli_account_token(monkeypatch):
     monkeypatch.setattr(
         resolver_mod,
         "host_copilot_cli_token",
-        lambda account: "gho_inference_only" if account == "tmichon_microsoft" else None,
+        lambda account: "gho_inference_only" if account == "inference-user" else None,
     )
     target = _target()
-    target.fleet.copilot_cli_account = "tmichon_microsoft"
+    target.fleet.copilot_cli_account = "inference-user"
 
     env, _relay_port, _host_relay_port = detach._launch_env(
         _args(no_relay=True),
@@ -349,7 +349,7 @@ def test_launch_env_fails_closed_when_copilot_cli_account_has_no_host_login(monk
 
     monkeypatch.setattr(resolver_mod, "host_copilot_cli_token", lambda account: None)
     target = _target()
-    target.fleet.copilot_cli_account = "tmichon_microsoft"
+    target.fleet.copilot_cli_account = "inference-user"
 
     with pytest.raises(RuntimeError, match="copilot-login"):
         detach._launch_env(

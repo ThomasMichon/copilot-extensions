@@ -228,7 +228,7 @@ own Copilot CLI login on THIS HOST should back `COPILOT_GITHUB_TOKEN`,
 independent of whatever GH_TOKEN carries:
 
 ```yaml
-copilot_cli_account: tmichon_microsoft   # global default for every trusted fleet
+copilot_cli_account: inference-user   # global default for every trusted fleet
 fleets:
   myrepo:
     repo: your-org/your-repo
@@ -258,7 +258,7 @@ interactive OAuth flow, or you'd rather not touch the host's own default
 login):
 
 ```bash
-agent-containers copilot-login myrepo-1 --account tmichon_microsoft
+agent-containers copilot-login myrepo-1 --account inference-user
 ```
 
 This execs into the container, runs `copilot login --device-code`

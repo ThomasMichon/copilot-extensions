@@ -111,23 +111,23 @@ def test_host_copilot_cli_token_reads_jsonc_auth_tokens(tmp_path):
             // User settings belong in settings.json.
             {
               "authTokens": {
-                "https://github.com:tmichon_microsoft": {"token": "gho_abc123"},
-                "https://github.com:ThomasMichon": {"token": "gho_def456"}
+                "https://github.com:inference-user": {"token": "gho_abc123"},
+                "https://github.com:git-user": {"token": "gho_def456"}
               }
             }
             """
         ),
         encoding="utf-8",
     )
-    assert host_copilot_cli_token("tmichon_microsoft", config_path) == "gho_abc123"
-    assert host_copilot_cli_token("ThomasMichon", config_path) == "gho_def456"
+    assert host_copilot_cli_token("inference-user", config_path) == "gho_abc123"
+    assert host_copilot_cli_token("git-user", config_path) == "gho_def456"
     assert host_copilot_cli_token("nobody", config_path) is None
 
 
 def test_host_copilot_cli_token_missing_file_returns_none(tmp_path):
     from agent_containers.resolver import host_copilot_cli_token
 
-    assert host_copilot_cli_token("tmichon_microsoft", tmp_path / "missing.json") is None
+    assert host_copilot_cli_token("inference-user", tmp_path / "missing.json") is None
 
 
 def test_host_copilot_cli_token_malformed_json_returns_none(tmp_path):
@@ -135,14 +135,14 @@ def test_host_copilot_cli_token_malformed_json_returns_none(tmp_path):
 
     config_path = tmp_path / "config.json"
     config_path.write_text("{ not valid json", encoding="utf-8")
-    assert host_copilot_cli_token("tmichon_microsoft", config_path) is None
+    assert host_copilot_cli_token("inference-user", config_path) is None
 
 
 def test_copilot_cli_token_from_json_text_matches_file_based_reader():
     from agent_containers.resolver import copilot_cli_token_from_json_text
 
-    raw = '{"authTokens": {"https://github.com:tmichon_microsoft": {"token": "gho_xyz"}}}'
-    assert copilot_cli_token_from_json_text("tmichon_microsoft", raw) == "gho_xyz"
+    raw = '{"authTokens": {"https://github.com:inference-user": {"token": "gho_xyz"}}}'
+    assert copilot_cli_token_from_json_text("inference-user", raw) == "gho_xyz"
     assert copilot_cli_token_from_json_text("nobody", raw) is None
 
 
@@ -150,8 +150,8 @@ def test_import_copilot_cli_token_creates_new_file(tmp_path):
     from agent_containers.resolver import host_copilot_cli_token, import_copilot_cli_token
 
     config_path = tmp_path / "subdir" / "config.json"
-    import_copilot_cli_token("tmichon_microsoft", "gho_fresh", config_path)
-    assert host_copilot_cli_token("tmichon_microsoft", config_path) == "gho_fresh"
+    import_copilot_cli_token("inference-user", "gho_fresh", config_path)
+    assert host_copilot_cli_token("inference-user", config_path) == "gho_fresh"
 
 
 def test_import_copilot_cli_token_preserves_other_keys_and_header(tmp_path):
@@ -166,9 +166,9 @@ def test_import_copilot_cli_token_preserves_other_keys_and_header(tmp_path):
             // User settings belong in settings.json.
             {
               "authTokens": {
-                "https://github.com:ThomasMichon": {"token": "gho_existing"}
+                "https://github.com:git-user": {"token": "gho_existing"}
               },
-              "loggedInUsers": [{"host": "https://github.com", "login": "ThomasMichon"}],
+              "loggedInUsers": [{"host": "https://github.com", "login": "git-user"}],
               "firstLaunchAt": "2026-01-01T00:00:00Z"
             }
             """
@@ -176,12 +176,12 @@ def test_import_copilot_cli_token_preserves_other_keys_and_header(tmp_path):
         encoding="utf-8",
     )
 
-    import_copilot_cli_token("tmichon_microsoft", "gho_new", config_path)
+    import_copilot_cli_token("inference-user", "gho_new", config_path)
 
     # The newly imported token resolves via the normal reader.
-    assert host_copilot_cli_token("tmichon_microsoft", config_path) == "gho_new"
+    assert host_copilot_cli_token("inference-user", config_path) == "gho_new"
     # The pre-existing account's token and other top-level keys survive.
-    assert host_copilot_cli_token("ThomasMichon", config_path) == "gho_existing"
+    assert host_copilot_cli_token("git-user", config_path) == "gho_existing"
     rendered = config_path.read_text(encoding="utf-8")
     assert "// User settings belong in settings.json." in rendered
     data = json.loads(
@@ -191,7 +191,52 @@ def test_import_copilot_cli_token_preserves_other_keys_and_header(tmp_path):
     )
     assert data["firstLaunchAt"] == "2026-01-01T00:00:00Z"
     logins = {u["login"] for u in data["loggedInUsers"]}
-    assert logins == {"ThomasMichon", "tmichon_microsoft"}
+    assert logins == {"git-user", "inference-user"}
+
+
+def test_import_copilot_cli_token_refuses_to_clobber_malformed_existing_file(tmp_path):
+    from agent_containers.resolver import import_copilot_cli_token
+
+    config_path = tmp_path / "config.json"
+    original = "{ this is not valid json at all"
+    config_path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="could not be parsed"):
+        import_copilot_cli_token("inference-user", "gho_new", config_path)
+
+    # Never touched: the malformed document is neither erased nor replaced.
+    assert config_path.read_text(encoding="utf-8") == original
+
+
+def test_import_copilot_cli_token_refuses_non_object_existing_body(tmp_path):
+    from agent_containers.resolver import import_copilot_cli_token
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text("[1, 2, 3]", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="not an object"):
+        import_copilot_cli_token("inference-user", "gho_new", config_path)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits only")
+def test_import_copilot_cli_token_preserves_owner_only_permissions(tmp_path):
+    import os
+    import stat
+
+    from agent_containers.resolver import import_copilot_cli_token
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text('{"authTokens": {}}', encoding="utf-8")
+    config_path.chmod(0o600)
+
+    old_umask = os.umask(0o022)  # a permissive umask the fix must not rely on
+    try:
+        import_copilot_cli_token("inference-user", "gho_new", config_path)
+    finally:
+        os.umask(old_umask)
+
+    mode = stat.S_IMODE(config_path.stat().st_mode)
+    assert mode == 0o600
 
 
 def _stub_agent_bridge(monkeypatch):

@@ -98,24 +98,24 @@ def test_copilot_cli_account_for_defaults_to_none():
 
 def test_copilot_cli_account_for_global_default_applies_to_every_trusted_fleet():
     c = ContainersConfig()
-    c.copilot_cli_account = "tmichon_microsoft"
-    assert c.copilot_cli_account_for(FleetConfig()) == "tmichon_microsoft"
-    assert c.copilot_cli_account_for(None) == "tmichon_microsoft"
+    c.copilot_cli_account = "inference-user"
+    assert c.copilot_cli_account_for(FleetConfig()) == "inference-user"
+    assert c.copilot_cli_account_for(None) == "inference-user"
 
 
 def test_copilot_cli_account_for_per_fleet_override_wins():
     c = ContainersConfig()
-    c.copilot_cli_account = "tmichon_microsoft"
+    c.copilot_cli_account = "inference-user"
     fleet = FleetConfig(copilot_cli_account="some-other-account")
     assert c.copilot_cli_account_for(fleet) == "some-other-account"
 
 
 def test_copilot_cli_account_for_restricted_fleet_always_none():
     c = ContainersConfig()
-    c.copilot_cli_account = "tmichon_microsoft"
+    c.copilot_cli_account = "inference-user"
     fleet = FleetConfig(
         security_profile="restricted",
-        copilot_cli_account="tmichon_microsoft",
+        copilot_cli_account="inference-user",
     )
     assert c.copilot_cli_account_for(fleet) is None
 
@@ -128,7 +128,7 @@ def test_load_config_from_file(tmp_path, monkeypatch):
             exec_user: dev
             workspace_folder: /workspaces/foo
             forward_gh_token: false
-            copilot_cli_account: tmichon_microsoft
+            copilot_cli_account: inference-user
             image_prefixes:
               - vsc-foo-
             fleets:
@@ -150,7 +150,7 @@ def test_load_config_from_file(tmp_path, monkeypatch):
     assert c.exec_user == "dev"
     assert c.workspace_folder == "/workspaces/foo"
     assert c.forward_gh_token is False
-    assert c.copilot_cli_account == "tmichon_microsoft"
+    assert c.copilot_cli_account == "inference-user"
     assert c.image_prefixes == ["vsc-foo-"]
     assert "myrepo" in c.fleets
     fleet = c.fleets["myrepo"]
@@ -158,7 +158,7 @@ def test_load_config_from_file(tmp_path, monkeypatch):
     assert fleet.prefix("myrepo") == "myrepo"
     assert fleet.devcontainer_path == "/src/myrepo-devcontainer"
     assert fleet.copilot_cli_account is None
-    assert c.copilot_cli_account_for(fleet) == "tmichon_microsoft"
+    assert c.copilot_cli_account_for(fleet) == "inference-user"
     other_fleet = c.fleets["otherrepo"]
     assert other_fleet.copilot_cli_account == "some-other-account"
     assert c.copilot_cli_account_for(other_fleet) == "some-other-account"

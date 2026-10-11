@@ -171,8 +171,11 @@ def resolve_copilot_cli_token_or_raise(config, fleet, container_name: str) -> st
     None if no account is configured for this fleet (the common case --
     callers should simply skip forwarding ``COPILOT_GITHUB_TOKEN``). Raises
     RuntimeError with the shared missing-login hint if an account IS
-    configured but :func:`host_copilot_cli_token` finds nothing -- the
-    fail-closed launch sites (copilot_detach, session-host-prepare).
+    configured but :func:`host_copilot_cli_token` finds nothing. Used by
+    EVERY launch site, with no soft-fail variant: silently falling back to
+    GH_TOKEN's identity when a separate inference identity was explicitly
+    configured would defeat the entire purpose of this setting (PR #6128
+    review).
     """
     account = config.copilot_cli_account_for(fleet)
     if not account:
@@ -180,26 +183,6 @@ def resolve_copilot_cli_token_or_raise(config, fleet, container_name: str) -> st
     token = host_copilot_cli_token(account)
     if not token:
         raise RuntimeError(copilot_cli_account_missing_hint(account, container_name))
-    return token
-
-
-def resolve_copilot_cli_token_or_warn(config, fleet, container_name: str, logger) -> str | None:
-    """Same resolution as :func:`resolve_copilot_cli_token_or_raise`, but
-    soft-fails (logs a warning, returns None) instead of raising -- for the
-    launch site (``_launch_container_agent``) whose existing GH_TOKEN
-    forwarding is likewise non-fatal.
-    """
-    account = config.copilot_cli_account_for(fleet)
-    if not account:
-        return None
-    token = host_copilot_cli_token(account)
-    if not token:
-        logger.warning(
-            "%s; the in-container Copilot CLI may be unauthenticated or "
-            "fall back to GH_TOKEN's identity.",
-            copilot_cli_account_missing_hint(account, container_name),
-        )
-        return None
     return token
 
 
@@ -239,7 +222,12 @@ def import_copilot_cli_token(
     through ``json.dumps`` (so interior comments elsewhere in the body, if
     any, would NOT survive -- Copilot CLI itself only ever writes a leading
     comment header in this file, confirmed by direct inspection, so this is
-    safe in practice). Writes atomically (temp file + replace).
+    safe in practice). A genuinely missing/empty file initializes a new
+    document; an EXISTING file whose body fails to parse (or isn't a JSON
+    object) raises instead of silently discarding it -- never clobber a
+    real, if malformed, document with an empty one. Writes atomically (a
+    0600-permissioned temp file + replace, preserving owner-only access to
+    this plaintext OAuth-token store regardless of the process umask).
     """
     path = Path(config_path) if config_path is not None else copilot_cli_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -256,13 +244,24 @@ def import_copilot_cli_token(
             body_start = i + 1
         else:
             break
-    body_text = "\n".join(lines[body_start:]) or "{}"
-    try:
-        data = json.loads(body_text)
-    except json.JSONDecodeError:
-        data = {}
-    if not isinstance(data, dict):
-        data = {}
+    body_text = "\n".join(lines[body_start:]).strip()
+    if not body_text:
+        # Genuinely missing/empty file: safe to initialize a new document.
+        data: dict = {}
+    else:
+        try:
+            data = json.loads(body_text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"'{path}' exists but its JSON body could not be parsed -- "
+                "refusing to overwrite a config.json we can't safely merge "
+                f"into (parse error: {exc})"
+            ) from exc
+        if not isinstance(data, dict):
+            raise RuntimeError(
+                f"'{path}' exists but its JSON body is not an object -- "
+                "refusing to overwrite it"
+            )
     auth_tokens = data.setdefault("authTokens", {})
     if not isinstance(auth_tokens, dict):
         auth_tokens = {}
@@ -284,6 +283,10 @@ def import_copilot_cli_token(
     rendered = "\n".join(header_lines + [json.dumps(data, indent=2)]) + "\n"
     tmp_path = path.with_suffix(path.suffix + ".tmp-copilot-login")
     tmp_path.write_text(rendered, encoding="utf-8")
+    # Preserve owner-only permissions: write_text creates the temp file under
+    # the process umask (e.g. 0644 under a normal 022 umask), which would
+    # silently widen this plaintext OAuth-token store's access on replace.
+    os.chmod(tmp_path, 0o600)
     tmp_path.replace(path)
 
 

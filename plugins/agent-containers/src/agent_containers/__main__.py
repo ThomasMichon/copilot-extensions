@@ -45,7 +45,6 @@ from .resolver import (
     build_restricted_spawn_command,
     host_gh_token,
     resolve_copilot_cli_token_or_raise,
-    resolve_copilot_cli_token_or_warn,
     resolve_extra_copilot_args,
     resolve_live_exec_target,
 )
@@ -1054,7 +1053,7 @@ def _launch_container_agent(
                 "the in-container Copilot CLI may be unauthenticated."
             )
 
-    copilot_token = resolve_copilot_cli_token_or_warn(config, fleet, args.name, log)
+    copilot_token = resolve_copilot_cli_token_or_raise(config, fleet, args.name)
     if copilot_token:
         env["COPILOT_GITHUB_TOKEN"] = copilot_token
 
