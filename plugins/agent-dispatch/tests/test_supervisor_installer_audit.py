@@ -269,3 +269,23 @@ def test_retirement_audit_warning_does_not_corrupt_result_or_suppress_diagnostic
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"ok": True, "retired": [123], "errors": []}
     assert "audit unavailable" in result.stderr
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is unavailable")
+def test_blocked_removal_propagates_reconciliation_failure(tmp_path):
+    text = (PLUGIN / "scripts/install.ps1").read_text()
+    start = text.index("function Remove-SupervisorTask {")
+    function = text[start:text.index("\nfunction ", start + 1)]
+    script = "\n".join([
+        "$ErrorActionPreference='Stop'; $Action='uninstall'; $script:SupervisorReconcileFailed=$false",
+        "function Get-ScheduledTask {param($TaskName) return [pscustomobject]@{State='Ready'}}",
+        "function Invoke-SupervisorTaskAction {param($Operation,$Name,$Reason)}",
+        "function Unregister-ScheduledTask {param($TaskName,$Confirm)}",
+        "function Invoke-SupervisorAudit {param($Event,$Reason,$Name,$Outcome)}",
+        function, "$result=Remove-SupervisorTask -Name fixture",
+        "if($result -ne 'blocked' -or -not $script:SupervisorReconcileFailed){throw 'incorrect removal outcome'}",
+    ])
+    fixture = tmp_path / "blocked-removal.ps1"
+    fixture.write_text(script)
+    result = subprocess.run(["pwsh", "-NoProfile", "-File", str(fixture)], capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr

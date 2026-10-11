@@ -2806,6 +2806,7 @@ function Remove-SupervisorTask {
     Invoke-SupervisorAudit -Event remove -Reason $Reason -Name $Name
     Unregister-ScheduledTask -TaskName $Name -Confirm:$false -ErrorAction SilentlyContinue
     if (Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue) {
+        $script:SupervisorReconcileFailed = $true
         Invoke-SupervisorAudit -Event remove -Reason $Reason -Name $Name -Outcome fail
         return 'blocked'
     }
