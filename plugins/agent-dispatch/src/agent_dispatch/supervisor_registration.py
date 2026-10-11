@@ -420,8 +420,11 @@ def _lane_flags(spec: dict) -> list[str]:
     if spec.get("ci_repair_bindings") is not None:
         from .ci_repair_spawn import validate_admission_command, validate_bindings
 
-        validate_bindings(spec["ci_repair_bindings"])
-        validate_admission_command(spec.get("ci_repair_admission_command"))
+        try:
+            validate_bindings(spec["ci_repair_bindings"])
+            validate_admission_command(spec.get("ci_repair_admission_command"))
+        except ValueError as exc:
+            raise UnsupportedKind(str(exc)) from exc
         argv += ["--ci-repair-bindings", json.dumps(spec["ci_repair_bindings"])]
         argv += ["--ci-repair-admission-command", json.dumps(spec["ci_repair_admission_command"])]
     argv += ["--interval", str(spec.get("interval", 30.0))]

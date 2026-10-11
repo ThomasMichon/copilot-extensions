@@ -14,7 +14,8 @@ is:
   "ci_repair": {
     "enabled": false,
     "repository": "example/project",
-    "source_command": ["python", "tools/ci_failure_dispatch_source.py", "--repo", "example/project", "--run-id", "123", "--sha", "0123456789012345678901234567890123456789", "--gh-command", "[\"reviewed-repository-gh-wrapper\"]"],
+    "lane_registration": "ci-repair-lane",
+    "source_command": ["python", "-m", "agent_dispatch.producers.ci_failure_source", "--repo", "example/project", "--run-id", "123", "--sha", "0123456789012345678901234567890123456789", "--gh-command", "[\"reviewed-repository-gh-wrapper\"]"],
     "admission_command": ["python", "tools/reviewed-ci-admission.py"],
     "execution": {
       "venue": "container:ci-repair-1",
@@ -43,7 +44,8 @@ emitter or one independent loop in every repair worker.
 The source receives `repository` and returns a list of candidate records with
 exact fields `repository`, positive integer `run_id`, `run_attempt`, `job_id`,
 gate-verified full lowercase `sha`, and watchdog's 12-hex `signature`.
-`tools/ci_failure_dispatch_source.py` reuses watchdog parsing over current,
+`python -m agent_dispatch.producers.ci_failure_source` is the shipped runtime
+adapter; its packaged signature parser preserves the watchdog key contract over current,
 completed failing jobs, rejects stale run attempts, and never files issues.
 Its supplied SHA must come from the independent commit gate: the outer
 workflow's `head_sha` is not that gate.
@@ -91,6 +93,11 @@ admitted `ci-repair` tasks and exact allowlisted overlays and calls
 agent-bridge's real `create --target-dir ... --charter ...` transport.
 No host worktree is allocated. Other ordinary lanes/emitter types are unchanged.
 Bind a dedicated label-gated, headless, non-fleet lane for this purpose.
+`lane_registration` must name that persisted lane's registration ID.
+Coordinator reservations refuse any other spawner, including catch-all pools;
+claims require `ci-repair-admitted` and an admitted spawned reservation.
+The worker seed supplies that claim capability. Ordinary workers cannot claim
+the queued task or bypass the dedicated launch admission path.
 
 The [portable container template](../../agent-containers/templates/ci-repair/README.md)
 is network-disconnected and carries no identity. No auth adapter, live policy,

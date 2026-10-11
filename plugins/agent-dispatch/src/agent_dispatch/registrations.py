@@ -618,6 +618,15 @@ def validate_registration(kind: str, spec: dict) -> None:
         raise RegistrationError("registration 'spec' must be a JSON object")
 
     if kind == RegistrationKind.SUPERVISED_LANE:
+        if "ci_repair_bindings" in spec:
+            from .ci_repair_spawn import validate_admission_command, validate_bindings
+            try:
+                validate_bindings(spec["ci_repair_bindings"])
+                validate_admission_command(spec.get("ci_repair_admission_command"))
+                if spec.get("labels") != ["ci-repair"] or spec.get("fleet") or spec.get("embody_backend", "headless") != "headless" or spec.get("cli_labels") or spec.get("script_labels"):
+                    raise ValueError("CI repair requires a dedicated local headless lane")
+            except ValueError as exc:
+                raise RegistrationError(str(exc)) from exc
         # A lane registration must name a scope: a specific repo, or an explicit
         # all-repos opt-in. This is what the supervisor spawns for.
         if not spec.get("repo") and not spec.get("all_repos"):
@@ -645,12 +654,13 @@ def validate_registration(kind: str, spec: dict) -> None:
             "command" in spec
             or "repository_issue_loop" in spec
             or "effort_driver_loop" in spec
+            or "ci_repair" in spec
         ):
-            from .producers.emitter import EmitterError, validate_spec
+            from .producers.emitter import validate_spec
 
             try:
                 validate_spec(spec)
-            except EmitterError as exc:
+            except ValueError as exc:
                 raise RegistrationError(str(exc)) from exc
     elif kind == RegistrationKind.EVALUATOR:
         if not spec:

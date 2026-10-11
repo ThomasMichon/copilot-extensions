@@ -82,6 +82,13 @@ class QueueClaimQueriesMixin:
             best_affinity = -1
             producer_rejections: list[dict[str, object]] = []
             for row in rows:
+                if row["source"] == "ci-repair":
+                    active = conn.execute(
+                        "SELECT session_handle FROM spawn_reservations WHERE task_id = ? AND state = 'spawned' ORDER BY attempt DESC LIMIT 1",
+                        (row["id"],),
+                    ).fetchone()
+                    if active is None or not active["session_handle"]:
+                        continue
                 if repo is not None and row["repo"] != repo:
                     continue
                 rejection = self._claim_fence_rejection(conn, row)

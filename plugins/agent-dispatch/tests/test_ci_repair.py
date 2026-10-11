@@ -13,7 +13,7 @@ import pytest
 from agent_dispatch import bridge
 from agent_dispatch.ci_repair_spawn import make_ci_repair_spawn
 from agent_dispatch.producers import ci_repair, emitter
-from agent_dispatch.queue import TaskQueue
+from agent_dispatch.queue import TaskError, TaskQueue
 
 
 EXECUTION = {
@@ -37,6 +37,7 @@ def config(**kwargs):
         "source_command": ["fake-source"],
         "admission_command": ["fake-admission"],
         "execution": EXECUTION,
+        "lane_registration": "repair-lane",
         **kwargs,
     }
 
@@ -119,6 +120,7 @@ def test_admission_dedup_and_real_bridge_argv(tmp_path, monkeypatch):
     ok, handle = spawn(task)
     assert ok, handle
     argv = calls[0]
+    assert any("--capability ci-repair-admitted" in arg for arg in argv)
     assert argv[:3] == ["fake-bridge", "--json", "create"]
     assert argv[argv.index("--target-dir") + 1] == EXECUTION["workspace"]
     assert argv[argv.index("--charter") + 1] == EXECUTION["charter"]
@@ -215,7 +217,8 @@ def test_two_reviewed_charters_and_spoofed_task(tmp_path, monkeypatch):
 
 def test_watchdog_source_reuses_signature_and_rejects_stale_jobs(monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "tools"))
-    source = importlib.import_module("ci_failure_dispatch_source")
+    source = importlib.import_module("agent_dispatch.producers.ci_failure_source")
+    watchdog = importlib.import_module("ci_failure_watchdog")
     run = {
         "id": 123,
         "run_attempt": 1,
@@ -234,6 +237,9 @@ def test_watchdog_source_reuses_signature_and_rejects_stale_jobs(monkeypatch):
     text = "FAILED tests/example.py::test_regression - AssertionError"
     records = source.candidates("example/project", 123, "a" * 40, run, [job], lambda _: text)
     assert records[0]["signature"] == source.watchdog.signature_key(
+        job["name"], "tests/example.py::test_regression"
+    )
+    assert records[0]["signature"] == watchdog.signature_key(
         job["name"], "tests/example.py::test_regression"
     )
     assert (
@@ -261,7 +267,29 @@ def test_real_adapter_processes_and_coordinator_lifecycle(tmp_path):
         f"v={verdict()!r}; v.update(r); print(json.dumps(v))",
     ]
     task = ci_repair.run_tick(client, selected)["created"][0]
-    claimed = client.queue.claim_one("fake-worker", repo=task["repo"], task_id=task["id"])
+    assert client.queue.claim_one("ordinary-worker", repo=task["repo"], task_id=task["id"]) is None
+    client.queue.register_registration(
+        "supervised-lane",
+        {
+            "repo": task["repo"],
+            "labels": ["ci-repair"],
+            "ci_repair_bindings": [EXECUTION],
+            "ci_repair_admission_command": ["fake-admission"],
+        },
+        reg_id="repair-lane",
+    )
+    from agent_dispatch.supervisor import Supervisor
+    ordinary = Supervisor(client, spawn_fn=lambda task: pytest.fail("catch-all cannot spawn"),
+                          repo=task["repo"])
+    assert not ordinary._matches_pool(task)
+    with pytest.raises(TaskError):
+        client.queue.reserve_spawn(task["id"], reserved_by="catch-all")
+    reservation, won = client.queue.reserve_spawn(task["id"], reserved_by="repair-lane")
+    assert won
+    client.queue.record_spawn(reservation.key, session_handle="local-body:fake-session")
+    claimed = client.queue.claim_one(
+        "fake-worker", capabilities=["ci-repair-admitted"], repo=task["repo"], task_id=task["id"]
+    )
     assert claimed.id == task["id"]
     assert client.queue.start(task["id"], "fake-worker").status == "started"
     assert client.queue.complete(task["id"], "fake-worker").status == "submitted"
@@ -330,9 +358,9 @@ def test_cli_json_errors_are_concise(bindings, command):
 
 
 def test_registrar_refuses_missing_admission_before_serialization():
-    from agent_dispatch.supervisor_registration import build_command
+    from agent_dispatch.supervisor_registration import UnsupportedKind, build_command
 
-    with pytest.raises(ci_repair.AdmissionRefused, match="admission command"):
+    with pytest.raises(UnsupportedKind, match="admission command"):
         build_command(
             {
                 "id": "repair",
@@ -340,6 +368,22 @@ def test_registrar_refuses_missing_admission_before_serialization():
                 "spec": {"ci_repair_bindings": [EXECUTION], "labels": ["ci-repair"]},
             }
         )
+
+
+def test_api_registration_rejects_bad_ci_bindings_before_reconciliation(tmp_path):
+    queue = TaskQueue(tmp_path / "registrations.db")
+    for spec in (
+        {"repo": "example/project", "labels": ["ci-repair"], "ci_repair_bindings": [EXECUTION]},
+        {"repo": "example/project", "labels": ["other"], "ci_repair_bindings": [EXECUTION],
+         "ci_repair_admission_command": ["fake-adapter"]},
+    ):
+        with pytest.raises(TaskError):
+            queue.register_registration("supervised-lane", spec)
+    with pytest.raises(TaskError):
+        queue.register_registration("emitter", {
+            "id": "bad", "interval_seconds": 1, "ci_repair": {"enabled": True},
+        })
+    assert queue.register_registration("supervised-lane", {"repo": "example/project"}).id
 
 
 @pytest.mark.parametrize(
@@ -386,7 +430,7 @@ def test_ci_repair_side_load_cannot_bypass_admission():
 
 def test_watchdog_source_cli_uses_only_scoped_wrapper(monkeypatch, capsys):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "tools"))
-    source = importlib.import_module("ci_failure_dispatch_source")
+    source = importlib.import_module("agent_dispatch.producers.ci_failure_source")
     calls = []
 
     def request(argv, **kwargs):

@@ -145,6 +145,10 @@ class SpawnReservationMixin:
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
+            if task.source == "ci-repair":
+                from .ci_repair_spawn import reservation_authorized
+                if not reservation_authorized(conn, task, reserved_by):
+                    raise TaskError("CI repair reservation requires its registered admission lane")
             rows = conn.execute(
                 "SELECT * FROM spawn_reservations WHERE task_id = ? ORDER BY attempt ASC",
                 (task_id,),
@@ -828,4 +832,3 @@ class SpawnReservationMixin:
             release_requested=release_requested,
             now=now,
         )
-

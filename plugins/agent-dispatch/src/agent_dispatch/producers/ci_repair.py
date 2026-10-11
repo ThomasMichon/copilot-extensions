@@ -32,6 +32,7 @@ def validate_config(config: dict) -> None:
         "admission_command",
         "execution",
         "timeout_seconds",
+        "lane_registration",
     }:
         raise AdmissionRefused("ci_repair has unexpected configuration fields")
     if not isinstance(config.get("enabled", False), bool):
@@ -51,6 +52,8 @@ def validate_config(config: dict) -> None:
     ):
         raise AdmissionRefused("ci_repair.lane_repository must be a nonempty lane")
     execution(config.get("execution"))
+    if not isinstance(config.get("lane_registration"), str) or not config["lane_registration"]:
+        raise AdmissionRefused("ci_repair requires a dedicated lane_registration")
     timeout = config.get("timeout_seconds", 30)
     if type(timeout) not in (int, float) or not 0 < timeout <= 300:
         raise AdmissionRefused("ci_repair.timeout_seconds must be in (0, 300]")
@@ -192,6 +195,8 @@ def run_tick(
                 repo=config.get("lane_repository") or config["repository"],
                 target_repo=config["repository"],
                 source="ci-repair",
+                origin_ref=config["lane_registration"],
+                requires=["ci-repair-admitted"],
                 dedup_key=f"ci-repair:{config['repository']}:{evidence['signature']}",
                 prompt=prompt,
                 labels=["ci-repair"],

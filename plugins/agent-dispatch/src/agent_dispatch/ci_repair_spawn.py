@@ -9,6 +9,26 @@ import uuid
 from .producers.ci_repair import AdmissionRefused, _invoke, execution, failure
 
 
+def reservation_authorized(conn, task, reserved_by: str | None) -> bool:
+    """Fence reservations to the persisted, validated specialized lane."""
+    if not reserved_by or reserved_by != task.origin_ref:
+        return False
+    row = conn.execute(
+        "SELECT kind,spec,status FROM registrations WHERE id = ?", (reserved_by,)
+    ).fetchone()
+    if row is None or row["kind"] != "supervised-lane" or row["status"] != "active":
+        return False
+    try:
+        spec = json.loads(row["spec"])
+        from .registrations import validate_registration
+
+        validate_registration("supervised-lane", spec)
+        selected = execution(json.loads(task.prompt)["execution"])
+        return selected in spec.get("ci_repair_bindings", []) and spec.get("repo") == task.repo
+    except (ValueError, TypeError, KeyError):
+        return False
+
+
 def validate_bindings(bindings: list[dict]) -> None:
     """Require an explicit non-empty execution allowlist."""
     if not isinstance(bindings, list) or not bindings:
@@ -98,6 +118,9 @@ def make_ci_repair_spawn(
             route=route,
             repo=task.get("repo"),
             explicit_worker_identity=True,
+        )
+        seed = seed.replace(
+            f"claim --task {task['id']}", f"claim --task {task['id']} --capability ci-repair-admitted"
         )
         try:
             result = bridge.spawn_worker(
