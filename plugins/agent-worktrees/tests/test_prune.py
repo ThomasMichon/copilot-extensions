@@ -1299,6 +1299,12 @@ class TestInterpretDescriptorPayload:
     def test_non_final_with_blockers_stays_supported(self):
         payload = self._final_payload()
         payload["label"] = "MERGED"
+        payload["style"] = "merged-blocked"
+        payload["compact"] = "MERGED C2"
+        payload["display"] = {
+            "label": "MERGED", "style": "merged-blocked",
+            "compact": "MERGED C2", "finalized": False,
+        }
         payload["closure"] = {"final": False}
         payload["claims"] = {"held": 2}
         payload["action"] = {"disposition": "blocked"}

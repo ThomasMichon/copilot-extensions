@@ -115,6 +115,17 @@ and completion gate. Session history is read only as needed to recover the
 predecessor's immediate delta. Standalone worktrees retain the bounded
 checkpoint-and-digest reconstruction path.
 
+Payload commands retain legacy-mode compatibility when marketplace provenance
+is unavailable: missing/default-false policy or an explicit global `false`
+without marketplace overrides may use an active, untransferred legacy root.
+Invalid policy, explicit installation contexts, scoped overrides, and ownership
+tombstones remain blocked. The policy schema is documented in
+[`docs/install-contract.md`](../../docs/install-contract.md#user-policy-schema).
+The compatibility exception requires the resolver's explicit null tombstone;
+an incomplete legacy status is not proof that ownership remains untransferred.
+Policy read-back rejects null/non-object installation modes and reports read
+failures without echoing policy contents.
+
 ## Documentation
 
 - [`docs/architecture.md`](docs/architecture.md) — components + data flow

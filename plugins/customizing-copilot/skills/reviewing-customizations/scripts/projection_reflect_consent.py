@@ -86,6 +86,8 @@ class Consent:
     trusted_marketplaces: tuple[str, ...]
     dispatch_label: str
     require_immutable_pin: bool = False
+    #: Explicit repair of content-edited owned generated artifacts, never ownership.
+    overwrite_existing_managed: bool = False
 
 
 def _valid_identifier(value: object) -> bool:
@@ -153,10 +155,14 @@ def load_consent(repo_root: Path) -> Consent | None:
         # Present but not a genuine boolean -- malformed, fail closed on
         # the whole consent file rather than guessing an interpretation.
         return None
+    overwrite_managed = raw.get("overwriteExistingManaged", False)
+    if not isinstance(overwrite_managed, bool):
+        return None
 
     return Consent(
         reconciler_agent=reconciler_agent,
         trusted_marketplaces=tuple(trusted_raw),
         dispatch_label=dispatch_label,
         require_immutable_pin=require_pin,
+        overwrite_existing_managed=overwrite_managed,
     )

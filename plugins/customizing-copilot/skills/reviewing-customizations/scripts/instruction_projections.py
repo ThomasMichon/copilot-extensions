@@ -29,6 +29,8 @@ from typing import BinaryIO, Callable, Iterable, Iterator
 
 import instruction_delivery as delivery
 import instruction_delivery_io as delivery_io
+import projection_reflect_consent
+import instruction_projection_transaction as transaction
 
 BLOCKING = "blocking"
 WARNING = "warning"
@@ -1632,19 +1634,23 @@ def _marker_matches_lock(
     marker: dict[str, object],
     entry: dict[str, object],
     actual_bytes: int,
+    *,
+    allow_content_edits: bool = False,
 ) -> bool:
     for key in _LOCK_ENTRY_KEYS - {"renderedSha256"}:
         if marker.get("version") == 2 and key not in delivery.SELECTOR_KEYS:
             continue
         if marker.get(key) != entry.get(key):
             return False
-    return marker.get("renderedBytes") == actual_bytes
+    return allow_content_edits or marker.get("renderedBytes") == actual_bytes
 
 
 def _validate_projection_file(
     repo_root: Path,
     entry: dict[str, object],
     result: Result,
+    *,
+    allow_content_edits: bool = False,
 ) -> bytes | None:
     destination = str(entry["destination"])
     relative = PurePosixPath(destination)
@@ -1666,21 +1672,23 @@ def _validate_projection_file(
             raise ValueError("locked selector is not a selector")
         if _frontmatter_apply_to(raw) != entry["applyTo"]:
             raise ValueError("projection frontmatter scope does not match lock")
-        if marker.get("deliveryKind") == "body" and not delivery.complete_body(raw, marker):
+        if not allow_content_edits and marker.get("deliveryKind") == "body" and not delivery.complete_body(raw, marker):
             raise ValueError("incomplete inline body envelope")
-        if not _marker_matches_lock(marker, entry, len(raw)):
+        if not _marker_matches_lock(
+            marker, entry, len(raw), allow_content_edits=allow_content_edits
+        ):
             raise ValueError("projection marker does not match lock ownership")
-        if _sha256(raw) != entry["renderedSha256"]:
+        if not allow_content_edits and _sha256(raw) != entry["renderedSha256"]:
             result.add(
                 BLOCKING,
                 "projection-local-modification",
                 destination,
                 "checked-in projection differs from its locked rendered digest",
             )
-        if len(raw) != entry["renderedBytes"]:
+        if not allow_content_edits and len(raw) != entry["renderedBytes"]:
             raise ValueError("projection byte count does not match the lock")
         forbidden = _forbidden_content(raw)
-        if forbidden:
+        if forbidden and not allow_content_edits:
             result.add(
                 BLOCKING,
                 "projection-dynamic-content",
@@ -1688,7 +1696,7 @@ def _validate_projection_file(
                 "projection contains forbidden dynamic content: "
                 + ", ".join(forbidden),
             )
-        if len(raw) > MAX_PROJECTION_BYTES:
+        if len(raw) > MAX_PROJECTION_BYTES and not allow_content_edits:
             result.add(
                 BLOCKING,
                 "projection-budget",
@@ -2030,73 +2038,24 @@ def scan_repository(
 
 
 def _atomic_write(path: Path, content: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        dir=path.parent,
-    )
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        try:
-            temporary.unlink()
-        except FileNotFoundError:
-            pass
+    transaction.atomic_write(path, content)
 
 
 def _current_regular_bytes(path: Path) -> bytes | None:
-    try:
-        info = path.lstat()
-    except FileNotFoundError:
-        return None
-    if (
-        not stat.S_ISREG(info.st_mode)
-        or stat.S_ISLNK(info.st_mode)
-        or _is_reparse(info)
-    ):
-        raise OSError(f"{path.as_posix()} is no longer a regular file")
-    return path.read_bytes()
+    return transaction.current_regular_bytes(path, _is_reparse)
 
 
 def _transactional_write(
     changes: list[tuple[Path, bytes | None, bytes | None]],
+    *,
+    before_write: Callable[[], None] | None = None,
+    validate_path: Callable[[Path], None] | None = None,
+    after_write: Callable[[], None] | None = None,
 ) -> None:
-    replaced: list[tuple[Path, bytes | None, bytes | None]] = []
-    try:
-        for path, content, expected_content in changes:
-            if _current_regular_bytes(path) != expected_content:
-                raise OSError(
-                    f"{path.as_posix()} changed after validation"
-                )
-            if content is None:
-                path.unlink()
-            else:
-                _atomic_write(path, content)
-            replaced.append((path, content, expected_content))
-    except OSError as exc:
-        rollback_errors: list[str] = []
-        for path, written_content, previous_content in reversed(replaced):
-            try:
-                if _current_regular_bytes(path) != written_content:
-                    raise OSError(
-                        "destination changed after the transaction write"
-                    )
-                if previous_content is None:
-                    path.unlink()
-                else:
-                    _atomic_write(path, previous_content)
-            except OSError as rollback_exc:
-                rollback_errors.append(f"{path.as_posix()}: {rollback_exc}")
-        detail = f"transaction failed at {path.as_posix()}: {exc}"
-        if rollback_errors:
-            detail += "; rollback also failed: " + "; ".join(rollback_errors)
-        raise OSError(detail) from exc
+    transaction.write(
+        changes, read=_current_regular_bytes, atomic_write=_atomic_write,
+        before_write=before_write, validate_path=validate_path, after_write=after_write,
+    )
 
 
 def _lock_handle(handle: BinaryIO) -> None:
@@ -2167,16 +2126,25 @@ def repository_sync_lock(repo_root: Path) -> Iterator[None]:
     return _repository_sync_lock(repo_root)
 
 
-def sync_repository_locked(repo_root: Path, sources: Iterable[object]) -> Result:
+def sync_repository_locked(
+    repo_root: Path, sources: Iterable[object], *,
+    overwrite_existing_managed: bool = False,
+) -> Result:
     """Like ``sync_repository``, but assumes the caller already holds the
     lock from ``repository_sync_lock`` -- use only inside a ``with
     repository_sync_lock(root):`` block, on the same already-resolved root.
     """
-    return _sync_repository_locked(repo_root, list(sources), Result(operation="sync"))
+    return _sync_repository_locked(
+        repo_root, list(sources), Result(operation="sync"),
+        overwrite_existing_managed=overwrite_existing_managed,
+    )
 
 
-def sync_repository(repo_root: Path, sources: Iterable[object]) -> Result:
-    """Safely create or update declared projections and their lock."""
+def sync_repository(
+    repo_root: Path, sources: Iterable[object], *,
+    overwrite_existing_managed: bool = False,
+) -> Result:
+    """Safely update projections; optional content repair requires live consent."""
     result = Result(operation="sync")
     try:
         root = _repository_root(repo_root)
@@ -2195,7 +2163,10 @@ def sync_repository(repo_root: Path, sources: Iterable[object]) -> Result:
         )
         return result
     try:
-        return _sync_repository_locked(root, sources, result)
+        return _sync_repository_locked(
+            root, sources, result,
+            overwrite_existing_managed=overwrite_existing_managed,
+        )
     finally:
         lock_context.__exit__(None, None, None)
 
@@ -2204,7 +2175,18 @@ def _sync_repository_locked(
     root: Path,
     sources: Iterable[object],
     result: Result,
+    *,
+    overwrite_existing_managed: bool = False,
 ) -> Result:
+    consent = None
+    if not isinstance(overwrite_existing_managed, bool):
+        result.add(BLOCKING, "projection-consent", LOCK_RELATIVE, "overwrite request must be boolean")
+        return result
+    if overwrite_existing_managed:
+        consent = projection_reflect_consent.load_consent(root)
+        if consent is None or not consent.overwrite_existing_managed:
+            result.add(BLOCKING, "projection-consent", LOCK_RELATIVE, "no live consent to overwrite managed artifacts")
+            return result
     lock, lock_exists, lock_preimage = _load_lock(root, result)
     aggregate_budget = _load_aggregate_budget(root, result)
     locked_plugins = frozenset(
@@ -2225,6 +2207,7 @@ def _sync_repository_locked(
             fallback_changes.extend(delivery_io.plan_fallback_change(
                 root, spec.destination, projection.fallback_content,
                 lock.get(spec.destination), _delivery_io(),
+                overwrite_existing_managed=overwrite_existing_managed,
             ))
         except (OSError, ValueError) as exc:
             result.add(
@@ -2261,7 +2244,8 @@ def _sync_repository_locked(
                 )
                 continue
             projection_preimages[spec.destination] = _validate_projection_file(
-                root, existing_entry, result
+                root, existing_entry, result,
+                allow_content_edits=overwrite_existing_managed,
             )
         else:
             projection_preimages[spec.destination] = None
@@ -2319,7 +2303,28 @@ def _sync_repository_locked(
         changes = fallback_changes + projection_changes
         if lock_changed:
             changes.append((lock_path, lock_content, lock_preimage))
-        _transactional_write(changes)
+        def recheck() -> None:
+            if overwrite_existing_managed and projection_reflect_consent.load_consent(root) != consent:
+                raise OSError("managed overwrite consent changed after validation")
+            if _current_regular_bytes(lock_path) != lock_preimage:
+                raise OSError("projection ownership lock changed after validation")
+
+        def validate_target(target: Path) -> None:
+            try:
+                _safe_destination(root, PurePosixPath(target.relative_to(root).as_posix()))
+            except ValueError as exc:
+                raise OSError(str(exc)) from exc
+
+        def final_recheck() -> None:
+            if overwrite_existing_managed and projection_reflect_consent.load_consent(root) != consent:
+                raise OSError("managed overwrite consent changed during publication")
+            if _current_regular_bytes(lock_path) != (lock_content if lock_changed else lock_preimage):
+                raise OSError("projection ownership lock changed during publication")
+
+        _transactional_write(
+            changes, before_write=recheck, validate_path=validate_target,
+            after_write=final_recheck,
+        )
     except (OSError, ValueError) as exc:
         result.unchanged.clear()
         result.add(

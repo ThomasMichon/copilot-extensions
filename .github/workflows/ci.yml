@@ -675,6 +675,12 @@ jobs:
         run: python tools/check-hook-process-hygiene.py
       - name: Skills
         run: python tools/check-skills.py
+      - name: Changed effort and vision structure
+        if: github.event_name == 'pull_request'
+        run: >-
+          python tools/check-effort-vision-structure.py
+          --base ${{ github.event.pull_request.base.sha }}
+          --head ${{ github.event.pull_request.head.sha }}
       - name: Docs consistency
         run: python tools/check-docs-consistency.py
       - name: Runbook references

@@ -15,15 +15,24 @@ not treat identity or label alone as sufficient.
    (never a newly minted one -- see the setup skill's own requirement).
 3. **Stamp label.** The PR carries the agreed stamp label for this reflect
    kind (distinct from any other bypass-eligible automation the repo runs).
-4. **Path scope.** Every changed path is inside `.github/instructions/**` or
-   the projection lock file (`.github/copilot/context-projections.json`) --
-   nothing else.
+4. **Path scope.** Every changed path is an exact destination from a validated
+   projection lock entry, its exact derived owned fallback (validated through
+   `instruction_delivery.validate_lock_delivery`), or the projection lock file
+   (`.github/copilot/context-projections.json`). Do not allow arbitrary files
+   under either instructions or context-fallbacks. For overwrite repairs,
+   validate ownership against the base lock and matching surviving provenance;
+   a PR cannot grant itself ownership or consent.
 5. **Diff shape.** Every changed file is a regular-file add or modify; no
    deletions, renames, symlinks, or mode changes.
 6. **Recompute match.** A fresh recompute of the changed lock entries
    byte-matches both the PR's lock-entry diff and the actual generated
-   instruction files it declares (see `projection_reflect.py`'s own module
-   docstring for the immutable-pin caveat this still carries).
+   selectors/inline files and complete reviewed fallback bodies it declares
+   (reuse the canonical sync and scan validators; no parallel ownership parser).
+   Recompute with live `overwriteExistingManaged` consent when repairing base
+   content edits; otherwise preserve those edits. The PR's head must pass the
+   ordinary strict scan, not the relaxed preimage validation.
+   See `projection_reflect.py`'s own module
+   docstring for the immutable-pin caveat this still carries.
 7. **Trusted-source allowlist.** Every changed lock entry's marketplace is in
    `consent.trusted_marketplaces` -- reuse
    `projection_reflect.bypass_decision`'s own check rather than

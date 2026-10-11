@@ -2022,9 +2022,9 @@ def test_sync_preserves_edit_made_after_validation(
     original_transaction = projections._transactional_write
     local_edit = b"concurrent local edit\n"
 
-    def edit_before_commit(changes) -> None:
+    def edit_before_commit(changes, **kwargs) -> None:
         destination.write_bytes(local_edit)
-        original_transaction(changes)
+        original_transaction(changes, **kwargs)
 
     monkeypatch.setattr(
         projections, "_transactional_write", edit_before_commit

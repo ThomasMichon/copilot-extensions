@@ -14,7 +14,7 @@ or must instead route to conflict-dispatch:
 
 * deterministic finding **classification** (fail-closed allowlist: only
   ``projection-missing`` and ``projection-source-update`` are plain drift
-  that ``sync`` already resolved; aggregate-budget warnings are separate
+  that ``sync`` already resolved; aggregate-budget and overlap warnings are separate
   audit advisories -- every other check name, including one this module
   has never seen before, requires conflict-dispatch);
 * the **"did anything change" trigger** (``changed or lock_updated``, not
@@ -110,7 +110,7 @@ class Classification:
 def classify_findings(findings: Iterable[object]) -> Classification:
     """Split findings by their ``.check`` name using the fail-closed allowlist.
 
-    Aggregate-budget warnings are audit-only. Every other check name not
+    Aggregate-budget and overlap warnings are audit-only. Every other check name not
     explicitly in :data:`PLAIN_DRIFT_CHECKS` -- including one this module
     has never seen before -- is treated as conflict-routed.
     This is deliberate: a newly introduced check in
@@ -123,7 +123,7 @@ def classify_findings(findings: Iterable[object]) -> Classification:
     for finding in findings:
         check = getattr(finding, "check", None)
         if (
-            check == "projection-aggregate-budget"
+            check in {"projection-aggregate-budget", "projection-overlap"}
             and getattr(finding, "severity", None) == "warning"
         ):
             advisory.append(finding)

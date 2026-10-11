@@ -818,12 +818,9 @@ class WorktreeRecord:
     # script watches across all three disposition fields together).
     activity: str = ""
     activity_at: str | None = None
-    # worktree-finality-and-obligations: the most recent timestamp this record
-    # was `finalized` before being atomically reopened (a new/reactivated held
-    # claim arrived after finalize). Preserves the historical fact "this was
-    # finalized as of X" once `completed_at` is cleared by the reopen -- see
-    # `reopen_finalized_owner`. Never set except by a reopen transition.
+    # Reopen preserves prior finalization time when completed_at is cleared.
     last_finalized_at: str | None = None
+    finalized_checkout: dict[str, str] | None = None
     # worktree-finality-and-obligations, Phase 3: the itemized follow-up
     # ledger replacing the boolean-only flag above. `follow_up` (the legacy
     # boolean) is preserved as-is for back-compat callers/YAMLs and is treated
@@ -2178,6 +2175,7 @@ def _load_record_uncached(path: Path) -> WorktreeRecord:
         activity_at=(str(data["activity_at"])
                      if data.get("activity_at") else None),
         last_finalized_at=(str(last_finalized_raw) if last_finalized_raw else None),
+        finalized_checkout=data.get("finalized_checkout") if isinstance(data.get("finalized_checkout"), dict) else None,
         mux_live=(bool(data["mux_live"])
                   if data.get("mux_live") is not None else None),
         mux_live_at=(str(mux_live_at_raw) if mux_live_at_raw else None),
@@ -2691,6 +2689,8 @@ def _save_record_unlocked(
         content += f"activity_at: '{record.activity_at}'\n"
     if record.last_finalized_at:
         content += f"last_finalized_at: {record.last_finalized_at}\n"
+    if record.finalized_checkout is not None:
+        content += yaml.safe_dump({"finalized_checkout": record.finalized_checkout})
     if record.active_effort is not None:
         content += yaml.safe_dump(
             {"active_effort": record.active_effort.to_dict()},

@@ -1275,9 +1275,7 @@ def _worktree_to_dict(
             paired_sibling_final=prune.default_paired_sibling_final,
         )
         d["cleanup_bucket"] = _disposition.bucket
-        # worktree-finality-and-obligations Phase 4: the canonical closure
-        # descriptor, additive alongside the legacy `cleanup_bucket`/`state`
-        # fields above (not yet a replacement -- see the effort's Phase 5).
+        # Closure evidence and durable lifecycle display remain separate.
         # "refreshed" requires a fetch to have both been requested AND
         # succeeded (`state_info.fetch_requested and not
         # state_info.fetch_failed`, Phase 5 follow-up) -- `fetch_failed`
@@ -1292,6 +1290,7 @@ def _worktree_to_dict(
             # the repo-scoped ledger rather than letting only this call
             # benefit from it.
             tracking.record_repo_fetch_confirmed(rec.repo)
+        from . import finalized_checkout
         d["closure"] = prune.assemble_closure_descriptor(
             rec,
             state_info,
@@ -1301,6 +1300,7 @@ def _worktree_to_dict(
             evidence_mode="refreshed" if _fetch_fresh else "cached",
             turn_count=_turns, repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
             cross_machine_claims=prune.cross_machine_claim_count(rec),
+            finalized_checkout_current=finalized_checkout.matches(rec),
         ).to_dict()
         d["ff_eligible"] = (
             git_ops.can_fast_forward(state_info)

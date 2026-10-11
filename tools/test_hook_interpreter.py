@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import re
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,31 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOKS = (ROOT / "tools" / "hooks" / "pre-commit", ROOT / "tools" / "hooks" / "pre-push")
+
+
+def test_pre_push_keeps_only_publication_safety_checks():
+    hook = HOOKS[1].read_text(encoding="utf-8")
+    invoked = set(re.findall(r'"\$ROOT/tools/([^"]+\.py)"', hook))
+    assert invoked == {"check-no-internal-identifiers.py", "check-large-files.py"}
+    assert '--head "$local_sha"' in hook
+
+
+def test_repository_guards_remain_in_ci_and_staged_checks_in_pre_commit():
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    for guard in (
+        "check-install-contract.py", "check-vendored-libs-sync.py",
+        "check-headless-launch.py", "check-picker-inbox-discipline.py",
+        "check-skills.py", "check-docs-consistency.py", "check-runbook-references.py",
+        "check-version-consistency.py", "check-effort-vision-structure.py",
+        "check-feed-neutrality.py", "check-agent-bridge-contracts.py",
+        "check-changefile-presence.py", "check-no-agent-machines-packages.py",
+        "check-module-size.py",
+    ):
+        assert guard in ci, f"{guard} must retain a CI validation lane"
+    pre_commit = HOOKS[0].read_text(encoding="utf-8")
+    assert "check --select F,E9" in pre_commit
+    for guard in ("check-skills.py", "check-effort-vision-structure.py", "check-large-files.py"):
+        assert f'"$ROOT/tools/{guard}"' in pre_commit
 
 
 @pytest.mark.parametrize("hook", HOOKS)

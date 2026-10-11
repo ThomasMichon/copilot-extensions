@@ -9,6 +9,16 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+The review-request workflow's fast contract uses
+`node --test tools/test_copilot_review_gate.cjs`. To exercise its exact script
+against the bundled `actions/github-script` runtime as well, download
+`dist/index.js` from the commit pinned in `copilot-review-gate.yml` into a
+task-specific scratch folder and pass its absolute path as
+`COPILOT_REVIEW_ACTION_BUNDLE` to that same command. The opt-in test uses
+synthetic read/write tokens and an in-memory HTTP adapter; it makes no live API
+requests or review writes. This catches bundled dependency/import differences
+that an injected unit-test client cannot reproduce.
+
 The pre-push agent-bridge contract guard (`tools/check-agent-bridge-contracts.py`)
 requires Git 2.45+ for enforced `GIT_NO_LAZY_FETCH` support; older versions
 fail before object reads, including in partial clones. This contributor

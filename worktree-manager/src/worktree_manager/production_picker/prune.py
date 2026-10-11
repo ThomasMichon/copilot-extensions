@@ -92,9 +92,47 @@ def interpret_descriptor_payload(payload: dict | None) -> dict:
     ):
         return _unsupported_descriptor(
             "unsupported-descriptor:final-with-blockers")
+    finalized_display = False
+    display = payload.get("display")
+    if display is not None:
+        if (
+            not isinstance(display, dict)
+            or not isinstance(display.get("finalized"), bool)
+            or not all(isinstance(display.get(k), str) for k in ("label", "style", "compact"))
+        ):
+            return _unsupported_descriptor("unsupported-descriptor:invalid-display")
+        finalized_display = display["finalized"]
+        if finalized_display:
+            git = payload.get("git")
+            settled_sessions = _non_negative_int(display.get("settled_sessions"))
+            if (
+                display["label"] != "FINAL"
+                or display["style"] != "final"
+                or display["compact"] != "FINAL"
+                or label not in ("FINAL", "MERGED", "ACTIVE")
+                or settled_sessions is None or held_claims != settled_sessions
+                or open_follow_ups != 0
+                or not isinstance(git, dict)
+                or _non_negative_int(git.get("dirty")) != 0
+                or not isinstance(git.get("branch_drift"), bool)
+                or git.get("active_effort") is not False
+                or not isinstance(payload.get("blockers"), list)
+                or any(b.get("code") not in ("held-claims", "paired-pending") for b in payload["blockers"] if isinstance(b, dict))
+                or any(not isinstance(b, dict) for b in payload["blockers"])
+                or not isinstance(payload.get("facts"), dict)
+                or not isinstance(payload["facts"].get("pending_handoff"), dict)
+                or _non_negative_int(payload["facts"]["pending_handoff"].get("count")) != 0
+            ):
+                return _unsupported_descriptor("unsupported-descriptor:invalid-finalized-display")
+        elif any(display[k] != value for k, value in (
+            ("label", label), ("style", style), ("compact", compact),
+        )):
+            return _unsupported_descriptor("unsupported-descriptor:display-mismatch")
+        label, style, compact = display["label"], display["style"], display["compact"]
     return {
         "supported": True,
         "final": final_value,
+        "finalized_display": finalized_display,
         "label": label,
         "style": style,
         "compact": compact,

@@ -109,6 +109,13 @@ copilot-extensions finalize          # clean up the worktree
 
 - **Update an open PR** with `copilot-extensions push-changes` (it re-pushes the
   `pr/<slug>` head; it will NOT land on `main`).
+- Managed publication has a 30-second `pr.push_timeout_seconds` deadline.
+  Pre-push retains identifier-leak and pushed-blob size checks; repository
+  contract, architecture, version, documentation, and whole-tree guards run
+  in required CI instead of delaying transport. Staged Python lint, skill
+  validity, effort/vision structure, and staged file size checks already run
+  at pre-commit. No hook automatically rewrites or restages partially staged
+  files; run the suggested lint autofix explicitly before committing.
 - **Merge is deliberately manual.** No auto-merge label is bound (the repo's
   `pr-self-merge` profile authorizes the submitter to merge directly): once
   the wait-for-a-verdict loop below is satisfied, squash-merge with

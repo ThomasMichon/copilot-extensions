@@ -63,6 +63,15 @@ def compute(
             default_branch=repo.default_branch,
             active_paths=active_paths,
         )
+        if record.status == "finalized" and info.state == git_ops.WorktreeState.ACTIVE:
+            # An attached concluding shell preserves FINAL, but ACTIVE's early
+            # classifier return cannot conceal new dirtiness or checkout drift.
+            content = git_ops.classify_worktree(
+                record.worktree_path, record.branch, fetch=False,
+                remote=repo.remote, default_branch=repo.default_branch,
+                active_paths=None,
+            )
+            info = dataclasses.replace(content, state=git_ops.WorktreeState.ACTIVE)
         info = tracking_override(record, info)
     elif record.status == "finalized":
         info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)

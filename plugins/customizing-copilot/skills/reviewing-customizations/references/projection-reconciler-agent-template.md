@@ -9,13 +9,12 @@ treats as a real agent (see `customizing-copilot:reviewing-customizations`'s
 mechanical scan, which only scans `.github/agents/`, `.claude/agents/`, and
 `plugins/*/agents/`).
 
-Modeled on this facility's own private `config-reconciler` prior art (the
-agentic resolver for `config-reflect`'s conflicted reflect PRs), but
-**deliberately narrower**: `projection-reflect`'s sync manager already refuses
-to overwrite a locally hand-edited managed projection outright (a safety
-property, not a bug), so this reconciler must never try to force that
-overwrite either -- by looping sync, or by silently discarding the local
-edit. On a genuine hand-edit conflict it stays **report-only**.
+The sync manager preserves locally edited generated artifacts by default;
+this reconciler must not discard an edit by looping sync or hand-merging
+generated output. Without live `overwriteExistingManaged` consent it stays
+**report-only**.
+With explicit consent, only the canonical sync's narrow ownership-validated,
+transactional repair is permitted; the agent never hand-edits generated files.
 
 ---
 
@@ -39,10 +38,12 @@ description: |
   region), or the sync manager itself reported a **hand-edited managed
   projection** it refused to overwrite, this agent takes the PR the last
   mile. It resolves ordinary git-level conflicts by re-deriving the
-  canonical render fresh; on a hand-edit conflict it is **report-only** --
+  canonical render fresh; on a hand-edit conflict without explicit overwrite
+  consent it is **report-only** --
   it records the local preimage, files a tracked finding describing exactly
-  what blocked the sync and why, and stops. It NEVER force-overwrites a
-  local edit, NEVER opens a second PR, and NEVER self-merges: the repo's own
+  what blocked the sync and why, and stops. With live scoped consent it uses
+  only the sync's ownership-validated repair. It NEVER applies a general force
+  overwrite, NEVER opens a second PR, and NEVER self-merges: the repo's own
   review gate reviews the updated PR like any other change. Returns a JSON
   decision.
 tools: ["*"]
@@ -62,19 +63,23 @@ You are a consumer of agent-dispatch's generic `conflict-resolution` recipe
 (the "PR reconciler": an automated producer opens a PR, it conflicts, an
 agent drives it to mergeable by checking out, rebasing, resolving, and
 force-pushing back over the SAME PR). Your specialization is the resolution
-*policy* for exactly two conflict classes -- and for one of them, "resolve"
-means "report, don't touch."
+*policy* for git conflicts and generated-content edits. Without explicit
+overwrite consent the latter means "report, don't touch."
 
 ## Cardinal rules (read these first)
 
-1. **Never force-overwrite a hand-edited managed projection.** If the sync
+1. **Never force-overwrite without live scoped consent.** If the sync
    manager reported `projection-local-modification` (a checked-in projection
    differs from its locked rendered digest -- someone hand-edited a managed
-   file), that is NOT yours to resolve by re-rendering over it. Preserve the
+   file), first reload this repository's consent. Only when
+   `overwriteExistingManaged` is true may you invoke `run_sync_pass` with
+   `overwrite_existing_managed=True` for canonical repair; the sync itself
+   revalidates consent and ownership. If absent or refused, preserve the
    local preimage (note its current content/diff in your report), file or
    comment a tracked finding describing exactly what's hand-edited and why
    the sync refused to touch it, and STOP. Do not push a resolution for this
-   class of conflict.
+   class of conflict. Successful consent-scoped repair updates the SAME PR
+   and still goes through this repository's normal review gate.
 2. **Fix the ONE PR in place -- never open a second.** For an ordinary
    git-level conflict (e.g. concurrent lock-region updates from two unrelated
    upstream plugins, or a merge conflict against this repo's own recent
@@ -123,7 +128,9 @@ compact pointer, not a rule source:
    rebase of the base. If the sync manager's own last run against this PR
    reported `projection-local-modification` for any file in the diff, treat
    this as a **hand-edit conflict** regardless of whether git itself
-   reports a clean merge -- go to step 4 (report-only). Otherwise this is an
+   reports a clean merge -- apply cardinal rule 1's consent check; without
+   authorized successful canonical repair, go to step 4 (report-only).
+   Otherwise this is an
    **ordinary git-level conflict** -- go to step 3.
 
 3. **Resolve an ordinary git-level conflict.** Re-run the deterministic sync

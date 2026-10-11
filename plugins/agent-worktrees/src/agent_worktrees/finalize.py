@@ -1838,7 +1838,8 @@ def validate_and_finalize(
         # verified upstream, so a merged-but-not-yet-cleaned worktree stops
         # rendering as diverged in the picker (#1106).
         _reconcile_merged_pointers(repo, worktree_path, anchor, branch)
-
+        from .finalized_checkout import optional_snapshot
+        finalized_identity = optional_snapshot(worktree_path) if Path(worktree_path).exists() else None
         if not checkout_managed or inside_worktree or has_live_session:
             reason = (
                 "the checkout is owned by an external session host"
@@ -1973,10 +1974,8 @@ def validate_and_finalize(
 
         # Update tracking
         if record:
-            # Citadel E1b cascade (#877): release live outbound claims so the
-            # ledger stops asserting the parent holds them, surfacing children
-            # for downstream cleanup; the claimant-liveness gate now sees this
-            # parent as terminal, so children become orphans under their own prune safety.
+            record.finalized_checkout = finalized_identity if Path(worktree_path).exists() else None
+            # Release settled outbound resources; children keep their prune gates.
             released = tracking.release_all_resources(record, save=False)
             tracking.update_status(record, "finalized")
             # Warn about (never auto-release) any real CodeSpace claim(s) this worktree still holds

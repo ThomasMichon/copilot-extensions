@@ -215,7 +215,7 @@ if [[ "$1" == status ]]; then
   if [[ -n "${TEST_INSTALLATION_STATUS:-}" ]]; then
     printf '%s\\n' "$TEST_INSTALLATION_STATUS"
   else
-    printf '%s\\n' '{"status":"ready","reason":"policy-default-false","actualMode":"legacy","desiredMode":"legacy","policy":{"state":"valid","enabled":false},"installationMode":{"marketplaces":{}}}'
+    printf '%s\\n' '{"status":"ready","reason":"policy-default-false","actualMode":"legacy","desiredMode":"legacy","policy":{"state":"valid","enabled":false}}'
   fi
   exit 0
 fi
@@ -250,7 +250,6 @@ if ($args[0] -eq 'status') {
             actualMode = 'legacy'
             desiredMode = 'legacy'
             policy = [ordered]@{ state = 'valid'; enabled = $false }
-            installationMode = [ordered]@{ marketplaces = [ordered]@{} }
         } | ConvertTo-Json -Compress -Depth 4
     }
     exit 0
@@ -309,6 +308,7 @@ def _run_payload_command(
         env=env,
         cwd=cwd,
         check=False,
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
 
 
@@ -501,3 +501,112 @@ def test_cross_cell_context_mismatch_is_rejected(tmp_path: Path, shell: str) -> 
     assert "blocks invocation" in result.stderr or (
         "requested installation context is not active" in result.stderr
     )
+
+
+@pytest.mark.parametrize("shell", ["powershell", "bash"])
+@pytest.mark.parametrize(
+    ("mode", "policy_state", "disposition", "tombstone", "expected_code"),
+    [
+        (None, "missing", "active", None, 0),
+        ({}, "valid", "active", None, 0),
+        ({"omit": True}, "valid", "active", None, 0),
+        ({"enabled": False}, "valid", "active", None, 0),
+        ({"enabled": False, "marketplaces": {}}, "valid", "active", None, 0),
+        ({"enabled": False, "marketplaces": {"example--1234": {"enabled": True}}},
+         "valid", "active", None, 126),
+        ({"enabled": True}, "valid", "active", None, 126),
+        ({"enabled": False}, "invalid", "active", None, 126),
+        ({"null": True}, "invalid", "active", None, 126),
+        ({"null": True}, "valid", "active", None, 126),
+        ({"malformed": True}, "valid", "active", None, 126),
+        ({"enabled": False}, "valid", "active", {"owner": "other"}, 126),
+        ({"enabled": False}, "valid", "active", "omit", 126),
+        (None, "missing", "owned-by-other-cell", None, 126),
+    ],
+)
+def test_legacy_policy_without_embedded_policy(
+    tmp_path: Path,
+    shell: str,
+    mode: dict[str, object] | None,
+    policy_state: str,
+    disposition: str,
+    tombstone: dict[str, str] | str | None,
+    expected_code: int,
+) -> None:
+    if (shell == "bash") == (os.name == "nt"):
+        pytest.skip("native platform runtime gate")
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    payload = _copy_payload(
+        profile, ".copilot/installed-plugins/example/agent-logger"
+    )
+    _write_gate_stubs(payload)
+    if mode is not None:
+        policy = profile / ".copilot-extensions" / "installation-mode.json"
+        policy.parent.mkdir()
+        document: dict[str, object] = {
+            "schema": "copilot-extensions.installation-mode",
+            "version": 1,
+        }
+        if mode != {"omit": True}:
+            document["installationMode"] = None if mode == {"null": True} else mode
+        policy.write_text(
+            '{"synthetic-policy-sentinel":'
+            if mode == {"malformed": True}
+            else json.dumps(document),
+            encoding="utf-8",
+        )
+    legacy_root = profile / ".agent-logger"
+    runtime = _fake_runtime(legacy_root)
+    capture = tmp_path / "capture.json"
+    env = _clean_subprocess_env()
+    env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    legacy: dict[str, object] = {"disposition": disposition}
+    if tombstone != "omit":
+        legacy["tombstone"] = tombstone
+    env.update({
+        "HOME": str(profile),
+        "USERPROFILE": str(profile),
+        "AGENT_LOGGER_HOME": str(legacy_root),
+        "AGENT_LOGGER_NO_SELFPROVISION": "1",
+        "TEST_CAPTURE": str(capture),
+        "TEST_PYTHON": str(runtime),
+        "TEST_INSTALLATION_STATUS": json.dumps({
+            "status": "provenance-blocked",
+            "reason": "provenance-blocked",
+            "actualMode": None,
+            "desiredMode": None,
+            "policy": {
+                "state": policy_state,
+                "enabled": bool(mode and mode.get("enabled")),
+                "reason": "policy-default-false" if mode is None else "policy-global",
+            },
+            "legacy": legacy,
+        }),
+    })
+    if shell == "bash":
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        getent = bin_dir / "getent"
+        getent.write_text(
+            '#!/bin/sh\nprintf \'user:x:0:0::%s:/bin/sh\\n\' "$HOME"\n',
+            encoding="utf-8",
+        )
+        getent.chmod(0o700)
+        env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
+
+    result = _run_payload_command(shell, payload, "ramp-up-session", env, "--probe")
+
+    assert result.returncode == expected_code, result.stderr
+    if expected_code == 0:
+        observed = json.loads(capture.read_text(encoding="utf-8"))
+        assert observed["module"] == "agent_logger.segmenter.ramp_up"
+        assert observed["args"] == ["--probe"]
+        assert observed["home"] == str(legacy_root)
+        assert observed["context"] is None
+    else:
+        assert "blocks invocation" in result.stderr or (
+            "installation policy could not be read" in result.stderr
+        )
+        assert "synthetic-policy-sentinel" not in result.stderr
+        assert not capture.exists()

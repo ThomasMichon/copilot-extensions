@@ -710,6 +710,12 @@ A worktree may complete only when its source-control content is safe and every
 durable obligation is settled or transferred. Interactive process exit is
 neither necessary nor sufficient evidence of completion.
 
+Successful explicit finalization is a durable conclusion displayed as FINAL.
+Ordinary polling, expired fetch freshness, and an attached concluding shell do
+not demote that assertion to MERGED. Genuinely reopened responsibility or new
+work invalidates it through the owning lifecycle. Displaying the conclusion
+never substitutes for the fresh, atomic checks that authorize removal.
+
 ### finalization-is-reversible-under-live-resume
 
 A worktree's completed/finalized state is not a one-way trap for a session

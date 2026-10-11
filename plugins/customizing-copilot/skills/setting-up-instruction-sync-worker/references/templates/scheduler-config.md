@@ -90,10 +90,11 @@ plugin ships a runtime package), so it needs no path setup.
        sources,
        trusted_marketplaces=consent.trusted_marketplaces,
        resolve_pins=resolve_pins,
+       overwrite_existing_managed=consent.overwrite_existing_managed,
        refresh=refresh_installed_payloads,  # your own repo's refresh step
    )
    if not outcome.needs_pr:
-       return  # nothing changed and nothing was found -- true no-op
+       return  # no actionable change/conflict; retain outcome.audit_warnings
    ```
 
 3. **Land, or route -- based on *why* it's ineligible, not just that it is.**

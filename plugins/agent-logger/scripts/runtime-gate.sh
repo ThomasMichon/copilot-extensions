@@ -49,11 +49,19 @@ json_get() {
 }
 
 json_type() {
-    LC_ALL=C awk -f "$JSON_QUERY" -v mode=type -v "query_path=$2" "$3"
+    LC_ALL=C awk -f "$JSON_QUERY" -v mode=type -v "query_path=$2" <<<"$1"
 }
 
-json_len() {
-    LC_ALL=C awk -f "$JSON_QUERY" -v mode=len -v "query_path=$2" "$3"
+json_type_file() {
+    LC_ALL=C awk -f "$JSON_QUERY" -v mode=type -v "query_path=$2" "$1"
+}
+
+json_get_file() {
+    LC_ALL=C awk -f "$JSON_QUERY" -v mode=get -v "query_path=$2" "$1"
+}
+
+json_len_file() {
+    LC_ALL=C awk -f "$JSON_QUERY" -v mode=len -v "query_path=$2" "$1"
 }
 
 profile_home() {
@@ -138,21 +146,6 @@ POLICY_PRESENT=0
 if [[ -e "$POLICY" || -L "$POLICY" ]]; then
     POLICY_PRESENT=1
 fi
-PROVENANCE_BOUNDARY=0
-case "${PAYLOAD_ROOT//\\//}" in
-    */.copilot/installed-plugins/*/*) PROVENANCE_BOUNDARY=1 ;;
-esac
-if [[ "$PROVENANCE_BOUNDARY" = 0 ]]; then
-    PROBE_ROOT="$PAYLOAD_ROOT"
-    while [[ "$PROBE_ROOT" != "/" ]]; do
-        if [[ -f "$PROBE_ROOT/.github/plugin/marketplace.json" ]]; then
-            PROVENANCE_BOUNDARY=1
-            break
-        fi
-        PROBE_ROOT="$(dirname -- "$PROBE_ROOT")"
-    done
-fi
-
 RUNTIME_ROOT="$LEGACY_ROOT"
 CONTEXT=""
 INSTALLATION_ID=""
@@ -190,21 +183,40 @@ RESOLUTION_REASON="$(json_get "$RESOLUTION" "$(json_path reason)" 2>/dev/null ||
 ACTUAL_MODE="$(json_get "$RESOLUTION" "$(json_path actualMode)" 2>/dev/null || true)"
 DESIRED_MODE="$(json_get "$RESOLUTION" "$(json_path desiredMode)" 2>/dev/null || true)"
 INSTALL_GENERATION="$(json_get "$RESOLUTION" "$(json_path installGeneration)" 2>/dev/null || true)"
+LEGACY_UNTRANSFERRED=0
+if [[ "$(json_get "$RESOLUTION" "$(json_path legacy disposition)" 2>/dev/null || true)" = active &&
+      "$(json_type "$RESOLUTION" "$(json_path legacy tombstone)" 2>/dev/null || true)" = null ]]; then
+    LEGACY_UNTRANSFERRED=1
+fi
 SIMPLE_POLICY_LEGACY=0
 if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
       "$POLICY_PRESENT" = 0 &&
-      "$PROVENANCE_BOUNDARY" = 0 &&
-      "$RESOLUTION_STATUS" = provenance-blocked ]]; then
+      "$RESOLUTION_STATUS" = provenance-blocked &&
+      "$LEGACY_UNTRANSFERRED" = 1 &&
+      "$(json_get "$RESOLUTION" "$(json_path policy state)" 2>/dev/null || true)" = missing &&
+      "$(json_get "$RESOLUTION" "$(json_path policy enabled)" 2>/dev/null || true)" = false &&
+      "$(json_get "$RESOLUTION" "$(json_path policy reason)" 2>/dev/null || true)" = policy-default-false ]]; then
     SIMPLE_POLICY_LEGACY=1
 elif [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
         "$RESOLUTION_STATUS" = provenance-blocked &&
+        "$POLICY_PRESENT" = 1 &&
+        "$LEGACY_UNTRANSFERRED" = 1 &&
         "$(json_get "$RESOLUTION" "$(json_path policy state)" 2>/dev/null || true)" = valid &&
         "$(json_get "$RESOLUTION" "$(json_path policy enabled)" 2>/dev/null || true)" = false ]]; then
     MARKETPLACES_PATH="$(json_path installationMode marketplaces)"
-    MARKETPLACES_TYPE="$(json_type "$RESOLUTION" "$MARKETPLACES_PATH" "$POLICY" 2>/dev/null || true)"
-    if [[ -z "$MARKETPLACES_TYPE" ||
+    MARKETPLACES_TYPE="$(json_type_file "$POLICY" "$MARKETPLACES_PATH" 2>/dev/null || true)"
+    ENABLED_PATH="$(json_path installationMode enabled)"
+    ENABLED_TYPE="$(json_type_file "$POLICY" "$ENABLED_PATH" 2>/dev/null || true)"
+    POLICY_TYPE="$(json_type_file "$POLICY" "" 2>/dev/null || true)"
+    MODE_TYPE="$(json_type_file "$POLICY" "$(json_path installationMode)" 2>/dev/null || true)"
+    if [[ "$POLICY_TYPE" = object &&
+          ( -z "$MODE_TYPE" || "$MODE_TYPE" = object ) &&
+          ( -z "$ENABLED_TYPE" ||
+            ( "$ENABLED_TYPE" = boolean &&
+              "$(json_get_file "$POLICY" "$ENABLED_PATH" 2>/dev/null || true)" = false ) ) &&
+          ( -z "$MARKETPLACES_TYPE" ||
           ( "$MARKETPLACES_TYPE" = object &&
-            "$(json_len "$RESOLUTION" "$MARKETPLACES_PATH" "$POLICY" 2>/dev/null || true)" = 0 ) ]]; then
+            "$(json_len_file "$POLICY" "$MARKETPLACES_PATH" 2>/dev/null || true)" = 0 ) ) ]]; then
         SIMPLE_POLICY_LEGACY=1
     fi
 fi

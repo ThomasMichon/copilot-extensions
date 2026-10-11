@@ -87,6 +87,10 @@ def _policy_relevant_destinations(
     entry moved.
     """
     relevant = set(changed)
+    for destination, entry in entries_after.items():
+        fallback = entry.get("fallback")
+        if isinstance(fallback, dict) and fallback.get("destination") in relevant:
+            relevant.add(destination)
     for destination, after_entry in entries_after.items():
         if entries_before.get(destination) != after_entry:
             relevant.add(destination)
@@ -185,6 +189,7 @@ def run_sync_pass(
     pinned_commits: Mapping[str, str] | None = None,
     resolve_pins: Callable[[list[object]], Mapping[str, str] | None] | None = None,
     refresh: Callable[[], None] | None = None,
+    overwrite_existing_managed: bool = False,
 ) -> SyncOutcome:
     """Run one complete sync -> scan -> decide pass; return the one outcome.
 
@@ -220,6 +225,8 @@ def run_sync_pass(
     silently disable pin enforcement for a caller that explicitly opted
     into it.
     """
+    # A true request still requires live consent inside the locked sync; the
+    # caller's earlier consent snapshot never authorizes the transaction.
     if refresh is not None:
         refresh()
 
@@ -262,6 +269,16 @@ def run_sync_pass(
             bypass=decision,
         )
     try:
+        live_consent = None
+        if overwrite_existing_managed:
+            live_consent = projection_reflect_consent.load_consent(root)
+            if live_consent is not None:
+                trusted_marketplaces = live_consent.trusted_marketplaces
+                resolve_pins = (
+                    scan_plugin_sources.resolve_pinned_commits
+                    if live_consent.require_immutable_pin else None
+                )
+                pinned_commits = None
         if resolve_pins is not None:
             # A resolver that returns None (a transient failure, or simply
             # "nothing resolved") must NOT be treated as "no pinned_commits
@@ -275,9 +292,19 @@ def run_sync_pass(
             resolved = resolve_pins(sources)
             pinned_commits = resolved if resolved is not None else {}
         entries_before = projections.load_lock_entries(root)
-        sync_result = projections.sync_repository_locked(root, sources)
+        sync_result = projections.sync_repository_locked(
+            root, sources, overwrite_existing_managed=overwrite_existing_managed
+        )
         scan_result = projections.scan_repository(root, sources)
         entries_after = projections.load_lock_entries(root)
+        if overwrite_existing_managed and (
+            live_consent is None
+            or projection_reflect_consent.load_consent(root) != live_consent
+        ):
+            sync_result.add(
+                projections.BLOCKING, "projection-consent", root,
+                "overwrite consent changed during the sync decision",
+            )
     finally:
         with_lock.__exit__(None, None, None)
 
@@ -402,6 +429,7 @@ def main(argv: list[str] | None = None) -> int:
         sources,
         trusted_marketplaces=consent.trusted_marketplaces,
         resolve_pins=resolve_pins,
+        overwrite_existing_managed=consent.overwrite_existing_managed,
     )
     if args.json:
         print(json.dumps(outcome.to_dict(), indent=2, sort_keys=True))

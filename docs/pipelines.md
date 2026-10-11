@@ -88,12 +88,17 @@ The automatic fallback waits **five minutes after its run starts**, without API
 polling, then checks the live PR once. It skips closed/draft/retargeted PRs,
 pending Copilot reviews, completed reviews of the current diff, and requests
 still inside their five-minute grace period. Completed reviews must be newer
-than the latest base-retarget/reopen event. A run superseded by a newer push
+than the latest base-retarget/reopen event. Identity checks accept the observed
+`Copilot` and `copilot-pull-request-reviewer[bot]` aliases only for API users
+typed `Bot`; the review write retains the canonical app login. A run superseded by a newer push
 leaves that push's grace period to its own queued run. Per-PR serialization keeps
 an active run plus the latest pending event; independent PRs remain concurrent.
 
 If no review activity qualifies, the workflow makes **one nudge**. All reads use
-`GITHUB_TOKEN`; only that write uses the licensed owner credential. A successful
+`GITHUB_TOKEN`; only that write uses the licensed owner credential. The separate
+read client is constructed from github-script's injected Octokit constructor
+with automatic retries disabled; bundled action dependencies are not available
+through dynamic `require`. A successful
 request is reported as accepted, not as proof that Copilot started. There is
 **no post-nudge confirmation polling**; review completion remains observable
 through the normal PR gate. Write failures report reset/backoff headers when
