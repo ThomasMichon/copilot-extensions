@@ -3481,6 +3481,7 @@ function Install-SupervisorTask {
         if ($master -and $master.State -eq 'Disabled') {
             Invoke-SupervisorAudit -Event selection -Reason master-not-active -Name $SupervisorTaskName -EnvFile $envFile -Outcome skipped
             Write-Warn 'Master supervisor remains disabled; preserving per-profile tasks'
+            Invoke-SupervisorsStart
         } else { Remove-ProfileSupervisorTasks }
     } else {
         foreach ($profile in @(Get-SupervisorProfileFiles)) {

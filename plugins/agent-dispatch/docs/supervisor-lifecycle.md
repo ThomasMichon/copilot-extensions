@@ -60,7 +60,9 @@ native enablement after its configuration changes; there is no safe inference
 that a disabled unit is merely installer-generated rather than operator-owned.
 A disabled native master does not authorize retirement of its native profile
 units; Linux additionally requires the master to be active. Pool overrides and
-budget pauses are not modified.
+budget pauses are not modified. On Windows, enabled profiles stopped by the
+generation-retirement pass are restarted when the master remains disabled;
+disabled profiles are not started or re-enabled.
 
 External `systemctl`/Task Scheduler actions do not pass through these seams.
 They have no fabricated source-owned event. A source log cannot reconstruct
