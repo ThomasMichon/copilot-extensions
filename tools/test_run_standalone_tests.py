@@ -214,3 +214,13 @@ def test_sandbox_cleanup_removes_deep_owned_paths():
     (extended / "fixture.txt").write_text("fixture")
     runner.cleanup_sandbox(temporary)
     assert not root.exists()
+
+
+@pytest.mark.parametrize(("path", "expected"), [
+    ("C:\\temp\\owned", "\\\\?\\C:\\temp\\owned"),
+    ("\\\\server\\share\\owned", "\\\\?\\UNC\\server\\share\\owned"),
+    ("\\\\?\\C:\\temp\\owned", "\\\\?\\C:\\temp\\owned"),
+    ("\\\\?\\UNC\\server\\share\\owned", "\\\\?\\UNC\\server\\share\\owned"),
+])
+def test_extended_windows_cleanup_normalizes_unc_without_double_prefix(path, expected):
+    assert runner.extended_windows_path(path) == expected

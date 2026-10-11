@@ -748,7 +748,7 @@ def inspect_candidates(install_root: Path, *, host_config_path: Path) -> dict:
         root = _host_root(install_root, host_config_path)
         candidates = []
         if root.exists():
-            primitive = _primitive()
+            primitive = None
             versions = root / "versions"
             _path(versions)
             if versions.exists():
@@ -759,6 +759,8 @@ def inspect_candidates(install_root: Path, *, host_config_path: Path) -> dict:
                         if not (slot / _RECEIPT).exists():
                             value, state = None, "incomplete"
                         else:
+                            if primitive is None:
+                                primitive = _primitive()
                             value = _receipt(slot, primitive, root, version)
                             state = "staged" if value else "invalid"
                     except FileNotFoundError:
