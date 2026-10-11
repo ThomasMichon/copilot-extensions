@@ -565,7 +565,19 @@ const session = await joinSession({
       handler: async (args, invocation) => {
         ensureState(invocation);
         await handoffConfigPromise;
-        const nativeObservation = await observeNativeContext(true);
+        let nativeObservation;
+        let observedRevision;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          observedRevision = state.windowRevision;
+          nativeObservation = await observeNativeContext(true);
+          if (observedRevision === state.windowRevision) break;
+        }
+        if (observedRevision !== state.windowRevision) {
+          session.log("[Context Handoff] Native observation changed repeatedly; retry generation before choosing continuity.",
+            { level: "warning" });
+          return { textResultForLlm: "Continuity observation changed during generation. Retry generate_handoff_prompt; no handoff state was latched.",
+            resultType: "error" };
+        }
         const sid = state.sessionId || invocation?.sessionId || "unknown";
         const { data: handoffData, modifiedEntries } = collectHandoffData(sid, args);
 
@@ -1695,6 +1707,9 @@ session.on("session.compaction_complete", (event) => {
     state.blockMutatingTools = false;
     pendingNudge = null;
     state.windowRevision++;
+    latestUsageEvent = null;
+    clearTimeout(usageRetryTimer);
+    usageRetryTimer = null;
     nativeWarnings.clear();
     nativeObserver.invalidate();
     session.log(
