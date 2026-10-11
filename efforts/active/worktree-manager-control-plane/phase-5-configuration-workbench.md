@@ -3,7 +3,8 @@
 - **Status:** Proposed; implementation awaits reviewed plan and per-wave design.
 - **Parent:** [Worktree Manager control plane](README.md)
 - **Coordination:** #357; adoption #356; prior enablement premise #543;
-  existing dispatch toggle scope #6044.
+  completed confirmation prior art #6044/#6096; remaining dispatch toggles owned
+  by `agent-dispatch-workers-config-section`.
 - **Vision:** [Configuration workbench](../../../visions/installer/configurator/README.md)
 
 ## Guiding Intent
@@ -30,7 +31,7 @@ No private originating identifiers or transcript are included here.
 | Configuration shell | Manager contribution contract and production Picker Configuration menu | Extend validated contributions; do not import plugin implementations |
 | Effective settings and overrides | Each plugin's configuration resolver/writer | Manager does not invent precedence or write YAML generically |
 | Related repos and pairing | agent-worktrees registration, related resolution, binding APIs | Local selection versus read-only versioned policy |
-| Worker controls | agent-dispatch workers configuration effort and Tasks-pane Phase 9 | Reconcile #6044; no competing toggle implementation |
+| Worker controls | agent-dispatch workers configuration effort and Tasks-pane Phase 9 | Reuse completed #6044/#6096 confirmation; coordinate remaining toggles with the workers effort |
 | SSH mesh | agent-ssh transport/profile and machine-registry owners | No keys, credential editors, or duplicated topology store |
 | Container loadouts | agent-containers effective fleet/security policy and lifecycle | Trust boundaries and leases remain provider-owned |
 | Delta maintenance | agent-dispatch task, recipe, worker, and evaluation contracts | No new queue; no automatic pool provisioning |
@@ -54,8 +55,10 @@ permission to plan/claim a wave, not blanket deployment or destructive authority
 - [ ] Specify typed source provenance, editable scope, override/reset semantics,
   validation/findings, and preview/apply outcomes; version existing contracts
   compatibly rather than add a parallel manifest registry.
-- [ ] Reconcile #543 with the read-only source boundary and #6044 with its
-  existing owner; do not close implementation issues on a planning amendment.
+- [ ] Reconcile #543 with the read-only source boundary; treat #6044/#6096 as
+  completed confirmation prior art and coordinate remaining dispatch toggles
+  with `agent-dispatch-workers-config-section`. Do not close implementation
+  issues on a planning amendment.
 - [ ] Resolve whether helper-backed widgets need a new capability or can use
   current process/service boundaries; keep static reads daemon-independent.
 
