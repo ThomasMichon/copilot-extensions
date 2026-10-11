@@ -68,6 +68,7 @@ def _run_payload_hash(plugin_dir: Path, install_dir: Path) -> str:
     real_python = Path(sys.executable).as_posix()
     script = f"""
 set -euo pipefail
+_fail() {{ printf '  [FAIL] %s\\n' "$1" >&2; }}
 PLUGIN_DIR={plugin_dir.as_posix()!r}
 PKG_SRC_DIR={(plugin_dir / "src" / "agent_pull_requests").as_posix()!r}
 INSTALL_DIR={install_dir.as_posix()!r}
@@ -124,11 +125,15 @@ def test_payload_hash_is_stable_for_identical_content(tmp_path: Path) -> None:
 def test_payload_hash_fails_closed_on_a_genuine_fingerprint_error(tmp_path: Path) -> None:
     """A real failure computing the fingerprint (simulated here via a
     missing/broken versioned_runtime.py) must propagate as a non-zero
-    return and a stderr message, never be silently swallowed into an empty
-    hash: an empty hash is indistinguishable from "nothing changed" to
-    every caller, which would let a genuinely-changed (or simply
-    unverifiable) payload be admitted as if it matched a previously
-    completed slot."""
+    return and the installer's real diagnostic on stderr, never be
+    silently swallowed into an empty hash: an empty hash is
+    indistinguishable from "nothing changed" to every caller, which would
+    let a genuinely-changed (or simply unverifiable) payload be admitted
+    as if it matched a previously completed slot. Defines a real `_fail`
+    helper (as the installer itself does) rather than leaving it
+    undefined, so this proves the function's OWN intended diagnostic
+    fires -- not merely that bash reports an unrelated "command not
+    found" for a missing `_fail`."""
     plugin_dir, _pkg_src_dir = _make_plugin_tree(tmp_path)
     install_dir = tmp_path / "install"
     bash = _bash()
@@ -138,6 +143,7 @@ def test_payload_hash_fails_closed_on_a_genuine_fingerprint_error(tmp_path: Path
     real_python = Path(sys.executable).as_posix()
     script = f"""
 set -euo pipefail
+_fail() {{ printf '  [FAIL] %s\\n' "$1" >&2; }}
 PLUGIN_DIR={plugin_dir.as_posix()!r}
 PKG_SRC_DIR={(plugin_dir / "src" / "agent_pull_requests").as_posix()!r}
 INSTALL_DIR={install_dir.as_posix()!r}
@@ -154,6 +160,11 @@ fi
     assert result.returncode == 0, result.stderr
     assert "FAILED_AS_EXPECTED" in result.stdout
     assert "UNEXPECTED_SUCCESS" not in result.stdout
+    assert "_fail: command not found" not in result.stderr, (
+        "the _fail helper itself was undefined -- this test did not "
+        "actually exercise _payload_hash's own diagnostic"
+    )
+    assert "Failed to compute payload fingerprint" in result.stderr
 
 
 def test_payload_hash_changes_when_a_uv_sources_path_dependency_changes(tmp_path: Path) -> None:

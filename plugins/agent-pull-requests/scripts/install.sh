@@ -345,10 +345,15 @@ _versioned_mark_complete() {
         _fail "Cannot mark versions/$SRC_VERSION complete without a bootstrap Python interpreter"
         return 1
     fi
-    local ph
-    if ! ph="$(_payload_hash)"; then
-        return 1
-    fi
+    # Reuse the SAME payload hash computed once, before the build, into
+    # $PAYLOAD_HASH -- never recompute it here. A local-checkout install
+    # does not self-stage: the live source tree can change between the
+    # pre-build admission check and this post-build marker write (e.g. an
+    # edit landing mid-install), and `uv pip install` already consumed
+    # whatever bytes were present earlier. Recomputing here would let the
+    # marker describe NEWER content than what was actually built into the
+    # slot, letting a later install wrongly reuse it as if it matched.
+    local ph="$PAYLOAD_HASH"
     local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
     if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
     "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'

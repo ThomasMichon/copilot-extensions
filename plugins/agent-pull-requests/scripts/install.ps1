@@ -212,6 +212,7 @@ if ($true) {
 }
 
 function Invoke-VersionedActivate {
+    param([string]$PayloadHash = '')
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
@@ -225,7 +226,7 @@ function Invoke-VersionedActivate {
         Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         return $false
     }
-    if (-not (Invoke-VersionedMarkComplete)) {
+    if (-not (Invoke-VersionedMarkComplete -PayloadHash $PayloadHash)) {
         return $false
     }
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
@@ -362,6 +363,7 @@ function Invoke-VersionedSlotClean {
 }
 
 function Invoke-VersionedMarkComplete {
+    param([string]$PayloadHash = '')
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
@@ -370,13 +372,15 @@ function Invoke-VersionedMarkComplete {
         return $false
     }
     $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
-    $ph = $null
-    try {
-        $ph = Get-PayloadHash
-    } catch {
-        Write-Fail "Could not compute payload fingerprint: $($_.Exception.Message)"
-        return $false
-    }
+    # Reuse the SAME payload hash computed once, before the build -- never
+    # recompute it here. A local-checkout install does not self-stage: the
+    # live source tree can change between the pre-build admission check
+    # and this post-build marker write (e.g. an edit landing mid-install),
+    # and `uv pip install` already consumed whatever bytes were present
+    # earlier. Recomputing here would let the marker describe NEWER
+    # content than what was actually built into the slot, letting a later
+    # install wrongly reuse it as if it matched.
+    $ph = $PayloadHash
     if ($ph) { $mcArgs += @('--payload-hash', $ph) }
     & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
     if ($LASTEXITCODE -ne 0) {
@@ -619,7 +623,7 @@ try {
         Remove-ConsoleTrampolines -VenvDir $VenvDir
         Write-Ok 'Package installed: agent-pull-requests'
 
-        if (-not (Invoke-VersionedActivate)) { exit 1 }
+        if (-not (Invoke-VersionedActivate -PayloadHash $payloadHash)) { exit 1 }
     }
 
     Write-SimpleBinstub `
