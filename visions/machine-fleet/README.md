@@ -105,6 +105,22 @@ credentials are distinct authorities. Providers own issuance, account/audience
 selection, expiry, renewal, and any interaction required to acquire credentials.
 The Gateway is not a blanket credential pool or an implicit source of authority.
 
+### Recommended fleet templates and owned configuration
+
+A harness supplies a recommended fleet shape; the adopter's own configuration
+records choices, custom capabilities and managed identities. Setup compares both
+with authoritative live state and admitted quota rather than treating a template
+as permission to overwrite the fleet. Recommended service capacity and optional
+execution capacity are separate, inspectable dimensions.
+
+Each adopted fleet supplies central management services and connections: Gateway,
+coordination, task state, indexing and declared communication capabilities.
+An unavailable future capability is an explicit requirement awaiting a supported
+implementation, not a fabricated ready service. Minimal capacity prioritizes
+these services; more capacity adds agent/build containers and product venues.
+Authenticated, operator-enrolled external execution hosts can supplement a small
+fleet without becoming controller hosts implicitly.
+
 ## Features
 
 ### driver-based-fleet-adoption
@@ -194,6 +210,31 @@ configuration and report why they were rejected. Changed trust, placement or
 roles require their own authorization and safe transitions; accepting a config
 file does not silently create capacity or activate a previously retired role.
 Restart-only changes are reported explicitly, not disguised as successful reload.
+
+### safe-template-and-live-refresh
+
+"Set up my fleet" resolves the adopter's existing configuration before planning
+recommended placement against live resources and available quota. Empty fleets
+can be outfitted within approved capacity; inadequate quota produces an explicit
+smaller proposal or unmet-capacity outcome, never silent quota expansion.
+Refresh shows additions, drift and proposed changes while retaining custom roles,
+novel capabilities and work. Unknown live resources remain observed, not deleted.
+
+Containers and code venues require inspection and source-control finalization
+before cleanup. Configuration removal, resource retirement and data destruction
+are separate approved operations; a template difference alone cannot authorize
+them. Stale inventory or uncertain ownership cannot produce a cleanup plan
+presented as safe convergence.
+
+### user-controlled-fleet-observation
+
+Gateway-backed telemetry and monitoring belong to the operator's fleet, with
+explicit collection, retention, access and export choices. Fleet-wide health
+separates services, connectors and execution capacity and remains diagnosable
+when a target is offline. Generic telemetry does not depend on an external
+analytics vendor or send data outside the fleet without consent.
+Organization-governed telemetry adapters are separate policy-owned integrations;
+they cannot silently widen the portable collector's scope.
 
 ## Behaviors
 

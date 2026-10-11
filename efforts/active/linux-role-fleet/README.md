@@ -104,6 +104,44 @@ authorize acquiring or migrating a live machine.
 
 ## Plan
 
+### Mission amendment - Setup, refresh and first useful services
+
+Public-safe summary of the operator's 2026-10-10 direction; full private wording
+remains with the adopter and is not linked from public artifacts:
+
+- Deliver "set up my fleet" through the private provider adapter and generic
+  `fleet-manager`, using a harness recommendation and existing adopter config
+  before diffing authoritative live resources and quota.
+- Outfit empty eligible fleets within quota; offer a smaller/scaled proposal
+  when quota is insufficient, never silently expand capacity.
+- Keep essential central services distinct from optional agent/build/product
+  venues. One-host fleets prioritize services and can use explicitly enrolled
+  external execution hosts; login/manual adoption remains required.
+- Refresh preserves work and custom capabilities. Containers/code venues require
+  inspection/finalization before cleanup, not template-driven deletion.
+- Integrate user-controlled fleet telemetry/monitoring at Gateway. External
+  organization-governed analytics is a separate later private policy adapter.
+- Initially prove index and dispatch on the Gateway host, then centralized
+  worktree/bridge observation and a full harness in a provider-hosted container.
+  Bare-host harness installation is not a prerequisite for this validation.
+- The name remains `fleet-manager`; the operator explicitly reconfirmed it.
+
+Implementation sequencing below is **agent-recommended**:
+
+- [ ] Review [safe setup/refresh proposal](fleet-setup-reconciliation.md) and
+  amended core intent before provider/service changes.
+- [ ] Implement bounded template/adopter/live/quota planning and version-bound
+  apply receipts with no implicit provisioning/cleanup.
+- [ ] Prove empty, existing-custom, no-quota, one-host and stale/partial states.
+- [ ] Supply harness default-template and paired-config integration downstream;
+  keep the portable runtime name-free and the private capacity adapter private.
+- [ ] Prove first useful index/dispatch service roles and full managed harness
+  container on an explicitly admitted/leased controller host.
+- [ ] Add central worktree/bridge monitoring and declared future communication
+  roles without inventing ready capabilities that are not implemented.
+- [ ] Implement explicit Gateway telemetry scope/retention and preservation-safe
+  finalization/retirement contracts before fleet-wide refresh/cleanup.
+
 ### Phase 1 - Reviewed intent and substrate contract
 - [x] Land the machine-fleet vision amendment and this effort through automated
   review before expanding runtime/deployment behavior.
@@ -113,7 +151,7 @@ authorize acquiring or migrating a live machine.
   installer/update, role/service and credential authorities; retain #5789 scope.
 
 ### Phase 2 - Repeatable first adoption
-- [ ] Land the standalone `fleet-manager` boundary amendment and
+- [x] Land the standalone `fleet-manager` boundary amendment and
   [system proposal](fleet-manager-system.md) before implementing system packaging.
 - [ ] Establish standalone client/controller/connector packaging and explicit
   install/update/diagnostics/uninstall, with a client-only default and no local
@@ -156,6 +194,16 @@ authorize acquiring or migrating a live machine.
 
 All entries are **agent-recommended implementation gates**.
 
+- [ ] Three-input reconciliation preserves user overrides/unknown roles and live
+  unowned resources; stale config/inventory/quota invalidates apply.
+- [ ] No quota cannot trigger creation; one-host service-only placement reports
+  unmet roles honestly and preserves external host enrollment requirements.
+- [ ] Refresh and retirement inspect unfinished work, claims, PRs and volumes;
+  no data/resource loss from template drift or process idleness.
+- [ ] Initial index/dispatch and full harness container proofs use actual
+  processes, managed worktrees/plugin loading and configured source auth.
+- [ ] User-controlled monitoring is bounded/redacted and off-fleet analytics
+  export remains disabled without separate explicit policy/consent.
 - [ ] Pure contracts: explicit provider/adapter selection, fixed named operations,
   untrusted/ambiguous input refusal and no raw remote script/URL/executable API.
 - [ ] Client-only fresh install and uninstall on Windows/Linux: no controller,
@@ -188,6 +236,7 @@ All entries are **agent-recommended implementation gates**.
 
 ## Proposal
 
+[Safe fleet setup and refresh](fleet-setup-reconciliation.md).
 [Standalone fleet-manager system](fleet-manager-system.md).
 [Substrate evaluation and proposed adapter boundary](substrate-evaluation.md).
 Runtime package/API details belong to the implementation contract after review,
@@ -237,3 +286,16 @@ not to the vision. This effort does not acquire or migrate live capacity.
   No ordinary user machine should host Komodo Core as a side effect.
 - Install/uninstall and live-config are requested system requirements, not
   deferred optional wrappers. This amendment precedes runtime packaging.
+
+### 2026-10-11 - Standalone system amendment merged
+- #6094 merged at `2026-10-11T01:15:18Z` after genuine current-head approval,
+  corrected dependency/auth status descriptions and successful required CI.
+- Public canonical topology is now thin user clients plus a designated remote
+  controller/Gateway and explicitly adopted connectors. The private hosting
+  provider is not a portable dependency or client-side controller.
+- Next implementation slice establishes the standalone distribution/dependency
+  boundary and client-only lifecycle. Server hosting, live-config runtime,
+  authentication persistence and controller APIs remain unchecked plan gates.
+- Native response #6034 remains held on confirmed partial-publication recovery
+  #6038. No lease was hand-edited and the final test-only follow-up stays local;
+  this does not transfer publisher ownership from the existing #5835 campaign.
