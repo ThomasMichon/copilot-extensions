@@ -261,15 +261,27 @@ _bootstrap_python() {
 }
 
 _payload_hash() {
-    local __parts=""
-    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
+    # Use the canonical fingerprint_source() (libs/versioned-runtime), not a
+    # bespoke pyproject.toml-only hash: a prior audit (#5472) found exactly
+    # this narrower scope on another adopter -- changing src/agent_pull_requests
+    # WITHOUT touching pyproject.toml must still be detected as a content
+    # change, or an installed slot could wrongly report `reuse` for a
+    # genuinely different payload.
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local py
+    py="$(_bootstrap_python)" || py=""
+    [[ -n "$py" ]] || { printf ''; return 0; }
+    local roots=()
+    [[ -f "$PLUGIN_DIR/pyproject.toml" ]] && roots+=("$PLUGIN_DIR/pyproject.toml")
+    [[ -d "$PKG_SRC_DIR" ]] && roots+=("$PKG_SRC_DIR")
     if [[ -d "$PLUGIN_DIR/libs" ]]; then
         local __f
         while IFS= read -r __f; do
-            __parts="$__parts"$'\n'"$(cat "$__f")"
+            roots+=("$__f")
         done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
     fi
-    printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
+    [[ ${#roots[@]} -gt 0 ]] || { printf ''; return 0; }
+    "$py" "$vr" --root "$INSTALL_DIR" fingerprint "${roots[@]}" 2>/dev/null || true
 }
 
 _versioned_slot_clean() {

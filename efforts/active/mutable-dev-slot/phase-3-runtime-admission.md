@@ -166,6 +166,18 @@ each adopter is already safe.
       coordinate with live installer PRs instead of superseding their changes.
       The canonical adopter inventory, not a hand-maintained plugin list,
       determines completion of the portfolio.
+      **Evidence surfaced while fixing agent-pull-requests' own narrow
+      payload-hash scope (same gap #5472 originally found on one adopter):**
+      the exact same bespoke `_payload_hash()`/`Get-PayloadHash` snippet
+      (pyproject.toml + libs/*/pyproject.toml only, never the plugin's own
+      `src/` tree) is copy-pasted -- NOT synced as an `install-contract:vN`
+      block -- across at least agent-bridge, agent-codespaces,
+      agent-containers, agent-logger, agent-dispatch, agent-index,
+      agent-vault, budget-guidance, agent-ssh, agent-worktrees, and
+      agent-mcp's install scripts. Each one needs the same fix (delegate to
+      `fingerprint_source()` over its own `pyproject.toml` + `src/` roots)
+      as its own wave item -- do not assume fixing one adopter closes this
+      for the others.
 - [ ] For each wave, add plugin changefiles, run targeted contained suites and
       shared sync/contract gates, obtain review, merge, verify promotion, and
       deploy through the unified update flow. Preserve active service work
