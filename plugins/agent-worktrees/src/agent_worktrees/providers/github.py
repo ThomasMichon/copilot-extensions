@@ -349,14 +349,7 @@ class GitHubProvider:
         self, repo: str, number: int, token: str | None, *,
         host: str = "github.com",
     ) -> tuple[Review, ...]:
-        """Fetch every review as ``pr_contract.Review``s, paging the endpoint. GitHub's
-        REST ``/pulls/{n}/reviews`` paginates (default 30) in ascending id order; the
-        watcher keys off the highest review id, so a missed later page would make the
-        newest reviews invisible and hang the wait. Pages at an explicit ``per_page``
-        until a short/empty page. Best-effort: a page that fails to read stops paging
-        with what was gathered rather than breaking the whole snapshot (``pr bar``'s
-        read is fail-closed instead: ``github_bar``).
-        """
+        """Read every ascending review page; incomplete evidence raises explicitly."""
         reviews: list[Review] = []
         page = 1
         page_size = 100
@@ -370,19 +363,25 @@ class GitHubProvider:
                 env=self._env(token),
             )
             if proc.returncode != 0:
-                break
+                detail = proc.stderr.strip() or proc.stdout.strip()
+                raise ProviderError(
+                    f"GitHub review page {page} failed: {detail}",
+                    transient=_gh_detail_is_transient(detail),
+                )
             try:
                 batch = json.loads(proc.stdout or "[]")
-            except json.JSONDecodeError:
-                break
-            if not isinstance(batch, list) or not batch:
+            except json.JSONDecodeError as exc:
+                raise ProviderError(f"Malformed GitHub review page {page}: {exc}", transient=True) from exc
+            if not isinstance(batch, list):
+                raise ProviderError(f"GitHub review page {page} is not a list", transient=True)
+            if not batch:
                 break
             for r in batch:
                 if not isinstance(r, dict):
-                    continue
+                    raise ProviderError(f"Malformed GitHub review on page {page}", transient=True)
                 rid = r.get("id")
                 if not isinstance(rid, int):
-                    continue
+                    raise ProviderError(f"GitHub review on page {page} has no integer id", transient=True)
                 state = str(r.get("state", "")).upper()
                 reviews.append(
                     Review(
@@ -403,22 +402,14 @@ class GitHubProvider:
         self, repo: str, sha: str, token: str | None, *,
         host: str = "github.com",
     ) -> str:
-        """Provider-neutral CI rollup for ``sha`` over BOTH GitHub check systems.
-
-        GitHub reports CI two independent ways and a repo may use either or both:
-        legacy commit **statuses** (``/commits/{sha}/status``) and Actions
-        **check-runs** (``/commits/{sha}/check-runs``). This folds them into the
-        ``pr_contract`` vocabulary -- ``success`` | ``failure`` | ``pending`` |
-        ``""`` (nothing configured / unknown) -- with **failure dominating
-        pending dominating success**. Never raises: an unreadable endpoint
-        contributes nothing (a fully-unreadable pair yields ``""``, which never
-        fires ``checks_failed``), so a transient hiccup can't break the snapshot.
-        """
+        """Roll up statuses and check-runs; unreadable data stays unknown ("").
+        Failure dominates pending; success/none require both reads to succeed."""
         if not sha:
             return ""
         any_signal = False
         failure = False
         pending = False
+        status_readable = runs_readable = False
 
         # 1. Legacy combined commit status.
         proc = run_cli(
@@ -435,6 +426,8 @@ class GitHubProvider:
                 data = {}
             if isinstance(data, dict):
                 statuses = data.get("statuses")
+                if isinstance(statuses, list):
+                    status_readable = True
                 if isinstance(statuses, list) and statuses:
                     any_signal = True
                     raw = str(data.get("state", "")).strip().lower()
@@ -442,25 +435,27 @@ class GitHubProvider:
                         failure = True
                     elif raw == "pending":
                         pending = True
+                    elif raw != "success":
+                        status_readable = False
 
         # 2. Actions check-runs.
         cproc = run_cli(
             [
-                "gh", "api", "--hostname", host,
+                "gh", "api", "--paginate", "--hostname", host,
                 f"/repos/{repo}/commits/{sha}/check-runs",
             ],
             env=self._env(token),
         )
         if cproc.returncode == 0:
-            try:
-                cdata = json.loads(cproc.stdout or "{}")
-            except json.JSONDecodeError:
-                cdata = {}
-            runs = cdata.get("check_runs") if isinstance(cdata, dict) else None
+            from .github_check_pages import check_runs_from_pages
+            runs = check_runs_from_pages(cproc.stdout or "")
+            if isinstance(runs, list):
+                runs_readable = True
             if isinstance(runs, list) and runs:
                 any_signal = True
                 for run in runs:
                     if not isinstance(run, dict):
+                        runs_readable = False
                         continue
                     status = str(run.get("status", "")).strip().lower()
                     if status != "completed":
@@ -473,14 +468,14 @@ class GitHubProvider:
                         "startup_failure", "stale",
                     ):
                         failure = True
+                    elif conclusion not in ("success", "neutral", "skipped"):
+                        runs_readable = False
 
-        if not any_signal:
-            return ""
         if failure:
             return "failure"
         if pending:
             return "pending"
-        return "success"
+        return ("success" if any_signal else "none") if status_readable and runs_readable else ""
 
     def add_label(
         self, repo: str, number: int, label: str, *, api_base: str = "",

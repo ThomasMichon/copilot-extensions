@@ -37,6 +37,7 @@ from .resolve import ResolvedPlugins, resolve_repo_plugins
 from .settings import (
     RepoPluginSettings,
     local_marketplace_path,
+    marketplace_manifest_name,
     marketplace_source_kind,
     read_repo_settings,
     split_source,
@@ -54,6 +55,7 @@ __all__ = [
     "has_plugin_manifest",
     "load_marketplace",
     "local_marketplace_path",
+    "marketplace_manifest_name",
     "marketplace_manifest_path",
     "marketplace_source_kind",
     "plugin_dir",

@@ -189,6 +189,48 @@ is a *review* signal, not the finish line: when `needs_consent` is true, run
 `pr-merge` and re-arm the watch. On a `pr-human-merge` repo (no consent label
 bound) the block degrades to a verdict/merge-state readout with no action.
 
+For `pr-agent-merge`, a valid current-head approval with missing consent wakes
+`pr-watch wait` promptly, even if the approval predates its baseline/cursor or
+the caller selected `--until merged`. This is a **state update**, reported as
+`updates: ["consent_required"]`, not a fabricated `approved` event; `events` and
+`transitions` still contain only selected provider transitions.
+`merge.consent_command` gives the exact single-PR follow-up command. The watcher
+also supplies `merge.consent_argv` for shell-independent execution; the display
+command uses POSIX quoting, so non-POSIX consumers should execute the argv array.
+The watcher does not grant consent or authorize consenting for another author.
+An unchanged update is acknowledged only by the cursor returned with that
+update: re-arm with it to deduplicate; `pr-watch cursor` does not acknowledge
+an update it never delivered. A new head/authoritative approval or an observed
+intervening block can prompt again; ignored comments, pending/dismissed reviews,
+and author reviews do not change the consent acknowledgement. Drafts, holds,
+conflicts/unknown mergeability, pending/failed
+checks, stale approvals, and wrong-base PRs do not receive this immediate wake.
+Only a successful checks rollup or confirmed empty checks (`"none"`) permits
+this wake; unreadable/unknown checks (`""`) and unknown author/reviewer identity
+fail closed. GitHub requires both status and check-run reads to confirm
+success or no checks, rejects unknown completed conclusions, and raises a
+provider error rather than returning incomplete review pages. Check-run reads
+paginate and require the reported total count before trusting success.
+Approval commit
+IDs must exactly match the current head for this wake. Self-merge and
+human-merge profiles do not receive updates.
+Azure DevOps currently omits authoritative checks and approval commit evidence
+from its snapshots, so this immediate state wake is unsupported there and fails
+closed. Its existing review transitions, timeout state, and explicit
+`pr-merge` auto-complete path remain unchanged; do not expect a merged-only ADO
+wait to substitute for explicitly requesting auto-complete after approval.
+
+Exit **0** means a selected transition **or** an actionable consent update, not
+proof of merge. Both text and `--json` expose the same result; text also prints
+the follow-up command. Timeout remains **124**, provider/auth failure **3**, and
+usage failure **2**. The native hibernation waiter composing this command wakes
+on exit 0 without needing to reinterpret a review transition.
+`pr-merge` applies consent by default through its existing checked provider
+path; `--dry-run` instead reports `merge.needs_consent`,
+`merge.consent_action`, and `merge.consent_command`, without waiting or labeling.
+Successful application reports consent fulfilled, not a completed merge; a
+refusal/application failure remains nonzero.
+
 ### Comment threads -- first-class, every provider
 
 Review **comment threads** are a first-class capability (`pr-status --threads`

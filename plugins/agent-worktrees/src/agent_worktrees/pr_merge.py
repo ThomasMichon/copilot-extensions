@@ -24,7 +24,8 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from . import pr_contract as pc
-from .pr_occupancy import occupancy_from_state
+from .pr_consent import consent_argv, consent_command
+from .pr_occupancy import occupancy_from_readiness, occupancy_from_state
 from .providers import account_token_for_slug, get_provider
 
 
@@ -120,6 +121,32 @@ def merge_one(
         "approval_stale_authorized": state.approval_stale_authorized,
         "occupancy": occupancy_from_state(state),
     }
+
+    def _result(current: pc.PRSnapshot) -> dict:
+        readiness = pc.merge_readiness(
+            current, **_binding(prcfg),
+            stale_approval_head_sha=tracked_head_sha,
+            stale_approval_head_observed_at=head_observed_at,
+        )
+        readiness["reason"] = row["reason"]
+        if row["action"] != readiness["consent_action"]:
+            readiness.update(
+                consent_action=row["action"], needs_consent=False,
+                eligible=False, clear_to_merge=False, reason=row["reason"],
+            )
+        if row.get("applied"):
+            readiness.update(
+                consent_present=True, consent_action="already",
+                needs_consent=False, eligible=False,
+                reason="merge consent applied; the review gate still decides",
+            )
+        if readiness["needs_consent"]:
+            readiness["consent_command"] = consent_command(repo, number)
+            readiness["consent_argv"] = consent_argv(repo, number)
+        row["merge"] = occupancy_from_readiness(readiness)
+        row["occupancy"] = row["merge"]["occupancy"]
+        return row
+
     if action == "apply" and apply:
         confirm = provider.get_snapshot(repo, number, api_base=base, token=tok)
         confirmed_state, confirmed_action, confirmed_reason = _decide(
@@ -144,7 +171,7 @@ def merge_one(
                 ),
                 occupancy=occupancy_from_state(confirmed_state),
             )
-            return row
+            return _result(confirm)
         if confirmed_action != "apply":
             row.update(
                 action=confirmed_action,
@@ -157,7 +184,7 @@ def merge_one(
                 ),
                 occupancy=occupancy_from_state(confirmed_state),
             )
-            return row
+            return _result(confirm)
         # "Request auto-complete" is the first-class concept; the provider
         # decides how (gitea/github apply the automerge_label; ADO sets native
         # auto-complete). Applying the label is an implementation detail here.
@@ -174,7 +201,7 @@ def merge_one(
             row["error"] = err
         else:
             row["applied"] = True
-    return row
+    return _result(snap)
 
 
 def sweep_once(

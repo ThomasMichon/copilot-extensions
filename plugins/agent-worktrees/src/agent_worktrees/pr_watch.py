@@ -15,7 +15,7 @@ then prints the event JSON and exits 0.  The Copilot CLI surfaces the
 background-task completion as a new turn, waking the otherwise-idle session so it
 can address feedback, re-push, or finalize -- unattended.
 
-Exit codes mirror the multi-machine system tool: 0 = a transition fired, 124 = timed out,
+Exit codes: 0 = transition or actionable consent update, 124 = timed out,
 3 = provider/auth error, 2 = usage error.
 """
 
@@ -25,6 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 from . import pr_contract as pc
+from .pr_consent import consent_argv, consent_command, consent_update_key
 from .pr_occupancy import occupancy_from_readiness
 from .providers import ProviderError, account_token_for_slug, get_provider
 
@@ -122,12 +123,14 @@ def run_wait(
     stale_approval_head_observed_at: str = "",
     review_blocking: bool = True,
     dismiss_stale_reviews: bool | None = None,
+    flow_profile: str = pc.PROFILE_PR_AGENT_MERGE,
+    default_branch: str = "",
     now: Callable[[], float] | None = None,
     sleep: Callable[[float], None] | None = None,
     on_poll: Callable[[pc.PRSnapshot], None] | None = None,
     on_error: Callable[[ProviderError], None] | None = None,
 ) -> WaitResult:
-    """Poll ``fetch`` until a target transition or ``timeout`` seconds elapse.
+    """Poll until a target transition, actionable consent update, or timeout.
 
     ``baseline`` of ``None`` means auto-baseline: the first successful poll
     establishes the reference ("notify me of changes from now on"), except that
@@ -136,6 +139,8 @@ def run_wait(
     ON the terminal state and hangs (test-chamber #1139).  Transient provider
     errors are tolerated (retried next interval); permanent ones propagate so a
     bad token / wrong repo fails fast instead of hanging the full timeout.
+    Current-head approval needing author consent is a separate state update,
+    regardless of ``until``; only a delivered update's cursor acknowledges it.
 
     The consent binding (``automerge_label`` / ``hold_labels`` /
     ``wip_title_prefixes`` / ``approval_required`` /
@@ -151,9 +156,11 @@ def run_wait(
 
     now = now or _time.monotonic
     sleep = sleep or _time.sleep
+    acknowledged = baseline.consent_update if baseline is not None else ""
 
     def _decorate(events: list[dict], snap: pc.PRSnapshot) -> dict:
-        return decorate_events(
+        nonlocal acknowledged
+        payload = decorate_events(
             events, repo, pr, snap,
             automerge_label=automerge_label,
             hold_labels=hold_labels,
@@ -165,6 +172,23 @@ def run_wait(
             review_blocking=review_blocking,
             dismiss_stale_reviews=dismiss_stale_reviews,
         )
+        key = consent_update_key(
+            snap, payload["merge"], flow_profile=flow_profile,
+            default_branch=default_branch,
+        )
+        if key:
+            payload["merge"]["consent_command"] = consent_command(repo, pr)
+            payload["merge"]["consent_argv"] = consent_argv(repo, pr)
+            if key != acknowledged:
+                payload["updates"] = ["consent_required"]
+        else:
+            acknowledged = ""
+        payload["cursor"] = replace(
+            pc.Baseline.from_snapshot(
+                snap, dismiss_stale_reviews=dismiss_stale_reviews,
+            ), consent_update=key,
+        ).to_cursor()
+        return payload
 
     deadline = now() + timeout if timeout > 0 else None
     base = baseline
@@ -182,6 +206,7 @@ def run_wait(
             last_snap = snap
             if on_poll is not None:
                 on_poll(snap)
+            payload = _decorate([], snap)
             if base is None:
                 # Auto-baseline = "changes from here on" -- but diff the first
                 # snapshot against a zero TERMINAL baseline so an already-merged
@@ -237,6 +262,8 @@ def run_wait(
                 )
                 if events:
                     return WaitResult(True, _decorate(events, snap))
+            if payload.get("updates"):
+                return WaitResult(True, payload)
 
         if deadline is not None and now() >= deadline:
             # #3486: on timeout, still return the current-state snapshot -- the

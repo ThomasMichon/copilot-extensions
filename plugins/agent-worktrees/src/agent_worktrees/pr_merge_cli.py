@@ -49,6 +49,8 @@ def _pr_merge_usage() -> None:
     print("                  directly now (squash). Refused where the submitter", file=out)
     print("                  does not self-merge -- use pr-watch/pr-status there.", file=out)
     print("  --dry-run       Preview classification only; apply nothing.", file=out)
+    print("                  Missing consent includes merge.needs_consent and", file=out)
+    print("                  merge.consent_command; run that command to consent.", file=out)
     print("  --loop          (sweep) Repeat until no PR remains eligible.", file=out)
     print("  --interval S    (sweep+loop) Seconds between passes (default 30).", file=out)
     print("  --max-passes N  (sweep+loop) Cap passes (0 = unbounded).", file=out)
@@ -80,6 +82,9 @@ def _pr_merge_print_human(summary: dict) -> None:
         else:
             mark = f"skip: {d.get('reason', '')}"
         print(f"  #{d['pr']:<6} {mark:<14} {d.get('title', '')}", file=sys.stderr)
+        merge = d.get("merge") or {}
+        if merge.get("needs_consent"):
+            print(f"    NEXT -> {merge['consent_command']}", file=sys.stderr)
 
 
 def _pr_merge_now(

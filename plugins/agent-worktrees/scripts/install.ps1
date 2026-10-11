@@ -1300,15 +1300,20 @@ function Get-BootstrapPython {
 }
 
 function Get-PayloadHash {
-    <# Payload fingerprint for the completion marker (#935, hardened #2609):
-       sha256 of pyproject.toml + the vendored-lib manifests + every actual
-       source file under src/ (this plugin's own package) and libs/*/src/
-       (its vendored path-dependencies). #2609: hashing only the manifests
-       missed any content change that didn't also bump the version string or
-       touch a dependency list -- exactly a plugin bug fix landing in .py
-       source with no pyproject.toml edit -- so `update`/`update --force`
-       reported "already at latest" and left the venv silently stale even
-       though the marketplace payload had genuinely changed. Deterministic
+    <# Payload fingerprint for the completion marker (#935, hardened #2609,
+       #5472): sha256 of pyproject.toml + the vendored-lib manifests + every
+       actual source file under src/ (this plugin's own package), libs/*/src/
+       (its PROMOTED/materialized path-dependencies), and -- #5472 -- every
+       [tool.uv.sources] `path = "../../libs/<lib>"` DEV-CHECKOUT dependency's
+       own complete directory, which otherwise lives entirely outside
+       $PluginDir and is invisible to the libs/ scan. #2609: hashing only the
+       manifests missed any content change that didn't also bump the version
+       string or touch a dependency list -- exactly a plugin bug fix landing
+       in .py source with no pyproject.toml edit -- so `update`/`update
+       --force` reported "already at latest" and left the venv silently
+       stale even though the marketplace payload had genuinely changed.
+       #5472 found the same narrower-scope gap on another adopter for its
+       OWN dev-checkout path dependencies specifically. Deterministic
        (sorted relative paths) and content-based (not size/mtime, which a
        checkout/clone can rewrite without changing bytes). Never throws -> ''
        on error, which Test-SlotAlreadyComplete already treats as "unknown,
@@ -1329,12 +1334,45 @@ function Get-PayloadHash {
                 if (Test-Path $candidate) { $sourceRoots += $candidate }
             }
         }
+        # #5472: resolve [tool.uv.sources] `path = "..."` entries and
+        # fingerprint each one's COMPLETE directory too -- a LOCAL entry
+        # (e.g. "libs/<lib>") resolves back under $libs and is already
+        # covered above; an EXTERNAL dev-checkout entry (e.g.
+        # "../../libs/<lib>") resolves outside $PluginDir entirely and
+        # would otherwise never be fingerprinted at all.
+        $libsReal = if (Test-Path $libs) { (Resolve-Path $libs).Path } else { $null }
+        if (Test-Path $pp) {
+            $ppText = Get-Content $pp -Raw
+            $sourcesMatch = [regex]::Match($ppText, '(?ms)^\[tool\.uv\.sources\](.*?)(?=^\[|\z)')
+            if ($sourcesMatch.Success) {
+                $pathMatches = [regex]::Matches($sourcesMatch.Groups[1].Value, 'path\s*=\s*"([^"]*)"')
+                foreach ($m in ($pathMatches | Sort-Object { $_.Groups[1].Value })) {
+                    $resolvedPath = Join-Path $PluginDir $m.Groups[1].Value
+                    if (-not (Test-Path $resolvedPath)) { continue }
+                    $resolved = (Resolve-Path $resolvedPath).Path
+                    if ($libsReal -and $resolved.StartsWith($libsReal, [StringComparison]::OrdinalIgnoreCase)) { continue }
+                    $extPp = Join-Path $resolved 'pyproject.toml'
+                    if (Test-Path $extPp) { $parts += (Get-Content $extPp -Raw) }
+                    $extSrc = Join-Path $resolved 'src'
+                    if (Test-Path $extSrc) { $sourceRoots += $extSrc }
+                }
+            }
+        }
         foreach ($root in $sourceRoots) {
             if (-not (Test-Path $root)) { continue }
+            $rootReal = (Resolve-Path $root).Path
             Get-ChildItem $root -Recurse -File -ErrorAction SilentlyContinue |
                 Where-Object { $_.Extension -notin @('.pyc', '.pyo') -and $_.Name -ne '__pycache__' } |
                 Sort-Object FullName | ForEach-Object {
-                    $rel = $_.FullName.Substring($PluginDir.ToString().Length).Replace('\', '/')
+                    if ($_.FullName.StartsWith($PluginDir.ToString(), [StringComparison]::OrdinalIgnoreCase)) {
+                        $rel = $_.FullName.Substring($PluginDir.ToString().Length).Replace('\', '/')
+                    } else {
+                        # An external dev-checkout root (outside $PluginDir)
+                        # has no meaningful $PluginDir-relative path -- key
+                        # it relative to its own resolved root instead so
+                        # the recorded identity stays deterministic.
+                        $rel = $_.FullName.Substring($rootReal.Length).Replace('\', '/')
+                    }
                     $parts += $rel
                     $parts += (Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue)
                 }

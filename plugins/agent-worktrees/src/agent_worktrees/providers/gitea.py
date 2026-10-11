@@ -606,14 +606,7 @@ class GiteaProvider:
     def _combined_status_state(
         self, repo: str, sha: str, api_base: str, token: str
     ) -> str:
-        """Best-effort provider-neutral CI rollup for ``sha`` (#225).
-
-        Reads Gitea's combined commit status and normalizes its state onto the
-        ``pr_contract`` vocabulary: ``success`` | ``failure`` | ``pending`` |
-        ``""`` (no statuses / unknown). Never raises: a status read that fails or
-        returns nothing yields ``""`` (which never fires ``checks_failed``), so a
-        transient status hiccup can't break the whole snapshot.
-        """
+        """CI rollup: success/failure/pending/none; unreadable status stays ""."""
         if not sha:
             return ""
         try:
@@ -629,11 +622,12 @@ class GiteaProvider:
             return ""
         if not isinstance(data, dict):
             return ""
-        # An empty combined status (no statuses attached) reports state
-        # "pending" in some Gitea versions; treat "no statuses" as unknown.
+        # Some versions report "pending" even with no statuses attached.
         statuses = data.get("statuses")
-        if isinstance(statuses, list) and not statuses:
+        if not isinstance(statuses, list):
             return ""
+        if isinstance(statuses, list) and not statuses:
+            return "none"
         raw = str(data.get("state", "")).strip().lower()
         # Gitea states: success | pending | failure | error | warning.
         if raw in ("failure", "error"):

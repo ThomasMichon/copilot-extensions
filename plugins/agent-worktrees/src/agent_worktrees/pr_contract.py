@@ -158,7 +158,7 @@ class PRSnapshot:
     just-opened PR can briefly report None)."""
     checks_state: str = ""
     """Provider-neutral CI rollup for the head commit (#225): ``"success"`` |
-    ``"failure"`` | ``"pending"`` | ``""`` (unknown / no checks configured). A
+    ``"failure"`` | ``"pending"`` | ``"none"`` (confirmed empty) | ``""`` (unknown). A
     provider that doesn't report it leaves ``""`` -- which never fires a
     ``checks_failed``/``checks_succeeded`` transition, so the field is
     additive and safe."""
@@ -281,9 +281,9 @@ class Baseline:
     """Whether the PR had an effective approval at arm time (#225). ``None`` =
     not yet known. A True->dismissed regression fires ``approval_dismissed``."""
     head_sha: str = ""
-    """Arm-time head commit a ``pushed`` transition diffs against. ``""`` =
-    not yet known (adopted without firing, same convention as ``mergeable``/
-    ``checks_state``)."""
+    """Arm-time head for ``pushed``; unknown heads are adopted without firing."""
+    consent_update: str = ""
+    """Last delivered consent-state update; a snapshot cursor never acknowledges it."""
 
     @classmethod
     def from_snapshot(
@@ -305,13 +305,8 @@ class Baseline:
         )
 
     def to_cursor(self) -> str:
-        """Compact, opaque, ASCII cursor (machine-facing -- stays ASCII).
-        Up to four ``.``-separated segments: ``r{id}``, then ``{flags}``
-        (``m``/``c``, possibly empty), then ``h{head_sha}``, then
-        ``k{checks_state}`` -- each only present when needed, so a cursor
-        minted before a later field existed stays a valid shorter cursor and
-        still parses (:meth:`from_cursor` reads by position, not by sniffing
-        segment content)."""
+        """Opaque ASCII cursor: review, flags, head, checks, consent acknowledgement.
+        Trailing optional fields preserve compatibility with older cursors."""
         flags = ("m" if self.merged else "") + ("c" if self.closed else "")
         parts = [f"r{self.max_review_id}"]
         if self.head_sha or self.checks_state or flags:
@@ -320,12 +315,15 @@ class Baseline:
             parts.append(f"h{self.head_sha}")
         if self.checks_state:
             parts.append(f"k{self.checks_state}")
+        if self.consent_update:
+            parts.extend([""] * (4 - len(parts)))
+            parts.append(f"s{self.consent_update}")
         return ".".join(parts)
 
     @classmethod
     def from_cursor(cls, cursor: str) -> Baseline:
-        """Parse a cursor produced by :meth:`to_cursor` (or a bare review id).
-        A bare int (e.g. ``"13"``) means "review high-water 13, not yet
+        """Parse an opaque cursor or bare review id.
+        A bare int means "review high-water, not yet
         merged/closed", so a PR already merged when such a cursor is passed
         counts the merge as a fresh transition.
         """
@@ -337,6 +335,7 @@ class Baseline:
         flags = parts[1] if len(parts) > 1 else ""
         head_sha = parts[2][1:] if len(parts) > 2 and parts[2].startswith("h") else ""
         checks_state = parts[3][1:] if len(parts) > 3 and parts[3].startswith("k") else ""
+        consent_update = parts[4][1:] if len(parts) > 4 and parts[4].startswith("s") else ""
         s = s.lstrip("r") or "0"
         try:
             rid = int(s)
@@ -348,6 +347,7 @@ class Baseline:
             closed="c" in flags,
             head_sha=head_sha,
             checks_state=checks_state,
+            consent_update=consent_update,
         )
 
 

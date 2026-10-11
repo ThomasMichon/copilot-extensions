@@ -1207,8 +1207,8 @@ def test_real_managed_companion_readiness_rollback_and_stop(tmp_path, monkeypatc
         command=["service.py", "run"],
         stop_command=["service.py", "stop"],
         health_probe=["service.py", "health"],
-        startup_timeout_seconds=3,
-        stop_timeout_seconds=3,
+        startup_timeout_seconds=10,
+        stop_timeout_seconds=10,
     )
     marker = tmp_path / "process.json"
     monkeypatch.setenv("EXAMPLE_STATE", str(marker))

@@ -36,6 +36,7 @@ from plugin_resolve import (
     has_plugin_manifest,
     load_marketplace,
     local_marketplace_path,
+    marketplace_manifest_name,
     marketplace_source_kind,
     plugin_dir,
     read_repo_settings,
@@ -182,14 +183,13 @@ def _resolve_ref_dir(source: str, repo_roots: list[Path]) -> Path | None:
             return None
         mp_root = mp_root.resolve()
         mp = load_marketplace(mp_root)
-        # The loaded manifest must actually self-identify as the requested
-        # marketplace -- a stale/misconfigured declaration pointing at a
-        # directory whose own marketplace.json carries a different `name`
-        # must never be trusted to resolve `name`, even if it happens to
-        # declare a plugin of that same name (plugin_resolve.resolve_repo_
-        # plugins applies the identical check).
+        # Validate the declared manifest identity, which defaults to the
+        # registration key unless this local source explicitly maps it.
+        # A same-named plugin in a mismatched marketplace is never sufficient.
         payload = (
-            plugin_dir(mp, name) if mp is not None and mp.name == marketplace else None
+            plugin_dir(mp, name)
+            if mp is not None and mp.name == marketplace_manifest_name(marketplace, settings)
+            else None
         )
         if payload is None:
             return None

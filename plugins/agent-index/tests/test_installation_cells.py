@@ -4859,9 +4859,11 @@ def test_cell_installers_preserve_reserved_coordinator_exit(
 
     assert result.returncode == exit_code, result.stderr
     lines = capture.read_text(encoding="utf-8").splitlines()
-    assert Path(lines[0]).resolve() == PLUGIN.resolve()
+    # Maintenance must leave the replaceable payload while using absolute inputs.
+    assert Path(lines[0]).resolve() == profile.resolve()
     assert lines[1:3] == ["unset", "unset"]
-    assert "cell-runtime.py" in lines[3]
+    assert str(SCRIPT) in lines[3]
+    assert str(context) in lines[3]
     assert "cell-recover" in lines[3]
     assert "-I" in lines[3]
     assert "-X utf8" in lines[3]

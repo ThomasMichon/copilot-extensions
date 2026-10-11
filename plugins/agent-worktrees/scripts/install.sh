@@ -913,17 +913,22 @@ _bootstrap_python() {
 }
 
 _payload_hash() {
-    # Payload fingerprint for the completion marker (#935, hardened #2609):
-    # sha256 of pyproject.toml + the vendored-lib manifests + every actual
-    # source file under src/ (this plugin's own package) and libs/*/src/ (its
-    # vendored path-dependencies). #2609: hashing only the manifests missed
-    # any content change that didn't also bump the version string or touch a
-    # dependency list -- exactly a plugin bug fix landing in .py source with
-    # no pyproject.toml edit -- so `update`/`update --force` reported
-    # "already at latest" and left the venv silently stale even though the
-    # marketplace payload had genuinely changed. Deterministic (sorted
-    # relative paths) and content-based. Empty on any error, which the
-    # completion-marker check already treats as "unknown, force a rebuild".
+    # Payload fingerprint for the completion marker (#935, hardened #2609,
+    # #5472): sha256 of pyproject.toml + the vendored-lib manifests + every
+    # actual source file under src/ (this plugin's own package), libs/*/src/
+    # (its PROMOTED/materialized path-dependencies), and -- #5472 -- every
+    # [tool.uv.sources] `path = "../../libs/<lib>"` DEV-CHECKOUT dependency's
+    # own complete directory, which otherwise lives entirely outside
+    # $PLUGIN_DIR and is invisible to the libs/ scan. #2609: hashing only the
+    # manifests missed any content change that didn't also bump the version
+    # string or touch a dependency list -- exactly a plugin bug fix landing
+    # in .py source with no pyproject.toml edit -- so `update`/`update
+    # --force` reported "already at latest" and left the venv silently stale
+    # even though the marketplace payload had genuinely changed. #5472 found
+    # the same narrower-scope gap on another adopter for its OWN dev-checkout
+    # path dependencies specifically. Deterministic (sorted relative paths)
+    # and content-based. Empty on any error, which the completion-marker
+    # check already treats as "unknown, force a rebuild".
     local __parts=""
     if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
     if [[ -d "$PLUGIN_DIR/libs" ]]; then
@@ -946,6 +951,33 @@ _payload_hash() {
             __parts="$__parts"$'\n'"${__f#"$PLUGIN_DIR"}"$'\n'"$(cat "$__f" 2>/dev/null)"
         done < <(find "$__root" -type f ! -name '*.pyc' ! -name '*.pyo' ! -path '*/__pycache__/*' 2>/dev/null | sort)
     done
+    # #5472: [tool.uv.sources] `path = "../../libs/<lib>"` dev-checkout
+    # dependencies live OUTSIDE $PLUGIN_DIR entirely and are invisible to the
+    # libs/ scan above, which only sees the PROMOTED/materialized copy under
+    # $PLUGIN_DIR/libs (tools/materialize_main.py rewrites these same
+    # dependencies' paths to "libs/<lib>" at promotion time, so a release
+    # build's own copy stays covered). A shared library's source changing in
+    # a dev checkout, without a version bump here, must still be detected as
+    # content drift -- resolve and fingerprint each declared root's complete
+    # directory too, skipping any that the libs/ scan already covered.
+    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+        local __rel __resolved
+        while IFS= read -r __rel; do
+            __resolved="$(cd "$PLUGIN_DIR" 2>/dev/null && cd "$__rel" 2>/dev/null && pwd)"
+            [[ -n "$__resolved" ]] || continue
+            [[ "$__resolved" == "$PLUGIN_DIR/libs"/* ]] && continue
+            [[ -f "$__resolved/pyproject.toml" ]] && __parts="$__parts"$'\n'"$(cat "$__resolved/pyproject.toml")"
+            [[ -d "$__resolved/src" ]] || continue
+            while IFS= read -r __f; do
+                __parts="$__parts"$'\n'"${__f#"$__resolved"}"$'\n'"$(cat "$__f" 2>/dev/null)"
+            done < <(find "$__resolved/src" -type f ! -name '*.pyc' ! -name '*.pyo' ! -path '*/__pycache__/*' 2>/dev/null | sort)
+        done < <(
+            sed -n '/^\[tool\.uv\.sources\]/,/^\[/p' "$PLUGIN_DIR/pyproject.toml" |
+            grep -o 'path[[:space:]]*=[[:space:]]*"[^"]*"' |
+            sed -n 's/.*"\([^"]*\)".*/\1/p' |
+            sort
+        )
+    fi
     printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
 }
 

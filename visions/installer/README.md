@@ -7,9 +7,9 @@
   and agent- control-plane** (picking, launching, and managing agent sessions) for
   those who want it. "Worktree Manager" is the product name for this one app across
   all three of its roles.
-- **Scope:** leaf (concrete component; links its sibling capability visions)
+- **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-09-04
+- **Last revised:** 2026-10-11
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -99,7 +99,11 @@ and fix how it is wired.
 - **The configurator surface** — a standalone, **non-agentic** visual wizard that
   presents the harness's real state (installed plugins and their prerequisites,
   machine/config, registered repos and accounts) and lets a human browse and
-  adjust it. It is the same app as the installer, entered in its ongoing mode.
+  adjust machine-local controls. Combined repository, knowledge, and plugin
+  settings remain read-only, with their provenance visible. Its
+  [configuration workbench](configurator/README.md) hosts plugin-owned panels
+  and explicit requests for source changes. It is the same app as the installer,
+  entered in its ongoing mode.
 - **The optional control-plane (Worktree Picker & host selector)** — the
   interactive front door for the fleet of worktree-backed agents: viewing,
   joining, resuming, creating, and **launching** agent sessions through
@@ -134,14 +138,13 @@ and fix how it is wired.
 ## Features
 
 ### repo-plugin-enablement
-Sets a **repo's own enabled-plugin configuration** — declaring the marketplace(s)
-and the plugins a repo turns on for the agents that run in it — by writing the
-repo-level settings the Copilot CLI **reads but does not itself manage**. Enabling
-the harness's plugins for a newly-adopted repo is a Configurator gesture, not a
-hand-edit; the app owns this write-surface precisely **because the plugin pipe
-won't** touch a repo's own plugin config. It merges rather than clobbers, chooses
-from the plugin set it already knows, and is the natural completion of adopting a
-repo.
+Shows a repository's effective marketplace and plugin enablement, including
+inherited declarations and machine-local overrides. The Configurator adjusts
+only supported machine-local enablement controls; it does not edit a
+repository's versioned plugin settings. An explicit source-change request can
+route a desired declaration change to the repository's own agent-driven
+contribution flow, as defined by the
+[configuration workbench](configurator/README.md).
 
 ### machine-and-connectivity-config
 Helps author the **minimal multi-machine / SSH configuration** the harness needs to
@@ -151,7 +154,8 @@ minimum, a machine switcher has nothing to switch between; standing up that base
 is part of making the harness turnkey and is the **source** the control-plane's
 per-machine scope derives from. It authors the *minimum* to make multi-machine
 legible and coordinates with (never replaces) a dedicated connectivity/SSH-mesh
-layer where one is present.
+layer where one is present. Direct adjustments are strictly machine-local;
+versioned topology and knowledge-repository settings are shown read-only.
 
 ### one-line-bootstrap
 A single published command takes a bare machine into the installer without any
@@ -178,7 +182,9 @@ offers to register them into the mesh.
 ### visual-configurator
 A standalone visual wizard to view and adjust the harness — plugins &
 prerequisites, machine/config, repos & accounts — usable long after first
-install, not only at bootstrap.
+install, not only at bootstrap. Its
+[configuration workbench](configurator/README.md) combines read-only effective
+configuration with machine-local controls and provider-owned backstage panels.
 
 ### bare-invocation-launches-configurator
 Invoking the harness with no project and outside any repo opens the
@@ -251,9 +257,11 @@ gated behind the plugin pipe, and never dependent on a Copilot session having
 launched.
 
 ### non-agentic-and-programmatic
-Every installer/configurator action is deterministic and runs without an AI
-agent in the loop. A human (or a script) drives it; it never needs a session to
-interpret intent.
+Installation, inspection, and direct machine-local adjustments are deterministic
+and run without an AI agent in the loop. A human (or a script) drives them.
+Submitting a source-change request is also an explicit programmatic action;
+the separately dispatched worker, not the Configurator, interprets and carries
+out repository maintenance under that repository's authority.
 
 ### idempotent-and-re-runnable
 Re-running the installer or configurator converges the machine to the intended
@@ -338,10 +346,15 @@ the app to keep *itself* current.
   installed runtimes expose and reach one another belongs to the plugin-services
   vision; how agents coordinate belongs to agent-fabric. This app **ensures those
   are set up** — it is not those systems.
+- **It is not a repository configuration editor.** Versioned harness,
+  knowledge-repository, and plugin-source settings are read-only in the
+  Configurator. Machine-local overrides and explicit dispatched delta requests
+  do not authorize the app to write those sources directly.
 
 ## See Also
 
 - Parent vision: none (top-level capability)
+- Child vision: [Configuration workbench](configurator/README.md)
 - Sibling visions: [plugin-services](../plugin-services/README.md) (the service
   model it makes real; the source of plugins' self-sufficiency without this app) ·
   [picker](../picker/README.md) (the Worktree Picker — the control-plane's

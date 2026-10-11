@@ -63,6 +63,36 @@ from plugin_resolve import (
   `directory`/`local` marketplace such as the `.ai` standard), and which don't
   (`unresolved`, e.g. remote). Never fetches, never mutates global config.
 
+## Local registration identity mapping
+
+A same-machine consumer can preserve a local marketplace registration key
+while explicitly declaring its expected manifest name:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "tools-local": {
+      "source": {
+        "source": "directory",
+        "path": "./.ai",
+        "manifestName": "tools"
+      }
+    }
+  },
+  "enabledPlugins": { "reviewer@tools-local": true }
+}
+```
+
+`marketplace_manifest_name(key, settings)` supplies the expected identity.
+Without `manifestName`, the manifest must still match the registration key.
+An explicit empty, non-string, or mismatched mapping remains unresolved;
+`stableId` never bypasses identity validation. This mapping applies only to
+local directory sources and preserves marketplace-qualified reference keys.
+Agent-bridge passes the resolved source directories directly as `--plugin-dir`
+arguments on the source machine, without copying or globally enabling plugins.
+It does not establish marketplace registration or dependency closure on a remote
+machine. Other activation libraries must adopt this contract separately.
+
 ## Sources
 
 - Copilot CLI: docs.github.com/.../customize-copilot/plugins-marketplace

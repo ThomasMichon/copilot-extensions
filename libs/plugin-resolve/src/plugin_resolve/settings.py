@@ -122,3 +122,21 @@ def marketplace_source_kind(
     if normalized in REMOTE_MARKETPLACE_SOURCE_KINDS:
         return MarketplaceSourceKind.REMOTE
     return MarketplaceSourceKind.INVALID
+
+
+def marketplace_manifest_name(
+    marketplace: str, settings: RepoPluginSettings
+) -> str | None:
+    """Expected manifest identity for a local registration, without renaming it.
+
+    A local source may explicitly map its registration key to ``manifestName``.
+    An invalid explicit mapping fails closed; remote sources cannot opt into it.
+    ``stableId`` identifies an installation and is not an identity-check bypass.
+    """
+    if marketplace_source_kind(marketplace, settings) is not MarketplaceSourceKind.LOCAL:
+        return marketplace
+    source = settings.marketplaces[marketplace]["source"]
+    if "manifestName" not in source:
+        return marketplace
+    name = source["manifestName"]
+    return name.strip() if isinstance(name, str) and name.strip() else None

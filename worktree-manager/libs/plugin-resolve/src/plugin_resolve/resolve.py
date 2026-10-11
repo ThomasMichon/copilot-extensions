@@ -22,6 +22,7 @@ from .marketplace import load_marketplace, plugin_dir
 from .settings import (
     RepoPluginSettings,
     local_marketplace_path,
+    marketplace_manifest_name,
     read_repo_settings,
     split_source,
 )
@@ -72,7 +73,7 @@ def resolve_repo_plugins(repo_dir: str | Path) -> ResolvedPlugins:
             loaded[key] = mp
         d = (
             plugin_dir(mp, name)
-            if mp is not None and mp.name == marketplace
+            if mp is not None and mp.name == marketplace_manifest_name(marketplace, settings)
             else None
         )
         if d is not None:
