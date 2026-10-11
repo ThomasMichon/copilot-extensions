@@ -175,7 +175,7 @@ def make_ci_repair_spawn(
                 charter=selected["charter"],
                 target_dir=selected["workspace"],
                 worker_id=worker_id,
-                prompt=seed,
+                prompt="Remain idle. Do not claim or execute any task until the coordinator sends an admitted task turn.",
                 wait=False,
                 json_output=True,
                 timeout=30,
@@ -187,7 +187,7 @@ def make_ci_repair_spawn(
         sid = embody.parse_fleet_body_session(result)
         if not sid:
             return False, {"error": "CI repair spawn omitted session identity"}
-        return True, {"session": f"local-body:{sid}", "worktree": None}
+        return True, {"session": f"local-body:{sid}", "worktree": None, "task_seed": seed}
 
     spawn.requires_reusable_worktree = False
     return spawn

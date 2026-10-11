@@ -122,7 +122,7 @@ def test_admission_dedup_and_real_bridge_argv(tmp_path, monkeypatch):
     ok, handle = spawn(task)
     assert ok, handle
     argv = calls[0]
-    assert any("--capability ci-repair-admitted" in arg for arg in argv)
+    assert "--capability ci-repair-admitted" in handle["task_seed"]
     assert argv[:3] == ["fake-bridge", "--json", "create"]
     assert argv[argv.index("--target-dir") + 1] == EXECUTION["workspace"]
     assert argv[argv.index("--charter") + 1] == EXECUTION["charter"]
@@ -516,6 +516,7 @@ def test_coordinator_launch_never_grants_caller_selected_spawn(tmp_path, monkeyp
     monkeypatch.setattr(bridge, "spawn_worker", lambda *a, **k: (
         calls.append(k) or SimpleNamespace(returncode=0, stdout='{"session_id":"trusted"}', stderr="")
     ))
+    monkeypatch.setattr(bridge, "resume_worker", lambda *a, **k: True)
     monkeypatch.setattr("agent_dispatch.ci_repair_spawn._invoke", lambda command, config, **kwargs: {
         **verdict(), **kwargs["request"],
     })

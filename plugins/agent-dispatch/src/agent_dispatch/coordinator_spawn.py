@@ -176,6 +176,11 @@ def register_spawn_routes(
                             "coordinator_launch": {"ok": False, "error": "spawned identity admission refused", **handle}}
                 queue.record_spawn(reservation.key, session_handle=handle["session"])
                 bus.publish({"type": "spawn.spawned", "reservation": _reservation_dict(queue.get_reservation(reservation.key))})
+                from . import bridge
+                if not bridge.resume_worker(handle["session"].removeprefix("local-body:"), handle["task_seed"], timeout=30):
+                    queue.request_spawn_release(reservation.key, detail="admitted task turn delivery failed")
+                    return {"reserved": False, "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
+                            "coordinator_launch": {"ok": False, "error": "task turn delivery failed"}}
             else:
                 queue.fail_spawn(reservation.key, detail=handle.get("error"))
             return {"reserved": False, "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
