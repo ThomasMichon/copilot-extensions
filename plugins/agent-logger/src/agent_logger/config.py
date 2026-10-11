@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover - pyyaml is a hard dependency
     yaml = None  # type: ignore[assignment]
 
 from .repo_trust import has_symlink_ancestor, path_traverses_symlink, repo_config_is_trusted
+from .config_process_logs import ProcessLogArchiveConfig
 
 #: Neutral, personality- and multi-machine system-free defaults.
 DEFAULTS: dict[str, Any] = {
@@ -635,7 +636,7 @@ def _load_repo_config(path: Path) -> dict[str, Any]:
     return result
 
 
-class Config:
+class Config(ProcessLogArchiveConfig):
     """Resolved agent-logger configuration."""
 
     def __init__(
@@ -768,18 +769,6 @@ class Config:
         ``.copilot-extensions/agent-logger/config.yaml``, on top of whatever
         repo_allowlist/repo_denylist otherwise decide. Off by default."""
         return bool(self._data.get("sync", {}).get("require_repo_opt_in", False))
-
-    @property
-    def process_logs_enabled(self) -> bool:
-        """Opt-in (default false) publication of process-log evidence
-        alongside session-state; see :func:`agent_logger.sync.engine.run_sync`
-        for the repo-scoped-sync exclusion this implies."""
-        return bool(self._data.get("sync", {}).get("process_logs", {}).get("enabled", False))
-
-    @property
-    def process_logs_source(self) -> Path:
-        """Configured machine's process-log directory (``<sync_source>/logs``)."""
-        return self.sync_source / "logs"
 
     @property
     def sync_notify(self) -> dict[str, Any]:
