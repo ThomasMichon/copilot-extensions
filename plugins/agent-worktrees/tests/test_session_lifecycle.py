@@ -888,6 +888,15 @@ class TestConcludeAndLinkCommands:
 
     @staticmethod
     def _run(monkeypatch, tracking_dir: Path, fn_name: str, **ns) -> dict:
+        from agent_worktrees import config as cfg
+
+        config = cfg.Config(
+            srcroot=str(tracking_dir), machine="test", platform="wsl", repo_name="test-repo",
+            repos={"test-repo": cfg.RepoConfig(
+                anchor=str(tracking_dir), worktree_root=str(tracking_dir / "trees"),
+            )},
+        )
+        monkeypatch.setattr(cfg, "load_project_config", lambda name: config)
         captured: dict = {}
         monkeypatch.setattr(session_tracking_cli, "_all_tracking_dirs", lambda: [tracking_dir])
         monkeypatch.setattr(output, "_json_output", lambda data: captured.update(data))

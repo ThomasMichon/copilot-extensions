@@ -226,10 +226,11 @@ class QueueBackedClient:
     def heartbeat(self, task_id, worker_id):
         return asdict(self._q.heartbeat(task_id, worker_id))
 
-    def set_activity(self, task_id, activity, *, reservation_key):
+    def set_activity(self, task_id, activity, *, reservation_key, observed_at=None, admission_fence=None):
         return asdict(
             self._q.set_activity(
-                task_id, activity, reservation_key=reservation_key
+                task_id, activity, reservation_key=reservation_key, observed_at=observed_at,
+                admission_fence=admission_fence,
             )
         )
 
@@ -3720,29 +3721,18 @@ def test_make_embody_spawn_records_handle_on_success(monkeypatch):
     record_spawn on the happy path)."""
     import subprocess
 
-    from agent_dispatch import embody
+    from agent_dispatch import session_acquisition
     from agent_dispatch.supervisor import make_embody_spawn
 
     def fake_spawn_embodied_worker(
-        task_id,
-        *,
-        worker_id,
-        driver,
-        project=None,
-        worktree_id=None,
-        resume_head=False,
-        route="",
-        repo=None,
-        all_repos=False,
-        verify_timeout=0,
-        charter=None,
+        task, **kwargs,
     ):
         return subprocess.CompletedProcess(
             args=[], returncode=0,
-            stdout='{"worktree_id": "wt-9", "session_id": "sess-9"}', stderr="",
+            stdout='{"worktree_id": "wt-9", "session_id": "sess-9", "native_session_id":"sess-9", "mode":"cli"}', stderr="",
         )
 
-    monkeypatch.setattr(embody, "spawn_embodied_worker", fake_spawn_embodied_worker)
+    monkeypatch.setattr(session_acquisition, "acquire", fake_spawn_embodied_worker)
     ok, handle = make_embody_spawn()(
         {"id": "t", "repo": "gitea.example/org/widgets"}
     )
@@ -3873,21 +3863,20 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
     body) -- and records no worktree handle (a headless body is not a worktree)."""
     import subprocess
 
-    from agent_dispatch import bridge, embody
+    from agent_dispatch import session_acquisition, embody
     from agent_dispatch.supervisor import make_headless_spawn
 
     calls: dict = {}
 
     def fake_spawn_worker(
-        task_id, *, agent, worker_id, prompt, route="", wait, **_kw
+        task, *, agent, prompt, **_kw
     ):
         calls.update(
-            task_id=task_id, agent=agent,
-            worker_id=worker_id, prompt=prompt, wait=wait,
+            task_id=task["id"], agent=agent, prompt=prompt,
         )
-        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout='{"mode":"acp","session_id":"bridge-1","native_session_id":"native-1","worktree_id":"wt-1"}', stderr="")
 
-    monkeypatch.setattr(bridge, "spawn_worker", fake_spawn_worker)
+    monkeypatch.setattr(session_acquisition, "acquire", fake_spawn_worker)
     monkeypatch.setattr(
         embody, "autopilot_worker_prompt",
         lambda task_id, *, worker_id, route="", repo=None, all_repos=False,
@@ -3900,10 +3889,9 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
     ok, handle = spawn({"id": "task-1"})
 
     assert ok is True
-    assert handle["worktree"] is None  # headless body is not a worktree
+    assert handle["worktree"] == "wt-1"
     assert calls["agent"] == "review-worker"
     assert calls["prompt"] == "SEED::task-1"  # the CLI autopilot seed, verbatim
-    assert calls["wait"] is False  # fire-and-forget; the worker drives itself
 
 
 def test_make_script_spawn_launches_runtime_python_with_task_context(monkeypatch, tmp_path):
@@ -4078,12 +4066,12 @@ def test_make_headless_spawn_charter_overrides_allocation_agent():
 def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch, stderr):
     import subprocess
 
-    from agent_dispatch import bridge, embody
+    from agent_dispatch import session_acquisition, embody
     from agent_dispatch.supervisor import make_headless_spawn
 
     monkeypatch.setattr(embody, "autopilot_worker_prompt", lambda *a, **k: "seed")
     monkeypatch.setattr(
-        bridge, "spawn_worker",
+        session_acquisition, "acquire",
         lambda *a, **k: subprocess.CompletedProcess([], 1, "", stderr),
     )
     ok, handle = make_headless_spawn()({"id": "t"})
@@ -4093,7 +4081,7 @@ def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch, stderr):
 
 
 def test_make_headless_spawn_reuses_carried_session(monkeypatch):
-    from agent_dispatch import bridge, embody
+    from agent_dispatch import bridge, embody, session_acquisition
     from agent_dispatch.supervisor import make_headless_spawn
 
     resumed = []
@@ -4109,6 +4097,11 @@ def test_make_headless_spawn_reuses_carried_session(monkeypatch):
         "spawn_worker",
         lambda *args, **kwargs: created.append((args, kwargs)),
     )
+    import subprocess
+    def acquire(task, **kwargs):
+        resumed.append((task["spawn_session_handle"].removeprefix("local-body:"), kwargs["prompt"]))
+        return subprocess.CompletedProcess([], 0, '{"mode":"acp","session_id":"session-old","native_session_id":"native-old","worktree_id":"wt-review"}', "")
+    monkeypatch.setattr(session_acquisition, "acquire", acquire)
 
     ok, handle = make_headless_spawn()(
         {
@@ -4121,17 +4114,16 @@ def test_make_headless_spawn_reuses_carried_session(monkeypatch):
     )
 
     assert ok is True
-    assert handle == {
-        "session": "local-body:session-old",
-        "worktree": "wt-review",
-    }
+    assert handle["session"] == "local-body:session-old"
+    assert handle["worktree"] == "wt-review"
+    assert handle["native_session_id"] == "native-old"
     assert resumed and resumed[0][0] == "session-old"
     assert "next-task" in resumed[0][1]
     assert created == []
 
 
 def test_make_headless_spawn_does_not_replace_live_busy_session(monkeypatch):
-    from agent_dispatch import bridge, embody
+    from agent_dispatch import bridge, embody, session_acquisition
     from agent_dispatch.supervisor import make_headless_spawn
 
     created = []
@@ -4142,6 +4134,9 @@ def test_make_headless_spawn_does_not_replace_live_busy_session(monkeypatch):
         "spawn_worker",
         lambda *args, **kwargs: created.append((args, kwargs)),
     )
+    def acquire(*args, **kwargs):
+        raise bridge.BridgeCarriedSessionBusy("carried session remains live")
+    monkeypatch.setattr(session_acquisition, "acquire", acquire)
 
     ok, handle = make_headless_spawn()(
         {
@@ -4158,10 +4153,10 @@ def test_make_headless_spawn_does_not_replace_live_busy_session(monkeypatch):
     assert created == []
 
 
-def test_make_headless_spawn_replaces_confirmed_gone_session(monkeypatch):
+def test_make_headless_spawn_does_not_replace_confirmed_gone_session(monkeypatch):
     import subprocess
 
-    from agent_dispatch import bridge, embody
+    from agent_dispatch import bridge, embody, session_acquisition
     from agent_dispatch.supervisor import make_headless_spawn
 
     created = []
@@ -4178,6 +4173,9 @@ def test_make_headless_spawn_replaces_confirmed_gone_session(monkeypatch):
         )
 
     monkeypatch.setattr(bridge, "spawn_worker", create)
+    def acquire(*args, **kwargs):
+        raise bridge.BridgeUnavailable("strict native resume refused")
+    monkeypatch.setattr(session_acquisition, "acquire", acquire)
 
     ok, handle = make_headless_spawn()(
         {
@@ -4188,17 +4186,13 @@ def test_make_headless_spawn_replaces_confirmed_gone_session(monkeypatch):
         }
     )
 
-    assert ok is True
-    assert handle == {
-        "session": "local-body:session-new",
-        "worktree": "wt-review",
-    }
-    assert created[0][1]["target_dir"] == "/tmp/wt-review"
-    assert created[0][1]["worktree_id"] == "wt-review"
+    assert ok is False
+    assert "strict native resume refused" in handle["error"]
+    assert created == []
 
 
 def test_make_headless_spawn_holds_on_unknown_carried_session(monkeypatch):
-    from agent_dispatch import bridge, embody
+    from agent_dispatch import bridge, embody, session_acquisition
     from agent_dispatch.supervisor import make_headless_spawn
 
     created = []
@@ -4208,6 +4202,9 @@ def test_make_headless_spawn_holds_on_unknown_carried_session(monkeypatch):
         "spawn_worker",
         lambda *args, **kwargs: created.append((args, kwargs)),
     )
+    def acquire(*args, **kwargs):
+        raise bridge.BridgeCarriedSessionBusy("could not determine native liveness")
+    monkeypatch.setattr(session_acquisition, "acquire", acquire)
 
     ok, handle = make_headless_spawn()(
         {
@@ -7839,6 +7836,41 @@ def test_supervisor_publishes_local_body_activity_while_task_is_queued(
     }
     assert sup.hold_live_leases() == 0
     assert q.get(t.id).activity == "IDLE"
+
+
+def test_cli_idle_snapshot_before_start_cannot_restore_stale_activity(q, client, monkeypatch):
+    from agent_dispatch import supervisor as module
+    task = q.create("review", now=10)
+    reservation, _ = q.reserve_spawn(task.id, now=11)
+    q.record_spawn(
+        reservation.key, session_handle="native-cli", worktree="wt-cli", now=12,
+    )
+    q.claim_one("machine/wt-cli", task_id=task.id, machine="machine", worktree="wt-cli", now=13)
+    q.set_activity(task.id, "IDLE", reservation_key=reservation.key, now=14)
+    published = []
+    set_activity = client.set_activity
+    def record(task_id, activity, **kwargs):
+        published.append((activity, kwargs["observed_at"]))
+        return set_activity(task_id, activity, **kwargs)
+    monkeypatch.setattr(client, "set_activity", record)
+    monkeypatch.setattr(module.time, "time", lambda: 15)
+    def liveness(worktree, machine):
+        assert worktree == "wt-cli"
+        # The query started at 15 and captured idle, but start happens before
+        # its response reaches the supervisor and establishes new admission.
+        q.start(task.id, "machine/wt-cli", owner_session_id="native-cli", now=16)
+        return {"session_id": "native-cli", "status": "idle", "liveness": "idle"}
+    supervisor = Supervisor(
+        client, spawn_fn=_ok_spawn(), repo=TEST_REPO,
+        liveness_fn=liveness, publish_activity=True, heartbeat=False,
+        recover=False, nudge=False,
+    )
+    supervisor.hold_live_leases()
+    assert published == [("IDLE", 15)]
+    current = q.get(task.id)
+    assert current.status == Status.STARTED
+    assert current.owner_session_id == "native-cli"
+    assert current.activity is None
 
 
 def test_hold_live_leases_degrades_when_local_session_listing_fails(

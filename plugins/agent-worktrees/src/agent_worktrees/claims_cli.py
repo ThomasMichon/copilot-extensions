@@ -389,17 +389,8 @@ def _resolve_owner_ref_record_path(
     config: cfg.Config,
 ) -> tuple[Path | None, str, str | None]:
     """Resolve a qualified owner-ref to a local tracking record path."""
-    parsed = tracking.parse_claim_ref(owner_ref)
-    if parsed is None or not parsed.is_qualified:
-        return (
-            None,
-            "",
-            f"--owner-ref must be a qualified machine/project/worktree_id ref (got {owner_ref!r})",
-        )
-    if parsed.machine != config.machine:
-        return (None, parsed.worktree_id, None)
-    path = cfg.project_dir(parsed.project) / "worktrees" / f"{parsed.worktree_id}.yaml"
-    return (path, parsed.worktree_id, None)
+    from .execution_spaces import resolve_owner_record_path
+    return resolve_owner_record_path(owner_ref, config)
 
 
 def _dispatch_claim(verb: str, verb_args: dict):
@@ -417,6 +408,7 @@ def _dispatch_claim(verb: str, verb_args: dict):
         verb_args,
         read_lock_data=lambda: _locks.read_lock(_smr._monitor_lock_path()),
         ensure_monitor=_smr._ensure_status_monitor if _smr._status_monitor_enabled() else None,
+        min_version=2,
     )
 
 
@@ -591,7 +583,7 @@ def _claims_release(args: argparse.Namespace, ref: str) -> int:
             return output._json_error(f"no outbound claim with ref: {ref}")
         output.err(f"no outbound claim with ref: {ref} on {wt_id}")
         return 1
-    if result.get("error") == "reserved":
+    if result.get("error") in {"reserved", "rejected"}:
         if args.json:
             return output._json_error(result["message"])
         output.err(result["message"])
@@ -659,7 +651,7 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
             return output._json_error(msg)
         output.err(msg)
         return 1
-    if result.get("error") == "reserved":
+    if result.get("error") in {"reserved", "rejected"}:
         if args.json:
             return output._json_error(result["message"])
         output.err(result["message"])
@@ -681,6 +673,7 @@ def _claims_sweep(args: argparse.Namespace) -> int:
     config = cfg.load_config()
     apply = getattr(args, "apply", False)
     from . import sweep as sweep_mod
+    from .execution_spaces import ExecutionSpaceError, require_record_mutation
 
     gone_of, safe_of = sweep_mod.make_resolvers(config)
 
@@ -711,6 +704,13 @@ def _claims_sweep(args: argparse.Namespace) -> int:
         if apply:
             with tracking._RecordLock(rec_path, require_sidecar=True):
                 rec = tracking.load_record(rec_path)
+                try:
+                    require_record_mutation(rec, config)
+                except ExecutionSpaceError as exc:
+                    if args.json:
+                        return output._json_error(str(exc))
+                    output.err(str(exc))
+                    return 1
                 flipped = tracking.sweep_abandoned_obligations(
                     rec,
                     gone_of=_gone,

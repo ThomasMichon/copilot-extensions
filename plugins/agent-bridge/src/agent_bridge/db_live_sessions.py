@@ -760,6 +760,7 @@ class _LiveSessionsMixin:
         idempotency_key: str | None = None,
         stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
         report_duplicate: bool = False,
+        require_idle: bool = False,
     ) -> tuple[int | None, str | None]:
         """Atomically lease-check the target registration and enqueue, or reject.
 
@@ -804,12 +805,17 @@ class _LiveSessionsMixin:
             "      )"
             "    )"
             f"    AND (? IS NULL OR {_CANON} = ls.session_id)"
+            "    AND (? = 0 OR (ls.turn_state IN ('idle','completed') "
+            "      AND NOT EXISTS (SELECT 1 FROM live_messages pending "
+            "        WHERE pending.session_id=ls.session_id AND pending.delivered_at IS NULL "
+            "        AND pending.kind NOT LIKE 'control:%')))"
             ")",
             (
                 session_id, session_id, sender, body, reply_to, kind, delivery,
                 idempotency_key, now,
                 session_id, session_id, cutoff, cutoff,
                 expected_session_id, expected_session_id, expected_session_id,
+                require_idle,
             ),
         )
         if cur.rowcount == 1:
@@ -865,7 +871,7 @@ class _LiveSessionsMixin:
             return None, f"superseded:{current_sid}"
         if expected_session_id is not None and expected_session_id != current_sid:
             return None, f"expected_mismatch:{current_sid}"
-        return None, "stale"
+        return None, "session_busy" if require_idle else "stale"
 
     def list_pending_live_messages(self, session_id: str) -> list[dict[str, Any]]:
         """Undelivered messages for a session, oldest-first (delivery order).

@@ -84,6 +84,60 @@ must be filtered.
 
 ## machines.yaml Format
 
+### Independent registered execution spaces
+
+Opt-in entries use their registry key as the execution-space identity:
+
+```yaml
+machines:
+  workstation-windows:
+    execution_platform: windows
+    physical_host: workstation
+    ssh:
+      ready: true
+      environments:
+        - name: windows
+          alias: workstation-windows-ssh
+          shell: pwsh
+  workstation-wsl:
+    execution_platform: wsl
+    physical_host: workstation
+    ssh:
+      ready: true
+      environments:
+        - name: wsl
+          alias: workstation-wsl-ssh
+          shell: bash
+```
+
+Each space owns its project/worktree registrations and settings independently.
+`physical_host` is grouping metadata only. Target selection uses the registered
+space key, not that group or the transport alias. Derived agent names preserve
+the registered keys, including the native Windows entry.
+
+For a topology using explicit spaces, set the daemon's own independent
+selection in its local `~/.agent-bridge/config.yaml`:
+
+```yaml
+local_execution_space: workstation-windows
+```
+
+The selected key must exist in the topology and match the daemon's execution
+platform. Missing, ambiguous or invalid selection fails visibly; matching the
+hostname never supplies a fallback. The worktrees runtime likewise uses its
+explicit `machine` setting as the registered execution-space key.
+Keys cannot contain whitespace, path separators or reference delimiters, and
+must be unique without regard to case.
+
+The key remains the first component of qualified ownership references; no
+reference syntax or existing record is automatically rewritten. After opting in, ambiguous legacy owned mutations and cross-space local ledger
+writes fail closed. Registries without explicit execution-space declarations
+retain their legacy lifecycle behavior; physical-host matching still cannot
+make two distinct registered keys local to one another.
+Cross-space owned creation remains blocked before source fetch/allocation:
+this identity support does not introduce reservations, allocation receipts,
+cross-registry ledger copying or worker-creation authority.
+
 `machines.yaml` defines the machines in your infrastructure under a
 top-level `machines:` key. Each machine has a unique key and nested
 metadata including SSH environments.

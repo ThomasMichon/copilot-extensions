@@ -8,6 +8,7 @@ the obligation and the child's finalize can settle it.
 from __future__ import annotations
 
 import types
+import json
 
 import pytest
 
@@ -24,6 +25,10 @@ def _seed_owner(tmp_path, monkeypatch, *, machine="anomalous-potato", project="e
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / f".{name}")
     owner_dir = tmp_path / f".{project}" / "worktrees"
     owner_dir.mkdir(parents=True, exist_ok=True)
+    (owner_dir.parent / "config.yaml").write_text(json.dumps({
+        "machine": machine, "platform": "wsl", "repo_name": project,
+        "repos": {project: {"anchor": str(tmp_path)}},
+    }), encoding="utf-8")
     wdir = tmp_path / owner_id
     wdir.mkdir(exist_ok=True)
     tracking.create_new_record(

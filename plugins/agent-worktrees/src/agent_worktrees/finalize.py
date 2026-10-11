@@ -36,6 +36,7 @@ deferred concern handled by cleanup once the worktree is idle.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 import os
 import shutil
 import time
@@ -1154,42 +1155,15 @@ def _settle_parent_obligation(
     treating this child as unsettled without re-deriving its state (the
     recursion collapse).
 
-    Same-machine only: when the parent lives on **this** machine its tracking
+    Same registered space only: when the parent lives on **this** space its tracking
     YAML is directly updatable (``~/.{project}/worktrees/{id}.yaml``); a
     cross-machine parent settles later via the lease disposition mirror. Fully
-    best-effort and degrade-safe -- any failure (no
-    owner_ref, unresolved/foreign parent, no matching claim, I/O error) is a
-    silent no-op and never perturbs the finalize.
+    best-effort for absent/unresolved ownership or a missing claim. Known
+    ledger I/O/format failures are reported without claiming settlement;
+    execution-space authority failures propagate and preserve the obligation.
     """
-    try:
-        owner = record.owner_claim_ref  # parsed ClaimRef of the parent, or None
-        if owner is None or not owner.is_qualified:
-            return
-        if owner.machine != config.machine:
-            return  # cross-machine parent -> lease mirror / sweep handles it
-        from . import config as cfg
-        parent_path = (
-            cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml"
-        )
-        if not parent_path.exists():
-            return
-        with tracking._RecordLock(parent_path, require_sidecar=True):
-            parent = tracking.load_record(parent_path)
-            child_ref = tracking.format_claim_ref(
-                config.machine, config.repo_name, worktree_id
-            )
-            settled = tracking.settle_resource_claim(
-                parent, child_ref, obligations.AT_REST, save=False,
-            )
-            if settled is not None:
-                tracking.save_record(parent, parent_path)
-        if settled is not None:
-            output.ok(
-                f"Settled parent {owner.worktree_id}'s claim on this worktree "
-                f"(-> at-rest)"
-            )
-    except Exception:  # never let settlement perturb finalize
-        return
+    from .execution_spaces import settle_parent_obligation
+    settle_parent_obligation(record, config, worktree_id, output=output)
 
 
 def _settle_current_session_claim(
@@ -1222,9 +1196,10 @@ def _settle_current_session_claim(
     from . import locks as _locks
     from . import status_monitor_runtime as _smr
     from . import tracking_write
+    from .execution_spaces import ExecutionSpaceError
 
     try:
-        tracking_write.dispatch(
+        result = tracking_write.dispatch(
             "claim_settle",
             {
                 "worktree_id": record.worktree_id,
@@ -1237,8 +1212,13 @@ def _settle_current_session_claim(
             ensure_monitor=(
                 _smr._ensure_status_monitor if _smr._status_monitor_enabled() else None
             ),
+            min_version=2,
         )
+        if result.get("error") == "rejected":
+            raise ExecutionSpaceError(result["message"])
         record = tracking.load_record(yaml_path)
+    except ExecutionSpaceError:
+        raise
     except Exception:
         pass
     return record, current_session_ref
@@ -1394,23 +1374,26 @@ def _assert_obligations_settled(
 
 
 def _rollback_finalizing_freeze(
-    yaml_path, prior_status: str | None, worktree_id: str,
+    yaml_path, prior_status: str | None, worktree_id: str, config: Config | None = None,
 ) -> None:
     """Restore a mutable stable state after a post-freeze finalize failure.
 
-    worktree-finality-and-obligations (Ph2): once ``record.status`` is frozen
-    to ``finalizing``, a subsequent failure (lock timeout, an exception during
-    cleanup) must not leave the record wedged there permanently -- creator
-    ownership would stay frozen forever (``add_resource_claim`` hard-rejects
-    ``finalizing``) with no path back. Best-effort and defensive: only reverts
-    when the record is still exactly ``finalizing`` (a concurrent process may
-    have already resolved it) and only when a real prior status was captured.
+    Only restore a still-``finalizing`` record with a known prior status.
+    Production callers supply config so a changed owner cannot be written
+    during rollback. A terminal outcome already committed is never reverted.
     """
     if prior_status is None or not yaml_path.exists():
         return
     try:
         with tracking._RecordLock(yaml_path, require_sidecar=True):
             record = tracking.load_record(yaml_path)
+            if config is not None:
+                from .execution_spaces import ExecutionSpaceError, require_record_mutation
+                try:
+                    require_record_mutation(record, config)
+                except ExecutionSpaceError as exc:
+                    output.err(f"Cannot restore {worktree_id}'s status: {exc}; record unchanged.")
+                    return
             if record.status != "finalizing":
                 return
             record.status = prior_status
@@ -1484,6 +1467,26 @@ def _worktree_branch(
     return f"worktree/{worktree_id}"
 
 
+def _authority_fenced_write(
+    yaml_path: Path, config: Config, mutate,
+) -> tracking.WorktreeRecord | None:
+    """Reload fresh, re-verify authority, then run ``mutate`` (given the
+    fresh record) under ONE required-sidecar lock, so a write off an
+    earlier, stale snapshot can never overwrite a record gone foreign since
+    (``mutate``'s own ``save_record`` nests safely, reentrant per path/
+    thread). Returns the fresh record, or ``None`` on a rejected check,
+    contention, or unreadable record -- callers treat that as "skip"."""
+    from .execution_spaces import require_record_mutation
+    try:
+        with tracking._RecordLock(yaml_path, require_sidecar=True):
+            fresh = tracking.load_record(yaml_path)
+            require_record_mutation(fresh, config)
+            mutate(fresh)
+            return fresh
+    except Exception:
+        return None
+
+
 def validate_and_finalize(
     worktree_id: str,
     config: Config,
@@ -1532,6 +1535,14 @@ def validate_and_finalize(
                 f"Cannot finalize {worktree_id}: its existing claim ledger is "
                 f"unreadable ({exc}). Creator ownership is preserved.")
             return False
+    if record is not None:
+        from .execution_spaces import ExecutionSpaceError, require_record_mutation
+
+        try:
+            require_record_mutation(record, config)
+        except ExecutionSpaceError as exc:
+            output.err(f"Cannot finalize {worktree_id}: {exc}")
+            return False
     branch = _worktree_branch(record, worktree_id)
     checkout_managed = record is None or record.checkout_managed
 
@@ -1562,57 +1573,39 @@ def validate_and_finalize(
         return True
 
     # Seal the worktree's durable identity (title + session registry) from
-    # session-state BEFORE any teardown, so a finalized/pruned worktree never
-    # reads as "(untitled)" with no session linkage -- even when the
-    # best-effort register/deregister-session hooks were bypassed (a dispatched
-    # or crashed session, a bare-resume cwd). Gap-filling + silent; mutates the
-    # in-memory ``record`` so the later update_status(save) preserves it.
-    try:
-        tracking.seal_worktree_identity(record)
-    except Exception:
-        pass
-
-    # Session-claim lifecycle (Phase 8, worktree-finality-and-obligations): settle the invoking
-    # session's own outbound claim BEFORE the hard obligation gate runs, so finalize never leaves
-    # the operator to settle it by hand -- and it never blocks the gate either way (see the `kind
-    # != "session"` exclusion in `_assert_obligations_settled`).
-    #
-    # Scoping note: this reads ``COPILOT_AGENT_SESSION_ID`` from the CURRENT process's own
-    # environment, so it settles the invoking (interactive) session's claim. `_post_exit_gate`'s
-    # backstop call (after the child Copilot process exits) runs in the *launcher's* environment,
-    # which never carries the exited child's session id -- so if that child's own `sessionEnd` hook
-    # was itself missed (a crash, not a clean exit), this step is a no-op and the orphaned claim is
-    # left `active`. That claim never blocks finalize (the `kind != "session"` exclusion above) and
-    # is exactly the still-deferred "sweep `claim_gone`/`claim_safe` session branch" Plan bullet's
-    # job to reclaim -- not solved here, to keep this slice's scope to the
-    # register/deregister/finalize wiring itself.
+    # session-state before any teardown, so a finalized/pruned worktree never
+    # reads as "(untitled)" with no session linkage -- even with a bypassed
+    # register/deregister-session hook. Gap-filling + silent.
+    if record is not None:
+        fresh = _authority_fenced_write(yaml_path, config, tracking.seal_worktree_identity)
+        record = fresh if fresh is not None else record
+    # Settle only the invoking session's claim before the obligation gate
+    # (the post-exit launcher lacks its child's session id, so missed
+    # sessionEnd claims remain active for the reclaim sweep; session claims
+    # do not block the obligation gate).
     current_session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
-    record, current_session_ref = _settle_current_session_claim(
-        yaml_path, record, current_session_id,
-    )
+    from .execution_spaces import ExecutionSpaceError, require_record_mutation
+    try:
+        record, current_session_ref = _settle_current_session_claim(
+            yaml_path, record, current_session_id,
+        )
+    except ExecutionSpaceError as exc:
+        output.err(str(exc))
+        return False
     _advise_other_live_sessions(record, current_session_ref)
-
     # pr-merge-obligation-gate defense 2: refresh the tracked PR(s) against
-    # the provider RIGHT BEFORE the obligation gate reads the local ledger.
-    # `_reconcile_active_pr` is the one shared observation path every other
-    # PR-workflow verb already funnels through (create-pr, pr-ready,
-    # pr-status, the Picker's background sweep, pr-reconcile); calling it
-    # here too means finalize never trusts a stale/never-verified local
-    # ``pr.state`` -- in particular an out-of-band ``set-pr`` (which
-    # persists state with NO provider read at all) gets its first real
-    # provider confirmation right here, so its `pr`-kind claim is created
-    # (still open) or released (confirmed merged) before the gate below
-    # ever runs. Best-effort: a provider failure/timeout degrades to the
-    # local state exactly as every other caller of this function already
-    # tolerates -- finalize is never blocked BY the reconcile itself, only
-    # by whatever obligation the ledger already (or now) records.
+    # the provider right before the obligation gate reads the local ledger
+    # (the same shared `_reconcile_active_pr` create-pr/pr-ready/pr-status/
+    # the Picker's sweep/pr-reconcile all use), so an out-of-band `set-pr`
+    # (no provider read) gets its first real confirmation here. Best-effort:
+    # degrades to local state, never blocking on the reconcile itself.
     if record is not None and repo.pr.enabled:
-        try:
-            from . import pr_ops as _pr_ops
+        from . import pr_ops as _pr_ops
 
-            _pr_ops._reconcile_active_pr(record, config)
-        except Exception:
-            pass
+        fresh = _authority_fenced_write(
+            yaml_path, config, lambda r: _pr_ops._reconcile_active_pr(r, config),
+        )
+        record = fresh if fresh is not None else record
 
     # Obligation gate (resource-obligation-settlement Phase 2). A worktree
     # answers for the outbound resources it still owns before it may finalize.
@@ -1722,11 +1715,8 @@ def validate_and_finalize(
             )
             return False
 
-    # Freeze the exact ownership set under the same record lock used by
-    # `claims add`: reload after the potentially-long fetch/content validation,
-    # re-check every claim, persist+verify the handoff, then mark the creator
-    # `finalizing`. Claim creation rejects that terminal transition, so no new
-    # resource can appear between this check and release_all_resources below.
+    # After content validation, recheck fresh authority and claims under the
+    # record lock before freezing to finalizing, which blocks new claims.
     try:
         active_handoffs = claim_handoffs.active_bundle_ids_for_source(source_ref)
     except Exception as exc:
@@ -1746,6 +1736,7 @@ def validate_and_finalize(
         try:
             with tracking._RecordLock(yaml_path, require_sidecar=True):
                 record = tracking.load_record(yaml_path)
+                require_record_mutation(record, config)
                 try:
                     from . import claim_handoffs
                     source_ref = tracking.format_claim_ref(
@@ -1801,6 +1792,9 @@ def validate_and_finalize(
                 prior_status = record.status
                 record.status = "finalizing"
                 tracking.save_record(record, yaml_path)
+        except ExecutionSpaceError as exc:
+            output.err(f"Cannot finalize {worktree_id}: {exc}; record unchanged.")
+            return False
         except Exception as exc:
             output.err(
                 f"Cannot freeze {worktree_id}'s claim ledger for finalize "
@@ -1814,15 +1808,17 @@ def validate_and_finalize(
         lock.acquire()
     except TimeoutError:
         output.err("Timed out waiting for finalization lock.")
-        _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id)
+        _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
         return False
 
+    cleanup_records = ExitStack()
     try:
         # Cleanup -- remove worktree and branch
         if yaml_path.exists():
-            with tracking._RecordLock(yaml_path, require_sidecar=True):
-                record = tracking.load_record(yaml_path)
-                checkout_managed = record.checkout_managed
+            cleanup_records.enter_context(tracking._RecordLock(yaml_path, require_sidecar=True))
+            record = tracking.load_record(yaml_path)
+            require_record_mutation(record, config)
+            checkout_managed = record.checkout_managed
         inside_worktree = git_ops.is_cwd_inside(worktree_path)
         has_live_session = _has_live_session(record)
 
@@ -1835,7 +1831,7 @@ def validate_and_finalize(
                 record, repo, worktree_path, anchor, precondition_fn=_pr_finalize_precondition)
             if err:
                 output.err(err)
-                _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id)
+                _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
                 return False
 
         # Reconcile local branch pointers with origin now that the content is
@@ -1909,7 +1905,7 @@ def validate_and_finalize(
                     precondition_fn=_pr_finalize_precondition)
                 if err:
                     output.err(err)
-                    _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id)
+                    _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
                     return False
 
             if not git_ops.remove_worktree(anchor, worktree_path):
@@ -2019,15 +2015,16 @@ def validate_and_finalize(
                         c, worktree_id=worktree_id, machine=record.machine, note="finalized",
                         project=record.repo)
 
-            # Obligation settlement, upward (resource-obligation-settlement Ph3):
-            # this worktree finalizing means its OWN work is safe, so settle the
-            # claim its PARENT holds on it -- flip the parent-visible claim to
-            # at-rest so the parent's finalize gate stops treating this child as
-            # unsettled. This is the recursion-collapse: the parent never
-            # re-derives the child's state, it trusts this flip. Best-effort +
-            # same-machine only (a cross-machine parent settles via the lease
-            # disposition mirror / reclaim sweep). Never blocks the finalize.
-            _settle_parent_obligation(record, config, worktree_id)
+            # Finalization is committed; a fresh parent-authority refusal cannot
+            # undo checkout removal or resurrect this child's released resources.
+            try:
+                _settle_parent_obligation(record, config, worktree_id)
+            except ExecutionSpaceError as exc:
+                output.warn(
+                    f"Worktree {worktree_id} remains finalized; parent-obligation "
+                    f"settlement is unconfirmed: {exc}. Parent obligation retained; "
+                    "inspect the owning ledger before retrying settlement."
+                )
 
         activity.log_event(
             "worktree_finalized",
@@ -2039,11 +2036,15 @@ def validate_and_finalize(
         output.ok(f"Worktree {worktree_id} finalized.")
         return True
 
+    except ExecutionSpaceError as exc:
+        output.err(f"Cannot finalize {worktree_id}: {exc}; record unchanged.")
+        return False
     except Exception as e:
         output.err(f"Finalization cleanup failed: {e}")
-        _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id)
+        _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
         return False
     finally:
+        cleanup_records.close()
         lock.release()
 
 

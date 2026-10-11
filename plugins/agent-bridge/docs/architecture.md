@@ -49,6 +49,11 @@ Copilot CLI sessions (multiple)
 | Elevated sub-daemon | `elevated.py` | Windows admin sub-daemon launcher (ephemeral loopback port, discovered via its routing table) |
 | CLI | `__main__.py` | Command-line interface |
 
+The [strict local acquisition boundary](session-acquisition.md) exposes
+protocol-30 task-bound CLI/ACP acquisition, native identity verification and
+durable retry reconciliation. Local dispatch launch callers use it; remote/
+fleet migration and native integration proof remain in the Phase 6 effort.
+
 ## Single-Instance Guard
 
 At most **one daemon may run per config dir + port**. On startup (`_cmd_start` in

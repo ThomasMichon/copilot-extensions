@@ -38,6 +38,10 @@ def _record(
     tdir.mkdir(parents=True, exist_ok=True)
     wdir = tmp_path / "trees" / project / worktree_id
     wdir.mkdir(parents=True, exist_ok=True)
+    (tmp_path / project / "config.yaml").write_text(json.dumps({
+        "repo_name": project, "machine": machine,
+        "repos": {project: {"anchor": str(wdir)}},
+    }), encoding="utf-8")
     record = tracking.create_new_record(
         worktree_id,
         f"worktree/{worktree_id}",
@@ -59,6 +63,11 @@ def handoff_world(tmp_path, monkeypatch):
     monkeypatch.setattr(claim_handoffs.cfg, "install_dir", lambda: runtime)
     monkeypatch.setattr(
         claim_handoffs.cfg, "project_dir", lambda name=None: tmp_path / str(name)
+    )
+    load_config = claim_handoffs.cfg.load_config
+    monkeypatch.setattr(
+        claim_handoffs.cfg, "load_project_config",
+        lambda name: load_config(tmp_path / name / "config.yaml", project=name),
     )
     return {"tmp_path": tmp_path}
 
@@ -421,6 +430,10 @@ def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
     refs = [claim.ref for claim in world["claims"]]
     bundle = _offer_cross_machine(world, refs)
     seen = {}
+    monkeypatch.setattr(
+        claim_handoff_accept_support, "no_window_kwargs",
+        lambda: {"creationflags": 0x08000000},
+    )
 
     monkeypatch.setattr(
         claim_handoff_accept_support.claimant,
@@ -434,6 +447,7 @@ def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
             return real_run(argv, **kwargs)
         seen["argv"] = argv
         seen["timeout"] = kwargs.get("timeout")
+        seen["creationflags"] = kwargs.get("creationflags")
         accepted = claim_handoffs.accept_source(bundle.bundle_id, actor=world["consumer"])
         return subprocess.CompletedProcess(
             argv,
@@ -451,6 +465,7 @@ def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
     )
 
     assert accepted.state == "accepted"
+    assert seen["creationflags"] == 0x08000000
     assert seen["argv"][:4] == [
         "ssh", "-o", "BatchMode=yes", "-o",
     ]
@@ -557,7 +572,7 @@ def test_cli_accept_source_returns_json_without_logging_main_accept(
     world = _setup_bundle(handoff_world, source_machine="ember")
     bundle = _offer_cross_machine(world, [world["claims"][1].ref])
     config = types.SimpleNamespace(machine="ember", repo_name="source-project")
-    monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(m.cfg, "load_config", lambda *args, **kwargs: config)
     monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-source")
 
     assert m.cmd_claims(
@@ -576,7 +591,7 @@ def test_cli_accept_logs_and_returns_accepted_bundle(handoff_world, monkeypatch,
     world = _setup_bundle(handoff_world)
     bundle = _offer(world, [world["claims"][1].ref])[0]
     config = types.SimpleNamespace(machine=MACHINE, repo_name="consumer-project")
-    monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(m.cfg, "load_config", lambda *args, **kwargs: config)
     monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-consumer")
     logged = []
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))

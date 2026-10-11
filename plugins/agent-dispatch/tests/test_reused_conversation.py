@@ -3,9 +3,7 @@
 import json
 import subprocess
 
-import pytest
-
-from agent_dispatch import bridge, bridge_reclaim, embody
+from agent_dispatch import bridge, embody, session_acquisition
 from agent_dispatch.spawn_factories import make_embody_spawn, make_headless_spawn
 from tests._helpers import TEST_REPO
 
@@ -13,6 +11,8 @@ from tests._helpers import TEST_REPO
 def _task(ownership="reused", *, conversation_retired=False):
     return {
         "id": "review-task",
+        "generation": 0,
+        "spawn_reservation_key": "reservation-a",
         "repo": TEST_REPO,
         "spawn_worktree": "review-worktree",
         "spawn_worktree_path": "/example/review-worktree",
@@ -24,31 +24,30 @@ def _task(ownership="reused", *, conversation_retired=False):
 
 def _transport(monkeypatch, *, refusal=None, send_busy=False):
     calls = []
-    monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: ["bridge"])
+    monkeypatch.setattr(session_acquisition, "agent_bridge_launch_prefix", lambda: ["bridge"])
     monkeypatch.setattr(bridge, "_resolve_agent_record", lambda *a, **kw: None)
 
     def run(argv, **kwargs):
         calls.append(argv)
-        if argv[1:3] == ["--json", "resume"]:
-            if refusal:
-                return subprocess.CompletedProcess(argv, 1, json.dumps(refusal), "refused")
-            return subprocess.CompletedProcess(
-                argv, 0, json.dumps({"session_id": "existing-conversation"}), "",
+        assert argv[1:] == ["acquire", "--request-file", "-"]
+        payload = json.loads(kwargs["input"])
+        if refusal or send_busy or payload["conversation_retired"] is None:
+            code = "session_busy" if send_busy else (
+                "foreign_live_holder" if refusal and refusal.get("reason") == "live_cli_holds_worktree"
+                else "retirement_unknown"
             )
-        if "create" in argv:
             return subprocess.CompletedProcess(
-                argv, 0, json.dumps({"session_id": "replacement-conversation"}), "",
+                argv, 1, json.dumps({"detail": {"code": code, "message": "refused"}}), "refused",
             )
-        if argv[1] == "send" or argv[1:3] == ["--json", "send"]:
-            if send_busy:
-                return subprocess.CompletedProcess(
-                    argv, bridge_reclaim._SEND_BUSY_EXIT, "", "session busy",
-                )
-            return subprocess.CompletedProcess(argv, 0, "sent", "")
-        pytest.fail(f"unexpected bridge operation: {argv}")
+        fresh = payload["allocation"] == "created" or payload["conversation_retired"] is True
+        sid = "replacement-conversation" if fresh else payload.get("prior_session_id") or "existing-conversation"
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            **{field: payload[field] for field in ("mode", "task_id", "task_generation", "worktree_id", "delivery_id")},
+            "session_id": sid, "native_session_id": f"native-{sid}",
+            "acquired": "created" if fresh else "resumed",
+        }), "")
 
-    monkeypatch.setattr(bridge.subprocess, "run", run)
-    monkeypatch.setattr(bridge_reclaim.subprocess, "run", run)
+    monkeypatch.setattr(session_acquisition.subprocess, "run", run)
     return calls
 
 
@@ -57,9 +56,8 @@ def test_missing_handle_resumes_retained_worktree_conversation(monkeypatch):
     ok, handle = make_headless_spawn()(_task())
     assert ok is True
     assert handle["session"] == "local-body:existing-conversation"
-    assert calls[0] == ["bridge", "--json", "resume", "review-worktree", "--strict"]
-    position = calls[1].index("send")
-    assert calls[1][position:position + 2] == ["send", "existing-conversation"]
+    assert calls[0] == ["bridge", "acquire", "--request-file", "-"]
+    assert len(calls) == 1
     assert not any("create" in call or "--force" in call for call in calls)
 
 
@@ -68,7 +66,7 @@ def test_first_allocation_still_creates_a_conversation(monkeypatch):
     ok, handle = make_headless_spawn()(_task("created"))
     assert ok is True
     assert handle["session"] == "local-body:replacement-conversation"
-    assert any("create" in call for call in calls)
+    assert calls[0][1] == "acquire"
 
 
 def test_retained_worktree_never_takes_over_an_interactive_holder(monkeypatch):
@@ -95,7 +93,7 @@ def test_busy_send_never_ends_or_replaces_the_resumed_conversation(monkeypatch):
     ok, handle = make_headless_spawn()(_task())
     assert ok is False
     assert handle["deferred"] is True
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert not any(
         "end" in call or "restart-worktree" in call or "create" in call
         for call in calls
@@ -109,7 +107,7 @@ def test_gone_carried_body_falls_back_to_worktree_resume_not_create(monkeypatch)
     task = {**_task(), "spawn_session_handle": "local-body:stopped-body"}
     ok, handle = make_headless_spawn()(task)
     assert ok is True
-    assert handle["session"] == "local-body:existing-conversation"
+    assert handle["session"] == "local-body:stopped-body"
     assert not any("create" in call for call in calls)
 
 
@@ -125,7 +123,7 @@ def test_retired_conversation_never_recovers_via_worktree_resume(monkeypatch):
     ok, handle = make_headless_spawn()(_task(conversation_retired=True))
     assert ok is True
     assert handle["session"] == "local-body:replacement-conversation"
-    assert any("create" in call for call in calls)
+    assert calls[0][1] == "acquire"
     assert not any(
         call[1:3] == ["--json", "resume"] for call in calls
     )
@@ -143,6 +141,8 @@ def test_missing_conversation_retired_marker_fails_closed(monkeypatch):
     calls = _transport(monkeypatch)
     task = {
         "id": "review-task",
+        "generation": 0,
+        "spawn_reservation_key": "reservation-a",
         "repo": TEST_REPO,
         "spawn_worktree": "review-worktree",
         "spawn_worktree_path": "/example/review-worktree",
@@ -152,9 +152,8 @@ def test_missing_conversation_retired_marker_fails_closed(monkeypatch):
         # coordinator shape.
     }
     ok, handle = make_headless_spawn()(task)
-    assert ok is True
-    assert handle["session"] == "local-body:replacement-conversation"
-    assert any("create" in call for call in calls)
+    assert ok is False
+    assert "refused" in handle["error"]
     assert not any(call[1:3] == ["--json", "resume"] for call in calls)
 
 
@@ -163,19 +162,23 @@ def _embody_cmd(monkeypatch):
     without actually shelling out."""
     calls = []
 
-    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: ["agent-worktrees"])
+    monkeypatch.setattr(session_acquisition, "agent_bridge_launch_prefix", lambda: ["bridge"])
 
     def fake_run(cmd, **kwargs):
-        calls.append(cmd)
+        payload = json.loads(kwargs["input"])
+        calls.append(payload)
 
         class _Proc:
             returncode = 0
-            stdout = '{"session_id": "cli-session", "worktree_id": "review-worktree"}'
+            stdout = json.dumps({
+                **{field: payload[field] for field in ("mode", "task_id", "task_generation", "worktree_id", "delivery_id")},
+                "session_id": "cli-session", "native_session_id": "cli-session", "acquired": "resumed",
+            })
             stderr = ""
 
         return _Proc()
 
-    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+    monkeypatch.setattr(session_acquisition.subprocess, "run", fake_run)
     return calls
 
 
@@ -187,14 +190,15 @@ def test_cli_spawn_resumes_a_retained_not_retired_conversation(monkeypatch):
     calls = _embody_cmd(monkeypatch)
     ok, _handle = make_embody_spawn()(_task())
     assert ok is True
-    assert "--resume-head" in calls[0]
+    assert calls[0]["allocation"] == "reused"
+    assert calls[0]["conversation_retired"] is False
 
 
 def test_cli_spawn_never_resumes_a_retired_conversation(monkeypatch):
     calls = _embody_cmd(monkeypatch)
     ok, _handle = make_embody_spawn()(_task(conversation_retired=True))
     assert ok is True
-    assert "--resume-head" not in calls[0]
+    assert calls[0]["conversation_retired"] is True
 
 
 def test_cli_spawn_fails_closed_on_missing_retired_marker(monkeypatch):
@@ -202,12 +206,11 @@ def test_cli_spawn_fails_closed_on_missing_retired_marker(monkeypatch):
     task = {**_task(), "spawn_conversation_retired": None}
     ok, _handle = make_embody_spawn()(task)
     assert ok is True
-    assert "--resume-head" not in calls[0]
+    assert calls[0]["conversation_retired"] is None
 
 
 def test_cli_spawn_never_resumes_a_freshly_created_worktree(monkeypatch):
     calls = _embody_cmd(monkeypatch)
     ok, _handle = make_embody_spawn()(_task("created"))
     assert ok is True
-    assert "--resume-head" not in calls[0]
-
+    assert calls[0]["allocation"] == "created"

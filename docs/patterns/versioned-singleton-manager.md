@@ -38,29 +38,21 @@ further restart attempt within that same window inherits the same mismatch,
 since the manager has no record of which process, if any, is actually the
 live one.
 
-This is not a new problem for *this suite*: the lighter
+The lighter
 [`service-lifecycle-supervision`](service-lifecycle-supervision.md)
-restart-in-place shape (the embody supervisor's `supervise serve`) is often
-described as solving it for daemons with **no in-flight request to drain** —
-wind down owned units, release the single-instance lease, spawn a successor
-**with the same argv**, then exit with a sentinel code
-(`SELF_UPDATE_EXIT_CODE`). **That description does not hold up under closer
-inspection, and this pattern does not rely on it being true:** the daemon
-pre-spawns its own successor *before* exiting, rather than the service
-manager performing the replacement — so unless the service manager is
-specifically configured to treat that exit code as success (confirmed
-absent from the real deployed systemd unit: no `SuccessExitStatus=`), its own
-native restart (`Restart=on-failure`) still fires against the *predecessor's*
-exit, starting a second, redundant instance that races the one already
-spawned. Whether that race is harmless in practice (the two instances'
-shared singleton lease serializes them) or itself a crash-loop (the loser
-re-exits non-zero every `RestartSec`, forever, on exactly the same shape this
-whole pattern exists to close) is an open question about *existing, already-
-shipped code* — out of scope to resolve here, but this pattern must not cite
-it as a proven safe exemplar to delegate to. Tracked as
-[#5574](https://github.com/ThomasMichon/copilot-extensions/issues/5574) (the
-deployed unit has no `SuccessExitStatus=` for this exit code); that issue, not
-this pattern's own Validation section, owns resolving it.
+shape for daemons with **no in-flight request to drain** differs by lifecycle
+owner. Agent-dispatch's identity-confirmed Linux systemd supervisor drains its
+units, releases the singleton lease, and exits 42 without pre-spawning a
+successor; `Restart=on-failure` owns the replacement through a stable,
+current-slot-resolving launcher. It must not mark 42 as success. Windows and
+non-native launchers retain the spawned-successor handoff with the same argv.
+An isolated native resource-unit fixture proves that session detachment does
+not escape the kill-on-exit cgroup, but does not prove the complete native
+restart loop. This pattern does not cite the lighter shape as a proven
+end-to-end exemplar. Remaining restart-loop/rollout validation belongs to
+[#5574](https://github.com/ThomasMichon/copilot-extensions/issues/5574); the
+historical disable-requester investigation remains separate in
+[#6137](https://github.com/ThomasMichon/copilot-extensions/issues/6137).
 
 A daemon that owns a shared endpoint and in-flight, non-resumable work (the
 coordinator) cannot collapse to that single-process shape — the whole point of

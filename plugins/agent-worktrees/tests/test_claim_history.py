@@ -164,6 +164,12 @@ def test_record_pr_event_convenience(monkeypatch):
 @pytest.fixture
 def record_path(tmp_tracking_dir: Path) -> Path:
     path = tmp_tracking_dir / "wt-claim.yaml"
+    project_dir = cfg.project_dir("example")
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "config.yaml").write_text(json.dumps({
+        "repo_name": "example", "machine": "machine-x",
+        "repos": {"example": {"anchor": str(tmp_tracking_dir)}},
+    }), encoding="utf-8")
     tracking.create_new_record(
         "wt-claim", "worktree/wt-claim", "/tmp/wt-claim", "example",
         "machine-x", "wsl", tmp_tracking_dir,
@@ -550,7 +556,7 @@ def test_cli_remote_falls_back_to_unverified_local_history_when_the_lock_fails(
 # transitive-finalization effort) ─────────────────────────────────────
 
 def test_cli_history_is_complete_and_ordered_across_a_real_session_rebind(
-    tmp_tracking_dir, capsys,
+    tmp_tracking_dir, capsys, monkeypatch_config,
 ):
     """Proves the Phase 3b query end-to-end for the one combination not
     yet covered by a dedicated test: a claim's origin plus a REAL
@@ -711,4 +717,3 @@ def test_merge_events_never_reorders_remote_only_extras_under_a_non_monotonic_cl
     ]
     merged = claims_history_cli._merge_events(local=[], remote=remote)
     assert [e["event"] for e in merged] == ["claimed", "released"]
-

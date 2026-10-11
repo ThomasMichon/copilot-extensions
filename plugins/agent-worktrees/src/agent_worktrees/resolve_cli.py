@@ -9,7 +9,7 @@ import sys
 import threading
 
 from . import activity, local_cache_refresh, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
-from . import codename_tracking, config as cfg
+from . import codename_tracking, config as cfg, machine_identity
 from .launch_trace import append_launch_event
 from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
 from .launch_seed_exec import deferred_command
@@ -21,6 +21,16 @@ def _core():
     from . import __main__ as core
 
     return core
+
+
+def _target_is_local(config: cfg.Config, name: str | None) -> bool:
+    if not name:
+        return False
+    if config.machine and name.casefold() == config.machine.casefold():
+        return True
+    from .resolve_machine_cli import _machine_key_for_display
+
+    return machine_identity.is_local_machine(_machine_key_for_display(config, name), config)
 
 
 def _apply_assignment_env(*args, **kwargs):
@@ -461,7 +471,33 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
         if state.requested_machine:
             config = state.load_config()
-            if state.requested_machine != config.machine:
+            try:
+                target_is_local = _target_is_local(config, state.requested_machine)
+            except ValueError as exc:
+                output.err(str(exc))
+                return 1
+            requested_environment = getattr(args, "environment", None) or ""
+            if requested_environment:
+                from .resolve_machine_cli import _ENV_LABEL_TO_NAME
+
+                want_platform = _ENV_LABEL_TO_NAME.get(requested_environment.lower())
+                if want_platform is None:
+                    output.err(f"Unknown environment: {requested_environment}")
+                    return 1
+                if not target_is_local or want_platform != cfg.detect_platform():
+                    from .resolve_machine_cli import _in_ssh_session
+
+                    if _in_ssh_session():
+                        output.err("Cannot dispatch another machine environment from an SSH session.")
+                        return 1
+                    rc = _emit_remote_plan_for_env(
+                        config, state.requested_machine, requested_environment
+                    )
+                    if rc is not None:
+                        return rc
+                    output.err("Requested machine environment is unavailable.")
+                    return 1
+            if not target_is_local:
                 rc = _try_machine_handoff(config, state.requested_machine)
                 if rc is not None:
                     return rc
@@ -533,14 +569,19 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # cross-platform resume (e.g. the Windows Worktree Picker launching a
     # WSL worktree) fail closed with a bogus "Worktree not found" instead of
     # SSHing into the requested environment -- confirmed live.
-    same_machine = state.requested_machine == getattr(config, "machine", None)
+    try:
+        same_machine = _target_is_local(config, state.requested_machine)
+    except ValueError as exc:
+        return output._json_error(str(exc))
     requested_environment = getattr(state.args, "environment", None) or ""
     same_environment = True
     if requested_environment:
         from . import resolve_machine_cli
 
         want_platform = resolve_machine_cli._ENV_LABEL_TO_NAME.get(requested_environment.lower())
-        same_environment = want_platform is None or want_platform == cfg.detect_platform()
+        if want_platform is None:
+            return output._json_error(f"Unknown environment: {requested_environment}")
+        same_environment = want_platform == cfg.detect_platform()
     if state.requested_machine and not (same_machine and same_environment):
         remote_args: list[str] = []
         if state.use_base:
@@ -637,6 +678,11 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     if not yaml_path.exists():
         return output._json_error(f"Worktree not found: {worktree_id}")
     record = tracking.load_record(yaml_path)
+    from .execution_spaces import ExecutionSpaceError, require_record_mutation
+    try:
+        require_record_mutation(record, config)
+    except ExecutionSpaceError as exc:
+        return output._json_error(str(exc), exit_code=3)
     try:
         staged_seed = seed_for_attempt(yaml_path, record, state.args)
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
@@ -670,10 +716,19 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 "Previous launch-prompt handoff is unconfirmed; the seed is retained "
                 "but will not be automatically submitted twice.", exit_code=3,
             )
-    with tracking._RecordLock(yaml_path):
-        record = tracking.load_record(yaml_path)
-        tracking.mark_resumed(record, save=False)
-        tracking.save_record(record)
+    try:
+        with tracking._RecordLock(yaml_path, require_sidecar=True):
+            record = tracking.load_record(yaml_path)
+            require_record_mutation(record, config)
+            tracking.mark_resumed(record, save=False)
+            tracking.save_record(record)
+    except ExecutionSpaceError as exc:
+        return output._json_error(str(exc), exit_code=3)
+    except TimeoutError as exc:
+        return output._json_error(
+            f"Cannot resolve {record.worktree_id}: contended by another process ({exc})",
+            exit_code=3,
+        )
 
     activity.log_event(
         "worktree_resumed",

@@ -21,7 +21,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_worktrees import resolve_cli
+from agent_worktrees import config as cfg, resolve_cli
 
 pytestmark = pytest.mark.guard
 
@@ -35,6 +35,13 @@ def _args(**overrides):
     )
     base.update(overrides)
     return argparse.Namespace(**base)
+
+
+def _config(tmp_path, machine):
+    return cfg.Config(
+        machine=machine, platform="windows", repo_name="example", srcroot=str(tmp_path),
+        repos={"example": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path))},
+    )
 
 
 def test_resolve_new_with_machine_and_seed_is_rejected_json(capfd):
@@ -58,11 +65,12 @@ def test_resolve_new_with_machine_and_seed_is_rejected_non_json(capfd):
     assert "machine" in out.lower()
 
 
-def test_resolve_new_with_machine_and_no_seed_is_unaffected(monkeypatch, capfd):
+def test_resolve_new_with_machine_and_no_seed_is_unaffected(monkeypatch, capfd, tmp_path):
     """The rejection is seed-specific -- an ordinary remote --new (no
     --seed) must still reach the existing remote-dispatch path untouched."""
     state = resolve_cli.ResolveCommandState.from_args(_args(seed=None))
-    state.config = object()  # load_config() short-circuits on a truthy cache
+    state.config = _config(tmp_path, "")
+    monkeypatch.setattr(resolve_cli.cfg, "load_machines_yaml", lambda _: {})
     called = []
     monkeypatch.setattr(
         resolve_cli, "_emit_remote_plan_for_env",
@@ -151,12 +159,13 @@ def test_resolve_machine_matching_local_and_environment_matches_current_platform
     assert not called  # same machine, same platform -- must stay local
 
 
-def test_resolve_machine_differing_from_the_local_machine_still_dispatches_remotely(monkeypatch):
+def test_resolve_machine_differing_from_the_local_machine_still_dispatches_remotely(monkeypatch, tmp_path):
     """Sibling of the self-match regression above: a genuinely different
     `--machine` must still reach `_emit_remote_plan_for_env` -- the new guard
     is specific to the self-match case, not a blanket skip."""
     state = resolve_cli.ResolveCommandState.from_args(_args(seed=None))
-    state.config = SimpleNamespace(machine="a-different-machine")
+    state.config = _config(tmp_path, "a-different-machine")
+    monkeypatch.setattr(resolve_cli.cfg, "load_machines_yaml", lambda _: {})
     called = []
     monkeypatch.setattr(
         resolve_cli, "_emit_remote_plan_for_env",
@@ -167,6 +176,131 @@ def test_resolve_machine_differing_from_the_local_machine_still_dispatches_remot
 
     assert rc == 0
     assert called
+
+
+@pytest.mark.parametrize("target", [None, "", "EXAMPLE-HOST", "raw-host", "local-alias", "Example Host"])
+@pytest.mark.parametrize("environment,remote", [("Win", False), ("WSL", True)])
+def test_json_launch_canonicalizes_self_target_before_selecting_transport(
+    monkeypatch, tmp_path, target, environment, remote,
+):
+    entry = cfg.MachineEntry(
+        key="example-host", hostname="raw-host", alias="local-alias",
+        display_name="Example Host",
+    )
+    config = _config(tmp_path, "example-host")
+    state = resolve_cli.ResolveCommandState.from_args(
+        _args(new_worktree=False, base=True, machine=target, environment=environment)
+    )
+    state.config = config
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _: {entry.key: entry})
+    calls = []
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *args, **kwargs: calls.append("remote") or 7,
+    )
+    monkeypatch.setattr(
+        resolve_cli, "_preflight_launch",
+        lambda *args: SimpleNamespace(error=None),
+    )
+    monkeypatch.setattr(resolve_cli.local_cache_refresh, "prepare_for_launch", lambda *a, **k: None)
+    monkeypatch.setattr(resolve_cli, "_build_launch_cmd", lambda *a, **k: ["local-launch"])
+    monkeypatch.setattr(resolve_cli, "_repo_session_env", lambda *a: {})
+    monkeypatch.setattr(resolve_cli, "_build_env", lambda *a, **k: {})
+    monkeypatch.setattr(
+        resolve_cli.output, "_json_output",
+        lambda plan: calls.append("local") if plan["action"] == "exec" else None,
+    )
+
+    dispatch_remote = remote and bool(target)
+    assert resolve_cli._resolve_json_mode(state) == (7 if dispatch_remote else 0)
+    assert calls == ["remote" if dispatch_remote else "local"]
+
+
+def test_self_identity_fast_path_does_not_read_topology(monkeypatch, tmp_path):
+    def unexpected_read(_):
+        pytest.fail("a direct configured identity must not read topology")
+
+    monkeypatch.setattr(cfg, "load_machines_yaml", unexpected_read)
+    assert resolve_cli._target_is_local(
+        _config(tmp_path, "example-host"), "EXAMPLE-HOST"
+    )
+
+
+def test_self_alias_rejects_unknown_environment(monkeypatch, tmp_path, capfd):
+    state = resolve_cli.ResolveCommandState.from_args(
+        _args(new_worktree=False, base=True, machine="local-alias", environment="Bogus")
+    )
+    state.config = _config(tmp_path, "example-host")
+    monkeypatch.setattr(
+        cfg, "load_machines_yaml",
+        lambda _: {"example-host": cfg.MachineEntry(
+            key="example-host", alias="local-alias", display_name="Example Host",
+        )},
+    )
+    assert resolve_cli._resolve_json_mode(state) != 0
+    assert "Unknown environment" in json.loads(capfd.readouterr().out)["error"]
+
+
+@pytest.mark.parametrize("target,environment,expected", [
+    ("local-alias", "WSL", 7),
+    ("local-alias", "Bogus", 1),
+    ("remote-host", "WSL", 7),
+    ("remote-host", "Win", 7),
+    ("remote-host", "Bogus", 1),
+])
+def test_interactive_self_alias_honors_explicit_environment(
+    monkeypatch, tmp_path, target, environment, expected,
+):
+    config = _config(tmp_path, "example-host")
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "peek_base_repo", lambda: False)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    for name in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(
+        resolve_cli.machine_identity, "is_local_machine",
+        lambda name, config: name == "local-alias",
+    )
+    monkeypatch.setattr(resolve_cli.sys.stdin, "isatty", lambda: True)
+    calls = []
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *a, **k: calls.append("remote") or 7,
+    )
+    rc = resolve_cli.cmd_resolve(
+        _args(json=False, new_worktree=False, machine=target, environment=environment)
+    )
+    assert rc == expected
+    assert calls == (["remote"] if environment != "Bogus" else [])
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_ambiguous_self_alias_never_launches_locally(monkeypatch, tmp_path, capfd, reverse):
+    entries = [
+        cfg.MachineEntry(key="example-host", alias="shared", display_name="Local"),
+        cfg.MachineEntry(key="remote-host", alias="shared", display_name="Remote"),
+    ]
+    if reverse:
+        entries.reverse()
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _: {e.key: e for e in entries})
+    state = resolve_cli.ResolveCommandState.from_args(
+        _args(new_worktree=False, base=True, machine="shared", environment="Win")
+    )
+    state.config = _config(tmp_path, "example-host")
+    assert resolve_cli._resolve_json_mode(state) != 0
+    assert "ambig" in json.loads(capfd.readouterr().out)["error"].lower()
+
+
+def test_interactive_environment_handoff_rejects_nested_ssh(monkeypatch, tmp_path):
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _config(tmp_path, "example-host"))
+    monkeypatch.setattr(cfg, "peek_base_repo", lambda: False)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(resolve_cli.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setenv("SSH_CONNECTION", "192.0.2.1 1234 192.0.2.2 22")
+    assert resolve_cli.cmd_resolve(
+        _args(json=False, new_worktree=False, machine="example-host", environment="WSL")
+    ) != 0
 
 
 def test_resolve_worktree_id_with_machine_and_seed_is_rejected_json(capfd):

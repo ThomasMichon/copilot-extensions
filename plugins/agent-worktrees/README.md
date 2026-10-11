@@ -49,6 +49,14 @@ The plugin installs via the Copilot CLI marketplace. The runtime installs
 via init/install scripts (or first-use provisioning from the global binstub)
 and provides the `agent-worktrees` CLI and per-project binstubs.
 
+## Independent Execution Spaces
+
+Native Windows and WSL can register independent execution-space keys without
+sharing project registrations, settings or ownership ledgers. Physical-host
+grouping never makes distinct registered spaces local to one another. See
+[Execution-space identity](docs/config-reference.md#execution-space-identity)
+for explicit selection, compatibility and lifecycle fences.
+
 ## Same-Machine AHP Sessions
 
 Same-machine Agent Host Protocol (AHP) session ownership now lives in the

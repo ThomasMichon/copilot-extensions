@@ -56,6 +56,87 @@ decisions; this document remains the canonical contract.
 
 ## Implementation plan
 
+### Source inventory (2026-10-10)
+
+Verified against the reviewed plan's `dev` snapshot, including PR #6064.
+This change closes the existing session-hosting and remote-interactive-sessions
+visions; it introduces no new execution host or daemon.
+
+| Caller / surface | Selection and acquisition today | Identity / remaining migration |
+|---|---|---|
+| Dispatch `create_cli._do_spawn` | `spawn_backend=bridge` defaults to ACP; `embody` explicitly selects CLI, with a fallback to ACP when worktrees is absent | ACP carries `local-body:<bridge-id>`; CLI parses the worktree launch handle. Remove mode-changing fallback and route both acquisitions through bridge |
+| `spawn_factories.make_embody_spawn` | Direct `embody.spawn_embodied_worker`; allocation interface `cli` | Worktree/session handle; keep allocation and CLI conclusion semantics |
+| `spawn_factories.make_headless_spawn` | `bridge.spawn_or_resume_worker`; allocation interface `acp` | `local-body:<bridge-id>`; replace consumer liveness/resume/create decision with facts |
+| `interactive_embody.launch_interactive_embodiment` | Claims/reserves and prepares the worktree before direct CLI launch | Bind the exact native session after launch; keep prelaunch claim rollback |
+| `fleet.FleetSpawner` | Explicit `headless` selects fleet ACP vs CLI; caller also decides carried-session recovery | Synthetic task lease owner is not a native conversation ID |
+| `embody.spawn_fleet_embodied_worker` | SSH to remote `agent-worktrees embody --new` | CLI worktree/session result; move session acquisition beneath bridge, not allocation or transport |
+| `embody.spawn_fleet_headless_worker` | Bridge carrier `create_session`, with remote bridge CLI fallback | `fleet-body:<host>:<bridge-id>`; remote acquisition needs the same versioned contract |
+| Bridge `BridgeClient.start_session` / session route | `POST /api/v1/sessions`, caller-affinity reuse unless `force_new` | Returns bridge handle; native ACP ID is separately held by `Session.acp_session_id` |
+| Bridge session resume | `SessionManager.resume_session(..., allow_recreate=False)` loads native ACP identity | Verify the native ID after recovery, including live-host reattachment; never use prompt auto-resume's `allow_recreate=True` |
+| Bridge worktree resume | Protocol 28 strict resume disables fresh fallback; per-worktree fresh-start locks and SQLite ownership guard already exist | Latest bridge session in a directory alone is not proof of task affinity |
+| Bridge CLI create / local CLI-mode launch | Namespaced `create --cli` delegates provider `copilot`; local CLI-mode reservation composes over worktree `embody` | Provider/mux handle is not a native ID; registration must prove exact conversation identity |
+| Worktrees `embody_resume` | Seed starts fresh unless gated `resume-head`; `with_resume` uses native ID and `with_seed` uses `--interactive` | `resolve_resume_target` has filesystem fallback; acquisition must not use that fallback without task authority |
+
+`resume_worktree_eligible` requires ownership `reused` and retirement exactly
+`False`. Missing retirement is unknown, not fresh intent. The new boundary
+must carry those distinct facts instead of collapsing them into one boolean.
+`worktree_head.resolve_head` is deliberately fail-open for legacy create;
+automatic acquisition must not mistake an unreadable head for proven absence.
+Bridge prompt submission can recreate context during automatic recovery, so it
+cannot implement strict acquisition/delivery unchanged.
+
+### Foundation slice and remaining runtime work
+
+The first runtime slice defined a strict bridge-owned request/result and a
+durable acquisition/delivery fence. It does not advertise a new HTTP protocol
+capability until a real route and CLI implementation can uphold it. Existing
+create/resume APIs and dispatch launch behavior are unchanged by this slice.
+The fence rejects a reused delivery key with different request facts, competing
+worktree operations, and replay after an ambiguous interruption; it never
+expires a pending operation into permission to create or redeliver.
+
+Remaining Phase 6 work: connect the fence to all live-holder registration and
+launch paths, compose native-ID-preserving ACP/CLI lifecycle adapters, expose
+the capability-gated CLI/HTTP operation, and migrate **all seven dispatch
+surfaces above**. No caller migration, native process-exit integration,
+provider parity, release, or rollout is credited by the foundation tests.
+
+### Connected local slice (2026-10-10)
+
+The subsequent slice exposes `agent-bridge acquire --request-file -` and
+`POST /api/v1/acquisitions`, capability-gated at HTTP protocol 30. It composes
+ACP SessionManager lifecycle and unseeded exact-native CLI embodiment over the
+existing worktree/provider owner. The request's generation is verified against
+the current task admission fence; same-task historical generation is not
+mistaken for immutable transcript lineage. None-valued options mean no override.
+
+| Surface | Connected local status |
+|---|---|
+| `create_cli._do_spawn` | CLI/ACP acquire and deliver through bridge; no mode-changing direct fallback |
+| `make_embody_spawn` | Bridge acquire; CLI/native cleanup handle retained |
+| `make_headless_spawn` | Bridge acquire; `local-body:<bridge-id>` retained with separate native ID |
+| `launch_interactive_embodiment` | Claim/reservation remains dispatch-owned; bridge acquisition; uncertain launch retains claim |
+| `FleetSpawner` | **Not migrated**; remote selection/resume/create still outstanding |
+| `spawn_fleet_embodied_worker` | **Not migrated**; remote direct launch still outstanding |
+| `spawn_fleet_headless_worker` | **Not migrated**; remote carrier create/fallback still outstanding |
+| Legacy `bridge.spawn_or_resume_worker` / `spawn_worker`, `embody.spawn_embodied_worker` | Production local callers migrated; helper removal and external/remote compatibility still outstanding |
+
+Durable stages reconcile interrupted launch and prompt admission on same-request
+retry or current same-task reservation. Cross-process executor exclusion prevents
+an active attempt being “recovered” concurrently. Native ACP turns carry a
+unique acquisition delivery ID; CLI retains existing guarded inbox idempotency.
+Live and unknown holders never become launch permission. The lifecycle verifies
+selected native evidence and excludes authoritative retired IDs even if the
+consumer omitted them.
+
+Remaining: remote/fleet migration and capability gates; complete CLI execution-
+option support (currently refused explicitly); unproven/ambiguous native launch
+recovery without surviving identity evidence; terminal receipt retention;
+native process-exit/transcript and Windows proof; reviewed merge, release and
+authorized rollout. Local adapter tests use actual SessionManager and SQLite
+with process/native-provider I/O simulated; they do not resolve native integration
+items in the validation matrix.
+
 The following sequencing and compatibility details are **agent-recommended**
 ways to realize the operator's requested contract, not additional operator
 requirements.

@@ -27,7 +27,7 @@ def _args(**over):
 
 def _fake_config():
     # default_repo.base_repo must be falsy so resolve takes the worktree path.
-    repo = SimpleNamespace(base_repo=False)
+    repo = SimpleNamespace(base_repo=False, anchor="")
     return SimpleNamespace(default_repo=repo, machine="anomalous-potato")
 
 

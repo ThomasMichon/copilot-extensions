@@ -10,11 +10,13 @@ is exercised end-to-end against a real ``TaskQueue`` with no actual
 from __future__ import annotations
 
 from dataclasses import asdict
+import json
 
 import pytest
 
 from agent_dispatch import embody
 from agent_dispatch import interactive_embody
+from agent_dispatch import session_acquisition
 from agent_dispatch.interactive_embody import (
     InteractiveEmbodimentError,
     launch_interactive_embodiment,
@@ -99,28 +101,30 @@ def _mock_prepare(monkeypatch, worktree_id="wt-interactive-1", ownership="create
 def _mock_spawn_ok(monkeypatch, session_id="cli-session-1", worktree_id="wt-interactive-1"):
     calls = []
 
-    def fake_spawn(task_id, *, worker_id, driver, project, worktree_id: str | None = None,
-                   resume_head: bool = False, seed=None, timeout=None, **kwargs):
+    def fake_spawn(task, *, mode, prompt, driver, project, timeout=None, **kwargs):
         calls.append(
             {
-                "task_id": task_id,
+                "task_id": task["id"],
                 "project": project,
-                "worktree_id": worktree_id,
-                "resume_head": resume_head,
-                "seed": seed,
+                "worktree_id": task["spawn_worktree"],
+                "ownership": task["spawn_worktree_ownership"],
+                "retired": task["spawn_conversation_retired"],
+                "seed": prompt,
+                "generation": task["generation"],
             }
         )
 
         class _Proc:
             returncode = 0
-            stdout = (
-                f'{{"session_id": "{session_id}", "worktree_id": "{worktree_id}"}}'
-            )
+            stdout = json.dumps({
+                "session_id": session_id, "native_session_id": session_id,
+                "worktree_id": worktree_id, "mode": mode,
+            })
             stderr = ""
 
         return _Proc()
 
-    monkeypatch.setattr(interactive_embody.embody, "spawn_embodied_worker", fake_spawn)
+    monkeypatch.setattr(session_acquisition, "acquire", fake_spawn)
     return calls
 
 
@@ -135,7 +139,7 @@ def _mock_spawn_fail(monkeypatch, *, returncode=1, stderr="boom"):
         proc.stderr = stderr
         return proc
 
-    monkeypatch.setattr(interactive_embody.embody, "spawn_embodied_worker", fake_spawn)
+    monkeypatch.setattr(session_acquisition, "acquire", fake_spawn)
 
 
 # -- fresh (queued) task ------------------------------------------------------
@@ -328,7 +332,8 @@ def test_suspended_task_with_no_prior_reservation_mints_one_from_owner(q, client
     # The freshly-minted reservation carries no retirement marker (nothing
     # was ever rearm-retired here) -- this is a legitimate continuation of
     # the task's own suspended worktree, so the head session resumes.
-    assert calls[0]["resume_head"] is True
+    assert calls[0]["ownership"] == "reused"
+    assert calls[0]["retired"] is False
 
 
 def test_suspended_task_with_active_reservation_refuses_to_steal_it(q, client, monkeypatch):

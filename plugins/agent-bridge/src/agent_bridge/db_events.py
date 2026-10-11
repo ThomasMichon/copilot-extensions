@@ -75,12 +75,13 @@ class _EventsMixin:
                 raise
 
     def create_turn(
-        self, session_id: str, turn_index: int, prompt: str, now: float
+        self, session_id: str, turn_index: int, prompt: str, now: float,
+        *, delivery_id: str | None = None,
     ) -> None:
         self.execute_write(
-            "INSERT INTO turns (session_id, turn_index, prompt, started_at) "
-            "VALUES (?, ?, ?, ?)",
-            (session_id, turn_index, prompt, now),
+            "INSERT INTO turns (session_id, turn_index, prompt, started_at, acquisition_delivery_id) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (session_id, turn_index, prompt, now, delivery_id),
         )
 
     def update_turn(

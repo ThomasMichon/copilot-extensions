@@ -207,8 +207,9 @@ def register_session(
         ),
         boot_wait_s=0.0,
         request_deadline_s=_SESSION_REGISTER_REQUEST_DEADLINE_S,
+        min_version=2,
     )
-    if result.get("error") == "lifecycle":
+    if result.get("error") in ("lifecycle", "execution_space"):
         raise tracking.SessionLifecycleError(result["message"])
     linked = result.get("linked_handoff")
     return tracking.SessionHandoff(**linked) if linked else None
@@ -321,6 +322,13 @@ def deregister_session(
     ``ensure_monitor()`` still fires the non-blocking spawn for the next
     session), and a reachable-but-stalled one is bounded by a short
     request deadline rather than the module's default ~9s.
+
+    Raises ``tracking.SessionLifecycleError`` on an ``execution_space``
+    rejection, matching ``register_session``'s contract -- the caller must
+    not treat a rejected deregistration as a silent success (a discarded
+    result would let ``cmd_deregister_session`` fall through to an
+    unrelated, unauthorized title write as if deregistration had actually
+    happened).
     """
     tracking = _tracking()
     yaml_path = tracking._owning_tracking_dir(worktree_id) / f"{worktree_id}.yaml"
@@ -330,7 +338,7 @@ def deregister_session(
     from . import status_monitor_runtime as _smr
     from . import tracking_write
 
-    tracking_write.dispatch(
+    result = tracking_write.dispatch(
         "session_deregister",
         {
             "worktree_id": worktree_id,
@@ -346,4 +354,7 @@ def deregister_session(
         ),
         boot_wait_s=0.0,
         request_deadline_s=_SESSION_DEREGISTER_REQUEST_DEADLINE_S,
+        min_version=2,
     )
+    if result.get("error") in ("lifecycle", "execution_space"):
+        raise tracking.SessionLifecycleError(result["message"])

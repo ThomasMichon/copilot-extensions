@@ -185,7 +185,16 @@ class TestReconcileAndPersistBestEffort:
     clobbering a concurrent update the stale-base ``rec`` never saw (#4547)."""
 
     def _seed(self, tmp_path):
+        import json
         from pathlib import Path
+        from agent_worktrees import config as cfg
+
+        project_dir = cfg.project_dir("owner/repo")
+        project_dir.mkdir(parents=True, exist_ok=True)
+        (project_dir / "config.yaml").write_text(json.dumps({
+            "repo_name": "owner/repo",
+            "repos": {"owner/repo": {"anchor": str(tmp_path)}},
+        }), encoding="utf-8")
         path = Path(tmp_path) / "wt-1.yaml"
         tracking.save_record(_rec(status="active", prs=[_pr(50, "open")]), path)
         return path
@@ -1314,4 +1323,3 @@ class TestInterpretDescriptorPayload:
         payload["claims"] = {"held": True}
         interpreted = prune.interpret_descriptor_payload(payload)
         assert interpreted["supported"] is False
-

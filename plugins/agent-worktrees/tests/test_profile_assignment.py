@@ -123,6 +123,33 @@ def assignment_home(tmp_path: Path, monkeypatch):
     tracking_dir.mkdir(parents=True)
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: project)
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tracking_dir)
+
+    # session_register's authority fence (execution_spaces.
+    # require_project_record_mutation) resolves cfg.load_project_config(
+    # record.repo) before any mutation; see conftest.py's monkeypatch_config
+    # for the full rationale -- same fail-open fake, scoped here since this
+    # fixture patches config independently rather than via monkeypatch_config.
+    # A REAL (empty) canonical machines.yaml at the fake anchor keeps
+    # ``load_machines_yaml`` from falling through to its own
+    # ``_overlay_machines_yaml_path`` probe, which calls the bare
+    # ``load_config()`` as a side effect -- some callers assert an exact
+    # ``load_config`` call count/args and would otherwise see a spurious
+    # extra call.
+    fake_anchor = tmp_path / ".aw-authority-fence-anchor"
+    (fake_anchor / ".agent-worktrees").mkdir(parents=True, exist_ok=True)
+    (fake_anchor / ".agent-worktrees" / "machines.yaml").write_text(
+        "machines: {}\n", encoding="utf-8",
+    )
+
+    def _fake_load_project_config(name, **_kwargs):
+        return cfg.Config(
+            srcroot=str(tmp_path), machine="test", platform="wsl", repo_name=name,
+            repos={name: cfg.RepoConfig(
+                anchor=str(fake_anchor), worktree_root=str(tracking_dir),
+            )},
+        )
+
+    monkeypatch.setattr(cfg, "load_project_config", _fake_load_project_config)
     return project, tracking_dir
 
 

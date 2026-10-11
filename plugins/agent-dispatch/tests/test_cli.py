@@ -2270,12 +2270,12 @@ def test_parser_consume_flags():
 def test_spawn_helper_degrades_gracefully(monkeypatch, capsys):
     import argparse
 
-    from agent_dispatch import __main__, bridge
+    from agent_dispatch import __main__, bridge, session_acquisition
 
     def boom(*_a, **_k):
         raise bridge.BridgeUnavailable("no bridge")
 
-    monkeypatch.setattr(bridge, "spawn_worker", boom)
+    monkeypatch.setattr(session_acquisition, "acquire", boom)
     args = argparse.Namespace(spawn_agent="task-worker", run_async=False, url=None)
     __main__._do_spawn(args, {"id": "t1"})
     err = capsys.readouterr().err
@@ -2292,17 +2292,17 @@ def test_do_spawn_forwards_resume_worktree_for_reused_allocation(monkeypatch):
     resume exists to close."""
     import argparse
 
-    from agent_dispatch import __main__, bridge
+    from agent_dispatch import __main__, session_acquisition
 
     captured = {}
 
-    def fake_spawn_or_resume_worker(*_a, **kwargs):
-        captured.update(kwargs)
+    def fake_spawn_or_resume_worker(task, **kwargs):
+        captured.update(task)
         import subprocess
 
-        return subprocess.CompletedProcess([], 0, stdout="{}", stderr="")
+        return subprocess.CompletedProcess([], 0, stdout='{"mode":"acp","session_id":"sid","native_session_id":"native","worktree_id":"wt-1"}', stderr="")
 
-    monkeypatch.setattr(bridge, "spawn_or_resume_worker", fake_spawn_or_resume_worker)
+    monkeypatch.setattr(session_acquisition, "acquire", fake_spawn_or_resume_worker)
     args = argparse.Namespace(
         spawn_agent="task-worker", run_async=False, url=None, spawn_backend="bridge",
     )
@@ -2314,7 +2314,8 @@ def test_do_spawn_forwards_resume_worktree_for_reused_allocation(monkeypatch):
         "spawn_session_handle": None,
     }
     __main__._do_spawn(args, task)
-    assert captured["resume_worktree"] is True
+    assert captured["spawn_worktree_ownership"] == "reused"
+    assert captured["spawn_conversation_retired"] is False
 
 
 def test_do_spawn_withholds_resume_worktree_for_retired_conversation(monkeypatch):
@@ -2325,17 +2326,17 @@ def test_do_spawn_withholds_resume_worktree_for_retired_conversation(monkeypatch
     already-correctly-dropped ``spawn_session_handle``."""
     import argparse
 
-    from agent_dispatch import __main__, bridge
+    from agent_dispatch import __main__, session_acquisition
 
     captured = {}
 
-    def fake_spawn_or_resume_worker(*_a, **kwargs):
-        captured.update(kwargs)
+    def fake_spawn_or_resume_worker(task, **kwargs):
+        captured.update(task)
         import subprocess
 
-        return subprocess.CompletedProcess([], 0, stdout="{}", stderr="")
+        return subprocess.CompletedProcess([], 0, stdout='{"mode":"acp","session_id":"sid","native_session_id":"native","worktree_id":"wt-1"}', stderr="")
 
-    monkeypatch.setattr(bridge, "spawn_or_resume_worker", fake_spawn_or_resume_worker)
+    monkeypatch.setattr(session_acquisition, "acquire", fake_spawn_or_resume_worker)
     args = argparse.Namespace(
         spawn_agent="task-worker", run_async=False, url=None, spawn_backend="bridge",
     )
@@ -2347,7 +2348,7 @@ def test_do_spawn_withholds_resume_worktree_for_retired_conversation(monkeypatch
         "spawn_session_handle": None,
     }
     __main__._do_spawn(args, task)
-    assert captured["resume_worktree"] is False
+    assert captured["spawn_conversation_retired"] is True
 
 
 def test_parser_worktree_status():

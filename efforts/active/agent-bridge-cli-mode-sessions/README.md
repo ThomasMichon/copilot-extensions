@@ -661,9 +661,9 @@ mechanism CLI mode binds through.
 
 ### Phase 6 — Unified dispatch session acquisition
 
-- [ ] Review and land the [scoped acquisition contract](dispatch-session-acquisition.md)
+- [x] Review and land the [scoped acquisition contract](dispatch-session-acquisition.md)
       before runtime changes; coordinate through #6076 with the adjacent
-      durable CLI worker tracker #4038.
+      durable CLI worker tracker #4038. Plan PR #6078 merged.
 - [ ] Inventory the current mode selectors, acquisition entry points, retained
       conversation identity, and protocol/capability checks; reuse existing
       strict bridge recovery rather than inventing a second resume mechanism.
@@ -776,6 +776,172 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-10-10 — PR ordering, clock-skew and post-launch deferral corrections
+
+Moved native receipt binding into the final locked delivery section, after
+resume/admission checks; start additionally verifies current bridge admission
+stage so a rejected pre-delivery receipt cannot authorize start. Added
+coordinator-issued admission snapshots to local CLI/ACP activity publication,
+avoiding cross-host clock comparisons. Post-launch task-fence changes now defer
+rather than authorizing ordinary spawn-failure cleanup.
+Bounded acquisition tests passed bridge 100 (1 skipped), dispatch 24 (2 skipped);
+final receipt/skew/post-launch regressions passed dispatch 26 (2 skipped).
+PR #6123 and all remaining Phase 6 gates remain open.
+
+### 2026-10-10 — PR review: durable native start authority for CLI and ACP
+
+PR #6123 identified two missing start-authority checks: arbitrary supplied native
+IDs and CLI worktree owners bypassing an explicit-worker prefix requirement.
+Bridge now binds a durable start receipt through the existing dispatch provider
+before delivery. Dispatch independently queries authenticated bridge acquisition
+inspection, validates the real stored result and current reservation, and checks
+the native ID atomically inside start (including replay), for both CLI and ACP.
+Tests reject forged receipt/native IDs and missing CLI owner identity.
+
+The shared validation slot's live holder exited normally; no job was killed or
+released. The bounded hardened-devcontainer `-k acquisition` selection passed
+100 bridge tests (1 skipped), 22 dispatch tests (2 skipped). Ruff F/E9, scoped
+mypy and install contract passed. This correction remains within PR #6123;
+remote/fleet/native integration and remaining Phase 6 gates stay open.
+
+### 2026-10-10 — Post-await admission and CLI activity review regressions
+
+Strict stopped-receipt delivery now revalidates current task/reservation
+admission and native worktree head after resume and after the turn-start lock,
+immediately before durable admission. Generation, hold, cancellation,
+reservation and native-head movement at either wait boundary refuse without
+creating a turn or advancing the launched receipt. CLI native-handle supervisor
+activity now timestamps before liveness probing and forwards that timestamp,
+matching the local ACP path; delayed pre-start IDLE is rejected.
+
+Targeted hardened-devcontainer runtime/race selection passed bridge 31 tests
+(1 skipped) and dispatch 1 test. Regression scenarios use actual pending
+turn-lock exclusion and real queue start/activity sequencing. Remote/native
+integration gates remain open; no PR or production mutation occurred.
+Final minimal regression command `test-supervisor -- python
+tools/run_tests_in_devcontainer.py agent-bridge agent-dispatch --
+-k 'recovery_revalidates_admission or cli_idle_snapshot_before_start'
+--test-timeout 20 --subsuite-timeout 180 --plugin-timeout 300` passed bridge
+10 tests (1 skipped) and dispatch 1. Ruff F/E9 and scoped acquisition mypy passed.
+
+### 2026-10-10 — Native start binding and current activity admission
+
+Tightly related integration review identified that a synthetic launch-worker
+claim/start could omit its native owner session and inherit a prior turn's IDLE.
+Bridge delivery now supplies verified native start identity; dispatch start
+forwards the explicit field. Newly acquired explicit workers use a stable
+reservation-qualified identity and fail closed on start without native binding.
+Claim/start clears prior activity. Local supervisor observation timestamps fence
+samples taken before the current admission, and a confirmed non-resting RUNNING
+turn outranks lingering idle metadata.
+
+Tests cover actual delivered prompt/native identity, constructed start request,
+real queue claim/start with rejection of missing native ID and stale observation,
+and the local supervisor publishing path. No consumer-specific reviewer charter,
+private tracker content, production service or live task was modified.
+Bounded hardened-devcontainer acquisition/idle mapping selection passed bridge
+90 tests (1 skipped) and dispatch 23 (2 skipped). Final dispatch selection
+`-k 'acquisition or session_activity or publishes_local_body_activity or test_cli and start or test_supervisor and (headless or embody)'`
+passed 63 tests (2 skipped), through `test-supervisor -- python
+tools/run_tests_in_devcontainer.py agent-dispatch --`, with the existing
+20/180/300-second budgets. Ruff F/E9 and scoped acquisition mypy passed.
+
+### 2026-10-10 — Five connected-slice review findings corrected
+
+Removed unsafe absence inference from failed/missing ACP client/native/head
+fields: a Session Host may survive a failed attach, so launching gates remain
+ambiguous without actual identity-bound process/cleanup proof. Made claim plus
+full request/`prepared` stage one SQLite transaction, allowing a newer authorized
+reservation to reconcile interrupted preflight. Established stopped ACP native
+identities now resume strictly before unadmitted delivery. Separate wait failures
+retain acquired success/cleanup identities and report observation errors.
+Pre-request protocol refusal now has typed unsupported-capability/not-started
+details; the exact prior CLI's protocol-426 string is also classified as
+pre-effect rather than launch ambiguity.
+
+Regression coverage includes same-request and newer-reservation ambiguous-host
+refusals, atomic prepared-write rollback, interrupted preflight recovery,
+strict native resume after bridge restart, observation exit/timeout/OS errors,
+typed/legacy pre-request refusal and an unqualified string-error counterexample.
+Bounded hardened-devcontainer command:
+`test-supervisor -- python tools/run_tests_in_devcontainer.py agent-bridge
+agent-dispatch -- -k acquisition --test-timeout 20 --subsuite-timeout 180
+--plugin-timeout 300`: bridge 90 passed/1 skipped; dispatch 16 passed/2 skipped.
+Ruff F/E9 and scoped acquisition mypy passed. Native/remote proof and the
+remaining Phase 6 gates remain open; no PR or production operation occurred.
+
+### 2026-10-10 — Local lifecycle acquisition connected, independent review pending
+
+Connected the foundation to protocol-30 HTTP/CLI acquisition and local one-shot,
+supervisor CLI/ACP and interactive callers. Bridge reads current task/reservation
+authority through the existing dispatch namespace, verifies worktree/native
+head, and composes existing ACP or unseeded CLI lifecycle primitives. Generation
+is a current admission fence rather than immutable transcript lineage; no
+override preserves configured options. CLI overrides without effective-state
+proof explicitly refuse.
+
+Added durable launch/identity/admission stages, cross-process executor exclusion,
+owned/represented launch gates, exact-native CLI launch under the worktree
+lifecycle lock, and unique ACP acquisition delivery IDs. Completed retries
+reuse receipts. Interrupted prior attempts reconcile from native launch/admission
+evidence; uncertain effects defer without fresh fallback or absence-shaped
+cleanup. Retired native identities are excluded even when the carried handle
+was dropped.
+
+Local caller and existing supervisor/one-shot targeted tests passed; detailed
+commands/counts are recorded with the connected-slice review report. Hardened
+devcontainer tests exercise real construction, SessionManager and SQLite, but
+native/provider process I/O is simulated. Phase 6 remains open: fleet/remote
+callers, CLI option proof, ambiguous launch recovery without surviving native
+evidence, native process-exit/transcript and Windows integration, merge/release/
+rollout remain unresolved. No PR or production mutation is part of this slice.
+
+Final bounded commands (all under `test-supervisor -- python
+tools/run_tests_in_devcontainer.py`, with `--test-timeout 20
+--subsuite-timeout 180 --plugin-timeout 300`):
+
+- `agent-bridge -- -k 'acquisition or test_db or strict_resume or protocol_negotiation'`:
+  181 passed, 1 skipped, 3805 deselected.
+- `agent-dispatch -- -k 'acquisition or test_supervisor and (embody or headless) or test_cli and spawn or interactive_embody or bridge_namespace_cli or reused_conversation or test_embody'`:
+  156 passed, 2 skipped, 4654 deselected.
+- Worktree selection `-k 'acquisition or test_db or strict_resume or protocol_negotiation or test_supervisor and (embody or headless) or test_cli and spawn or interactive_embody or bridge_namespace_cli or reused_conversation or test_embody'`:
+  91 passed, 7819 deselected.
+
+Ruff `--select F,E9` on every changed Python file and scoped mypy
+`--follow-imports=skip` on acquisition service modules passed. Install contract
+passed for 13 plugins. Source modules remain within unchanged baseline ceilings.
+
+### 2026-10-10 — Strict acquisition foundation prepared for independent review
+
+Recorded source-backed caller/mode/identity inventory in the Phase 6 document.
+Added internal version-1 request/result models, a side-effect-free policy over
+complete provider/ground-layer evidence, and a SQLite acquisition-attempt
+journal using bridge's existing database machinery. The journal binds delivery
+identity to the actual request digest, serializes pending target/worktree
+operations across database connections, returns exact completed receipts on
+retry, and retains interrupted attempts as ambiguous instead of expiring them
+into fresh launch or duplicate delivery.
+
+The targeted hardened devcontainer run passed 69 tests (1 skipped, 3901
+deselected) through `test-supervisor -- python
+tools/run_tests_in_devcontainer.py agent-bridge -- -k acquisition_foundation
+--test-timeout 20 --subsuite-timeout 180 --plugin-timeout 300`.
+Ruff `--select F,E9`, scoped mypy `--follow-imports=skip` on the three new
+source modules, and the install-contract guard passed. These are foundation
+contracts, not native process-exit/resume or provider parity evidence.
+The subsequent coherent database regression selection
+`-k 'acquisition_foundation or test_db'`, under the same bounded devcontainer
+command and limits, passed 132 tests (1 skipped, 3838 deselected).
+
+No new HTTP protocol capability is advertised. No CLI command, lifecycle
+adapter, dispatch caller, provider launch, or terminal cleanup behavior is
+changed. All one-shot, supervisor CLI/ACP, interactive, fleet, and remote
+acquisition migrations remain open, as do live-holder fencing integration,
+interrupted-effect reconciliation, native-ID process-exit proof, and release/
+rollout. This is an explicitly bounded foundation slice, not Phase 6 completion;
+runtime boundary and caller checklist items remain unchecked. The source
+inventory is recorded, but its acceptance remains pending independent review.
 
 ### 2026-10-10 — Scope dispatch acquisition consolidation before implementation
 

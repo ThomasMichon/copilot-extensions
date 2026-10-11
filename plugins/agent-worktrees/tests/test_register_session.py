@@ -1175,6 +1175,13 @@ class TestDeregisterSessionStdin:
         _save_record(tracking_dir, "z-record", "/tmp/z")
         _save_record(tracking_dir, "a-record", "/tmp/a")
         m.cfg.set_active_project("test-project")
+        config = m.cfg.Config(
+            srcroot=str(tmp_path), machine="test", platform="wsl", repo_name="test-repo",
+            repos={"test-repo": m.cfg.RepoConfig(
+                anchor=str(tmp_path / "anchor"), worktree_root=str(tracking_dir),
+            )},
+        )
+        monkeypatch.setattr(m.cfg, "load_project_config", lambda name, **_k: config)
         for worktree_id in ("z-record", "a-record"):
             monkeypatch.setattr(
                 m.cfg, "tracking_dir", lambda: tracking_dir

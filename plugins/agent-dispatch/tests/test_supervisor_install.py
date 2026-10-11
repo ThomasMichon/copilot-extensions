@@ -116,8 +116,8 @@ def test_service_enabled_only_when_labels_configured():
     # since the master daemon self-gates -- only labeled units run). Match the label
     # guard substring (present in both the legacy and serve-aware conditions).
     guard = body.index('_supervisor_labels_configured "$env_file"; then')
-    enable = body.index('systemctl --user enable "$unit"')
-    disable = body.index('systemctl --user disable "$unit"')
+    enable = body.index('_supervisor_action enable "$unit"')
+    disable = body.index('_supervisor_action disable "$unit"')
     assert guard < enable < disable, (
         "enable must be gated by _supervisor_labels_configured for that env "
         "file, with disable/stop in the inert (no-label) branch"
@@ -208,8 +208,8 @@ def test_profile_label_gating_uses_profile_env_file():
     idx = text.index("_install_supervisor_unit()")
     body = text[idx:]
     assert 'if _supervisor_labels_configured "$env_file"; then' in body
-    assert 'systemctl --user enable "$unit"' in body
-    assert 'systemctl --user disable "$unit"' in body
+    assert '_supervisor_action enable "$unit"' in body
+    assert '_supervisor_action disable "$unit"' in body
 
 
 def test_profile_reconcile_removes_orphan_units():
@@ -285,8 +285,8 @@ class TestWindowsSupervisorInstall:
         # MODE=serve short-circuits the gate (the master daemon self-gates); match
         # the label-guard substring present in both the legacy and serve conditions.
         gate = body.index("(Test-SupervisorLabelsConfigured -EnvFile $EnvFile)")
-        start = body.index("Start-ScheduledTask -TaskName $Name")
-        disable = body.index("Disable-ScheduledTask -TaskName $Name")
+        start = body.index("Invoke-SupervisorTaskAction -Operation start -Name $Name")
+        disable = body.index("Invoke-SupervisorTaskAction -Operation disable -Name $Name")
         # enable/start in the positive branch (after the gate); disable in the
         # inert (no-label) else branch (after start).
         assert gate < start < disable, (
@@ -351,8 +351,8 @@ class TestWindowsSupervisorInstall:
         idx = text.index("function Install-SupervisorTaskInstance")
         body = text[idx:]
         assert "(Test-SupervisorLabelsConfigured -EnvFile $EnvFile)" in body
-        assert "Enable-ScheduledTask -TaskName $Name" in body
-        assert "Disable-ScheduledTask -TaskName $Name" in body
+        assert "Invoke-SupervisorTaskAction -Operation enable -Name $Name" in body
+        assert "Invoke-SupervisorTaskAction -Operation disable -Name $Name" in body
 
     def test_profile_reconcile_removes_orphan_tasks(self):
         text = _ps1_text()
@@ -445,7 +445,7 @@ class TestWindowsSupervisorInstall:
         body = text[idx : text.index("\nfunction ", idx + 1)]
         assert "Stop-DispatchProcess -Subcommand supervise" not in body
         assert "Retire-SupervisorProcesses" not in body
-        assert "Start-ScheduledTask -TaskName $Name" in body
+        assert "Invoke-SupervisorTaskAction -Operation start -Name $Name" in body
         # Install-SupervisorTaskInstance short-circuits to the in-place restart
         # whenever the existing task's action already matches the desired one --
         # regardless of the caller's elevation state (#1837): re-registering is

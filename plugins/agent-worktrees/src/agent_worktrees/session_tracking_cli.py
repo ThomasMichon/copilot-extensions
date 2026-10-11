@@ -634,7 +634,8 @@ def _dispatch_session_lifecycle(verb: str, verb_args: dict):
     identical in-process code (logged) when not. Raises
     ``tracking_write.AmbiguousWriteOutcome`` for the one unsafe case (a
     request that reached the daemon and then failed) -- callers must
-    handle it, never silently retry.
+    handle it, never silently retry. These lifecycle verbs require version 2
+    so an older daemon cannot bypass receiving-side execution-space authority.
     """
     from . import locks as _locks
     from . import tracking_write
@@ -648,6 +649,9 @@ def _dispatch_session_lifecycle(verb: str, verb_args: dict):
             if status_monitor_runtime._status_monitor_enabled()
             else None
         ),
+        min_version=2 if verb in (
+            "session_conclude", "session_link_succession", "session_resolve_handoff_successor",
+        ) else 1,
     )
 
 
@@ -688,7 +692,7 @@ def cmd_conclude_session(args: argparse.Namespace) -> int:
         return output._json_error(
             f"conclude-session: write to {raw} is in an unknown state: {exc}"
         )
-    if result.get("error") == "lifecycle":
+    if result.get("error") in ("lifecycle", "execution_space"):
         return output._json_error(result["message"])
     output._json_output(
         {
@@ -919,7 +923,7 @@ def cmd_link_succession(args: argparse.Namespace) -> int:
         return output._json_error(
             f"link-succession: write to {raw} is in an unknown state: {exc}"
         )
-    if result.get("error") == "lifecycle":
+    if result.get("error") in ("lifecycle", "execution_space"):
         return output._json_error(result["message"])
     output._json_output(
         {

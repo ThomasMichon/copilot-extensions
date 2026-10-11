@@ -36,6 +36,7 @@ class AgentResolver(_ProviderDiscoveryMixin):
         *,
         topology_errors: list[str] | None = None,
         topology_warnings: list[str] | None = None,
+        local_execution_space: str | None = None,
     ) -> None:
         from . import agent_registry as compat
 
@@ -109,8 +110,9 @@ class AgentResolver(_ProviderDiscoveryMixin):
                 else:
                     self._agent_alias_index[key] = canonical
 
-        self._local_machine, self._local_platform = compat._detect_local_machine(
-            machines,
+        self._local_machine, self._local_platform = (
+            compat._detect_local_machine(machines, local_execution_space)
+            if local_execution_space is not None else compat._detect_local_machine(machines)
         )
 
     @property
@@ -120,6 +122,30 @@ class AgentResolver(_ProviderDiscoveryMixin):
     @property
     def machines(self) -> dict[str, MachineConfig]:
         return self._machines
+
+    def is_local_transport(
+        self, ssh_host: str | None, *, execution_space_key: str | None = None,
+    ) -> bool:
+        """Match a transport to the selected execution space, not its physical host."""
+        machine, platform = self._local_machine, self._local_platform
+        if any(entry.execution_platform for entry in self.machines.values()):
+            return bool(
+                machine and execution_space_key == machine.key
+            )
+        if not ssh_host:
+            return True
+        import socket
+
+        hostname = socket.gethostname().lower()
+        host_lower = ssh_host.lower()
+        if not machine:
+            return host_lower == hostname
+        for env in machine.ssh_environments:
+            if env.alias and env.alias.lower() == host_lower:
+                return env.name == platform
+        if host_lower == hostname or host_lower == machine.key.lower():
+            return len([env for env in machine.ssh_environments if env.name == platform]) == 1
+        return False
 
     @property
     def topology_errors(self) -> list[str]:
@@ -210,6 +236,8 @@ class AgentResolver(_ProviderDiscoveryMixin):
             if machine and machine is not alias_machine:
                 raise AmbiguousMachineError(f"Machine '{host}' is ambiguous in topology")
             machine = alias_machine
+            if machine.execution_platform:
+                raise ValueError("independent execution-space targeting requires its registered key")
             if ssh_environment and ssh_environment != matched_env.name:
                 raise ValueError(
                     f"Host '{host}' resolved via SSH alias to machine "
@@ -617,6 +645,10 @@ class AgentResolver(_ProviderDiscoveryMixin):
                 env=config.env,
                 project=config.project,
                 mcp_servers=config.mcp_servers,
+                execution_space_key=(
+                    self._local_machine.key
+                    if self._local_machine and self._local_machine.execution_platform else None
+                ),
             )
 
         machine, alias_env = self._resolve_machine(config.host, config.ssh_environment)
@@ -661,6 +693,7 @@ class AgentResolver(_ProviderDiscoveryMixin):
                 env=config.env,
                 project=config.project,
                 mcp_servers=config.mcp_servers,
+                execution_space_key=machine.key if machine.execution_platform else None,
             )
 
         if not machine.ssh_ready:
@@ -712,6 +745,7 @@ class AgentResolver(_ProviderDiscoveryMixin):
             ssh_shell=ssh_env.shell,
             auth_hooks=auth_hook_dicts,
             mcp_servers=config.mcp_servers,
+            execution_space_key=machine.key if machine.execution_platform else None,
         )
 
     def _is_local_loopback_agent(self, config: AgentConfig) -> bool:

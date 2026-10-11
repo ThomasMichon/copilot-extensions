@@ -48,9 +48,11 @@ ambient config from inside their own locked block.
 from __future__ import annotations
 
 import dataclasses
+import logging
 from pathlib import Path
 
 from . import obligations, tracking, tracking_write
+from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
 from .tracking_session_registry import _start_session_activation
 
 
@@ -82,6 +84,29 @@ def head_hold_note(session_id: str, head: str | None) -> str:
 
 
 def apply_session_register(args: dict) -> dict:
+    """Registered as the ``session_register`` verb. Delegates to
+    :func:`_apply_session_register_locked` for the actual transaction and
+    translates a cross-process lock-contention ``TimeoutError`` (the
+    required sidecar lock timing out) into the same structured
+    ``{"error": "execution_space", ...}`` shape an authority rejection
+    already returns, so a competing writer never silently wins a race
+    against a stale local read -- registration fails closed and reports
+    contention rather than raising an unhandled exception into the
+    sessionStart hook."""
+    try:
+        return _apply_session_register_locked(args)
+    except TimeoutError as exc:
+        worktree_id = args.get("worktree_id")
+        logging.getLogger(__name__).warning(
+            "Registration contended for %s: %s", worktree_id, exc,
+        )
+        return {
+            "error": "execution_space",
+            "message": f"contended by another process: {exc}",
+        }
+
+
+def _apply_session_register_locked(args: dict) -> dict:
     """Registered as the ``session_register`` verb. Mirrors the former
     ``tracking_session_registry.register_session`` transaction exactly --
     every branch, in the same order, under the same single
@@ -105,8 +130,15 @@ def apply_session_register(args: dict) -> dict:
     candidate_token = args.get("candidate_token")
     initial_projection = bool(args.get("initial_projection"))
 
-    with tracking._RecordLock(yaml_path):
+    with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
+        try:
+            require_project_record_mutation(record)
+        except ExecutionSpaceError as exc:
+            logging.getLogger(__name__).warning(
+                "Rejecting session registration for %s: %s", worktree_id, exc,
+            )
+            return {"error": "execution_space", "message": str(exc)}
         if (
             record.kind in tracking.MANAGED_KINDS
             and record.status in {"complete", "completed", "finalized"}
@@ -306,4 +338,4 @@ def apply_session_register(args: dict) -> dict:
         }
 
 
-tracking_write.register_verb("session_register", apply_session_register)
+tracking_write.register_verb("session_register", apply_session_register, version=2)

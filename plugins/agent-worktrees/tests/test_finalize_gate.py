@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 from agent_worktrees import obligations as ob
+from agent_worktrees import config as cfg
 from agent_worktrees import tracking
 from agent_worktrees.__main__ import build_parser
 from agent_worktrees.finalize import (
@@ -117,6 +119,12 @@ def _tracking_record(tmp_tracking_dir: Path, **overrides) -> tracking.WorktreeRe
     )
     base.update(overrides)
     rec = tracking.WorktreeRecord(**base)
+    project_dir = cfg.project_dir(rec.repo)
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "config.yaml").write_text(json.dumps({
+        "repo_name": rec.repo, "machine": rec.machine,
+        "repos": {rec.repo: {"anchor": str(tmp_tracking_dir)}},
+    }), encoding="utf-8")
     tracking.save_record(rec, tmp_tracking_dir / f"{rec.worktree_id}.yaml")
     return rec
 

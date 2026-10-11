@@ -145,7 +145,7 @@ class QueueClaimQueriesMixin:
             conn.execute(
                 "UPDATE tasks SET status = ?, owner = ?, claimed_at = ?, updated_at = ?,"
                 " lease_expires_at = ?, last_seen_at = ?, generation = generation + 1,"
-                " owner_session_id = NULL, last_liveness = NULL,"
+                " owner_session_id = NULL, last_liveness = NULL, activity = NULL,"
                 " attempts = attempts + 1 WHERE id = ? AND status = ?",
                 (Status.CLAIMED, worker_id, ts, ts, ts + lease, ts, chosen["id"], Status.QUEUED),
             )

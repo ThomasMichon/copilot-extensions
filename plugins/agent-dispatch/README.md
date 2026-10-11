@@ -31,6 +31,10 @@ agent-bridge for live cross-boundary conversation and steering, and
 
 ## Install
 
+Supervisor transitions have a [structured lifecycle audit](docs/supervisor-lifecycle.md)
+that separates runtime-slot readiness from service reconciliation and preserves
+observed native disablement without guessing its author.
+
 `agent-dispatch` is a standalone runtime plugin. Enabling the plugin installs the
 payload; the session-start hook can **stamp** a binstub into `~/.local/bin` so
 the first `agent-dispatch` invocation self-provisions the runtime. Repos that use

@@ -136,6 +136,8 @@ class WorkerBody(BaseModel):
 class ActivityBody(BaseModel):
     activity: str | None = None
     reservation_key: str
+    observed_at: float | None = None
+    admission_fence: dict | None = None
 
 
 class OwnerSessionBody(BaseModel):
@@ -319,6 +321,8 @@ def register_task_routes(
     control_token: str | None,
     resolve_owner_session_id: Callable[[str | None], str | None],
 ) -> None:
+    from .acquisition_receipts import register_routes
+    register_routes(app, queue)
     def _require(task: Task | None) -> Task:
         if task is None:
             raise HTTPException(status_code=404, detail="no such task")
@@ -856,7 +860,9 @@ def register_task_routes(
     def activity(task_id: str, body: ActivityBody) -> dict:
         return _guard(
             lambda: queue.set_activity(
-                task_id, body.activity, reservation_key=body.reservation_key
+                task_id, body.activity, reservation_key=body.reservation_key,
+                observed_at=body.observed_at,
+                admission_fence=body.admission_fence,
             ),
             "task.activity_updated",
         )

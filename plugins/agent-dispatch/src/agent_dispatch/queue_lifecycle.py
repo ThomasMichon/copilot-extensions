@@ -14,6 +14,8 @@ standalone.
 
 from __future__ import annotations
 
+import math
+
 import json
 import sqlite3
 
@@ -58,8 +60,12 @@ class QueueLifecycleMixin:
         now: float | None = None,
     ) -> Task:
         """Move a ``claimed`` task to ``started`` (owner must match)."""
+        if worker_id.startswith("acquired-") and not owner_session_id:
+            raise TaskError("acquired worker start requires an exact native owner_session_id")
         ts = self._now(now)
-        extra: dict[str, object] = {"last_seen_at": ts}
+        from .acquisition_receipts import start_authority
+        authority = start_authority(self, task_id)
+        extra: dict[str, object] = {"last_seen_at": ts, "activity": None, "activity_updated_at": ts}
         if owner_session_id is not None:
             extra["owner_session_id"] = owner_session_id
         allowed, to = _task_transition_spec("start")
@@ -74,6 +80,7 @@ class QueueLifecycleMixin:
             extra=extra,
             idempotent_replay=True,
             reject_if_held=True,
+            start_acquisition_authority=authority,
         )
 
     def complete(
@@ -649,6 +656,8 @@ class QueueLifecycleMixin:
         activity: str | None,
         *,
         reservation_key: str,
+        observed_at: float | None = None,
+        admission_fence: dict | None = None,
         now: float | None = None,
     ) -> Task:
         """Publish activity fenced to this task's active spawn reservation."""
@@ -656,6 +665,8 @@ class QueueLifecycleMixin:
             raise TaskError(
                 f"invalid task activity {activity!r} (allowed: ACTIVE, IDLE, STALLED, or null)"
             )
+        if observed_at is not None and not math.isfinite(observed_at):
+            raise TaskError("activity observation timestamp must be finite")
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -663,6 +674,17 @@ class QueueLifecycleMixin:
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
+            if admission_fence is not None and admission_fence != {
+                "generation": task.generation, "status": task.status,
+                "started_at": task.started_at, "owner_session_id": task.owner_session_id,
+            }:
+                conn.execute("COMMIT")
+                return task
+            if admission_fence is None and observed_at is not None and observed_at < max(
+                task.claimed_at or 0, task.started_at or 0,
+            ):
+                conn.execute("COMMIT")
+                return task
             if task.status == Status.SUSPENDED and activity not in {None, "IDLE"}:
                 conn.execute("COMMIT")
                 raise TaskError(f"cannot set active activity on suspended task {task_id!r}")
@@ -789,6 +811,7 @@ class QueueLifecycleMixin:
         reject_if_held: bool = False,
         idempotent_replay: bool = False,
         report_replay: bool = False,
+        start_acquisition_authority: dict | None = None,
     ) -> Task | tuple[Task, bool]:
         """Generic fenced transition helper.
 
@@ -806,6 +829,11 @@ class QueueLifecycleMixin:
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
+            if note == "start" or note == "resume" and (extra or {}).get("owner_session_id"):
+                from .acquisition_receipts import validate_start
+                validate_start(
+                    conn, task, (extra or {}).get("owner_session_id"), start_acquisition_authority,
+                )
             try:
                 _check_expected_status(task, expected_status)
             except TaskError:

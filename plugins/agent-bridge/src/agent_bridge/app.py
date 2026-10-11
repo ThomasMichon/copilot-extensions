@@ -1114,16 +1114,12 @@ def create_app(*, config=None, token: str | None = None) -> FastAPI:
     # Auth middleware
     app.add_middleware(BearerAuthMiddleware, token=auth_token)
 
-    # Routes
-    app.include_router(health.router)
-    app.include_router(ui.router)
-    app.include_router(acp_ws.router)
-    app.include_router(sessions.router)
-    app.include_router(live_sessions.router)
-    app.include_router(remote.router)
-    app.include_router(agents.router)
-    app.include_router(worktrees.router)
-    app.include_router(admin.router)
-    app.include_router(dispatch_tasks.router)
+    from .routes import acquisitions
+    for router in (
+        acquisitions.router, health.router, ui.router, acp_ws.router,
+        sessions.router, live_sessions.router, remote.router, agents.router,
+        worktrees.router, admin.router, dispatch_tasks.router,
+    ):
+        app.include_router(router)
 
     return app

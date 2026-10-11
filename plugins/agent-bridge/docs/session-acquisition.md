@@ -1,0 +1,174 @@
+# Strict local session acquisition
+
+Phase 6 of `efforts/active/agent-bridge-cli-mode-sessions` consolidates dispatch
+session acquisition beneath bridge. `agent-bridge acquire --request-file -`
+accepts version-1 JSON on stdin and calls `POST /api/v1/acquisitions`.
+HTTP protocol **30** gates this operation; older daemons refuse capability
+instead of falling back to create. Legacy unbound/explicit-fresh `create`
+semantics are unchanged. This slice supports **local** CLI and ACP; remote/
+fleet acquisition remains outstanding.
+
+## Request and result
+
+`acquisition_contract.AcquisitionRequest` version 1 carries explicit `cli` or
+`acp` mode, target, task ID and generation, worktree ID, allocation provenance
+(`created`, `reused`, or `targeted`), tri-state conversation retirement,
+`automatic`/`fresh`/`continue` intent, carried bridge and native conversation
+identities, execution options, prompt, delivery ID, project, driver,
+verification timeout and the current spawn reservation key. Additive unknown
+fields are ignored by request and result readers, following the repository's
+wire-compatibility contract; they grant no acquisition authority. Versions,
+modes, malformed required facts, and conflicting strict-continuation/retirement
+intent still refuse validation. Admission independently verifies the known
+task/reservation/native bindings. A new field that changes safety or continuity
+semantics requires a new negotiated protocol, not an ignorable extension.
+No mode defaults to CLI.
+
+`AcquisitionResult` requires the represented or owned session handle **and**
+the exact native conversation ID, requested bindings, delivery ID, and
+`created`/`reused`/`resumed` outcome. A mux handle, path, successful process
+launch, or reused worktree is not a substitute for native identity proof.
+Output validation rejects changed bindings and recreated strict continuation.
+
+## Selection policy
+
+`acquisition_policy.select_acquisition` is side-effect free. Its input is a
+provider-verified, complete holder snapshot and ground-layer native head.
+The adapter, not the consumer, must establish task affinity and native identity.
+Unknown authority, unknown liveness, a pending transition, multiple live
+holders, busy/foreign ownership, option mismatches, and missing retirement
+evidence refuse. A fresh targeted directory inherits no transcript.
+
+Creation is selected only for a verified new allocation or explicit fresh/
+retired intent with no live or unknown holder. Fresh intent authorizes neither
+takeover nor stopping a process. Retained automatic acquisition requires
+retirement exactly false, one exact task/mode-bound conversation,
+and a matching native head. Stopped reuse selects resume; live reuse selects
+delivery to that same conversation.
+
+The bridge reads admission facts through the existing `dispatch:` namespace
+provider: current task generation/status/hold, latest active reservation,
+worktree ownership and retirement. Generation is the **current admission
+fence**, not immutable conversation lineage: claim/adoption increments it.
+A bridge binding from an older generation of the same task remains resumable
+when current owner facts authorize it. A future/stale admission generation
+refuses. Historical expired registrations that are not the current native head
+are not live holders; a current head with missing identity/liveness proof refuses.
+Cross-task exclusive-key carry alone does not prove task transcript affinity.
+
+A first-attempt targeted task with no owner session, attachments or carried
+conversation receives fresh intent from the task owner's authoritative facts.
+Directory existence alone never supplies that intent. Creation excludes all
+known retired/head native identities even when the consumer dropped its handle.
+Request `None` for execution options means **no override**, not “erase configured
+defaults”; explicit incompatible overrides refuse. ACP retains registry/bound
+charter and preference setup. CLI override requests currently refuse explicitly
+because their effective-state proof is not yet implemented.
+
+## Durable retry fence
+
+`acquisition_journal.AcquisitionJournal` uses the bridge database's existing
+SQLite connection/write machinery, with a separate internal attempt table.
+One delivery ID binds the complete request digest. A partial unique index
+permits only one pending acquisition per target/worktree. Completed retries
+return the original validated result without authorizing another delivery.
+Rebinding a delivery ID is a typed refusal.
+
+A process interruption leaves a durable pending attempt. It has **no automatic
+expiration**: elapsed time does not prove whether launch or delivery happened.
+Admission atomically commits the complete request and `prepared` recovery stage
+with the delivery claim. Interrupted preflight can therefore be reconciled by
+a newer authorized reservation without guessing its prior request.
+An adapter may record a pre-effect refusal only when it has proven that no
+effect occurred. Recovery stages record the selected outcome, retired identities,
+native binding, and delivery admission. ACP turns carry a unique delivery ID;
+CLI uses the existing guarded, idempotent durable inbox. A retry reconstructs
+receipts from these facts without submitting a second turn. A newer authorized
+same-task reservation settles an interrupted predecessor: preserve an already
+launched native conversation, abandon an unadmitted stale prompt, or observe
+its durable admission. An ambiguous launch/turn refuses rather than guesses.
+FAILED status, absent client/native ID, or missing head/record do not establish
+process absence: an independently owned Session Host may survive failed attach.
+These launching states retain their ambiguity and gate until actual
+identity-bound host/process cleanup or recovery evidence exists. An established
+native conversation stopped by a bridge restart is strictly resumed before
+its unadmitted prompt is delivered; recreation remains disabled.
+Recovery rechecks current dispatch admission and worktree/native head after
+strict resume and again after acquiring the turn-start lock, immediately before
+persisting the turn. A hold, cancellation, generation or reservation change
+while waiting refuses the stale prompt without advancing its delivery stage.
+`GET /api/v1/acquisitions/{delivery_id}` reports recovery evidence read-only.
+Its `delivery_admitted` flag is derived from the exact durable CLI inbox row or
+ACP turn (delivery key, session and constructed prompt), not the pre-effect
+`delivering` journal stage. Dispatch STARTED admission requires that proof;
+a receipt bound before insertion does not suffice.
+The CLI inbox's atomic admission statement also requires an idle/completed turn
+and no pending non-control message. Competing enqueue/turn transitions refuse
+as `session_busy`; an identical delivery-key retry returns its original row.
+Unsupported CLI execution
+overrides report `effect: not_started` before any journal, gate or launch, so
+dispatch fails the capability mismatch instead of deferring it for reconciliation.
+Terminal receipt retention and recovery of launches with no surviving native
+proof remain outstanding; no timeout-based force-clear is provided.
+
+The journal is **not a live-holder lock**. Acquisition composes it with the
+existing worktree async lock, an existing cross-process OS lease primitive,
+durable launch gates guarding owned/represented registration, ACP ownership,
+and CLI-mode reservations. The OS lease prevents another live executor from
+mistaking an active attempt for an interrupted one during daemon cutover.
+Pending gates survive process loss for reconciliation. Ordinary ACP resume
+respects the gate; failed strict resume never enters legacy create fallback.
+Native prompt *completion* is distinct from durable admission.
+The delivery includes the exact native `start --owner-session-id` binding,
+not a generated launch-worker ID or ambient predecessor identity. The same
+constructed prompt is used for durable admission and retry reconciliation.
+Before delivery, the registered dispatch provider persists a start receipt after
+independently checking bridge's authenticated durable acquisition inspection.
+The receipt covers CLI worktree owners as well as explicit ACP workers, and
+dispatch compares its exact native identity inside the start transaction.
+
+## Graceful cutover
+
+This adds no resident process or service-management path. The existing bridge
+and dispatch installers activate immutable runtimes through their existing
+active/passive routing and drain seams. Acquisition refuses new work while the
+bridge is draining; started effects stay in the installation's durable database.
+The per-worktree OS executor lease prevents a replacement frontend from
+reconciling an acquisition still executing in the previous frontend. Native
+hosts remain owned by their existing lifecycle providers, not this HTTP request.
+Stopped established conversations recover strictly; failed attachment without
+actual host-absence evidence retains its gate. No shutdown, forced takeover,
+host kill or production rollout is introduced by acquisition.
+
+CLI launch calls the worktree owner's unseeded
+`embody --bridge-acquisition <native-id|fresh>`. Its capability preflight uses
+`--dry-run`; the real launch rechecks native head/liveness under the existing
+worktree lifecycle lock, refuses a live mux, and leaves pending worktree seeds
+untouched. Bridge waits for exact native registration/head, then submits once
+through the existing inbox. No new CLI PTY/session-host daemon is introduced.
+
+## Compatibility and remaining wiring
+
+Existing unbound/explicit-fresh `create` and legacy resume behavior are
+unchanged except respecting an in-flight acquisition launch fence.
+Unsupported modes, providers, or strict-continuation capability must refuse,
+never switch mode or bypass bridge.
+Pre-request protocol refusal is typed as `unsupported_acquisition_protocol`
+with `effect=not_started`; it is not an ambiguous launch result.
+
+Local one-shot (`create --spawn`), supervisor CLI/ACP factories, and interactive
+embodiment now call this boundary. CLI handles remain native session/worktree
+handles for CLI cleanup; ACP handles remain `local-body:<bridge-id>`, separately
+returning the native conversation ID. Unknown launch outcomes defer rather than
+claim absence or permit destructive cleanup. No CLI-to-ACP fallback remains in
+one-shot acquisition.
+
+Remaining implementation includes remote carrier/provider acquisition and
+fleet callers, CLI execution-option proof, complete legacy identity adoption,
+native process-exit/transcript integration and Windows validation. The current
+tests exercise real request/response construction, SQLite admission/fencing,
+and SessionManager start/resume, with native process/provider I/O simulated.
+They are not proof of a deployed native transcript across process exit.
+Worktree allocation/ledger, task leases,
+evaluation, provider transport, and CLI-vs-ACP terminal cleanup keep their
+existing owners. No additional CLI host/PTY daemon belongs in this boundary.

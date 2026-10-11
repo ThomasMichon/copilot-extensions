@@ -189,6 +189,7 @@ def _detect_platform() -> str:
 
 def _detect_local_machine(
     machines: dict[str, MachineConfig],
+    local_execution_space: str | None = None,
 ) -> tuple[MachineConfig | None, str]:
     """Match the local hostname to a machine in topology."""
     import socket
@@ -197,6 +198,20 @@ def _detect_local_machine(
 
     hostname = socket.gethostname()
     platform = _detect_platform()
+    scoped = any(machine.execution_platform for machine in machines.values())
+    if local_execution_space is not None:
+        selected = machines.get(local_execution_space)
+        if selected is None:
+            raise ValueError("local_execution_space does not name a canonical registered key")
+        if scoped and not selected.execution_platform:
+            raise ValueError("local_execution_space must select a registered execution space in a scoped topology")
+        if selected.execution_platform and selected.execution_platform != platform:
+            raise ValueError("local_execution_space does not match this daemon's execution platform")
+        return selected, platform
+    if scoped:
+        raise ValueError(
+            "explicit local_execution_space is required for independent registered spaces"
+        )
 
     try:
         machine_config = find_machine_entry(machines, hostname, reject_ambiguous=True)
@@ -278,6 +293,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     all_machines: dict[str, MachineConfig] = {}
     all_agents: dict[str, AgentConfig] = {}
     topology_errors: list[str] = []
+    loaded_profiles = []
 
     for profile_name, profile in cfg.topologies.items():
         if not profile.machines_yaml:
@@ -297,7 +313,26 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
         except TopologyLoadError as exc:
             topology_errors.append(f"{profile_name}: {exc}")
             continue
+        for key, entry in machines.items():
+            previous = all_machines.get(key)
+            if previous and previous.execution_platform != entry.execution_platform:
+                raise TopologyLoadError(
+                    f"{profile_name}: execution-space key {key!r} has conflicting platforms"
+                )
         all_machines.update(machines)
+        loaded_profiles.append((profile_name, profile, machines))
+
+    if any(entry.execution_platform for entry in all_machines.values()):
+        folded: dict[str, str] = {}
+        for key in all_machines:
+            previous = folded.setdefault(key.casefold(), key)
+            if previous != key:
+                raise TopologyLoadError(
+                    "execution-space keys must be unique without regard to case "
+                    f"across topology profiles: {previous!r}, {key!r}"
+                )
+
+    for profile_name, profile, machines in loaded_profiles:
         if profile.agents_config:
             agents_path = Path(profile.agents_config).expanduser()
             try:
@@ -314,7 +349,12 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
             log.info("Control-plane project '%s' (from %s)", cp_project, cp_source)
         repo_root = Path(profile.machines_yaml).expanduser().resolve().parent
         related = _load_related_entries(repo_root)
-        local_machine, local_platform = _detect_local_machine(machines)
+        selector = getattr(cfg, "local_execution_space", None)
+        local_machine, local_platform = (
+            _detect_local_machine(machines, selector) if selector in machines
+            else (None, _detect_platform()) if selector is not None
+            else _detect_local_machine(machines)
+        )
         from .config import load_repo_bridge_config
 
         repo_cfg = load_repo_bridge_config(repo_root)
@@ -335,7 +375,9 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
 
     discovered = discover_local_agents()
     if discovered and all_machines:
-        _enrich_local_agents(discovered, all_machines)
+        _enrich_local_agents(
+            discovered, all_machines, getattr(cfg, "local_execution_space", None),
+        )
     for name, agent in discovered.items():
         if name in all_agents:
             log.debug(
@@ -343,7 +385,9 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
                 name,
             )
             continue
-        covering = _find_covering_agent(agent, all_agents, all_machines)
+        covering = _find_covering_agent(
+            agent, all_agents, all_machines, getattr(cfg, "local_execution_space", None),
+        )
         if covering:
             log.info(
                 "Suppressing auto-discovered agent '%s' -- registry agent "
@@ -359,6 +403,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
             all_agents,
             all_machines,
             topology_errors=topology_errors,
+            local_execution_space=getattr(cfg, "local_execution_space", None),
         )
         log.info(
             "Resolver built: %d machines, %d agents (%d derived, %d auto-discovered)",

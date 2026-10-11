@@ -411,6 +411,7 @@ SUPERVISOR_LAUNCHER="$INSTALL_DIR/supervise-service.sh"
 # operator can still override PATH in supervisor.env.
 SUPERVISOR_PATH="$LOCAL_BIN:$HOME/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 export AGENT_DISPATCH_INSTALL_DIR="$INSTALL_DIR"
+SUPERVISOR_AUDIT_CORRELATION="$$-$(date +%s)"
 
 # === install-contract:v3 versioned-venv (agent-dispatch: .venv-as-symlink) ===
 # Immutable per-version runtime (#581): build the venv into versions/<version>
@@ -1161,6 +1162,7 @@ _ensure_runtime() {
             exit 1
         fi
         _versioned_mark_complete
+        _supervisor_audit runtime-ready import-health-gate "" "" ok
         _versioned_activate || exit 1
         # The supersession check and the shared publication it protects
         # (the binstub + deploy-manifest, both readable/overwritable by any
@@ -1482,6 +1484,45 @@ _supervisor_labels_configured() {
     [[ -n "$v" ]]
 }
 
+_supervisor_audit() {
+    local action="$1" reason="$2" unit="${3:-}" env_file="${4:-}"
+    local outcome="${5:-begin}" rc="${6:-}" py="${VENV_PYTHON:-}"
+    [[ -x "$py" ]] || py="$(_resolve_runtime_python 2>/dev/null || true)"
+    if [[ ! -x "$py" ]]; then
+        _warn "Supervisor lifecycle audit unavailable ($action/$reason); action is not suppressed"
+        return 0
+    fi
+    local enabled=unknown active=unknown main_pid=""
+    if [[ -n "$unit" ]] && command -v systemctl >/dev/null 2>&1; then
+        enabled="$(systemctl --user is-enabled "$unit" 2>/dev/null || true)"
+        active="$(systemctl --user is-active "$unit" 2>/dev/null || true)"
+        main_pid="$(systemctl --user show "$unit" -p MainPID --value 2>/dev/null || true)"
+    fi
+    local args=(--root "$INSTALL_DIR" --action "$action" --reason "$reason"
+        --origin installer.sh --verb "$ACTION" --correlation "$SUPERVISOR_AUDIT_CORRELATION"
+        --initiator-pid "$$" --parent-pid "$PPID" --outcome "$outcome"
+        --version "$SRC_VERSION" --native-enabled "$enabled" --native-active "$active")
+    [[ -z "$unit" ]] || args+=(--unit "$unit")
+    [[ -z "$env_file" ]] || args+=(--env-file "$env_file")
+    [[ -z "$rc" ]] || args+=(--exit-code "$rc")
+    [[ ! "$main_pid" =~ ^[0-9]+$ ]] || args+=(--native-main-pid "$main_pid")
+    "$py" "$PKG_SRC_DIR/supervisor_lifecycle.py" "${args[@]}" \
+        || _warn "Supervisor lifecycle audit unavailable ($action/$reason); action is not suppressed"
+}
+
+_supervisor_action() {
+    local action="$1" unit="$2" env_file="$3" reason="$4" rc=0
+    _supervisor_audit "$action" "$reason" "$unit" "$env_file"
+    systemctl --user "$action" "$unit" || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+        _supervisor_audit "$action" "$reason" "$unit" "$env_file" ok "$rc"
+    else
+        SUPERVISOR_RECONCILE_FAILED=1
+        _supervisor_audit "$action" "$reason" "$unit" "$env_file" fail "$rc"
+        _warn "Supervisor $action failed ($unit, exit $rc)"
+    fi
+}
+
 # The supervisor MODE: 'serve' runs the single master registrar daemon
 # (`supervise serve --legacy-env`, which reconciles declared pools + legacy env
 # profiles, each in its own subprocess); anything else (blank/'legacy') runs the
@@ -1582,7 +1623,7 @@ AGENT_DISPATCH_SUPERVISE_MODE=
 # alias (e.g. mantis-counter) to pin it explicitly.
 AGENT_DISPATCH_SUPERVISE_MACHINE=
 ENVEOF
-        _ok "Supervisor env: $SUPERVISOR_ENV_FILE (no labels -> service stays inert; add a label to enable)"
+        _ok "Supervisor env: $SUPERVISOR_ENV_FILE (no labels -> inert; configure labels then explicitly enable the native unit)"
     else
         _skip "Supervisor env already exists: $SUPERVISOR_ENV_FILE"
     fi
@@ -1604,6 +1645,26 @@ export PYTHONUTF8=1
 # ~/.local/bin and ~/.bun/bin are prepended (copilot-extensions#89).
 export PATH="\$HOME/.local/bin:\$HOME/.bun/bin:\$PATH"
 export AGENT_DISPATCH_INSTALL_DIR="$INSTALL_DIR"
+
+# Native identity comes from the owning unit's argv, not editable env values.
+if [[ "\${1:-}" == --systemd-unit ]]; then
+    export AGENT_DISPATCH_SUPERVISOR_SYSTEMD_UNIT="\${2:?missing native unit identity}"
+    shift 2
+else
+    unset AGENT_DISPATCH_SUPERVISOR_SYSTEMD_UNIT
+fi
+AGENT_RT_ROOT="$INSTALL_DIR"
+resolver="$INSTALL_DIR/bin/resolve-runtime.sh"
+if [[ ! -r "\$resolver" ]]; then
+    echo "agent-dispatch-supervisor: native runtime resolver unavailable" >&2
+    exit 78
+fi
+. "\$resolver"
+if [[ -z "\${AGENT_RT_PY:-}" || ! -x "\$AGENT_RT_PY" ]]; then
+    echo "agent-dispatch-supervisor: no complete runtime slot available" >&2
+    exit 78
+fi
+export AGENT_DISPATCH_SUPERVISOR_MAIN_PID="\$\$"
 
 labels="\${AGENT_DISPATCH_SUPERVISE_LABELS:-}"
 interval="\${AGENT_DISPATCH_SUPERVISE_INTERVAL:-30}"
@@ -1633,7 +1694,7 @@ if [[ "\$mode" == "serve" ]]; then
     [[ -n "\$smachine" ]] && serve_args+=(--machine "\$smachine")
     # shellcheck disable=SC2206
     [[ -n "\$extra" ]] && serve_args+=(\$extra)
-    exec "$VENV_PYTHON" -m agent_dispatch "\${serve_args[@]}"
+    exec "\$AGENT_RT_PY" -m agent_dispatch "\${serve_args[@]}"
 fi
 
 args=(supervise --all-repos --interval "\$interval" \\
@@ -1681,16 +1742,21 @@ done
 # shellcheck disable=SC2206
 [[ -n "\$extra" ]] && args+=(\$extra)
 
-exec "$VENV_PYTHON" -m agent_dispatch "\${args[@]}"
+exec "\$AGENT_RT_PY" -m agent_dispatch "\${args[@]}"
 LAUNCHEOF
     chmod +x "$SUPERVISOR_LAUNCHER"
 }
 
 _remove_supervisor_unit() {
     local unit="${1:-$SUPERVISOR_UNIT}"
+    local reason="${2:-lifecycle-$ACTION}" env_file
+    env_file="$(_supervisor_env_for_unit "$unit")"
+    if [[ "$NO_SUPERVISOR" -eq 1 ]]; then reason=explicit-no-supervisor
+    elif [[ "$NO_SERVICE" -eq 1 ]]; then reason=explicit-client-only
+    fi
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$unit" ]]; then
-        systemctl --user stop "$unit" 2>/dev/null || true
-        systemctl --user disable "$unit" 2>/dev/null || true
+        _supervisor_action stop "$unit" "$env_file" "$reason"
+        _supervisor_action disable "$unit" "$env_file" "$reason"
         rm -f "$UNIT_DIR/$unit"
         systemctl --user daemon-reload 2>/dev/null || true
     elif [[ -f "$UNIT_DIR/$unit" ]]; then
@@ -1715,6 +1781,16 @@ _install_supervisor_unit() {
     local unit="$1"
     local env_file="$2"
     local label="$3"
+    local prior_enabled=absent
+    local prior_unit_present=0
+    [[ ! -f "$UNIT_DIR/$unit" ]] || prior_unit_present=1
+    prior_enabled="$(systemctl --user is-enabled "$unit" 2>/dev/null || true)"
+    [[ -n "$prior_enabled" ]] || prior_enabled=absent
+    if [[ "$prior_enabled" == masked ]]; then
+        _supervisor_audit selection prior-native-masked "$unit" "$env_file" skipped
+        _skip "$label remains $prior_enabled; explicitly unmask, re-run the installer/update to restore the unit, then enable it"
+        return 0
+    fi
 
     cat > "$UNIT_DIR/$unit" << EOF
 [Unit]
@@ -1729,7 +1805,7 @@ Environment=AGENT_DISPATCH_INSTALL_DIR=$INSTALL_DIR
 Environment=AGENT_DISPATCH_SUPERVISOR_ENV_FILE=$env_file
 EnvironmentFile=-$env_file
 Environment=PYTHONUTF8=1
-ExecStart=$SUPERVISOR_LAUNCHER
+ExecStart=$SUPERVISOR_LAUNCHER --systemd-unit $unit
 Restart=on-failure
 RestartSec=10
 WorkingDirectory=$INSTALL_DIR
@@ -1739,10 +1815,20 @@ WantedBy=default.target
 EOF
     systemctl --user daemon-reload 2>/dev/null || true
 
+    if [[ "$prior_enabled" == masked-runtime ]]; then
+        _supervisor_audit selection prior-native-masked "$unit" "$env_file" skipped
+        _skip "$label definition refreshed; runtime mask remains in place"
+        return 0
+    fi
     local mode; mode="$(_supervisor_mode "$env_file")"
     if [[ "$mode" == "serve" ]] || _supervisor_labels_configured "$env_file"; then
-        systemctl --user enable "$unit" 2>/dev/null || true
-        systemctl --user restart "$unit" 2>/dev/null || true
+        if [[ "$prior_enabled" == disabled && "$prior_unit_present" -eq 1 ]]; then
+            _supervisor_audit selection prior-native-disabled "$unit" "$env_file" skipped
+            _skip "$label remains $prior_enabled; explicit native enablement is required"
+            return 0
+        fi
+        _supervisor_action enable "$unit" "$env_file" configured-opt-in
+        _supervisor_action restart "$unit" "$env_file" configured-opt-in
         if systemctl --user is-active "$unit" &>/dev/null; then
             if [[ "$mode" == "serve" ]]; then
                 _ok "$label installed + started ($unit -- MODE=serve: master registrar daemon)"
@@ -1750,14 +1836,15 @@ EOF
                 _ok "$label installed + started ($unit)"
             fi
         else
+            SUPERVISOR_RECONCILE_FAILED=1
             _warn "$label installed but not active -- check: systemctl --user status $unit"
         fi
     else
-        systemctl --user stop "$unit" 2>/dev/null || true
-        systemctl --user disable "$unit" 2>/dev/null || true
+        _supervisor_action stop "$unit" "$env_file" installer-inert
+        _supervisor_action disable "$unit" "$env_file" installer-inert
         _ok "$label installed (INERT: no opt-in label). To enable: set"
-        _step "AGENT_DISPATCH_SUPERVISE_LABELS in $env_file, then re-run update"
-        _step "(or: systemctl --user enable --now $unit)"
+        _step "AGENT_DISPATCH_SUPERVISE_LABELS in $env_file, then explicitly enable the native unit:"
+        _step "systemctl --user enable --now $unit"
     fi
 }
 
@@ -1783,7 +1870,7 @@ _reconcile_supervisor_profiles() {
         name="${name%.service}"
         env_file="$SUPERVISOR_PROFILE_DIR/$name.env"
         if ! _supervisor_profile_name_valid "$name" || [[ ! -f "$env_file" ]]; then
-            _remove_supervisor_unit "$unit"
+            _remove_supervisor_unit "$unit" orphan-profile
             _ok "Removed orphan supervisor profile unit: $unit"
         fi
     done
@@ -1800,16 +1887,25 @@ _retire_supervisor_profile_units() {
     for unit_path in "$UNIT_DIR"/"$SUPERVISOR_UNIT_BASE"-*.service; do
         [[ -e "$unit_path" ]] || continue
         unit="${unit_path##*/}"
-        _remove_supervisor_unit "$unit"
+        _remove_supervisor_unit "$unit" master-profile-migration
         _ok "Retired per-profile unit (MODE=serve; the daemon runs it): $unit"
     done
+}
+
+_supervisor_env_for_unit() {
+    if [[ "$1" == "$SUPERVISOR_UNIT" ]]; then
+        printf '%s' "$SUPERVISOR_ENV_FILE"
+    else
+        local profile="${1#"$SUPERVISOR_UNIT_BASE"-}"
+        printf '%s/%s.env' "$SUPERVISOR_PROFILE_DIR" "${profile%.service}"
+    fi
 }
 
 _start_supervisor_unit_if_enabled() {
     local unit="$1"
     local label="$2"
     if [[ -f "$UNIT_DIR/$unit" ]] && systemctl --user is-enabled "$unit" &>/dev/null; then
-        systemctl --user start "$unit" 2>/dev/null || true
+        _supervisor_action start "$unit" "$(_supervisor_env_for_unit "$unit")" lifecycle-start
         systemctl --user is-active "$unit" &>/dev/null \
             && _ok "$label started" \
             || _warn "$label did not start -- check: systemctl --user status $unit"
@@ -1820,7 +1916,7 @@ _stop_supervisor_unit_if_active() {
     local unit="$1"
     local label="$2"
     if [[ -f "$UNIT_DIR/$unit" ]] && systemctl --user is-active "$unit" &>/dev/null; then
-        systemctl --user stop "$unit" 2>/dev/null || true
+        _supervisor_action stop "$unit" "$(_supervisor_env_for_unit "$unit")" lifecycle-stop
         _ok "$label stopped"
     fi
 }
@@ -1870,7 +1966,9 @@ _status_supervisor_callback() {
 }
 
 _install_supervisor_service() {
+    SUPERVISOR_RECONCILE_FAILED=0
     if [[ "$NO_SUPERVISOR" -eq 1 ]]; then
+        _supervisor_audit selection explicit-no-supervisor "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" skipped
         _remove_all_supervisor_units
         _skip "Embody supervisor skipped (--no-supervisor)"
         return 0
@@ -1881,6 +1979,7 @@ _install_supervisor_service() {
     # true client-only host (--no-service) or a WSL guest opted into Windows-client
     # mode. Remove a stale unit if this host became client-only.
     if [[ "$NO_SERVICE" -eq 1 ]] || { _is_wsl && _wsl_windows_client; }; then
+        _supervisor_audit selection client-only-policy "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" skipped
         _remove_all_supervisor_units
         _skip "Embody supervisor skipped (client-only / Windows-client WSL host)"
         return 0
@@ -1893,16 +1992,26 @@ _install_supervisor_service() {
 
     _write_supervisor_default_env
     _write_supervisor_launcher
+    _supervisor_audit service-reconcile configured-supervisor-pass "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE"
     _install_supervisor_unit "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" "Embody supervisor"
     if [[ "$(_supervisor_mode "$SUPERVISOR_ENV_FILE")" == "serve" ]]; then
         # MODE=serve: the master daemon runs the legacy profiles itself (via
         # --legacy-env), so the per-profile units are redundant and would
         # double-run -- retire them (their .env files stay; the daemon reads them).
-        _retire_supervisor_profile_units
+        if systemctl --user is-enabled "$SUPERVISOR_UNIT" &>/dev/null \
+            && systemctl --user is-active "$SUPERVISOR_UNIT" &>/dev/null; then
+            _retire_supervisor_profile_units
+        else
+            _supervisor_audit selection master-not-active "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" skipped
+            _warn "Master supervisor is not enabled and active; preserving per-profile units"
+        fi
     else
         _install_supervisor_profiles
         _reconcile_supervisor_profiles
     fi
+    local outcome=ok
+    [[ "$SUPERVISOR_RECONCILE_FAILED" -eq 0 ]] || outcome=fail
+    _supervisor_audit service-reconcile sequence-complete "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" "$outcome"
 }
 
 # -- Actions ----------------------------------------------------------------
@@ -2017,6 +2126,7 @@ do_install() {
     fi
     _install_service
     _install_supervisor_service
+    _supervisor_audit installer-reconcile invocation-returned "" "" ok
     echo ''; echo '=== agent-dispatch install complete ==='
     echo '  Coordinator: systemctl --user status agent-dispatch'
     echo '  Supervisor:  systemctl --user status agent-dispatch-supervisor'
@@ -2128,12 +2238,14 @@ do_update() {
     # cutover/fallback action -- cutover attempt AND the unit reconciliation
     # that completes it -- has fully finished and released it.
     if _coordinator_cutover; then
+        _supervisor_audit coordinator-cutover coordinator-cutover-returned "$SUPERVISOR_UNIT" "$SUPERVISOR_ENV_FILE" ok
         _install_service --no-restart
     else
         _install_service
     fi
     _install_supervisor_service
     _unlock_cutover
+    _supervisor_audit installer-reconcile invocation-returned "" "" ok
     echo ''; echo '=== agent-dispatch update complete ==='
 }
 

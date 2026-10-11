@@ -55,6 +55,29 @@ resolved -- network call to reach a host that is actually the caller itself.
 
 ## Usage
 
+### Independent execution spaces
+
+An entry may opt into execution-space identity with
+`execution_platform: windows|wsl|linux`. Its registry **key**, not its alias,
+hostname or display name, is then canonical. `physical_host` is optional
+grouping metadata and never implies shared registration, settings or locality.
+An explicit space cannot contain SSH environments for another platform.
+Its key cannot contain whitespace, path separators or reference delimiters;
+keys must be unique without regard to case.
+
+Declare native Windows and WSL as separate entries, for example
+`workstation-windows` and `workstation-wsl`. Consumers select the current
+registered key explicitly. Distinct entries do not become local merely because
+their OS hostname matches. Physical-host metadata cannot resolve an explicit
+space; ambiguous legacy names are rejected rather than bound to the first entry.
+
+Existing qualified references retain their three-part syntax:
+`registered-space-key/project/worktree-id`. Legacy registrations and records
+remain readable; this does not rewrite or migrate their identities.
+Registries without an explicit execution-space declaration retain their legacy
+lifecycle behavior. Opted-in consumers reject invalid selection rather than
+guessing from shared hostname metadata.
+
 ```python
 from machine_transport import get_machine_transport
 

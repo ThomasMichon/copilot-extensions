@@ -44,7 +44,10 @@ class _SessionPromptMixin:
         async with session._turn_start_lock:
             return await self._submit_prompt_locked(resolved, prompt)
 
-    async def _submit_prompt_locked(self, session_id: str, prompt: str, *, no_resume: bool = False) -> int:
+    async def _submit_prompt_locked(
+        self, session_id: str, prompt: str, *, no_resume: bool = False,
+        delivery_id: str | None = None,
+    ) -> int:
         """Submit a prompt to a session, returning the turn index.
 
         The prompt is sent to the ACP subprocess. Streaming events
@@ -101,7 +104,10 @@ class _SessionPromptMixin:
         now = time.time()
 
         # Persist turn skeleton
-        self._db.create_turn(session_id, turn_index, prompt, now)
+        if delivery_id is None:
+            self._db.create_turn(session_id, turn_index, prompt, now)
+        else:
+            self._db.create_turn(session_id, turn_index, prompt, now, delivery_id=delivery_id)
 
         # Cancel any pending out-of-turn content bracket (#2835) synchronously,
         # BEFORE this new turn's `running` is written and the prompt task is
@@ -620,4 +626,3 @@ class _SessionPromptMixin:
         genuinely idle one (#51)."""
         for session in list(self._sessions.values()):
             await self._notify_host_reapable(session)
-

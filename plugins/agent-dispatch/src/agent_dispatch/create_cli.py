@@ -325,6 +325,7 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
             "spawn_worktree": worktree,
             "spawn_worktree_path": prepared["path"],
             "spawn_worktree_ownership": ownership,
+            "spawn_reservation_key": key,
             "spawn_session_handle": (
                 None if prepared.get("replaced") else reservation.get("session_handle")
             ),
@@ -364,7 +365,9 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
                     c.fail_spawn(key, detail="no spawn mechanism available")
             else:
                 result, via, handle = spawned
-                if result.returncode != 0:
+                if handle.get("deferred"):
+                    c.defer_spawn(key, detail=result.stderr or "acquisition awaits reconciliation")
+                elif result.returncode != 0:
                     detail = f"{via} exited {result.returncode}"
                     if spawn_task.get("spawn_worktree_ownership") == "created":
                         _core()._release_failed_created_spawn(
@@ -373,7 +376,7 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
                             worktree=str(spawn_task["spawn_worktree"]),
                             session_id=handle.get("session"),
                             detail=detail,
-                            body_absent=False,
+                            body_absent=bool(handle.get("not_started")),
                         )
                     else:
                         c.fail_spawn(key, detail=detail)
@@ -495,82 +498,31 @@ def _spawn_route(args: argparse.Namespace) -> str:
 def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
     """Launch a worker for a task (best effort); return ``(result, via, handle)``.
 
-    Returns ``None`` if no spawn mechanism is available (task left queued). Two
-    backends select *how* the worker is embodied:
-
-    - ``embody`` -- a **CLI-backed autopilot** session in a fresh parallel
-      worktree via ``agent-worktrees embody`` (the "dispatch an agent to do X"
-      path: a durable, NF-viewable session that works the task to explicit
-      completion). Falls back to the bridge backend if agent-worktrees is
-      absent.
-    - ``bridge`` (default) -- a **headless** agent-bridge ACP worker.
+    Both explicit CLI ``embody`` and default ACP ``bridge`` acquire through
+    bridge. Missing capabilities never authorize switching execution mode.
     """
     backend = getattr(args, "spawn_backend", "bridge")
-    if backend == "embody":
-        from . import embody, spawn_factories
-
-        if embody.embody_available():
-            worker_id = f"embody-{uuid.uuid4().hex[:8]}"
-            try:
-                result = embody.spawn_embodied_worker(
-                    task["id"],
-                    worker_id=worker_id,
-                    route=route,
-                    worktree_id=(task.get("target_worktree") or task.get("spawn_worktree")),
-                    resume_head=spawn_factories.resume_worktree_eligible(task),
-                    verify_timeout=getattr(args, "verify_timeout", 0) or 0,
-                )
-            except embody.EmbodyUnavailable as exc:
-                print(
-                    f"agent-dispatch: --spawn (embody) skipped ({exc}); task "
-                    f"{task['id']} left queued for any worker to claim",
-                    file=sys.stderr,
-                )
-                return None
-            _core()._report_spawn_result(result, task["id"], "agent-worktrees embody")
-            return result, "agent-worktrees embody", _core()._embody_handle(result)
-        # Graceful degrade: no agent-worktrees -> try the headless bridge path.
-        print(
-            "agent-dispatch: embody backend unavailable (agent-worktrees not on "
-            "PATH); falling back to the bridge backend",
-            file=sys.stderr,
-        )
-        print(
-            "agent-dispatch: WARNING -- the bridge fallback's seed is a thinner "
-            "contract than the embody backend's: no contract-net evaluation "
-            "window, no duplicate/feasibility check, and no goal/progress "
-            "loop. The spawned worker will claim, start, and complete "
-            "mechanically, but it will not evaluate whether the task is "
-            "genuinely a duplicate or actually fits it before committing.",
-            file=sys.stderr,
-        )
-
-    from . import bridge, embody, spawn_factories
-
-    worker_id = f"spawn-{uuid.uuid4().hex[:8]}"
-    prompt = bridge.worker_prompt(
-        task["id"],
-        worker_id=worker_id,
-        route=route,
+    import subprocess
+    from . import bridge, embody, session_acquisition
+    worker_id = f"acquired-{task.get('spawn_reservation_key')}"
+    prompt = (
+        embody.autopilot_worker_prompt(task["id"], worker_id=worker_id, route=route)
+        if backend == "embody" else bridge.worker_prompt(task["id"], worker_id=worker_id, route=route)
     )
-    prior_session = None
-    session_handle = task.get("spawn_session_handle")
-    if isinstance(session_handle, str) and session_handle.startswith("local-body:"):
-        prior_session = session_handle.removeprefix("local-body:") or None
     try:
-        result = bridge.spawn_or_resume_worker(
-            task["id"],
+        result = session_acquisition.acquire(
+            task, mode="cli" if backend == "embody" else "acp",
             agent=args.spawn_agent,
-            worker_id=worker_id,
             prompt=prompt,
-            prior_session_id=prior_session,
-            liveness_fn=embody.local_body_verdict,
             project=embody.project_for_task(task),
-            target_dir=task.get("spawn_worktree_path"),
-            worktree_id=task.get("spawn_worktree"),
-            resume_worktree=spawn_factories.resume_worktree_eligible(task),
+            verify_timeout=getattr(args, "verify_timeout", 0) or 0,
             wait=not args.run_async,
-            json_output=bool(task.get("spawn_worktree")),
+        )
+    except bridge.BridgeCarriedSessionBusy as exc:
+        return (
+            subprocess.CompletedProcess([], 1, "", str(exc)),
+            "agent-bridge",
+            {"deferred": True, "worktree": task.get("spawn_worktree")},
         )
     except bridge.BridgeUnavailable as exc:
         print(
@@ -580,15 +532,12 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
         )
         return None
     _core()._report_spawn_result(result, task["id"], "agent-bridge")
-    session = embody.parse_fleet_body_session(result)
-    handle = f"local-body:{session}" if session and task.get("spawn_worktree") else worker_id
+    if result.returncode == 0 and result.stderr:
+        print(f"agent-dispatch: {result.stderr}", file=sys.stderr)
     return (
         result,
         "agent-bridge",
-        {
-            "session": handle,
-            "worktree": task.get("spawn_worktree"),
-        },
+        session_acquisition.handle(result) if result.returncode == 0 else {"not_started": True},
     )
 
 def _report_spawn_result(result, task_id: str, via: str) -> None:

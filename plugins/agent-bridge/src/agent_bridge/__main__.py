@@ -504,6 +504,8 @@ def build_parser() -> argparse.ArgumentParser:
     register_session_targeting_commands(sub)
     register_session_streaming_commands(sub)
     register_session_lifecycle_commands(sub)
+    from .acquisition_cli import register as register_acquisition
+    register_acquisition(sub)
     return parser
 
 

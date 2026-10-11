@@ -21,7 +21,12 @@ def _seed_owner(tmp_path, monkeypatch):
         lambda *a, **k: types.SimpleNamespace(machine="m", repo_name="p"))
     monkeypatch.setattr(
         cfg, "load_project_config",
-        lambda name: types.SimpleNamespace(machine="m", repo_name=name),
+        lambda name: cfg.Config(
+            srcroot=str(tmp_path), machine="m", platform="windows", repo_name=name,
+            repos={"p": cfg.RepoConfig(
+                anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"),
+            )},
+        ),
     )
     ready_root = state_root.StateRoot(
         str(tmp_path), "launch_repo", "p", False, False, True

@@ -445,6 +445,7 @@ $SupervisorTaskName = if ($publishLegacyNames) {
 }
 $SupervisorProfileDir = Join-Path $InstallDir 'supervisors'
 $DefaultPort = 9847
+. (Join-Path $PSScriptRoot 'supervisor-lifecycle.ps1')
 
 # === install-contract:v3 versioned-venv (agent-dispatch: .venv-as-junction) ===
 # Immutable per-version runtime (#581). Build the venv into versions/<version>
@@ -1894,6 +1895,7 @@ function Install-Runtime {
             exit 1
         }
         Invoke-VersionedMarkComplete
+        Invoke-SupervisorAudit -Event runtime-ready -Reason import-health-gate -Outcome ok
         if (-not (Invoke-VersionedActivate)) { exit 1 }
         # The supersession check and the shared publication it protects
         # (the binstub + deploy-manifest, both readable/overwritable by any
@@ -2187,6 +2189,7 @@ function Retire-SupervisorProcesses {
        pure, unit-tested process classifier; this installer owns when to invoke
        it. Returns the count retired. #>
     if ($env:OS -ne 'Windows_NT') { return 0 }
+    Invoke-SupervisorAudit -Event retire -Reason windows-generation-inventory
     $py = $null
     try {
         $marker = Join-Path $InstallDir 'current-version'
@@ -2207,9 +2210,10 @@ function Retire-SupervisorProcesses {
     $ErrorActionPreference = 'Continue'
     $raw = & $py -m agent_dispatch _retire-supervisors --install-dir $InstallDir 2>&1 | Out-String
     $rc = $LASTEXITCODE
+    Invoke-SupervisorAudit -Event retire -Reason windows-generation-inventory -Outcome $(if ($rc -eq 0) { 'ok' } else { 'fail' }) -ExitCode $rc
     $ErrorActionPreference = $prevEAP
     try {
-        $result = $raw | ConvertFrom-Json
+        $result = Convert-SupervisorRetirementResult -Output $raw
         $retired = @($result.retired).Count
         foreach ($message in @($result.errors)) {
             if ($message) { Write-Warn "Supervisor generation retirement: $message" }
@@ -2795,17 +2799,21 @@ function Get-SupervisorProfileFiles {
 }
 
 function Remove-SupervisorTask {
-    param([string]$Name = $SupervisorTaskName)
+    param([string]$Name = $SupervisorTaskName, [string]$Reason = "lifecycle-$Action")
     # Returns 'removed' | 'blocked' | 'absent'. Mirrors Remove-CoordinatorTask.
     if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) { return 'absent' }
     if (-not (Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue)) {
         return 'absent'
     }
-    Stop-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+    Invoke-SupervisorTaskAction -Operation stop -Name $Name -Reason $Reason
+    Invoke-SupervisorAudit -Event remove -Reason $Reason -Name $Name
     Unregister-ScheduledTask -TaskName $Name -Confirm:$false -ErrorAction SilentlyContinue
     if (Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue) {
+        $script:SupervisorReconcileFailed = $true
+        Invoke-SupervisorAudit -Event remove -Reason $Reason -Name $Name -Outcome fail
         return 'blocked'
     }
+    Invoke-SupervisorAudit -Event remove -Reason $Reason -Name $Name -Outcome ok
     return 'removed'
 }
 
@@ -2823,7 +2831,8 @@ function Remove-SupervisorAutostart {
 }
 
 function Remove-AllSupervisorTasks {
-    switch (Remove-SupervisorTask -Name $SupervisorTaskName) {
+    $reason = if ($NoSupervisor) { 'explicit-no-supervisor' } elseif ($NoService) { 'explicit-client-only' } else { "lifecycle-$Action" }
+    switch (Remove-SupervisorTask -Name $SupervisorTaskName -Reason $reason) {
         'removed' { Write-Step "Removed supervisor task '$SupervisorTaskName'" }
         default   { }
     }
@@ -2832,7 +2841,7 @@ function Remove-AllSupervisorTasks {
         $tasks = @(Get-ScheduledTask -TaskName "$SupervisorTaskName-*" -ErrorAction SilentlyContinue)
         foreach ($task in $tasks) {
             $name = $task.TaskName
-            switch (Remove-SupervisorTask -Name $name) {
+            switch (Remove-SupervisorTask -Name $name -Reason $reason) {
                 'removed' { Write-Step "Removed supervisor profile task '$name'" }
                 'blocked' { Write-Skip "Supervisor profile task '$name' present but not removable without elevation -- run elevated to remove it" }
                 default   { }
@@ -2861,7 +2870,7 @@ function Remove-OrphanSupervisorProfiles {
         $profile = $name.Substring($SupervisorTaskName.Length + 1)
         $envFile = Get-SupervisorProfileEnvFile -ProfileName $profile
         if ((-not (Test-SupervisorProfileName -Name $profile)) -or (-not (Test-Path $envFile))) {
-            switch (Remove-SupervisorTask -Name $name) {
+            switch (Remove-SupervisorTask -Name $name -Reason orphan-profile) {
                 'removed' { Write-Ok "Removed orphan supervisor profile task: $name" }
                 'blocked' { Write-Skip "Orphan supervisor profile task '$name' present but not removable without elevation" }
                 default   { }
@@ -2895,7 +2904,7 @@ function Remove-ProfileSupervisorTasks {
         $tasks = @(Get-ScheduledTask -TaskName "$SupervisorTaskName-*" -ErrorAction SilentlyContinue)
         foreach ($task in $tasks) {
             $name = $task.TaskName
-            switch (Remove-SupervisorTask -Name $name) {
+            switch (Remove-SupervisorTask -Name $name -Reason master-profile-migration) {
                 'removed' { Write-Ok "Retired per-profile task (MODE=serve; the daemon runs it): $name" }
                 'blocked' { Write-Skip "Per-profile task '$name' present but not removable without elevation" }
                 default   { }
@@ -3047,7 +3056,9 @@ function Install-SupervisorLogonAutostart {
     # ONCE before reconciling all primary/profile launchers. Do not repeat a
     # process-wide stop here: doing so would kill siblings started earlier in the
     # same profile pass.
+    Invoke-SupervisorAudit -Event start -Reason logon-launcher -Name $Name -EnvFile $EnvFile
     Start-DispatchDetachedLogonLauncher -Launcher $Launcher -LauncherArguments @('-EnvFile', $EnvFile)
+    Invoke-SupervisorAudit -Event start -Reason logon-launcher -Name $Name -EnvFile $EnvFile -Outcome ok
     try {
         $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
         New-ItemProperty -Path $runKey -Name $Name -Value "conhost.exe $taskArgs" `
@@ -3114,7 +3125,7 @@ AGENT_DISPATCH_SUPERVISE_MODE=
 AGENT_DISPATCH_SUPERVISE_MACHINE=
 "@
         [System.IO.File]::WriteAllText($envFile, $envDefault, $utf8NoBom)
-        Write-Ok "Supervisor env: $envFile (no labels -> task stays inert; add a label to enable)"
+        Write-Ok "Supervisor env: $envFile (no labels -> inert; configure labels then explicitly enable the native task)"
     } else {
         Write-Skip "Supervisor env already exists: $envFile"
     }
@@ -3282,14 +3293,19 @@ function Restart-SupervisorTaskInPlace {
         [Parameter(Mandatory)][string]$DisplayName
     )
     if ($Mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)) {
-        Enable-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue | Out-Null
-        Stop-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
-        Start-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
-        Write-Ok "$DisplayName refreshed in place (Scheduled Task '$Name'; restarted onto the new build -- no re-register, no elevation)"
+        Invoke-SupervisorTaskAction -Operation enable -Name $Name -Reason configured-opt-in
+        $succeeded = $script:SupervisorActionSucceeded
+        Invoke-SupervisorTaskAction -Operation stop -Name $Name -Reason runtime-refresh
+        $succeeded = $succeeded -and $script:SupervisorActionSucceeded
+        Invoke-SupervisorTaskAction -Operation start -Name $Name -Reason runtime-refresh
+        if ($succeeded -and $script:SupervisorActionSucceeded) {
+            Write-Ok "$DisplayName refreshed in place (Scheduled Task '$Name'; restarted onto the new build -- no re-register, no elevation)"
+        }
     } else {
-        Stop-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
-        Disable-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue | Out-Null
-        Write-Ok "$DisplayName INERT (no opt-in label; task disabled)"
+        Invoke-SupervisorTaskAction -Operation stop -Name $Name -Reason installer-inert
+        $succeeded = $script:SupervisorActionSucceeded
+        Invoke-SupervisorTaskAction -Operation disable -Name $Name -Reason installer-inert
+        if ($succeeded -and $script:SupervisorActionSucceeded) { Write-Ok "$DisplayName INERT (no opt-in label; task disabled)" }
     }
 }
 
@@ -3304,6 +3320,14 @@ function Install-SupervisorTaskInstance {
     # MODE=serve runs the self-gating master daemon, so it is enabled
     # unconditionally (no label opt-in); the direct loop stays label-gated.
     $mode = Get-SupervisorMode -EnvFile $EnvFile
+    if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+        $priorTask = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+        if ($priorTask -and $priorTask.State -eq 'Disabled') {
+            Invoke-SupervisorAudit -Event selection -Reason prior-native-disabled -Name $Name -EnvFile $EnvFile -Outcome skipped
+            Write-Skip "$DisplayName remains disabled; explicit native enablement is required"
+            return
+        }
+    }
 
     # Interactive-required host: prefer an Interactive-logon Scheduled Task (same
     # desktop access as the HKCU Run auto-start it replaces, PLUS Task
@@ -3313,8 +3337,18 @@ function Install-SupervisorTaskInstance {
     # disabled-task case).
     if ((Get-ServiceMode) -eq 'interactive') {
         if ($mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)) {
+            Invoke-SupervisorAudit -Event restart -Reason interactive-task-refresh -Name $Name -EnvFile $EnvFile
             if (Install-InteractiveScheduledTask -Name $Name -Launcher $Launcher `
                     -Description 'agent-dispatch -- embody + companion supervisor (interactive)') {
+                $startedTask = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+                if ($startedTask -and $startedTask.State -eq 'Running') {
+                    $script:SupervisorReconciledNames[$Name] = $true
+                    Invoke-SupervisorAudit -Event restart -Reason interactive-task-refresh -Name $Name -EnvFile $EnvFile -Outcome ok
+                } else {
+                    $script:SupervisorReconcileFailed = $true
+                    Invoke-SupervisorAudit -Event restart -Reason interactive-task-refresh -Name $Name -EnvFile $EnvFile -Outcome fail
+                    Write-Warn "$DisplayName interactive task activation is unconfirmed"
+                }
                 if (Remove-SupervisorAutostart -Name $Name) {
                     Write-Step "Removed the non-elevated logon fallback -- the Scheduled Task supersedes it"
                 }
@@ -3335,7 +3369,7 @@ function Install-SupervisorTaskInstance {
             default   { }
         }
         if (Remove-SupervisorAutostart -Name $Name) { Write-Step "Removed supervisor logon auto-start '$Name' (no opt-in label)" }
-        Write-Ok "$DisplayName INERT (no opt-in label). Set AGENT_DISPATCH_SUPERVISE_LABELS in $EnvFile + re-run update to enable."
+        Write-Ok "$DisplayName INERT (no opt-in label). Configure $EnvFile, then explicitly enable native supervision."
         return
     }
 
@@ -3393,16 +3427,21 @@ function Install-SupervisorTaskInstance {
         $regOk = $false
     }
     if (-not $regOk) {
+        $script:SupervisorReconcileFailed = $true
         $ErrorActionPreference = $prevEAP
         Write-Warn "$DisplayName not registered (first-time task registration needs elevation) -- run elevated ONCE to install the task; subsequent updates refresh it in place, no elevation"
         return
     }
 
     if ($mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)) {
-        Enable-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue | Out-Null
-        Start-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+        Invoke-SupervisorTaskAction -Operation enable -Name $Name -Reason configured-opt-in
+        $enabled = $script:SupervisorActionSucceeded
+        Invoke-SupervisorTaskAction -Operation start -Name $Name -Reason configured-opt-in
         $ErrorActionPreference = $prevEAP
-        if ($mode -eq 'serve') {
+        if (-not $enabled -or -not $script:SupervisorReconciledNames[$Name]) {
+            $script:SupervisorReconcileFailed = $true
+            Write-Warn "$DisplayName task activation is unconfirmed"
+        } elseif ($mode -eq 'serve') {
             Write-Ok "$DisplayName installed + started (Scheduled Task '$Name' -- MODE=serve: master registrar daemon)"
         } else {
             Write-Ok "$DisplayName installed + started (Scheduled Task '$Name')"
@@ -3410,15 +3449,18 @@ function Install-SupervisorTaskInstance {
     } else {
         # No opt-in label -> leave the task registered but DISABLED (inert), the
         # Windows analogue of an installed-but-not-enabled systemd unit.
-        Disable-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue | Out-Null
+        Invoke-SupervisorTaskAction -Operation disable -Name $Name -Reason installer-inert
         $ErrorActionPreference = $prevEAP
-        Write-Ok "$DisplayName installed (INERT: no opt-in label; task disabled). To enable: set"
-        Write-Step "AGENT_DISPATCH_SUPERVISE_LABELS in $EnvFile, then re-run update"
-        Write-Step "(or: Enable-ScheduledTask -TaskName $Name; Start-ScheduledTask -TaskName $Name)"
+        if ($script:SupervisorActionSucceeded) { Write-Ok "$DisplayName installed (INERT: no opt-in label; task disabled). To enable: set" }
+        Write-Step "AGENT_DISPATCH_SUPERVISE_LABELS in $EnvFile, then explicitly enable the native task:"
+        Write-Step "Enable-ScheduledTask -TaskName $Name; Start-ScheduledTask -TaskName $Name"
     }
 }
 
 function Install-SupervisorTask {
+    $script:SupervisorReconcileFailed = $false
+    $script:SupervisorReconciledNames = @{}
+    Invoke-SupervisorAudit -Event service-reconcile -Reason configured-supervisor-pass
     # Install only where the full coordinator lives (a client-only host has no
     # local coordinator for the supervisor to talk to). -NoSupervisor opts a full
     # host out; -NoService (client-only) skips it too. Remove stale primary and
@@ -3433,12 +3475,16 @@ function Install-SupervisorTask {
         }
     }
     if ($NoSupervisor -or $NoService) {
+        $reason = if ($NoSupervisor) { 'explicit-no-supervisor' } else { 'explicit-client-only' }
+        Invoke-SupervisorAudit -Event selection -Reason $reason -Name $SupervisorTaskName -Outcome skipped
         Remove-AllSupervisorTasks
+        Invoke-SupervisorAudit -Event service-reconcile -Reason sequence-complete -Name $SupervisorTaskName -Outcome $(if ($script:SupervisorReconcileFailed) { 'fail' } else { 'ok' })
         Write-Skip 'Embody supervisor skipped (client-only / -NoSupervisor)'
         return
     }
     if ($env:OS -ne 'Windows_NT') { return }
     if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
+        Invoke-SupervisorAudit -Event service-reconcile -Reason platform-unavailable -Outcome skipped
         Write-Skip 'ScheduledTasks module unavailable -- run "agent-dispatch supervise --all-repos --label <L>" manually'
         return
     }
@@ -3456,7 +3502,16 @@ function Install-SupervisorTask {
         # MODE=serve: the master daemon runs the legacy profiles itself
         # (--legacy-env), so the per-profile tasks are redundant and would
         # double-run -- retire them (their .env files stay; the daemon reads them).
-        Remove-ProfileSupervisorTasks
+        $master = Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
+        if (-not $script:SupervisorReconciledNames[$SupervisorTaskName] -or $script:SupervisorReconcileFailed) {
+            if (-not $master -or $master.State -ne 'Disabled') { $script:SupervisorReconcileFailed = $true }
+            Invoke-SupervisorAudit -Event selection -Reason master-not-active -Name $SupervisorTaskName -EnvFile $envFile -Outcome skipped
+            Write-Warn 'Master supervisor reconciliation is unconfirmed; preserving per-profile tasks'
+            foreach ($profile in @(Get-SupervisorProfileFiles)) {
+                $name = Get-SupervisorTaskName -ProfileName $profile.BaseName
+                Invoke-SupervisorStart -Name $name -EnvFile $profile.FullName -Label "Embody supervisor profile '$($profile.BaseName)'"
+            }
+        } else { Remove-ProfileSupervisorTasks }
     } else {
         foreach ($profile in @(Get-SupervisorProfileFiles)) {
             $name = Get-SupervisorTaskName -ProfileName $profile.BaseName
@@ -3465,6 +3520,7 @@ function Install-SupervisorTask {
         }
         Remove-OrphanSupervisorProfiles
     }
+    Invoke-SupervisorAudit -Event service-reconcile -Reason sequence-complete -Name $SupervisorTaskName -EnvFile $envFile -Outcome $(if ($script:SupervisorReconcileFailed) { 'fail' } else { 'ok' })
 }
 
 function Invoke-SupervisorStart {
@@ -3475,8 +3531,8 @@ function Invoke-SupervisorStart {
     )
     $task = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
     if ($task -and $task.State -ne 'Disabled') {
-        Start-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
-        Write-Ok "$Label started"
+        Invoke-SupervisorTaskAction -Operation start -Name $Name -Reason lifecycle-start
+        if ($script:SupervisorActionSucceeded) { Write-Ok "$Label started" }
         return
     }
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
@@ -3502,7 +3558,7 @@ function Invoke-SupervisorsStop {
     if ($primary) { $tasks += $primary }
     $tasks += @(Get-ScheduledTask -TaskName "$SupervisorTaskName-*" -ErrorAction SilentlyContinue)
     foreach ($task in $tasks) {
-        Stop-ScheduledTask -TaskName $task.TaskName -ErrorAction SilentlyContinue
+        Invoke-SupervisorTaskAction -Operation stop -Name $task.TaskName -Reason "lifecycle-$Action"
     }
 }
 
@@ -3730,6 +3786,7 @@ function Invoke-Install {
     Remove-CoordinatorFirewallRule
     Install-SupervisorTask
     if (-not $NoService) { Confirm-CoordinatorRunning }
+    Invoke-SupervisorAudit -Event installer-reconcile -Reason invocation-returned -Outcome ok
     Write-Host ''; Write-Host '=== agent-dispatch install complete ===' -ForegroundColor Cyan
 }
 
@@ -3771,6 +3828,7 @@ function Invoke-CoordinatorCutover {
         if ($jsonLine) { $ok = [bool]((ConvertFrom-Json $jsonLine).ok) }
     } catch { $ok = $false }
     if ($ok -or $rc -eq 0) {
+        Invoke-SupervisorAudit -Event coordinator-cutover -Reason coordinator-cutover-returned -Outcome ok
         Write-Ok 'Coordinator cut over to the new build (no in-flight work killed; supervisor/workers re-adopt via the queue DB + routing table)'
         return $true
     }
@@ -3874,6 +3932,7 @@ function Invoke-Update {
         Install-CoordinatorTask
         Install-SupervisorTask
     }
+    Invoke-SupervisorAudit -Event installer-reconcile -Reason invocation-returned -Outcome ok
     Write-Host ''; Write-Host '=== agent-dispatch update complete ===' -ForegroundColor Cyan
     } finally {
         Clear-UpdateMarker

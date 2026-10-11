@@ -23,6 +23,14 @@ from agent_worktrees import tracking
 def _wire_dirs(monkeypatch, tracking_dir: Path, state_dir: Path) -> None:
     monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_dir)
     monkeypatch.setattr(m.sessions, "_session_state_dir", lambda: state_dir)
+    config = m.cfg.Config(
+        srcroot=str(tracking_dir.parent), machine="test", platform="wsl", repo_name="test",
+        repos={"test": m.cfg.RepoConfig(
+            anchor=str(tracking_dir.parent), worktree_root=str(tracking_dir),
+        )},
+    )
+    monkeypatch.setattr(m.cfg, "load_project_config", lambda project: config)
+    monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda anchor: {})
 
 
 def _save(rec: tracking.WorktreeRecord, tracking_dir: Path) -> None:
@@ -202,4 +210,3 @@ def test_title_pass_ignores_detached_prefers_real(
 
     after = tracking.load_record(tmp_tracking_dir / "wt-g.yaml")
     assert after.title == "Investigate Agent-Bridge Performance"
-

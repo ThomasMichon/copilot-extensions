@@ -2620,6 +2620,39 @@ class TestOwningTrackingDirResolution:
             _repos, "_adopted_project_names",
             lambda: {"harness-proj", "knowledge-proj"},
         )
+
+        # session_register's authority fence (execution_spaces.
+        # require_project_record_mutation) resolves
+        # cfg.load_project_config(record.repo) before any mutation; see
+        # conftest.py's monkeypatch_config for the full rationale. A REAL
+        # (empty) canonical machines.yaml at each fake anchor keeps
+        # ``load_machines_yaml`` from falling through to its own
+        # ``_overlay_machines_yaml_path`` probe (which calls the bare
+        # ``load_config()`` as a side effect).
+        anchors = {}
+        for name, tracking_dir in (
+            ("harness-proj", harness_dir), ("knowledge-proj", knowledge_dir),
+        ):
+            anchor = tmp_path / f".aw-authority-fence-anchor-{name}"
+            (anchor / ".agent-worktrees").mkdir(parents=True, exist_ok=True)
+            (anchor / ".agent-worktrees" / "machines.yaml").write_text(
+                "machines: {}\n", encoding="utf-8",
+            )
+            anchors[name] = (anchor, tracking_dir)
+
+        def _fake_load_project_config(requested_name, **_kwargs):
+            anchor, tracking_dir = anchors.get(
+                requested_name, anchors["harness-proj"],
+            )
+            return _cfg.Config(
+                srcroot=str(tmp_path), machine="test", platform="wsl",
+                repo_name=requested_name,
+                repos={requested_name: _cfg.RepoConfig(
+                    anchor=str(anchor), worktree_root=str(tracking_dir),
+                )},
+            )
+
+        monkeypatch.setattr(_cfg, "load_project_config", _fake_load_project_config)
         return harness_dir, knowledge_dir, _t
 
     def test_yaml_path_uses_records_own_repo_not_ambient_project(

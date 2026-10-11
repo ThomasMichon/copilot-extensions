@@ -20,6 +20,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from ..agent_registry import AgentConfig, AgentResolver
+from ..acquisition_gates import AcquisitionGateHeld
 from ..loop_governance import LoopGovernance
 from ..models import SessionInfo, SessionStatus, WorktreeHandoffRequest
 from ..session_manager import (
@@ -415,7 +416,7 @@ class WorktreeDiscoveryCache:
                 return []
             # If the resolved target is the local machine, run locally
             # instead of SSH (avoids loopback SSH failures)
-            if _is_local_target(target.host, resolver):
+            if _is_local_target(target.host, resolver, target.execution_space_key):
                 is_local = True
             else:
                 host = target.host or config.host
@@ -518,39 +519,11 @@ async def _run_local_ex(
     return await _exec_ex(cmd, timeout=timeout)
 
 
-def _is_local_target(ssh_host: str | None, resolver: AgentResolver) -> bool:
-    """Check if an SSH host alias resolves to the local machine AND platform.
-
-    True only when the alias points to the same machine key AND platform
-    (wsl/windows/linux) -- avoids treating a Windows agent as "local" on
-    WSL (or vice versa), even on the same physical machine.
-    """
-    if not ssh_host:
-        return True
-
-    import socket
-    hostname = socket.gethostname().lower()
-    host_lower = ssh_host.lower()
-
-    from ..agent_registry import _detect_local_machine
-    machine, platform = _detect_local_machine(resolver.machines)
-    if not machine:
-        # Can't identify our own machine -- only match exact hostname.
-        return host_lower == hostname
-
-    # Match the SSH alias against the local machine's environments, but
-    # only the environment matching our platform.
-    for env in machine.ssh_environments:
-        if env.alias and env.alias.lower() == host_lower:
-            return env.name == platform
-
-    if host_lower == hostname or host_lower == machine.key.lower():
-        # Ambiguous -- only treat as local if exactly one environment
-        # matches our platform.
-        matching = [e for e in machine.ssh_environments if e.name == platform]
-        return len(matching) == 1
-
-    return False
+def _is_local_target(
+    ssh_host: str | None, resolver: AgentResolver, execution_space_key: str | None = None,
+) -> bool:
+    """Use the resolver's selected identity for transport loopback."""
+    return resolver.is_local_transport(ssh_host, execution_space_key=execution_space_key)
 
 
 async def _run_ssh(
@@ -1072,12 +1045,8 @@ async def resume_worktree(
 
     def _strict_refusal(reason_detail: str) -> HTTPException:
         return HTTPException(
-            status_code=409,
-            detail={
-                "reason": "resume_requires_existing_session",
-                "worktree_id": worktree_id,
-                "detail": reason_detail,
-            },
+            status_code=409, detail={"reason": "resume_requires_existing_session",
+                                    "worktree_id": worktree_id, "detail": reason_detail},
         )
 
     mgr = getattr(request.app.state, "session_manager", None)
@@ -1140,7 +1109,8 @@ async def resume_worktree(
             detail=f"Session {session.session_id} not found",
         ) from exc
     except ValueError as exc:
-        # Not actually stopped / nothing to resume -- return current state.
+        if isinstance(exc, AcquisitionGateHeld):
+            raise HTTPException(409, detail={"reason": "acquisition_launch_gate_held"}) from exc
         log.info("resume_worktree %s: %s; returning current state", worktree_id, exc)
         return _session_info(session)
     except ProviderTargetRefreshError as exc:
@@ -1337,7 +1307,7 @@ async def _run_for_agent(
         log.warning("Cannot resolve agent %s for session read: %s", agent_name, exc)
         return None
 
-    if _is_local_target(target.host, resolver):
+    if _is_local_target(target.host, resolver, target.execution_space_key):
         return await _run_local(config.project, args)
 
     return await _run_ssh(

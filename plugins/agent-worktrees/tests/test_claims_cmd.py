@@ -11,6 +11,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import claim_providers, claims_owner
+from agent_worktrees import config as cfg
 from agent_worktrees import state_root
 from agent_worktrees import tracking
 from agent_worktrees import worktree_identity
@@ -216,6 +217,15 @@ def _seed(tmp_path, monkeypatch, *, owner_ref=None, resources=None):
     import types
     monkeypatch.setattr("agent_worktrees.config.load_config",
                         lambda *a, **k: types.SimpleNamespace(machine="anomalous-potato"))
+    monkeypatch.setattr(
+        cfg, "load_project_config",
+        lambda name: cfg.Config(
+            srcroot=str(tmp_path), machine="anomalous-potato", platform="wsl", repo_name=name,
+            repos={"test-chamber": cfg.RepoConfig(
+                anchor=str(wdir), worktree_root=str(tmp_path / "trees"),
+            )},
+        ),
+    )
     ready_root = state_root.StateRoot(
         str(tmp_path), "launch_repo", "test-chamber", False, False, True)
     monkeypatch.setattr(
@@ -826,7 +836,12 @@ def _seed_ownerref(tmp_path, monkeypatch, *, machine="anomalous-potato"):
                         lambda *a, **k: types.SimpleNamespace(machine=machine))
     monkeypatch.setattr(
         "agent_worktrees.config.load_project_config",
-        lambda name: types.SimpleNamespace(machine=machine),
+        lambda name: cfg.Config(
+            srcroot=str(tmp_path), machine=machine, platform="wsl", repo_name=name,
+            repos={"example-web": cfg.RepoConfig(
+                anchor=str(wdir), worktree_root=str(tmp_path / "trees"),
+            )},
+        ),
     )
     ready_root = state_root.StateRoot(
         str(tmp_path), "launch_repo", "example-web", False, False, True)

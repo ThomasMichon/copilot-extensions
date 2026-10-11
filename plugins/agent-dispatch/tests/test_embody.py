@@ -998,16 +998,17 @@ def test_fleet_headless_426_without_charter_fails_outright(monkeypatch):
 def test_spawn_worker_for_uses_embody_backend(monkeypatch):
     """`create --spawn --spawn-backend embody` routes to the embody backend."""
     from agent_dispatch import __main__ as m
+    from agent_dispatch import session_acquisition
 
     calls = {}
 
-    def fake_spawn(task_id, **kwargs):
-        calls["task_id"] = task_id
-        calls["route"] = kwargs.get("route")
-        return subprocess.CompletedProcess([], 0, "", "")
+    def fake_spawn(task, **kwargs):
+        calls["task_id"] = task["id"]
+        calls["mode"] = kwargs["mode"]
+        return subprocess.CompletedProcess([], 0, '{"mode":"cli","session_id":"native","native_session_id":"native","worktree_id":"wt"}', "")
 
     monkeypatch.setattr(embody, "embody_available", lambda: True)
-    monkeypatch.setattr(embody, "spawn_embodied_worker", fake_spawn)
+    monkeypatch.setattr(session_acquisition, "acquire", fake_spawn)
     monkeypatch.setattr(m, "client_url", lambda: "http://coord")
 
     args = types.SimpleNamespace(
@@ -1016,13 +1017,14 @@ def test_spawn_worker_for_uses_embody_backend(monkeypatch):
     )
     m._do_spawn(args, {"id": "T7"})
     assert calls["task_id"] == "T7"
-    assert calls["route"] == ""  # default local discovery, no baked endpoint
+    assert calls["mode"] == "cli"
 
 
-def test_spawn_worker_for_embody_degrades_to_bridge(monkeypatch, capsys):
-    """When agent-worktrees is absent, the embody backend falls back to bridge."""
+def test_spawn_worker_for_embody_never_degrades_to_acp(monkeypatch, capsys):
+    """Missing CLI capability does not authorize an ACP launch."""
     from agent_dispatch import __main__ as m
     from agent_dispatch import bridge
+    from agent_dispatch import session_acquisition
 
     bridge_calls = {}
 
@@ -1034,18 +1036,20 @@ def test_spawn_worker_for_embody_degrades_to_bridge(monkeypatch, capsys):
         return subprocess.CompletedProcess([], 0, "", "")
 
     monkeypatch.setattr(bridge, "spawn_worker", fake_bridge_spawn)
+    def missing(*args, **kwargs):
+        raise bridge.BridgeUnavailable("CLI capability unavailable")
+    monkeypatch.setattr(session_acquisition, "acquire", missing)
 
     args = types.SimpleNamespace(
         spawn_backend="embody", url=None, verify_timeout=0,
         spawn_agent="task-worker", run_async=False,
     )
     m._do_spawn(args, {"id": "T8"})
-    assert bridge_calls["task_id"] == "T8"
+    assert bridge_calls == {}
     # The degraded fallback must be loud about what it drops (WARNING), never
     # a silent downgrade of the evaluation/duplicate-check guardrails.
     err = capsys.readouterr().err
-    assert "WARNING" in err
-    assert "contract-net evaluation" in err
+    assert "CLI capability unavailable" in err
 
 
 # -- remote registered-agent probe (fleet preflight) -------------------------

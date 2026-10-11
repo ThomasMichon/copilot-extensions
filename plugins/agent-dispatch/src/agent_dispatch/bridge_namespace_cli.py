@@ -86,6 +86,7 @@ def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
         with core._client(args) as c:
             task = c.get(task_id)
             attachments = c.attachments(task_id)
+            reservations = c.list_reservations(task_id=task_id, latest_only=True, limit=1)
     except DispatchError as exc:
         if exc.status_code == 404:
             print(f"dispatch task {task_id} not found", file=sys.stderr)
@@ -103,6 +104,14 @@ def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
     else:
         machine = task.get("target_machine")
         worktree_id = task.get("target_worktree")
+    acquisition_reservation = reservations[0] if reservations else None
+    if (
+        isinstance(acquisition_reservation, dict)
+        and status in {"queued", "claimed", "started", "suspended"}
+        and acquisition_reservation.get("state") in {"reserving", "spawned"}
+        and not acquisition_reservation.get("release_requested")
+    ):
+        worktree_id = worktree_id or acquisition_reservation.get("worktree")
 
     if not worktree_id:
         # A headless body (e.g. a board-sweep/review worker) never binds a
@@ -154,6 +163,7 @@ def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
                 "target_id": task_id,
                 "task": task,
                 "attachments": attachments,
+                "acquisition_reservation": acquisition_reservation,
             },
         }
         print(json.dumps(spec))
@@ -184,6 +194,7 @@ def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
             "target_id": task_id,
             "task": task,
             "attachments": attachments,
+            "acquisition_reservation": acquisition_reservation,
         },
     }
     print(json.dumps(spec))

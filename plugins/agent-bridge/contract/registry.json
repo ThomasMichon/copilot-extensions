@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 29,
+        "current": 30,
         "minimum": 1,
-        "previous_generation": 28,
+        "previous_generation": 29,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -35,7 +35,8 @@
           26,
           27,
           28,
-          29
+          29,
+          30
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -81,21 +82,22 @@
         "codespace_launch_policy": 26,
         "target_preferences": 27,
         "strict_resume": 28,
-        "current_attention": 29
+        "current_attention": 29,
+        "strict_acquisition": 30
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "7e0d4d50db67d256d106062e8ea58c398339f0462ed356bc73b54dcbefef0090",
+          "sha256": "bb15034be397105b401684dd64cefb53fda746018ad7491f79144f69387d806f",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "b5b0843605601bf33d65b332e49e80e9ade23e0ed3f1cee54e17abab67ca156d",
+          "sha256": "a4fddf5fff6fccb66a5633b51ec444d5892b1315ef557e93e04ee00652b15d06",
           "semantic": false,
-          "non_semantic_reason": "Live-message request/response models gained an optional delivery urgency field, then its default changed from \"queue\" to \"steer\"; the live-session registration request gained an optional process_started_at; and ServiceConfig gained an agent_roster_cache_interval field (Phase 3b), whose validation floor was later raised from gt=0 to ge=1.0 to match AgentRosterCache's own runtime clamp; SessionInfo/StartSessionRequest also gained an optional, tolerant-reader caller_session_id (the creating Copilot session id), recorded as null in the representative session-create request fixture's accepted_model. StartSessionResponse gains an optional caller_session_id (HTTP generation 24, gated by caller_session_id), captured in the current session-create response fixture; the representative session-create request shape is unchanged. The live-message response gained an optional duplicate flag for an identical idempotent retry; the prompt-submit request gained an optional no_resume and its response an optional session_id naming the session that took the prompt (HTTP generation 25, gated by cooperative_stop). The live-event ingest item (SdkEventIn) gained an optional, tolerant-reader agentId (the event envelope's sub-agent id); an older daemon ignores it and a newer daemon without it treats the event as before, so no client gates on it."
+          "non_semantic_reason": "Live-message request/response models gained an optional delivery urgency field, then its default changed from \"queue\" to \"steer\"; the live-session registration request gained an optional process_started_at; and ServiceConfig gained an agent_roster_cache_interval field (Phase 3b), whose validation floor was later raised from gt=0 to ge=1.0 to match AgentRosterCache's own runtime clamp; SessionInfo/StartSessionRequest also gained an optional, tolerant-reader caller_session_id (the creating Copilot session id), recorded as null in the representative session-create request fixture's accepted_model. StartSessionResponse gains an optional caller_session_id (HTTP generation 24, gated by caller_session_id), captured in the current session-create response fixture; the representative session-create request shape is unchanged. The live-message response gained an optional duplicate flag for an identical idempotent retry; the prompt-submit request gained an optional no_resume and its response an optional session_id naming the session that took the prompt (HTTP generation 25, gated by cooperative_stop). The live-event ingest item (SdkEventIn) gained an optional, tolerant-reader agentId (the event envelope's sub-agent id); an older daemon ignores it and a newer daemon without it treats the event as before, so no client gates on it. ServiceConfig also gained the optional local_execution_space daemon-configuration selector; it does not change any registered HTTP request or response fixture."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
@@ -129,6 +131,18 @@
         }
       ],
       "fixtures": [
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-30.json",
+          "sha256": "b36fae14696bc3bac0416b8c861a5bf0eba9b197a5c2a487bd7835e6fc9be91d",
+          "role": "unchanged agent-roster response at current HTTP generation",
+          "generation": 30
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/acquisition-protocol.json",
+          "sha256": "e73e6de23803c793529ef873921122bb81b877d3fa4c7a746c258bda93cf8d98",
+          "role": "current additive acquisition capability constants and refusal contract",
+          "generation": 30
+        },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
           "sha256": "41750674e030aaecbab8aab9b40913cda9baf7c3d072c4f3f14699cf82173d28",
@@ -293,6 +307,22 @@
         }
       ],
       "provenance": [
+        {
+          "commit": "db122b5771d2189df12d5f0d518c651cd143bd32",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 30,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-attest byte-identical agent-roster source and unchanged representative response alongside additive acquisition generation 30."
+        },
+        {
+          "commit": "db122b5771d2189df12d5f0d518c651cd143bd32",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 30,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "bff4fd1ff0f5513e0d32a02432096f4f025a5dfa",
+          "capture_method": "Read committed production HTTP constants for generation 30; local acquisition client construction and typed 426 refusal are exercised by test_acquisition_runtime."
+        },
         {
           "commit": "3d0338b56e6d72e1d7204a56a2257ce978577dc0",
           "plugin_version": "0.4.1-dev3",

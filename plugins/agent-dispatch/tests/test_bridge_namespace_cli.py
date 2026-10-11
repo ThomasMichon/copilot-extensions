@@ -34,9 +34,10 @@ def _no_local_machine(monkeypatch):
 
 
 class _FakeClient:
-    def __init__(self, task, attachments=()):
+    def __init__(self, task, attachments=(), reservations=()):
         self._task = task
         self._attachments = list(attachments)
+        self._reservations = list(reservations)
 
     def __enter__(self):
         return self
@@ -51,6 +52,9 @@ class _FakeClient:
 
     def attachments(self, task_id):
         return self._attachments
+
+    def list_reservations(self, **kwargs):
+        return self._reservations
 
 
 def _args(argv):
@@ -95,6 +99,72 @@ def test_namespace_resolve_unclaimed_pinned_task_uses_target_worktree(
     assert rc == 0
     spec = json.loads(capsys.readouterr().out)
     assert spec["worktree_id"] == "wt-pinned"
+
+
+@pytest.mark.parametrize("status", ["queued", "claimed", "started", "suspended"])
+@pytest.mark.parametrize("state", ["reserving", "spawned"])
+def test_namespace_resolve_active_reservation_supplies_acquisition_worktree(
+    monkeypatch, capsys, status, state,
+):
+    reservation = {"worktree": "wt-active", "state": state, "release_requested": False}
+    monkeypatch.setattr(
+        m, "_client",
+        lambda _args, **_kw: _FakeClient(
+            {"status": status, "owner": None, "owner_session_id": "s-current"},
+            reservations=[reservation],
+        ),
+    )
+    assert m.main(["namespace-resolve", "task-1"]) == 0
+    spec = json.loads(capsys.readouterr().out)
+    assert spec["type"] == "worktree"
+    assert spec["worktree_id"] == "wt-active"
+    assert spec["venue"]["acquisition_reservation"] == reservation
+
+
+@pytest.mark.parametrize("status", ["submitted", "completed", "abandoned"])
+@pytest.mark.parametrize("session_source", ["owner", "attachment"])
+def test_namespace_resolve_terminal_task_ignores_historical_reservation(
+    monkeypatch, capsys, status, session_source,
+):
+    reservation = {"worktree": "wt-released", "state": "spawned", "release_requested": False}
+    task = {"status": status, "owner": None}
+    if session_source == "owner":
+        task["owner_session_id"] = "s-durable"
+    monkeypatch.setattr(
+        m, "_client",
+        lambda _args, **_kw: _FakeClient(
+            task, attachments=[{"session_id": "s-durable"}],
+            reservations=[reservation],
+        ),
+    )
+    assert m.main(["namespace-resolve", "task-1"]) == 0
+    spec = json.loads(capsys.readouterr().out)
+    assert spec["type"] == "session"
+    assert "worktree_id" not in spec
+    assert spec["venue"]["acquisition_reservation"] == reservation
+
+
+@pytest.mark.parametrize(
+    "state,release_requested",
+    [("released", False), ("failed", False), ("spawned", True), (None, False)],
+)
+def test_namespace_resolve_inactive_reservation_cannot_redirect_session(
+    monkeypatch, capsys, state, release_requested,
+):
+    monkeypatch.setattr(
+        m, "_client",
+        lambda _args, **_kw: _FakeClient(
+            {"status": "started", "owner": None, "owner_session_id": "s-current"},
+            reservations=[{
+                "worktree": "wt-released", "state": state,
+                "release_requested": release_requested,
+            }],
+        ),
+    )
+    assert m.main(["namespace-resolve", "task-1"]) == 0
+    spec = json.loads(capsys.readouterr().out)
+    assert spec["type"] == "session"
+    assert "worktree_id" not in spec
 
 
 def test_namespace_resolve_unknown_task_exits_not_found(monkeypatch, capsys):

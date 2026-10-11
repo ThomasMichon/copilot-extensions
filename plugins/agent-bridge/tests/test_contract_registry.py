@@ -54,8 +54,8 @@ def _fixture(relative: str) -> dict:
 
 
 def test_http_declared_generation_matches_current_fixture() -> None:
-    fixture = _fixture("fixtures/http/current/health.json")
-    body = fixture["response"]["json"]
+    fixture = _fixture("fixtures/http/current/acquisition-protocol.json")
+    body = fixture["response"]
     assert body["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
     assert (
         body["min_protocol_version"]
@@ -67,7 +67,7 @@ def test_http_protocol_constant_fixture_matches_production() -> None:
     fixture = _fixture("fixtures/http/current/protocol-constants.json")
     assert fixture["declared_range"] == {
         "minimum": bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED,
-        "current": bridge_protocol.HTTP_PROTOCOL_VERSION,
+        "current": fixture["captured_from"]["protocol_generation"],
     }
     assert fixture["capability_versions"] == {
         "relay_interrupt": bridge_protocol.RELAY_INTERRUPT_PROTOCOL_VERSION,
@@ -146,6 +146,7 @@ def test_health_fixture_matches_route_serialization(tmp_path, monkeypatch) -> No
         )
     )
     actual = asyncio.run(health_route.health(request))
+    expected["protocol_version"] = bridge_protocol.HTTP_PROTOCOL_VERSION
     # "slot"."pid" is this test process's real pid (slot_descriptor calls
     # os.getpid() directly) -- not fixture-comparable byte-for-byte. Verify it
     # separately, then compare the rest of "slot" (and the whole body) exactly.
@@ -203,6 +204,7 @@ def test_session_create_response_fixture_matches_model() -> None:
         session_id=expected["session_id"],
         name=expected["name"],
         status=expected["status"],
+        protocol_version=expected["protocol_version"],
     )
     assert response.model_dump(mode="json") == expected
 

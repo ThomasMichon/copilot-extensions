@@ -256,9 +256,12 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
             params["repo"] = repo
         return self._unwrap(self._http.get("/tasks/mine", params=params))
 
-    def start(self, task_id: str, worker_id: str) -> dict:
+    def start(self, task_id: str, worker_id: str, *, owner_session_id: str | None = None) -> dict:
+        body = {"worker_id": worker_id}
+        if owner_session_id:
+            body["owner_session_id"] = owner_session_id
         return self._unwrap(
-            self._http.post(f"/tasks/{task_id}/start", json={"worker_id": worker_id})
+            self._http.post(f"/tasks/{task_id}/start", json=body)
         )
 
     def yield_task(
@@ -455,12 +458,15 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
         )
 
     def set_activity(
-        self, task_id: str, activity: str | None, *, reservation_key: str
+        self, task_id: str, activity: str | None, *, reservation_key: str,
+        observed_at: float | None = None,
+        admission_fence: dict | None = None,
     ) -> dict:
         return self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/activity",
-                json={"activity": activity, "reservation_key": reservation_key},
+                json={"activity": activity, "reservation_key": reservation_key,
+                      "observed_at": observed_at, "admission_fence": admission_fence},
             )
         )
 

@@ -69,7 +69,8 @@ from .managed_runtime import (
 )
 from .loop_governance import LoopGovernance
 from .registrations import RegistrationKind
-
+from .supervisor_lifecycle import Invocation, daemon_audit
+from .supervisor_native_lifecycle import NativeOwnershipUnconfirmed, native_restart_unit, request_native_restart
 from .supervisor_registration import (  # noqa: F401 -- re-exported below
     DesiredRegistrationSet,
     Launcher,
@@ -313,6 +314,8 @@ class SupervisorDaemon:
         #: eligible (rather than waiting a full poll interval after startup).
         self._self_update_last_check = float("-inf")
         self._self_update_last_spawn: float | None = None
+        self._lifecycle_invocation: Invocation | None = None
+        self._self_update_native_unit: str | None = None
         #: Set by ``_maybe_self_update`` the tick it triggers a handoff; read by
         #: ``serve`` to break its loop and pick the distinct return code.
         self.self_update_triggered = False
@@ -1944,13 +1947,13 @@ class SupervisorDaemon:
         return self._shutdown_drained
 
     def _maybe_self_update(self) -> bool:
-        """Check for a newer installed version and hand off to it if found.
+        """Check for a newer slot and commit a native restart or spawned handoff.
 
         Fail-safe and non-blocking: a no-op unless ``self_update_enabled`` and
         the poll cadence has elapsed since the last check; a staleness-check
         failure (a marker read raising, etc.) never propagates. Returns
-        ``True`` once a successor daemon has been spawned and this process
-        should exit; ``False`` otherwise, including when the spawn itself
+        ``True`` commits native restart or a returned spawn, not successor readiness.
+        ``False`` otherwise, including when the spawn itself
         failed (in which case this daemon reclaims its singleton lease and
         keeps running rather than exiting into a void).
         """
@@ -2000,23 +2003,29 @@ class SupervisorDaemon:
                 target,
             )
             return False
-        self._self_update_last_spawn = now
         # Every reconcile tick already runs to completion before the next one
         # starts, so this is always a safe cutover point (unlike the
         # coordinator, there is no in-flight request to drain). Wind down
         # every managed unit and release the singleton lease *before* spawning
         # the successor, so its own `acquire_singleton()` never races this
         # daemon's still-held lock.
+        try:
+            native_unit = native_restart_unit()
+        except NativeOwnershipUnconfirmed as exc:
+            log.warning("supervisor self-update deferred: %s", exc)
+            return False
+        self._self_update_last_spawn = now
+        daemon_audit(self, "handoff", "new-slot-selected")
         drained = self.shutdown()
         self.release_singleton()
+        if native_unit is not None:
+            request_native_restart(self, native_unit)
+            return True
         try:
             self._self_update_spawn(target, self._self_update_argv)
         except Exception:
-            log.warning(
-                "supervisor self-update: failed to spawn a successor daemon "
-                "at %s; reclaiming the singleton lease to stay on this version",
-                target, exc_info=True,
-            )
+            daemon_audit(self, "handoff", "spawn-request-returned", outcome="fail")
+            log.warning("supervisor self-update: spawn failed at %s; reclaiming singleton lease", target, exc_info=True)
             if not self.acquire_singleton():
                 log.error(
                     "supervisor self-update: spawn failed AND could not "
@@ -2037,11 +2046,8 @@ class SupervisorDaemon:
                     self._retired_runtime_executors.append(self._runtime_executor)
                 self._runtime_executor = None
             return False
-        log.info(
-            "supervisor self-update: detected a newer installed version at "
-            "%s -- spawned a successor daemon and handing off",
-            target,
-        )
+        log.info("supervisor self-update: spawned a successor daemon at %s and handing off", target)
+        daemon_audit(self, "handoff", "spawn-request-returned", outcome="ok")
         return True
 
     def _reconnect(self) -> bool:
@@ -2098,11 +2104,13 @@ class SupervisorDaemon:
         (e.g. the runtime-status file) for programmatic staleness checks.
         """
         if single_instance and not self.acquire_singleton():
+            daemon_audit(self, "selection", "singleton-held-by-peer", outcome="skipped")
             log.info(
                 "another supervisor daemon already holds %s; standing down",
                 supervisor_lease_scope(self.machine, self.env),
             )
             return 3
+        daemon_audit(self, "start", "singleton-acquired" if single_instance else "unguarded-run", outcome="ok")
         try:
             while True:
                 boundary = self._recheck_governance("iteration-boundary")
@@ -2181,24 +2189,13 @@ class SupervisorDaemon:
             if single_instance:
                 self.release_singleton()
             if self.self_update_triggered and not drained:
-                # A successor is already spawned and live (see
-                # _maybe_self_update); this process's only remaining job is
-                # to vanish. A plain return here still runs Python's normal
-                # interpreter-exit machinery, which joins every live
-                # ThreadPoolExecutor worker thread (see shutdown()'s
-                # docstring) -- so a genuinely stuck probe/validate call
-                # would otherwise delay this process's exit for as long as
-                # its own underlying operation's ceiling allows, well after
-                # the successor has already taken over. os._exit() bypasses
-                # that atexit join entirely; safe specifically here since
-                # every unit was already asked to stop above and nothing
-                # else in this process depends on a cooperative return from
-                # serve().
+                # The handoff is committed: either native restart owns the next
+                # launch or a successor spawn returned. Avoid interpreter atexit
+                # joining stuck probe threads after every owned unit was asked
+                # to stop. This exit is a restart request, not successor proof.
                 log.warning(
-                    "supervisor self-update: a probe/validate worker was "
-                    "still running past the shutdown grace window; forcing "
-                    "process exit rather than wait on it (the successor is "
-                    "already up)",
+                    "supervisor self-update: probe worker outlived shutdown "
+                    "grace; forcing exit to finish the committed handoff",
                 )
                 os._exit(SELF_UPDATE_EXIT_CODE)
         if self.self_update_triggered:
