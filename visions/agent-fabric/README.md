@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-10-08
+- **Last revised:** 2026-10-11
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
