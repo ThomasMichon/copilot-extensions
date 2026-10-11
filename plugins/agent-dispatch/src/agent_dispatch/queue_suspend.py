@@ -155,6 +155,8 @@ class QueueSuspendMixin:
         }
         if adopt_owner_session_id is not None:
             extra["owner_session_id"] = adopt_owner_session_id
+        from .acquisition_receipts import start_authority
+        authority = start_authority(self, task_id) if adopt_owner_session_id is not None else None
         allowed, to = _task_transition_spec("resume")
         result = self._transition(
             task_id,
@@ -172,6 +174,7 @@ class QueueSuspendMixin:
             wake_message=wake_message,
             reject_if_held=True,
             idempotent_replay=adopt_owner_session_id is None,
+            start_acquisition_authority=authority,
         )
         self._notify_owned_transition()
         return result

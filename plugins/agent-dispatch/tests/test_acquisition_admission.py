@@ -213,6 +213,32 @@ def test_withdrawn_cli_receipt_cannot_fall_back_to_legacy_owner_start(tmp_path, 
     assert queue.get(task.id).status == "claimed"
 
 
+def test_suspended_acquisition_adoption_requires_exact_native_receipt(tmp_path, monkeypatch):
+    queue = TaskQueue(tmp_path / "resume-receipt.db")
+    task = queue.create("work")
+    queue.claim_one("machine/worktree-a", task_id=task.id)
+    queue.start(task.id, "machine/worktree-a", owner_session_id="prior-native")
+    queue.suspend(task.id, "machine/worktree-a", reason="resume test")
+    task = queue.get(task.id)
+    reservation, _ = queue.reserve_spawn(task.id, allow_suspended_reembodiment=True)
+    queue.record_spawn_worktree(reservation.key, "worktree-a", ownership="reused")
+    receipt = {
+        "reservation_key": reservation.key, "task_id": task.id,
+        "task_generation": task.generation, "worktree_id": "worktree-a",
+        "session_id": "native-a", "native_session_id": "native-a",
+        "mode": "cli", "delivery_id": "delivery-a",
+    }
+    bind(queue, receipt, evidence=evidence(receipt))
+    monkeypatch.setattr(acquisition_receipts, "bridge_evidence", lambda _id: {
+        **evidence(receipt), "stage": "delivered",
+    })
+    with pytest.raises(TaskError, match="does not match"):
+        queue.resume(task.id, "machine/worktree-a", adopt_owner_session_id="wrong-native")
+    assert queue.get(task.id).status == "suspended"
+    resumed = queue.resume(task.id, "machine/worktree-a", adopt_owner_session_id="native-a")
+    assert resumed.status == "started" and resumed.owner_session_id == "native-a"
+
+
 def test_receipt_route_reads_bridge_authority_not_request_supplied_session(tmp_path, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient

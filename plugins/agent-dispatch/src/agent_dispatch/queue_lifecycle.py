@@ -829,7 +829,7 @@ class QueueLifecycleMixin:
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
-            if note == "start":
+            if note == "start" or note == "resume" and (extra or {}).get("owner_session_id"):
                 from .acquisition_receipts import validate_start
                 validate_start(
                     conn, task, (extra or {}).get("owner_session_id"), start_acquisition_authority,
