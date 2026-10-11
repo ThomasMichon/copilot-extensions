@@ -66,14 +66,17 @@ def _task_menu_open(scr):
     return _task_menu(scr) is not None
 
 
-async def _open_task_menu_and_wait(scr, pilot):
-    """Open the task action sub-menu, then poll briefly for the modal to
-    actually mount. A single ``pilot.pause()`` right after ``push_screen`` is
-    occasionally not enough to observe the new screen on the stack under
-    system load -- a pre-existing, load-sensitive flake independent of any
-    particular test's own content (reproduces identically on an unmodified
-    checkout); poll instead of assuming one pump always suffices."""
-    scr._open_task_menu()
+async def _open_task_menu_and_wait(scr, pilot, *, row: int) -> None:
+    """Render the seeded pivot, focus its native task row, and activate it."""
+    scr.refresh()
+    await pilot.pause()
+    body = scr.query_one("#nf-body-data")
+    body.focus()
+    body.highlighted = body._stops.index(("T", row))
+    await pilot.pause()
+    assert body.has_focus and scr.sel == ("T", row)
+    assert scr._selected_task() == scr._task_rows()[row]
+    await pilot.press("enter")
     for _ in range(50):
         await pilot.pause()
         if _task_menu(scr) is not None:
@@ -9290,7 +9293,7 @@ def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch
 
             # Enter opens the action sub-menu (ModalScreen) with the manifest's
             # actions.
-            await _open_task_menu_and_wait(scr, pilot)
+            await _open_task_menu_and_wait(scr, pilot, row=0)
             menu = _task_menu(scr)
             assert menu is not None
             assert [a.label for a in menu._actions] == [
@@ -9455,7 +9458,7 @@ def test_registered_pivot_conditional_actions_filter_by_when(tmp_path, monkeypat
             # Row 0 (in-use): Details + Release, NOT Recycle.
             scr.sel = ("T", 0)
             await pilot.pause()
-            await _open_task_menu_and_wait(scr, pilot)
+            await _open_task_menu_and_wait(scr, pilot, row=0)
             menu = _task_menu(scr)
             assert menu is not None
             assert [a.label for a in menu._actions] == ["Details", "Release"]
@@ -9465,7 +9468,7 @@ def test_registered_pivot_conditional_actions_filter_by_when(tmp_path, monkeypat
             # Row 1 (stale): Details + Recycle, NOT Release.
             scr.sel = ("T", 1)
             await pilot.pause()
-            await _open_task_menu_and_wait(scr, pilot)
+            await _open_task_menu_and_wait(scr, pilot, row=1)
             menu = _task_menu(scr)
             assert menu is not None
             assert [a.label for a in menu._actions] == ["Details", "Recycle"]
@@ -9850,7 +9853,7 @@ def test_steering_card_and_form_actions_gate_and_drive(tmp_path, monkeypatch):
             # Awaiting-steer row: Card + Steer are shown (plus Abandon).
             scr.sel = ("T", 0)
             await pilot.pause()
-            await _open_task_menu_and_wait(scr, pilot)
+            await _open_task_menu_and_wait(scr, pilot, row=0)
             menu = _task_menu(scr)
             assert [a.label for a in menu._actions] == ["View card", "Steer", "Abandon"]
             await pilot.press("escape")
@@ -9859,7 +9862,7 @@ def test_steering_card_and_form_actions_gate_and_drive(tmp_path, monkeypatch):
             # Non-awaiting row: only Abandon (card/steer gated out).
             scr.sel = ("T", 1)
             await pilot.pause()
-            await _open_task_menu_and_wait(scr, pilot)
+            await _open_task_menu_and_wait(scr, pilot, row=1)
             menu = _task_menu(scr)
             assert [a.label for a in menu._actions] == ["Abandon"]
             await pilot.press("escape")
@@ -10284,8 +10287,13 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
         async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
             scr.machine_idx = scr.local_index()
-            scr.sel = ("L", 0)
+            scr.refresh()
             await pilot.pause()
+            body = scr.query_one("#nf-body-data")
+            body.focus()
+            body.highlighted = body._stops.index(("L", 0))
+            await pilot.pause()
+            assert body.has_focus and scr.sel == ("L", 0)
             scr._open_submenu()
             await pilot.pause()
             # Open-first: the menu is ALREADY open (from cached verbs) and marked

@@ -1,0 +1,9 @@
+{
+  "comment": "Synchronize optional strict pre-resume Windows Job containment in the vendored process helper.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

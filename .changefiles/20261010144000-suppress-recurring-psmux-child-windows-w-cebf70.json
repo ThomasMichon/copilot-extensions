@@ -1,0 +1,9 @@
+{
+  "comment": "Suppress recurring PSMux child windows while preserving direct daemon PID ownership.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

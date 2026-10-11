@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Cross-platform containment for repository plugin test processes."""
+"""Cross-platform containment for repository plugin test processes.
+
+Windows worker and command boundaries use the canonical no-window primitive
+with explicit inherited stdio. Ordinary console descendants inherit that
+launch state; intentional interactive child launches are not rewritten.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +18,16 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence, TypeVar
+
+# Repository runners consume the canonical source without a plugin installation.
+_previous_path = sys.path.copy()
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[1] / "libs" / "agent-procutil" / "src")
+)
+try:
+    from agent_procutil import no_window_kwargs
+finally:
+    sys.path[:] = _previous_path
 
 CONTAINED_ENV = "COPILOT_EXTENSIONS_TEST_CONTAINED"
 SANDBOX_ENV = "COPILOT_EXTENSIONS_TEST_SANDBOX"
@@ -507,6 +522,16 @@ def _worker_command(command: Sequence[str], ready: Path) -> list[str]:
     return [sys.executable, str(Path(__file__).resolve()), "_worker", str(ready), *command]
 
 
+def _windows_stdio_kwargs() -> dict[str, Any]:
+    # CREATE_NO_WINDOW has no console from which to recover default handles.
+    # Forward native streams explicitly, including when the caller uses pipes.
+    if os.name == "nt":
+        return {
+            "stdin": sys.__stdin__, "stdout": sys.__stdout__, "stderr": sys.__stderr__,
+        }
+    return {}
+
+
 def _worker_main(argv: Sequence[str]) -> int:
     if len(argv) < 2:
         raise SystemExit("worker requires a ready path and command")
@@ -518,7 +543,9 @@ def _worker_main(argv: Sequence[str]) -> int:
             print("containment worker was not assigned before launch", file=sys.stderr)
             return 126
         time.sleep(0.01)
-    return subprocess.run(command, check=False).returncode
+    return subprocess.run(
+        command, check=False, **no_window_kwargs(), **_windows_stdio_kwargs(),
+    ).returncode
 
 
 def _run_contained_process(
@@ -539,6 +566,8 @@ def _run_contained_process(
         cwd=str(cwd),
         env=dict(env),
         start_new_session=os.name != "nt",
+        **no_window_kwargs(),
+        **_windows_stdio_kwargs(),
     )
     job = None
     try:

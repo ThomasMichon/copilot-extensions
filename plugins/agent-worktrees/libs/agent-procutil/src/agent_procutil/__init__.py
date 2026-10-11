@@ -377,6 +377,8 @@ async def spawn_in_kill_on_close_job(
 
 def spawn_sync_in_kill_on_close_job(
     argv: list[str],
+    *,
+    require_job: bool = False,
     **kwargs: Any,
 ) -> tuple[subprocess.Popen, JobHandle | None]:
     """Synchronous (``subprocess.Popen``) counterpart to
@@ -398,7 +400,9 @@ def spawn_sync_in_kill_on_close_job(
     child is already dead -- exactly the failure mode that left a real
     self-update sweep tick alive-but-stuck for over a day in practice.
 
-    If job creation or assignment fails, the child still runs (resumed) and is
+    With ``require_job=True``, failed Windows Job assignment kills the still
+    suspended child before it can launch descendants and raises explicitly.
+    Otherwise, if job creation or assignment fails, the child still runs (resumed) and is
     returned with ``job_handle=None`` so existing cleanup paths remain in
     charge -- containment is a best-effort hardening layer, not a hard
     dependency for the child to execute at all. Off Windows this is a plain
@@ -416,6 +420,10 @@ def spawn_sync_in_kill_on_close_job(
     try:
         pid = process.pid
         job_handle = _assign_suspended_to_kill_on_close_job(pid)
+        if job_handle is None and require_job:
+            process.kill()
+            process.wait(timeout=5)
+            raise RuntimeError("Windows descendant Job assignment failed before child resume")
         if not _resume_suspended_process(pid):
             log.debug("killing pid %s because suspended-start resume failed", pid)
             try:

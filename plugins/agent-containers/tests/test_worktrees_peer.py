@@ -42,6 +42,7 @@ def test_lookup_uses_native_same_cell_prefix(
         assert argv == [*prefix, "state-root", "--json"]
         assert kwargs["encoding"] == "utf-8"
         assert kwargs["timeout"] == 20
+        assert kwargs.items() >= config._peer_launch.no_window_kwargs().items()
         return subprocess.CompletedProcess(argv, 0, json.dumps({
             "requires_external": True, "bound": True, "state_root": str(knowledge),
         }), "")
