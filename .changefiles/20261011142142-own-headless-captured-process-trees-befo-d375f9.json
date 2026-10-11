@@ -1,0 +1,9 @@
+{
+  "comment": "Own headless captured process trees before execution and reap descendants on Windows timeout",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

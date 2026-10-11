@@ -4,10 +4,10 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent serial slice PRs targeting `dev`
 - **Created:** 2026-10-10
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugin-services/README.md` - service-scaled process count, transient hooks, discovered local endpoints
 - **Umbrella issue:** #6086
-- **Sub-issues:** #6087
+- **Sub-issues:** #6087, #4644
 - **Related, independently owned:** #6040, #6077, #6079, #6088, #6092
 
 ## Guiding Intent
@@ -154,6 +154,21 @@ after equivalence and error semantics are established. Keep native integration
 small and explicit while unit policy tests remain in-process.
 
 ## Journal
+
+### 2026-10-11 - Captured child safety
+
+- Resumed the reviewed campaign, retaining the separate hook fast-path and
+  immutable-runtime admission obligations.
+- Traced local-guidance identity discovery to the same detached captured-child
+  seam as bounded Git publication. A console-subsystem re-exec could allocate
+  a terminal; PID-based timeout sweeps also carried the tracked #4644 race.
+- Reused the existing suspended-start Job primitive with required Windows
+  ownership and captured-child headlessness. POSIX process-group behavior is
+  unchanged; no daemon lifetime escape or installed-runtime mutation.
+- Focused contained policy, publication and guidance tests passed, including
+  two native consoleless-parent cycles with zero new visible windows and zero
+  foreground transitions, captured output/exit status, and grandchild timeout
+  cleanup. Promotion and authorized running-state rollout remain outstanding.
 
 ### 2026-10-10 - Canonical campaign claimed
 

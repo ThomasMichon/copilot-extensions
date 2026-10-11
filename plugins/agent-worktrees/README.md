@@ -57,6 +57,15 @@ grouping never makes distinct registered spaces local to one another. See
 [Execution-space identity](docs/config-reference.md#execution-space-identity)
 for explicit selection, compatibility and lifecycle fences.
 
+## Captured child ownership
+
+Bounded Git publication and local-guidance discovery/rendering use a headless
+captured child on Windows, assigned to a kill-on-close Job before execution.
+Job admission failure is explicit; there is no detached fallback. Timeout or
+caller exit reaps ordinary descendants while preserving captured diagnostics.
+POSIX retains its process-group timeout cleanup. This is not a durable-daemon
+launch or an interactive terminal.
+
 ## Same-Machine AHP Sessions
 
 Same-machine Agent Host Protocol (AHP) session ownership now lives in the

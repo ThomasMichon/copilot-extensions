@@ -11,7 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Process Slot Ownership](active/process-slot-ownership/README.md) | Draft; reader-lifetime continuation | #3963; registry presentation separately #5559 |
-| [Process Spawn Reduction](active/process-spawn-reduction/README.md) | Draft | #6086 |
+| [Process Spawn Reduction](active/process-spawn-reduction/README.md) | Active | #6086 |
 | [Private PR Source Attribution](active/private-pr-source-attribution/README.md) | Active; originating identity slice | #6068 |
 | [Remote Picker Seed Parity](active/remote-picker-seed-parity/README.md) | Draft; operator-requested parity | #6057 |
 | [Worktree Conclusion Tidier](active/worktree-conclusion-tidier/README.md) | Draft; design/charter review before pilot or scheduling | #6060 |
