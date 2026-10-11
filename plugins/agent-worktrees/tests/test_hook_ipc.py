@@ -519,8 +519,9 @@ def test_session_start_rejects_old_resident_without_lifecycle_capability(
     assert hook_client._request("sessionStart", {}, tmp_path) is None
 
 
+@pytest.mark.parametrize("installed", [False, True])
 def test_session_start_old_runtime_uses_legacy_compatibility(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, installed
 ):
     runtime = tmp_path / ".agent-worktrees"
     python = runtime / "versions" / "1.5.3-dev744" / (
@@ -535,6 +536,14 @@ def test_session_start_old_runtime_uses_legacy_compatibility(
     (runtime / "current-version").write_text(
         "1.5.3-dev744", encoding="utf-8"
     )
+    # An installed but idle Manager must not suppress stale-runtime recovery.
+    monkeypatch.setattr(
+        hook_client.shutil, "which",
+        lambda name: str(tmp_path / "manager-stub") if installed else None,
+    )
+    manager = tmp_path / "manager"
+    manager.mkdir()
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(manager))
     seen = {}
 
     def legacy(payload):
@@ -561,6 +570,216 @@ def test_session_start_old_runtime_uses_legacy_compatibility(
         "additionalContext": "legacy"
     }
     assert seen["sessionId"] == "session-1"
+
+
+def test_session_start_old_runtime_skips_legacy_when_worktree_manager_active(
+    monkeypatch, tmp_path
+):
+    """A stale runtime must not trigger this hook's own legacy reconcile
+    fallback (which can shell out to a full installer build) when an external
+    driver like worktree-manager already owns update/reconcile duties --
+    otherwise every session start redundantly races its own install attempt
+    against the same runtime slot."""
+    runtime = tmp_path / ".agent-worktrees"
+    python = runtime / "versions" / "1.5.3-dev744" / (
+        "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
+    )
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    (python.parents[1] / ".install-complete.json").write_text(
+        json.dumps({"version": "1.5.3-dev744"}),
+        encoding="utf-8",
+    )
+    (runtime / "current-version").write_text(
+        "1.5.3-dev744", encoding="utf-8"
+    )
+    (runtime / "updater.lock").write_text(
+        json.dumps({"pid": os.getpid(), "started": time.time()}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(hook_client.shutil, "which", lambda name: None)
+    monkeypatch.setattr(
+        hook_client,
+        "_load_sibling",
+        lambda name: SimpleNamespace(
+            _pid_alive=lambda pid: pid == os.getpid(),
+            _pid_image_path=lambda pid: str(python),
+        ),
+    )
+    seen = {}
+
+    def lifecycle(payload, *, skip_reconcile=False):
+        seen["skip_reconcile"] = skip_reconcile
+        seen["sessionId"] = payload["sessionId"]
+        return {"additionalContext": "registered"}
+
+    monkeypatch.setattr(hook_client, "_fallback_legacy_session_start", lifecycle)
+    monkeypatch.setattr(
+        hook_client.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("old runtime must not be invoked"),
+    )
+    payload = {
+        "sessionId": "session-1",
+        "cwd": str(tmp_path),
+        "_agentWorktrees": {
+            "pluginVersion": "1.5.3-dev745",
+            "environment": {},
+        },
+    }
+    assert hook_client._fallback_session_start(payload, tmp_path) == {
+        "additionalContext": "registered"
+    }
+    assert seen == {"skip_reconcile": True, "sessionId": "session-1"}
+
+
+def test_active_update_preserves_non_reconcile_legacy_hooks(monkeypatch):
+    launched = []
+
+    class Process:
+        def __init__(self, argv, **kwargs):
+            script = next(arg for arg in argv if arg.endswith((".ps1", ".sh")))
+            launched.append((Path(script).stem, kwargs["env"]))
+
+        def communicate(self, *args, **kwargs):
+            return '{"additionalContext":"lifecycle"}', ""
+
+    monkeypatch.setattr(hook_client.shutil, "which", lambda name: "shell")
+    monkeypatch.setattr(hook_client.subprocess, "Popen", Process)
+    assert hook_client._fallback_legacy_session_start(
+        {"sessionId": "session-1"}, skip_reconcile=True
+    ) == {"additionalContext": "lifecycle"}
+    assert {name for name, env in launched} == {
+        "project-hooks", "register-nudge", "register-session", "anchor-hygiene-check"
+    }
+    for name, env in launched:
+        assert env["WORKTREE_NO_RECONCILE"] == "1"
+        assert env["WORKTREE_NO_PROVISION"] == "1"
+
+
+@pytest.mark.parametrize(
+    "ownership",
+    [
+        None,
+        {"pid": 0, "started": 999},
+        {"pid": True, "started": 999},
+        {"pid": 1, "started": "999"},
+        {"pid": 1, "started": float("nan")},
+        {"pid": 1, "started": 10 ** 1000},
+        {"pid": 1, "started": -(10 ** 1000)},
+        {"pid": 1, "started": 1001},
+        {"pid": 1, "started": 880},
+    ],
+)
+def test_update_driver_rejects_absent_or_invalid_ownership(
+    monkeypatch, tmp_path, ownership
+):
+    runtime = tmp_path / ".agent-worktrees"
+    runtime.mkdir()
+    if ownership is not None:
+        (runtime / "updater.lock").write_text(json.dumps(ownership), encoding="utf-8")
+    (runtime / "updater-status.json").write_text(
+        json.dumps({"stage_done": True, "skipped": "locked"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(hook_client.time, "time", lambda: 1000)
+    monkeypatch.setattr(
+        hook_client, "_load_sibling",
+        lambda name: pytest.fail("invalid ownership must not probe a process"),
+    )
+    assert not hook_client._external_update_driver_active(tmp_path, Path(sys.executable))
+
+
+@pytest.mark.parametrize("alive,image", [(False, "matching"), (True, None), (True, "other")])
+def test_update_driver_rejects_dead_or_wrong_process(monkeypatch, tmp_path, alive, image):
+    runtime = tmp_path / ".agent-worktrees"
+    runtime.mkdir()
+    (runtime / "updater.lock").write_text(
+        json.dumps({"pid": 123, "started": time.time()}), encoding="utf-8"
+    )
+    python = tmp_path / "python"
+    monkeypatch.setattr(
+        hook_client, "_load_sibling",
+        lambda name: SimpleNamespace(
+            _pid_alive=lambda pid: alive,
+            _pid_image_path=lambda pid: str(python) if image == "matching" else image,
+        ),
+    )
+    assert not hook_client._external_update_driver_active(tmp_path, python)
+
+
+def test_update_driver_tracks_real_stage_lock_lifetime(tmp_path):
+    from agent_worktrees import update_stage
+
+    runtime = tmp_path / ".agent-worktrees"
+    lock = runtime / "updater.lock"
+    helper = hook_client._load_sibling("versioned_runtime.py")
+    assert helper is not None
+    # Test venvs can use a trampoline; production version slots use copied
+    # interpreters. Bind this fixture to the actual running image.
+    image = helper._pid_image_path(os.getpid())
+    assert image is not None
+    python = Path(image)
+    assert update_stage.acquire_lock(lock)
+    try:
+        assert hook_client._external_update_driver_active(tmp_path, python)
+    finally:
+        update_stage.release_lock(lock)
+    assert not hook_client._external_update_driver_active(tmp_path, python)
+
+
+@pytest.mark.parametrize("failure", ["unavailable", "probe-error"])
+def test_update_driver_unverified_ownership_preserves_recovery(
+    monkeypatch, tmp_path, failure
+):
+    runtime = tmp_path / ".agent-worktrees"
+    runtime.mkdir()
+    (runtime / "updater.lock").write_text(
+        json.dumps({"pid": 123, "started": time.time()}), encoding="utf-8"
+    )
+
+    def probe(pid):
+        raise OSError("process probe unavailable")
+
+    helper = None if failure == "unavailable" else SimpleNamespace(_pid_image_path=probe)
+    monkeypatch.setattr(hook_client, "_load_sibling", lambda name: helper)
+    assert not hook_client._external_update_driver_active(tmp_path, Path(sys.executable))
+
+
+@pytest.mark.parametrize("result", ["/runtime/bin/python", None, "probe-error"])
+def test_update_driver_darwin_native_image_probe(monkeypatch, tmp_path, result):
+    import ctypes
+
+    runtime = tmp_path / ".agent-worktrees"
+    runtime.mkdir()
+    (runtime / "updater.lock").write_text(
+        json.dumps({"pid": 123, "started": time.time()}), encoding="utf-8"
+    )
+    calls = []
+
+    def probe(pid, buffer, size):
+        calls.append((pid, size))
+        if result == "probe-error":
+            raise OSError("native probe unavailable")
+        if result is None:
+            return 0
+        buffer.value = os.fsencode(result)
+        return len(buffer.value)
+
+    monkeypatch.setattr(hook_client.sys, "platform", "darwin")
+    monkeypatch.setattr(
+        hook_client, "_load_sibling",
+        lambda name: SimpleNamespace(
+            _pid_image_path=lambda pid: None, _pid_alive=lambda pid: True,
+        ),
+    )
+    monkeypatch.setattr(
+        ctypes, "CDLL",
+        lambda name: SimpleNamespace(proc_pidpath=probe),
+    )
+    assert hook_client._external_update_driver_active(
+        tmp_path, Path("/runtime/bin/python")
+    ) is (result == "/runtime/bin/python")
+    assert calls == [(123, 4096)]
 
 
 def test_session_start_enriches_payload_with_session_environment(
@@ -1659,7 +1878,7 @@ def test_migrate_legacy_marketplace_overrides_retires_marker(tmp_path):
         json.dumps(
             {
                 "extraKnownMarketplaces": {
-                    "odsp-web-harness": {
+                    "example-knowledge-repo": {
                         "source": {
                             "source": "directory",
                             "path": "C:\\stale\\anchor\\.ai",
@@ -1670,7 +1889,7 @@ def test_migrate_legacy_marketplace_overrides_retires_marker(tmp_path):
                 "_agentWorktreesMarketplaceOverrides": {
                     "version": 1,
                     "marketplaces": {
-                        "odsp-web-harness": {
+                        "example-knowledge-repo": {
                             "source": {
                                 "source": "directory",
                                 "path": "C:\\stale\\anchor\\.ai",
@@ -1687,7 +1906,7 @@ def test_migrate_legacy_marketplace_overrides_retires_marker(tmp_path):
 
     result = json.loads(settings_local.read_text(encoding="utf-8"))
     assert "_agentWorktreesMarketplaceOverrides" not in result
-    assert "odsp-web-harness" not in result.get("extraKnownMarketplaces", {})
+    assert "example-knowledge-repo" not in result.get("extraKnownMarketplaces", {})
     assert result["extraKnownMarketplaces"]["operator-own"] == unrelated_value
 
 
@@ -1699,11 +1918,11 @@ def test_migrate_legacy_marketplace_overrides_preserves_operator_edit(tmp_path):
     settings_local.write_text(
         json.dumps(
             {
-                "extraKnownMarketplaces": {"odsp-web-harness": edited_value},
+                "extraKnownMarketplaces": {"example-knowledge-repo": edited_value},
                 "_agentWorktreesMarketplaceOverrides": {
                     "version": 1,
                     "marketplaces": {
-                        "odsp-web-harness": {
+                        "example-knowledge-repo": {
                             "source": {
                                 "source": "directory",
                                 "path": "C:\\stale\\anchor\\.ai",
@@ -1723,7 +1942,7 @@ def test_migrate_legacy_marketplace_overrides_preserves_operator_edit(tmp_path):
     # The operator changed this value after the marker was written, so the
     # migration must not clobber it -- only exactly-unmodified marker-owned
     # values are retired.
-    assert result["extraKnownMarketplaces"]["odsp-web-harness"] == edited_value
+    assert result["extraKnownMarketplaces"]["example-knowledge-repo"] == edited_value
 
 
 def test_migrate_legacy_marketplace_overrides_no_marker_is_noop(tmp_path):

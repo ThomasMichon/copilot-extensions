@@ -569,7 +569,7 @@ def _bootstrap_first_install(payload: dict) -> dict:
     return result
 
 
-def _fallback_legacy_session_start(payload: dict) -> dict:
+def _fallback_legacy_session_start(payload: dict, *, skip_reconcile: bool = False) -> dict:
     scripts = Path(__file__).resolve().parent
     if os.name == "nt":
         shell = shutil.which("pwsh") or shutil.which("powershell.exe")
@@ -601,6 +601,8 @@ def _fallback_legacy_session_start(payload: dict) -> dict:
         }
     )
     for name, extra in specs:
+        if skip_reconcile and name in {"bootstrap-check", "provision-check"}:
+            continue
         script = scripts / f"{name}{suffix}"
         if not script.is_file():
             continue
@@ -612,7 +614,14 @@ def _fallback_legacy_session_start(payload: dict) -> dict:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    env={**os.environ, "PYTHONPATH": ""},
+                    env={
+                        **os.environ,
+                        "PYTHONPATH": "",
+                        **(
+                            {"WORKTREE_NO_RECONCILE": "1", "WORKTREE_NO_PROVISION": "1"}
+                            if skip_reconcile else {}
+                        ),
+                    },
                     **group_kwargs,
                 )
             )
@@ -659,6 +668,61 @@ def _fallback_legacy_session_start(payload: dict) -> dict:
     return result
 
 
+def _update_driver_image(helper, pid: int) -> str | None:
+    image = helper._pid_image_path(pid)
+    if image or sys.platform != "darwin":
+        return image
+    import ctypes
+
+    libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
+    probe = libproc.proc_pidpath
+    probe.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+    probe.restype = ctypes.c_int
+    buffer = ctypes.create_string_buffer(4096)
+    if probe(pid, buffer, len(buffer)) <= 0:
+        return None
+    return os.fsdecode(buffer.value) or None
+
+
+def _external_update_driver_active(home: Path, python: Path) -> bool:
+    """Defer only to a live update stage, not an installed Manager.
+
+    Manager's launch wrapper drives ``stage-update`` through the engine. Its
+    ``update_stage.acquire_lock`` records pid/started in ``updater.lock`` for
+    at most 120 seconds and releases it in ``finally``. Read that ownership
+    signal directly, without invoking the stale runtime or a provider command.
+    A completed stage or a cached ``skipped: locked`` status owns no work.
+    """
+    runtime = _selected_runtime_root(home)
+    if runtime is None:
+        return False
+    lock = _read_json(runtime / "updater.lock")
+    if not lock:
+        return False
+    pid, started = lock.get("pid"), lock.get("started")
+    now = time.time()
+    if (
+        type(pid) is not int
+        or pid <= 0
+        or type(started) not in (int, float)
+        or (type(started) is float and not math.isfinite(started))
+        or not now - 120 < started <= now
+    ):
+        return False
+    helper = _load_sibling("versioned_runtime.py")
+    if helper is None:
+        return False
+    try:
+        image = _update_driver_image(helper, pid)
+        return bool(
+            image
+            and Path(image).resolve() == python.resolve()
+            and helper._pid_alive(pid)
+        )
+    except Exception:
+        return False
+
+
 def _fallback_session_start(payload: dict, home: Path) -> dict:
     contextual = bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
     python = _runtime_python(home)
@@ -678,6 +742,10 @@ def _fallback_session_start(payload: dict, home: Path) -> dict:
         and payload_version
         and _version_key(runtime_version) < _version_key(payload_version)
     ):
+        if _external_update_driver_active(home, python):
+            return {} if contextual else _fallback_legacy_session_start(
+                payload, skip_reconcile=True
+            )
         return {} if contextual else _fallback_legacy_session_start(payload)
     try:
         environment = os.environ.copy()

@@ -1,0 +1,9 @@
+{
+  "comment": "sessionStart hook: skip the legacy stale-runtime reconcile fallback entirely when an external update driver (worktree-manager) is already active, instead of racing it with another concurrent install attempt",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
