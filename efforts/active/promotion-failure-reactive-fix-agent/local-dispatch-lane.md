@@ -1,10 +1,10 @@
-# Local CI-repair dispatch lane — outstanding requirements
+# Local CI-repair dispatch lane — offline implementation and live gates
 
 This slice belongs to the existing
 [Promotion-Failure Reactive Fix Agent effort](README.md), coordinated by
 [#6102](https://github.com/ThomasMichon/copilot-extensions/issues/6102).
-It records requested portable container-template and dispatch-emitter work,
-not an implemented or enabled repair agent. The cloud `gh-aw` workflow remains
+It records implemented offline template/emitter construction and outstanding
+live validation, not an enabled repair agent. The cloud `gh-aw` workflow remains
 a separate execution lane; this slice changes none of its credentials.
 
 ## Ownership and composition
@@ -57,6 +57,22 @@ authority from this template.
 
 ## Acceptance
 
+- [x] Build the portable restricted image/fleet template under
+  `plugins/agent-containers/templates/ci-repair/` and the default-OFF emitter
+  `agent_dispatch.producers.ci_repair`, with a watchdog source adapter at
+  `tools/ci_failure_dispatch_source.py`.
+- [x] Exercise real config/Docker argv, leased emitter, coordinator dedup and
+  bridge argv owners with network-free fake adapters. Distinct venue, charter
+  and workspace selections, refusal/disabled paths, stale jobs and ordinary
+  command emitters have regression coverage.
+
+**Construction is authorized independently of activation.** The unresolved
+#5890 episode decision and live authentication proof block autonomous activation,
+not offline construction. The emitter's independent admission adapter must
+prove those truths and revalidate CI provenance; source JSON/signatures alone
+cannot authorize a task. No production policy adapter is supplied while that
+decision remains unresolved.
+
 - [ ] A portable template provisions through `agent-containers` and accepts
   more than one charter without baking an agent, repository, account, or host
   into the image; task-selected overlays reach the real invocation.
@@ -75,6 +91,12 @@ authority from this template.
 - [ ] Contrasting test-defect and implementation-regression fixtures prove
   intent-preserving triage; ambiguous intent and protected-path fixes escalate.
   A proposed repair follows the repository's ordinary review/merge gate.
+
+The offline implementation and fake transports do not establish live
+provisioning, workspace materialization, authenticated inference, repository
+authority, repair triage or deployment. The starter fleet has no host token
+forwarding or credential relay; host-custody inference remains an independent
+prerequisite, not a token-vending feature of this template.
 
 No live credential acquisition, login, worker activation, workflow execution,
 deployment or restart is authorized by this requirements document.
