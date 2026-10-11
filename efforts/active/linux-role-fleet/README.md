@@ -317,3 +317,17 @@ not to the vision. This effort does not acquire or migrate live capacity.
   quota, unadmitted resources, one-host budget, future unsupported roles,
   duplicate/oversized inputs and plan identity/freshness. An actual installed CLI
   process proves no input/config writes or implicit hosting.
+
+### 2026-10-11 - Planner review bounds and portability
+- Separated bounded plan output from individual input limits. Near-limit
+  preserved config, the union of custom/recommended roles and nested extensions
+  now fit the larger explicitly bounded output envelope. Hashing, saved-plan
+  verification and CLI serialization share its output-specific diagnostics.
+- The standalone preparation fixture uses the runner's native interpreter
+  layout; file errors retain input-kind diagnostics without an unreachable
+  generic I/O fallback.
+- Installed contained planner selection: 40 passed, including real CLI
+  subprocesses. Runner/CI-selector contracts: 40 passed, one platform skip.
+  These are offline contracts, not provider deployment, clean-room service
+  hosting or live capacity receipts. #6133 still requires current review and CI;
+  none of the fleet activation or lifecycle gates are completed by this fix.

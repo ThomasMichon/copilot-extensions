@@ -1,13 +1,12 @@
 """The thin standalone entry point; this initial slice performs offline planning."""
 
 import argparse
-import json
 import sys
 import time
 from pathlib import Path
 
 from . import __version__
-from .planning import MAX_BYTES, PlanError, decode, plan
+from .planning import MAX_BYTES, PlanError, canonical, decode, plan
 
 
 def read(path, label):
@@ -33,11 +32,11 @@ def main(argv=None):
         result = plan(read(args.template, "template"), read(args.config, "config") if args.config else None,
                       read(args.inventory, "inventory"), fleet_id=args.fleet_id,
                       machine_limit=args.machine_limit, now=time.time())
-    except (PlanError, OSError) as exc:
-        message = str(exc) if isinstance(exc, PlanError) else "Input file could not be read"
-        print(f"fleet-manager: {message}", file=sys.stderr)
+        serialized = canonical(result, output=True).decode("utf-8")
+    except PlanError as exc:
+        print(f"fleet-manager: {exc}", file=sys.stderr)
         return 1
-    print(json.dumps(result, sort_keys=True))
+    print(serialized)
     return 2 if result["blockers"] else 0
 
 

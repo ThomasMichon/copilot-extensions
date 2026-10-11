@@ -62,5 +62,9 @@ A future controller must independently authenticate and re-admit resources.
 Inputs are limited to 1 MiB, depth 12 and 256-object/collection items. Duplicate
 JSON keys, invalid types, identity mismatches, unknown wire fields and nonfinite
 numbers are rejected; diagnostics omit input values. Output limits are separately
-enforced. The package uses only the standard library and has no server,
+enforced: plans allow 4 MiB, depth 15 and 513-object/collection items to
+accommodate preserved config plus joined recommendations and observations.
+Output hashing, saved-plan verification and CLI serialization use these output
+bounds and output-specific diagnostics, not the individual input limits.
+The package uses only the standard library and has no server,
 Docker, Copilot, marketplace or private-provider dependency.

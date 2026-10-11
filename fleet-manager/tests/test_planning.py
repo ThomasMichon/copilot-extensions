@@ -9,7 +9,7 @@ import pytest
 
 from fleet_manager import PlanError, plan, verify_plan
 from fleet_manager.__main__ import main
-from fleet_manager.planning import MAX_BYTES, decode
+from fleet_manager.planning import MAX_BYTES, MAX_ITEMS, MAX_PLAN_BYTES, canonical, decode
 
 
 def inputs():
@@ -274,3 +274,51 @@ def test_cli_read_error_identifies_input_kind_without_disclosing_path(tmp_path, 
     assert f"{missing} file could not be read" in captured.err
     assert "private-missing-name" not in captured.err
     assert captured.out == ""
+
+
+def test_near_limit_config_has_room_for_plan_envelope_and_revalidation():
+    template, _, live = inputs()
+    config = {
+        "schema": "fleet-manager.config", "version": 1, "fleet_id": "example", "revision": "u1",
+        "capacity": {"machine_limit": 5, "execution_hosts": 0}, "roles": {},
+        "extensions": {"padding": ["x" * 65536 for _ in range(15)] + ["x" * 64500]},
+    }
+    assert len(canonical(config)) < MAX_BYTES
+    saved = compute(template, config, live)
+    assert MAX_BYTES < len(canonical(saved, output=True)) < MAX_PLAN_BYTES
+    assert verify_plan(
+        saved, template, config, live, fleet_id="example", machine_limit=5, now=160,
+    ) == saved
+
+
+def test_plan_bounds_allow_union_of_independently_bounded_roles_and_nested_config():
+    template, _, live = inputs()
+    template["roles"] = {
+        f"service-{i}": {"kind": "service", "required": True, "available": True}
+        for i in range(MAX_ITEMS)
+    }
+    nested = "preserve"
+    for _ in range(11):
+        nested = {"child": nested}
+    config = {
+        "schema": "fleet-manager.config", "version": 1, "fleet_id": "example", "revision": "u1",
+        "capacity": {"machine_limit": 5, "execution_hosts": 0},
+        "roles": {f"custom-{i}": {} for i in range(MAX_ITEMS)}, "extensions": nested,
+    }
+    saved = compute(template, config, live)
+    assert len(saved["roles"]) == 2 * MAX_ITEMS
+    assert len(saved["config_changes"]) == MAX_ITEMS + 1
+    assert saved["suggested_config"]["extensions"] == nested
+    assert verify_plan(
+        saved, template, config, live, fleet_id="example", machine_limit=5, now=160,
+    ) == saved
+
+
+def test_output_limit_diagnostic_and_saved_plan_refusal_are_output_specific():
+    oversized = {"padding": ["x" * 65536 for _ in range(64)]}
+    with pytest.raises(PlanError, match="plan output exceeds byte limit"):
+        canonical(oversized, output=True)
+    oversized["plan_digest"] = "untrusted"
+    template, config, live = inputs()
+    with pytest.raises(PlanError, match="plan output exceeds byte limit"):
+        verify_plan(oversized, template, config, live, fleet_id="example", machine_limit=5, now=160)

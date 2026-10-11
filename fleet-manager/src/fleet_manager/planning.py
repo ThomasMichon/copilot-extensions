@@ -10,6 +10,8 @@ import re
 
 MAX_BYTES = 1024 * 1024
 MAX_ITEMS = 256
+MAX_PLAN_BYTES = 4 * MAX_BYTES
+MAX_PLAN_ITEMS = 2 * MAX_ITEMS + 1
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 
 
@@ -42,43 +44,47 @@ def record(value, schema, required, optional=()):
         raise PlanError("unsupported input schema/version")
 
 
-def _tree(value, depth=0):
-    if depth > 12:
-        raise PlanError("input exceeds nesting limit")
+def _tree(value, depth=0, *, output=False):
+    label = "plan output" if output else "input"
+    if depth > (15 if output else 12):
+        raise PlanError(f"{label} exceeds nesting limit")
     if isinstance(value, dict):
-        if len(value) > MAX_ITEMS or any(not isinstance(key, str) for key in value):
-            raise PlanError("input object exceeds bounds")
+        if len(value) > (MAX_PLAN_ITEMS if output else MAX_ITEMS) or any(not isinstance(key, str) for key in value):
+            raise PlanError(f"{label} object exceeds bounds")
         for key, child in value.items():
             if len(key.encode("utf-8")) > 256:
-                raise PlanError("input key exceeds bounds")
-            _tree(child, depth + 1)
+                raise PlanError(f"{label} key exceeds bounds")
+            _tree(child, depth + 1, output=output)
     elif isinstance(value, list):
-        if len(value) > MAX_ITEMS:
-            raise PlanError("input collection exceeds bounds")
+        if len(value) > (MAX_PLAN_ITEMS if output else MAX_ITEMS):
+            raise PlanError(f"{label} collection exceeds bounds")
         for child in value:
-            _tree(child, depth + 1)
+            _tree(child, depth + 1, output=output)
     elif isinstance(value, str):
         if len(value.encode("utf-8")) > 65536:
-            raise PlanError("input text exceeds bounds")
+            raise PlanError(f"{label} text exceeds bounds")
     elif value is not None and type(value) not in (bool, int, float):
-        raise PlanError("input contains unsupported value")
+        raise PlanError(f"{label} contains unsupported value")
     elif type(value) is float and not math.isfinite(value):
-        raise PlanError("input contains nonfinite number")
+        raise PlanError(f"{label} contains nonfinite number")
 
 
-def canonical(value):
+def canonical(value, *, output=False):
+    label = "plan output" if output else "input"
     try:
-        _tree(value)
+        _tree(value, output=output)
         raw = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    except PlanError:
+        raise
     except (UnicodeError, ValueError, RecursionError) as exc:
-        raise PlanError("invalid bounded JSON input") from exc
-    if len(raw) > MAX_BYTES:
-        raise PlanError("input exceeds byte limit")
+        raise PlanError(f"invalid bounded JSON {label}") from exc
+    if len(raw) > (MAX_PLAN_BYTES if output else MAX_BYTES):
+        raise PlanError(f"{label} exceeds byte limit")
     return raw
 
 
-def digest(value):
-    return hashlib.sha256(canonical(value)).hexdigest()
+def digest(value, *, output=False):
+    return hashlib.sha256(canonical(value, output=output)).hexdigest()
 
 
 def _pairs(pairs):
@@ -251,7 +257,8 @@ def plan(template, config, live, *, fleet_id, machine_limit, now):
         "status": "blocked" if blockers else "review-required",
         "mutations_performed": False, "cleanup_actions": [],
     }
-    result["plan_digest"] = digest(result)
+    result["plan_digest"] = digest(result, output=True)
+    canonical(result, output=True)
     return result
 
 
@@ -260,7 +267,8 @@ def verify_plan(saved, template, config, live, *, fleet_id, machine_limit, now):
     if not isinstance(saved, dict) or "plan_digest" not in saved:
         raise PlanError("invalid saved plan")
     body = {key: value for key, value in saved.items() if key != "plan_digest"}
-    if digest(body) != saved["plan_digest"]:
+    canonical(saved, output=True)
+    if digest(body, output=True) != saved["plan_digest"]:
         raise PlanError("saved plan integrity mismatch")
     current = plan(template, config, live, fleet_id=fleet_id, machine_limit=machine_limit, now=now)
     if current["plan_digest"] != saved["plan_digest"] or live["expires_at"] <= now:
