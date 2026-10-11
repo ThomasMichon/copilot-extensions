@@ -70,6 +70,15 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
     assert not Path(calls[1][calls[1].index("--override") + 1]).exists()
 
 
+def test_manager_preparation_retains_source_payload_layout(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    calls = []
+    monkeypatch.setattr(runner.subprocess, "run", lambda argv, **kwargs: calls.append(argv))
+    python = tmp_path / ".test-venvs" / "worktree-manager" / "bin" / "python"
+    runner.prepare("worktree-manager", python)
+    assert calls[-1][-2:] == ["--editable", str(tmp_path / "worktree-manager") + "[dev]"]
+
+
 def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     called = []

@@ -55,7 +55,7 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
         reason = "SSH admission timed out" if isinstance(exc, subprocess.TimeoutExpired) else str(exc)
         raise RuntimeError(
             f"Remote launch admission {request_id} is unconfirmed on {alias}: {reason}. "
-            f"Do not repeat New; run {project} resolve --json "
+            f"Do not resubmit this {kind} prompt; run {project} resolve --json "
             f"--launch-request-status {request_id} on the target."
         ) from exc
     if result.returncode:
@@ -71,7 +71,7 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
             f"Remote launch admission {request_id} failed on {alias}: "
             f"{detail}. "
             f"Inspect with {project} resolve --json --launch-request-status {request_id} "
-            "on the target before another New attempt."
+            f"on the target before resubmitting this {kind} prompt."
         )
     try:
         receipt = json.loads(result.stdout)

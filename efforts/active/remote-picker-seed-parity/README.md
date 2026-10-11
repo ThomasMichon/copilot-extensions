@@ -222,3 +222,13 @@ hiding the problem or silently dropping text.
   assertion remains. Added the required package changefile, with targeted
   regression passing. These fixes are owed forward to make the encountered
   validation gates honest, not dismissed as pre-existing failures.
+- **2026-10-10** -- The contained Manager runner exposed two additional
+  environment assumptions: its regular wheel install omitted the distribution's
+  sibling launcher/reference layout, and explicit fixture homes were overridden
+  by runner-injected plugin/pivot roots. Prepare the Manager editably from its
+  real source payload and clear those overrides only in the fixture-home
+  contract module. The affected layout/discovery/install/delivery portfolio
+  passes 70 cases (two skips), and runner contracts pass 13 (one skip).
+  Full-suite observations still include setup-epoch and process-probe timeouts;
+  isolated revalidation is in progress. Later CI has another failed plugin
+  fan-out awaiting its completed logs; no merge bypass is used.

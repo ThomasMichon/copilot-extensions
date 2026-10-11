@@ -1,16 +1,8 @@
-"""picker-new-session-prompt-and-composer /
-resume-prompt-durable-seed-and-mux-fix: ``resolve --seed`` guard behavior.
+"""Local and structured SSH ``resolve --seed`` admission guards.
 
-``--seed`` is valid with either ``--new`` (persisted onto the new record) or
-``--worktree-id`` (appended directly to the resume launch's own argv -- see
-``resolve_launch_cli._resolve_resume_context``) -- but never with ``--base``
-(no worktree record, no launch argv builder for the seed to reach), and never
-combined with a remote ``--machine`` target in either mode: the non-JSON path
-checks ``use_new``/``worktree_id`` before ``requested_machine`` and would
-otherwise silently create/resume LOCALLY instead of honoring (or rejecting)
-``--machine``; the JSON path's remote dispatch additionally relays a naively
-space-joined command string with no shell quoting, unsafe for a value that
-can contain arbitrary text.
+New and cold Resume stage prompt intent on the target. Remote text requires
+non-preview JSON admission; interactive remote resolve and incompatible base,
+bare-resume and restore modes refuse before mutation.
 """
 from __future__ import annotations
 
