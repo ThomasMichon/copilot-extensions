@@ -227,6 +227,42 @@ def test_self_identity_fast_path_does_not_read_topology(monkeypatch, tmp_path):
     )
 
 
+def test_self_alias_rejects_unknown_environment(monkeypatch, tmp_path, capfd):
+    state = resolve_cli.ResolveCommandState.from_args(
+        _args(new_worktree=False, base=True, machine="local-alias", environment="Bogus")
+    )
+    state.config = _config(tmp_path, "example-host")
+    monkeypatch.setattr(
+        cfg, "load_machines_yaml",
+        lambda _: {"example-host": cfg.MachineEntry(
+            key="example-host", alias="local-alias", display_name="Example Host",
+        )},
+    )
+    assert resolve_cli._resolve_json_mode(state) != 0
+    assert "Unknown environment" in json.loads(capfd.readouterr().out)["error"]
+
+
+@pytest.mark.parametrize("environment,expected", [("WSL", 7), ("Bogus", 1)])
+def test_interactive_self_alias_honors_explicit_environment(
+    monkeypatch, tmp_path, environment, expected,
+):
+    config = _config(tmp_path, "example-host")
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "peek_base_repo", lambda: False)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(resolve_cli.sys.stdin, "isatty", lambda: True)
+    calls = []
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *a, **k: calls.append("remote") or 7,
+    )
+    rc = resolve_cli.cmd_resolve(
+        _args(json=False, new_worktree=False, machine="local-alias", environment=environment)
+    )
+    assert rc == expected
+    assert calls == (["remote"] if environment == "WSL" else [])
+
+
 def test_resolve_worktree_id_with_machine_and_seed_is_rejected_json(capfd):
     """The same remote-target rejection applies to a --worktree-id resume
     seed, not only --new."""

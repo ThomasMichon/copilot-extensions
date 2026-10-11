@@ -461,6 +461,22 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
         if state.requested_machine:
             config = state.load_config()
+            requested_environment = getattr(args, "environment", None) or ""
+            if requested_environment:
+                from .resolve_machine_cli import _ENV_LABEL_TO_NAME
+
+                want_platform = _ENV_LABEL_TO_NAME.get(requested_environment.lower())
+                if want_platform is None:
+                    output.err(f"Unknown environment: {requested_environment}")
+                    return 1
+                if want_platform != cfg.detect_platform():
+                    rc = _emit_remote_plan_for_env(
+                        config, state.requested_machine, requested_environment
+                    )
+                    if rc is not None:
+                        return rc
+                    output.err("Requested machine environment is unavailable.")
+                    return 1
             if not machine_identity.is_local_machine(state.requested_machine, config):
                 rc = _try_machine_handoff(config, state.requested_machine)
                 if rc is not None:
@@ -542,7 +558,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         from . import resolve_machine_cli
 
         want_platform = resolve_machine_cli._ENV_LABEL_TO_NAME.get(requested_environment.lower())
-        same_environment = want_platform is None or want_platform == cfg.detect_platform()
+        if want_platform is None:
+            return output._json_error(f"Unknown environment: {requested_environment}")
+        same_environment = want_platform == cfg.detect_platform()
     if state.requested_machine and not (same_machine and same_environment):
         remote_args: list[str] = []
         if state.use_base:
