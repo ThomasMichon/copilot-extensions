@@ -121,6 +121,41 @@ def test_payload_hash_is_stable_for_identical_content(tmp_path: Path) -> None:
     assert first == second
 
 
+def test_payload_hash_fails_closed_on_a_genuine_fingerprint_error(tmp_path: Path) -> None:
+    """A real failure computing the fingerprint (simulated here via a
+    missing/broken versioned_runtime.py) must propagate as a non-zero
+    return and a stderr message, never be silently swallowed into an empty
+    hash: an empty hash is indistinguishable from "nothing changed" to
+    every caller, which would let a genuinely-changed (or simply
+    unverifiable) payload be admitted as if it matched a previously
+    completed slot."""
+    plugin_dir, _pkg_src_dir = _make_plugin_tree(tmp_path)
+    install_dir = tmp_path / "install"
+    bash = _bash()
+    fn = _extract_payload_hash()
+    broken_scripts_dir = tmp_path / "broken-scripts"
+    broken_scripts_dir.mkdir()
+    real_python = Path(sys.executable).as_posix()
+    script = f"""
+set -euo pipefail
+PLUGIN_DIR={plugin_dir.as_posix()!r}
+PKG_SRC_DIR={(plugin_dir / "src" / "agent_pull_requests").as_posix()!r}
+INSTALL_DIR={install_dir.as_posix()!r}
+SCRIPT_DIR={broken_scripts_dir.as_posix()!r}
+_bootstrap_python() {{ printf '%s' {real_python!r}; }}
+{fn}
+if _payload_hash; then
+    echo UNEXPECTED_SUCCESS
+else
+    echo "FAILED_AS_EXPECTED rc=$?"
+fi
+"""
+    result = subprocess.run([bash, "-c", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert "FAILED_AS_EXPECTED" in result.stdout
+    assert "UNEXPECTED_SUCCESS" not in result.stdout
+
+
 def test_payload_hash_matches_canonical_fingerprint_source(tmp_path: Path) -> None:
     """The shell function's output must agree with calling
     fingerprint_source() directly on the same (pyproject.toml, src) roots,
