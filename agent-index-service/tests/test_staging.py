@@ -526,7 +526,8 @@ def test_windows_job_assignment_failure_is_unconfirmed_and_preserves_candidate(c
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows strict Job teardown")
-def test_windows_job_teardown_uncertainty_preserves_candidate(case, monkeypatch):
+@pytest.mark.parametrize("failure", [OSError, TimeoutError])
+def test_windows_job_teardown_uncertainty_preserves_candidate(case, monkeypatch, failure):
     import agent_procutil
 
     class Process:
@@ -541,7 +542,7 @@ def test_windows_job_teardown_uncertainty_preserves_candidate(case, monkeypatch)
 
     class Job:
         def terminate_and_wait(self, timeout_seconds):
-            raise OSError("native Job teardown failed")
+            raise failure("native Job teardown failed")
 
     monkeypatch.setattr(agent_procutil, "spawn_sync_in_kill_on_close_job",
                         lambda *args, **kwargs: (Process(), Job()))

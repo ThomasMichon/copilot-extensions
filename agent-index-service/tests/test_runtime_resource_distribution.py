@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import inspect
 import subprocess
 import sys
 import tarfile
@@ -55,7 +56,21 @@ def test_sdist_to_wheel_preserves_canonical_primitive_outside_repository(tmp_pat
         stream = archive.extractfile(names[0])
         assert stream is not None
         assert stream.read() == expected
-        archive.extractall(extracted, filter="data")
+        if "filter" in inspect.signature(archive.extractall).parameters:
+            archive.extractall(extracted, filter="data")
+        else:
+            for member in archive.getmembers():
+                target = extracted / member.name
+                assert target.resolve().is_relative_to(extracted.resolve())
+                assert member.isdir() or member.isfile()
+                if member.isdir():
+                    target.mkdir(parents=True, exist_ok=True)
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    content = archive.extractfile(member)
+                    assert content is not None
+                    with target.open("wb") as output:
+                        shutil.copyfileobj(content, output)
     standalone = next(path for path in extracted.iterdir() if path.is_dir())
     assert not (standalone.parent / "libs").exists()
     result = _build(standalone, artifacts, "build_wheel")

@@ -97,7 +97,7 @@ def _path(value: Path, *, file: bool = False) -> Path:
         except FileNotFoundError:
             continue
         if stat.S_ISLNK(info.st_mode) or (
-            getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+            getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
         ):
             raise CandidateError("symlink/reparse ancestors are not allowed")
         if ancestor != path and not stat.S_ISDIR(info.st_mode):
