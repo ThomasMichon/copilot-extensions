@@ -2716,9 +2716,17 @@ def test_health_loops_report_liveness_gc_and_orphan_reap(tmp_path, monkeypatch):
         loops = {}
         while time.time() < deadline:
             loops = httpx.get(f"{url}/health", timeout=5).json()["loops"]
+            # Wait for each loop to have both recorded a run AND cleared
+            # in_progress -- just checking total_runs races the loop's own
+            # completion under system load (#5582): total_runs increments
+            # before in_progress resets to False, so a poll landing in that
+            # narrow window would otherwise break out early and immediately
+            # fail the in_progress assertion below.
             if (
                 loops.get("liveness_gc", {}).get("total_runs", 0) >= 1
+                and loops.get("liveness_gc", {}).get("in_progress") is False
                 and loops.get("orphan_reap", {}).get("total_runs", 0) >= 1
+                and loops.get("orphan_reap", {}).get("in_progress") is False
             ):
                 break
             time.sleep(0.1)
@@ -2866,7 +2874,14 @@ def test_health_loops_report_handoff_fallback_when_enabled(tmp_path, monkeypatch
         loops = {}
         while time.time() < deadline:
             loops = httpx.get(f"{url}/health", timeout=5).json()["loops"]
-            if loops.get("handoff_fallback", {}).get("total_runs", 0) >= 1:
+            # Same in_progress race as #5582's liveness_gc/orphan_reap fix:
+            # wait for the loop to both record a run AND clear in_progress
+            # before breaking out, rather than racing the loop's own
+            # completion.
+            if (
+                loops.get("handoff_fallback", {}).get("total_runs", 0) >= 1
+                and loops.get("handoff_fallback", {}).get("in_progress") is False
+            ):
                 break
             time.sleep(0.1)
         assert loops["handoff_fallback"]["total_runs"] >= 1
