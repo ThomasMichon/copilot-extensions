@@ -101,6 +101,20 @@ prerequisite, not a token-vending feature of this template.
 No live credential acquisition, login, worker activation, workflow execution,
 deployment or restart is authorized by this requirements document.
 
+## Provider waiting and API budget
+
+Keep this slice on the existing leased emitter and coordinator. Source and
+admission adapters are bounded one-shot reads, not per-worker polling loops;
+errors are visible and do not trigger an immediate retry inside the emitter.
+Use a conservative configured cadence and honor provider rate-limit reset or
+Retry-After evidence rather than multiplying reads across workers.
+
+Prefer the existing [agent-pull-requests watch contract](../../../plugins/agent-pull-requests/README.md)
+for shared PR waiting where its negotiated capability fits. Broader centralized
+provider drivers/waiting remain a separate design dependency, not implementation
+scope here and not a claim that they are deployed. Do not add a repair-owned
+scheduler, queue, provider daemon or redundant GitHub polling loop.
+
 ## See also
 
 - [Owning effort](README.md) — plan, remaining guardrails and journal.

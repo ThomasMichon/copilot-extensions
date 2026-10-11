@@ -908,6 +908,22 @@ Documentation-impact review: plugin READMEs link their new source docs;
 the canonical local slice distinguishes implementation from unvalidated live
 provisioning/authentication/triage. No runtime update or deployment performed.
 
+Operator follow-up (summary): reduce redundant GitHub polling through existing
+provider/shared waiting infrastructure; keep broader centralized PR drivers as
+a separate dependency rather than expanding this construction slice.
+The local slice now links the existing shared watch contract and requires
+bounded reads/conservative cadence/provider backoff.
+
+Concrete PR validation evidence: `request-review-if-maintainer` in Actions run
+`38112737598`, job `114391490401`, received HTTP 403 while
+`copilotReviewIdsAtHeadSha` paginated `/pulls/6142/reviews` at
+2026-10-10 22:07:45 America/Los_Angeles. The response named the core rate
+resource, limit/used 5000, remaining 0 and reset 22:32:13 local.
+This identifies the failing review-request polling caller, not the complete
+set of quota consumers. The constructed CI emitter was not activated, so
+there is no evidence it consumed live GitHub quota. No reviewer internals,
+credential changes or alternate-auth workaround were used.
+
 ### 2026-10-10 — Local-lane requirements documented
 
 - Recorded #6102 as an outstanding portable template/emitter slice in this

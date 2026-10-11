@@ -34,6 +34,12 @@ enabling it or launching a container.
 Commands are trusted, operator-reviewed argv bindings, not paths from issue
 text. They receive JSON on stdin, have bounded execution, and return JSON;
 nonzero/malformed output is an explicit refusal, not a successful empty tick.
+There is no in-tick adapter retry or per-worker GitHub polling. Bind a
+conservative emitter cadence, use existing shared provider/waiting infrastructure
+where available, and honor rate-limit reset/Retry-After evidence before the
+next invocation. PR waiting belongs to the
+[existing shared watch owner](../../agent-pull-requests/README.md), not this
+emitter or one independent loop in every repair worker.
 The source receives `repository` and returns a list of candidate records with
 exact fields `repository`, positive integer `run_id`, `run_attempt`, `job_id`,
 gate-verified full lowercase `sha`, and watchdog's 12-hex `signature`.
