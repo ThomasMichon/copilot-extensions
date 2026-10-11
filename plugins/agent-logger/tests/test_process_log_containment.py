@@ -164,3 +164,16 @@ def test_process_log_source_roots_native_ancestor_rename_is_denied_during_io(
     assert blocked
     assert ref.path.read_bytes() == PAYLOAD
     root.parent.rename(tmp_path / "renamed")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows handle lifetime")
+@pytest.mark.parametrize("codec", ["raw", "gzip", "zip"])
+def test_process_log_source_roots_native_enumeration_yield_releases_handles(
+    tmp_path: Path, codec: str,
+) -> None:
+    root = tmp_path / "ancestor" / "logs"
+    ref = _evidence(root, codec, PAYLOAD)
+    iterator = iter_process_log_refs(root)
+    assert next(iterator) == ref
+    root.parent.rename(tmp_path / "renamed")
+    iterator.close()

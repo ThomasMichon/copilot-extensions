@@ -261,12 +261,14 @@ def iter_process_log_refs(log_root: Path) -> Iterator[ProcessLogRef]:
     from agent_logger.sync.archive_directory import archive_directory
 
     with archive_directory(log_root) as directory:
-        for name in directory.names():
-            path = directory.path / name
-            if _is_log_name(name.removesuffix(".gz")):
-                yield ProcessLogRef(path)
-            elif path.suffix == ".zip":
-                with _open_regular(path) as raw, zipfile.ZipFile(raw) as archive:
-                    names = [info.filename for info in _zip_logs(archive)]
-                for member in names:
-                    yield ProcessLogRef(path, member)
+        names = directory.names()
+        canonical = directory.path
+    for name in names:
+        path = canonical / name
+        if _is_log_name(name.removesuffix(".gz")):
+            yield ProcessLogRef(path)
+        elif path.suffix == ".zip":
+            with _open_regular(path) as raw, zipfile.ZipFile(raw) as archive:
+                members = [info.filename for info in _zip_logs(archive)]
+            for member in members:
+                yield ProcessLogRef(path, member)
