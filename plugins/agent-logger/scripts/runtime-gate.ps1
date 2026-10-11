@@ -148,9 +148,10 @@ elseif (
         $installationMode.Value.PSObject.Properties['marketplaces']
     } else { $null }
     $simplePolicyLegacy = (
-        $null -ne $enabled -and
-        $enabled.Value -is [bool] -and
-        -not $enabled.Value -and
+        (
+            $null -eq $enabled -or
+            ($enabled.Value -is [bool] -and -not $enabled.Value)
+        ) -and
         (
             $null -eq $marketplaces -or
             (

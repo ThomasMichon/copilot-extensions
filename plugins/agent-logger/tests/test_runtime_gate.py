@@ -508,6 +508,8 @@ def test_cross_cell_context_mismatch_is_rejected(tmp_path: Path, shell: str) -> 
     ("mode", "policy_state", "disposition", "tombstone", "expected_code"),
     [
         (None, "missing", "active", None, 0),
+        ({}, "valid", "active", None, 0),
+        ({"omit": True}, "valid", "active", None, 0),
         ({"enabled": False}, "valid", "active", None, 0),
         ({"enabled": False, "marketplaces": {}}, "valid", "active", None, 0),
         ({"enabled": False, "marketplaces": {"example--1234": {"enabled": True}}},
@@ -538,11 +540,13 @@ def test_legacy_policy_without_embedded_policy(
     if mode is not None:
         policy = profile / ".copilot-extensions" / "installation-mode.json"
         policy.parent.mkdir()
-        policy.write_text(json.dumps({
+        document: dict[str, object] = {
             "schema": "copilot-extensions.installation-mode",
             "version": 1,
-            "installationMode": mode,
-        }), encoding="utf-8")
+        }
+        if mode != {"omit": True}:
+            document["installationMode"] = mode
+        policy.write_text(json.dumps(document), encoding="utf-8")
     legacy_root = profile / ".agent-logger"
     runtime = _fake_runtime(legacy_root)
     capture = tmp_path / "capture.json"

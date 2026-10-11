@@ -201,8 +201,12 @@ elif [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
         "$(json_get "$RESOLUTION" "$(json_path policy enabled)" 2>/dev/null || true)" = false ]]; then
     MARKETPLACES_PATH="$(json_path installationMode marketplaces)"
     MARKETPLACES_TYPE="$(json_type "$RESOLUTION" "$MARKETPLACES_PATH" "$POLICY" 2>/dev/null || true)"
-    if [[ "$(LC_ALL=C awk -f "$JSON_QUERY" -v mode=get \
-                -v "query_path=$(json_path installationMode enabled)" "$POLICY" 2>/dev/null || true)" = false &&
+    ENABLED_PATH="$(json_path installationMode enabled)"
+    ENABLED_TYPE="$(json_type "$RESOLUTION" "$ENABLED_PATH" "$POLICY" 2>/dev/null || true)"
+    if [[ ( -z "$ENABLED_TYPE" ||
+            ( "$ENABLED_TYPE" = boolean &&
+              "$(LC_ALL=C awk -f "$JSON_QUERY" -v mode=get \
+                -v "query_path=$ENABLED_PATH" "$POLICY" 2>/dev/null || true)" = false ) ) &&
           ( -z "$MARKETPLACES_TYPE" ||
           ( "$MARKETPLACES_TYPE" = object &&
             "$(json_len "$RESOLUTION" "$MARKETPLACES_PATH" "$POLICY" 2>/dev/null || true)" = 0 ) ) ]]; then
