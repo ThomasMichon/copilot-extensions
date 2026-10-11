@@ -1,0 +1,9 @@
+{
+  "comment": "Make late-ACK regression wait for old-generation worker completion rather than a transient total worker count.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

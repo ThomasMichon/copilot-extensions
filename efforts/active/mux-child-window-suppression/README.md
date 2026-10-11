@@ -210,3 +210,7 @@ contain terminal-multiplexer descendants.
   with six Linux-only skips; the contract guard passed both contracts and all
   35 fixtures. The local full runner was refused by an existing host admission
   lease after a bounded wait; no competing workload was stopped.
+- Repair PR #6114 merged as `1bf681095776` after current-head approval,
+  full bridge CI and all required checks passed. The next `dev` CI candidate
+  contains both the launch repair and refreshed corpus bindings. Promotion,
+  live runtime cutover and deployment observation remain outstanding.
