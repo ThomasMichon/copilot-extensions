@@ -140,6 +140,11 @@ def _state(w):
     git access exists, incl. per remote machine). Falls back to an approximation
     from tracking fields when classification is absent.
     """
+    from .. import prune
+
+    interpreted = prune.interpret_descriptor_payload(w.get("closure"))
+    if interpreted.get("finalized_display"):
+        return "FINAL"
     # A live process owns the worktree regardless of a cached or concurrently
     # derived git/tracking state. Check this before the explicit ``state`` field
     # so a first-paint WIP/FINAL cannot hide a live PID lock.
@@ -166,7 +171,7 @@ def _state(w):
             # ``closure`` field), instead of always collapsing COMPLETED to
             # FINAL. Falls back to the legacy FINAL label when a descriptor
             # is unavailable (an older remote without Phase 4's `closure`).
-            closure_label = (w.get("closure") or {}).get("label")
+            closure_label = interpreted["label"] if interpreted["supported"] else None
             if closure_label in ("FINAL", "MERGED"):
                 return closure_label
             return "FINAL"

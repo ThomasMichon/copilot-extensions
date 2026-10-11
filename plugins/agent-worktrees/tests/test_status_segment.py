@@ -43,6 +43,7 @@ def _wire(monkeypatch, target, *, state, turns, rec=None):
         rec = _record(worktree_path=target)
     monkeypatch.setattr(m, "_detect_upstream_branch", lambda *a, **k: "master")
     monkeypatch.setattr(m, "_find_record_for_path", lambda _p: rec)
+    monkeypatch.setattr("agent_worktrees.finalized_checkout.matches", lambda record: True)
     # Reflect the real classify_worktree contract: fetch_requested mirrors
     # whether THIS call actually passed fetch=True, so a test's --fetch flag
     # (ns.fetch) genuinely drives evidence_mode the same way it would for
@@ -177,6 +178,18 @@ def test_completed_but_not_fetched_renders_merged_not_final(monkeypatch, capsys)
     out = capsys.readouterr().out.strip()
     assert "MERGED" in out
     assert "FINAL" not in out
+
+
+def test_explicit_finalization_survives_fetch_free_mux_polling(monkeypatch, capsys):
+    target = str(Path("wt-finalized").resolve())
+    rec = _record(worktree_path=target, status="finalized")
+    _wire(monkeypatch, target, state=git_ops.WorktreeState.COMPLETED, turns=0, rec=rec)
+    for _ in range(3):
+        assert m.cmd_status_segment(_ns(target)) == 0
+        assert capsys.readouterr().out.strip() == "[FINAL]"
+    rec.status = "active"
+    assert m.cmd_status_segment(_ns(target)) == 0
+    assert "MERGED" in capsys.readouterr().out
 
 
 def test_completed_with_held_claim_renders_merged_with_marker(monkeypatch, capsys):

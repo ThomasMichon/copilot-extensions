@@ -5,8 +5,16 @@ the canonical closure descriptor, additive alongside the legacy
 
 from __future__ import annotations
 
+import pytest
+
 from agent_worktrees import __main__ as cli
 from agent_worktrees import git_ops, tracking
+from agent_worktrees import prune
+
+
+@pytest.fixture(autouse=True)
+def confirmed_fixture_checkout(monkeypatch):
+    monkeypatch.setattr("agent_worktrees.finalized_checkout.matches", lambda record: True)
 
 
 def _rec(**kw):
@@ -106,3 +114,46 @@ def test_closure_downgrades_to_cached_when_no_fetch_requested():
     assert row["closure"]["label"] == "MERGED"
     assert row["closure"]["closure"] == {"final": False}
 
+
+def test_finalized_display_is_independent_of_cached_removal_permission():
+    rec = _rec()
+    info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    descriptor = cli._worktree_to_dict(rec, state_info=info)["closure"]
+    assert descriptor["display"] == {
+        "label": "FINAL", "style": "final", "compact": "FINAL", "finalized": True,
+        "settled_sessions": 0,
+    }
+    interpreted = prune.interpret_descriptor_payload(descriptor)
+    assert interpreted["supported"]
+    assert interpreted["label"] == "FINAL"
+    assert interpreted["final"] is False
+    assert interpreted["action_disposition"] == "blocked"
+
+
+def test_new_work_and_responsibility_do_not_inherit_finalized_display():
+    rec = _rec()
+    info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    for changed in (
+        _rec(status="active"),
+        _rec(follow_up=True),
+        _rec(resources=[tracking.ResourceClaim(kind="codespace", ref="cs", state="active")]),
+    ):
+        assert not cli._worktree_to_dict(changed, state_info=info)["closure"]["display"]["finalized"]
+    dirty = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.DIRTY, dirty=1)
+    assert not cli._worktree_to_dict(rec, state_info=dirty)["closure"]["display"]["finalized"]
+
+
+def test_finalized_display_rejects_malformed_counts_without_authorizing_removal():
+    rec = _rec()
+    info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    descriptor = cli._worktree_to_dict(rec, state_info=info)["closure"]
+    descriptor["git"]["dirty"] = False
+    assert not prune.interpret_descriptor_payload(descriptor)["supported"]
+
+
+def test_finalized_display_requires_explicit_settled_session_count():
+    rec = _rec()
+    info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    descriptor = cli._worktree_to_dict(rec, state_info=info)["closure"]
+    del descriptor["display"]["settled_sessions"]
+    assert not prune.interpret_descriptor_payload(descriptor)["supported"]

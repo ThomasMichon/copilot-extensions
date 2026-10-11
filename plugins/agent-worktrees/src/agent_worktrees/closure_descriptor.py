@@ -134,6 +134,10 @@ class ClosureDescriptor:
     place, and the whole descriptor is downgraded defensively (see
     :func:`assemble_closure_descriptor`), never collapsed into a separate
     whole state.
+
+    ``display`` is an additive lifecycle projection: successful explicit
+    finalization remains visibly FINAL during cached polling without changing
+    ``closure.final`` or granting a safe destructive ``action``.
     """
 
     version: int
@@ -150,6 +154,11 @@ class ClosureDescriptor:
     final: bool
     action_disposition: str
     action_bucket: str
+    display: dict | None = None
+
+    @property
+    def display_compact(self) -> str:
+        return self.display["compact"] if self.display else self.compact
 
     def to_dict(self) -> dict:
         return {
@@ -169,6 +178,10 @@ class ClosureDescriptor:
                 "disposition": self.action_disposition,
                 "bucket": self.action_bucket,
             },
+            "display": self.display or {
+                "label": self.label, "style": self.style,
+                "compact": self.compact, "finalized": False,
+            },
         }
 
 
@@ -184,6 +197,7 @@ def assemble_closure_descriptor(
     turn_count: int = 0,
     repo_fetch_fresh: bool = False,
     cross_machine_claims: int = 0,
+    finalized_checkout_current: bool = False,
     now: str | None = None,
 ) -> ClosureDescriptor:
     """Assemble the canonical closure descriptor from already-computed facts.
@@ -372,6 +386,32 @@ def assemble_closure_descriptor(
         # identical two-fact gate above).
         action_disposition = "blocked"
 
+    # Finalize already validated this lifecycle transition. Its durable display
+    # survives fetch-free polling; it never authorizes cached removal.
+    settled_sessions = sum(
+        1 for claim in rec.resources
+        if claim.kind == "session" and claim.is_live and claim.is_at_rest
+    )
+    finalized_display = (
+        rec.status == "finalized"
+        and finalized_checkout_current
+        and evidence_complete
+        and info.state in (S.COMPLETED, S.ACTIVE)
+        and info.dirty == 0
+        and not info.branch_drift
+        and held_claims == settled_sessions
+        and open_follow_ups == 0
+        and not rec.has_live_pr()
+        and not rec.pending_handoffs
+    )
+    display = {
+        "label": "FINAL" if finalized_display else label,
+        "style": "final" if finalized_display else style,
+        "compact": "FINAL" if finalized_display else compact,
+        "finalized": finalized_display,
+        "settled_sessions": settled_sessions if finalized_display else 0,
+    }
+
     return ClosureDescriptor(
         version=DESCRIPTOR_VERSION,
         computed_at=now or tracking._now_iso(),
@@ -391,6 +431,7 @@ def assemble_closure_descriptor(
         final=final,
         action_disposition=action_disposition,
         action_bucket=disposition.bucket,
+        display=display,
     )
 
 
@@ -460,9 +501,39 @@ def interpret_descriptor_payload(payload: dict | None) -> dict:
     ):
         return _unsupported_descriptor(
             "unsupported-descriptor:final-with-blockers")
+    finalized_display = False
+    display = payload.get("display")
+    if display is not None:
+        if (
+            not isinstance(display, dict)
+            or not isinstance(display.get("finalized"), bool)
+            or not all(isinstance(display.get(k), str) for k in ("label", "style", "compact"))
+        ):
+            return _unsupported_descriptor("unsupported-descriptor:invalid-display")
+        finalized_display = display["finalized"]
+        if finalized_display:
+            git = payload.get("git")
+            settled_sessions = _non_negative_int(display.get("settled_sessions"))
+            if (
+                display["label"] != "FINAL"
+                or display["style"] != "final"
+                or display["compact"] != "FINAL"
+                or label not in ("FINAL", "MERGED", "ACTIVE")
+                or settled_sessions is None or held_claims != settled_sessions
+                or open_follow_ups != 0
+                or not isinstance(git, dict)
+                or _non_negative_int(git.get("dirty")) != 0
+            ):
+                return _unsupported_descriptor("unsupported-descriptor:invalid-finalized-display")
+        elif any(display[k] != value for k, value in (
+            ("label", label), ("style", style), ("compact", compact),
+        )):
+            return _unsupported_descriptor("unsupported-descriptor:display-mismatch")
+        label, style, compact = display["label"], display["style"], display["compact"]
     return {
         "supported": True,
         "final": final_value,
+        "finalized_display": finalized_display,
         "label": label,
         "style": style,
         "compact": compact,
@@ -496,4 +567,3 @@ def _non_negative_int(value) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         return None
     return value if value >= 0 else None
-

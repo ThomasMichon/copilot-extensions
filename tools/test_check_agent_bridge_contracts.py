@@ -480,13 +480,50 @@ def test_missing_provenance_commit_recovers_history_once(
         raise AssertionError(f"unexpected git call: {args}")
 
     monkeypatch.setattr(checker._eg, "git", fake_git)
-    checker._eg._FETCH_RECOVERY_ATTEMPTED = False
+    checker._eg.reset_evidence_cache()
 
     assert checker._ensure_commit_available(commit) is True
     assert checker._ensure_commit_available(commit) is True
     assert calls.count(
         ("fetch", "--quiet", "origin", checker._eg._MAIN_REFSPEC)
     ) == 1
+
+
+def test_immutable_git_reads_are_reused_only_within_validation(monkeypatch):
+    checker = _load_checker()
+    evidence = checker._eg
+    evidence.reset_evidence_cache()
+    calls = []
+
+    def fake_git(*args):
+        calls.append(args)
+        if args[:2] == ("cat-file", "-e"):
+            return subprocess.CompletedProcess(args, 0, "", "")
+        if args[0] == "rev-parse":
+            return subprocess.CompletedProcess(args, 0, "b" * 40, "")
+        if args[0] == "show":
+            return subprocess.CompletedProcess(args, 0, '{"version":"1.0.0"}', "")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(evidence, "git", fake_git)
+    for _ in range(35):
+        assert evidence.git_blob("a" * 40, SOURCE) == "b" * 40
+        assert evidence.plugin_version_at("a" * 40) == "1.0.0"
+    assert len(calls) == 3
+    evidence.reset_evidence_cache()
+    assert evidence.git_blob("a" * 40, SOURCE) == "b" * 40
+    assert len(calls) == 5
+
+
+def test_each_check_resets_evidence_cache(monkeypatch):
+    checker = _load_checker()
+    resets = []
+    monkeypatch.setattr(checker._eg, "reset_evidence_cache", lambda: resets.append(True))
+    monkeypatch.setattr(checker, "_validate_schema", lambda errors: None)
+    monkeypatch.setattr(checker, "_load_json", lambda *args: None)
+    checker.check()
+    checker.check()
+    assert resets == [True, True]
 
 
 @pytest.mark.parametrize(

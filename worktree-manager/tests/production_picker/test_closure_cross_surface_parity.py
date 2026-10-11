@@ -23,12 +23,18 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import pytest
 from pathlib import Path
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import git_ops, sessions, tracking
 
 from worktree_manager.production_picker.picker_tui import derive
+
+
+@pytest.fixture(autouse=True)
+def confirmed_fixture_checkout(monkeypatch):
+    monkeypatch.setattr("agent_worktrees.finalized_checkout.matches", lambda record: True)
 
 
 def _rec(**kw):
@@ -181,7 +187,7 @@ def test_cached_evidence_never_upgrades_to_final_on_any_surface(
     """design.md's destructive-freshness rule: a fetch-free (cached) poll of
     a COMPLETED worktree must render MERGED, never FINAL, on every surface --
     not just list JSON, which is the only one most existing tests check."""
-    rec = _rec()
+    rec = _rec(status="active")
     info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
 
     row = m._worktree_to_dict(rec, state_info=info)
@@ -198,3 +204,44 @@ def test_cached_evidence_never_upgrades_to_final_on_any_surface(
 
     picker_row = _picker_row_for(closure)
     assert picker_row["state"] == "MERGED"
+
+
+def test_explicit_finalize_is_stable_across_cached_surfaces_and_attached_shell(
+    monkeypatch, capsys,
+):
+    rec = _rec(resources=[
+        tracking.ResourceClaim(kind="session", ref="host/owner/wt-parity#s", state="at-rest"),
+    ])
+    info = git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED)
+    for _ in range(3):
+        row = m._worktree_to_dict(rec, state_info=info)
+        closure = row["closure"]
+        assert closure["action"]["disposition"] == "blocked"
+        assert closure["closure"]["final"] is False
+        ns = _wire_mux(monkeypatch, rec, state=git_ops.WorktreeState.COMPLETED,
+                       fetch_requested=False)
+        assert m.cmd_status_segment(ns) == 0
+        assert capsys.readouterr().out.strip() == "[FINAL]"
+        picker_row = derive.norm(
+            {**row, "mux_session": True, "mux_attached": True}, "host", "wsl",
+        )
+        assert picker_row["state"] == "FINAL"
+        assert picker_row["state_style"] == "final"
+        assert picker_row["status_markers"] == ""
+    rec.status = "active"
+    reopened = m._worktree_to_dict(rec, state_info=info)
+    assert derive.norm(
+        {**reopened, "mux_session": True}, "host", "wsl",
+    )["state"] == "ACTIVE"
+
+
+def test_truncated_finalized_display_never_overrides_live_picker():
+    from worktree_manager.production_picker import prune
+
+    rec = _rec()
+    row = m._worktree_to_dict(
+        rec, state_info=git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.COMPLETED),
+    )
+    del row["closure"]["display"]["settled_sessions"]
+    assert not prune.interpret_descriptor_payload(row["closure"])["supported"]
+    assert derive.norm({**row, "mux_session": True}, "host", "wsl")["state"] == "ACTIVE"

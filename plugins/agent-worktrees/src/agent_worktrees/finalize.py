@@ -1977,10 +1977,10 @@ def validate_and_finalize(
 
         # Update tracking
         if record:
-            # Citadel E1b cascade (#877): release live outbound claims so the
-            # ledger stops asserting the parent holds them, surfacing children
-            # for downstream cleanup; the claimant-liveness gate now sees this
-            # parent as terminal, so children become orphans under their own prune safety.
+            from .finalized_checkout import snapshot
+
+            record.finalized_checkout = snapshot(worktree_path) if inside_worktree or has_live_session else None
+            # Release settled outbound resources; children keep their prune gates.
             released = tracking.release_all_resources(record, save=False)
             tracking.update_status(record, "finalized")
             # Warn about (never auto-release) any real CodeSpace claim(s) this worktree still holds
