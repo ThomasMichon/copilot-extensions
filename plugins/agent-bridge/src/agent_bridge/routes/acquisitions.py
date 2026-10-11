@@ -32,7 +32,11 @@ async def inspect_acquisition(delivery_id: str, request: Request) -> dict:
 @router.post("", response_model=AcquisitionResult)
 async def acquire_session(body: RequestEnvelope, request: Request) -> AcquisitionResult:
     if body.protocol_version != ACQUISITION_PROTOCOL_VERSION:
-        raise HTTPException(426, detail={"code": "unsupported_acquisition_protocol"})
+        raise HTTPException(426, detail={
+            "code": "unsupported_acquisition_protocol",
+            "message": "request does not support strict session acquisition protocol",
+            "effect": "not_started",
+        })
     state = request.app.state
     if not getattr(state, "ready", True) or state.session_manager.is_draining:
         raise HTTPException(503, detail={"code": "acquisition_not_ready"})
