@@ -5,13 +5,16 @@ the daemon restarts and cannot serve reads while the vault is locked. The
 *persistent* cache is a separate, **opt-in** tier: a Fernet-encrypted file on disk
 that survives restarts and answers reads without unlocking the vault -- so a
 consumer can fetch a previously-cached secret even when the master password is not
-loaded (e.g. an unattended job on a locked box).
+loaded (e.g. an unattended job on a locked box). On Windows without cryptography,
+new caches use native user-bound DPAPI directly, including on ARM64. Existing
+Fernet caches require cryptography to read; they are never discarded to create
+a replacement. DPAPI caches remain readable if cryptography is later installed.
 
 It is inert unless enabled. Storing secrets on disk -- even encrypted with a
 local key -- is a deliberate tradeoff, so the cache does nothing until switched on
 via the ``AGENT_VAULT_CACHE`` env var (truthy) or a configured cache directory
-(``AGENT_VAULT_CACHE_DIR``). When disabled, or when the optional ``cryptography``
-dependency is not installed, every operation is a safe no-op.
+(``AGENT_VAULT_CACHE_DIR``). When disabled, every operation is a safe no-op.
+POSIX caches also require the optional ``cryptography`` dependency.
 
 Security posture: the Fernet key sits beside the cache file, **wrapped at rest** --
 DPAPI (per-OS-user) on Windows via the ``kek`` module, or a ``0600`` file on POSIX.
@@ -67,8 +70,8 @@ def cache_enabled() -> bool:
 class PersistentCache:
     """Fernet-encrypted on-disk ``(entry, field) -> value`` cache.
 
-    All mutating operations are no-ops when the cache is disabled or when the
-    ``cryptography`` library is unavailable; reads return ``None`` in those cases.
+    Disabled caches are inert. POSIX requires cryptography; Windows can use
+    native DPAPI for new caches without that package.
     """
 
     def __init__(self, base_dir: str | Path | None = None) -> None:
@@ -94,6 +97,8 @@ class PersistentCache:
         return cache_enabled() and self._crypto_available()
 
     def _crypto_available(self) -> bool:
+        if IS_WINDOWS:
+            return True
         if self._available is not None:
             return self._available
         try:
@@ -109,7 +114,26 @@ class PersistentCache:
             return self._fernet
         if not self._crypto_available():
             return None
-        from cryptography.fernet import Fernet
+        from .cache_dpapi import MAGIC, CacheProtectionError, DpapiCacheCipher
+
+        if IS_WINDOWS:
+            if self._cache_file.exists():
+                with self._cache_file.open("rb") as stream:
+                    native_cache = stream.read(len(MAGIC)) == MAGIC
+                if native_cache:
+                    self._fernet = DpapiCacheCipher()
+                    return self._fernet
+            try:
+                from cryptography.fernet import Fernet
+            except ImportError as exc:
+                if self._cache_file.exists() or self._key_file.exists():
+                    raise CacheProtectionError(
+                        "legacy cache requires cryptography; existing cache was not replaced"
+                    ) from exc
+                self._fernet = DpapiCacheCipher()
+                return self._fernet
+        else:
+            from cryptography.fernet import Fernet
 
         from . import kek
 
@@ -148,9 +172,19 @@ class PersistentCache:
             plaintext = f.decrypt(self._cache_file.read_bytes())
             data = json.loads(plaintext)
             if data.get("v") != 1:
+                from .cache_dpapi import CacheProtectionError, DpapiCacheCipher
+
+                if isinstance(f, DpapiCacheCipher):
+                    raise CacheProtectionError("unsupported Windows cache schema")
                 return {"v": 1, "entries": {}}
             return data
-        except Exception:
+        except Exception as exc:
+            from .cache_dpapi import CacheProtectionError, DpapiCacheCipher
+
+            if isinstance(exc, CacheProtectionError):
+                raise
+            if isinstance(f, DpapiCacheCipher):
+                raise CacheProtectionError("Windows cache data is invalid; not replaced") from exc
             return {"v": 1, "entries": {}}
 
     @contextlib.contextmanager

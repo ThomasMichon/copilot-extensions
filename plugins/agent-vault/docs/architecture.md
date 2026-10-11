@@ -94,6 +94,16 @@ The persistent cache (`src/agent_vault/cache.py`) is off unless `AGENT_VAULT_CAC
 
 The cache file lives under the configured cache dir, defaulting to a `cache` directory beside the global config. Its Fernet key is wrapped with `src/agent_vault/kek.py`: DPAPI per-user on Windows, `0600` raw wrapping on POSIX. This is a convenience layer for locked unattended reads, not a substitute for host security and disk encryption.
 
+On Windows without `cryptography`, new caches use native user-bound DPAPI
+directly (`cache_dpapi.py`), including on ARM64; no Fernet key file or vault
+unlock is needed to read a populated cache. The `AVC1D` format tag distinguishes
+these local caches from legacy Fernet files. Existing DPAPI caches keep their
+format when cryptography becomes available. Existing Fernet caches still need
+cryptography: an unavailable legacy decoder, wrong user, or invalid DPAPI cache
+must not cause replacement with an empty store. The cache is machine-local;
+only the authoritative vault database and its shared credential travel
+between machines.
+
 Password replacement uses an encrypted pending journal plus a cross-process
 caller lock. Cache-through writes preserve pending journals; only the owning
 replacement or an authoritative live read can finalize them. Daemon responses

@@ -1,0 +1,9 @@
+{
+  "comment": "Support native Windows DPAPI local credential cache without cryptography, preserving legacy files",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}
