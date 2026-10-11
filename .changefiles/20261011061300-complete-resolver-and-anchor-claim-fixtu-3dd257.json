@@ -1,0 +1,9 @@
+{
+  "comment": "Complete resolver and anchor claim fixtures for integrated identity and authority checks",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

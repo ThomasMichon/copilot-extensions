@@ -198,12 +198,17 @@ class TestJournalRunClaim:
         # A run from a singleton anchor journals onto @anchor, creating the
         # ledger on first use (no pre-existing record).
         import types
+        from agent_worktrees import config as cfg
+        config = cfg.Config(
+            srcroot=str(tmp_path), machine="anomalous-potato", platform="wsl", repo_name="spo-core",
+            repos={"spo-core": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path))},
+        )
+        monkeypatch.setattr(cfg, "load_project_config", lambda project: config)
+        monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: {})
         monkeypatch.setattr("agent_worktrees.config.tracking_dir",
                             lambda: tmp_path)
         monkeypatch.setattr("agent_worktrees.config.load_config",
-                            lambda *a, **k: types.SimpleNamespace(
-                                machine="anomalous-potato", platform="wsl",
-                                repo_name="spo-core"))
+                            lambda *a, **k: config)
         adir = tmp_path / "anchors" / "spo-core"
         adir.mkdir(parents=True)
         monkeypatch.setattr(
