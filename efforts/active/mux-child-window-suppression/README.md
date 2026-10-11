@@ -72,7 +72,7 @@ Additional request, with the private host identifier redacted:
       windows, preserving explicitly interactive fixtures and containment.
 
 ### Phase 3 - Promote, deploy and close
-- [ ] Verify the promotion pipeline publishes the fixed snapshot to `main`.
+- [x] Verify the promotion pipeline publishes the fixed snapshot to `main`.
 - [ ] Deploy through the supported unified update on the declared targets.
 - [ ] Record live launch behavior and deployed versions, then archive this
       completed effort through review.
@@ -91,7 +91,7 @@ Additional request, with the private host identifier redacted:
       exit with the caller Job. _(agent-recommended lifecycle requirement)_
 - [x] Applicable lint, install-contract, headless-launch and documentation-impact
       gates pass. _(agent-recommended)_
-- [ ] The promoted `main` snapshot contains the fix and release metadata.
+- [x] The promoted `main` snapshot contains the fix and release metadata.
 - [ ] Deployed runtime evidence establishes the fixed behavior, without private
       identifiers in public artifacts.
 - [x] Shared test-runner validation covers nested Python, PowerShell and Git
@@ -214,3 +214,29 @@ contain terminal-multiplexer descendants.
   full bridge CI and all required checks passed. The next `dev` CI candidate
   contains both the launch repair and refreshed corpus bindings. Promotion,
   live runtime cutover and deployment observation remain outstanding.
+- Watch-generation repair PR #6135 merged as `3972e45374a6` after approval
+  and green checks, resolving the transient worker-count assertion in #6131.
+  A separate portable installer timeout is tracked in #6138; the unchanged
+  Linux reproduction passed in 8.17 seconds without increasing test budgets.
+- At the operator's explicit request for immediate mitigation, applied a
+  reversible local emergency overlay of the reviewed child suppression and
+  direct-console launch changes. The existing graceful cutover completed with
+  clean, unforced drain and relay adoption; the predecessor exited. Two real
+  desktop cycles observed four PSMux clients with no owned visible windows or
+  focus acquisitions. This mitigation is not a promoted release and does not
+  close the release or unified deployment gates.
+- Triggered the trusted `repository_dispatch` full validation/promotion path
+  for current reviewed `dev`. It resolves and pins live `dev` through the
+  existing gate and retains all full validation requirements.
+- Promotion run `38109888269` passed all full validation jobs. Generated
+  release PR #6154 merged as `887bb50826ec`, publishing the actual fixed
+  `main` snapshot and Worktree Manager `0.6.22-dev1`.
+- The primary Windows target completed the supported unified update. The
+  promoted mux daemon replaced the emergency generation; the predecessor
+  exited. Two real desktop cycles observed 13 PSMux clients, zero owned
+  visible windows and zero focus acquisitions, with healthy released runtime
+  responses in both cycles. The emergency overlay is no longer serving.
+- A second, native Linux target completed its unified update to the same
+  manager release and updated plugin runtimes with graceful daemon cutovers.
+  The outbound-only target still requires on-device rollout confirmation;
+  retain the deployment and final archival gates until that evidence exists.
