@@ -22,7 +22,7 @@ def shell_command(shell: str, argv: list[str]) -> str:
         return f"{shell} -NoProfile -EncodedCommand {encoded}"
     from machine_transport import wrap_remote_command
 
-    if shell.lower() not in ("bash", "sh", "zsh", "fish", "ksh"):
+    if shell not in ("bash", "sh", "zsh"):
         raise ValueError("Remote prompt launch requires a supported explicit shell")
     return wrap_remote_command(shell, " ".join(shlex.quote(part) for part in argv))
 

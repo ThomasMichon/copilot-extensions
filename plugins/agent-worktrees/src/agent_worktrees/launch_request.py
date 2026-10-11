@@ -156,8 +156,17 @@ def _apply_stage(args: dict) -> dict:
                     raise ValueError("Admitted launch intent is completed or superseded")
             elif seed is None or seed.seed_id != receipt["seed_id"]:
                 revision = tracking.load_record(path).pending_seed_revision
-                if seed is not None:
-                    revision = max(revision, seed.revision)
+                try:
+                    durable = json.loads(launch_seed_state.state_path(path).read_text(encoding="utf-8"))
+                except FileNotFoundError:
+                    durable = None
+                if durable is not None:
+                    if (
+                        not isinstance(durable, dict) or durable.get("version") != 1
+                        or type(durable.get("revision")) is not int
+                    ):
+                        raise ValueError("Invalid durable launch-seed revision fence")
+                    revision = max(revision, durable["revision"])
                 if revision != receipt["prior_revision"]:
                     raise ValueError("Launch intent changed after admission; refusing replacement")
                 launch_seed_state._apply_stage({
@@ -186,7 +195,9 @@ def cmd_request(args) -> int:
     from . import output
     request_id = None
     try:
-        if not args.json or args.machine or args.seed or args.seed_id or args.dry_run:
+        forbidden = ("machine", "seed", "seed_id", "dry_run", "new_worktree",
+                     "worktree_id", "codename", "base", "bare_resume", "restore", "auto")
+        if not args.json or any(getattr(args, key, None) for key in forbidden):
             raise ValueError("Structured launch requests require local --json execution")
         if args.launch_request_status:
             if args.launch_request_b64:

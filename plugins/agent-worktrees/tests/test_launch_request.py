@@ -120,7 +120,8 @@ def test_unaccepted_new_cannot_recreate_removed_worktree(tmp_path, authority, mo
         request.execute(authority, _intent("new"))
 
 
-def test_interrupted_replacement_seed_revision_fences_old_admission(tmp_path, authority):
+@pytest.mark.parametrize("finished", [False, True])
+def test_interrupted_replacement_seed_revision_fences_old_admission(tmp_path, authority, finished):
     record = tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
                                        "demo", "test", "windows", tmp_path)
     intent = _intent()
@@ -135,9 +136,16 @@ def test_interrupted_replacement_seed_revision_fences_old_admission(tmp_path, au
     launch_seed_state._write(record.yaml_path, launch_seed_state.LaunchSeed(
         "b" * 32, "resume", "replacement", 1,
     ))
+    if finished:
+        tracking._atomic_write(launch_seed_state.state_path(record.yaml_path), json.dumps({
+            "version": 1, "finished": True, "seed_id": "b" * 32, "revision": 2,
+        }))
     with pytest.raises(ValueError, match="changed after admission"):
         request.execute(authority, intent)
-    assert launch_seed_state.peek(record.yaml_path).text == "replacement"
+    if finished:
+        assert launch_seed_state.peek(record.yaml_path) is None
+    else:
+        assert launch_seed_state.peek(record.yaml_path).text == "replacement"
 
 
 def test_decode_round_trip_preserves_shell_metacharacters():
@@ -259,3 +267,25 @@ def test_remote_error_envelope_wins_over_creation_progress(monkeypatch):
     ))
     with pytest.raises(RuntimeError, match="seed storage failed"):
         remote_seed_launch.prepare(None, "target", "bash", ["--new"], "task")
+
+
+@pytest.mark.parametrize("shell", ["fish", "ksh", "unknown"])
+def test_unsupported_shell_is_rejected_before_remote_admission(shell):
+    with pytest.raises(ValueError, match="supported explicit shell"):
+        remote_seed_launch.shell_command(shell, ["demo", "resolve"])
+
+
+@pytest.mark.parametrize("selector", [["--new"], ["--base"], ["--worktree-id", "wt-a"],
+                                      ["--codename", "one-two"]])
+def test_structured_request_rejects_ordinary_selector_before_mutation(selector, capfd):
+    import argparse
+    from agent_worktrees import resolve_cli
+
+    parsers = argparse.ArgumentParser().add_subparsers()
+    resolve_cli.add_parsers(parsers)
+    encoded = base64.b64encode(json.dumps(_intent()).encode()).decode()
+    args = parsers.choices["resolve"].parse_args(
+        ["--json", "--launch-request-b64", encoded, *selector],
+    )
+    assert resolve_cli.cmd_resolve(args) == 3
+    assert "Structured launch requests require" in json.loads(capfd.readouterr().out)["error"]
