@@ -1,9 +1,0 @@
-{
-  "comment": "Refresh frozen wrapper authority bindings after the shared process-helper update; protocol vectors unchanged.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

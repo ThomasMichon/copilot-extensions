@@ -1,9 +1,0 @@
-{
-  "comment": "Use Windows CNG for portable identity-token AES-GCM on ARM64 without cryptography",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

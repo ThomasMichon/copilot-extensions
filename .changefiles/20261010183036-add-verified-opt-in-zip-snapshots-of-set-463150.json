@@ -1,9 +1,0 @@
-{
-  "comment": "Add verified opt-in ZIP snapshots of settled local process logs without retiring originals",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

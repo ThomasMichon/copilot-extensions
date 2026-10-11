@@ -1,9 +1,0 @@
-{
-  "comment": "Show mux-hosted sessions before slow classification and report enrichment failures",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

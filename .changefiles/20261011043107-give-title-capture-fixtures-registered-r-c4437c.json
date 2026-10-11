@@ -1,9 +1,0 @@
-{
-  "comment": "Give title-capture fixtures registered receiving-side project authority",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Include batched live mux observations in cache-first worktree listings",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

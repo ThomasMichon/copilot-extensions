@@ -1,9 +1,0 @@
-{
-  "comment": "Audit supervisor lifecycle decisions, preserve native disablement, and let identity-confirmed systemd supervisors restart into the resolved current slot",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

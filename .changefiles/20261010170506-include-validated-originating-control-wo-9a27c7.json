@@ -1,9 +1,0 @@
-{
-  "comment": "Include validated originating control-worktree identity inside encrypted PR markers",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Ship the shared optional strict Windows pre-resume Job containment contract; default behavior unchanged.",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

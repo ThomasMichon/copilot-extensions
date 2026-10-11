@@ -1,9 +1,0 @@
-{
-  "comment": "Register receiving authority before terminal session rejection assertions",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

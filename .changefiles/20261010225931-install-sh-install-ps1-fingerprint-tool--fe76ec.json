@@ -1,9 +1,0 @@
-{
-  "comment": "install.sh/install.ps1: fingerprint [tool.uv.sources] dev-checkout path dependencies (e.g. ../../libs/<lib>), not just the local promoted libs/<lib> form, when computing the completion-marker payload hash (phase-3-runtime-admission, #5472). No behavior change when dependency content is unchanged.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

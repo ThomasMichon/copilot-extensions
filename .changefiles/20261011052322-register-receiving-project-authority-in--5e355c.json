@@ -1,9 +1,0 @@
-{
-  "comment": "Register receiving project authority in managed-removal safety fixtures",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

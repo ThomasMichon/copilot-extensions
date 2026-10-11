@@ -1,9 +1,0 @@
-{
-  "comment": "Fix two load-sensitive test races/timeouts (#5582, #5584) blocking a clean full-suite run (#5731).",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}
