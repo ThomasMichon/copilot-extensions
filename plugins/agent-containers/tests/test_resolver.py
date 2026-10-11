@@ -9,6 +9,7 @@ the token at spawn time and selects SSH or restricted docker transport.
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import textwrap
 import types
@@ -256,6 +257,41 @@ def test_import_copilot_cli_token_preserves_owner_only_permissions(tmp_path):
 
     mode = stat.S_IMODE(config_path.stat().st_mode)
     assert mode == 0o600
+
+
+def test_import_copilot_cli_token_leaves_no_leftover_temp_file(tmp_path):
+    """The write must clean up its own temp file on the success path --
+    never leave a stray partial/renamed artifact beside config.json."""
+    from agent_containers.resolver import import_copilot_cli_token
+
+    config_path = tmp_path / "config.json"
+    import_copilot_cli_token("inference-user", "gho_fresh", config_path)
+
+    entries = {p.name for p in tmp_path.iterdir()}
+    assert entries == {"config.json"}
+
+
+def test_import_copilot_cli_token_uses_a_unique_temp_name_per_call(tmp_path, monkeypatch):
+    """Two concurrent/sequential imports must not race on the same fixed
+    temp filename -- each call's own temp path (captured via os.open) must
+    differ."""
+    import agent_containers.resolver as resolver_mod
+
+    config_path = tmp_path / "config.json"
+    seen_paths: list[str] = []
+    real_open = os.open
+
+    def _spying_open(path, flags, mode=0o777):
+        seen_paths.append(str(path))
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(resolver_mod.os, "open", _spying_open)
+
+    resolver_mod.import_copilot_cli_token("inference-user", "gho_one", config_path)
+    resolver_mod.import_copilot_cli_token("inference-user", "gho_two", config_path)
+
+    assert len(seen_paths) == 2
+    assert seen_paths[0] != seen_paths[1]
 
 
 def _stub_agent_bridge(monkeypatch):
