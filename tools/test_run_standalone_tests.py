@@ -177,6 +177,25 @@ def test_smoke_rejects_undefined_component_before_admission(monkeypatch):
     assert exc.value.code == 2
 
 
+def test_venv_interpreter_symlink_is_not_resolved_out_of_its_environment(tmp_path, monkeypatch):
+    root = tmp_path / "worktree-manager"
+    (root / "tests").mkdir(parents=True)
+    base = tmp_path / "base-python"
+    base.touch()
+    python = tmp_path / ".test-venvs" / "worktree-manager" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    try:
+        python.symlink_to(base)
+    except OSError:
+        pytest.skip("Symlink creation is unavailable")
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    monkeypatch.setattr(runner, "acquire", lambda wait: type("Lease", (), {"release": lambda self: None})())
+    commands = []
+    monkeypatch.setattr(runner, "run_contained", lambda command, **kwargs: commands.append(command) or 0)
+    assert runner.main(["worktree-manager", "--python", str(python)]) == 0
+    assert commands[0][0] == str(python)
+
+
 @pytest.mark.parametrize("timeout", ["nan", "inf", "-inf", "0", "-1"])
 def test_nonfinite_or_nonpositive_timeout_rejected_before_admission(monkeypatch, timeout):
     monkeypatch.setattr(runner, "acquire", lambda wait, root: pytest.fail("unexpected admission"))
