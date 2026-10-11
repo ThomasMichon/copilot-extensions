@@ -105,3 +105,29 @@ def test_legacy_id_backfill_attribution_write_does_not_take_authority(tmp_path, 
     assert current.pr.pr_id
     assert current.pr.attribution_mode == "false"
     assert pr_publication_state.authority(current.pr) == before
+
+
+def test_unregister_checks_blockers_only_after_authority_admission(monkeypatch):
+    from types import SimpleNamespace
+    from agent_worktrees import unregister_cli
+
+    state = {"held": False, "publication": False}
+
+    @contextmanager
+    def admit(**kwargs):
+        state.update(held=True, publication=True)
+        try:
+            yield
+        finally:
+            state["held"] = False
+
+    def blockers(project):
+        assert state["held"] and state["publication"]
+        return ["1 open PR(s)"]
+
+    monkeypatch.setattr(pr_authority, "guard", admit)
+    monkeypatch.setattr(cfg, "project_name", lambda: "example")
+    monkeypatch.setattr(unregister_cli, "_unregister_blockers", blockers)
+    monkeypatch.setattr(unregister_cli.inst, "remove_project_binstub", lambda *a: pytest.fail("removed blocked project"))
+    assert unregister_cli.cmd_unregister(SimpleNamespace(force=False, keep_repo_entry=True)) == 1
+    assert not state["held"]

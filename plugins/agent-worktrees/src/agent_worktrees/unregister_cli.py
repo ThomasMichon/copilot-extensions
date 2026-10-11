@@ -95,6 +95,17 @@ def _unregister_blockers(project: str) -> list[str]:
 
 def cmd_unregister(args: argparse.Namespace) -> int:
     """Deregister a project's adoption lifecycle -- never the shared runtime."""
+    from . import pr_authority
+
+    try:
+        with pr_authority.guard():
+            return _unregister_guarded(args)
+    except TimeoutError as exc:
+        output.err(str(exc))
+        return 1
+
+
+def _unregister_guarded(args: argparse.Namespace) -> int:
     project = cfg.project_name()
     output.header(f"Unregistering project: {project}")
 
