@@ -2905,11 +2905,13 @@ class Supervisor:
         tracking = _tracking()
         local_by_id: dict[str, dict] | None = None
         held = 0
+        snapshots = []
         for res in self._pool_reservations(state=SpawnState.SPAWNED):
             try:
-                task = self.client.get(res["task_id"])
+                snapshots.append((res, self.client.get(res["task_id"])))
             except DispatchError:
                 continue
+        for res, task in snapshots:
             if task.get("status") == Status.SUSPENDED:
                 continue
             owner = task.get("owner")
@@ -2921,7 +2923,7 @@ class Supervisor:
             fleet = _parse_fleet_body_handle(res.get("session_handle"))
             if fleet is not None:
                 host, bridge_sid = fleet
-                if self.publish_activity:
+                if local_by_id is None:
                     try:
                         fleet_activity = self.fleet_activity_fn(host, bridge_sid)
                     except Exception:  # best-effort observation, never fatal
@@ -3033,7 +3035,9 @@ class Supervisor:
             if not session:
                 if self.publish_activity:
                     try:
-                        self.client.set_activity(task["id"], None, reservation_key=res["key"])
+                        self.client.set_activity(task["id"], None, reservation_key=res["key"],
+                            observed_at=observed_at,
+                            admission_fence={k: task.get(k) for k in ("generation", "status", "started_at", "owner_session_id")})
                     except DispatchError:
                         pass
                 continue  # not confirmed alive -> let the lease ride

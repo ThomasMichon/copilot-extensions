@@ -113,3 +113,14 @@ async def bind_dispatch_receipt(
         raise AcquisitionRefused("dispatch_receipt_unproven", "dispatch receipt response is invalid") from exc
     if actual != receipt:
         raise AcquisitionRefused("dispatch_receipt_unproven", "dispatch receipt response changed native authority")
+
+
+async def mark_dispatch_acquisition(request: AcquisitionRequest, resolver: Any) -> None:
+    provider = resolver.namespace_resolvers.get("dispatch")
+    run = getattr(provider, "_run", None)
+    if run is None:
+        raise AcquisitionRefused("dispatch_capability_missing", "dispatch acquisition marking unavailable")
+    facts = {field: getattr(request, field) for field in ("reservation_key", "task_id", "task_generation")}
+    response = await run(["acquisition-mark", "--request-json", json.dumps(facts)])
+    if not response or response[0] or json.loads(response[1]) != facts:
+        raise AcquisitionRefused("dispatch_marker_refused", "dispatch acquisition marker was not accepted")

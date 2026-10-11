@@ -59,7 +59,8 @@ def rig(tmp_db, session_manager, mock_acp_client, monkeypatch, tmp_path):
         return SpawnTarget(type="local", cwd=str(tmp_path))
 
     async def provider_run(argv):
-        assert argv[:2] == ["acquisition-bind", "--request-json"]
+        assert argv[0] in {"acquisition-bind", "acquisition-mark"}
+        assert argv[1] == "--request-json"
         return 0, argv[2], ""
     resolver = SimpleNamespace(
         resolve_async=resolve,

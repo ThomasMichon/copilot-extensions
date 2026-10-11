@@ -9,7 +9,7 @@ from dataclasses import replace
 from typing import Any
 from types import SimpleNamespace
 
-from .acquisition_authority import verify_dispatch, verify_worktree, worktree_command, bind_dispatch_receipt
+from .acquisition_authority import verify_dispatch, verify_worktree, worktree_command, bind_dispatch_receipt, mark_dispatch_acquisition
 from .acquisition_contract import (
     AcquisitionRefused,
     AcquisitionRequest,
@@ -61,6 +61,8 @@ class AcquisitionRuntime:
             self.store.release_gate(req)
             return replay.result
         venue = await verify_dispatch(req, self.resolver)
+        if venue["acquisition_reservation"]["state"] == "reserving":
+            await mark_dispatch_acquisition(req, self.resolver)
         row, head = await verify_worktree(req)
         await self._reconcile_prior(req, row, head)
         try:

@@ -11,6 +11,7 @@ from .queue import TaskError
 
 
 def ensure(conn: Any) -> None:
+    conn.execute("CREATE TABLE IF NOT EXISTS acquisition_markers (reservation_key TEXT PRIMARY KEY)")
     conn.execute(
         "CREATE TABLE IF NOT EXISTS acquisition_receipts ("
         "reservation_key TEXT PRIMARY KEY, task_id TEXT NOT NULL, "
@@ -109,13 +110,14 @@ def validate_start(
 ) -> None:
     ensure(conn)
     rows = conn.execute(
-        "SELECT a.*,s.state AS reservation_state,s.release_requested,s.worktree AS reserved_worktree FROM spawn_reservations s "
+        "SELECT a.*,s.state AS reservation_state,s.release_requested,s.worktree AS reserved_worktree,"
+        "EXISTS(SELECT 1 FROM acquisition_markers m WHERE m.reservation_key=s.key) AS acquisition_marked FROM spawn_reservations s "
         "LEFT JOIN acquisition_receipts a ON s.key=a.reservation_key WHERE s.task_id=? "
         "ORDER BY s.attempt DESC LIMIT 1", (task.id,),
     ).fetchall()
     if not rows or not rows[0]["delivery_id"]:
         if (task.owner or "").startswith("acquired-") or (
-            rows and rows[0]["reservation_state"] == "reserving" and rows[0]["reserved_worktree"]
+            rows and (rows[0]["acquisition_marked"] or rows[0]["reservation_state"] == "reserving" and rows[0]["reserved_worktree"])
         ):
             raise TaskError("acquired worker start requires a bridge acquisition receipt")
         return
@@ -145,6 +147,19 @@ def validate_start(
 def register_routes(app: Any, queue: Any) -> None:
     from fastapi import HTTPException
 
+    @app.post("/acquisition-markers")
+    def mark(request: dict[str, Any]) -> dict:
+        with queue._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            ensure(conn)
+            reservation = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (request.get("reservation_key"),)).fetchone()
+            task = queue._fetch(conn, request.get("task_id"))
+            if not reservation or not task or reservation["task_id"] != task.id or reservation["state"] != "reserving" or task.generation != request.get("task_generation"):
+                raise HTTPException(409, detail="acquisition marker fence changed")
+            conn.execute("INSERT OR IGNORE INTO acquisition_markers VALUES (?)", (reservation["key"],))
+            conn.commit()
+        return request
+
     @app.post("/acquisition-receipts")
     def persist_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -161,7 +176,8 @@ def command(args: argparse.Namespace) -> int:
     core = _resolve_cli_module()
     with core._client(args) as client:
         result = client._unwrap(client._http.post(
-            "/acquisition-receipts", json=json.loads(args.request_json),
+            "/acquisition-markers" if args.command == "acquisition-mark" else "/acquisition-receipts",
+            json=json.loads(args.request_json),
         ))
     print(json.dumps(result))
     return 0
@@ -169,5 +185,8 @@ def command(args: argparse.Namespace) -> int:
 
 def register_cli(sub: Any) -> None:
     parser = sub.add_parser("acquisition-bind", help="Record bridge-native start authority")
+    parser.add_argument("--request-json", required=True)
+    parser.set_defaults(func=command)
+    parser = sub.add_parser("acquisition-mark", help="Mark a reservation as bridge-acquisition bound")
     parser.add_argument("--request-json", required=True)
     parser.set_defaults(func=command)
