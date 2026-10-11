@@ -395,6 +395,7 @@ def test_host_state_still_fails_closed_on_escaped_temp(
 
 
 def test_admission_fails_fast_with_live_holder(monkeypatch, tmp_path: Path) -> None:
+    (tmp_path / "environment").mkdir()
     class BusyLease:
         def acquire(self) -> None:
             raise runner.AlreadyRunningError(tmp_path / "runner.lock", 123)
@@ -407,6 +408,7 @@ def test_admission_fails_fast_with_live_holder(monkeypatch, tmp_path: Path) -> N
 
 
 def test_admission_wait_is_bounded_and_retries(monkeypatch) -> None:
+    monkeypatch.setattr(admission, "admission_dir", lambda _: Path("unused-lock"))
     class EventuallyAvailableLease:
         calls = 0
 

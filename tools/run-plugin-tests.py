@@ -256,24 +256,38 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
     py = _venv_python(name)
     stamp = venv / ".dep-fingerprint"
     fingerprint = _dep_fingerprint(name)
-    if reinstall and venv.exists():
-        shutil.rmtree(venv, ignore_errors=True)
     fresh = not py.exists()
     # Rebuild a cached venv whose dependency fingerprint has drifted (e.g. a
     # dependency added across a rebase) -- otherwise the stale venv silently
     # masks or introduces failures instead of testing the current deps.
-    if not fresh:
+    drifted = False
+    if not fresh and not reinstall:
         try:
             drifted = stamp.read_text(encoding="utf-8").strip() != fingerprint
         except OSError:
             drifted = True
-        if drifted:
-            shutil.rmtree(venv, ignore_errors=True)
-            py = _venv_python(name)
-            fresh = True
+    if reinstall or drifted or fresh:
+        # The held lease is keyed by this directory's filesystem identity.
+        # Remove only contents, never the directory (including on partial rebuild).
+        for child in venv.iterdir():
+            if child.is_symlink():
+                child.unlink()
+            elif child.is_junction():
+                child.rmdir()
+            elif child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+        fresh = True
     if fresh:
-        VENV_ROOT.mkdir(parents=True, exist_ok=True)
-        subprocess.run([uv, "venv", str(venv)], check=True)
+        before = venv.stat()
+        subprocess.run(
+            [uv, "venv", "--allow-existing", str(venv)], check=True,
+            env={key: value for key, value in os.environ.items() if key != "UV_VENV_CLEAR"},
+        )
+        after = venv.stat()
+        if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
+            raise RuntimeError("uv replaced the leased environment directory")
     if fresh or reinstall:
         if _has_pyproject(name):
             # Install the plugin editable with its dev extras. cwd = the plugin
@@ -565,6 +579,7 @@ def main(argv: list[str] | None = None) -> int:
         lease: SingleInstance | None = None
         try:
             environment_root = (VENV_ROOT / name).resolve()
+            environment_root.mkdir(parents=True, exist_ok=True)
             if args.admission_wait:
                 print(f"Waiting up to {args.admission_wait:g}s for {environment_root} ...")
             try:

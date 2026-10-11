@@ -54,6 +54,7 @@ def cache(tmp_path, monkeypatch):
 
 
 def probe(root: Path, wait: float = 0) -> int:
+    root.mkdir(parents=True, exist_ok=True)
     return subprocess.run(
         child_command(root, wait), timeout=10, check=False,
         stdin=subprocess.DEVNULL, capture_output=True, **launch_options(),
@@ -183,6 +184,7 @@ def test_busy_main_names_environment_and_keeps_exit_code(cache, monkeypatch, cap
     monkeypatch.setattr(runner, "VENV_ROOT", cache / "venvs")
     monkeypatch.setattr(runner.shutil, "which", lambda _: "uv")
     environment = runner.VENV_ROOT / "alpha"
+    environment.mkdir(parents=True)
     lease = admission.acquire(0, environment)
     try:
         assert runner.main(["alpha"]) == 3
@@ -197,6 +199,7 @@ def test_standalone_managed_environment_protects_prepare_and_use(cache, monkeypa
     monkeypatch.setattr(runner, "REPO", cache)
     (cache / "agent-index-service" / "tests").mkdir(parents=True)
     environment = cache / ".test-venvs" / sys.platform / "agent-index-service"
+    environment.mkdir(parents=True)
     events = []
 
     def prepare(*args, **kwargs):
@@ -248,6 +251,7 @@ def test_custom_venv_discovery_does_not_follow_launcher_to_base_interpreter(cach
 @pytest.mark.parametrize("wait", [0, 3], ids=["busy", "bounded-wait"])
 def test_missing_interpreter_during_rebuild_obeys_environment_lease(cache, custom, wait):
     environment = cache / ".test-venvs" / sys.platform / "agent-index-service"
+    environment.mkdir(parents=True)
     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     ready = cache / "holder-ready"
     waiter_ready = cache / "waiter-ready"
@@ -283,7 +287,7 @@ runner.subprocess.run = lambda *a, **k: (_ for _ in ()).throw(AssertionError('ca
 Path(ready).touch()
 arguments = ['agent-index-service', '--admission-wait', wait]
 if custom == 'True':
-    arguments += ['--python', python]
+    arguments += ['--python', python, '--environment-root', str(Path(python).parent.parent)]
 raise SystemExit(runner.main(arguments))
 """
         waiter = subprocess.Popen(
@@ -317,3 +321,177 @@ raise SystemExit(runner.main(arguments))
         if waiter is not None and waiter.poll() is None:
             waiter.communicate(timeout=10)
     assert holder.returncode == 0
+
+
+@pytest.mark.parametrize("alias_shape", ["macos-case", "linux-bind-mount"])
+def test_filesystem_identity_not_path_spelling_keys_aliases(cache, monkeypatch, alias_shape):
+    from types import SimpleNamespace
+    import stat
+
+    roots = (
+        (cache / "Environment", cache / "environment")
+        if alias_shape == "macos-case"
+        else (cache / "source" / "venv", cache / "mount" / "venv")
+    )
+    metadata = SimpleNamespace(st_dev=71, st_ino=108, st_mode=stat.S_IFDIR)
+    monkeypatch.setattr(Path, "stat", lambda self, **kwargs: metadata)
+    assert admission.admission_dir(roots[0]) == admission.admission_dir(roots[1])
+    monkeypatch.setattr(
+        Path, "stat",
+        lambda self, **kwargs: SimpleNamespace(
+            st_dev=71, st_ino=108 if str(self) == str(roots[0]) else 109, st_mode=stat.S_IFDIR,
+        ),
+    )
+    assert admission.admission_dir(roots[0]) != admission.admission_dir(roots[1])
+
+
+def test_absent_or_unidentifiable_environment_never_uses_path_fallback(cache, monkeypatch):
+    from types import SimpleNamespace
+    import stat
+
+    root = cache / "missing"
+    with pytest.raises(FileNotFoundError):
+        admission.admission_dir(root)
+    assert not root.exists()
+    monkeypatch.setattr(
+        Path, "stat",
+        lambda self, **kwargs: SimpleNamespace(st_dev=1, st_ino=0, st_mode=stat.S_IFDIR),
+    )
+    with pytest.raises(ValueError, match="filesystem identity"):
+        admission.admission_dir(root)
+
+
+@pytest.mark.parametrize("mode", ["fresh", "reinstall", "drift", "partial", "root-alias"])
+def test_real_uv_rebuild_preserves_leased_directory_and_exclusion(cache, monkeypatch, mode):
+    import shutil
+
+    uv = shutil.which("uv")
+    assert uv, "runner contract requires uv"
+    runner = load_runner("run-plugin-tests.py")
+    monkeypatch.setattr(runner, "VENV_ROOT", cache / "venvs")
+    monkeypatch.setattr(runner, "_dep_fingerprint", lambda _: "current")
+    monkeypatch.setattr(runner, "_has_pyproject", lambda _: False)
+    monkeypatch.setenv("UV_VENV_CLEAR", "true")
+    root = runner.VENV_ROOT / "alpha"
+    if mode == "root-alias":
+        actual_root = cache / "actual-root"
+        actual_root.mkdir()
+        root.parent.mkdir()
+        if os.name == "nt":
+            subprocess.run(
+                [os.environ["COMSPEC"], "/c", "mklink", "/J", str(root), str(actual_root)],
+                check=True, timeout=10, capture_output=True, **launch_options(),
+            )
+        else:
+            root.symlink_to(actual_root, target_is_directory=True)
+    else:
+        root.mkdir(parents=True)
+    python = runner._venv_python("alpha")
+    real_run = subprocess.run
+    if mode in {"reinstall", "drift"}:
+        real_run(
+            [uv, "venv", "--allow-existing", "--python", sys.executable, str(root)],
+            env={k: v for k, v in os.environ.items() if k != "UV_VENV_CLEAR"},
+            check=True, timeout=30, capture_output=True, **launch_options(),
+        )
+    if mode != "fresh":
+        (root / "stale-package").mkdir()
+        (root / "stale-package" / "stale.txt").touch()
+        (root / ".dep-fingerprint").write_text("current" if mode == "reinstall" else "old")
+    outside = cache / "outside"
+    outside.mkdir()
+    sentinel = outside / "keep"
+    sentinel.touch()
+    link = root / "outside-link"
+    if os.name == "nt":
+        real_run(
+            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(link), str(outside)],
+            check=True, timeout=10, capture_output=True, **launch_options(),
+        )
+    else:
+        link.symlink_to(outside, target_is_directory=True)
+    before = root.stat()
+    before_key = admission.admission_dir(root)
+    if mode == "root-alias":
+        assert admission.admission_dir(actual_root) == before_key
+    invocations = []
+
+    def run(command, **kwargs):
+        if command[:2] == [uv, "pip"]:
+            assert python.is_file()
+            return subprocess.CompletedProcess(command, 0)
+        if command[:2] == [uv, "venv"]:
+            assert command[2] == "--allow-existing"
+            assert "UV_VENV_CLEAR" not in kwargs["env"]
+            assert root.is_dir()
+            assert not (root / "stale-package").exists()
+            assert sentinel.exists()
+            assert admission.admission_dir(root) == before_key
+            # Probe without the monkeypatched subprocess.run call.
+            contender = real_run(
+                child_command(actual_root if mode == "root-alias" else root),
+                timeout=10, capture_output=True, **launch_options(),
+            )
+            assert contender.returncode == 3
+            invocations.append("uv")
+            kwargs.update(capture_output=True, timeout=30, **launch_options())
+            return real_run(command, **kwargs)
+        return real_run(command, **kwargs)
+
+    lease = admission.acquire(0, root)
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    try:
+        assert runner._ensure_venv("alpha", uv, reinstall=mode == "reinstall") == python
+        after = root.stat()
+        assert (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
+        assert admission.admission_dir(root) == before_key
+        assert probe(root) == 3
+    finally:
+        lease.release()
+    assert invocations == ["uv"]
+    assert sentinel.exists()
+    assert probe(root) == 0
+
+
+def test_standalone_real_uv_preparation_preserves_environment_identity(cache, monkeypatch):
+    import shutil
+
+    uv = shutil.which("uv")
+    assert uv
+    runner = load_runner("run-standalone-tests.py")
+    monkeypatch.setattr(runner, "REPO", cache)
+    monkeypatch.setenv("UV_VENV_CLEAR", "true")
+    root = cache / ".test-venvs" / "standalone"
+    root.mkdir(parents=True)
+    python = root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    before = root.stat()
+    key = admission.admission_dir(root)
+    real_run = subprocess.run
+    calls = []
+
+    def run(command, **kwargs):
+        if command[:2] == ["uv", "pip"]:
+            assert python.is_file()
+            return subprocess.CompletedProcess(command, 0)
+        if command[:2] == ["uv", "venv"]:
+            assert command == ["uv", "venv", "--allow-existing", str(root)]
+            assert "UV_VENV_CLEAR" not in kwargs["env"]
+            assert real_run(
+                child_command(root), timeout=10, capture_output=True, **launch_options(),
+            ).returncode == 3
+            command[0] = uv
+            kwargs["timeout"] = 30
+            calls.append("uv")
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(runner.subprocess, "run", run)
+    lease = admission.acquire(0, root)
+    try:
+        runner.prepare("agent-index-service", python, smoke=True)
+        after = root.stat()
+        assert (after.st_dev, after.st_ino) == (before.st_dev, before.st_ino)
+        assert admission.admission_dir(root) == key
+    finally:
+        lease.release()
+    assert calls == ["uv"]
+    assert probe(root) == 0

@@ -72,12 +72,20 @@ Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
 than repeatedly importing file groups that contain no selected tests.
 
 There is no host-wide test singleton. Each target takes a lease keyed by its
-**resolved concrete environment directory**, held across venv preparation,
+**concrete environment directory's filesystem identity** (`st_dev`, `st_ino`),
+held across venv preparation,
 dependency-fingerprint rebuilds, `--reinstall`, and all test use. This includes
-`--guards`, `--collect-only`, and `--prepare-only`; `--list` neither resolves
+`--guards`, `--collect-only`, and `--prepare-only`; `--list` neither establishes
 nor locks an environment. Different plugins or checkouts run independently
 under the unchanged per-job resource and time bounds. Filesystem aliases of
-the same environment contend for the same lease. A multi-target run releases
+the same environment, including case-insensitive and bind-mount aliases,
+contend for the same lease. Managed runners establish the directory before
+locking it and preserve its identity through rebuild: only contents are
+cleared under the lease, and `uv venv --allow-existing` preserves the root.
+The installer environment excludes `UV_VENV_CLEAR`, and a post-creation
+identity check detects an unexpected replacement. An absent or unidentifiable
+custom root is rejected; there is no lexical fallback lock key.
+A multi-target run releases
 each target before acquiring the next, so it never holds multiple environment
 locks. A conflicting run fails fast with exit code 3 and names the environment
 and live holder; `--admission-wait` allows a non-negative, finite, bounded wait
@@ -313,10 +321,13 @@ containment.
 The standalone runner (`tools/run-standalone-tests.py`) uses the same
 environment lease protocol for managed venvs and custom `--python`
 interpreters. Standard venv roots are discovered from the canonical containing
-`bin`/`Scripts` directory or `pyvenv.cfg`, without executing candidate code.
-The root remains identifiable while a competing rebuild temporarily removes
-the interpreter and configuration. Availability is checked only after the
-lease is acquired, so `--admission-wait` covers that race.
+`bin`/`Scripts` directory **with `pyvenv.cfg`** or a known managed target,
+without executing candidate code. Directory names alone are not proof of a
+venv: an opaque wrapper can also live in `bin` or `Scripts`. Known managed
+roots remain identifiable while a competing rebuild removes their contents;
+custom environments with temporarily missing configuration need an explicit
+root. Availability is checked only after the lease is acquired, so
+`--admission-wait` covers the missing-executable race.
 Nonstandard custom launchers require `--environment-root <actual-env-root>`:
 their target cannot be inferred safely without executing them. This explicit
 address must name the environment they actually use, so different launchers

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import math
 import os
+import stat
 import sys
 import time
 from pathlib import Path
@@ -17,9 +18,12 @@ ADMISSION_SERVICE = "copilot-extensions-test-runner"
 
 
 def admission_dir(environment_root: Path) -> Path:
-    """Key by the concrete environment directory, including filesystem aliases."""
-    identity = os.path.normcase(str(environment_root.resolve()))
-    key = hashlib.sha256(os.fsencode(identity)).hexdigest()
+    """Key by directory filesystem identity; callers preserve that directory."""
+    metadata = environment_root.stat()
+    if not stat.S_ISDIR(metadata.st_mode) or not metadata.st_ino:
+        raise ValueError("test environment requires a directory with filesystem identity")
+    identity = f"{metadata.st_dev}:{metadata.st_ino}"
+    key = hashlib.sha256(identity.encode("ascii")).hexdigest()
     if os.name == "nt":
         base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
     else:
