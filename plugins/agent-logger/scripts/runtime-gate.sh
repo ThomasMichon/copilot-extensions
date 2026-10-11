@@ -49,15 +49,19 @@ json_get() {
 }
 
 json_type() {
-    if [[ "$#" -ge 3 ]]; then
-        LC_ALL=C awk -f "$JSON_QUERY" -v mode=type -v "query_path=$2" "$3"
-    else
-        LC_ALL=C awk -f "$JSON_QUERY" -v mode=type -v "query_path=$2" <<<"$1"
-    fi
+    LC_ALL=C awk -f "$JSON_QUERY" -v mode=type -v "query_path=$2" <<<"$1"
 }
 
-json_len() {
-    LC_ALL=C awk -f "$JSON_QUERY" -v mode=len -v "query_path=$2" "$3"
+json_type_file() {
+    LC_ALL=C awk -f "$JSON_QUERY" -v mode=type -v "query_path=$2" "$1"
+}
+
+json_get_file() {
+    LC_ALL=C awk -f "$JSON_QUERY" -v mode=get -v "query_path=$2" "$1"
+}
+
+json_len_file() {
+    LC_ALL=C awk -f "$JSON_QUERY" -v mode=len -v "query_path=$2" "$1"
 }
 
 profile_home() {
@@ -200,16 +204,19 @@ elif [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
         "$(json_get "$RESOLUTION" "$(json_path policy state)" 2>/dev/null || true)" = valid &&
         "$(json_get "$RESOLUTION" "$(json_path policy enabled)" 2>/dev/null || true)" = false ]]; then
     MARKETPLACES_PATH="$(json_path installationMode marketplaces)"
-    MARKETPLACES_TYPE="$(json_type "$RESOLUTION" "$MARKETPLACES_PATH" "$POLICY" 2>/dev/null || true)"
+    MARKETPLACES_TYPE="$(json_type_file "$POLICY" "$MARKETPLACES_PATH" 2>/dev/null || true)"
     ENABLED_PATH="$(json_path installationMode enabled)"
-    ENABLED_TYPE="$(json_type "$RESOLUTION" "$ENABLED_PATH" "$POLICY" 2>/dev/null || true)"
-    if [[ ( -z "$ENABLED_TYPE" ||
+    ENABLED_TYPE="$(json_type_file "$POLICY" "$ENABLED_PATH" 2>/dev/null || true)"
+    POLICY_TYPE="$(json_type_file "$POLICY" "" 2>/dev/null || true)"
+    MODE_TYPE="$(json_type_file "$POLICY" "$(json_path installationMode)" 2>/dev/null || true)"
+    if [[ "$POLICY_TYPE" = object &&
+          ( -z "$MODE_TYPE" || "$MODE_TYPE" = object ) &&
+          ( -z "$ENABLED_TYPE" ||
             ( "$ENABLED_TYPE" = boolean &&
-              "$(LC_ALL=C awk -f "$JSON_QUERY" -v mode=get \
-                -v "query_path=$ENABLED_PATH" "$POLICY" 2>/dev/null || true)" = false ) ) &&
+              "$(json_get_file "$POLICY" "$ENABLED_PATH" 2>/dev/null || true)" = false ) ) &&
           ( -z "$MARKETPLACES_TYPE" ||
           ( "$MARKETPLACES_TYPE" = object &&
-            "$(json_len "$RESOLUTION" "$MARKETPLACES_PATH" "$POLICY" 2>/dev/null || true)" = 0 ) ) ]]; then
+            "$(json_len_file "$POLICY" "$MARKETPLACES_PATH" 2>/dev/null || true)" = 0 ) ) ]]; then
         SIMPLE_POLICY_LEGACY=1
     fi
 fi

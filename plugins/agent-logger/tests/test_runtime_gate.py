@@ -516,7 +516,11 @@ def test_cross_cell_context_mismatch_is_rejected(tmp_path: Path, shell: str) -> 
          "valid", "active", None, 126),
         ({"enabled": True}, "valid", "active", None, 126),
         ({"enabled": False}, "invalid", "active", None, 126),
+        ({"null": True}, "invalid", "active", None, 126),
+        ({"null": True}, "valid", "active", None, 126),
+        ({"malformed": True}, "valid", "active", None, 126),
         ({"enabled": False}, "valid", "active", {"owner": "other"}, 126),
+        ({"enabled": False}, "valid", "active", "omit", 126),
         (None, "missing", "owned-by-other-cell", None, 126),
     ],
 )
@@ -526,7 +530,7 @@ def test_legacy_policy_without_embedded_policy(
     mode: dict[str, object] | None,
     policy_state: str,
     disposition: str,
-    tombstone: dict[str, str] | None,
+    tombstone: dict[str, str] | str | None,
     expected_code: int,
 ) -> None:
     if (shell == "bash") == (os.name == "nt"):
@@ -545,13 +549,21 @@ def test_legacy_policy_without_embedded_policy(
             "version": 1,
         }
         if mode != {"omit": True}:
-            document["installationMode"] = mode
-        policy.write_text(json.dumps(document), encoding="utf-8")
+            document["installationMode"] = None if mode == {"null": True} else mode
+        policy.write_text(
+            '{"synthetic-policy-sentinel":'
+            if mode == {"malformed": True}
+            else json.dumps(document),
+            encoding="utf-8",
+        )
     legacy_root = profile / ".agent-logger"
     runtime = _fake_runtime(legacy_root)
     capture = tmp_path / "capture.json"
     env = _clean_subprocess_env()
     env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    legacy: dict[str, object] = {"disposition": disposition}
+    if tombstone != "omit":
+        legacy["tombstone"] = tombstone
     env.update({
         "HOME": str(profile),
         "USERPROFILE": str(profile),
@@ -569,7 +581,7 @@ def test_legacy_policy_without_embedded_policy(
                 "enabled": bool(mode and mode.get("enabled")),
                 "reason": "policy-default-false" if mode is None else "policy-global",
             },
-            "legacy": {"disposition": disposition, "tombstone": tombstone},
+            "legacy": legacy,
         }),
     })
     if shell == "bash":
@@ -593,5 +605,8 @@ def test_legacy_policy_without_embedded_policy(
         assert observed["home"] == str(legacy_root)
         assert observed["context"] is None
     else:
-        assert "blocks invocation" in result.stderr
+        assert "blocks invocation" in result.stderr or (
+            "installation policy could not be read" in result.stderr
+        )
+        assert "synthetic-policy-sentinel" not in result.stderr
         assert not capture.exists()

@@ -107,6 +107,7 @@ $policyPresent = (
 $legacyUntransferred = (
     $null -ne $resolution.legacy -and
     [string]$resolution.legacy.disposition -ceq 'active' -and
+    $null -ne $resolution.legacy.PSObject.Properties['tombstone'] -and
     $null -eq $resolution.legacy.tombstone
 )
 $simplePolicyLegacy = $false
@@ -136,11 +137,26 @@ elseif (
             ConvertFrom-Json
     } catch {
         [Console]::Error.WriteLine(
-            "[agent-logger] installation policy could not be read: $_"
+            '[agent-logger] installation policy could not be read.'
+        )
+        exit 126
+    }
+    if ($policyDocument -isnot [pscustomobject]) {
+        [Console]::Error.WriteLine(
+            '[agent-logger] installation context blocks invocation: invalid policy document.'
         )
         exit 126
     }
     $installationMode = $policyDocument.PSObject.Properties['installationMode']
+    if (
+        $null -ne $installationMode -and
+        $installationMode.Value -isnot [pscustomobject]
+    ) {
+        [Console]::Error.WriteLine(
+            '[agent-logger] installation context blocks invocation: invalid installation mode.'
+        )
+        exit 126
+    }
     $enabled = if ($null -ne $installationMode) {
         $installationMode.Value.PSObject.Properties['enabled']
     } else { $null }
