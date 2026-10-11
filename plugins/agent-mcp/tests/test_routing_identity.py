@@ -10,6 +10,7 @@ import pytest
 from agent_mcp.auth.identity import resolve_entra_identity
 from agent_mcp.client import OneShotSession, UpstreamError
 from agent_mcp.config import AuthSpec, parse_config
+from agent_mcp.routing_errors import RoutingError
 
 from .test_routing import MockUpstream, TOOLS, definition
 
@@ -154,7 +155,7 @@ async def test_relay_without_identity_binding_fails_closed(identity_backend, mon
 
     monkeypatch.setattr(identity.shutil, "which", lambda _name: "relay-helper")
     async with OneShotSession(parse_config(entra_definition())) as session:
-        with pytest.raises(RuntimeError, match="relay cannot bind identity"):
+        with pytest.raises(UpstreamError, match="relay cannot bind identity"):
             await session.call_tool("read", {"organization": "alpha"})
     assert identity_backend["probes"] == []
     assert identity_backend["started"] == []
@@ -179,7 +180,7 @@ async def test_explicit_tenant_selects_unique_principal_without_switch(identity_
 async def test_unknown_or_malformed_identity_fails_before_backend(identity_backend):
     identity_backend["principal"] = ""
     async with OneShotSession(parse_config(entra_definition())) as session:
-        with pytest.raises(RuntimeError, match="incomplete Azure account"):
+        with pytest.raises(UpstreamError, match="incomplete Azure account"):
             await session.call_tool("read", {"organization": "alpha"})
     assert identity_backend["started"] == []
 
@@ -218,7 +219,7 @@ async def test_azure_probe_timeout_uses_owned_tree_teardown(monkeypatch):
     monkeypatch.setattr(source, "_az_argv", lambda args: ["az", *args])
     monkeypatch.setattr(identity.asyncio, "create_subprocess_exec", spawn)
     monkeypatch.setattr(injectors, "_terminate_tree", close)
-    with pytest.raises(TimeoutError):
+    with pytest.raises(RoutingError, match="probe failed"):
         await identity.azure_json(["account", "show"], timeout=1)
     assert closed == [proc]
 

@@ -167,6 +167,10 @@ does not attest connectivity. `diagnose` reports an unchecked routing context
 and fails rather than treating the inert outer `auth: none` or trusted catalog
 target as proof that every execution target is healthy. Use a bounded audited
 read with an explicit selector to validate a particular target.
+Expected compatibility and identity-acquisition failures are returned as
+structured JSON-RPC errors and reported by `call`/`materialize` with a nonzero
+exit status, not an uncaught traceback. Cancellation and unrelated programming
+exceptions are not converted into successful fallbacks.
 
 Use an existing fleet first. Re-materialize when the expected stub is absent or
 `manifest.json.generated_by` differs from `agent-mcp --version`.

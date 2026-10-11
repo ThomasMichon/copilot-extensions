@@ -13,10 +13,7 @@ from dataclasses import asdict, replace
 from .config import BridgeConfig, ToolFilter
 from .decorators import BridgeContext, build_decorators
 from .pipeline import Pipeline, error_response, is_request, result_response
-
-
-class CompatibilityError(RuntimeError):
-    """A target does not implement the configured common tool contract."""
+from .routing_errors import CompatibilityError as CompatibilityError, RoutingError
 
 
 def isolated_config(cfg: BridgeConfig) -> BridgeConfig:
@@ -150,7 +147,7 @@ class RoutedCore:
         return response
 
     async def handle(self, msg: dict) -> dict | None:
-        from .client import tool_visible
+        from .client import UpstreamError, tool_visible
         from . import protocol
 
         method = msg.get("method")
@@ -201,8 +198,14 @@ class RoutedCore:
                 return error_response(msg, "routing supports tools only; no execution "
                                       f"context for '{method}'", -32601)
             raise RuntimeError(f"routing cannot safely forward '{method}' without a target")
-        except CompatibilityError as exc:
-            return error_response(msg, str(exc)) if is_request(msg) else None
+        except (RoutingError, UpstreamError) as exc:
+            if not is_request(msg):
+                return None
+            response = error_response(
+                msg, str(exc), code=exc.code if exc.code is not None else -32603)
+            if exc.data is not None:
+                response["error"]["data"] = exc.data
+            return response
 
     async def aclose(self) -> None:
         await asyncio.gather(*(policy.aclose() for policy in self._policies.values()))

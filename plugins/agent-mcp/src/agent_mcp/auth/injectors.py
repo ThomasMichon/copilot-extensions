@@ -21,6 +21,7 @@ from agent_procutil import windowless_daemon_kwargs
 
 from .._exec import no_window_creationflags, resolve_argv
 from ..config import AuthSpec, BridgeConfig
+from ..routing_errors import RoutingError
 from .base import AuthInjector, CompositeInjector, NoneInjector, TokenInjector
 
 log = logging.getLogger("agent-mcp.auth")
@@ -154,7 +155,7 @@ class EntraInjector(TokenInjector):
         context = await resolve_entra_identity(self.spec, timeout=self._timeout)
         if context != self.spec.identity_context:
             await self.invalidate()
-            raise RuntimeError("routing auth identity changed; retry as a new routed request")
+            raise RoutingError("routing auth identity changed; retry as a new routed request")
 
     async def _get(self) -> str | None:
         if self.spec.identity_context is None:
@@ -230,7 +231,7 @@ class EntraInjector(TokenInjector):
                 args += ["--tenant", self.spec.tenant]
             result = await azure_json(args, timeout=self._timeout)
             if not isinstance(result, dict) or not isinstance(result.get("accessToken"), str):
-                raise RuntimeError("routing target authentication failed: missing Azure token")
+                raise RoutingError("routing target authentication failed: missing Azure token")
             await self._assert_identity()
             return result["accessToken"]
         helper = None if self.spec.tenant else shutil.which(self._RELAY_HELPER)
@@ -513,13 +514,13 @@ class RequiredAuthInjector(AuthInjector):
     async def headers(self) -> dict[str, str]:
         values = await self.inner.headers()
         if not values or not all(values.values()):
-            raise RuntimeError("routing target authentication failed")
+            raise RoutingError("routing target authentication failed")
         return values
 
     async def child_env(self) -> dict[str, str]:
         values = await self.inner.child_env()
         if not values or not all(values.values()):
-            raise RuntimeError("routing target authentication failed")
+            raise RoutingError("routing target authentication failed")
         return values
 
     async def invalidate(self) -> None:

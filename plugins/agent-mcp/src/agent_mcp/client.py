@@ -403,7 +403,7 @@ class OneShotSession:
     async def list_tools(self) -> list[dict]:
         """Fetch the full (paginated) upstream catalog, honoring the tool filter."""
         if self._router is not None:
-            return filter_tools(await self._router.catalog(), self.cfg.tools)
+            return await self._routed_tools()
         self._need_client()
         if self._ctx is None:
             raise RuntimeError("OneShotSession used outside its async context")
@@ -428,7 +428,7 @@ class OneShotSession:
         hard failure rather than an early, silent stop.
         """
         if self._router is not None:
-            return filter_tools(await self._router.catalog(), self.cfg.tools)
+            return await self._routed_tools()
         client = self._need_client()
         if self._ctx is None:
             raise RuntimeError("OneShotSession used outside its async context")
@@ -466,6 +466,14 @@ class OneShotSession:
         if cursor and self.cfg.routed_target:
             raise UpstreamError("routing compatibility error: catalog pagination exceeds bound")
         return filter_tools(tools, self.cfg.tools)
+
+    async def _routed_tools(self) -> list[dict]:
+        from .routing_errors import RoutingError
+
+        try:
+            return filter_tools(await self._router.catalog(), self.cfg.tools)
+        except RoutingError as exc:
+            raise UpstreamError(str(exc), code=exc.code, data=exc.data) from exc
 
     async def call_tool(self, name: str, arguments: dict) -> dict:
         """Invoke one tool; return the ``tools/call`` result mapping.

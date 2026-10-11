@@ -12,7 +12,7 @@ import pytest
 
 from agent_mcp.client import OneShotSession, UpstreamError
 from agent_mcp.config import ConfigError, parse_config
-from agent_mcp.routing import CompatibilityError, RoutedCore, isolated_config
+from agent_mcp.routing import RoutedCore, isolated_config
 from agent_mcp.serve import WarmPool
 from agent_mcp.session import BridgeSession
 from agent_mcp.transports.base import Transport
@@ -175,7 +175,7 @@ async def test_catalog_mismatch_never_calls_backend(upstreams, difference):
 async def test_selector_collision_is_explicit(upstreams):
     upstreams["tools"]["alpha"][0]["inputSchema"]["properties"]["organization"] = {}
     async with OneShotSession(parse_config(definition())) as session:
-        with pytest.raises(CompatibilityError, match="collides"):
+        with pytest.raises(UpstreamError, match="collides"):
             await session.list_tools()
 
 
@@ -406,6 +406,6 @@ async def test_failed_target_auth_does_not_spawn_stdio_child(tmp_path, monkeypat
     cfg = parse_config({"routing": {"parameter": "organization", "catalog": "alpha",
                                     "targets": {"alpha": target}}})
     async with OneShotSession(cfg) as session:
-        with pytest.raises(RuntimeError, match="authentication failed"):
+        with pytest.raises(UpstreamError, match="authentication failed"):
             await session.call_tool("read", {"organization": "alpha"})
     assert not marker.exists()
