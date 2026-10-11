@@ -165,6 +165,31 @@ def test_bound_but_unadmitted_receipt_cannot_start_task(tmp_path, monkeypatch):
     assert queue.get(task.id).status == "claimed"
 
 
+def test_start_bridge_observation_does_not_hold_queue_write_lock(tmp_path, monkeypatch):
+    queue = TaskQueue(tmp_path / "nonblocking-start.db")
+    task = queue.create("work")
+    reservation, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn_worktree(reservation.key, "worktree-a", ownership="created")
+    receipt = {
+        "reservation_key": reservation.key, "task_id": task.id,
+        "task_generation": task.generation, "worktree_id": "worktree-a",
+        "session_id": "native-a", "native_session_id": "native-a",
+        "mode": "cli", "delivery_id": "delivery-a",
+    }
+    bind(queue, receipt, evidence=evidence(receipt))
+    queue.claim_one("machine/worktree-a", task_id=task.id)
+    writes = []
+    def inspect(_delivery):
+        # A second queue write must succeed during the potentially slow bridge
+        # observation, rather than wait behind a BEGIN IMMEDIATE start lock.
+        writes.append(queue.create("unrelated").id)
+        return {**evidence(receipt), "stage": "delivered"}
+    monkeypatch.setattr(acquisition_receipts, "bridge_evidence", inspect)
+    started = queue.start(task.id, "machine/worktree-a", owner_session_id="native-a")
+    assert started.status == "started"
+    assert len(writes) == 1
+
+
 def test_receipt_route_reads_bridge_authority_not_request_supplied_session(tmp_path, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient

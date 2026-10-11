@@ -93,7 +93,21 @@ def bind(
     return receipt
 
 
-def validate_start(conn: Any, task: Any, native_id: str | None) -> None:
+def start_authority(queue: Any, task_id: str) -> dict[str, Any] | None:
+    with queue._connect() as conn:
+        ensure(conn)
+        row = conn.execute(
+            "SELECT a.delivery_id FROM acquisition_receipts a JOIN spawn_reservations s "
+            "ON s.key=a.reservation_key WHERE a.task_id=? "
+            "AND s.state IN ('reserving','spawned') AND s.release_requested=0 "
+            "ORDER BY s.attempt DESC LIMIT 1", (task_id,),
+        ).fetchone()
+    return bridge_evidence(row["delivery_id"]) if row else None
+
+
+def validate_start(
+    conn: Any, task: Any, native_id: str | None, authority: dict[str, Any] | None,
+) -> None:
     ensure(conn)
     rows = conn.execute(
         "SELECT a.* FROM acquisition_receipts a JOIN spawn_reservations s "
@@ -106,8 +120,10 @@ def validate_start(conn: Any, task: Any, native_id: str | None) -> None:
             raise TaskError("acquired worker start requires a bridge acquisition receipt")
         return
     receipt = rows[0]
-    current = bridge_evidence(receipt["delivery_id"])
+    current = authority or {}
     if (
+        current.get("delivery_id") != receipt["delivery_id"]
+        or
         current.get("stage") not in {"delivering", "delivered"}
         or current.get("state") not in {"pending", "completed"}
         or not isinstance(current.get("recorded_result"), dict)

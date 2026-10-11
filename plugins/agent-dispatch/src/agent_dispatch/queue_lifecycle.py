@@ -63,6 +63,8 @@ class QueueLifecycleMixin:
         if worker_id.startswith("acquired-") and not owner_session_id:
             raise TaskError("acquired worker start requires an exact native owner_session_id")
         ts = self._now(now)
+        from .acquisition_receipts import start_authority
+        authority = start_authority(self, task_id)
         extra: dict[str, object] = {"last_seen_at": ts, "activity": None, "activity_updated_at": ts}
         if owner_session_id is not None:
             extra["owner_session_id"] = owner_session_id
@@ -78,6 +80,7 @@ class QueueLifecycleMixin:
             extra=extra,
             idempotent_replay=True,
             reject_if_held=True,
+            start_acquisition_authority=authority,
         )
 
     def complete(
@@ -808,6 +811,7 @@ class QueueLifecycleMixin:
         reject_if_held: bool = False,
         idempotent_replay: bool = False,
         report_replay: bool = False,
+        start_acquisition_authority: dict | None = None,
     ) -> Task | tuple[Task, bool]:
         """Generic fenced transition helper.
 
@@ -827,7 +831,9 @@ class QueueLifecycleMixin:
                 raise TaskError(f"no such task {task_id!r}")
             if note == "start":
                 from .acquisition_receipts import validate_start
-                validate_start(conn, task, (extra or {}).get("owner_session_id"))
+                validate_start(
+                    conn, task, (extra or {}).get("owner_session_id"), start_acquisition_authority,
+                )
             try:
                 _check_expected_status(task, expected_status)
             except TaskError:
