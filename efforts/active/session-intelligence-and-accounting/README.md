@@ -194,6 +194,23 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
 
+### 2026-10-10 - ZIP review corrections validated
+- The first source review found an uncaught ZIP runtime failure and stale setup
+  guidance. Snapshot verification now rejects unsupported codecs explicitly
+  and records encrypted/corrupt-deflate runtime errors per file, preserving
+  later candidates and the scheduled raw-log transfer. A parameterized synthetic
+  regression exercises all three real decoder failure shapes, not a mocked
+  archive failure.
+- Updated the setup skill's scheduled/manual snapshot guidance, canonical config
+  example and discoverable command triggers. The customization scan reports
+  zero blocking findings and none on the changed setup skill.
+- Exact code `758971aa6838a423c7a8c5216b157f32a599c2b4` passed 426 Linux
+  network-disconnected sync/source cases (21 skips) and 183 bounded native
+  Windows ZIP/health/source cases (16 skips). Linux admission initially found a
+  live test-slot holder; a bounded wait admitted the run without stopping it.
+- Source re-review, exact-final-head CI, merge, release and adoption remain
+  separate outstanding gates. No original evidence was rewritten or retired.
+
 ### 2026-10-10 - Native ZIP validation corrected and passed
 - Native Windows execution found three ZIP snapshot failures after the earlier
   admission deferral. A synthetic metadata probe confirmed that `lstat` and
