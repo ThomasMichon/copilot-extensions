@@ -13,6 +13,15 @@ from . import locks, procs, self_retire, status_monitor_cutover, status_monitor_
 
 def _candidates() -> list[diagnostics.DaemonCandidate]:
     runtime_root = str(status_monitor_runtime._aw_runtime_home())
+    if sys.platform == "win32":
+        from . import windows_process_census
+
+        return [
+            diagnostics.DaemonCandidate(pid=item["pid"], start_time=item["start_time"])
+            for item in windows_process_census.snapshot()
+            if procs._is_under(item["cwd"], runtime_root)
+            and status_monitor_cutover._is_status_monitor_cmdline(item["command_line"])
+        ]
     if sys.platform == "darwin":
         scoped_pids = {
             pid
