@@ -166,6 +166,28 @@ resource fencing, or existing standalone-service defaults.
 
 ## Features
 
+### capability-sized-runtime-dependencies
+
+Each runtime carries the dependency closure needed for its selected capability,
+not the union of every client, UI, host, model and optional transport role.
+Lightweight callers remain light; expensive optional stacks have explicit
+installation ownership. Dependency cost is measured across fresh installation,
+downloads, resident processes and retained immutable generations, rather than
+judged by package names or direct wheel size alone.
+
+### compatible-helper-runtime-reuse
+
+Independently shippable payloads may supply shared helpers that installers reuse
+over efficient, attributable process boundaries when compatibility and trust
+permit. A lone consumer's installer supplies the required capability; later
+eligible consumers can avoid reconstructing an equivalent helper runtime.
+Sharing preserves installation-cell isolation, caller state and independent
+service lifecycle, and supports compatible generations without mutating live
+runtimes. It never assumes a pre-existing sibling, imports another service's
+private venv or turns an optimization into a mandatory global coordinator.
+Consolidated fronts retain independently owned endpoints, routing, drain and
+rollback even when execution resources are shared.
+
 ### self-contained-runtime
 Every runtime plugin owns a complete, standalone runtime (venv + binstub +
 service) that its own installer deploys and updates. Nothing a service needs to
