@@ -217,7 +217,9 @@ def test_json_launch_canonicalizes_self_target_before_selecting_transport(
     assert calls == ["remote" if dispatch_remote else "local"]
 
 
-def test_self_identity_fast_path_does_not_read_topology(monkeypatch, tmp_path):
+def test_self_identity_comparison_does_not_read_topology_after_owner_validation(monkeypatch, tmp_path):
+    monkeypatch.setattr("agent_worktrees.execution_spaces.require_owner_identity",
+                        lambda *args, **kwargs: True)
     def unexpected_read(_):
         pytest.fail("a direct configured identity must not read topology")
 

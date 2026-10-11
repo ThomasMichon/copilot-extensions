@@ -1,0 +1,9 @@
+{
+  "comment": "Update self-identity comparison regression to isolate mandatory execution-space owner validation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

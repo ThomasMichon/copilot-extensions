@@ -635,6 +635,7 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
                     "reserved_by": reserved_by,
                     "allow_suspended_reembodiment": allow_suspended_reembodiment,
                 },
+                timeout=180.0,
             )
         )
 
