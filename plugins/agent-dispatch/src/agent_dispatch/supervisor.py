@@ -2905,12 +2905,8 @@ class Supervisor:
         tracking = _tracking()
         local_by_id: dict[str, dict] | None = None
         held = 0
-        snapshots = []
-        for res in self._pool_reservations(state=SpawnState.SPAWNED):
-            try:
-                snapshots.append((res, self.client.get(res["task_id"])))
-            except DispatchError:
-                continue
+        from .activity_snapshots import capture
+        snapshots = capture(self.client, self._pool_reservations(state=SpawnState.SPAWNED))
         for res, task in snapshots:
             if task.get("status") == Status.SUSPENDED:
                 continue
