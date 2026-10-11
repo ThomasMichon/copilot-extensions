@@ -60,6 +60,10 @@ supervision.
 - **Installation cells:** namespaced installation cells build and reconcile the
   host runtime with the same local slot/cutover primitives as legacy mode. They
   remain self-contained and do not require `agent-dispatch`.
+  Cell/slot installer actions invoke the coordinator from the user profile,
+  outside both the payload and the invoking directory, with isolated Python
+  and no inherited `PYTHONPATH` or `PYTHONHOME`. Reserved coordinator exit
+  codes propagate unchanged.
 
 ## Consequences
 
