@@ -977,11 +977,19 @@ jobs:
           import subprocess
           import time
 
-          deadline = time.monotonic() + 18000
+          WAIT_SECONDS = 5 * 60 * 60
+          POLL_SECONDS = 30
+          identity = f"{os.environ['GITHUB_REPOSITORY']}#{os.environ['PROMOTION_PR']}"
+          expected = f"{os.environ['CANDIDATE_BRANCH']} -> main"
+          observed = "not yet queried"
+          deadline = time.monotonic() + WAIT_SECONDS
           while True:
               remaining = deadline - time.monotonic()
               if remaining <= 0:
-                  raise TimeoutError("Promotion PR did not merge within five hours")
+                  raise TimeoutError(
+                      f"{identity} did not merge within {WAIT_SECONDS}s; "
+                      f"expected {expected}; observed {observed}"
+                  )
               result = subprocess.run(
                   ["gh", "pr", "view", os.environ["PROMOTION_PR"],
                    "--repo", os.environ["GITHUB_REPOSITORY"],
@@ -990,21 +998,28 @@ jobs:
                   timeout=min(60, remaining),
               )
               pr = json.loads(result.stdout)
+              observed = (
+                  f"{pr['state']}: {pr['headRefName']} -> {pr['baseRefName']}"
+              )
               if (
                   pr["headRefName"] != os.environ["CANDIDATE_BRANCH"]
                   or pr["baseRefName"] != "main"
               ):
-                  raise RuntimeError("Promotion PR identity changed while waiting")
+                  raise RuntimeError(
+                      f"{identity} identity changed; expected {expected}; observed {observed}"
+                  )
               if pr["state"] == "MERGED":
                   sha = (pr.get("mergeCommit") or {}).get("oid")
                   if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
-                      raise RuntimeError("Merged promotion PR has no valid merge commit")
+                      raise RuntimeError(
+                          f"{identity} has no valid merge commit: {sha!r}; observed {observed}"
+                      )
                   with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
                       output.write(f"merge_sha={sha}\n")
                   break
               if pr["state"] != "OPEN":
-                  raise RuntimeError("Promotion PR closed without merging")
-              time.sleep(min(30, max(0, deadline - time.monotonic())))
+                  raise RuntimeError(f"{identity} closed without merging; observed {observed}")
+              time.sleep(min(POLL_SECONDS, max(0, deadline - time.monotonic())))
           PY
       - name: Tag the real post-merge commit
         if: steps.promote.outputs.land == 'true' && steps.land.outputs.candidate_pushed == 'true'

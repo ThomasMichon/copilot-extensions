@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -19,7 +20,9 @@ def waiter(monkeypatch, tmp_path):
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     steps = workflow["jobs"]["promote"]["steps"]
     step = next(s for s in steps if s.get("id") == "merged")
-    code = step["run"].split("python - <<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+    match = re.search(r"^python - <<'PY'\s*\n(.*?)^PY\s*$", step["run"], re.M | re.S)
+    assert match is not None, "promotion waiter must contain a complete Python heredoc"
+    code = match.group(1)
     output = tmp_path / "output"
     for key, value in {
         "PROMOTION_PR": "123",
