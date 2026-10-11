@@ -10,6 +10,9 @@ MAX_MESSAGE_BYTES = 65536
 MAX_TARGETS = 256
 MAX_SERVICES = 32
 MAX_QUERY_BYTES = 4096
+MAX_HITS = 100
+MAX_PATH_BYTES = 1024
+MAX_CONTENT_BYTES = 4096
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", re.ASCII)
 _REVISION = re.compile(r"sha256:[a-f0-9]{64}", re.ASCII)
 _CAPABILITIES = frozenset({"ssh", "create", "delete", "lease", "bootstrap"})
@@ -42,6 +45,29 @@ def _text(value: object, field: str, maximum: int) -> None:
         raise ContractError(f"{field} must be UTF-8 text") from exc
     if size > maximum or any(ord(c) < 32 and c not in "\t\n\r" for c in value):
         raise ContractError(f"{field} exceeds its text bounds")
+
+
+def _bounded_text(value: object, field: str, maximum: int, *, allow_empty: bool = False) -> None:
+    """Like :func:`_text`, but callable with ``allow_empty=True`` for a field
+    (e.g. search-hit body content) that is legitimately blank rather than a
+    missing identifier."""
+    if not isinstance(value, str):
+        raise ContractError(f"{field} must be text")
+    if not allow_empty and not value.strip():
+        raise ContractError(f"{field} must be nonempty text")
+    try:
+        size = len(value.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise ContractError(f"{field} must be UTF-8 text") from exc
+    if size > maximum or any(ord(c) < 32 and c not in "\t\n\r" for c in value):
+        raise ContractError(f"{field} exceeds its text bounds")
+
+
+def _number(value: object, field: str, *, minimum: float = 0.0) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ContractError(f"{field} must be a finite number")
+    if value < minimum:
+        raise ContractError(f"{field} must be >= {minimum}")
 
 
 def _object(value: object, required: set[str], optional: set[str] | None = None) -> dict:
@@ -361,4 +387,142 @@ class RouteRequest(_WireRecord):
             data["fleet_id"], TargetRef.from_dict(data["target"]), data["connector_id"],
             data["generation"], data["service_id"], data["installation_id"],
             data["request_id"], data["operation"], parameters,
+        )
+
+
+@dataclass(frozen=True)
+class SearchHit:
+    """One bounded, response-shaped search result.
+
+    Mirrors agent-index's existing public hit shape (``query_surface.
+    hit_to_dict``) field-for-field, so an adapter can build one directly from
+    the backend's unmodified JSON -- but every field is independently bounded
+    here, so a malformed or oversized backend response cannot become an
+    oversized or malformed wire response merely by being relayed.
+    """
+
+    chunk_id: str
+    score: float
+    file_path: str
+    source: str
+    chunk_type: str
+    language: str
+    content: str
+    line_start: int | None = None
+    line_end: int | None = None
+
+    def __post_init__(self) -> None:
+        _bounded_text(self.chunk_id, "chunk_id", 256)
+        _number(self.score, "score")
+        _bounded_text(self.file_path, "file_path", MAX_PATH_BYTES, allow_empty=True)
+        _bounded_text(self.source, "source", 256, allow_empty=True)
+        _bounded_text(self.chunk_type, "chunk_type", 128, allow_empty=True)
+        _bounded_text(self.language, "language", 128, allow_empty=True)
+        _bounded_text(self.content, "content", MAX_CONTENT_BYTES, allow_empty=True)
+        for name in ("line_start", "line_end"):
+            value = getattr(self, name)
+            if value is not None:
+                _integer(value, name, minimum=0, maximum=2**31 - 1)
+
+    @classmethod
+    def from_dict(cls, value: object) -> SearchHit:
+        data = _object(value, {
+            "chunk_id", "score", "file_path", "source", "chunk_type", "language",
+            "content", "line_start", "line_end",
+        })
+        return cls(
+            data["chunk_id"], data["score"], data["file_path"], data["source"],
+            data["chunk_type"], data["language"], data["content"],
+            data["line_start"], data["line_end"],
+        )
+
+
+@dataclass(frozen=True)
+class HealthResult:
+    available: bool
+    detail: str | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.available) is not bool:
+            raise ContractError("available must be a boolean")
+        if self.detail is not None:
+            _bounded_text(self.detail, "detail", 512, allow_empty=True)
+
+    @classmethod
+    def from_dict(cls, value: object) -> HealthResult:
+        data = _object(value, {"available", "detail"})
+        return cls(data["available"], data["detail"])
+
+
+@dataclass(frozen=True)
+class RouteResponse(_WireRecord):
+    """The typed, bounded counterpart to :class:`RouteRequest`.
+
+    Correlates to its originating request by echoing ``request_id``,
+    ``service_id``, ``installation_id`` and ``operation`` -- never a
+    client-supplied value the adapter didn't itself validate -- and carries
+    exactly one operation-shaped result, mirroring ``RouteRequest``'s own
+    operation-typed ``parameters`` field.
+    """
+
+    SCHEMA: ClassVar[str] = "agent-fleet.route-response"
+    request_id: str
+    service_id: str
+    installation_id: str
+    operation: str
+    health: HealthResult | None = None
+    hits: tuple[SearchHit, ...] | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("request_id", "service_id", "installation_id"):
+            _identifier(getattr(self, name), name)
+        if self.operation == "health":
+            if not isinstance(self.health, HealthResult):
+                raise ContractError("health operation requires a health result")
+            if self.hits is not None:
+                raise ContractError("health operation cannot carry hits")
+        elif self.operation == "index.search":
+            if self.health is not None:
+                raise ContractError("index.search operation cannot carry a health result")
+            if type(self.hits) is not tuple:
+                raise ContractError("hits must be an immutable collection")
+            values = _tuple(self.hits, "hits", MAX_HITS, empty=True)
+            if any(not isinstance(item, SearchHit) for item in values):
+                raise ContractError("hits must contain search hit records")
+        else:
+            raise ContractError("unsupported routing operation")
+
+    @classmethod
+    def for_request(
+        cls,
+        request: RouteRequest,
+        *,
+        health: HealthResult | None = None,
+        hits: tuple[SearchHit, ...] | None = None,
+    ) -> RouteResponse:
+        """Build a response correlated to its originating ``request`` --
+        the request's own validated identity fields, never a value an
+        adapter would otherwise have to re-assert by hand."""
+        return cls(
+            request.request_id, request.service_id, request.installation_id,
+            request.operation, health, hits,
+        )
+
+    @classmethod
+    def from_dict(cls, value: object) -> RouteResponse:
+        data = _wire(value, cls.SCHEMA, {
+            "request_id", "service_id", "installation_id", "operation", "health", "hits",
+        })
+        health = data["health"]
+        if health is not None:
+            health = HealthResult.from_dict(health)
+        hits = data["hits"]
+        if hits is not None:
+            hits = tuple(
+                SearchHit.from_dict(item)
+                for item in _tuple(hits, "hits", MAX_HITS, empty=True)
+            )
+        return cls(
+            data["request_id"], data["service_id"], data["installation_id"],
+            data["operation"], health, hits,
         )
