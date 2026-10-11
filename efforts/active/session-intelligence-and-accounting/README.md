@@ -194,6 +194,22 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
 
+### 2026-10-10 - Review-request recovery and absent-root correction
+- A confirmed GitHub REST quota exhaustion prevented the review-request
+  workflow from reaching the request. After the reported reset and a cooldown,
+  an explicit API re-request produced a new whole-PR review at the published
+  head. No workflow was rerun or merge gate bypassed.
+- That review confirmed the earlier decoder fix and found an initially absent
+  optional process-log root incorrectly failed snapshot commands. The fix
+  treats only initial absence as an empty pass, without creating the root;
+  permission, unsafe-root and disappearance-during-opening failures remain
+  explicit. Existing transfer-health semantics remain unchanged.
+- Code `9d3cac763` passed 435 bounded Linux sync/source/process-log tests
+  (21 skips), including the new absent-root and refusal regressions. Native
+  Windows evidence still belongs to the earlier source until rerun.
+- Exact updated-head review, complete required CI, merge, release and adoption
+  remain separate gates.
+
 ### 2026-10-10 - ZIP review corrections validated
 - The first source review found an uncaught ZIP runtime failure and stale setup
   guidance. Snapshot verification now rejects unsupported codecs explicitly
