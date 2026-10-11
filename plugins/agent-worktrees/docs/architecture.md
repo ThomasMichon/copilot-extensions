@@ -512,6 +512,14 @@ records it. A `bind-session --handoff-token <token>` call claims one exact
 pending handoff and performs the predecessor conclusion, two-way link, handoff
 state change, and head transition atomically.
 
+Resident session discovery preserves the head read from the authoritative
+record under its lock, not a head cached earlier in the catalog cycle. Observing
+an old process cannot adopt a yielded or concluded session as head. Cancelling
+an unclaimed handoff restores only its latest rightful predecessor; rebinding
+that same session must not displace a newer yielded lineage. Historical damage
+to that lineage is repaired through explicit `link-succession` with both known
+session identities, never by editing state files or treating discovery as consent.
+
 When a launch carries an opt-in profile-assignment token, the same registration
 also binds the pending assignment to the actual session id. Ordinary resume
 looks up that bound assignment and rebuilds the launch with the same ordinary

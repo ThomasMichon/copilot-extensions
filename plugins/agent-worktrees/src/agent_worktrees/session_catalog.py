@@ -614,7 +614,9 @@ class ResidentSessionReconciler:
                     changed = True
                 else:
                     changed = False
-                protected_head = self._heads.get((project, worktree_id))
+                # Preserve authority read under this lock, never an earlier
+                # catalog-cycle head that may have yielded or been replaced.
+                protected_head = record.resolved_head_session
                 entry = record.session_entry(observation["session_id"])
                 if entry is None:
                     observed_at = observation["started_at"] or _canonical_timestamp(
