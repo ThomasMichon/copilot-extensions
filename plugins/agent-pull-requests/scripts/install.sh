@@ -261,15 +261,62 @@ _bootstrap_python() {
 }
 
 _payload_hash() {
-    local __parts=""
-    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
+    # Use the canonical fingerprint_source() (libs/versioned-runtime), not a
+    # bespoke pyproject.toml-only hash: a prior audit (#5472) found exactly
+    # this narrower scope on another adopter -- changing src/agent_pull_requests
+    # WITHOUT touching pyproject.toml must still be detected as a content
+    # change, or an installed slot could wrongly report `reuse` for a
+    # genuinely different payload.
+    #
+    # Returns 0 with EMPTY output only for the two legitimate "nothing to
+    # hash yet" cases (no bootstrap Python available on a first-ever
+    # install; no declared roots exist at all) -- both already degrade the
+    # same way the pre-fix hash did. Any OTHER failure (the fingerprint
+    # command itself erroring, e.g. on an unsupported filesystem object)
+    # returns NON-ZERO and prints to stderr: a caller must treat that as a
+    # hard install failure, never silently proceed as if "no content
+    # changed", which would be exactly the stale-slot-reuse this seam
+    # exists to prevent.
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local py
+    py="$(_bootstrap_python)" || py=""
+    [[ -n "$py" ]] || { printf ''; return 0; }
+    local roots=()
+    [[ -f "$PLUGIN_DIR/pyproject.toml" ]] && roots+=("$PLUGIN_DIR/pyproject.toml")
+    [[ -d "$PKG_SRC_DIR" ]] && roots+=("$PKG_SRC_DIR")
     if [[ -d "$PLUGIN_DIR/libs" ]]; then
         local __f
         while IFS= read -r __f; do
-            __parts="$__parts"$'\n'"$(cat "$__f")"
+            roots+=("$__f")
         done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
     fi
-    printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
+    # This plugin's own dependencies[] on shared libraries are resolved
+    # live via [tool.uv.sources] `path = "..."` entries in pyproject.toml
+    # (e.g. "../../libs/work-coalescing-singleton") -- never vendored --
+    # so those libraries' OWN content is just as much a part of this
+    # plugin's actual runtime payload as src/agent_pull_requests is.
+    # Fingerprint each referenced library's COMPLETE directory (not just
+    # its own pyproject.toml): a shared library's source changing without
+    # a version bump here must still be detected as content drift.
+    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+        local __rel __resolved
+        while IFS= read -r __rel; do
+            __resolved="$(cd "$PLUGIN_DIR" 2>/dev/null && cd "$__rel" 2>/dev/null && pwd)"
+            [[ -n "$__resolved" ]] && roots+=("$__resolved")
+        done < <(
+            sed -n '/^\[tool\.uv\.sources\]/,/^\[/p' "$PLUGIN_DIR/pyproject.toml" |
+            grep -o 'path[[:space:]]*=[[:space:]]*"[^"]*"' |
+            sed -n 's/.*"\([^"]*\)".*/\1/p' |
+            sort
+        )
+    fi
+    [[ ${#roots[@]} -gt 0 ]] || { printf ''; return 0; }
+    local hash
+    if ! hash="$("$py" "$vr" --root "$INSTALL_DIR" fingerprint "${roots[@]}" 2>&1)"; then
+        _fail "Failed to compute payload fingerprint: $hash"
+        return 1
+    fi
+    printf '%s' "$hash"
 }
 
 _versioned_slot_clean() {
@@ -299,7 +346,9 @@ _versioned_mark_complete() {
         return 1
     fi
     local ph
-    ph="$(_payload_hash)"
+    if ! ph="$(_payload_hash)"; then
+        return 1
+    fi
     local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
     if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
     "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'
@@ -423,7 +472,7 @@ mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
 _ok "Directories: $INSTALL_DIR"
 _install_hook_files
 
-PAYLOAD_HASH="$(_payload_hash)"
+PAYLOAD_HASH="$(_payload_hash)" || exit 1
 SLOT_ALREADY_COMPLETE=0
 if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
     if _versioned_is_complete "$PAYLOAD_HASH"; then

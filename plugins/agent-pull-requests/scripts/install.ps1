@@ -282,20 +282,65 @@ function Get-BootstrapPython {
 }
 
 function Get-PayloadHash {
-    try {
-        $parts = @()
-        $pp = Join-Path $PluginDir 'pyproject.toml'
-        if (Test-Path $pp) { $parts += (Get-Content $pp -Raw) }
-        $libs = Join-Path $PluginDir 'libs'
-        if (Test-Path $libs) {
-            Get-ChildItem $libs -Recurse -Filter 'pyproject.toml' -ErrorAction SilentlyContinue |
-                Sort-Object FullName | ForEach-Object { $parts += (Get-Content $_.FullName -Raw) }
+    # Use the canonical fingerprint_source() (libs/versioned-runtime), not a
+    # bespoke pyproject.toml-only hash: a prior audit (#5472) found exactly
+    # this narrower scope on another adopter -- changing src\agent_pull_requests
+    # WITHOUT touching pyproject.toml must still be detected as a content
+    # change, or an installed slot could wrongly report `reuse` for a
+    # genuinely different payload.
+    #
+    # Returns '' only for the two legitimate "nothing to hash yet" cases
+    # (no bootstrap Python available on a first-ever install; no declared
+    # roots exist at all) -- both already degrade the same way the pre-fix
+    # hash did. Any OTHER failure (the fingerprint command itself erroring,
+    # e.g. on an unsupported filesystem object) THROWS: a caller must treat
+    # that as a hard install failure, never silently proceed as if "no
+    # content changed", which would be exactly the stale-slot-reuse this
+    # seam exists to prevent.
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    $py = Get-BootstrapPython
+    if (-not $py) { return '' }
+    $roots = @()
+    $pp = Join-Path $PluginDir 'pyproject.toml'
+    if (Test-Path $pp) { $roots += $pp }
+    if (Test-Path $PkgSrcDir) { $roots += $PkgSrcDir }
+    $libs = Join-Path $PluginDir 'libs'
+    if (Test-Path $libs) {
+        Get-ChildItem $libs -Recurse -Filter 'pyproject.toml' -ErrorAction SilentlyContinue |
+            Sort-Object FullName | ForEach-Object { $roots += $_.FullName }
+    }
+    # This plugin's own dependencies on shared libraries are resolved live
+    # via [tool.uv.sources] `path = "..."` entries in pyproject.toml (e.g.
+    # "../../libs/work-coalescing-singleton") -- never vendored -- so
+    # those libraries' OWN content is just as much a part of this plugin's
+    # actual runtime payload as src\agent_pull_requests is. Fingerprint
+    # each referenced library's COMPLETE directory (not just its own
+    # pyproject.toml): a shared library's source changing without a
+    # version bump here must still be detected as content drift.
+    if (Test-Path $pp) {
+        $ppText = Get-Content $pp -Raw
+        $sourcesMatch = [regex]::Match($ppText, '(?ms)^\[tool\.uv\.sources\](.*?)(?=^\[|\z)')
+        if ($sourcesMatch.Success) {
+            $pathMatches = [regex]::Matches($sourcesMatch.Groups[1].Value, 'path\s*=\s*"([^"]*)"')
+            foreach ($m in ($pathMatches | Sort-Object { $_.Groups[1].Value })) {
+                $resolved = Join-Path $PluginDir $m.Groups[1].Value
+                if (Test-Path $resolved) {
+                    $roots += (Resolve-Path $resolved).Path
+                }
+            }
         }
-        $joined = [string]::Join("`n", $parts)
-        $sha = [System.Security.Cryptography.SHA256]::Create()
-        $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($joined))
-        return (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
-    } catch { return '' }
+    }
+    if ($roots.Count -eq 0) { return '' }
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $fpArgs = @($vr, '--root', $InstallDir, 'fingerprint') + $roots
+    $output = (& $py @fpArgs 2>&1 | Out-String)
+    $rc = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
+    if ($rc -ne 0) {
+        throw "Failed to compute payload fingerprint: $($output.Trim())"
+    }
+    return $output.Trim()
 }
 
 function Invoke-VersionedSlotClean {
@@ -325,7 +370,13 @@ function Invoke-VersionedMarkComplete {
         return $false
     }
     $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
-    $ph = Get-PayloadHash
+    $ph = $null
+    try {
+        $ph = Get-PayloadHash
+    } catch {
+        Write-Fail "Could not compute payload fingerprint: $($_.Exception.Message)"
+        return $false
+    }
     if ($ph) { $mcArgs += @('--payload-hash', $ph) }
     & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
     if ($LASTEXITCODE -ne 0) {
@@ -521,7 +572,13 @@ try {
     Write-Ok "Directories: $InstallDir"
     Install-HookFiles
 
-    $payloadHash = Get-PayloadHash
+    $payloadHash = $null
+    try {
+        $payloadHash = Get-PayloadHash
+    } catch {
+        Write-Fail "Could not compute payload fingerprint: $($_.Exception.Message)"
+        exit 1
+    }
     $slotAlreadyComplete = $false
     if ($VersionedRuntime) {
         if (Test-VersionedSlotComplete -ExpectedHash $payloadHash) {

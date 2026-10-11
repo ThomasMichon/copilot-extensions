@@ -1,0 +1,9 @@
+{
+  "comment": "install.sh/install.ps1: fingerprint src/agent_pull_requests, not just pyproject.toml, when computing the completion-marker payload hash (phase-3-runtime-admission, #5472) -- delegates to the canonical fingerprint_source() seam instead of a bespoke pyproject.toml-only sha256. No behavior change when src/ content is unchanged.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
