@@ -87,6 +87,10 @@ def _policy_relevant_destinations(
     entry moved.
     """
     relevant = set(changed)
+    for destination, entry in entries_after.items():
+        fallback = entry.get("fallback")
+        if isinstance(fallback, dict) and fallback.get("destination") in relevant:
+            relevant.add(destination)
     for destination, after_entry in entries_after.items():
         if entries_before.get(destination) != after_entry:
             relevant.add(destination)
@@ -265,6 +269,16 @@ def run_sync_pass(
             bypass=decision,
         )
     try:
+        live_consent = None
+        if overwrite_existing_managed:
+            live_consent = projection_reflect_consent.load_consent(root)
+            if live_consent is not None:
+                trusted_marketplaces = live_consent.trusted_marketplaces
+                resolve_pins = (
+                    scan_plugin_sources.resolve_pinned_commits
+                    if live_consent.require_immutable_pin else None
+                )
+                pinned_commits = None
         if resolve_pins is not None:
             # A resolver that returns None (a transient failure, or simply
             # "nothing resolved") must NOT be treated as "no pinned_commits
@@ -283,6 +297,14 @@ def run_sync_pass(
         )
         scan_result = projections.scan_repository(root, sources)
         entries_after = projections.load_lock_entries(root)
+        if overwrite_existing_managed and (
+            live_consent is None
+            or projection_reflect_consent.load_consent(root) != live_consent
+        ):
+            sync_result.add(
+                projections.BLOCKING, "projection-consent", root,
+                "overwrite consent changed during the sync decision",
+            )
     finally:
         with_lock.__exit__(None, None, None)
 

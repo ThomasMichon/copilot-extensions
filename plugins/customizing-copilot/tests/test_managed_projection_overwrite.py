@@ -187,3 +187,25 @@ def test_overlap_warning_only_cli_returns_success_without_diff(
     result = json.loads(capsys.readouterr().out)
     assert not result["needsPr"] and not result["needsConflictDispatch"]
     assert result["auditWarnings"][0]["check"] == "projection-overlap"
+
+
+@pytest.mark.parametrize("case", ["untrusted", "unpinned", "stale-trust"])
+def test_fallback_only_repair_uses_owner_and_live_bypass_policy(
+    tmp_path: Path, case: str,
+) -> None:
+    repo, source, spec = fixture(tmp_path)
+    assert not projections.sync_repository(repo, [source]).blocking
+    fallback = repo / delivery.fallback_destination(spec.destination)
+    fallback.write_bytes(fallback.read_bytes() + b"\nhand edit\n")
+    opt_in(
+        repo, trustedMarketplaces=["other"] if case != "unpinned" else ["market"],
+        requireImmutablePin=case == "unpinned",
+    )
+    outcome = worker.run_sync_pass(
+        repo, [source], trusted_marketplaces=["market"], overwrite_existing_managed=True
+    )
+    assert outcome.has_actionable_change
+    assert not outcome.lock_updated
+    assert not outcome.bypass_eligible
+    assert not outcome.needs_conflict_dispatch
+    assert outcome.bypass.reasons
