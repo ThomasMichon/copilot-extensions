@@ -2367,8 +2367,9 @@ def _merge_pr_attribution_state(
             setattr(match, f, getattr(match, f) or getattr(current_pr, f))
         # Attribution-only stamps cannot erase an incoming authority transition.
         from .pr_publication_state import same_loaded_authority
-        if (current_pr.pr_revision > match.pr_revision and not same_loaded_authority(current_pr, match)) or (
-                not same_pr and current_pr.pr_revision >= max(1, match.pr_revision)):
+        if not same_loaded_authority(current_pr, match) and (
+                current_pr.pr_revision > match.pr_revision or (
+                    not same_pr and current_pr.pr_revision >= max(1, match.pr_revision))):
             for f in fields(match):
                 setattr(match, f.name, getattr(current_pr, f.name))
         # Equal revisions preserve the already-durable first-touch attribution freeze.

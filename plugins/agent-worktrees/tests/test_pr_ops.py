@@ -54,7 +54,9 @@ class TestExistingFeaturePush:
 
         result = pr_ops._push_existing_feature(
             ".", "feature/change", "origin", None, None, None, {},
-            config=None, worktree_id="", title="", body=None, open_pr=None,
+            config=cfg.Config(srcroot=".", machine="test", platform="linux",
+                              repos={"test": cfg.RepoConfig(anchor=".", worktree_root=".")}),
+            worktree_id="", title="", body=None, open_pr=None,
             draft=False, attribution=None,
         )
 
@@ -75,7 +77,9 @@ class TestExistingFeaturePush:
 
         result = pr_ops._push_existing_feature(
             ".", "feature/change", "origin", None, None, None, {},
-            config=None, worktree_id="", title="", body=None, open_pr=None,
+            config=cfg.Config(srcroot=".", machine="test", platform="linux",
+                              repos={"test": cfg.RepoConfig(anchor=".", worktree_root=".")}),
+            worktree_id="", title="", body=None, open_pr=None,
             draft=False, attribution=None,
         )
 
@@ -4214,7 +4218,7 @@ class TestPRFinalizeAndPush:
         pr = dataclasses.replace(repo.pr, fork=cfg.ForkConfig(enabled=True, remote="fork"))
         return dataclasses.replace(config, repos={"ext": dataclasses.replace(repo, pr=pr)})
 
-    def _move_head_to_fork(self, wt_path, remote_dir, branch):
+    def _move_head_to_fork(self, wt_path, remote_dir, branch, record):
         """The PR's head branch lives only on a fork (as the fork-PR flow
         publishes it): a bare 'fork' remote has it, origin doesn't."""
         fork_dir = remote_dir.parent / "fork.git"
@@ -4222,6 +4226,9 @@ class TestPRFinalizeAndPush:
         _git("remote", "add", "fork", str(fork_dir), cwd=wt_path)
         _git("push", "fork", f"refs/remotes/origin/{branch}:refs/heads/{branch}", cwd=wt_path)
         _git("push", "origin", "--delete", branch, cwd=wt_path)
+        rec = tracking.load_record(record.yaml_path)
+        rec.pr.rewrite_owner = rec.pr.rewrite_identity = ""
+        tracking.save_record(rec)
         return fork_dir
 
     @pytest.mark.parametrize("scheme", ["snapshot", "refspec"])
@@ -4233,7 +4240,7 @@ class TestPRFinalizeAndPush:
         pr_ops.create_pr(wid, config, title="Add feature")
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         branch = rec.pr.branch
-        fork_dir = self._move_head_to_fork(wt_path, remote_dir, branch)
+        fork_dir = self._move_head_to_fork(wt_path, remote_dir, branch, rec)
         config = self._fork_config(config)
         (wt_path / "c.txt").write_text("feedback\n")
         _git("add", "-A", cwd=wt_path)
@@ -4341,7 +4348,8 @@ class TestPRFinalizeAndPush:
         pr_ops.create_pr(wid, config, title="Add feature")
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         branch = rec.pr.branch
-        self._move_head_to_fork(wt_path, remote_dir, branch)
+        self._move_head_to_fork(wt_path, remote_dir, branch, rec)
+        rec = tracking.load_record(rec.yaml_path)
         rec.pr.remote = "fork"
         tracking.save_record(rec)
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
@@ -4362,7 +4370,7 @@ class TestPRFinalizeAndPush:
         pr_ops.create_pr(wid, config, title="Add feature")
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         branch = rec.pr.branch
-        self._move_head_to_fork(wt_path, remote_dir, branch)
+        self._move_head_to_fork(wt_path, remote_dir, branch, rec)
         rec.pr.remote = ""
         rec.pr.head_repo = ""
         tracking.save_record(rec)
@@ -4400,7 +4408,7 @@ class TestPRFinalizeAndPush:
         config, wid, wt_path, remote_dir = pr_repo
         pr_ops.create_pr(wid, config, title="Add feature")
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
-        self._move_head_to_fork(wt_path, remote_dir, rec.pr.branch)
+        self._move_head_to_fork(wt_path, remote_dir, rec.pr.branch, rec)
         rec.pr.remote = ""
         rec.pr.head_repo = ""
         config = self._fork_config(config)
@@ -4531,7 +4539,8 @@ class TestPRFinalizeAndPush:
         config, wid, wt_path, remote_dir = pr_repo
         pr_ops.create_pr(wid, config, title="Add feature")
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
-        fork_dir = self._move_head_to_fork(wt_path, remote_dir, rec.pr.branch)
+        fork_dir = self._move_head_to_fork(wt_path, remote_dir, rec.pr.branch, rec)
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         rec.pr.remote = "fork"
         tracking.save_record(rec)
         (wt_path / "c.txt").write_text("feedback\n")
