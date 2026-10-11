@@ -138,6 +138,12 @@ verified by this effort's Validation Plan.
 
 ## Validation Plan
 
+- [ ] Across agent-worktrees, agent-bridge, and agent-dispatch, each role slot
+      has exactly one logical owner session; concurrent claims cannot gain
+      a second live holder.
+- [ ] Confirmed owner-session end releases its slot, permits a new session
+      to claim it, and cannot release a successor's slot through delayed
+      cleanup. Unknown ownership/liveness is not an affirmative release.
 - [ ] N same-role concurrent requests perform one underlying read.
 - [ ] A timed-out/cancelled waiter cannot release or cancel another waiter's
       shared holder; a cancellation-resistant holder cannot multiply.
