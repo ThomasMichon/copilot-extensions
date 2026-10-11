@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -79,6 +80,33 @@ def test_canonical_entrypoint_builds_committed_standalone_tree(
     assert PROVENANCE.RECEIPT not in receipt["paths"]
     with pytest.raises(ValueError, match="already exist"):
         PROVENANCE.build(dest, source_root=root)
+
+
+def test_builder_does_not_inherit_repository_selection(source, tmp_path, monkeypatch):
+    root, head = source
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "wrong.git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "wrong-tree"))
+    monkeypatch.setenv("GIT_OBJECT_DIRECTORY", str(tmp_path / "wrong-objects"))
+    dest = tmp_path / "candidate"
+    PROVENANCE.build(dest, source_root=root)
+    assert PROVENANCE.verify(dest, head) == head
+
+
+@pytest.mark.parametrize("kind", ["fifo", "hardlink"])
+def test_receipt_special_or_multiple_link_file_fails_before_read(source, tmp_path, kind):
+    root, head = source
+    dest = tmp_path / "candidate"
+    PROVENANCE.build(dest, source_root=root)
+    receipt = dest / PROVENANCE.RECEIPT
+    if kind == "fifo":
+        if not hasattr(os, "mkfifo"):
+            pytest.skip("FIFO unavailable")
+        receipt.unlink()
+        os.mkfifo(receipt)
+    else:
+        os.link(receipt, tmp_path / "receipt-alias")
+    with pytest.raises(ValueError, match="single-link regular"):
+        PROVENANCE.verify(dest, head)
 
 
 @pytest.mark.parametrize("fault", [

@@ -62,7 +62,8 @@ def assert_dormant(home: Path, root: Path | None, *, stamped: bool = False) -> N
         logs = legacy / "logs"
         if logs.exists():
             assert set(p.name for p in logs.iterdir()) <= {"boot-trace.jsonl"}
-            for line in (logs / "boot-trace.jsonl").read_text().splitlines():
+            trace = logs / "boot-trace.jsonl"
+            for line in trace.read_text().splitlines() if trace.is_file() else []:
                 record = json.loads(line)
                 assert record["event"] == "boot_trace" and record["source"] == "resolver", record
     else:

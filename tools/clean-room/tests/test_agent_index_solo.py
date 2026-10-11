@@ -82,6 +82,11 @@ def test_dormant_rejects_service_or_global_stamp(tmp_path: Path) -> None:
         WITNESS.assert_dormant(home, cell)
 
 
+def test_stamped_only_accepts_empty_resolver_logs(tmp_path: Path) -> None:
+    (tmp_path / ".agent-index/logs").mkdir(parents=True)
+    WITNESS.assert_dormant(tmp_path, None, stamped=True)
+
+
 def test_manifest_and_execution_keep_release_and_safety_contract() -> None:
     manifest = json.loads((SCENARIO / "manifest.json").read_text(encoding="utf-8"))
     source = (SCENARIO / "scenario.sh").read_text(encoding="utf-8")

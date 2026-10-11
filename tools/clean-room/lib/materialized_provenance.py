@@ -72,9 +72,16 @@ def content_manifest(root: Path) -> dict[str, dict]:
 
 def verify(root: Path, expected_head: str) -> str:
     receipt_path = root / RECEIPT
-    if receipt_path.is_symlink():
-        raise ValueError("materialized receipt must not be a symlink")
-    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    info = receipt_path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        raise ValueError("materialized receipt must be a single-link regular file")
+    fd = os.open(receipt_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    with os.fdopen(fd, "r", encoding="utf-8") as stream:
+        opened = os.fstat(stream.fileno())
+        if ((info.st_dev, info.st_ino) != (opened.st_dev, opened.st_ino)
+                or not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1):
+            raise ValueError("materialized receipt identity changed")
+        receipt = json.load(stream)
     if not isinstance(receipt, dict) or receipt.get("schema") != SCHEMA or receipt.get("version") != 1:
         raise ValueError("unsupported materialized source receipt")
     head = receipt.get("source_commit")
@@ -93,13 +100,14 @@ def build(dest: Path, *, source_root: Path) -> list[str]:
 
     if dest.exists() or dest.is_symlink():
         raise ValueError("candidate destination must not already exist")
+    git_env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     head = subprocess.run(
         ["git", "-C", str(source_root), "rev-parse", "--verify", "HEAD^{commit}"],
-        check=True, capture_output=True, text=True, timeout=10,
+        check=True, capture_output=True, text=True, timeout=10, env=git_env,
     ).stdout.strip()
     archive = subprocess.run(
         ["git", "-C", str(source_root), "archive", "--format=tar", head],
-        check=True, capture_output=True, timeout=120,
+        check=True, capture_output=True, timeout=120, env=git_env,
     ).stdout
     with tempfile.TemporaryDirectory(prefix="materialized-source-") as temporary:
         source = Path(temporary)
