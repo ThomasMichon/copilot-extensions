@@ -740,6 +740,8 @@ class AgentRosterCache(_DiscoveryMixin):
         try:
             if resolver is None:
                 raise LookupError(f"namespace '{ns}:' no longer registered")
+            if resolver is not provider_ref:
+                raise LookupError(f"namespace '{ns}:' provider replaced before scan started")
             # This cache owns the advertised refresh cadence -- a resolver's
             # own separate, shorter result TTL (e.g. `CliNamespaceResolver`'s
             # internal `_list_cache`) must never let a scan this cache

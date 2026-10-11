@@ -217,3 +217,14 @@ The roster-cache contract passed (49 passed, one skipped), touched F/E9 lint
 passed, and the install-contract guard reported zero violations.
 This is not native process-tree cleanup, budget/circuit implementation, or
 release/adoption proof; those remain open acceptance gates.
+
+### 2026-10-10 - Scheduled provider identity verified
+
+Review identified a swap-before-task-start race: a task captured under provider
+A could read replacement B when first scheduled, admitting two B reads.
+The scan now verifies its captured provider identity before invalidation or
+calling the resolver. There is no await between that check and the resolver's
+own provider capture. A deterministic replacement-before-yield regression
+proves A performs no read, B performs exactly one, and only B's rows publish.
+The full roster-cache contract passes (50 passed, one skipped); touched lint
+and the install contract remain clean.

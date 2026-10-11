@@ -269,6 +269,28 @@ async def test_force_fail_bumps_generation_so_an_abandoned_scans_late_result_is_
 
 
 @pytest.mark.asyncio
+async def test_provider_swap_before_task_start_does_not_scan_replacement_twice() -> None:
+    resolver, original = _make_resolver_with_namespace()
+    cache = AgentRosterCache(resolver, refresh_interval=60.0)
+    old_task = cache._refresh_namespace("ns")
+    replacement = _ControllableResolver("ns")
+    replacement.outcomes = [[_agent("current")]]
+    resolver.unregister_namespace_resolver("ns")
+    resolver.register_namespace_resolver(replacement)
+    new_task = cache._refresh_namespace("ns")
+
+    await asyncio.wait_for(asyncio.gather(old_task, new_task), timeout=2)
+
+    assert original.call_count == 0
+    assert replacement.call_count == 1
+    assert cache._entries["ns"].provider_ref is replacement
+    assert [row["name"] for row in cache._entries["ns"].rows] == ["ns:current"]
+    assert not cache._inflight
+    assert not cache._owned_scans
+    await cache.stop()
+
+
+@pytest.mark.asyncio
 async def test_provider_replacement_keeps_cancel_resistant_scan_owned_until_shutdown() -> None:
     resolver, original = _make_resolver_with_namespace()
     cache = AgentRosterCache(resolver, refresh_interval=60.0)
