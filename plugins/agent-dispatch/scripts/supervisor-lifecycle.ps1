@@ -64,6 +64,7 @@ function Invoke-SupervisorTaskAction {
             'enable' { Enable-ScheduledTask -TaskName $Name -ErrorAction Stop | Out-Null }
             'disable' { Disable-ScheduledTask -TaskName $Name -ErrorAction Stop | Out-Null }
         }
+
         if ($Operation -eq 'start') {
             if (-not $script:SupervisorReconciledNames) { $script:SupervisorReconciledNames = @{} }
             $startedTask = Get-ScheduledTask -TaskName $Name -ErrorAction Stop
@@ -73,10 +74,24 @@ function Invoke-SupervisorTaskAction {
                 throw 'native task start returned but activation is unconfirmed'
             }
         }
+
         Invoke-SupervisorAudit -Event $Operation -Reason $Reason -Name $Name -Outcome ok
     } catch {
         $script:SupervisorReconcileFailed = $true
         Invoke-SupervisorAudit -Event $Operation -Reason $Reason -Name $Name -Outcome fail
         Write-Warn "Supervisor $Operation failed ($Name): $($_.Exception.Message)"
     }
+}
+
+function Convert-SupervisorRetirementResult {
+    param([string]$Output)
+    $lines = @($Output -split "`n" | Where-Object { $_.Trim() })
+    $jsonLines = @($lines | Where-Object { $_.Trim().StartsWith('{') })
+    foreach ($line in $lines) {
+        if (-not $line.Trim().StartsWith('{')) {
+            Write-Warn "Supervisor retirement diagnostic: $line"
+        }
+    }
+    if ($jsonLines.Count -ne 1) { throw 'Expected one retirement JSON result' }
+    return ($jsonLines[0] | ConvertFrom-Json -ErrorAction Stop)
 }

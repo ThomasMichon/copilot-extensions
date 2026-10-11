@@ -244,3 +244,22 @@ def test_native_start_audit_requires_running_receipt(tmp_path, state):
     events = [json.loads(line) for line in (tmp_path / "lifecycle.log").read_text().splitlines()]
     assert events[-1]["outcome"] == ("ok" if state == "Running" else "fail")
     assert ("activation is unconfirmed" in result.stderr) == (state != "Running")
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is unavailable")
+def test_retirement_audit_warning_does_not_corrupt_result_or_suppress_diagnostic(tmp_path):
+    helper = PLUGIN / "scripts/supervisor-lifecycle.ps1"
+    script = "\n".join([
+        "$ErrorActionPreference='Stop'",
+        "function Write-Warn { param($msg) [Console]::Error.WriteLine($msg) }",
+        f". '{helper}'",
+        '$raw=\'supervisor lifecycle audit unavailable\' + "`n" + \'{"ok":true,"retired":[123],"errors":[]}\'',
+        "$result=Convert-SupervisorRetirementResult -Output $raw",
+        "$result|ConvertTo-Json -Compress",
+    ])
+    fixture = tmp_path / "retirement-result.ps1"
+    fixture.write_text(script)
+    result = subprocess.run(["pwsh", "-NoProfile", "-File", str(fixture)], capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"ok": True, "retired": [123], "errors": []}
+    assert "audit unavailable" in result.stderr

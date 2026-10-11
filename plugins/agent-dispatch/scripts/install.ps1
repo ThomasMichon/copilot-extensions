@@ -2210,7 +2210,7 @@ function Retire-SupervisorProcesses {
     Invoke-SupervisorAudit -Event retire -Reason windows-generation-inventory -Outcome $(if ($rc -eq 0) { 'ok' } else { 'fail' }) -ExitCode $rc
     $ErrorActionPreference = $prevEAP
     try {
-        $result = $raw | ConvertFrom-Json
+        $result = Convert-SupervisorRetirementResult -Output $raw
         $retired = @($result.retired).Count
         foreach ($message in @($result.errors)) {
             if ($message) { Write-Warn "Supervisor generation retirement: $message" }
