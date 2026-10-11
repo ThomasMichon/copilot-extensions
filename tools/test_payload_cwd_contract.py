@@ -1,6 +1,7 @@
 """Maintenance must leave replaceable payloads before it waits or builds."""
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 import os
 from pathlib import Path
@@ -105,6 +106,61 @@ def _reported_path(value: str) -> Path:
     return Path(value).resolve()
 
 
+def _wait_for_smoke_receipt(
+    receipt: Path,
+    poll: Callable[[], int | None],
+    timeout: float = 15,
+) -> dict[str, object]:
+    deadline = time.monotonic() + timeout
+    last_error: FileNotFoundError | json.JSONDecodeError | None = None
+    while True:
+        try:
+            data = json.loads(receipt.read_text(encoding="utf-8-sig"))
+        except (FileNotFoundError, json.JSONDecodeError) as error:
+            last_error = error
+        else:
+            if not isinstance(data, dict):
+                pytest.fail(f"staged receipt is not a JSON object: {data!r}")
+            return data
+        if poll() is not None or time.monotonic() >= deadline:
+            pytest.fail(f"no complete staged receipt: {last_error}")
+        time.sleep(0.05)
+
+
+@pytest.mark.parametrize("initial", [None, "", '{"staged":'])
+def test_smoke_receipt_waits_for_complete_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, initial: str | None,
+) -> None:
+    receipt = tmp_path / "smoke.json"
+    if initial is not None:
+        receipt.write_text(initial, encoding="utf-8")
+
+    def complete_receipt(_delay: float) -> None:
+        receipt.write_text('{"staged": true}', encoding="utf-8")
+
+    monkeypatch.setattr(time, "sleep", complete_receipt)
+    assert _wait_for_smoke_receipt(receipt, lambda: None) == {"staged": True}
+
+
+def test_smoke_receipt_rejects_incomplete_json_after_child_exit(tmp_path: Path) -> None:
+    receipt = tmp_path / "smoke.json"
+    receipt.write_text("", encoding="utf-8")
+    with pytest.raises(pytest.fail.Exception, match="no complete staged receipt"):
+        _wait_for_smoke_receipt(receipt, lambda: 0)
+
+
+def test_smoke_receipt_timeout_is_explicit(tmp_path: Path) -> None:
+    with pytest.raises(pytest.fail.Exception, match="no complete staged receipt"):
+        _wait_for_smoke_receipt(tmp_path / "smoke.json", lambda: None, timeout=0)
+
+
+def test_smoke_receipt_rejects_non_object_json(tmp_path: Path) -> None:
+    receipt = tmp_path / "smoke.json"
+    receipt.write_text("[]", encoding="utf-8")
+    with pytest.raises(pytest.fail.Exception, match="not a JSON object"):
+        _wait_for_smoke_receipt(receipt, lambda: None)
+
+
 @pytest.mark.parametrize("extension", ["ps1", "sh"])
 @pytest.mark.parametrize("stage_flag", ["", "1", "context-install"])
 @pytest.mark.parametrize("contextual", [False, True], ids=["legacy", "context"])
@@ -129,17 +185,17 @@ def test_inherited_stage_flag_cannot_pin_payload(
     )
     try:
         receipt = home / ".agent-example" / "smoke.json"
-        deadline = time.monotonic() + 15
-        while not receipt.exists() and proc.poll() is None and time.monotonic() < deadline:
-            time.sleep(0.05)
-        if not receipt.exists():
-            stdout, stderr = proc.communicate(timeout=20)
-            pytest.fail(f"no staged receipt: {proc.returncode}\n{stdout}\n{stderr}")
-        data = json.loads(receipt.read_text(encoding="utf-8-sig"))
+        data = _wait_for_smoke_receipt(receipt, proc.poll)
         assert data["staged"] is True
-        assert _reported_path(data["ran_from"]).is_relative_to(home.resolve())
-        assert _reported_path(data["working_dir"]) == home.resolve()
-        assert data["staged_from"].replace("\\", "/").endswith("/example/agent-example")
+        ran_from = data["ran_from"]
+        working_dir = data["working_dir"]
+        staged_from = data["staged_from"]
+        assert isinstance(ran_from, str)
+        assert isinstance(working_dir, str)
+        assert isinstance(staged_from, str)
+        assert _reported_path(ran_from).is_relative_to(home.resolve())
+        assert _reported_path(working_dir) == home.resolve()
+        assert staged_from.replace("\\", "/").endswith("/example/agent-example")
         if contextual:
             assert not (home / ".agent-worktrees").exists()
         assert proc.poll() is None
