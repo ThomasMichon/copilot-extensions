@@ -1,0 +1,9 @@
+{
+  "comment": "Expose explicit read-only source-qualified corpus session inventory",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
