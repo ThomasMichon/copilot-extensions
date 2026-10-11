@@ -42,6 +42,12 @@ sync:
   # section.
   process_logs:
     enabled: false              # opt-in
+    # Additive settled-log ZIP snapshots; never delete or retire originals.
+    # Only attest local_source for this OS's original producer logs.
+    zip_snapshots:
+      enabled: false
+      local_source: false
+      min_quiet_seconds: 600    # positive quiet threshold, not retention
   # Incremental sync via a local, stat-only change signature db. On by
   # default -- disables only with `enabled: false` (then every run always
   # pushes everything, as before this existed). See SKILL.md's "Change

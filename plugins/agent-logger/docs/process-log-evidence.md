@@ -126,6 +126,10 @@ the producer probe are checked around bounded streaming; the ZIP member's full
 hash is verified before and after no-replace publication. Truncation, rotation,
 append, corrupt existing archives, and unsupported kernel-owned publication fail
 explicitly. Neither a corrupt archive nor an original is overwritten/deleted.
+Snapshot verification accepts stored or deflated members (new snapshots use
+deflate), and rejects other codecs without attempting a decoder. Encryption
+and deflate runtime failures are per-file errors: later eligible files and the
+scheduled raw-log transfer still run, while the command returns failure.
 Publication reuses the source-admission kernel-owned file boundary: Linux
 uses an anonymous `O_TMPFILE` inode linked from its descriptor; Windows uses
 the protected original handle and a no-replace handle rename. Cleanup never

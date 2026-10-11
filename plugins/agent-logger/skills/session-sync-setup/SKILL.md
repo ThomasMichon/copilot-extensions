@@ -5,11 +5,11 @@ description: >
   data is pushed (local dotfolder, OneDrive subfolder, SSH, or an rsync/HTTP
   ingest sink), plus validated provider rescues through a single-writer
   compare-and-set local target. Use this skill when
-  the user wants to set up, change, or troubleshoot session syncing. Trigger
-  phrases include: - 'set up session sync' - 'sync my sessions' - 'ingest
+  the user wants to set up, change, or troubleshoot session syncing.
+  Trigger phrases include: - 'set up session sync' - 'sync my sessions' - 'ingest
   rescued sessions' - 'rescue-push' - 'change the sync target' - 'sync to
   OneDrive' - 'sync sessions over SSH' - 'session-sync config' - 'where do my
-  sessions go'
+  sessions go' - 'compact-logs' - 'process-log ZIP snapshots'
 ---
 
 # Session Sync Setup
@@ -366,8 +366,31 @@ Two deliberate scope limits:
   publication entirely rather than attempting to filter it.
 
 See [`process-log-evidence.md`](../../docs/process-log-evidence.md#sync-publication-session-sync)
-for the full design and current gaps (scheduled compaction and SSH/ingest
-target support remain outstanding).
+for the full design and current gaps (source reclamation and SSH/ingest target
+support remain outstanding).
+
+### Scheduled ZIP snapshots (originals retained)
+
+An original local producer log root can separately opt into
+`sync.process_logs.zip_snapshots` in the machine-local configuration example.
+The existing scheduled `run` then creates verified snapshots before its
+unfiltered process-log transfer; this does not enable source deletion or
+change retention. `local_source: true` must explicitly attest that the root
+belongs to this operating system's local producers, not a rescued/copied or
+shared Windows/WSL corpus.
+
+Inspect without writing or publishing:
+
+```text
+<agent-logger catalog "session-sync" argv[0]> compact-logs --dry-run
+```
+
+Omitting `--dry-run` creates additive snapshots under the sync lock, without
+transferring them to a target. The complete configuration, active-producer,
+revision, error, and platform contract is owned by
+[Process-log evidence](../../docs/process-log-evidence.md#additive-settled-log-zip-snapshots).
+ZIP preservation is implemented; storage reclamation and completed compaction
+remain separate gates.
 
 ## Change tracking (incremental sync)
 

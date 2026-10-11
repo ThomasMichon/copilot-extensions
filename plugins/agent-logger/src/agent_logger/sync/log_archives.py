@@ -10,6 +10,7 @@ import stat
 import sys
 import time
 import zipfile
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, BinaryIO
@@ -151,6 +152,8 @@ def _verify_zip_stream(raw: BinaryIO, name: str, expected_hash: str, size: int) 
         info = members[0]
         if info.file_size != size or stat.S_ISLNK(info.external_attr >> 16):
             raise ValueError("process-log ZIP metadata mismatch")
+        if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+            raise ValueError("process-log snapshot ZIP compression is unsupported")
         with archive.open(info) as member:
             if _hash_stream(member, size) != expected_hash:
                 raise ValueError("process-log ZIP content mismatch")
@@ -270,7 +273,7 @@ def _archive_directory(
                 result.archived += 1
             else:
                 result.unchanged += 1
-        except (OSError, ValueError, zipfile.BadZipFile) as error:
+        except (OSError, ValueError, zipfile.BadZipFile, RuntimeError, zlib.error) as error:
             message = f"{name}: {error}"
             result.failed.append(message)
             log.warning("process-log ZIP snapshot failed: %s", message)

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import zipfile
+import zlib
 from pathlib import Path
 
 import pytest
@@ -233,6 +234,57 @@ def test_scheduled_archive_error_still_transfers_raw_and_returns_failure(
     monkeypatch.setattr(log_archive_cli, "archive_settled_process_logs", failed)
     assert engine.run_sync(cfg) == 1
     assert (tmp_path / "dest" / "sample-machine" / "logs" / NAME).read_bytes() == PAYLOAD
+
+
+@pytest.mark.parametrize("failure", ["compression", "deflate", "encrypted"])
+def test_zip_decoder_failure_does_not_abort_scheduled_raw_transfer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    failure: str,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    source = tmp_path / "copilot"
+    logs = source / "logs"
+    _log(logs)
+    (source / "session-state").mkdir()
+    monkeypatch.setattr(log_archives, "producer_exited", lambda pid: True)
+    assert log_archives.archive_settled_process_logs(logs, min_quiet_seconds=600).archived == 1
+    archive_path = next(logs.glob("*.zip"))
+    unsupported = bytearray(archive_path.read_bytes())
+    central = unsupported.index(b"PK\x01\x02")
+    expected: type[Exception]
+    if failure == "compression":
+        unsupported[8:10] = (99).to_bytes(2, "little")
+        unsupported[central + 10:central + 12] = (99).to_bytes(2, "little")
+        expected = NotImplementedError
+    elif failure == "deflate":
+        name_size = int.from_bytes(unsupported[26:28], "little")
+        extra_size = int.from_bytes(unsupported[28:30], "little")
+        unsupported[30 + name_size + extra_size] = 0x07
+        expected = zlib.error
+    else:
+        unsupported[6:8] = (1).to_bytes(2, "little")
+        unsupported[central + 8:central + 10] = (1).to_bytes(2, "little")
+        expected = RuntimeError
+    archive_path.write_bytes(unsupported)
+    with zipfile.ZipFile(archive_path) as archive:
+        with pytest.raises(expected):
+            with archive.open(NAME) as member:
+                member.read()
+    other = _log(logs, "process-1700000000001-2147483647.log")
+    cfg = Config({"sync": {
+        "source": str(source), "targets": {"local": {"path": str(tmp_path / "dest")}},
+        "process_logs": {"enabled": True, "zip_snapshots": {
+            "enabled": True, "local_source": True,
+        }},
+    }, "machine": {"name": "sample-machine"}}, home)
+    assert engine.run_sync(cfg) == 1
+    assert "process-log ZIP failure" in capsys.readouterr().err
+    delivered = tmp_path / "dest" / "sample-machine" / "logs"
+    assert (delivered / NAME).read_bytes() == PAYLOAD
+    assert (delivered / other.name).read_bytes() == PAYLOAD
+    assert archive_path.read_bytes() == unsupported
+    assert len(list(logs.glob("*.zip"))) == 2
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink/rename fixture")
