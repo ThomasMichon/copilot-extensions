@@ -48,7 +48,7 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
     try:
         result = subprocess.run(
             ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", alias, command],
-            capture_output=True, text=True, encoding="utf-8", timeout=180,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
             **no_window_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:

@@ -81,11 +81,11 @@ def test_new_response_loss_reuses_allocated_worktree_not_new_creation(tmp_path, 
                                            "demo", "test", "windows", tmp_path)
         launch_seed_state.stage(record.yaml_path, kind="new", text=kwargs["pending_seed"],
                                 seed_id=kwargs["pending_seed_id"])
-        raise OSError("response lost after creation")
+        return {"worktree": {"id": wid}}
     monkeypatch.setattr(worktree_creation, "_create_worktree_core", create)
-    with pytest.raises(OSError):
-        request.execute(authority, _intent("new"))
+    first = request.execute(authority, _intent("new"))
     receipt = request.execute(authority, _intent("new"))
+    assert first == receipt
     assert created == [receipt["worktree_id"]]
     assert launch_seed_state.peek(tmp_path / f"{created[0]}.yaml").kind == "new"
 
