@@ -3707,7 +3707,8 @@ class Supervisor:
             except DispatchError:
                 continue
             if not resp.get("reserved"):
-                continue  # already actively reserved -> never double-spawn
+                if resp.get("coordinator_launch"): break  # conservative same-cycle capacity fence
+                continue
             reservation = resp["reservation"]
             key = reservation["key"]
             from . import bridge

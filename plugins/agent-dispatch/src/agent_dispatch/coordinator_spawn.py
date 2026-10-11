@@ -156,11 +156,22 @@ def register_spawn_routes(
                 spawn = make_ci_repair_spawn(
                     spec["ci_repair_bindings"],
                     admission_command=spec["ci_repair_admission_command"],
+                    route=" --shared" if spec.get("shared") is True else "",
                 )
                 ok, handle = spawn(asdict(task))
             except (ValueError, KeyError, OSError) as exc:
                 ok, handle = False, {"error": str(exc)}
             if ok:
+                from .ci_repair_spawn import reservation_authorized
+                with queue._connect() as probe:
+                    ok = reservation_authorized(probe, task, task.origin_ref, transition={
+                        "phase": "spawned", "session_handle": handle["session"],
+                    })
+                if not ok:
+                    queue.record_spawn(reservation.key, session_handle=handle["session"])
+                    queue.request_spawn_release(reservation.key, detail="spawned identity admission refused")
+                    return {"reserved": False, "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
+                            "coordinator_launch": {"ok": False, "error": "spawned identity admission refused", **handle}}
                 queue.record_spawn(reservation.key, session_handle=handle["session"])
                 bus.publish({"type": "spawn.spawned", "reservation": _reservation_dict(queue.get_reservation(reservation.key))})
             else:

@@ -178,6 +178,7 @@ def make_ci_repair_spawn(
                 prompt=seed,
                 wait=False,
                 json_output=True,
+                timeout=30,
             )
         except (bridge.BridgeUnavailable, OSError, subprocess.TimeoutExpired) as exc:
             return False, {"error": str(exc)}
