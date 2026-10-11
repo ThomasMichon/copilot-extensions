@@ -2341,6 +2341,8 @@ function prepareTaskDeliveryCheckpoint(
       return {
         ok: false,
         claimedBySession: existing.consumerSession,
+        worktree: existing.metadata?.worktree || null,
+        predecessorSession: existing.predecessorSession || existing.metadata?.sessionId || null,
         message:
           `Handoff ${taskId} is already being delivered to ` +
           `${existing.consumerSession}; refusing replay in ${sid || "unknown"}.`,
@@ -2565,8 +2567,8 @@ export function consumeDispatchHandoffTask(
   if (!prepared.ok) return {
     ...prepared,
     id: taskId,
-    worktree: before.metadata?.worktree || null,
-    predecessorSession: before.metadata?.sessionId || null,
+    worktree: prepared.worktree || before.metadata?.worktree || null,
+    predecessorSession: prepared.predecessorSession || before.metadata?.sessionId || null,
   };
   const checkpoint = prepared.checkpoint;
   const checkpointPayload = decodeHandoffPayload(checkpoint.payload || "");

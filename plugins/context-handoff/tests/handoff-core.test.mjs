@@ -1151,7 +1151,7 @@ test("task-backed consume checkpoints payload before one-time consume and surviv
     const replay = consumeDispatchHandoffTask(
       "C:\\repo", "task-1", "refused-session", true,
       {
-        readPayload: () => payload,
+        readPayload: () => "",
         consumeTask: () => { throw new Error("must not replay"); },
         stateDirResolver: () => dir,
         promoteHead: () => { throw new Error("must not change head"); },
