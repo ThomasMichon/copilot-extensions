@@ -263,11 +263,12 @@ promotion authority, task queue, or dashboard.
 - Removed a publication blocker caused by ignored artifacts of retired vendor
   trees. Shared discovery now preserves malformed source-bearing copies and
   excludes artifact-only remnants across synchronization and publication gates.
-- Reduced automatic review-request amplification with a five-minute per-PR
-  cooldown, live-head coalescing, and bounded pending-review waits. Repository
-  tokens perform reads; the licensed account credential performs only the write.
-  Confirmation reads run every 30 seconds for up to ten minutes, with explicit
-  provider reset/backoff diagnostics and no blind write retries.
+- Reduced automatic review-request amplification. The operator's later
+  simplification supersedes the intermediate polling design: wait five minutes,
+  inspect live review activity, and nudge once only if needed. There is no
+  post-nudge polling or seat inference. Repository tokens perform reads; the
+  licensed account credential performs only the write. Existing native-review
+  trust policy is unchanged; provider reset/backoff errors remain explicit.
 
 ### 2026-09-05 - Kickoff
 

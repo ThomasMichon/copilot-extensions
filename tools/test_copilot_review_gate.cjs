@@ -4,282 +4,171 @@ const path = require("node:path");
 const test = require("node:test");
 
 const workflow = fs.readFileSync(
-  path.join(__dirname, "../.github/workflows/copilot-review-gate.yml"),
-  "utf8",
+  path.join(__dirname, "../.github/workflows/copilot-review-gate.yml"), "utf8",
 );
-const requestStep = workflow.split(
+const script = workflow.split(
   "      - name: Request Copilot review as a licensed Maintainer account\n",
-)[1];
-assert.ok(requestStep);
-const script = requestStep.split("          script: |\n")[1]
-  .split("\n")
-  .filter((line) => line.trim())
-  .map((line) => {
+)[1].split("          script: |\n")[1]
+  .split("\n").filter(line => line.trim()).map(line => {
     assert.ok(line.startsWith("            "));
     return line.slice(12);
-  })
-  .join("\n");
+  }).join("\n");
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-const runScript = new AsyncFunction(
+const execute = new AsyncFunction(
   "require", "process", "context", "github", "core", "Date", "setTimeout", script,
 );
 const NOW = Date.parse("2026-10-11T03:00:00Z");
 const BOT = "copilot-pull-request-reviewer[bot]";
 
 async function run(options = {}) {
+  const writes = [], reads = [], waits = [], failures = [], warnings = [], infos = [];
   let clock = NOW;
-  const waits = [];
-  const writes = [];
-  const failures = [];
-  const warnings = [];
-  const reads = [];
-  let reviewReads = 0;
-  let pendingReadsBeforeWrite = 0;
   const reader = {
     rest: {
-      issues: { listEventsForTimeline: "timeline" },
+      issues: { listEventsForTimeline: "events" },
       pulls: {
-        listReviews: "reviews",
         get: async () => {
-          reads.push("get");
-          return {
-            data: {
-              state: options.state ?? "open",
-              draft: options.draft ?? false,
-              base: { ref: options.base ?? "dev" },
-              head: { sha: "latest-head" },
-            },
-          };
+          reads.push("pr");
+          return { data: {
+            state: options.state ?? "open",
+            draft: options.draft ?? false,
+            base: { ref: options.base ?? "dev" },
+            head: { sha: options.head ?? "event-head" },
+          } };
         },
         listRequestedReviewers: async () => {
-          reads.push("requested");
-          if (writes.length === 0) {
-            pendingReadsBeforeWrite += 1;
-            const pending = options.pendingForever ||
-              pendingReadsBeforeWrite <= (options.pendingReadsBeforeWrite ?? 0);
-            return { data: { users: pending ? [{ login: BOT }] : [] } };
-          }
-          return { data: { users: options.pending === false ? [] : [{ login: BOT }] } };
+          reads.push("pending");
+          return { data: { users: options.pending ? [{ login: BOT }] : [] } };
         },
+        listReviews: "reviews",
       },
     },
     paginate: async (method) => {
       reads.push(method);
-      if (method === "timeline") return options.events ?? [];
-      assert.equal(method, "reviews");
-      reviewReads += 1;
-      if (reviewReads === 1) return options.existingReviews ?? [];
-      if (options.baselineReviews && writes.length === 0) return options.baselineReviews;
-      return writes.length === 0
-        ? options.reviewsAfterPending ?? [] : options.newReviews ?? [];
+      return method === "events" ? options.events ?? [] : options.reviews ?? [];
     },
   };
-  const writer = {
-    rest: {
-      pulls: {
-        requestReviewers: async (params) => {
-          writes.push(params);
-          if (options.writeError) throw options.writeError;
-        },
-      },
-    },
-  };
-  await runScript(
-    (name) => {
+  const writer = { rest: { pulls: { requestReviewers: async params => {
+    writes.push(params);
+    if (options.error) throw options.error;
+  } } } };
+  await execute(
+    name => {
       assert.equal(name, "@actions/github");
-      return {
-        getOctokit: (token) => {
-          assert.equal(token, "repository-read-token");
-          return reader;
-        },
-      };
+      return { getOctokit: token => {
+        assert.equal(token, "repository-token");
+        return reader;
+      } };
     },
-    { env: { REVIEW_READ_TOKEN: "repository-read-token" } },
-    {
-      repo: { owner: "owner", repo: "repo" },
-      payload: { pull_request: { user: { login: "maintainer" }, number: 7,
-        head: { sha: "old-event-head" } } },
-    },
+    { env: { REVIEW_READ_TOKEN: "repository-token" } },
+    { repo: { owner: "owner", repo: "repo" },
+      payload: { pull_request: { number: 7, head: { sha: "event-head" } } } },
     writer,
-    {
-      info: () => {},
-      setFailed: (message) => failures.push(message),
-      warning: (message) => warnings.push(message),
-    },
+    { info: msg => infos.push(msg), setFailed: msg => failures.push(msg),
+      warning: msg => warnings.push(msg) },
     { now: () => clock, parse: Date.parse },
-    (callback, delay) => {
-      waits.push(delay);
-      clock += delay;
-      callback();
-    },
+    (callback, ms) => { waits.push(ms); clock += ms; callback(); },
   );
-  return { waits, writes, failures, warnings, reads };
+  return { writes, reads, waits, failures, warnings, infos };
 }
 
-test("requests latest head with repository-token reads and only one owner write", async () => {
-  const result = await run({
-    pending: false,
-    newReviews: [{ user: { login: BOT }, commit_id: "latest-head", id: 1,
-      state: "COMMENTED", submitted_at: new Date(NOW).toISOString() }],
-  });
+function review(overrides = {}) {
+  return { id: 1, user: { login: BOT }, commit_id: "event-head",
+    state: "COMMENTED", submitted_at: new Date(NOW).toISOString(), ...overrides };
+}
+
+test("one five-minute sleep, one snapshot and one nudge, no post-write polling", async () => {
+  const result = await run();
+  assert.deepEqual(result.waits, [300_000]);
+  assert.deepEqual(result.reads, ["pr", "pending", "events", "reviews"]);
   assert.equal(result.writes.length, 1);
-  assert.equal(result.failures.length, 0);
-  assert.ok(result.reads.includes("requested"));
+  assert.match(result.infos.at(-1), /not verified/);
 });
 
-test("coalesces at the five-minute boundary using native request time", async () => {
-  const result = await run({
-    events: [{ event: "review_requested", requested_reviewer: { login: BOT },
-      created_at: new Date(NOW - 120_000).toISOString() }],
-  });
-  assert.deepEqual(result.waits, [180_000]);
-  assert.equal(result.writes.length, 1);
-});
-
-test("ignores unrelated reviewer events and expired cooldowns", async () => {
-  const result = await run({
-    events: [
-      { event: "review_requested", requested_reviewer: { login: "human" },
-        created_at: new Date(NOW).toISOString() },
-      { event: "review_requested", requested_reviewer: { login: BOT },
-        created_at: new Date(NOW - 300_000).toISOString() },
-    ],
-  });
-  assert.deepEqual(result.waits, []);
-  assert.equal(result.writes.length, 1);
-});
-
-test("skips duplicate completed reviews of live head", async () => {
-  const result = await run({
-    existingReviews: [{ user: { login: BOT }, commit_id: "latest-head", id: 1,
-      state: "APPROVED", submitted_at: new Date(NOW).toISOString() }],
-  });
+test("pending review needs only PR and pending reads and no nudge", async () => {
+  const result = await run({ pending: true });
+  assert.deepEqual(result.reads, ["pr", "pending"]);
   assert.equal(result.writes.length, 0);
 });
 
-for (const event of ["base_ref_changed", "reopened"]) {
-  test(`${event} requires a review newer than the current diff epoch`, async () => {
-    const result = await run({
-      events: [{ event, created_at: new Date(NOW - 60_000).toISOString() }],
-      existingReviews: [{ user: { login: BOT }, commit_id: "latest-head", id: 1,
-        state: "APPROVED", submitted_at: new Date(NOW - 120_000).toISOString() }],
-    });
-    assert.equal(result.writes.length, 1);
-  });
-}
-
-test("review after retarget suppresses a duplicate queued request", async () => {
-  const result = await run({
-    events: [{ event: "base_ref_changed", created_at: new Date(NOW - 120_000).toISOString() }],
-    existingReviews: [{ user: { login: BOT }, commit_id: "latest-head", id: 1,
-      state: "APPROVED", submitted_at: new Date(NOW - 60_000).toISOString() }],
-  });
-  assert.equal(result.writes.length, 0);
-});
-
-test("same-second new review confirms request by ID delta", async () => {
-  const stamp = new Date(NOW).toISOString();
-  const result = await run({
-    events: [{ event: "base_ref_changed", created_at: stamp }],
-    existingReviews: [{ user: { login: BOT }, commit_id: "latest-head", id: 1,
-      state: "COMMENTED", submitted_at: stamp }],
-    baselineReviews: [{ user: { login: BOT }, commit_id: "latest-head", id: 1,
-      state: "COMMENTED", submitted_at: stamp }],
-    pending: false,
-    newReviews: [
-      { user: { login: BOT }, commit_id: "latest-head", id: 1,
-        state: "COMMENTED", submitted_at: stamp },
-      { user: { login: BOT }, commit_id: "latest-head", id: 2,
-        state: "COMMENTED", submitted_at: stamp },
-    ],
-  });
-  assert.equal(result.writes.length, 1);
-  assert.equal(result.failures.length, 0);
-});
-
-test("same-second preexisting review alone cannot confirm a new request", async () => {
-  const stamp = new Date(NOW).toISOString();
-  const review = { user: { login: BOT }, commit_id: "latest-head", id: 1,
-    state: "COMMENTED", submitted_at: stamp };
-  const result = await run({
-    events: [{ event: "reopened", created_at: stamp }],
-    existingReviews: [review], baselineReviews: [review],
-    pending: false, newReviews: [review],
-  });
-  assert.equal(result.failures.length, 1);
-});
-
-test("pending or dismissed reviews do not suppress an automatic request", async () => {
-  for (const state of ["PENDING", "DISMISSED"]) {
-    const result = await run({
-      existingReviews: [{ user: { login: BOT }, commit_id: "latest-head", id: 1,
-        state, submitted_at: state === "PENDING" ? null : new Date(NOW).toISOString() }],
-    });
-    assert.equal(result.writes.length, 1);
-  }
+test("completed current-head review suppresses nudge", async () => {
+  assert.equal((await run({ reviews: [review()] })).writes.length, 0);
 });
 
 for (const options of [{ state: "closed" }, { draft: true }, { base: "main" }]) {
-  test(`skips no-longer-eligible PR ${JSON.stringify(options)}`, async () => {
-    assert.equal((await run(options)).writes.length, 0);
+  test(`ineligible PR ${JSON.stringify(options)} never nudged`, async () => {
+    const result = await run(options);
+    assert.deepEqual(result.reads, ["pr"]);
+    assert.equal(result.writes.length, 0);
   });
 }
 
-test("pending review completes at latest head without duplicate write", async () => {
+test("newer push leaves full grace period to latest queued run", async () => {
+  assert.equal((await run({ head: "newer-head" })).writes.length, 0);
+});
+
+for (const state of ["PENDING", "DISMISSED"]) {
+  test(`${state} review cannot masquerade as completion`, async () => {
+    assert.equal((await run({ reviews: [review({ state })] })).writes.length, 1);
+  });
+}
+
+for (const event of ["reopened", "base_ref_changed"]) {
+  test(`${event} invalidates old same-head review`, async () => {
+    const result = await run({
+      events: [{ event, created_at: new Date(NOW).toISOString() }],
+      reviews: [review({ submitted_at: new Date(NOW - 60_000).toISOString() })],
+    });
+    assert.equal(result.writes.length, 1);
+  });
+}
+
+test("post-retarget review suppresses new nudge", async () => {
+  assert.equal((await run({
+    events: [{ event: "base_ref_changed", created_at: new Date(NOW - 60_000).toISOString() }],
+    reviews: [review()],
+  })).writes.length, 0);
+});
+
+test("recent native/manual request suppresses duplicate nudge", async () => {
   const result = await run({
-    pendingReadsBeforeWrite: 2,
-    reviewsAfterPending: [{ user: { login: BOT }, commit_id: "latest-head", id: 2,
-      state: "APPROVED", submitted_at: new Date(NOW).toISOString() }],
+    events: [{ event: "review_requested", requested_reviewer: { login: BOT },
+      created_at: new Date(NOW + 240_000).toISOString() }],
   });
   assert.equal(result.writes.length, 0);
-  assert.deepEqual(result.waits, [30_000, 30_000]);
 });
 
-test("old-head pending review completes then requests live head", async () => {
+test("five-minute request boundary allows nudge when still no review", async () => {
   const result = await run({
-    pendingReadsBeforeWrite: 1,
-    reviewsAfterPending: [{ user: { login: BOT }, commit_id: "old-event-head", id: 2,
-      state: "APPROVED", submitted_at: new Date(NOW).toISOString() }],
+    events: [{ event: "review_requested", requested_reviewer: { login: BOT },
+      created_at: new Date(NOW).toISOString() }],
   });
   assert.equal(result.writes.length, 1);
-  assert.equal(result.reads.filter((item) => item === "get").length, 2);
 });
 
-test("long-pending review defers explicitly without any owner write", async () => {
-  const result = await run({ pendingForever: true });
-  assert.equal(result.writes.length, 0);
-  assert.deepEqual(result.waits, Array(10).fill(30_000));
-  assert.match(result.failures[0], /deferred without a duplicate request/);
-});
-
-test("confirmation remains bounded at 20 polls spaced 30 seconds apart", async () => {
-  const result = await run({ pending: false });
-  assert.equal(result.writes.length, 1);
-  assert.equal(result.reads.filter((item) => item === "requested").length, 21);
-  assert.deepEqual(result.waits, Array(19).fill(30_000));
-  assert.equal(result.failures.length, 1);
-});
-
-test("rate-limit write failure reports provider backoff without retry", async () => {
+test("rate-limit failure reports headers and performs no retry", async () => {
   const result = await run({
-    writeError: { message: "rate limit exceeded", status: 403,
-      response: { headers: { "x-ratelimit-remaining": "0",
-        "x-ratelimit-reset": "1791687600", "retry-after": "60" } } },
+    error: { message: "quota exhausted", response: { headers: {
+      "retry-after": "60", "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1791687600",
+    } } },
   });
   assert.equal(result.writes.length, 1);
   assert.equal(result.failures.length, 1);
-  assert.match(result.warnings[0], /retry-after=60; reset-epoch=1791687600/);
+  assert.match(result.warnings[0], /retry-after=60/);
 });
 
-test("invalid or future cooldown timestamps fail before the write", async () => {
-  for (const created_at of ["invalid", new Date(NOW + 60_000).toISOString()]) {
+test("invalid or future timeline state fails before write", async () => {
+  for (const created_at of ["invalid", new Date(NOW + 360_000).toISOString()]) {
     await assert.rejects(run({
-      events: [{ event: "review_requested", requested_reviewer: { login: BOT }, created_at }],
+      events: [{ event: "base_ref_changed", created_at }],
     }));
   }
 });
 
-test("per-PR workflow concurrency retains active confirmation", () => {
-  assert.match(workflow, /group: copilot-review-request-.*pull_request\.number/);
+test("workflow preserves author trust and per-PR serialization", () => {
+  assert.match(workflow, /repos\.checkCollaborator/);
+  assert.match(workflow, /CODEOWNERS/);
+  assert.match(workflow, /steps\.status\.outputs\.is_maintainer == 'true'/);
   assert.match(workflow, /cancel-in-progress: false/);
+  assert.match(workflow, /group: copilot-review-request-.*pull_request\.number/);
 });

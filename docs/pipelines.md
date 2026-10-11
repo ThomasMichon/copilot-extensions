@@ -84,21 +84,28 @@ fire for literally anyone — so this repo has removed that rule.) Like
 `main` via a promotion — request a review manually for any PR opened
 before that first promotion completes.
 
-Automatic requests are serialized per PR with a **five-minute cooldown** from
-the most recent native Copilot `review_requested` timeline event. Rapid pushes
-coalesce to the live head; a queued run skips a head already reviewed, or a PR
-that is closed, draft, or retargeted away from `dev`. Reused reviews must be
-newer than the latest base-retarget or reopen timeline event, so a same-head
-review of an earlier diff cannot suppress a required new request. Independent PRs do not
-share a cooldown, and manual requests remain available. Metadata and confirmation
-reads use `GITHUB_TOKEN`; the licensed owner credential performs only the request
-write. An already-pending Copilot review is awaited for up to five minutes before
-refetching the live head; if it remains pending, the run reports an explicit
-deferral without a duplicate write. Confirmation polls every 30 seconds for up
-to ten minutes. A write failure
-is explicit and reports provider reset/backoff headers when present, without
-blind retries. This reduces duplicate/read amplification but is not a guarantee
-against exhaustion of the owner's shared REST budget by other clients.
+The automatic fallback waits **five minutes after its run starts**, without API
+polling, then checks the live PR once. It skips closed/draft/retargeted PRs,
+pending Copilot reviews, completed reviews of the current diff, and requests
+still inside their five-minute grace period. Completed reviews must be newer
+than the latest base-retarget/reopen event. A run superseded by a newer push
+leaves that push's grace period to its own queued run. Per-PR serialization keeps
+an active run plus the latest pending event; independent PRs remain concurrent.
+
+If no review activity qualifies, the workflow makes **one nudge**. All reads use
+`GITHUB_TOKEN`; only that write uses the licensed owner credential. A successful
+request is reported as accepted, not as proof that Copilot started. There is
+**no post-nudge confirmation polling**; review completion remains observable
+through the normal PR gate. Write failures report reset/backoff headers when
+present without blind retries. Manual requests remain available.
+
+This fallback neither enables native automatic review nor infers the author's
+Copilot subscription. The documented seat-management APIs require organization
+owner access and do not supply a general personal-seat lookup for arbitrary PR
+authors. Native review remains disabled under this repository's trust policy,
+so the fallback may still supply the normal request until that policy changes
+separately. Reduced amplification is not a guarantee against other clients
+exhausting the owner's shared API budget.
 
 Whether a review (Copilot's or anyone else's) must formally *approve* the
 PR before merge is governed by a second ruleset ("dev branch policy:
