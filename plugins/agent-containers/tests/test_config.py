@@ -412,6 +412,28 @@ class TestKnowledgeOverlayResolver:
         monkeypatch.setattr("shutil.which", lambda name: None)
         assert _knowledge_overlay_config() is None
 
+    def test_legacy_probe_preserves_capture_and_suppresses_windows(self, monkeypatch):
+        from agent_containers import config
+
+        monkeypatch.setattr(config, "_installation_owner", lambda: None)
+        monkeypatch.setattr("shutil.which", lambda name: "agent-worktrees")
+        monkeypatch.setattr(
+            config._peer_launch, "no_window_kwargs", lambda: {"creationflags": 123},
+        )
+
+        def run(argv, **kwargs):
+            import subprocess
+
+            assert argv == ["agent-worktrees", "state-root", "--json"]
+            assert kwargs == {
+                "capture_output": True, "text": True, "timeout": 20,
+                "creationflags": 123,
+            }
+            return subprocess.CompletedProcess(argv, 0, '{"requires_external": false}', "")
+
+        monkeypatch.setattr("subprocess.run", run)
+        assert config._knowledge_overlay_config() is None
+
 
 def test_rescue_limits_load_with_bounded_defaults(tmp_path, monkeypatch):
     config_file = tmp_path / "containers.yaml"

@@ -457,7 +457,7 @@ def test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir(tmp_path, monk
     os.symlink call omits.
     Supply it at the fixture's link-creation seam, retaining real extraction,
     native filesystem checks, and the production refusal path on every OS.
-    Missing symlink privilege must fail visibly rather than skip this contract.
+    Hosts without symlink-creation privilege use the existing capability skip.
     """
     import os
     from pathlib import Path
@@ -465,6 +465,12 @@ def test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir(tmp_path, monk
     from types import SimpleNamespace
 
     if os.name == "nt":
+        probe_target = tmp_path / "symlink-probe-target"
+        probe_target.mkdir()
+        _symlink_to_or_skip(
+            tmp_path / "symlink-probe", probe_target, target_is_directory=True,
+        )
+
         def directory_symlink(src: str, dst: str) -> None:
             assert src == "nested/real-target"
             assert Path(dst).name == "copilot-extensions-main"

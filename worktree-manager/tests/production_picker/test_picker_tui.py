@@ -10287,8 +10287,13 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
         async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
             scr.machine_idx = scr.local_index()
-            scr.sel = ("L", 0)
+            scr.refresh()
             await pilot.pause()
+            body = scr.query_one("#nf-body-data")
+            body.focus()
+            body.highlighted = body._stops.index(("L", 0))
+            await pilot.pause()
+            assert body.has_focus and scr.sel == ("L", 0)
             scr._open_submenu()
             await pilot.pause()
             # Open-first: the menu is ALREADY open (from cached verbs) and marked

@@ -8,6 +8,9 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -96,12 +99,13 @@ def test_containment_owner_launch_preserves_process_contract(monkeypatch, tmp_pa
 
 @pytest.mark.skipif(os.name != "nt", reason="real Windows console inheritance")
 @pytest.mark.parametrize("timeout", [False, True], ids=["exit-and-streams", "timeout-tree"])
-def test_windowless_runner_contains_bare_console_descendants(tmp_path, timeout):
+def test_windowless_runner_contains_bare_console_descendants(tmp_path, timeout, monkeypatch):
     """Exercise pythonw -> runner -> worker -> bare Python/PowerShell/git.
 
     No subprocess patch is installed: intentional CREATE_NEW_CONSOLE callers
     remain untouched. Console handles/visibility are OS observations, not flag
-    assertions; interactive desktop focus still needs the manual launch lane.
+    assertions. The opt-in desktop lane additionally observes external terminal
+    hosts, visible windows and foreground changes against a pre-launch baseline.
     """
     import ctypes
     from ctypes import wintypes
@@ -194,10 +198,76 @@ Path({str(streams)!r}).write_text(json.dumps({{
     'returncode': probe.returncode, 'stdout': probe.stdout, 'stderr': probe.stderr,
 }}))
 """
-    completed = subprocess.run(
-        [pythonw, "-c", launcher], cwd=tmp_path, capture_output=True,
-        text=True, timeout=30, **no_window_kwargs(),
-    )
+    desktop = os.environ.get("MUX_CHILD_WINDOWS_E2E") == "1"
+    stop = threading.Event()
+    visible: set[int] = set()
+    focused: set[int] = set()
+    owned: set[int] = set()
+    roots: set[int] = set()
+    if desktop:
+        session = wintypes.DWORD()
+        assert ctypes.windll.kernel32.ProcessIdToSessionId(
+            os.getpid(), ctypes.byref(session),
+        )
+        assert session.value != 0, "desktop observation cannot run in Windows session zero"
+        monkeypatch.syspath_prepend(
+            str(SCRIPT.parent.parent / "worktree-manager" / "tests"),
+        )
+        from mux_windows_observer import descendants, processes, windows
+
+        baseline_windows, baseline_foreground = windows()
+        baseline_pids = set(processes())
+        real_popen = subprocess.Popen
+
+        def popen(argv, **kwargs):
+            process = real_popen(argv, **kwargs)
+            roots.add(process.pid)
+            return process
+
+        monkeypatch.setattr(subprocess, "Popen", popen)
+
+        def observe() -> None:
+            while not stop.is_set():
+                table = processes()
+                for pid in roots.copy():
+                    owned.update(descendants(pid, table))
+                current_windows, foreground_pid = windows()
+                terminals = {"windowsterminal.exe", "openconsole.exe", "conhost.exe"}
+                for hwnd, pid in current_windows.items():
+                    if pid in owned or (
+                        hwnd not in baseline_windows
+                        and table.get(pid, ("", 0))[0].lower() in terminals
+                    ):
+                        visible.add(hwnd)
+                if foreground_pid in owned or (
+                    foreground_pid != baseline_foreground
+                    and table.get(foreground_pid, ("", 0))[0].lower() in terminals
+                ):
+                    focused.add(foreground_pid)
+                for pid, (name, _) in table.items():
+                    if pid not in baseline_pids and name.lower() == "openconsole.exe":
+                        visible.add(pid)
+                stop.wait(.01)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        monitor = executor.submit(observe) if desktop else None
+        try:
+            completed = subprocess.run(
+                [pythonw, "-c", launcher], cwd=tmp_path, capture_output=True,
+                text=True, timeout=30, **no_window_kwargs(),
+            )
+            if desktop:
+                assert roots and owned, "observer never identified runner fixture processes"
+                deadline = time.monotonic() + 5
+                while owned & processes().keys() and time.monotonic() < deadline:
+                    time.sleep(.02)
+                assert not (owned & processes().keys()), "runner fixture descendants leaked"
+        finally:
+            stop.set()
+            if monitor is not None:
+                monitor.result(timeout=3)
+    assert not visible, "runner child or external terminal host surfaced a window"
+    assert not focused, "runner child or external terminal host stole focus"
     assert completed.returncode == 0, completed.stderr
     captured = json.loads(streams.read_text())
     assert captured["returncode"] == 0, captured["stderr"]

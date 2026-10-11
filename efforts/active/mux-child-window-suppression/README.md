@@ -182,3 +182,18 @@ contain terminal-multiplexer descendants.
   conflicting changes: supported sync attempted a rebase and aborted cleanly.
   Resolve the conflict and obtain current-head review/checks before merge;
   promotion and deployment are not complete.
+- Reconciled the implementation with current `dev`, preserving other active
+  effort entries and the complete local validation journal.
+- The combined native desktop run passed 1,887 checks with 15 capability or
+  platform skips. The nested runner's success and timeout cases now observe
+  external terminal hosts, visible windows, foreground transitions and process
+  cleanup against a pre-launch baseline. Both completed without a surfaced
+  window or focus acquisition.
+- Restored the symlink fixture's established capability probe for accounts
+  without native symlink privilege. Stabilized an intermittent actions-menu
+  fixture by selecting the actual focused native row before opening its menu.
+- A recurring legacy container namespace lookup still launched the worktrees
+  state-root command without suppression. Applied the existing peer-launch
+  no-window primitive to both legacy and same-cell probes; 59 targeted config
+  and peer-boundary tests passed. Capture, timeout, encoding and optional-peer
+  behavior remain unchanged.
