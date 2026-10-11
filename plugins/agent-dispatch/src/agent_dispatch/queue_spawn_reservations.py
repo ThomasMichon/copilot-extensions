@@ -139,6 +139,14 @@ class SpawnReservationMixin:
         carry-forward) is unchanged.
         """
         ts = self._now(now)
+        from .ci_repair_spawn import authority_snapshot, reservation_authorized
+        admission = None
+        with self._connect() as probe:
+            candidate = self._fetch(probe, task_id)
+            if candidate and candidate.source == "ci-repair":
+                admission = authority_snapshot(probe, candidate)
+                if not reservation_authorized(probe, candidate, reserved_by):
+                    raise TaskError("CI repair reservation requires independently verified authority")
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             task = self._fetch(conn, task_id)
@@ -146,8 +154,7 @@ class SpawnReservationMixin:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
             if task.source == "ci-repair":
-                from .ci_repair_spawn import reservation_authorized
-                if not reservation_authorized(conn, task, reserved_by):
+                if admission != authority_snapshot(conn, task):
                     raise TaskError("CI repair reservation requires its registered admission lane")
             rows = conn.execute(
                 "SELECT * FROM spawn_reservations WHERE task_id = ? ORDER BY attempt ASC",

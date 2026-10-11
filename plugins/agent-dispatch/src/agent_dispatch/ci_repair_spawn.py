@@ -39,6 +39,40 @@ def reservation_authorized(conn, task, reserved_by: str | None, *, transition: d
         return False
 
 
+def authority_snapshot(conn, task) -> tuple:
+    """Capture task, registration and latest session identity for compare-before-write."""
+    registration = conn.execute("SELECT * FROM registrations WHERE id = ?", (task.origin_ref,)).fetchone()
+    reservation = conn.execute(
+        "SELECT * FROM spawn_reservations WHERE task_id = ? ORDER BY attempt DESC LIMIT 1",
+        (task.id,),
+    ).fetchone()
+    return repr(task), tuple(registration) if registration else None, tuple(reservation) if reservation else None
+
+
+def claim_admissions(queue, worker_id, caps, repo, task_id) -> dict:
+    """Probe only eligible CI tasks outside any coordinator write transaction."""
+    admitted = {}
+    if "ci-repair-admitted" not in caps:
+        return admitted
+    with queue._connect() as conn:
+        rows = conn.execute("SELECT id FROM tasks WHERE source = 'ci-repair' AND status = 'queued'").fetchall()
+        for row in rows:
+            task = queue._fetch(conn, row["id"])
+            if (task_id and task.id != task_id) or (repo and task.repo != repo):
+                continue
+            reservation = conn.execute(
+                "SELECT session_handle FROM spawn_reservations WHERE task_id = ? AND state = 'spawned' ORDER BY attempt DESC LIMIT 1",
+                (task.id,),
+            ).fetchone()
+            if not reservation or not reservation["session_handle"]:
+                continue
+            snapshot = authority_snapshot(conn, task)
+            if reservation_authorized(conn, task, task.origin_ref, transition={
+                "phase": "claim", "worker_id": worker_id, "session_handle": reservation["session_handle"],
+            }):
+                admitted[task.id] = snapshot
+    return admitted
+
 def validate_bindings(bindings: list[dict]) -> None:
     """Require an explicit non-empty execution allowlist."""
     if not isinstance(bindings, list) or not bindings:
@@ -110,6 +144,8 @@ def make_ci_repair_spawn(
             )
             if not isinstance(verdict, dict) or verdict.get("allowed") is not True:
                 raise AdmissionRefused("CI repair launch admission refused")
+            if verdict.get("phase") != "spawn":
+                raise AdmissionRefused("CI repair launch response is not bound to spawn phase")
             if (
                 failure(verdict.get("failure"), evidence["repository"]) != evidence
                 or execution(verdict.get("execution")) != selected

@@ -76,6 +76,8 @@ def adapters(command, **kwargs):
     else:
         assert request["failure"] == EVIDENCE
         output = verdict(selected=request["execution"])
+        if "phase" in request:
+            output["phase"] = request["phase"]
     return SimpleNamespace(returncode=0, stdout=json.dumps(output), stderr="")
 
 
@@ -476,6 +478,24 @@ def test_spoofed_registration_id_and_fake_session_do_not_authorize_claim(tmp_pat
         client.queue.reserve_spawn(task["id"], reserved_by="repair-lane")
     assert client.queue.claim_one("spoofed-worker", capabilities=["ci-repair-admitted"],
                                  repo=task["repo"], task_id=task["id"]) is None
+
+
+def test_authority_probe_does_not_hold_coordinator_write_lock(tmp_path, monkeypatch):
+    client = Client(tmp_path)
+    task = ci_repair.run_tick(client, config(enabled=True), runner=adapters)["created"][0]
+    client.queue.register_registration("supervised-lane", {
+        "repo": task["repo"], "labels": ["ci-repair"], "ci_repair_bindings": [EXECUTION],
+        "ci_repair_admission_command": ["independent-authority"],
+    }, reg_id="repair-lane")
+    def probe(*args, **kwargs):
+        other = TaskQueue(tmp_path / "tasks.db")
+        other.create("unrelated write", repo="example/other")
+        return {"allowed": True, **kwargs["request"]}
+    monkeypatch.setattr("agent_dispatch.ci_repair_spawn._invoke", probe)
+    reservation, _ = client.queue.reserve_spawn(task["id"], reserved_by="repair-lane")
+    client.queue.record_spawn(reservation.key, session_handle="local-body:verified")
+    assert client.queue.claim_one("verified-worker", capabilities=["ci-repair-admitted"],
+                                 repo=task["repo"], task_id=task["id"])
 
 
 def test_watchdog_source_cli_uses_only_scoped_wrapper(monkeypatch, capsys):

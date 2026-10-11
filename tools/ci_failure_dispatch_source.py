@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""Checkout convenience wrapper for the packaged CI failure source adapter."""
+"""Deprecated checkout entrypoint; use the installed agent-dispatch runtime."""
 
-from pathlib import Path
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "agent-dispatch" / "src"))
-from agent_dispatch.producers.ci_failure_source import main  # noqa: E402
-
 if __name__ == "__main__":
-    raise SystemExit(main())
+    print("Use the managed agent-dispatch interpreter: python -m agent_dispatch.producers.ci_failure_source", file=sys.stderr)
+    raise SystemExit(2)
