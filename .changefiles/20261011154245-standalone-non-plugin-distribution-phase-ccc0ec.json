@@ -1,0 +1,9 @@
+{
+  "comment": "Standalone (non-plugin) distribution Phase 1: bootstrap.sh/.ps1 + out-of-plugin CI",
+  "changes": [
+    {
+      "plugin": "agent-dispatch-service",
+      "type": "dev"
+    }
+  ]
+}
