@@ -73,7 +73,11 @@ jobs:
         with:
           github-token: ${{ secrets.MAINTAINER_REVIEW_PAT }}
           script: |
-            const reader = require("@actions/github").getOctokit(process.env.REVIEW_READ_TOKEN);
+            // github-script bundles Octokit; its dependencies are not require-able.
+            const reader = new github.constructor({
+              auth: process.env.REVIEW_READ_TOKEN,
+              retry: { enabled: false },
+            });
             const pull_number = context.payload.pull_request.number;
             const request = { ...context.repo, pull_number };
             // One grace-period sleep, not a polling loop. Independent PRs
