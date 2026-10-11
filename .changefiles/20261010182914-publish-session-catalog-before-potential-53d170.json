@@ -1,0 +1,9 @@
+{
+  "comment": "Publish session catalog before potentially slow lifecycle decisions so hook cancellation preserves readiness evidence",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

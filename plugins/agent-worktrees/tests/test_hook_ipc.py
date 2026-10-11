@@ -1184,6 +1184,38 @@ def test_session_start_main_emits_empty_object_on_unhandled_exception(
     assert hook_client.main(["sessionStart"]) == 0
     assert json.loads(capsys.readouterr().out) == {}
 
+@pytest.mark.parametrize("decision_fails", [False, True])
+def test_session_start_catalog_exists_before_lifecycle_decision(
+    monkeypatch, tmp_path, capsys, decision_fails
+):
+    payload = {"sessionId": "early-catalog", "cwd": str(tmp_path)}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    monkeypatch.setattr(hook_client, "_enrich_session_payload", lambda value: value)
+    monkeypatch.setattr(hook_client, "_registration_context", lambda *_: "")
+    monkeypatch.setattr(
+        hook_client, "_command_catalog_context", lambda: "canonical fixture catalog"
+    )
+    writer = hook_client._write_session_guidance
+    monkeypatch.setattr(
+        hook_client, "_write_session_guidance",
+        lambda value, **kwargs: writer(value, home=tmp_path, **kwargs),
+    )
+    path = (tmp_path / ".copilot" / "session-state" / "early-catalog"
+            / "instructions" / "agent-worktrees" / "session-guidance.instructions.md")
+
+    def decide(*_):
+        assert "canonical fixture catalog" in path.read_text()
+        if decision_fails:
+            raise RuntimeError("finite lifecycle failure")
+        return {"additionalContext": "final lifecycle context"}
+
+    monkeypatch.setattr(hook_client, "decide", decide)
+    assert hook_client.main(["sessionStart"]) == 0
+    text = path.read_text()
+    assert "canonical fixture catalog" in text
+    assert ("final lifecycle context" in text) is not decision_fails
+    assert json.loads(capsys.readouterr().out) == {}
+
 
 def test_first_install_preserves_bootstrap_output(monkeypatch, tmp_path):
     monkeypatch.setattr(

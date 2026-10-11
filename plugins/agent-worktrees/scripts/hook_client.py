@@ -964,6 +964,8 @@ def main(argv: list[str] | None = None) -> int:
             payload = {}
         if kind == "sessionStart":
             payload = _enrich_session_payload(payload)
+            # Catalog evidence must survive cancellation of slow lifecycle work.
+            _write_session_guidance(payload)
         result = decide(kind, payload)
         diagnostic = result.pop("_stderr", None)
         if diagnostic:
