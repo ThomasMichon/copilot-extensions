@@ -98,6 +98,11 @@ def _validated_legs(stored: object) -> dict[str, dict[str, Any]]:
             "deferred_file_count": count,
             "deferred_files": samples,
         }
+        reason = entry.get("reason")
+        if reason is not None:
+            if not isinstance(reason, str) or len(reason) > 256:
+                raise OSError("invalid sync health reason")
+            legs[name]["reason"] = reason
     return legs
 
 
@@ -172,6 +177,7 @@ def merge_health(
     deferred: list[str],
     sample_limit: int,
     sample_chars: int,
+    reason: str | None = None,
 ) -> None:
     """Update one leg; another leg's success cannot clear its failure streak."""
     status = status[:256]
@@ -197,6 +203,8 @@ def merge_health(
         "deferred_file_count": len(deferred),
         "deferred_files": [path[:sample_chars] for path in deferred[:sample_limit]],
     }
+    if reason is not None:
+        legs[leg]["reason"] = reason[:256]
     metadata["sync_legs"] = legs
     metadata.update(_aggregate_health(legs))
 

@@ -96,6 +96,8 @@ while either recorded leg is partial; its streak is the maximum current
 per-leg streak, and its deferred count is the sum. A successful session transfer
 cannot reset a failing log streak, so existing sustained-partial health
 thresholds also detect repeated log deferrals.
+Non-enumerable failures record a bounded leg `reason` and zero identified
+deferred files; diagnostic strings never inflate the file count.
 
 A clean process-log retry, including an incremental pass that copies no files,
 clears only that leg. Session diagnostics and detritus measurements survive.

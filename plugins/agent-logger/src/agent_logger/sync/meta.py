@@ -94,6 +94,8 @@ def write_process_log_meta(
     dest: Path,
     status: str,
     deferred_files: Iterable[str] = (),
+    *,
+    reason: str | None = None,
 ) -> None:
     """Record a log attempt while preserving all session-state diagnostics."""
     try:
@@ -110,6 +112,7 @@ def write_process_log_meta(
             deferred=[str(path) for path in deferred_files],
             sample_limit=MAX_DEFERRED_FILE_SAMPLES,
             sample_chars=MAX_DEFERRED_PATH_CHARS,
+            reason=reason,
         )
     except OSError as exc:
         log.warning("cannot update process-log sync health at %s: %s", dest, exc)

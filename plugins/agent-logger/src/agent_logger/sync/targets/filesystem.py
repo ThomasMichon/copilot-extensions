@@ -537,7 +537,7 @@ def _copy_process_logs(source: Path, dest: Path) -> tuple[int, int, list[Path]]:
                     nbytes += size
                 _revalidate_root(opened_root)
         except FileNotFoundError as exc:
-            raise OSError("process-log source vanished during copy") from exc
+            raise OSError("process-log copy path vanished during transfer") from exc
         return copied, nbytes, locked
 
     try:
@@ -1870,6 +1870,7 @@ class FilesystemTarget(Target):
 
     def _record_process_log_health(
         self, machine: str, status: str, deferred_files: tuple[str, ...] = (),
+        *, reason: str | None = None,
     ) -> None:
         """Update only the process-log leg under existing machine metadata."""
         try:
@@ -1881,7 +1882,7 @@ class FilesystemTarget(Target):
             return
         if machine_root is None:
             return
-        write_process_log_meta(machine_root, status, deferred_files)
+        write_process_log_meta(machine_root, status, deferred_files, reason=reason)
 
     def push_process_logs(self, log_root: Path, machine: str) -> PushResult:
         """Publish process-log evidence; see :class:`Target`'s base method.
@@ -1906,17 +1907,17 @@ class FilesystemTarget(Target):
         try:
             safe_source = _existing_real_directory(log_root)
         except OSError as exc:
-            self._record_process_log_health(machine, "partial", ("unsafe process-log source",))
+            self._record_process_log_health(machine, "partial", reason="unsafe process-log source")
             return PushResult(ok=False, detail=f"unsafe process-log source: {exc}")
         if safe_source is None:
-            self._record_process_log_health(machine, "partial", ("no process-log source",))
+            self._record_process_log_health(machine, "partial", reason="no process-log source")
             return PushResult(ok=True, detail="no process-log source")
         log_root = safe_source
         try:
             root = self._root()
             dest = _ensure_relative_directory(root, Path(machine) / "logs")
         except OSError as exc:
-            self._record_process_log_health(machine, "partial", ("unsafe process-log destination",))
+            self._record_process_log_health(machine, "partial", reason="unsafe process-log destination")
             return PushResult(
                 ok=False,
                 detail=f"cannot create safe destination for {machine}/logs: {exc}",
@@ -1929,7 +1930,7 @@ class FilesystemTarget(Target):
             # between this method's own validation above and the copy) --
             # a genuinely unsafe root, not the benign per-file skip
             # `_copy_process_logs` already handles internally.
-            self._record_process_log_health(machine, "partial", ("process-log copy failed",))
+            self._record_process_log_health(machine, "partial", reason="process-log copy failed")
             return PushResult(ok=False, detail=f"process-log copy failed: {exc}")
         detail = f"-> {dest}"
         if locked_paths:

@@ -249,7 +249,7 @@ def test_vanished_log_root_does_not_clear_partial(
     monkeypatch.setattr(filesystem.os, "scandir", vanished)
     result = target.push_process_logs(logs, "machine")
     assert not result.ok
-    assert "source vanished" in result.detail
+    assert "vanished" in result.detail
     assert meta.read_sync_meta(root)["status"] == "partial"
     assert meta.read_sync_meta(root)["consecutive_partial_count"] == 2
 
@@ -388,3 +388,15 @@ def test_heartbeat_preserves_invalid_legs_and_warns(
     meta.heartbeat_sync_meta(tmp_path, "machine", "local", 0)
     assert path.read_text(encoding="utf-8") == raw
     assert "cannot validate sync metadata for heartbeat" in caplog.text
+
+
+def test_missing_root_reason_is_not_a_deferred_file(tmp_path: Path) -> None:
+    target = LocalTarget({"path": str(tmp_path / "dest")})
+    root = tmp_path / "dest" / "machine"
+    meta.write_sync_meta(root, "machine", "local", "ok")
+    target.push_process_logs(tmp_path / "missing", "machine")
+    metadata = meta.read_sync_meta(root)
+    assert metadata["status"] == "partial"
+    assert metadata["deferred_file_count"] == 0
+    assert metadata["deferred_files"] == []
+    assert metadata["sync_legs"]["process-logs"]["reason"] == "no process-log source"
