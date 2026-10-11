@@ -409,7 +409,7 @@ class GitHubProvider:
         any_signal = False
         failure = False
         pending = False
-        readable = 0
+        status_readable = runs_readable = False
 
         # 1. Legacy combined commit status.
         proc = run_cli(
@@ -427,7 +427,7 @@ class GitHubProvider:
             if isinstance(data, dict):
                 statuses = data.get("statuses")
                 if isinstance(statuses, list):
-                    readable += 1
+                    status_readable = True
                 if isinstance(statuses, list) and statuses:
                     any_signal = True
                     raw = str(data.get("state", "")).strip().lower()
@@ -436,7 +436,7 @@ class GitHubProvider:
                     elif raw == "pending":
                         pending = True
                     elif raw != "success":
-                        readable -= 1
+                        status_readable = False
 
         # 2. Actions check-runs.
         cproc = run_cli(
@@ -453,12 +453,12 @@ class GitHubProvider:
                 cdata = {}
             runs = cdata.get("check_runs") if isinstance(cdata, dict) else None
             if isinstance(runs, list):
-                readable += 1
+                runs_readable = True
             if isinstance(runs, list) and runs:
                 any_signal = True
                 for run in runs:
                     if not isinstance(run, dict):
-                        readable -= 1
+                        runs_readable = False
                         continue
                     status = str(run.get("status", "")).strip().lower()
                     if status != "completed":
@@ -472,13 +472,13 @@ class GitHubProvider:
                     ):
                         failure = True
                     elif conclusion not in ("success", "neutral", "skipped"):
-                        readable -= 1
+                        runs_readable = False
 
         if failure:
             return "failure"
         if pending:
             return "pending"
-        return ("success" if any_signal else "none") if readable == 2 else ""
+        return ("success" if any_signal else "none") if status_readable and runs_readable else ""
 
     def add_label(
         self, repo: str, number: int, label: str, *, api_base: str = "",
