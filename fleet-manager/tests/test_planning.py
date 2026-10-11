@@ -273,6 +273,26 @@ def test_optional_missing_provenance_retains_review_suggestion_without_blocking_
     assert verify_plan(saved, template, config, live, fleet_id="example", machine_limit=5, now=160) == saved
 
 
+@pytest.mark.parametrize("arguments,expected", [
+    ([], 1), (["plan"], 1), (["unknown"], 1),
+    (["plan", "--unknown"], 1),
+    (["plan", "--template", "template", "--inventory", "inventory",
+      "--fleet-id", "example", "--machine-limit", "invalid"], 1),
+    (["--help"], 0), (["--version"], 0), (["plan", "--help"], 0),
+], ids=["missing-command", "missing-options", "unknown-command", "unknown-option",
+        "invalid-integer", "help", "version", "plan-help"])
+def test_installed_cli_syntax_errors_are_not_blocked_plan_exit_codes(tmp_path, arguments, expected):
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    result = subprocess.run(
+        [sys.executable, "-I", "-m", "fleet_manager", *arguments],
+        cwd=tmp_path, capture_output=True, text=True, timeout=10, **flags,
+    )
+    assert result.returncode == expected
+    if expected:
+        assert result.stdout == ""
+        assert "error:" in result.stderr
+
+
 def test_installed_cli_blocked_plan_returns_two_and_valid_nonsecret_json(tmp_path):
     template, _, live = inputs()
     now = int(time.time())

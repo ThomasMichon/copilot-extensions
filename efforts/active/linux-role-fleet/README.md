@@ -341,3 +341,13 @@ not to the vision. This effort does not acquire or migrate live capacity.
 - Installed contained planner selection: 43 passed, including stale revision,
   different template and optional absent-provenance regressions. Current review
   and CI still gate #6133; this correction is not fleet activation.
+
+### 2026-10-11 - CLI syntax outcome separation
+- A subsequent current-head review identified argparse's default exit 2 for
+  invalid invocation syntax, colliding with valid blocked-plan output. Parser
+  failures now return the documented invalid-input code 1; help/version retain
+  exit 0. Eight actual installed CLI subprocess regressions cover missing and
+  unknown arguments, invalid integers, help/version and subcommand help.
+- Installed contained planner selection: 51 passed. Shared review-request
+  workflow import failure is tracked in #6191; no current workflow failure or
+  review finding is bypassed to land the planner.

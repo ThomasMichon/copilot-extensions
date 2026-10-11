@@ -27,7 +27,10 @@ def main(argv=None):
     planning.add_argument("--inventory", type=Path, required=True)
     planning.add_argument("--fleet-id", required=True)
     planning.add_argument("--machine-limit", type=int, required=True)
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return 0 if exc.code == 0 else 1
     try:
         result = plan(read(args.template, "template"), read(args.config, "config") if args.config else None,
                       read(args.inventory, "inventory"), fleet_id=args.fleet_id,
