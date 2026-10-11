@@ -169,3 +169,14 @@ def test_git_adopter_requires_new_ignore_rule_before_publication(tmp_path: Path)
     assert not result.blocking
     assert not old.exists()
     assert (repo / delivery.local_destination(spec.destination)).exists()
+
+
+def test_ignore_probe_permission_failure_is_not_non_git_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess
+    import instruction_delivery_io as io
+    monkeypatch.setattr(io.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+        a[0], 128, stdout=b"", stderr=b"fatal: permission denied"
+    ))
+    assert not io.ignored_local_paths(tmp_path, [".github/copilot/context-locals/policy/a.local.md"])

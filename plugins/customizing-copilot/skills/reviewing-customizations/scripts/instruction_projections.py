@@ -1371,11 +1371,13 @@ def _resolve_git_tracked_paths(
             env=env,
         )
     except FileNotFoundError:
-        return set(), False
+        return set(), any((p / ".git").exists() for p in [root, *root.parents])
     except (OSError, subprocess.SubprocessError):
         return set(), True
-    if probe.returncode != 0 or probe.stdout.strip() != b"true":
-        return set(), False
+    if probe.returncode != 0:
+        return set(), b"not a git repository" not in probe.stderr.lower()
+    if probe.stdout.strip() != b"true":
+        return set(), True
     # From here on, root IS a git working tree -- any further failure is
     # inconclusive, never "confirmed untracked".
     try:

@@ -100,8 +100,12 @@ def ignored_local_paths(root: Path, relatives: list[str]) -> set[str]:
             ["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"],
             capture_output=True, timeout=5, env=env, **flags,
         )
-        if probe.returncode != 0 or probe.stdout.strip() != b"true":
+        if probe.returncode != 0:
+            if b"not a git repository" not in probe.stderr.lower():
+                return set()
             return set(relatives)
+        if probe.stdout.strip() != b"true":
+            return set()
         proc = subprocess.run(
             ["git", "-C", str(root), "check-ignore", "--no-index", "-z", "--stdin"],
             input=b"\0".join(path.encode() for path in relatives) + b"\0",
@@ -111,7 +115,7 @@ def ignored_local_paths(root: Path, relatives: list[str]) -> set[str]:
             return set()
         return {p for p in proc.stdout.decode("utf-8").split("\0") if p}
     except FileNotFoundError:
-        return set(relatives)
+        return set() if any((p / ".git").exists() for p in [root, *root.parents]) else set(relatives)
     except (OSError, subprocess.SubprocessError, UnicodeError):
         return set()
 
