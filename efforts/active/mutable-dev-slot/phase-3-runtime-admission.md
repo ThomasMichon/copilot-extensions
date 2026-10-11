@@ -167,17 +167,59 @@ each adopter is already safe.
       The canonical adopter inventory, not a hand-maintained plugin list,
       determines completion of the portfolio.
       **Evidence surfaced while fixing agent-pull-requests' own narrow
-      payload-hash scope (same gap #5472 originally found on one adopter):**
-      the exact same bespoke `_payload_hash()`/`Get-PayloadHash` snippet
+      payload-hash scope (#6085, same gap #5472 originally found on one
+      adopter), later corrected by a per-plugin audit (#6165's investigation)
+      after the FIRST two "same bespoke snippet" assumptions below both
+      turned out to be wrong on direct inspection:** a blanket claim that
+      the exact same narrow `_payload_hash()`/`Get-PayloadHash` snippet
       (pyproject.toml + libs/*/pyproject.toml only, never the plugin's own
-      `src/` tree) is copy-pasted -- NOT synced as an `install-contract:vN`
-      block -- across at least agent-bridge, agent-codespaces,
-      agent-containers, agent-logger, agent-dispatch, agent-index,
-      agent-vault, budget-guidance, agent-ssh, agent-worktrees, and
-      agent-mcp's install scripts. Each one needs the same fix (delegate to
-      `fingerprint_source()` over its own `pyproject.toml` + `src/` roots)
-      as its own wave item -- do not assume fixing one adopter closes this
-      for the others.
+      `src/` tree) was copy-pasted unchanged across every other adopter did
+      NOT hold up. Do not trust a pattern-matched plugin list without reading
+      each installer directly -- confirmed per-plugin findings so far:
+      - **agent-pull-requests** (#6085, DONE): had the narrow bug exactly as
+        described. Fixed by delegating to canonical `fingerprint_source()`.
+      - **agent-worktrees** (#6165, DONE): already hashed its own `src/` tree
+        AND any LOCAL (promoted) `libs/<lib>/src/` fully -- NOT the narrow
+        bug. The one real gap was narrower: a DEV-CHECKOUT
+        `[tool.uv.sources] path = "../../libs/<lib>"` dependency living
+        outside the plugin directory was invisible. Fixed with a surgical
+        in-place extension (not a rewrite) to resolve and fingerprint those
+        external roots too, skipping any that resolve back under the
+        existing local `libs/` scan.
+      - **agent-index** (NOT YET FIXED, bigger/different shape than this
+        wave item covers): has its OWN heavily-engineered, TOCTOU-hardened
+        whole-directory snapshot hash (`find "$PLUGIN_DIR" -mindepth 1
+        -print0` plus before/after inode-level mutation detection) -- not
+        remotely the simple bespoke snippet described above. It walks the
+        entire plugin directory (so a LOCAL `libs/<lib>` is covered) but
+        still misses external dev-checkout `[tool.uv.sources]` roots
+        (confirmed it declares some, e.g. `../../libs/zdd`), the same class
+        of gap as agent-worktrees'. More importantly, its `is-complete` call
+        for the reuse/admission decision does NOT pass `--expect-hash` at
+        all right now -- the hash is computed and recorded via
+        `mark-complete --payload-hash`, but never actually CHECKED against
+        on reuse, so content drift within the same version currently goes
+        undetected regardless of fingerprint scope. Wiring `--expect-hash`
+        into its reuse check is a real behavior change (today: version match
+        alone reuses; proposed: content must also match) that needs its own
+        deliberate, reviewed wave item -- do not fold it into a routine
+        "fingerprint scope" fix.
+      - **agent-bridge, agent-codespaces, agent-containers, agent-logger,
+        agent-dispatch, agent-vault, budget-guidance, agent-ssh, agent-mcp**
+        (NOT YET FIXED, OUT OF THIS WAVE'S NARROW SCOPE): none of these have
+        adopted the reuse/admission gate at all yet (no `is-complete`/
+        `_versioned_is_complete`/`--expect-hash` call site in their
+        installer) -- they only toss-if-incomplete, build, and
+        mark-complete unconditionally on every run. A "fingerprint scope"
+        fix is meaningless without a reuse gate to feed it first; these
+        belong to 3b bullet 1's broader "first complete adoption" pattern
+        (building the whole admission contract), not this narrow wave.
+      **Before touching any plugin in a future wave, first confirm with
+      `grep -l "is-complete\|_versioned_is_complete\|expect-hash"
+      <plugin>/scripts/install.sh` (or `init.sh` -- agent-containers and
+      agent-mcp use that filename instead) that the reuse gate already
+      exists, THEN read its actual current hash function before assuming
+      the narrow bug applies -- do not assume either from this list alone.**
 - [ ] For each wave, add plugin changefiles, run targeted contained suites and
       shared sync/contract gates, obtain review, merge, verify promotion, and
       deploy through the unified update flow. Preserve active service work
