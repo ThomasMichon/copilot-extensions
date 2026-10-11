@@ -265,9 +265,13 @@ and pass the catalog `--agent-worktrees-path` when repository settings require i
 its lock -- privileged, PR-gated, consent-gated by design (see Phase 5).
 `instruction_projections.render_local_cache(repo_root, discover_sources)` is
 a deliberately **un**privileged sibling: it renders each enabled source's
-*current* projection into a gitignored `<sourceId>.local.instructions.md`
-file next to its checked-in destination
-(`local_sibling_destination()` computes the path) -- no consent check, no
+*current* full body into gitignored
+`.github/copilot/context-locals/<plugin>/<sourceId>.local.md`,
+outside automatic instruction discovery (nested paths preserved).
+`local_sibling_destination()` retains its API name but computes the new path.
+Legacy local reads remain canonically authenticated; after new publication only
+verified canonical untracked legacy files are retired. Edited/foreign/tracked
+files remain with visible findings. There is no consent check and no
 mutation of any checked-in file, lock, or git history. It *does* hold its
 own dedicated lock (`_local_cache_lock`, separate from `sync`'s own) so
 concurrent callers for the same repository can't interleave their
@@ -410,8 +414,8 @@ payload size remains unknown by default; prompt-hook payloads are reported
 separately and are not counted as `additionalContext`.
 JSON output includes a stable `context_budget` object.
 Its additive `instruction_delivery` inventory separates automatically
-discovered selectors, inline kernels and local bodies from reviewed on-demand
-fallbacks. These counts never assert that a body was admitted to the model;
+discovered selectors, inline kernels and legacy locals from non-discovered
+current local bodies and reviewed fallbacks. These counts never assert model admission;
 selective reads and native/runtime admission remain unknown.
 
 Add `--capture-dynamic` to also measure the real session-scoped

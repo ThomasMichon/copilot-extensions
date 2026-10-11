@@ -886,27 +886,15 @@ _INSTRUCTIONS_SUFFIX = ".instructions.md"
 
 
 def local_sibling_destination(destination: str) -> str:
-    """Return the gitignored ``*.local.instructions.md`` sibling path for a
-    checked-in ``*.instructions.md`` projection destination.
-
-    See ``docs/patterns/worktree-scoped-dynamic-guidance.md``: every
-    checked-in destination gets exactly one worktree-local, gitignored
-    sibling holding a freshly re-rendered copy of the installed payload.
-    """
-    if destination.endswith(_LOCAL_CACHE_SUFFIX):
-        raise ValueError(f"destination {destination!r} is already a local cache path")
-    if not destination.endswith(_INSTRUCTIONS_SUFFIX):
-        raise ValueError(
-            f"destination {destination!r} is not a plain .instructions.md path"
-        )
-    return destination[: -len(_INSTRUCTIONS_SUFFIX)] + _LOCAL_CACHE_SUFFIX
+    """Compatibility API name for the non-discovered derived local-body path."""
+    return delivery.local_destination(destination)
 
 
 def render_local_cache(
     repo_root: Path, discover_sources: Callable[[], Iterable[object]]
 ) -> Result:
-    """Render every enabled source's current projection into its gitignored
-    ``*.local.instructions.md`` sibling -- never mutating the checked-in
+    """Render every enabled source's current body outside automatic discovery,
+    at its gitignored ``context-locals/**/*.local.md`` path; never mutate the checked-in
     destination, the projection lock, or any git state.
 
     Purely local and offline: this never fetches a newer plugin version --
@@ -918,7 +906,7 @@ def render_local_cache(
     behaves exactly as if no tracking concept applied -- see
     :func:`_resolve_git_tracked_paths`), specifically so it can refuse to
     manage a destination git already tracks (see the last bullet below) --
-    the ``*.local.instructions.md`` suffix is not necessarily gitignored
+    the ``context-locals/**/*.local.md`` path is not necessarily gitignored
     until the adopting repo has actually adopted that still-separate
     convention. Safe to call from any session regardless of the caller's
     repository push/PR permissions, and safe to call unconditionally on
@@ -940,7 +928,9 @@ def render_local_cache(
 
     * **Stale-sibling reconciliation.** A source that becomes disabled,
       removed, or unloadable between two calls has its previous
-      ``.local.instructions.md`` removed too. A file is only ever removed
+      current ``.local.md`` removed too. Legacy auto-discovered files are
+      retired only after new publication and exact enabled canonical validation.
+      A file is only ever removed
       when its own provenance marker both parses *and* declares the
       checked-in destination whose local sibling is exactly this path --
       a foreign file (no marker, a malformed one, or one copied from a
@@ -964,7 +954,7 @@ def render_local_cache(
       Invalid budget config warns and uses the default for size accounting.
       Separate local safety bounds keep source and provenance reads bounded;
       checked-in scan/sync retain their strict budget policy.
-    * **`.github` indirection is rejected**, not just ``.github/instructions``
+    * **`.github` indirection is rejected**, including ``.github/copilot``
       -- a symlinked/junctioned ``.github`` could otherwise let the walk (and
       the stale-cleanup unlink) reach files outside the repository.
     * **Serialized against concurrent callers of this same function**, via a
@@ -977,7 +967,7 @@ def render_local_cache(
       after the lock is held, no call can ever act on a source set that a
       more recent call has already superseded.
     * **Never manages a destination git already tracks.** A
-      ``.local.instructions.md`` sibling is only ever written, refreshed,
+      ``.local.md`` body is only ever written, refreshed,
       or reconciled away when it is not currently tracked by git -- the
       `.gitignore` convention this mechanism depends on
       (``docs/patterns/worktree-scoped-dynamic-guidance.md``) is a
@@ -1195,7 +1185,7 @@ def _render_local_cache_locked(
                     "this local-cache destination is tracked by git (or its "
                     "tracked status could not be confirmed in a git working "
                     "tree); refusing to manage it until it is confirmed "
-                    "untracked and the *.local.instructions.md ignore rule "
+                    "untracked and the context-locals/**/*.local.md ignore rule "
                     "is in place",
                 )
                 continue
@@ -1238,7 +1228,7 @@ def _render_local_cache_locked(
                         f"{marker.get('plugin')}:{marker.get('sourceId')}; "
                         f"now superseded by {spec.source_key}",
                     )
-            _atomic_write(path, rendered.content)
+            _transactional_write([(path, rendered.content, current)])
         except (OSError, ValueError) as exc:
             # A failed refresh must never leave a *stale* prior sibling
             # masquerading as current guidance: deliberately NOT adding
@@ -1259,6 +1249,13 @@ def _render_local_cache_locked(
         result.written.append(local_destination)
         valid_destinations.add(local_destination)
 
+    for local_destination, spec, _rendered in accepted:
+        if local_destination in valid_destinations:
+            delivery_io.retire_legacy_local(
+                root, spec, _delivery_io(), result,
+                lambda paths: _resolve_git_tracked_paths(root, paths),
+            )
+
     for path in existing_local_cache_files:
         try:
             relative = path.relative_to(root).as_posix()
@@ -1267,6 +1264,7 @@ def _render_local_cache_locked(
         if relative in valid_destinations:
             continue
         try:
+            path = _safe_destination(root, PurePosixPath(relative))
             raw = _read_bounded_regular(path, MAX_LOCAL_CACHE_BYTES)
         except (OSError, ValueError):
             continue
@@ -1290,12 +1288,15 @@ def _render_local_cache_locked(
                 "tracked status could not be confirmed in a git working "
                 "tree); leaving it in place rather than deleting a "
                 "possibly-tracked file -- untrack it and add the "
-                "*.local.instructions.md ignore rule",
+                "context-locals/**/*.local.md ignore rule",
             )
             continue
         try:
+            path = _safe_destination(root, PurePosixPath(relative))
+            if _read_bounded_regular(path, MAX_LOCAL_CACHE_BYTES) != raw:
+                raise OSError("stale local cache changed after validation")
             path.unlink()
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             result.add(
                 BLOCKING,
                 "projection-local-cache-stale",
@@ -1430,6 +1431,7 @@ def _parse_owned_local_cache_marker(
         return None
     try:
         marker = _parse_marker(raw)
+        delivery.validate_local_template(raw, marker)
         if marker.get("deliveryKind") == "body" and not delivery.complete_body(raw, marker):
             raise ValueError("incomplete inline body envelope")
     except ValueError:
@@ -1448,7 +1450,10 @@ def _parse_owned_local_cache_marker(
 def _iter_local_cache_files(repo_root: Path) -> Iterable[Path]:
     if _is_indirection(repo_root / ".github"):
         return ()
-    instructions = repo_root / ".github" / "instructions"
+    try:
+        instructions = _safe_destination(repo_root, PurePosixPath(".github/copilot/context-locals"))
+    except ValueError:
+        return ()
     if not instructions.is_dir() or _is_indirection(instructions):
         return ()
     found: list[Path] = []
@@ -1460,7 +1465,7 @@ def _iter_local_cache_files(repo_root: Path) -> Iterable[Path]:
                 safe_dirs.append(name)
         dirnames[:] = safe_dirs
         for name in filenames:
-            if name.endswith(_LOCAL_CACHE_SUFFIX):
+            if name.endswith(".local.md"):
                 found.append(Path(dirpath) / name)
     return found
 

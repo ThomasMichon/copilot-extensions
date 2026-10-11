@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+.github/copilot/context-locals/**/*.local.md
 
 # Deploy-time build provenance, stamped into an INSTALLED copy's package dir
 # (never meant to be committed). A mutable-dev-slot `dev` install is editable

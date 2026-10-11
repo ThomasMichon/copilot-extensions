@@ -4,7 +4,8 @@ applyTo: "**"
 
 Before dependent/consequential action, acquire authoritative applicable
 guidance. Resolution failure is a visible blocker, never authorization.
-Inventory `.github/instructions/**/*.local.instructions.md` after startup:
+Inventory `.github/copilot/context-locals/**/*.local.md` after startup.
+During migration also inventory `.github/instructions/**/*.local.instructions.md`:
 a hook may have written bodies after automatic instruction discovery.
 Missing local caches are normal; use each selector's reviewed fallback.
 

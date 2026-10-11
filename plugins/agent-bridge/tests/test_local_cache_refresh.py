@@ -474,7 +474,7 @@ class TestRefreshLocalCache:
             / "test-plugin"
             / "fallback.instructions.md"
         )
-        local_sibling = destination.parent / "fallback.local.instructions.md"
+        local_sibling = repo / ".github" / "copilot" / "context-locals" / destination.parent.name / "fallback.local.md"
         assert not local_sibling.exists()
 
         monkeypatch.setattr(lcr, "_resolve_agent_worktrees_path", lambda: (None, False))
