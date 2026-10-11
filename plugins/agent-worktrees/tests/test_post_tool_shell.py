@@ -139,6 +139,28 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path)
             ("postToolUse", {"toolName": "view"}),
             ("postToolUse", {"toolName": "deny"}),
         ]
+        bin_dir = root / "bin"
+        bin_dir.mkdir()
+        shutil.copyfile(SCRIPT, bin_dir / SCRIPT.name)
+        command = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))[
+            "hooks"
+        ]["postToolUse"][0]["powershell"]
+        manifest_harness = tmp_path / "manifest.ps1"
+        manifest_harness.write_text(
+            "function Get-Command { throw 'manifest requested a child client' }\n"
+            + command,
+            encoding="utf-8",
+        )
+        manifest_result = subprocess.run(
+            [shell, "-NoProfile", "-NonInteractive", "-File", str(manifest_harness)],
+            input='{"toolName":"manifest"}',
+            capture_output=True, text=True, env=env, timeout=15,
+            **no_window_kwargs(),
+        )
+        assert manifest_result.returncode == 0, manifest_result.stderr
+        assert manifest_result.stderr == ""
+        assert json.loads(manifest_result.stdout) == {"additionalContext": "resident"}
+        assert seen[-1] == ("postToolUse", {"toolName": "manifest"})
     finally:
         server.close()
 
