@@ -253,10 +253,36 @@ _versioned_activate() {
 _bootstrap_python() {
     if [[ -x "$VENV_DIR/bin/python" ]]; then echo "$VENV_DIR/bin/python"; return 0; fi
     if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
-    local __c
+    local __c __resolved
     for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
+        __resolved="$(command -v "$__c" 2>/dev/null)" || continue
+        # `command -v` only confirms a PATH entry exists -- on Windows this
+        # can resolve to the broken WindowsApps "App execution alias"
+        # stub, which still fails when actually invoked. Confirm it
+        # genuinely runs before trusting it.
+        if "$__resolved" -c '' >/dev/null 2>&1; then
+            printf '%s' "$__resolved"
+            return 0
+        fi
     done
+    # No working system Python found -- uv (already a hard install
+    # prerequisite, resolved earlier into $UV_CMD) can provision one on
+    # demand. Without this fallback, a genuinely python-less first install
+    # would compute no payload hash at all, write an unhashed completion
+    # marker, then find a REAL hash available on the very next run (once
+    # the venv's own python exists) -- wrongly reporting unchanged content
+    # as a payload conflict.
+    if [[ -n "${UV_CMD:-}" ]]; then
+        __resolved="$("$UV_CMD" python find 2>/dev/null)" || __resolved=""
+        if [[ -z "$__resolved" ]]; then
+            "$UV_CMD" python install --quiet >/dev/null 2>&1 || true
+            __resolved="$("$UV_CMD" python find 2>/dev/null)" || __resolved=""
+        fi
+        if [[ -n "$__resolved" && -x "$__resolved" ]]; then
+            printf '%s' "$__resolved"
+            return 0
+        fi
+    fi
     return 1
 }
 

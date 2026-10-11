@@ -37,6 +37,14 @@ def _bash() -> str:
     return bash
 
 
+def _extract_bootstrap_python() -> str:
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    start = "_bootstrap_python() {"
+    assert text.count(start) == 1, "expected exactly one _bootstrap_python() definition"
+    body = start + text.split(start, 1)[1].split("\n}\n", 1)[0] + "\n}"
+    return body
+
+
 def _extract_payload_hash() -> str:
     text = _INSTALL_SH.read_text(encoding="utf-8")
     start = "_payload_hash() {"
@@ -219,3 +227,56 @@ def test_payload_hash_matches_canonical_fingerprint_source(tmp_path: Path) -> No
     )
     assert result.returncode == 0, result.stderr
     assert shell_hash == result.stdout.strip()
+
+
+def test_bootstrap_python_falls_back_to_uv_when_no_system_python_is_found(
+    tmp_path: Path,
+) -> None:
+    """The exact regression this round's audit found: without a uv-backed
+    fallback, a genuinely python-less first install would compute NO
+    payload hash at all (the two earlier lookups both fail), write an
+    UNHASHED completion marker, then find a REAL hash available on the
+    very next run once the venv's own python exists -- wrongly reporting
+    unchanged content as a payload conflict. Shadows the `command` builtin
+    (never touches PATH, which is fragile to manipulate portably) so only
+    `command -v python3`/`command -v python` report "not found", while
+    every other use of `command` still delegates to the real builtin."""
+    bash = _bash()
+    fn = _extract_bootstrap_python()
+    real_python = Path(sys.executable).as_posix()
+
+    fake_uv = tmp_path / "fake-uv.sh"
+    state_file = tmp_path / "uv-python-installed"
+    fake_uv.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1" == "python" && "$2" == "find" ]]; then\n'
+        f"    if [[ -f {state_file.as_posix()!r} ]]; then\n"
+        f"        printf '%s' {real_python!r}\n"
+        "    fi\n"
+        "    exit 0\n"
+        'elif [[ "$1" == "python" && "$2" == "install" ]]; then\n'
+        f"    : > {state_file.as_posix()!r}\n"
+        "    exit 0\n"
+        "fi\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+
+    script = f"""
+set -euo pipefail
+VENV_DIR={(tmp_path / "no-such-venv").as_posix()!r}
+LINK_DIR={(tmp_path / "no-such-link").as_posix()!r}
+UV_CMD={fake_uv.as_posix()!r}
+command() {{
+    if [[ "$1" == "-v" && ( "$2" == "python3" || "$2" == "python" ) ]]; then
+        return 1
+    fi
+    builtin command "$@"
+}}
+{fn}
+_bootstrap_python
+"""
+    result = subprocess.run([bash, "-c", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == real_python

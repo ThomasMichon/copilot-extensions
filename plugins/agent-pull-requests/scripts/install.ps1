@@ -279,6 +279,24 @@ function Get-BootstrapPython {
         $c = Get-Command $cand -ErrorAction SilentlyContinue
         if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
     }
+    # No working system Python found -- uv (already a hard install
+    # prerequisite, resolved earlier into $script:uvPath) can provision one
+    # on demand. Without this fallback, a genuinely python-less first
+    # install would compute no payload hash at all, write an unhashed
+    # completion marker, then find a REAL hash available on the very next
+    # run (once the venv's own python exists) -- wrongly reporting
+    # unchanged content as a payload conflict.
+    if ($script:uvPath) {
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $found = (& $script:uvPath python find 2>$null | Out-String).Trim()
+        if (-not $found) {
+            & $script:uvPath python install --quiet 2>$null | Out-Null
+            $found = (& $script:uvPath python find 2>$null | Out-String).Trim()
+        }
+        $ErrorActionPreference = $prevEAP
+        if ($found -and (Test-Path $found)) { return $found }
+    }
     return $null
 }
 
@@ -568,6 +586,11 @@ try {
         Write-Fail 'uv is required but could not be resolved or acquired'
         exit 1
     }
+    # Script-scoped so Get-BootstrapPython (defined earlier, but only ever
+    # CALLED after this point) can reach it as a last-resort Python
+    # provisioner without needing an explicit parameter threaded through
+    # every helper that transitively calls Get-BootstrapPython.
+    $script:uvPath = $uvPath
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) {
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
