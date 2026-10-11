@@ -58,6 +58,11 @@ Each plan binds exact canonical input/policy digests and inventory expiry.
 `verify_plan` rejects altered, expired, blocked or changed-assumption plans;
 this integrity/freshness check is not authentication or permission to apply.
 A future controller must independently authenticate and re-admit resources.
+Explicit recorded template provenance that differs from the selected template
+ID/revision adds `template-provenance-mismatch`, so saved-plan verification
+rejects it until reconciled. The recorded provenance and custom config remain
+preserved. Optional absent provenance still produces a review suggestion without
+inventing or silently stamping a prior template identity.
 
 Inputs are limited to 1 MiB, depth 12 and 256-object/collection items. Duplicate
 JSON keys, invalid types, identity mismatches, unknown wire fields and nonfinite

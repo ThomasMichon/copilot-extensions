@@ -331,3 +331,13 @@ not to the vision. This effort does not acquire or migrate live capacity.
   These are offline contracts, not provider deployment, clean-room service
   hosting or live capacity receipts. #6133 still requires current review and CI;
   none of the fleet activation or lifecycle gates are completed by this fix.
+
+### 2026-10-11 - Recorded provenance revalidation refusal
+- The next review identified that explicit stale/different recorded template
+  provenance remained only a suggestion. Added a plan blocker so saved-plan
+  verification rejects that unresolved discrepancy while retaining the original
+  provenance and custom roles. Optional missing provenance remains supported
+  without inventing a previous template identity.
+- Installed contained planner selection: 43 passed, including stale revision,
+  different template and optional absent-provenance regressions. Current review
+  and CI still gate #6133; this correction is not fleet activation.

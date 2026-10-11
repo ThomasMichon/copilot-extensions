@@ -212,6 +212,10 @@ def plan(template, config, live, *, fleet_id, machine_limit, now):
         suggestions.append({"change": "review-template-revision"})
 
     blockers = []
+    if config is not None and "template" in config and config["template"] != {
+        "id": template["id"], "revision": template["revision"],
+    }:
+        blockers.append("template-provenance-mismatch")
     fresh = live["complete"] and live["expires_at"] > now
     if not fresh:
         blockers.append("inventory-stale-or-incomplete")

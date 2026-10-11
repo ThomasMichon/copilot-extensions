@@ -237,6 +237,42 @@ def test_known_template_provenance_is_strict_while_custom_roles_remain_preserved
         compute(template, config, live)
 
 
+@pytest.mark.parametrize("provenance", [
+    {"id": "default", "revision": "old"},
+    {"id": "other-template", "revision": "r1"},
+], ids=["stale-revision", "different-template"])
+def test_mismatched_recorded_provenance_blocks_revalidation_without_overwriting_config(provenance):
+    template, _, live = inputs()
+    config = {
+        "schema": "fleet-manager.config", "version": 1, "fleet_id": "example", "revision": "u1",
+        "capacity": {"machine_limit": 5, "execution_hosts": 0},
+        "roles": {"custom": {"storage": "retain"}}, "template": provenance,
+    }
+    before = copy.deepcopy(config)
+    saved = compute(template, config, live)
+    assert config == before
+    assert saved["suggested_config"]["template"] == provenance
+    assert saved["suggested_config"]["roles"]["custom"] == config["roles"]["custom"]
+    assert saved["status"] == "blocked"
+    assert "template-provenance-mismatch" in saved["blockers"]
+    assert {"change": "review-template-revision"} in saved["config_changes"]
+    with pytest.raises(PlanError, match="unresolved blockers"):
+        verify_plan(saved, template, config, live, fleet_id="example", machine_limit=5, now=160)
+
+
+def test_optional_missing_provenance_retains_review_suggestion_without_blocking_revalidation():
+    template, _, live = inputs()
+    config = {
+        "schema": "fleet-manager.config", "version": 1, "fleet_id": "example", "revision": "u1",
+        "capacity": {"machine_limit": 5, "execution_hosts": 0}, "roles": {},
+    }
+    saved = compute(template, config, live)
+    assert "template" not in saved["suggested_config"]
+    assert {"change": "review-template-revision"} in saved["config_changes"]
+    assert not saved["blockers"]
+    assert verify_plan(saved, template, config, live, fleet_id="example", machine_limit=5, now=160) == saved
+
+
 def test_installed_cli_blocked_plan_returns_two_and_valid_nonsecret_json(tmp_path):
     template, _, live = inputs()
     now = int(time.time())
