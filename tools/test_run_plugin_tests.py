@@ -272,7 +272,7 @@ Path({str(streams)!r}).write_text(json.dumps({{
     assert completed.returncode == 0, completed.stderr
     captured = json.loads(streams.read_text())
     assert captured["returncode"] == 0, captured["stderr"]
-    assert json.loads(result.read_text())["returncode"] == (124 if timeout else 17)
+    assert json.loads(result.read_text())["returncode"] == (124 if timeout else 17), captured
     identity = json.loads(receipt.read_text())
     assert not identity["window"]
     if timeout:

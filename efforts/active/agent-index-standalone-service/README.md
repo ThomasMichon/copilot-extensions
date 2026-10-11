@@ -392,3 +392,12 @@ boundaries from implementation decisions and deployment-specific policy.
   51 cases including real owned child/grandchild termination. Updated complete
   installed staging suite passed 343 tests with two separately covered Linux
   process cases skipped. Existing best-effort close semantics remain unchanged.
+- Shared Job-helper integration changes the bridge's frozen authority component
+  digest, because that closure intentionally includes `agent_procutil`.
+  Authority fixture digest fields and registry hashes are recaptured from the
+  final integrated source without changing validity vectors. The contained
+  authority corpus/attestation selection passed 42 tests with platform skips.
+  A Windows nested-runner failure could not be reproduced in two targeted runs;
+  its assertion now includes captured fixture diagnostics instead of hiding the
+  inner cause behind exit 18. No passing expectation or visibility check is
+  relaxed.
