@@ -117,7 +117,7 @@ def validate_start(
     ).fetchall()
     if not rows or not rows[0]["delivery_id"]:
         if (task.owner or "").startswith("acquired-") or (
-            rows and (rows[0]["acquisition_marked"] or rows[0]["reservation_state"] == "reserving" and rows[0]["reserved_worktree"])
+            rows and rows[0]["acquisition_marked"]
         ):
             raise TaskError("acquired worker start requires a bridge acquisition receipt")
         return

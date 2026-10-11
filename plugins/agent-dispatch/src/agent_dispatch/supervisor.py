@@ -2919,7 +2919,7 @@ class Supervisor:
             fleet = _parse_fleet_body_handle(res.get("session_handle"))
             if fleet is not None:
                 host, bridge_sid = fleet
-                if local_by_id is None:
+                if self.publish_activity:
                     try:
                         fleet_activity = self.fleet_activity_fn(host, bridge_sid)
                     except Exception:  # best-effort observation, never fatal
@@ -2952,7 +2952,7 @@ class Supervisor:
             local_sid = _parse_local_body_handle(res.get("session_handle"))
             if local_sid is not None:
                 if self.publish_activity:
-                    if self.publish_activity:
+                    if local_by_id is None:
                         local_observed_at = time.time()
                         local_by_id = {
                             str(row.get("session_id")): row

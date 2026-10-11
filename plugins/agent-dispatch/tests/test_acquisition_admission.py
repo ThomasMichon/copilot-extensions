@@ -244,6 +244,10 @@ def test_cli_start_before_acquisition_receipt_binding_refuses(tmp_path):
     task = queue.create("work")
     reservation, _ = queue.reserve_spawn(task.id)
     queue.record_spawn_worktree(reservation.key, "worktree-a", ownership="created")
+    with queue._connect() as conn:
+        acquisition_receipts.ensure(conn)
+        conn.execute("INSERT INTO acquisition_markers VALUES (?)", (reservation.key,))
+        conn.commit()
     queue.claim_one("machine/worktree-a", task_id=task.id)
     with pytest.raises(TaskError, match="bridge acquisition receipt"):
         queue.start(task.id, "machine/worktree-a", owner_session_id="inferred-native")
