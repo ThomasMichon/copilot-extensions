@@ -1255,11 +1255,14 @@ def _render_local_cache_locked(
         result.written.append(local_destination)
         valid_destinations.add(local_destination)
 
+    legacy_tracking, legacy_inconclusive = _resolve_git_tracked_paths(
+        root, [delivery.legacy_local_destination(spec.destination) for _, spec, _ in accepted]
+    )
     for local_destination, spec, _rendered in accepted:
         if local_destination in valid_destinations:
             delivery_io.retire_legacy_local(
                 root, spec, _delivery_io(), result,
-                tracked_paths, tracking_inconclusive,
+                legacy_tracking, legacy_inconclusive,
             )
     delivery_io.report_unmanaged_legacy_locals(
         root, {spec.destination for local, spec, _ in accepted if local in valid_destinations},
@@ -1330,7 +1333,7 @@ def _git_isolated_env() -> dict[str, str]:
     """
     return {
         key: value for key, value in os.environ.items() if not key.startswith("GIT_")
-    }
+    } | {"LC_ALL": "C", "LANG": "C"}
 
 
 def _resolve_git_tracked_paths(

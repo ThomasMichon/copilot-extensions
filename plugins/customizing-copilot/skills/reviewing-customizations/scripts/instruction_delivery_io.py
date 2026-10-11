@@ -94,6 +94,7 @@ def ignored_local_paths(root: Path, relatives: list[str]) -> set[str]:
     if not relatives:
         return set()
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env.update(LC_ALL="C", LANG="C")
     flags = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
     try:
         probe = subprocess.run(
