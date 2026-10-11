@@ -127,6 +127,8 @@ def test_powershell_adapter_records_failures_and_preserves_native_disable(tmp_pa
         "function Stop-ScheduledTask { param($TaskName) throw 'fixture stop refused' }",
         f". '{helper}'", function,
         "$script:SupervisorAuditCorrelation='123-456'",
+        "function Invoke-ShadowedAudit { $action=[pscustomobject]@{Execute='fixture'}; Invoke-SupervisorAudit -Event selection -Reason shadow-probe -Name $SupervisorTaskName -Outcome skipped }",
+        "Invoke-ShadowedAudit",
         f"Install-SupervisorTaskInstance -Name $SupervisorTaskName -EnvFile '{env_file}' -Launcher fixture -DisplayName fixture",
         "Invoke-SupervisorTaskAction -Operation stop -Name $SupervisorTaskName -Reason lifecycle-stop",
     ])
@@ -137,15 +139,17 @@ def test_powershell_adapter_records_failures_and_preserves_native_disable(tmp_pa
     assert "fixture stop refused" in result.stderr
     events = [json.loads(line) for line in (tmp_path / "lifecycle.log").read_text().splitlines()]
     assert [(e["action"], e["outcome"]) for e in events] == [
+        ("supervisor-selection", "skipped"),
         ("supervisor-selection", "skipped"), ("supervisor-stop", "begin"), ("supervisor-stop", "fail"),
     ]
     assert events[0]["detail"]["origin"] == "installer.ps1"
     assert events[0]["detail"]["parent_pid"] == 100
     assert events[0]["detail"]["configured_enabled"] is True
+    assert all(e["detail"]["verb"] == "update" for e in events)
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is unavailable")
-@pytest.mark.parametrize("master_state", ["Disabled", "Absent", "Ready"])
+@pytest.mark.parametrize("master_state", ["Disabled", "Absent", "Ready", "OptOut"])
 def test_disabled_windows_master_restores_only_enabled_profiles(tmp_path, master_state):
     text = (PLUGIN / "scripts/install.ps1").read_text()
 
@@ -158,7 +162,10 @@ def test_disabled_windows_master_restores_only_enabled_profiles(tmp_path, master
         "$SupervisorTaskName='agent-dispatch-supervisor'; $InstallDir='fixture'; $SupervisorProfileDir='fixture'",
         "$script:Started=@(); $script:Stopped=@(); $script:Retired=0",
         f"$script:MasterState='{master_state}'",
-        "function Invoke-SupervisorAudit { param($Event,$Reason,$Name,$EnvFile,$Outcome) }",
+        "if($script:MasterState -eq 'OptOut'){$NoSupervisor=$true}",
+        "$script:AuditReasons=@(); function Invoke-SupervisorAudit { param($Event,$Reason,$Name,$EnvFile,$Outcome) $script:AuditReasons+=$Reason }",
+        "function Remove-AllSupervisorTasks { }",
+        "function Write-Skip { param($message) }",
         "function Write-Warn { param($message) }; function Write-Step { param($message) }; function Write-Ok { param($message) }",
         "function Retire-SupervisorProcesses { $script:Retired++; return 0 }",
         "function Register-ScheduledTask { throw 'fixture must not register' }",
@@ -176,7 +183,7 @@ def test_disabled_windows_master_restores_only_enabled_profiles(tmp_path, master
         "function Invoke-SupervisorTaskAction { param($Operation,$Name,$Reason) if($Operation -eq 'start'){$script:Started+=$Name}; if($Operation -eq 'stop'){$script:Stopped+=$Name} }",
         *(function(name) for name in ("Install-SupervisorTask", "Invoke-SupervisorStart", "Invoke-SupervisorsStart", "Invoke-SupervisorsStop")),
         "Install-SupervisorTask",
-        "@{started=$script:Started;stopped=$script:Stopped;retired=$script:Retired}|ConvertTo-Json -Compress",
+        "@{started=$script:Started;stopped=$script:Stopped;retired=$script:Retired;reasons=$script:AuditReasons}|ConvertTo-Json -Compress",
     ])
     fixture = tmp_path / "preserved-profiles.ps1"
     fixture.write_text(script)
@@ -184,6 +191,10 @@ def test_disabled_windows_master_restores_only_enabled_profiles(tmp_path, master
     assert result.returncode == 0, result.stderr
     data = json.loads(result.stdout)
     assert data["retired"] == 1
+    assert data["reasons"][-1] == "sequence-complete"
+    if master_state == "OptOut":
+        assert data["started"] == []
+        return
     assert data["started"] == ["agent-dispatch-supervisor-enabled"]
     assert "agent-dispatch-supervisor-enabled" in data["stopped"]
     assert "agent-dispatch-supervisor-disabled" in data["stopped"]

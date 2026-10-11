@@ -3468,11 +3468,13 @@ function Install-SupervisorTask {
         $reason = if ($NoSupervisor) { 'explicit-no-supervisor' } else { 'explicit-client-only' }
         Invoke-SupervisorAudit -Event selection -Reason $reason -Name $SupervisorTaskName -Outcome skipped
         Remove-AllSupervisorTasks
+        Invoke-SupervisorAudit -Event service-reconcile -Reason sequence-complete -Name $SupervisorTaskName -Outcome $(if ($script:SupervisorReconcileFailed) { 'fail' } else { 'ok' })
         Write-Skip 'Embody supervisor skipped (client-only / -NoSupervisor)'
         return
     }
     if ($env:OS -ne 'Windows_NT') { return }
     if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
+        Invoke-SupervisorAudit -Event service-reconcile -Reason platform-unavailable -Outcome skipped
         Write-Skip 'ScheduledTasks module unavailable -- run "agent-dispatch supervise --all-repos --label <L>" manually'
         return
     }

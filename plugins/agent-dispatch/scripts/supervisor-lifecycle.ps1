@@ -33,7 +33,7 @@ function Invoke-SupervisorAudit {
     $auditArgs = @(
         (Join-Path $PluginDir 'src\agent_dispatch\supervisor_lifecycle.py'),
         '--root', $InstallDir, '--action', $Event, '--reason', $Reason,
-        '--origin', 'installer.ps1', '--verb', $Action,
+        '--origin', 'installer.ps1', '--verb', $script:Action,
         '--correlation', $script:SupervisorAuditCorrelation,
         '--initiator-pid', "$PID", '--parent-pid', "$parentPid",
         '--outcome', $Outcome, '--native-enabled', $enabled, '--native-active', $active
