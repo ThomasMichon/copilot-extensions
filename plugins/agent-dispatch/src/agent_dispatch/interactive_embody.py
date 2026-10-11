@@ -76,10 +76,9 @@ claims it first" race to close:
 from __future__ import annotations
 
 import subprocess
-import uuid
 from typing import Any, Protocol
 
-from . import embody, spawn_factories
+from . import embody
 from .embody_prompts import interactive_worker_prompt
 from .queue import worker_id_for
 from .queue_records import Status
@@ -305,22 +304,26 @@ def launch_interactive_embodiment(
 
     seed = interactive_worker_prompt(task_id, status=status)
     try:
-        result = embody.spawn_embodied_worker(
-            task_id,
-            worker_id=f"embody-{uuid.uuid4().hex[:8]}",
+        from . import bridge, session_acquisition
+        current_task = client.get(task_id)
+        result = session_acquisition.acquire(
+            {
+                **current_task, "spawn_worktree": worktree_id,
+                "spawn_worktree_ownership": ownership, "spawn_reservation_key": key,
+                "spawn_conversation_retired": reservation.get("conversation_retired"),
+                "spawn_session_handle": reservation.get("session_handle"),
+            },
+            mode="cli", prompt=seed,
             driver=driver,
             project=resolved_project,
-            worktree_id=worktree_id,
-            resume_head=spawn_factories.resume_worktree_eligible(
-                {
-                    "spawn_worktree_ownership": ownership,
-                    "spawn_conversation_retired": reservation.get("conversation_retired"),
-                }
-            ),
-            seed=seed,
             timeout=timeout,
         )
-    except embody.EmbodyUnavailable as exc:
+    except bridge.BridgeCarriedSessionBusy as exc:
+        client.defer_spawn(key, detail=str(exc)[:200])
+        raise InteractiveEmbodimentError(
+            f"acquisition pending; worktree claim retained for reconciliation: {exc}"
+        ) from exc
+    except bridge.BridgeUnavailable as exc:
         client.fail_spawn(key, detail=str(exc)[:200])
         _release_prelaunch_claim(client, task_id, worker_id, resuming=resuming)
         raise InteractiveEmbodimentError(str(exc)) from exc
@@ -329,7 +332,7 @@ def launch_interactive_embodiment(
         client.fail_spawn(key, detail=detail)
         _release_prelaunch_claim(client, task_id, worker_id, resuming=resuming)
         raise InteractiveEmbodimentError(detail)
-    handle = embody.parse_handle(result)
+    handle = session_acquisition.handle(result)
     session_id = handle.get("session")
     if not session_id:
         client.fail_spawn(key, detail="embody reported success but returned no session id")

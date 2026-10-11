@@ -14,6 +14,8 @@ standalone.
 
 from __future__ import annotations
 
+import math
+
 import json
 import sqlite3
 
@@ -58,8 +60,10 @@ class QueueLifecycleMixin:
         now: float | None = None,
     ) -> Task:
         """Move a ``claimed`` task to ``started`` (owner must match)."""
+        if worker_id.startswith("acquired-") and not owner_session_id:
+            raise TaskError("acquired worker start requires an exact native owner_session_id")
         ts = self._now(now)
-        extra: dict[str, object] = {"last_seen_at": ts}
+        extra: dict[str, object] = {"last_seen_at": ts, "activity": None, "activity_updated_at": ts}
         if owner_session_id is not None:
             extra["owner_session_id"] = owner_session_id
         allowed, to = _task_transition_spec("start")
@@ -649,6 +653,7 @@ class QueueLifecycleMixin:
         activity: str | None,
         *,
         reservation_key: str,
+        observed_at: float | None = None,
         now: float | None = None,
     ) -> Task:
         """Publish activity fenced to this task's active spawn reservation."""
@@ -656,6 +661,8 @@ class QueueLifecycleMixin:
             raise TaskError(
                 f"invalid task activity {activity!r} (allowed: ACTIVE, IDLE, STALLED, or null)"
             )
+        if observed_at is not None and not math.isfinite(observed_at):
+            raise TaskError("activity observation timestamp must be finite")
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -663,6 +670,11 @@ class QueueLifecycleMixin:
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
+            if observed_at is not None and observed_at < max(
+                task.claimed_at or 0, task.started_at or 0,
+            ):
+                conn.execute("COMMIT")
+                return task
             if task.status == Status.SUSPENDED and activity not in {None, "IDLE"}:
                 conn.execute("COMMIT")
                 raise TaskError(f"cannot set active activity on suspended task {task_id!r}")

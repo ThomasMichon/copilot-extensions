@@ -52,6 +52,9 @@ class _FakeClient:
     def attachments(self, task_id):
         return self._attachments
 
+    def list_reservations(self, **kwargs):
+        return []
+
 
 def _args(argv):
     return m.build_parser().parse_args(argv)

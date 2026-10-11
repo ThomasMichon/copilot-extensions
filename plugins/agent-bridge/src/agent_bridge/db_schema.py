@@ -32,6 +32,14 @@ class _SchemaMixin:
             # migration (or a table created without a column) self-heals rather
             # than failing every write to that column (dotfiles #815).
             self._ensure_columns(conn)
+            if "acquisition_delivery_id" not in {
+                item[1] for item in conn.execute("PRAGMA table_info(turns)")
+            }:
+                conn.execute("ALTER TABLE turns ADD COLUMN acquisition_delivery_id TEXT")
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_turn_acquisition_delivery "
+                "ON turns(acquisition_delivery_id) WHERE acquisition_delivery_id IS NOT NULL"
+            )
             live_columns = {
                 row[1]
                 for row in conn.execute(

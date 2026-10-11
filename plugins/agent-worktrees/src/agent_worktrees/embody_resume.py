@@ -18,6 +18,9 @@ def resume_target(
     a new task and starts fresh unless ``--resume-head``. ``--fresh``, a new
     worktree, or an explicit ``--copilot-arg=--resume=...`` never adds one.
     """
+    acquisition = getattr(args, "bridge_acquisition", None)
+    if acquisition:
+        return None if acquisition == "fresh" else acquisition
     if make_new or record is None or getattr(args, "fresh", False):
         return None
     if seed and not getattr(args, "resume_head", False):

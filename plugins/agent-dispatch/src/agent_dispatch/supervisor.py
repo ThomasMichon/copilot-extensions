@@ -604,14 +604,8 @@ class Supervisor:
                         "reservation retained for repair"
                     ) from exc
                 raise
-        return {
-            **task,
-            "spawn_worktree": worktree,
-            "spawn_worktree_path": prepared["path"],
-            "spawn_worktree_ownership": ownership,
-            "spawn_session_handle": (None if replaced else reservation.get("session_handle")),
-            "spawn_conversation_retired": reservation.get("conversation_retired"),
-        }
+        from .session_acquisition import spawn_snapshot
+        return spawn_snapshot(task, reservation, worktree, prepared, ownership, replaced)
 
     def _reservation_has_live_process(self, reservation: dict, task: dict) -> bool:
         if reservation.get("state") == SpawnState.RELEASING:
@@ -2961,6 +2955,7 @@ class Supervisor:
             if local_sid is not None:
                 if self.publish_activity:
                     if local_by_id is None:
+                        local_observed_at = time.time()
                         local_by_id = {
                             str(row.get("session_id")): row
                             for row in tracking.list_local_body_sessions()
@@ -2971,6 +2966,7 @@ class Supervisor:
                             task["id"],
                             tracking.session_activity(local_by_id.get(local_sid)),
                             reservation_key=res["key"],
+                            observed_at=local_observed_at,
                         )
                     except DispatchError:
                         pass
@@ -3029,6 +3025,7 @@ class Supervisor:
             if not probe_worktree or not owner:
                 continue
             try:
+                observed_at = time.time()
                 session = self.liveness_fn(probe_worktree, _machine_from_owner(owner))
             except Exception:  # liveness is best-effort -- never let a probe be fatal
                 session = None
@@ -3045,6 +3042,7 @@ class Supervisor:
                         task["id"],
                         tracking.session_activity(session),
                         reservation_key=res["key"],
+                        observed_at=observed_at,
                     )
                 except DispatchError:
                     pass

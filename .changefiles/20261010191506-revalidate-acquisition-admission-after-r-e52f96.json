@@ -1,0 +1,13 @@
+{
+  "comment": "Revalidate acquisition admission after resume and turn-lock waits; fence delayed CLI idle activity snapshots",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

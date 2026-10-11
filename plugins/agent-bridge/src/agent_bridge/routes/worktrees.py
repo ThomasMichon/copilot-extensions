@@ -20,6 +20,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from ..agent_registry import AgentConfig, AgentResolver
+from ..acquisition_gates import AcquisitionGateHeld
 from ..loop_governance import LoopGovernance
 from ..models import SessionInfo, SessionStatus, WorktreeHandoffRequest
 from ..session_manager import (
@@ -1072,12 +1073,8 @@ async def resume_worktree(
 
     def _strict_refusal(reason_detail: str) -> HTTPException:
         return HTTPException(
-            status_code=409,
-            detail={
-                "reason": "resume_requires_existing_session",
-                "worktree_id": worktree_id,
-                "detail": reason_detail,
-            },
+            status_code=409, detail={"reason": "resume_requires_existing_session",
+                                    "worktree_id": worktree_id, "detail": reason_detail},
         )
 
     mgr = getattr(request.app.state, "session_manager", None)
@@ -1140,7 +1137,8 @@ async def resume_worktree(
             detail=f"Session {session.session_id} not found",
         ) from exc
     except ValueError as exc:
-        # Not actually stopped / nothing to resume -- return current state.
+        if isinstance(exc, AcquisitionGateHeld):
+            raise HTTPException(409, detail={"reason": "acquisition_launch_gate_held"}) from exc
         log.info("resume_worktree %s: %s; returning current state", worktree_id, exc)
         return _session_info(session)
     except ProviderTargetRefreshError as exc:

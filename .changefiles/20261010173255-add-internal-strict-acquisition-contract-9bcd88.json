@@ -1,0 +1,9 @@
+{
+  "comment": "Add internal strict acquisition contracts, task-affinity policy, and durable retry fencing; lifecycle and dispatch wiring remain pending",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

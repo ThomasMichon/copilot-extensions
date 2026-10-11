@@ -185,7 +185,7 @@ CURRENT_ATTENTION_PROTOCOL_VERSION = 29
 
 # Current HTTP wire-contract version this build speaks -- bumped alongside the
 # constant just above it.
-HTTP_PROTOCOL_VERSION = 29
+HTTP_PROTOCOL_VERSION = 30
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

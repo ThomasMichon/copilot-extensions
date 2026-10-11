@@ -1,0 +1,13 @@
+{
+  "comment": "Bind acquisition worker start to native conversation identity and fence stale idle activity across claim/start admission",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

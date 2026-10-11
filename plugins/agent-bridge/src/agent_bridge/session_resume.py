@@ -74,6 +74,8 @@ class _SessionResumeMixin:
             raise KeyError(f"Session {session_id} not found")
 
         async with session._lifecycle_lock:
+            from .acquisition_gates import assert_resume_allowed
+            assert_resume_allowed(self._db, session)
             core = _core()
             if session.status != SessionStatus.STOPPED:
                 raise ValueError(

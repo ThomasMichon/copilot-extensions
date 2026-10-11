@@ -181,7 +181,11 @@ def _cmd_start(args: argparse.Namespace) -> int:
     if worker_id is None:
         return 2
     with _core()._client(args) as c:
-        return _core()._emit(c.start(args.task_id, worker_id))
+        native = getattr(args, "owner_session_id", None)
+        return _core()._emit(
+            c.start(args.task_id, worker_id, owner_session_id=native)
+            if native else c.start(args.task_id, worker_id)
+        )
 
 def _cmd_suspend(args: argparse.Namespace) -> int:
     worker_id = _core()._resolve_owner(args, verb="suspend")

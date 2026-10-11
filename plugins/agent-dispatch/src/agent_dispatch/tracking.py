@@ -376,6 +376,8 @@ def session_activity(session: dict[str, Any] | None) -> str | None:
     turn_state = str(session.get("turn_state") or "").lower()
     if liveness == "stalled":
         return "STALLED"
+    if status == "running" and session.get("at_rest") is False and liveness != "disconnected":
+        return "ACTIVE"
     # "disconnected" (agent-bridge __main__.py's own vocabulary: "DISCONNECTED
     # - transport down") must never be reported ACTIVE, however stale/live-
     # looking the rest of the snapshot's fields are -- a dead transport can

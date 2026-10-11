@@ -538,26 +538,27 @@ def make_embody_spawn(
     from . import embody
 
     def spawn(task: dict) -> tuple[bool, dict]:
-        worker_id = f"embody-{uuid.uuid4().hex[:8]}"
+        from . import bridge, session_acquisition
+        worker_id = f"embody-{task.get('spawn_reservation_key')}"
         try:
-            result = embody.spawn_embodied_worker(
-                task["id"],
-                worker_id=worker_id,
+            result = session_acquisition.acquire(
+                task, mode="cli",
+                prompt=embody.autopilot_worker_prompt(
+                    task["id"], worker_id=worker_id, route=route,
+                    repo=None if all_repos else task.get("repo"), all_repos=all_repos,
+                ),
                 driver=driver,
                 project=embody.project_for_task(task),
-                worktree_id=task.get("spawn_worktree"),
-                resume_head=resume_worktree_eligible(task),
-                route=route,
-                repo=None if all_repos else task.get("repo"),
-                all_repos=all_repos,
-                verify_timeout=verify_timeout,
                 charter=charter,
+                verify_timeout=verify_timeout,
             )
-        except embody.EmbodyUnavailable as exc:
+        except bridge.BridgeCarriedSessionBusy as exc:
+            return False, {"error": str(exc), "deferred": True}
+        except bridge.BridgeUnavailable as exc:
             return False, {"error": str(exc)}
         if result.returncode != 0:
             return False, {"error": (result.stderr or "").strip()[:200] or "nonzero exit"}
-        handle = embody.parse_handle(result)
+        handle = session_acquisition.handle(result)
         if not handle.get("session"):
             # A zero exit with no recognizable session id is not a usable
             # success: record_spawn would persist a SPAWNED reservation with
@@ -646,10 +647,10 @@ def make_headless_spawn(
     ``agent-dispatch`` commands (``""`` for local discovery, ``" --shared"`` for
     the shared moniker); never a raw ``--url`` (the caller rejects that).
     """
-    from . import bridge, embody
+    from . import bridge, embody, session_acquisition
 
     def spawn(task: dict) -> tuple[bool, dict]:
-        worker_id = f"headless-{uuid.uuid4().hex[:8]}"
+        worker_id = f"acquired-{task.get('spawn_reservation_key')}"
         seed = embody.autopilot_worker_prompt(
             task["id"],
             worker_id=worker_id,
@@ -658,21 +659,13 @@ def make_headless_spawn(
             all_repos=all_repos,
             explicit_worker_identity=True,
         )
-        prior_session = _parse_local_body_handle(task.get("spawn_session_handle"))
         try:
-            result = bridge.spawn_or_resume_worker(
-                task["id"],
+            result = session_acquisition.acquire(
+                task, mode="acp",
                 agent=agent,
                 charter=charter,
-                worker_id=worker_id,
                 prompt=seed,
-                prior_session_id=prior_session,
-                liveness_fn=embody.local_body_verdict,
-                target_dir=task.get("spawn_worktree_path"),
-                worktree_id=task.get("spawn_worktree"),
-                resume_worktree=resume_worktree_eligible(task),
-                wait=False,
-                json_output=True,
+                project=embody.project_for_task(task),
             )
         except bridge.BridgeCarriedSessionBusy as exc:
             return False, {"error": str(exc), "deferred": True}
@@ -689,12 +682,7 @@ def make_headless_spawn(
         # `local-body:<sid>` recovery handle so a *gone* body (ended/cancelled)
         # is liveness-recovered by the supervisor -- freeing its spawn slot.
         # Falls back to the opaque worker id when uncapturable (degrade safe).
-        sid = embody.parse_fleet_body_session(result)
-        handle = f"{_LOCAL_BODY_PREFIX}{sid}" if sid else worker_id
-        return True, {
-            "session": handle,
-            "worktree": task.get("spawn_worktree"),
-        }
+        return True, session_acquisition.handle(result)
 
     spawn.requires_reusable_worktree = True
     spawn.allocation_driver = "agent-dispatch"

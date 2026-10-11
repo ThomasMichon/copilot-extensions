@@ -10,6 +10,8 @@ from . import config as cfg, finalize as fin, output, profile_assignment, sessio
 from . import launch_seed_state, embody_resume
 from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
 from .worktree_creation import LaunchSeedStagingFailure
+from . import bridge_acquisition_launch
+from .launch_passthrough import passthrough_error as _passthrough_error
 
 
 def _core():
@@ -46,12 +48,6 @@ def _monitor_read_session_state_handoff(*args, **kwargs): return _core_helper("_
 def resolve_worktree_id_by_codename(*args, **kwargs): return _core().resolve_worktree_id_by_codename(*args, **kwargs)
 
 
-# Copilot flags a caller may NOT pass through `--copilot-arg`: they would change
-# what kind of process embody launches (ACP/stdio instead of the interactive TUI
-# that registers with the bridge) or race the seed embody itself delivers.
-_REJECTED_COPILOT_ARGS = ("--acp", "--stdio", "-p", "--prompt", "-i", "--interactive")
-
-
 def add_launch_passthrough_args(p: argparse.ArgumentParser) -> None:
     """Register the launch-passthrough flags shared by `embody` and `copilot`."""
     p.add_argument(
@@ -73,19 +69,6 @@ def add_launch_passthrough_args(p: argparse.ArgumentParser) -> None:
         "the same repo stay distinguishable on the host bridge. Does not change "
         "the local mux session name.",
     )
-
-
-def _passthrough_error(args: argparse.Namespace) -> str | None:
-    """Return a refusal message for a disallowed `--copilot-arg`, else None."""
-    for arg in getattr(args, "copilot_args", None) or []:
-        flag = str(arg).split("=", 1)[0]
-        if flag in _REJECTED_COPILOT_ARGS:
-            return (
-                f"--copilot-arg {arg!r} is not allowed: it changes the launched "
-                "session's mode (embody always launches the interactive TUI; "
-                "use --seed for the first turn)"
-            )
-    return None
 
 
 def _apply_bridge_scope(env: dict[str, str], args: argparse.Namespace) -> None:
@@ -134,6 +117,7 @@ def add_parsers(sub) -> None:
     g.add_argument("--anchor", action="store_true", help="Embody directly in the active project's ANCHOR checkout instead of any worktree -- no worktree is created or required. Matches the existing headless-dispatch behavior (a CodeSpace/container ACP session already runs in the anchor, never a worktree); this brings CLI-mode into line with that same contract. Session id is synthesized as `anchor-<repo_name>` (one live anchor session per repo, same one-live-session-per-target rule as an ordinary worktree). The anchor is not writable through this harness's own PR-gated flow (see AGENTS.md) -- use for reads/exploration or a repo whose anchor is otherwise safe to drive directly; an actual change still belongs in a worktree/PR.")
     p.add_argument("--seed", default=None, help="Seed prompt injected as the session's first interactive turn once Copilot is ready")
     r = p.add_mutually_exclusive_group()
+    bridge_acquisition_launch.add_arguments(r)
     r.add_argument("--fresh", action="store_true", help="Start a new conversation even in an existing worktree. By default, an existing worktree embodied without a seed resumes its head session (the conversation the worktree's ledger names as current), so bringing a task back never loses its history")
     r.add_argument("--resume-head", dest="resume_head", action="store_true", help="Resume the worktree's head session even when a --seed (or pending seed) is given; the seed is then typed into the resumed conversation. Without this, a seeded embody starts a fresh conversation for its new task")
     p.add_argument("--seed-ready-timeout", dest="seed_ready_timeout", type=float, default=180.0, metavar="SECONDS", help="Idle window while waiting for Copilot's input prompt before typing the --seed (default 180). Visibly busy/changing panes keep waiting up to a hard cap; if the pane never reaches a confirmed live input prompt, the seed is never delivered and the session idles at an empty prompt")
@@ -257,6 +241,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
     """
     make_new = getattr(args, "new", False)
     raw_id = getattr(args, "worktree_id", None)
+    if getattr(args, "bridge_acquisition", None) and (not raw_id or getattr(args, "seed", None) or getattr(args, "copilot_args", None)):
+        return output._json_error("bridge acquisition requires an explicit worktree and no seed/passthrough args", exit_code=3)
     codename_arg = getattr(args, "codename", None)
     anchor_mode = getattr(args, "anchor", False)
     if codename_arg and not raw_id:
@@ -324,6 +310,9 @@ def cmd_embody(args: argparse.Namespace) -> int:
     # Resume: a live mux session already embodies this worktree -- don't
     # duplicate (one live session per cwd). Report it and stop.
     already = sessions.has_mux_session(wt_id)
+    acquisition = getattr(args, "bridge_acquisition", None)
+    if acquisition and already:
+        return output._json_error("bridge acquisition target already has a live mux", exit_code=3)
     seed = getattr(args, "seed", None)
     launch_preflight = None
     if getattr(args, "dry_run", False) or not already:
@@ -344,7 +333,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
             # Peek only (no clear) -- the real claim happens right before
             # delivery, so an early return (dry-run, a validation failure,
             # a concurrent session) can never consume it undelivered.
-            if not seed:
+            if not seed and not acquisition:
                 seed = launch_seed_state.creation_text(cfg.tracking_dir() / f"{wt_id}.yaml", record)
             backend_error = _unsupported_hosted_launch(
                 record,
@@ -494,6 +483,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
             )
         ):
             return output._json_error(f"Worktree record changed before launch: {wt_id}", exit_code=3,)
+        if acquisition and (error := bridge_acquisition_launch.refusal(args, launch_record, wt_id)):
+            return output._json_error(error, exit_code=3)
         if sessions.has_mux_session(wt_id):
             output._json_output(
                 {
@@ -546,7 +537,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
     # Reserve only New intent at delivery; failed typing retains it.
     claimed_seed: str | None = None
     creation_receipt = {"seed": None}
-    if record is not None:
+    if record is not None and not acquisition:
         try:
             creation_receipt = launch_seed_state.claim_creation(cfg.tracking_dir() / f"{wt_id}.yaml")
         except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
