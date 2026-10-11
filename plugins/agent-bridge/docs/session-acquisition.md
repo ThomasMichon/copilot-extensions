@@ -98,6 +98,12 @@ strict resume and again after acquiring the turn-start lock, immediately before
 persisting the turn. A hold, cancellation, generation or reservation change
 while waiting refuses the stale prompt without advancing its delivery stage.
 `GET /api/v1/acquisitions/{delivery_id}` reports recovery evidence read-only.
+Its `delivery_admitted` flag is derived from the exact durable CLI inbox row or
+ACP turn (delivery key, session and constructed prompt), not the pre-effect
+`delivering` journal stage. Dispatch STARTED admission requires that proof;
+a receipt bound before insertion does not suffice. Unsupported CLI execution
+overrides report `effect: not_started` before any journal, gate or launch, so
+dispatch fails the capability mismatch instead of deferring it for reconciliation.
 Terminal receipt retention and recovery of launches with no surviving native
 proof remain outstanding; no timeout-based force-clear is provided.
 

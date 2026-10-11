@@ -228,6 +228,12 @@ async def test_real_constructed_client_envelope_and_http_response(rig):
             **req(mode="cli").model_dump(), "protocol_version": 29,
             "force": True,
         }).status_code == 426
+        refused = http.post("/api/v1/acquisitions", json={
+            **req(mode="cli", charter="unsupported").model_dump(), "protocol_version": 30,
+        })
+        assert refused.status_code == 409
+        assert refused.json()["detail"]["code"] == "cli_options_unsupported"
+        assert refused.json()["detail"]["effect"] == "not_started"
     client = BridgeClient("http://unused", "unused", connect_grace=0)
     client._daemon_proto = (30, 1)
     sent = []
@@ -266,10 +272,56 @@ async def test_reconciliation_after_delivery_does_not_redeliver(rig):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["cli", "acp"])
+async def test_inspection_requires_actual_durable_prompt_admission(rig, monkeypatch, mode):
+    captured = {}
+    if mode == "cli":
+        original = rig.db.enqueue_live_message_if_fresh
+        def interrupted(*args, **kwargs):
+            captured.update(args=args, kwargs=kwargs)
+            raise RuntimeError("before durable admission")
+        monkeypatch.setattr(rig.db, "enqueue_live_message_if_fresh", interrupted)
+    else:
+        async def interrupted(session_id, prompt, **kwargs):
+            captured.update(session_id=session_id, prompt=prompt, kwargs=kwargs)
+            raise RuntimeError("before durable admission")
+        monkeypatch.setattr(rig.manager, "_submit_prompt_locked", interrupted)
+    with pytest.raises(RuntimeError, match="before durable admission"):
+        await rig.runtime.acquire(req(mode=mode))
+    before = await rig.runtime.inspect_pending("delivery-a")
+    assert before["stage"] == "delivering"
+    assert before["delivery_admitted"] is False
+    if mode == "cli":
+        wrong = {**captured["kwargs"], "body": "another prompt"}
+        message, _ = original(*captured["args"], **wrong)
+        assert message is not None
+        assert (await rig.runtime.inspect_pending("delivery-a"))["delivery_admitted"] is False
+        rig.db.execute_write(
+            "UPDATE live_messages SET body=? WHERE idempotency_key=?",
+            (captured["kwargs"]["body"], "acquisition:delivery-a"),
+        )
+    else:
+        rig.db.create_turn(
+            captured["session_id"], 0, "another prompt", time.time(),
+            delivery_id=captured["kwargs"]["delivery_id"],
+        )
+        assert (await rig.runtime.inspect_pending("delivery-a"))["delivery_admitted"] is False
+        rig.db.execute_write(
+            "UPDATE turns SET prompt=? WHERE acquisition_delivery_id=?",
+            (captured["prompt"], "delivery-a"),
+        )
+    admitted = await rig.runtime.inspect_pending("delivery-a")
+    assert admitted["stage"] == "delivering"
+    assert admitted["delivery_admitted"] is True
+    assert admitted["recorded_result"] == before["recorded_result"]
+
+
+@pytest.mark.asyncio
 async def test_cli_overrides_are_refused_not_dropped(rig):
     with pytest.raises(AcquisitionRefused) as error:
         await rig.runtime.acquire(req(mode="cli", model="requested-model"))
     assert error.value.code == "cli_options_unsupported"
+    assert error.value.effect == "not_started"
     assert not rig.db.execute_read("SELECT * FROM acquisition_attempts")
 
 

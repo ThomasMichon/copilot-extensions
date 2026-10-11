@@ -134,6 +134,7 @@ def validate_start(
         current.get("delivery_id") != receipt["delivery_id"]
         or
         current.get("stage") not in {"delivering", "delivered"}
+        or current.get("delivery_admitted") is not True
         or current.get("state") not in {"pending", "completed"}
         or not isinstance(current.get("recorded_result"), dict)
         or any(current["recorded_result"].get(field) != receipt[field] for field in (

@@ -51,6 +51,7 @@ async def acquire_session(body: RequestEnvelope, request: Request) -> Acquisitio
     except AcquisitionRefused as exc:
         raise HTTPException(409, detail={
             "code": exc.code, "message": str(exc), "delivery_id": req.delivery_id,
+            **({"effect": exc.effect} if exc.effect is not None else {}),
         }) from exc
     except sqlite3.IntegrityError as exc:
         if "acquisition launch fence held" not in str(exc):

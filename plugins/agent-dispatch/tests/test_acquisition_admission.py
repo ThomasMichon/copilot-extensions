@@ -18,6 +18,7 @@ from agent_dispatch.acquisition_receipts import bridge_evidence as bridge_eviden
 
 def evidence(receipt):
     return {"delivery_id": receipt["delivery_id"], "stage": "launched", "state": "pending",
+            "delivery_admitted": True,
             "recorded_result": {k: v for k, v in receipt.items() if k != "reservation_key"}}
 
 pytestmark = pytest.mark.contract("agent_dispatch.acquisition_admission")
@@ -332,3 +333,29 @@ def test_receipt_route_reads_bridge_authority_not_request_supplied_session(tmp_p
     with pytest.raises(TaskError):
         queue.start(task.id, "machine/worktree-a", owner_session_id="foreign")
     assert queue.start(task.id, "machine/worktree-a", owner_session_id="native-a").owner_session_id == "native-a"
+
+
+@pytest.mark.parametrize("mode", ["cli", "acp"])
+@pytest.mark.parametrize("stage", ["delivering", "delivered"])
+def test_start_refuses_pre_admission_receipt_even_with_delivery_stage(
+    tmp_path, monkeypatch, mode, stage,
+):
+    queue = TaskQueue(tmp_path / "admission.db")
+    task = queue.create("work")
+    reservation, _ = queue.reserve_spawn(task.id)
+    queue.record_spawn_worktree(reservation.key, "worktree-a", ownership="created")
+    claimed = queue.claim_one("machine/worktree-a", task_id=task.id)
+    receipt = {
+        "reservation_key": reservation.key, "task_id": task.id,
+        "task_generation": claimed.generation, "worktree_id": "worktree-a",
+        "session_id": "native-a" if mode == "cli" else "bridge-a",
+        "native_session_id": "native-a", "mode": mode, "delivery_id": "delivery-a",
+    }
+    bind(queue, receipt, evidence=evidence(receipt))
+    authority = {**evidence(receipt), "stage": stage, "delivery_admitted": False}
+    monkeypatch.setattr(acquisition_receipts, "bridge_evidence", lambda _id: authority)
+    with pytest.raises(TaskError, match="delivery has not"):
+        queue.start(task.id, "machine/worktree-a", owner_session_id="native-a")
+    assert queue.get(task.id).status == "claimed"
+    authority["delivery_admitted"] = True
+    assert queue.start(task.id, "machine/worktree-a", owner_session_id="native-a").status == "started"

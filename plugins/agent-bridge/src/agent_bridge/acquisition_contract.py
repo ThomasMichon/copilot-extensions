@@ -71,9 +71,12 @@ class AcquisitionResult(BaseModel):
 class AcquisitionRefused(RuntimeError):
     """A continuity refusal, never authorization for a replacement launch."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(
+        self, code: str, message: str, *, effect: Literal["not_started"] | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
+        self.effect = effect
 
 
 def cli_driver(request: AcquisitionRequest) -> str:

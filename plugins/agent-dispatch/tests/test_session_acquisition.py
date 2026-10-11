@@ -161,6 +161,28 @@ def test_unqualified_protocol_string_failure_remains_ambiguous(monkeypatch):
         session_acquisition.acquire(task(), mode="acp", prompt="work")
 
 
+def test_cli_factory_unsupported_options_fail_without_deferred_retry(monkeypatch):
+    monkeypatch.setattr(session_acquisition, "agent_bridge_launch_prefix", lambda: ["bridge"])
+    calls = []
+    def run(argv, **kwargs):
+        payload = json.loads(kwargs["input"])
+        calls.append(payload)
+        assert payload["charter"] == "configured-charter"
+        return subprocess.CompletedProcess(argv, 1, json.dumps({
+            "status": 409, "detail": {
+                "code": "cli_options_unsupported",
+                "message": "CLI acquisition cannot yet prove execution overrides",
+                "effect": "not_started",
+            },
+        }), "")
+    monkeypatch.setattr(session_acquisition.subprocess, "run", run)
+    ok, failure = spawn_factories.make_embody_spawn(charter="configured-charter")(task())
+    assert not ok
+    assert not failure.get("deferred")
+    assert "execution overrides" in failure["error"]
+    assert len(calls) == 1
+
+
 def test_postlaunch_dispatch_fence_refusal_defers_instead_of_authorizing_cleanup(monkeypatch):
     monkeypatch.setattr(session_acquisition, "agent_bridge_launch_prefix", lambda: ["bridge"])
     monkeypatch.setattr(session_acquisition.subprocess, "run", lambda argv, **kwargs:

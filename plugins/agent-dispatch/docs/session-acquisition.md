@@ -65,5 +65,10 @@ Current local probes also carry the coordinator-issued generation/status/start/
 owner snapshot; that tuple, not cross-host clock comparison, fences admission.
 Legacy callers without the tuple retain the historical timestamp fallback.
 Start checks that bridge delivery has actually reached admission, not just that
-a pre-delivery receipt was prepared. Post-launch task-fence refusal defers;
+a pre-delivery receipt was prepared: authenticated inspection must carry
+`delivery_admitted: true` from the exact durable inbox/turn row, including its
+session, delivery key and prompt. A `delivering` stage alone cannot authorize
+start. Unsupported CLI overrides fail as proven `not_started` capability
+mismatches rather than being deferred and repeatedly retried.
+Post-launch task-fence refusal defers;
 it never authorizes created-worktree teardown as a pre-effect failure.

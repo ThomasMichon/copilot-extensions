@@ -46,7 +46,8 @@ class AcquisitionRuntime:
             item is not None for item in (req.charter, req.model, req.effort)
         ):
             raise AcquisitionRefused(
-                "cli_options_unsupported", "CLI acquisition cannot yet prove execution overrides"
+                "cli_options_unsupported", "CLI acquisition cannot yet prove execution overrides",
+                effect="not_started",
             )
         async with _fresh_start_locks.setdefault(req.worktree_id, asyncio.Lock()):
             with executor(self.db, req.worktree_id):
@@ -645,6 +646,15 @@ class AcquisitionRuntime:
             raise AcquisitionRefused("acquisition_not_found", "acquisition delivery was not found")
         row = rows[0]
         data = json.loads(row["data_json"] or "{}")
+        delivery_admitted = False
+        if data.get("result") and data.get("_request"):
+            from .acquisition_delivery import admitted
+            recorded_request = AcquisitionRequest.model_validate(data["_request"])
+            recorded_result = AcquisitionResult.model_validate(data["result"])
+            delivery_admitted = admitted(
+                self.db, recorded_request, recorded_result,
+                self._delivery_prompt(recorded_request, recorded_result),
+            )
         sessions = self.db.execute_read(
             "SELECT id,status,acp_session_id FROM sessions WHERE caller_id=?",
             (f"acquisition:{delivery_id}",),
@@ -654,6 +664,7 @@ class AcquisitionRuntime:
             "stage": row["stage"] or "prepared", "worktree_id": row["worktree_id"],
             "native_evidence": [dict(item) for item in sessions],
             "recorded_result": data.get("result"),
+            "delivery_admitted": delivery_admitted,
             "recovery": "retry the same request, or allow a current same-task reservation to reconcile",
         }
 
