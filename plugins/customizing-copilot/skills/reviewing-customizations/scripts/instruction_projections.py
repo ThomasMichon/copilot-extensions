@@ -1291,15 +1291,8 @@ def _render_local_cache_locked(
         if _parse_owned_local_cache_marker(raw, relative) is None:
             continue
         if relative in tracked_paths or tracking_inconclusive:
-            # Never delete a file git tracks, even one this renderer
-            # clearly owns (its own marker parses and matches this exact
-            # path) -- that can only mean it was accidentally committed
-            # before the *.local.instructions.md ignore rule was in place,
-            # and this function's own contract is to never mutate git
-            # state, not even indirectly via a working-tree delete that
-            # would show up as a tracked change. Exactly like the write
-            # path above, an inconclusive check in a git working tree is
-            # treated the same as "tracked" -- never assumed safe.
+            # Provenance does not authorize changing tracked working-tree
+            # content. Failed tracking probes likewise cannot authorize removal.
             result.add(
                 WARNING,
                 "projection-local-cache-tracked",
