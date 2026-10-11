@@ -33,15 +33,20 @@ Solo effort, single participant, no multi-agent branch topology.
 ## Guiding Intent
 
 A managed supervised-lane child process (e.g. a `supervise --supervisor-id
-<id>` instance) must be **at most one** live process per id at all times
-(normal startup, a crash, and the existing restart backoff all create
-legitimate periods with zero children — "exactly one" is an impossible
-availability invariant to hold continuously), must leave a diagnosable
-trace when it stops (crash or clean exit alike), and must never be
-silently duplicated across a daemon restart. A missing desired child must
-still be detected and reconciled (relaunched) separately from the
-duplicate-prevention guarantee. Today duplication is possible, nothing
-protects against it, and nothing logs it.
+<id>` instance) must have **at most one lease-owning, actually-running
+supervisory loop** per id at all times — not "at most one live process":
+Phase 2's own lock design necessarily lets a losing contender exist
+briefly before it fails to acquire the lease and exits, so a
+process-count invariant would contradict that accepted, intentional
+outcome. A contender must do no supervisory work before it holds the
+lease. Separately, normal startup, a crash, and the existing restart
+backoff all create legitimate periods with zero children, so this is also
+not an "exactly one, always" availability guarantee — a missing desired
+child must be detected and reconciled (relaunched) independently of the
+duplicate-prevention guarantee above. The child must also leave a
+diagnosable trace when it stops (crash or clean exit alike), and must
+never be silently duplicated across a daemon restart. Today duplication is
+possible, nothing protects against it, and nothing logs it.
 
 ## Context
 
@@ -143,12 +148,21 @@ stands as originally asked.
       `docs/patterns/process-slot-ownership.md`'s two-pillar discipline —
       the single-owner slot above is only pillar 2).** A detached
       supervised-lane child must itself track the liveness of its logical
-      owner (the daemon that spawned it, identified by its durable
-      registration rather than the parent PID, which a daemon restart
-      changes) and drain and exit on its own once that owner is
-      *confirmed* gone — an ambiguous read (can't tell, or momentarily
-      dark) must never be treated as gone. Without this, Phase 3's
-      external reaper is the *only* backstop, and an orphan survives
+      owner and drain and exit on its own once that owner is *confirmed*
+      gone — an ambiguous read (can't tell, or momentarily dark) must
+      never be treated as gone. **The owner identity must be the
+      spawning daemon's own immutable generation (e.g. its own
+      `process_start_time`-style identity token at launch), not the
+      durable registration/supervisor id:** a registration identifies the
+      *lane* across every daemon generation, so a successor daemon keeps
+      the same registration "live" across a restart — checking liveness
+      against the registration would never let an orphan confirm its
+      *actual* spawning daemon died, making this pillar ineffective. If
+      Phase 3 permits adoption (a new daemon generation claiming an
+      existing live child as its own), adoption must safely retether that
+      child to the *new* generation's identity before the old-generation
+      liveness check would otherwise retire it. Without this pillar,
+      Phase 3's external reaper is the *only* backstop, and an orphan survives
       indefinitely whenever no replacement daemon happens to start and run
       that reconciliation.
 
@@ -231,14 +245,21 @@ stands as originally asked.
       deliverable is the trace+diagnosis itself, not a code change;
       subsequent phases' designs depend on both answers.
 - [ ] **Phase 2:** automated test simulating two near-simultaneous launch
-      attempts for the same managed-child id; exactly one acquires the
-      lock, the other exits cleanly (or defers) rather than running
-      duplicated. Separately, an owner-liveness test: a detached child
-      whose logical owner (the daemon's durable registration) is confirmed
-      gone drains and self-retires on its own, without waiting on Phase
-      3's external reaper; an *ambiguous* owner-liveness read (can't tell,
-      or momentarily dark) must not be treated as gone and must not
-      trigger self-retirement.
+      attempts for the same managed-child id; the losing contender does no
+      supervisory work before failing to acquire the lease and exiting
+      cleanly (or defers) — the invariant under test is "at most one
+      lease-owning, running loop," not "at most one live process," so a
+      losing contender's brief pre-acquisition existence is expected, not
+      a failure. Separately, an owner-liveness test: a detached child
+      whose spawning daemon generation (its own immutable identity at
+      launch, not the durable registration) is confirmed gone drains and
+      self-retires on its own, without waiting on Phase 3's external
+      reaper; an *ambiguous* owner-liveness read (can't tell, or
+      momentarily dark) must not be treated as gone and must not trigger
+      self-retirement; and if Phase 3's adoption path is implemented, a
+      case proving adoption retethers the child to the new generation's
+      identity before the old generation's liveness check would otherwise
+      retire it.
 - [ ] **Phase 3:** the restart/reconciliation test is unconditional —
       simulate a daemon restart with a still-alive orphaned child from a
       previous generation; confirm the new daemon detects and reconciles
@@ -413,4 +434,24 @@ _Pending — begin with Phase 1 (trace the actual spawn entry points)._
   to restarts that don't go through that clean path (crash, incomplete
   teardown), consistent with Phase 1's own job of determining the actual
   trigger(s).
+
+### 2026-10-10 — Plan PR #5309 review round 7 (2 refinements of round 6's own fixes)
+- **Low:** round 6's "at most one live process" restatement was still too
+  strict — Phase 2's own lock design necessarily lets a losing contender
+  exist briefly before it fails to acquire the lease and exits, so a
+  process-count invariant contradicts that accepted outcome. Redefined the
+  safety property as "at most one lease-owning, actually-running
+  supervisory loop," with a contender forbidden from doing supervisory
+  work before it holds the lease, and updated the matching Phase 2
+  validation case to test that invariant instead of a raw process count.
+- **Low:** round 6's owner-liveness tether bound owner identity to the
+  *durable registration*, which identifies the lane across every daemon
+  generation rather than the specific spawning daemon — a successor
+  keeps the same registration "live" across a restart, so checking
+  against it would never let an orphan confirm its actual owner died,
+  leaving the pillar ineffective. Rebound the tether to the spawning
+  daemon's own immutable generation identity instead, and added the
+  requirement that Phase 3's adoption path (if implemented) must retether
+  a child to the new generation before the old generation's liveness
+  check would otherwise retire it, plus a matching Validation Plan case.
 
