@@ -9,23 +9,29 @@ _ARTIFACT_DIRS = {
     ".pytest_cache",
     ".mypy_cache",
     "__pycache__",
-    ".venv",
-    "build",
-    "dist",
 }
+_ROOT_ARTIFACT_DIRS = {".venv", "build", "dist"}
 
 
 def is_artifact_only(path: Path) -> bool:
     """Return true only when no source, manifest, or unknown entry survives."""
+    return _is_artifact_only(path, library_root=True)
+
+
+def _is_artifact_only(path: Path, *, library_root: bool) -> bool:
     if path.is_symlink():
         return False
     for entry in path.iterdir():
         if entry.is_symlink():
             return False
+        if entry.name.endswith(".egg-info"):
+            continue
         if entry.is_dir():
-            if entry.name in _ARTIFACT_DIRS or entry.name.endswith(".egg-info"):
+            if entry.name in _ARTIFACT_DIRS:
                 continue
-            if is_artifact_only(entry):
+            if library_root and entry.name in _ROOT_ARTIFACT_DIRS:
+                continue
+            if _is_artifact_only(entry, library_root=False):
                 continue
         return False
     return True
