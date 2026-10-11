@@ -117,10 +117,10 @@ def git_file_sha256(commit: str, path: str) -> str | None:
 
 @lru_cache(maxsize=256)
 def blob_sha256(blob: str) -> str | None:
-    require_local_object_reads()
     """Hash a Git blob object's content directly by its own object id --
     content-addressed, so resolvable even when the commit that captured it
     is orphaned (e.g. by a squash merge)."""
+    require_local_object_reads()
     result = subprocess.run(
         ["git", "-C", str(REPO), "cat-file", "-p", f"{blob}^{{blob}}"],
         capture_output=True,
