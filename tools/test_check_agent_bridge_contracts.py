@@ -5,6 +5,8 @@ import copy
 import hashlib
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -453,40 +455,157 @@ def test_capability_constant_mismatch_fails(repo: Path) -> None:
     assert "capability dispatch_task_session does not match" in result.stderr
 
 
-def test_missing_provenance_commit_recovers_history_once(
+@pytest.mark.parametrize("available", [False, True])
+def test_provenance_commit_validation_is_local_only(
     monkeypatch: pytest.MonkeyPatch,
+    available: bool,
 ) -> None:
     checker = _load_checker()
     commit = "a" * 40
     calls: list[tuple[str, ...]] = []
-    state = {"available": False}
 
     def fake_git(*args: str):
         calls.append(args)
         if args[:2] == ("cat-file", "-e"):
-            return subprocess.CompletedProcess(args, 0 if state["available"] else 1, "", "")
-        if args == (
-            "fetch",
-            "--quiet",
-            "origin",
-            checker._eg._MAIN_REFSPEC,
-        ):
-            state["available"] = True
-            return subprocess.CompletedProcess(args, 0, "", "")
-        if args in {
-            ("fetch", "--quiet", "--unshallow", "origin"),
-        }:
-            return subprocess.CompletedProcess(args, 0, "", "")
+            return subprocess.CompletedProcess(args, 0 if available else 1, "", "")
         raise AssertionError(f"unexpected git call: {args}")
 
     monkeypatch.setattr(checker._eg, "git", fake_git)
-    checker._eg._FETCH_RECOVERY_ATTEMPTED = False
+    assert checker._ensure_commit_available(commit) is available
+    assert checker._ensure_commit_available(commit) is available
+    assert calls == [("cat-file", "-e", f"{commit}^{{commit}}")] * 2
 
-    assert checker._ensure_commit_available(commit) is True
-    assert checker._ensure_commit_available(commit) is True
-    assert calls.count(
-        ("fetch", "--quiet", "origin", checker._eg._MAIN_REFSPEC)
-    ) == 1
+
+def test_local_git_probe_is_bounded_headless_and_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checker = _load_checker()
+    checker._eg.git.cache_clear()
+    monkeypatch.setattr(checker._eg, "require_local_object_reads", lambda: None)
+    observed = {}
+
+    def timed_out(args, **kwargs):
+        observed.update(kwargs)
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    monkeypatch.setattr(checker._eg.subprocess, "run", timed_out)
+    with pytest.raises(subprocess.TimeoutExpired):
+        checker._ensure_commit_available("a" * 40)
+    assert observed["timeout"] == 10
+    assert observed["env"]["GIT_NO_LAZY_FETCH"] == "1"
+    assert observed["creationflags"] == (
+        subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    )
+
+
+def test_repeated_local_evidence_is_read_once_per_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checker = _load_checker()
+    checker._eg.git.cache_clear()
+    monkeypatch.setattr(checker._eg, "require_local_object_reads", lambda: None)
+    calls = []
+
+    def read(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(checker._eg.subprocess, "run", read)
+    for _ in range(20):
+        assert checker._ensure_commit_available("b" * 40)
+    assert len(calls) == 1
+    checker._eg.git.cache_clear()
+
+
+@pytest.mark.parametrize("version", ["2.44.9", "2.45.0", "2.55.0.windows.5"])
+def test_local_only_guard_refuses_unsupported_git_before_object_reads(
+    monkeypatch: pytest.MonkeyPatch, version: str,
+) -> None:
+    checker = _load_checker()
+    checker._eg.require_local_object_reads.cache_clear()
+    checker._eg.git.cache_clear()
+    calls = []
+
+    def read(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, f"git version {version}\n", "")
+
+    monkeypatch.setattr(checker._eg.subprocess, "run", read)
+    if version.startswith("2.44"):
+        with pytest.raises(RuntimeError, match="Git 2.45"):
+            checker._eg.git("cat-file", "-e", "a" * 40)
+        assert calls == [["git", "--version"]]
+    else:
+        checker._eg.git("cat-file", "-e", "a" * 40)
+        assert len(calls) == 2
+    checker._eg.require_local_object_reads.cache_clear()
+    checker._eg.git.cache_clear()
+
+
+@pytest.mark.parametrize("corrupt_hash", [False, True])
+def test_real_pre_push_preserves_orphan_blob_validation(
+    repo: Path, corrupt_hash: bool,
+) -> None:
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("production pre-push hook requires bash")
+    hook = SCRIPT.parent / "hooks" / "pre-push"
+    _write(repo, "tools/hooks/pre-push", hook.read_text(encoding="utf-8"))
+    (repo / "tools" / "hooks" / "pre-push").chmod(0o755)
+    # Isolate the changed gate while retaining Git's real hook/stdin protocol.
+    for line in hook.read_text(encoding="utf-8").splitlines():
+        if '"$ROOT/tools/' not in line:
+            continue
+        name = line.split('"$ROOT/tools/', 1)[1].split('"', 1)[0]
+        if name != SCRIPT.name:
+            _write(repo, f"tools/{name}", "raise SystemExit(0)\n")
+
+    def orphan(data: dict[str, Any]) -> None:
+        for contract in data["contracts"]:
+            for provenance in contract["provenance"]:
+                provenance["commit"] = "f" * 40
+
+    _mutate_registry(repo, orphan)
+    for relative in (FIXTURE, HOST_FIXTURE):
+        fixture = json.loads((repo / relative).read_text(encoding="utf-8"))
+        fixture["captured_from"]["commit"] = "f" * 40
+        if corrupt_hash and relative == FIXTURE:
+            fixture["captured_from"]["source_sha256"] = "0" * 64
+        _write(repo, relative, fixture)
+    _mutate_registry(repo, lambda data: [
+        entry.update(sha256=_sha256(repo, entry["path"]))
+        for contract in data["contracts"] for entry in contract["fixtures"]
+    ])
+    remote = repo.parent / "remote.git"
+    _git(repo, "init", "--bare", "-q", str(remote))
+    _git(repo, "remote", "add", "origin", str(remote))
+    _git(repo, "push", "-q", "origin", "HEAD:refs/heads/main")
+    _git(repo, "update-ref", "-d", "refs/remotes/origin/main")
+    _git(repo, "update-ref", "refs/remotes/origin/dev", "HEAD")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "contract evidence")
+    _git(repo, "config", "core.hooksPath", "tools/hooks")
+    result = subprocess.run(
+        ["git", "push", "origin", "HEAD:refs/heads/validated"],
+        cwd=repo, capture_output=True, text=True, timeout=30,
+        env={**os.environ, **{"GIT_TERMINAL_PROMPT": "0"}},
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
+    assert (result.returncode == 0) is not corrupt_hash, result.stderr
+    assert subprocess.run(
+        ["git", "show-ref", "--verify", "refs/remotes/origin/main"],
+        cwd=repo, capture_output=True, timeout=5,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    ).returncode != 0
+    if corrupt_hash:
+        assert "direct blob" in result.stderr
+        assert subprocess.run(
+            ["git", "--git-dir", str(remote), "show-ref", "--verify",
+             "refs/heads/validated"], capture_output=True, timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        ).returncode != 0
+    else:
+        assert "OK (2 contracts, 2 fixtures)" in result.stdout
 
 
 @pytest.mark.parametrize(

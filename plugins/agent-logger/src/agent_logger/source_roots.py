@@ -7,7 +7,7 @@ import json
 import os
 import re
 import stat
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -333,11 +333,15 @@ def _source(root: Path, path: Path, layout: LayoutKind) -> ArchiveSource:
     return source
 
 
-def iter_archive_sources(root: Path) -> Iterator[ArchiveSource]:
+def iter_archive_sources(
+    root: Path, *, on_error: Callable[[str, OSError | ValueError], None] | None = None,
+) -> Iterator[ArchiveSource]:
     """Discover flat roots, legacy CodeSpaces, and qualified groups, without recursion.
 
     Missing, inaccessible, malformed and unsafe evidence raises explicitly.
-    Source records without a producer marker retain unknown identity.
+    Source records without a producer marker retain unknown identity. An explicit
+    error callback may record rejected source candidates and continue healthy
+    peers; root enumeration and corpus-budget failures still abort the traversal.
     """
     root = _directory(root)
     count = 0
@@ -347,24 +351,43 @@ def iter_archive_sources(root: Path) -> Iterator[ArchiveSource]:
         )
         if entry.name.startswith(".") and not grouped:
             continue
-        mode = entry.lstat().st_mode
-        if stat.S_ISREG(mode):
+        try:
+            mode = entry.lstat().st_mode
+            if stat.S_ISREG(mode):
+                continue
+            layout: LayoutKind = (
+                "container"
+                if entry.name.endswith(".containers")
+                else "codespace"
+                if entry.name in _LEGACY_CODESPACE_GROUPS or entry.name.endswith(".codespaces")
+                else "flat"
+            )
+            if layout != "flat" and entry.name not in _LEGACY_CODESPACE_GROUPS:
+                suffix = ".containers" if layout == "container" else ".codespaces"
+                _component(entry.name.removesuffix(suffix))
+            candidates = _entries(_directory(entry)) if layout != "flat" else [entry]
+        except (OSError, ValueError) as exc:
+            if grouped or on_error is None:
+                raise
+            on_error(entry.relative_to(root).as_posix(), exc)
             continue
-        layout: LayoutKind = (
-            "container"
-            if entry.name.endswith(".containers")
-            else "codespace"
-            if entry.name in _LEGACY_CODESPACE_GROUPS or entry.name.endswith(".codespaces")
-            else "flat"
-        )
-        if layout != "flat" and entry.name not in _LEGACY_CODESPACE_GROUPS:
-            suffix = ".containers" if layout == "container" else ".codespaces"
-            _component(entry.name.removesuffix(suffix))
-        candidates = _entries(_directory(entry)) if layout != "flat" else [entry]
         for candidate in candidates:
-            if stat.S_ISREG(candidate.lstat().st_mode):
+            try:
+                if stat.S_ISREG(candidate.lstat().st_mode):
+                    continue
+            except OSError as exc:
+                if on_error is None:
+                    raise
+                on_error(candidate.relative_to(root).as_posix(), exc)
                 continue
             count += 1
             if count > MAX_SOURCE_ENTRIES:
                 raise SourceLayoutError("archive corpus exceeds source budget")
-            yield _source(root, candidate, layout)
+            try:
+                source = _source(root, candidate, layout)
+            except (OSError, ValueError) as exc:
+                if on_error is None:
+                    raise
+                on_error(candidate.relative_to(root).as_posix(), exc)
+                continue
+            yield source

@@ -14,6 +14,20 @@ import pytest
 import agent_procutil as pu
 
 
+def test_required_sync_job_failure_never_resumes_child(monkeypatch):
+    process = Mock(pid=123)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))
+    monkeypatch.setattr(pu, "_assign_suspended_to_kill_on_close_job", lambda pid: None)
+    resume = Mock(return_value=True)
+    monkeypatch.setattr(pu, "_resume_suspended_process", resume)
+    with pytest.raises(RuntimeError, match="before child resume"):
+        pu.spawn_sync_in_kill_on_close_job(["fixture"], require_job=True)
+    process.kill.assert_called_once_with()
+    process.wait.assert_called_once_with(timeout=5)
+    resume.assert_not_called()
+
+
 def test_contained_test_mode_reads_explicit_runner_marker(monkeypatch):
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     assert not pu.contained_test_mode()
@@ -639,4 +653,3 @@ time.sleep(60)
         process.wait(timeout=5)
         if job is not None:
             job.close()
-

@@ -125,7 +125,7 @@ def parse_marker(raw: bytes) -> dict[str, object]:
         raise ValueError("projection provenance marker schema is unsupported")
     if "deliveryKind" in marker:
         kind = marker["deliveryKind"]
-        if kind not in {"body", "selector"} or (
+        if not isinstance(kind, str) or kind not in {"body", "selector"} or (
             ("bodySha256" in marker) != (kind == "body")
         ):
             raise ValueError("invalid delivery envelope")

@@ -34,7 +34,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import subprocess
 import tempfile
 import threading
 import time
@@ -42,10 +41,12 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
 from work_coalescing_singleton import CoalescingServer
 from zdd.diagnostics import process_start_time
 
 from . import mux_daemon_cutover, mux_daemon_live, mux_daemon_process
+from .mux_child_process import run as run_mux_child
 from .mux_attached_clients import AttachedClientObserver
 from .mux_mapping_registry import (
     MuxMappingRegistry,
@@ -314,11 +315,12 @@ def apply_status_options(entry: dict, values: dict) -> bool:
     all_ok = True
     for option, value in values.items():
         try:
-            result = subprocess.run(
+            result = run_mux_child(
                 [mux_bin, "set-option", "-t", session, str(option), str(value)],
                 capture_output=True,
                 text=True,
                 timeout=15,
+                **no_window_kwargs(),
             )
             if result.returncode != 0:
                 all_ok = False
@@ -334,10 +336,11 @@ def _mux_session_alive(mux_bin: str, session: str) -> bool:
     safe direction, since the caller's only use of this is to avoid writing
     into a session that may no longer exist."""
     try:
-        result = subprocess.run(
+        result = run_mux_child(
             [mux_bin, "has-session", "-t", session],
             capture_output=True,
             timeout=5,
+            **no_window_kwargs(),
         )
         return result.returncode == 0
     except Exception:

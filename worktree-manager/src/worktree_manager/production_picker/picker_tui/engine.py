@@ -22,6 +22,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widget import Widget
 
+from .engine_action_confirm import ActionConfirmScreen
 from .engine_dialogs import (
     CfgMenuScreen,
     MaintMenuScreen,
@@ -111,6 +112,7 @@ from .steering import (
 __all__ = [
     "ACTION_DESC",
     "ACTIVE_SPECS",
+    "ActionConfirmScreen",
     "BUILTIN_PIVOTS",
     "BUTTON_SETS",
     "CLEAN_SPECS",

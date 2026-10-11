@@ -253,23 +253,113 @@ _versioned_activate() {
 _bootstrap_python() {
     if [[ -x "$VENV_DIR/bin/python" ]]; then echo "$VENV_DIR/bin/python"; return 0; fi
     if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
-    local __c
+    local __c __resolved
     for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
+        __resolved="$(command -v "$__c" 2>/dev/null)" || continue
+        # `command -v` only confirms a PATH entry exists -- on Windows this
+        # can resolve to the broken WindowsApps "App execution alias"
+        # stub, which still fails when actually invoked. Confirm it
+        # genuinely runs before trusting it.
+        if "$__resolved" -c '' >/dev/null 2>&1; then
+            printf '%s' "$__resolved"
+            return 0
+        fi
     done
+    # No working system Python found -- uv (already a hard install
+    # prerequisite, resolved earlier into $UV_CMD) can provision one on
+    # demand. Without this fallback, a genuinely python-less first install
+    # would compute no payload hash at all, write an unhashed completion
+    # marker, then find a REAL hash available on the very next run (once
+    # the venv's own python exists) -- wrongly reporting unchanged content
+    # as a payload conflict.
+    if [[ -n "${UV_CMD:-}" ]]; then
+        __resolved="$("$UV_CMD" python find 2>/dev/null)" || __resolved=""
+        if [[ -z "$__resolved" ]]; then
+            "$UV_CMD" python install --quiet >/dev/null 2>&1 || true
+            __resolved="$("$UV_CMD" python find 2>/dev/null)" || __resolved=""
+        fi
+        if [[ -n "$__resolved" && -x "$__resolved" ]]; then
+            printf '%s' "$__resolved"
+            return 0
+        fi
+    fi
     return 1
 }
 
 _payload_hash() {
-    local __parts=""
-    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
+    # Use the canonical fingerprint_source() (libs/versioned-runtime), not a
+    # bespoke pyproject.toml-only hash: a prior audit (#5472) found exactly
+    # this narrower scope on another adopter -- changing src/agent_pull_requests
+    # WITHOUT touching pyproject.toml must still be detected as a content
+    # change, or an installed slot could wrongly report `reuse` for a
+    # genuinely different payload.
+    #
+    # Returns 0 with EMPTY output only for the two legitimate "nothing to
+    # hash yet" cases (no bootstrap Python available on a first-ever
+    # install; no declared roots exist at all) -- both already degrade the
+    # same way the pre-fix hash did. Any OTHER failure (the fingerprint
+    # command itself erroring, e.g. on an unsupported filesystem object)
+    # returns NON-ZERO and prints to stderr: a caller must treat that as a
+    # hard install failure, never silently proceed as if "no content
+    # changed", which would be exactly the stale-slot-reuse this seam
+    # exists to prevent.
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local py
+    py="$(_bootstrap_python)" || py=""
+    [[ -n "$py" ]] || { printf ''; return 0; }
+    local roots=()
+    [[ -f "$PLUGIN_DIR/pyproject.toml" ]] && roots+=("$PLUGIN_DIR/pyproject.toml")
+    [[ -d "$PKG_SRC_DIR" ]] && roots+=("$PKG_SRC_DIR")
     if [[ -d "$PLUGIN_DIR/libs" ]]; then
         local __f
         while IFS= read -r __f; do
-            __parts="$__parts"$'\n'"$(cat "$__f")"
+            roots+=("$__f")
         done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
     fi
-    printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
+    # This plugin's own dependencies[] on shared libraries are resolved
+    # live via [tool.uv.sources] `path = "..."` entries in pyproject.toml
+    # (e.g. "../../libs/work-coalescing-singleton") -- never vendored --
+    # so those libraries' OWN content is just as much a part of this
+    # plugin's actual runtime payload as src/agent_pull_requests is.
+    # Fingerprint each referenced library's COMPLETE directory (not just
+    # its own pyproject.toml): a shared library's source changing without
+    # a version bump here must still be detected as content drift.
+    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+        local __rel __resolved
+        while IFS= read -r __rel; do
+            __resolved="$(cd "$PLUGIN_DIR" 2>/dev/null && cd "$__rel" 2>/dev/null && pwd)"
+            [[ -n "$__resolved" ]] && roots+=("$__resolved")
+        done < <(
+            sed -n '/^\[tool\.uv\.sources\]/,/^\[/p' "$PLUGIN_DIR/pyproject.toml" |
+            grep -o 'path[[:space:]]*=[[:space:]]*"[^"]*"' |
+            sed -n 's/.*"\([^"]*\)".*/\1/p' |
+            sort
+        )
+    fi
+    [[ ${#roots[@]} -gt 0 ]] || { printf ''; return 0; }
+    # Capture stdout (the hash) and stderr (diagnostics) SEPARATELY: a
+    # bare `2>&1` would merge stderr into the returned hash even on
+    # success, silently contaminating it if the command ever emits a
+    # warning/notice on stderr while still exiting 0.
+    local hash rc err_file err_text
+    err_file="$(mktemp 2>/dev/null)" || err_file=""
+    if [[ -n "$err_file" ]]; then
+        hash="$("$py" "$vr" --root "$INSTALL_DIR" fingerprint "${roots[@]}" 2>"$err_file")"
+        rc=$?
+        err_text="$(cat "$err_file" 2>/dev/null)"
+        rm -f "$err_file"
+    else
+        # mktemp unavailable -- fall back to the old merged-stream
+        # behavior rather than failing outright.
+        hash="$("$py" "$vr" --root "$INSTALL_DIR" fingerprint "${roots[@]}" 2>&1)"
+        rc=$?
+        err_text="$hash"
+    fi
+    if [[ "$rc" -ne 0 ]]; then
+        _fail "Failed to compute payload fingerprint: $err_text"
+        return 1
+    fi
+    printf '%s' "$hash"
 }
 
 _versioned_slot_clean() {
@@ -298,8 +388,15 @@ _versioned_mark_complete() {
         _fail "Cannot mark versions/$SRC_VERSION complete without a bootstrap Python interpreter"
         return 1
     fi
-    local ph
-    ph="$(_payload_hash)"
+    # Reuse the SAME payload hash computed once, before the build, into
+    # $PAYLOAD_HASH -- never recompute it here. A local-checkout install
+    # does not self-stage: the live source tree can change between the
+    # pre-build admission check and this post-build marker write (e.g. an
+    # edit landing mid-install), and `uv pip install` already consumed
+    # whatever bytes were present earlier. Recomputing here would let the
+    # marker describe NEWER content than what was actually built into the
+    # slot, letting a later install wrongly reuse it as if it matched.
+    local ph="$PAYLOAD_HASH"
     local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
     if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
     "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'
@@ -423,7 +520,7 @@ mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
 _ok "Directories: $INSTALL_DIR"
 _install_hook_files
 
-PAYLOAD_HASH="$(_payload_hash)"
+PAYLOAD_HASH="$(_payload_hash)" || exit 1
 SLOT_ALREADY_COMPLETE=0
 if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
     if _versioned_is_complete "$PAYLOAD_HASH"; then

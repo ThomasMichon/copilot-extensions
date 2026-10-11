@@ -33,6 +33,16 @@ def _cmd_version(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_corpus_inventory(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from agent_logger.corpus_inventory import inventory_corpus
+
+    result = inventory_corpus(Path(args.root), include_sessions=args.include_sessions)
+    print(json.dumps(result, indent=2))
+    return 0 if result["complete"] else 1
+
+
 def _load_aggregate_plan() -> ResolvedPlan:
     home = home_dir()
     machine = MachineIdentity(
@@ -627,6 +637,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true", help="derive + count without writing"
     )
     o_corpus.set_defaults(func=_cmd_origin_backfill_corpus)
+
+    p_corpus = sub.add_parser("corpus", help="explicit read-only synced-corpus inspection")
+    corpus_sub = p_corpus.add_subparsers(dest="corpus_command", required=True)
+    corpus_inventory = corpus_sub.add_parser(
+        "inventory", help="count all primary session refs without chronicling filters"
+    )
+    corpus_inventory.add_argument("--root", required=True, help="synced corpus source root")
+    corpus_inventory.add_argument(
+        "--include-sessions", action="store_true", help="include source-qualified session IDs"
+    )
+    corpus_inventory.set_defaults(func=_cmd_corpus_inventory)
 
     p_chronicle = sub.add_parser(
         "chronicle", help="background chronicling -- the orchestrator daemon"

@@ -52,6 +52,39 @@ def test_windows_venv_without_direct_interpreter_is_rejected(tmp_path, monkeypat
         mux_daemon_process.direct_daemon_python(executable)
 
 
+def test_direct_windows_interpreter_uses_console_base(tmp_path, monkeypatch):
+    executable = _venv_python(tmp_path)
+    base = tmp_path / "base"
+    base.mkdir()
+    console = base / "python.exe"
+    console.touch()
+    monkeypatch.setattr(mux_daemon_process, "os", SimpleNamespace(name="nt", path=os.path))
+    monkeypatch.setattr(
+        mux_daemon_process, "windowless_python", lambda _: str(base / "pythonw.exe"),
+    )
+    monkeypatch.setattr(
+        mux_daemon_process, "windowless_python_env",
+        lambda _: {"__PYVENV_LAUNCHER__": executable},
+    )
+    assert mux_daemon_process.direct_daemon_python(executable) == (
+        str(console), {"__PYVENV_LAUNCHER__": executable},
+    )
+
+
+def test_direct_windows_interpreter_rejects_missing_console_base(tmp_path, monkeypatch):
+    executable = _venv_python(tmp_path)
+    monkeypatch.setattr(mux_daemon_process, "os", SimpleNamespace(name="nt", path=os.path))
+    monkeypatch.setattr(
+        mux_daemon_process, "windowless_python", lambda _: str(tmp_path / "pythonw.exe"),
+    )
+    monkeypatch.setattr(
+        mux_daemon_process, "windowless_python_env",
+        lambda _: {"__PYVENV_LAUNCHER__": executable},
+    )
+    with pytest.raises(RuntimeError, match="base python.exe is unavailable"):
+        mux_daemon_process.direct_daemon_python(executable)
+
+
 def test_posix_interpreter_selection_stays_unchanged(monkeypatch):
     monkeypatch.setattr(mux_daemon_process, "os", SimpleNamespace(name="posix", path=os.path))
     monkeypatch.setattr(mux_daemon_process, "windowless_python", lambda source: source)

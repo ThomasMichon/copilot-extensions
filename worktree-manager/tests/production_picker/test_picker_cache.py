@@ -138,7 +138,7 @@ def test_local_load_uses_cache_only_then_classified_provider_reads(monkeypatch):
     assert calls == [
         ("list", ("example",), {
             "classify": False,
-            "mux_details": False,
+            "mux_details": True,
             "cache_only": True,
             "runner": None,
         }),

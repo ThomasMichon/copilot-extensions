@@ -25,6 +25,60 @@ def _args(**kw):
     return types.SimpleNamespace(**base)
 
 
+@pytest.mark.parametrize("snapshot", [
+    {"wt-example.a".replace(".", "_"): 2, "wt-detached": 0},
+    {},
+    None,
+])
+def test_cache_only_mux_details_use_one_snapshot_without_enrichment(monkeypatch, snapshot, capsys):
+    from agent_worktrees import __main__ as core, list_cli, sessions
+    from agent_worktrees import delegate_cli
+    from agent_worktrees.picker_support import data_local
+
+    records = [types.SimpleNamespace(worktree_id=wid, session_summary=None)
+               for wid in ("example.a", "detached", "absent")]
+    monkeypatch.setattr(core, "_list_records_for_args", lambda _args: records)
+    calls = []
+    monkeypatch.setattr(sessions, "_list_mux_sessions",
+                        lambda: calls.append("enumerate") or snapshot)
+    monkeypatch.setattr(sessions, "has_mux_session",
+                        lambda *_args: pytest.fail("per-worktree mux probe"))
+    monkeypatch.setattr(sessions, "scan_sessions_fast",
+                        lambda *_args: pytest.fail("transcript scan"))
+    monkeypatch.setattr(core, "_classify_records",
+                        lambda *_args, **_kwargs: pytest.fail("git classification"))
+    monkeypatch.setattr(data_local, "_overlay_cached_state", lambda *_args: None)
+    monkeypatch.setattr(delegate_cli, "annotate_delegate_graph", lambda *_args: None)
+
+    def render(rec, *, mux_info=None, **_kwargs):
+        row = {"id": rec.worktree_id}
+        if mux_info is not None:
+            row.update(mux_session=mux_info.exists, mux_clients=mux_info.clients,
+                       mux_attached=mux_info.attached)
+        return row
+
+    monkeypatch.setattr(core, "_worktree_to_dict", render)
+    results = []
+    monkeypatch.setattr(output, "_json_output", results.append)
+    args = _args(json=True, cache_only=True, stream=False, glance=False,
+                 worktree_id=None, codename=None, refresh=False)
+    assert list_cli.cmd_list(args) == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert ("Mux enumeration unavailable" in captured.err) == (snapshot is None)
+    assert calls == ["enumerate"]
+    rows = results[0]["worktrees"]
+    if snapshot is None:
+        assert all("mux_session" not in row for row in rows)
+    else:
+        assert [row["mux_session"] for row in rows] == [
+            sessions.mux_session_name(rec.worktree_id) in snapshot for rec in records
+        ]
+        assert [row["mux_clients"] for row in rows] == [
+            snapshot.get(sessions.mux_session_name(rec.worktree_id), 0) for rec in records
+        ]
+
+
 # --- key ---------------------------------------------------------------------
 
 def test_cache_key_stable_and_axis_sensitive():

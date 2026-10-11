@@ -104,6 +104,17 @@ for the full reconciliation and the resulting north star.
 
 ## Plan
 
+### Operator extension (2026-10-10): one dispatch session-acquisition owner
+
+> We need to reconcile `agent-worktrees embody` vs `agent-bridge create`. I expect agent-dispatch to be using `agent-bridge` exclusively, which internally chooses between CLI and ACP sessions based on a flag set for the task, and handles creating a new session vs resuming and existing session automatically.
+
+The operator selected stopgap-then-consolidation sequencing, then directed
+that consolidation be scoped into this existing effort rather than a duplicate
+campaign. PR #6064 supplies the gated CLI-resume stopgap; [#6076](https://github.com/ThomasMichon/copilot-extensions/issues/6076)
+owns the remaining consolidation. The implementation and validation contract
+is [Phase 6: dispatch session acquisition](dispatch-session-acquisition.md).
+This extends this effort's caller coverage without changing explicit CLI opt-in.
+
 ### Phase 1 — Fix the blocking ACP gap
 
 Prerequisite correctness work, useful independent of CLI mode itself: a
@@ -648,6 +659,22 @@ mechanism CLI mode binds through.
       remaining Phase 5 item above (plugin docs/architecture sync) is
       unaffected and still open.
 
+### Phase 6 — Unified dispatch session acquisition
+
+- [ ] Review and land the [scoped acquisition contract](dispatch-session-acquisition.md)
+      before runtime changes; coordinate through #6076 with the adjacent
+      durable CLI worker tracker #4038.
+- [ ] Inventory the current mode selectors, acquisition entry points, retained
+      conversation identity, and protocol/capability checks; reuse existing
+      strict bridge recovery rather than inventing a second resume mechanism.
+- [ ] Give agent-bridge one local/remote CLI/ACP acquisition boundary that owns
+      live reuse, stopped-conversation resume, and explicitly fresh creation.
+- [ ] Route dispatch session acquisition and delivery exclusively through that
+      boundary; retain worktree allocation, task leases, and terminal cleanup
+      with their existing owners.
+- [ ] Complete the Phase 6 validation matrix and update authoritative bridge,
+      dispatch, and worktree/venue documentation where their contracts change.
+
 ### Bug sweep — linked open bugs (2026-09-24)
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
@@ -656,6 +683,11 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   - Project-scoped Windows SSH dispatch landing at the wrong cwd is exactly this effort's CWD-keyed discovery scope.
 
 ## Validation Plan
+
+- [ ] Run the [Phase 6 acquisition matrix](dispatch-session-acquisition.md#validation-plan),
+      including actual conversation-ID continuity across process exit, CLI/ACP
+      task-mode selection, fresh/retired/unknown identity, concurrent holders,
+      pending steers, missing optional capabilities, and protocol skew.
 
 - [x] A represented interactive peer under concurrent `send` pressure never
       produces a split-stream turn (regression covering the Phase 1 fix) —
@@ -744,6 +776,21 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-10-10 — Scope dispatch acquisition consolidation before implementation
+
+The operator requested one bridge-owned session acquisition boundary for
+dispatch, with explicit task-mode selection and automatic new-versus-resume
+handling. Added Phase 6 and its linked contract under #6076 instead of creating
+a peer effort. PR #6064 is the narrow prerequisite, not evidence that every
+backend now shares acquisition ownership.
+
+The current headless adapter already supports strict retained-worktree recovery
+through bridge resume/send/create (`bridge.spawn_or_resume_worker`); the gap is
+ownership consolidation and CLI parity, not absence of all cold-resume support.
+Historical CLI launch paths and `create`'s explicit-fresh behavior must be
+reconciled without losing deliberate retirement, task affinity, or standalone
+dispatch behavior. No runtime implementation is included in this planning delta.
 
 ### 2026-09-22 — Detached venue launch: an orchestrator's observable, steerable remote CLI session
 

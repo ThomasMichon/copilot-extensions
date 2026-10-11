@@ -57,6 +57,10 @@ Version-1 compatibility also covers the existing declarative fields:
   the action's keyboard affordance without hard-coding a provider's keys;
 - top-level `worktree_actions`;
 - top-level `config_sections`;
+- `confirm: true` on a pivot action, a `worktree_actions` entry, or a
+  `config_sections` entry gates that action behind a native modal
+  are-you-sure before it actually runs — Cancel is the gate's initial
+  choice, so a reflexive Enter never runs the action;
 - optional top-level `create_action` — a pivot-**level** "New …" affordance
   (no row selected), distinct from a row-scoped `kind:"form"` action:
   `{"label": <str>, "key"?: <str, default "create">,

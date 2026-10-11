@@ -395,8 +395,8 @@ class PickerScreenWorktreeActionsMixin:
         cur, no_mux, ahp = result
         ext = getattr(self, "_wt_submenu_ext", {}) or {}
         if cur in ext:
-            # A cross-plugin contributed action (#B): run it and rescan.
-            self._run_wt_action(ext[cur], rec)
+            from .engine_action_confirm import confirm_then
+            confirm_then(self.app, ext[cur], lambda a=ext[cur]: self._run_wt_action(a, rec))
             return
         workers = getattr(self, "_wt_submenu_workers", {}) or {}
         if cur in workers:

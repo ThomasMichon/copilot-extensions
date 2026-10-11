@@ -23,6 +23,20 @@ container manager or a private infrastructure provider its required substrate.
 
 ## Concepts & Components
 
+### Standalone fleet-manager system
+
+`fleet-manager` is the standalone entry point and distribution home for the
+fleet's CLI, controller/Gateway and machine connectors. Its services are usable
+without Copilot or marketplace hooks, while optional harness integrations
+provide authenticated client access.
+
+Ordinary user machines install only the thin CLI client. Commands reach the
+explicitly configured remote controller API using supplied scoped authority;
+client installation never installs Komodo Core, starts a controller or directly
+mutates worker container managers. A designated service host runs the
+controller/Gateway and its selected deployment-manager integration. Worker hosts
+run only their explicitly adopted connectors and service roles.
+
 ### Harness-declared fleet
 
 Harness-side configuration declares the selected fleet driver, machine membership,
@@ -90,6 +104,22 @@ operator control, access to a registered service, and borrowing resource
 credentials are distinct authorities. Providers own issuance, account/audience
 selection, expiry, renewal, and any interaction required to acquire credentials.
 The Gateway is not a blanket credential pool or an implicit source of authority.
+
+### Recommended fleet templates and owned configuration
+
+A harness supplies a recommended fleet shape; the adopter's own configuration
+records choices, custom capabilities and managed identities. Setup compares both
+with authoritative live state and admitted quota rather than treating a template
+as permission to overwrite the fleet. Recommended service capacity and optional
+execution capacity are separate, inspectable dimensions.
+
+Each adopted fleet supplies central management services and connections: Gateway,
+coordination, task state, indexing and declared communication capabilities.
+An unavailable future capability is an explicit requirement awaiting a supported
+implementation, not a fabricated ready service. Minimal capacity prioritizes
+these services; more capacity adds agent/build containers and product venues.
+Authenticated, operator-enrolled external execution hosts can supplement a small
+fleet without becoming controller hosts implicitly.
 
 ## Features
 
@@ -165,6 +195,46 @@ prerequisites, not hidden manual repairs.
 The deployment adapter is replaceable: adopting one manager does not bake its
 resource model into service contracts or require it for direct/standalone use.
 Inspection and planning do not install a manager, enroll hosts or start roles.
+
+### role-selective-system-lifecycle
+
+Client, controller and connector installations have explicit, independently
+usable install, update, diagnostics and owned-uninstall flows. The client has
+no heavy server dependencies or automatic hosting side effects. Server roles
+use existing service distributions and runtime activation authorities rather
+than introducing competing installers for the same service state.
+
+Live configuration changes are validated and applied atomically by the owning
+controller or connector. Invalid candidates preserve the last valid effective
+configuration and report why they were rejected. Changed trust, placement or
+roles require their own authorization and safe transitions; accepting a config
+file does not silently create capacity or activate a previously retired role.
+Restart-only changes are reported explicitly, not disguised as successful reload.
+
+### safe-template-and-live-refresh
+
+"Set up my fleet" resolves the adopter's existing configuration before planning
+recommended placement against live resources and available quota. Empty fleets
+can be outfitted within approved capacity; inadequate quota produces an explicit
+smaller proposal or unmet-capacity outcome, never silent quota expansion.
+Refresh shows additions, drift and proposed changes while retaining custom roles,
+novel capabilities and work. Unknown live resources remain observed, not deleted.
+
+Containers and code venues require inspection and source-control finalization
+before cleanup. Configuration removal, resource retirement and data destruction
+are separate approved operations; a template difference alone cannot authorize
+them. Stale inventory or uncertain ownership cannot produce a cleanup plan
+presented as safe convergence.
+
+### user-controlled-fleet-observation
+
+Gateway-backed telemetry and monitoring belong to the operator's fleet, with
+explicit collection, retention, access and export choices. Fleet-wide health
+separates services, connectors and execution capacity and remains diagnosable
+when a target is offline. Generic telemetry does not depend on an external
+analytics vendor or send data outside the fleet without consent.
+Organization-governed telemetry adapters are separate policy-owned integrations;
+they cannot silently widen the portable collector's scope.
 
 ## Behaviors
 

@@ -64,12 +64,13 @@ def scrub_session_credentials(env: dict[str, str]) -> dict[str, str]:
 
 
 def direct_daemon_python(executable: str) -> tuple[str, dict[str, str]]:
-    """Resolve a direct interpreter while preserving a Windows venv's imports.
+    """Resolve direct console Python while preserving a Windows venv's imports.
 
     A venv redirector's PID is not the daemon PID. Do not silently retain
     that launch shape when the shared helper cannot select the real base
     interpreter: routing and generation ownership require the returned PID
-    to belong to the runtime itself.
+    to belong to the runtime itself. Recurring mux children need a console
+    root under windowless_daemon_kwargs, not a GUI-subsystem interpreter.
     """
     python = windowless_python(executable)
     extra_env = windowless_python_env(executable)
@@ -79,6 +80,13 @@ def direct_daemon_python(executable: str) -> tuple[str, dict[str, str]]:
             "Cannot start mux daemon directly: the Windows venv's base "
             "pythonw.exe is unavailable; repair the Python installation."
         )
+    if os.name == "nt" and os.path.basename(python).lower() == "pythonw.exe":
+        python = os.path.join(os.path.dirname(python), "python.exe")
+        if not os.path.isfile(python):
+            raise RuntimeError(
+                "Cannot start mux daemon directly: the base python.exe "
+                "is unavailable; repair the Python installation."
+            )
     return python, extra_env
 
 

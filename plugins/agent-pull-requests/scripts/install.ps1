@@ -212,6 +212,7 @@ if ($true) {
 }
 
 function Invoke-VersionedActivate {
+    param([string]$PayloadHash = '')
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
@@ -225,7 +226,7 @@ function Invoke-VersionedActivate {
         Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         return $false
     }
-    if (-not (Invoke-VersionedMarkComplete)) {
+    if (-not (Invoke-VersionedMarkComplete -PayloadHash $PayloadHash)) {
         return $false
     }
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
@@ -278,24 +279,97 @@ function Get-BootstrapPython {
         $c = Get-Command $cand -ErrorAction SilentlyContinue
         if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
     }
+    # No working system Python found -- uv (already a hard install
+    # prerequisite, resolved earlier into $script:uvPath) can provision one
+    # on demand. Without this fallback, a genuinely python-less first
+    # install would compute no payload hash at all, write an unhashed
+    # completion marker, then find a REAL hash available on the very next
+    # run (once the venv's own python exists) -- wrongly reporting
+    # unchanged content as a payload conflict.
+    if ($script:uvPath) {
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $found = (& $script:uvPath python find 2>$null | Out-String).Trim()
+        if (-not $found) {
+            & $script:uvPath python install --quiet 2>$null | Out-Null
+            $found = (& $script:uvPath python find 2>$null | Out-String).Trim()
+        }
+        $ErrorActionPreference = $prevEAP
+        if ($found -and (Test-Path $found)) { return $found }
+    }
     return $null
 }
 
 function Get-PayloadHash {
-    try {
-        $parts = @()
-        $pp = Join-Path $PluginDir 'pyproject.toml'
-        if (Test-Path $pp) { $parts += (Get-Content $pp -Raw) }
-        $libs = Join-Path $PluginDir 'libs'
-        if (Test-Path $libs) {
-            Get-ChildItem $libs -Recurse -Filter 'pyproject.toml' -ErrorAction SilentlyContinue |
-                Sort-Object FullName | ForEach-Object { $parts += (Get-Content $_.FullName -Raw) }
+    # Use the canonical fingerprint_source() (libs/versioned-runtime), not a
+    # bespoke pyproject.toml-only hash: a prior audit (#5472) found exactly
+    # this narrower scope on another adopter -- changing src\agent_pull_requests
+    # WITHOUT touching pyproject.toml must still be detected as a content
+    # change, or an installed slot could wrongly report `reuse` for a
+    # genuinely different payload.
+    #
+    # Returns '' only for the two legitimate "nothing to hash yet" cases
+    # (no bootstrap Python available on a first-ever install; no declared
+    # roots exist at all) -- both already degrade the same way the pre-fix
+    # hash did. Any OTHER failure (the fingerprint command itself erroring,
+    # e.g. on an unsupported filesystem object) THROWS: a caller must treat
+    # that as a hard install failure, never silently proceed as if "no
+    # content changed", which would be exactly the stale-slot-reuse this
+    # seam exists to prevent.
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    $py = Get-BootstrapPython
+    if (-not $py) { return '' }
+    $roots = @()
+    $pp = Join-Path $PluginDir 'pyproject.toml'
+    if (Test-Path $pp) { $roots += $pp }
+    if (Test-Path $PkgSrcDir) { $roots += $PkgSrcDir }
+    $libs = Join-Path $PluginDir 'libs'
+    if (Test-Path $libs) {
+        Get-ChildItem $libs -Recurse -Filter 'pyproject.toml' -ErrorAction SilentlyContinue |
+            Sort-Object FullName | ForEach-Object { $roots += $_.FullName }
+    }
+    # This plugin's own dependencies on shared libraries are resolved live
+    # via [tool.uv.sources] `path = "..."` entries in pyproject.toml (e.g.
+    # "../../libs/work-coalescing-singleton") -- never vendored -- so
+    # those libraries' OWN content is just as much a part of this plugin's
+    # actual runtime payload as src\agent_pull_requests is. Fingerprint
+    # each referenced library's COMPLETE directory (not just its own
+    # pyproject.toml): a shared library's source changing without a
+    # version bump here must still be detected as content drift.
+    if (Test-Path $pp) {
+        $ppText = Get-Content $pp -Raw
+        $sourcesMatch = [regex]::Match($ppText, '(?ms)^\[tool\.uv\.sources\](.*?)(?=^\[|\z)')
+        if ($sourcesMatch.Success) {
+            $pathMatches = [regex]::Matches($sourcesMatch.Groups[1].Value, 'path\s*=\s*"([^"]*)"')
+            foreach ($m in ($pathMatches | Sort-Object { $_.Groups[1].Value })) {
+                $resolved = Join-Path $PluginDir $m.Groups[1].Value
+                if (Test-Path $resolved) {
+                    $roots += (Resolve-Path $resolved).Path
+                }
+            }
         }
-        $joined = [string]::Join("`n", $parts)
-        $sha = [System.Security.Cryptography.SHA256]::Create()
-        $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($joined))
-        return (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
-    } catch { return '' }
+    }
+    if ($roots.Count -eq 0) { return '' }
+    # Capture stdout (the hash) and stderr (diagnostics) SEPARATELY via a
+    # temp file: a bare `2>&1` would merge stderr into the returned hash
+    # even on success, silently contaminating it if the command ever
+    # emits a warning/notice on stderr while still exiting 0.
+    $fpArgs = @($vr, '--root', $InstallDir, 'fingerprint') + $roots
+    $errFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $stdout = (& $py @fpArgs 2>$errFile | Out-String).Trim()
+        $rc = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+        $stderrText = (Get-Content -LiteralPath $errFile -Raw -ErrorAction SilentlyContinue)
+    } finally {
+        Remove-Item -LiteralPath $errFile -ErrorAction SilentlyContinue
+    }
+    if ($rc -ne 0) {
+        throw "Failed to compute payload fingerprint: $($stderrText.Trim())"
+    }
+    return $stdout
 }
 
 function Invoke-VersionedSlotClean {
@@ -317,6 +391,7 @@ function Invoke-VersionedSlotClean {
 }
 
 function Invoke-VersionedMarkComplete {
+    param([string]$PayloadHash = '')
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
@@ -325,7 +400,15 @@ function Invoke-VersionedMarkComplete {
         return $false
     }
     $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
-    $ph = Get-PayloadHash
+    # Reuse the SAME payload hash computed once, before the build -- never
+    # recompute it here. A local-checkout install does not self-stage: the
+    # live source tree can change between the pre-build admission check
+    # and this post-build marker write (e.g. an edit landing mid-install),
+    # and `uv pip install` already consumed whatever bytes were present
+    # earlier. Recomputing here would let the marker describe NEWER
+    # content than what was actually built into the slot, letting a later
+    # install wrongly reuse it as if it matched.
+    $ph = $PayloadHash
     if ($ph) { $mcArgs += @('--payload-hash', $ph) }
     & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
     if ($LASTEXITCODE -ne 0) {
@@ -513,6 +596,11 @@ try {
         Write-Fail 'uv is required but could not be resolved or acquired'
         exit 1
     }
+    # Script-scoped so Get-BootstrapPython (defined earlier, but only ever
+    # CALLED after this point) can reach it as a last-resort Python
+    # provisioner without needing an explicit parameter threaded through
+    # every helper that transitively calls Get-BootstrapPython.
+    $script:uvPath = $uvPath
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) {
             New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -521,7 +609,13 @@ try {
     Write-Ok "Directories: $InstallDir"
     Install-HookFiles
 
-    $payloadHash = Get-PayloadHash
+    $payloadHash = $null
+    try {
+        $payloadHash = Get-PayloadHash
+    } catch {
+        Write-Fail "Could not compute payload fingerprint: $($_.Exception.Message)"
+        exit 1
+    }
     $slotAlreadyComplete = $false
     if ($VersionedRuntime) {
         if (Test-VersionedSlotComplete -ExpectedHash $payloadHash) {
@@ -562,7 +656,7 @@ try {
         Remove-ConsoleTrampolines -VenvDir $VenvDir
         Write-Ok 'Package installed: agent-pull-requests'
 
-        if (-not (Invoke-VersionedActivate)) { exit 1 }
+        if (-not (Invoke-VersionedActivate -PayloadHash $payloadHash)) { exit 1 }
     }
 
     Write-SimpleBinstub `

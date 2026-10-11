@@ -480,17 +480,22 @@ def _allowed(lines: list[str], lineno: int) -> bool:
 
 def verify() -> list[str]:
     problems: list[str] = []
-    cache: dict[Path, tuple[str, list[tuple[int, str]]]] = {}
+    cache: dict[Path, tuple[str, list[tuple[int, str]], list[tuple[int, str]]]] = {}
     parse_failures: set[Path] = set()
 
-    def scan(f: Path) -> tuple[str, list[tuple[int, str]]]:
+    def scan(f: Path) -> tuple[str, list[tuple[int, str]], list[tuple[int, str]]]:
         if f in cache:
             return cache[f]
+        text = f.read_text(encoding="utf-8")
         try:
-            result = _find_flags(f)
+            tree = ast.parse(text, filename=str(f))
+            flags = _FlagFinder()
+            flags.visit(tree)
+            spawns = _SpawnFinder(text)
+            spawns.visit(tree)
+            result = (text, sorted(set(flags.hits)), sorted(set(spawns.hits)))
         except SyntaxError as exc:
-            text = f.read_text(encoding="utf-8")
-            result = (text, [])
+            result = (text, [], [])
             if f not in parse_failures:
                 parse_failures.add(f)
                 rel = f.relative_to(REPO).as_posix()
@@ -506,7 +511,7 @@ def verify() -> list[str]:
     # plugin source so a vendored primitive cannot bypass the adoption gate.
     for src in _production_src_roots():
         for f in _iter_py(src):
-            text, hits = scan(f)
+            text, hits, _ = scan(f)
             lines = text.splitlines()
             rel = f.relative_to(REPO).as_posix()
             for lineno, tok in hits:
@@ -525,7 +530,7 @@ def verify() -> list[str]:
         if not src.is_dir():
             continue
         for f in _iter_py(src):
-            text, hits = scan(f)
+            text, hits, _ = scan(f)
             if not hits:
                 continue
             lines = text.splitlines()
@@ -552,10 +557,7 @@ def verify() -> list[str]:
     path_allow = _load_path_allowlist()
     for src in _production_src_roots():
         for f in _iter_py(src):
-            try:
-                text, hits = _find_unsuppressed_spawns(f)
-            except SyntaxError:
-                continue  # Already reported by the scan above.
+            text, _, hits = scan(f)
             if not hits:
                 continue
             lines = text.splitlines()

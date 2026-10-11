@@ -95,8 +95,9 @@ def add_parsers(sub) -> None:
         help="Cache-only fast paint (picker-cache-first-paint, "
         "dotfiles#948): build JSON rows from ONLY the cached "
         "session-render fields in each tracking record -- no "
-        "events.jsonl scan, no process/mux scan, no git "
-        "classify. Never-populated worktrees render Unknown. "
+        "events.jsonl scan or git classification. With --mux-details, "
+        "include one live mux-session enumeration. "
+        "Never-populated worktrees render Unknown. "
         "Used by the Picker's SSH fast phase; a --classify "
         "populate later fills + writes the cache back.",
     )
@@ -453,11 +454,25 @@ def cmd_list(args: argparse.Namespace) -> int:
             from .picker_support.data_local import _overlay_cached_state
             from . import delegate_cli
 
+            mux_snapshot = None
+            if getattr(args, "mux_details", False):
+                mux_snapshot = sessions._list_mux_sessions()
+                if mux_snapshot is None:
+                    with output.stdout_to_stderr():
+                        output.warn("Mux enumeration unavailable; cached listing has no live mux observation.")
             worktrees = []
             with cfg.cached_load_config_scope():
                 for rec in records:
+                    mux_info = None
+                    if mux_snapshot is not None:
+                        name = sessions.mux_session_name(rec.worktree_id)
+                        mux_info = sessions.MuxInfo(
+                            exists=name in mux_snapshot,
+                            clients=mux_snapshot.get(name, 0),
+                        )
                     raw = _worktree_to_dict(
                         rec,
+                        mux_info=mux_info,
                         include_profile_assignment_history=getattr(
                             args, "profile_assignment_history", False
                         ),

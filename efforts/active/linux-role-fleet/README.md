@@ -17,6 +17,9 @@ Make an explicitly adopted fleet of Linux hosts run containerized roles from
 the existing service ecosystem with repeatable setup and inspectable placement.
 Use a lightweight existing deployment manager, not a new general scheduler.
 Keep the core portable and the provider-specific provisioning private.
+The standalone system is named `fleet-manager`. Ordinary harness/user machines
+run only its authenticated API client; a designated remote service host owns
+the controller/Gateway, deployment adapter and selected Komodo Core.
 
 Komodo/Periphery is the first adapter to prove. SSH/Compose is the lower-footprint
 static-host alternative. Swarm remains deferred until automatic cross-host
@@ -82,7 +85,62 @@ The operator explicitly selected:
 The operator confirmed `linux-role-fleet`. Detailed sequencing and proof
 requirements below are **agent-recommended**, not additional operator mandates.
 
+Standalone-system direction (public-safe capture, private host substrate
+identifier removed):
+
+> Let's focus on giving this whole system its own standalone entry point, and
+> home for services and CLI tools. "fleet" or "factory" are reasonably generic.
+> Do we want "fleet-manager" to complement worktree-manager? We'll need something
+> with proper install/uninstall, live-config support, etc. One designated machine
+> will be the controller/Gateway, controlled via its API to manage the rest of
+> the fleet; the harness-side installed CLI just sends commands with supplied
+> auth. The user's machines won't directly have the Komodo controller or anything.
+
+The operator confirmed **`fleet-manager`**. This replaces the proposed
+workstation-local deployment CLI ownership with a remote-controller system and
+thin client. The private hosting substrate remains an adopter choice, not a
+public hard dependency. Controller-host selection is explicit and does not
+authorize acquiring or migrating a live machine.
+
 ## Plan
+
+### Mission amendment - Setup, refresh and first useful services
+
+Public-safe summary of the operator's 2026-10-10 direction; full private wording
+remains with the adopter and is not linked from public artifacts:
+
+- Deliver "set up my fleet" through the private provider adapter and generic
+  `fleet-manager`, using a harness recommendation and existing adopter config
+  before diffing authoritative live resources and quota.
+- Outfit empty eligible fleets within quota; offer a smaller/scaled proposal
+  when quota is insufficient, never silently expand capacity.
+- Keep essential central services distinct from optional agent/build/product
+  venues. One-host fleets prioritize services and can use explicitly enrolled
+  external execution hosts; login/manual adoption remains required.
+- Refresh preserves work and custom capabilities. Containers/code venues require
+  inspection/finalization before cleanup, not template-driven deletion.
+- Integrate user-controlled fleet telemetry/monitoring at Gateway. External
+  organization-governed analytics is a separate later private policy adapter.
+- Initially prove index and dispatch on the Gateway host, then centralized
+  worktree/bridge observation and a full harness in a provider-hosted container.
+  Bare-host harness installation is not a prerequisite for this validation.
+- The name remains `fleet-manager`; the operator explicitly reconfirmed it.
+
+Implementation sequencing below is **agent-recommended**:
+
+- [ ] Review [safe setup/refresh proposal](fleet-setup-reconciliation.md) and
+  amended core intent before provider/service changes.
+- [ ] Implement bounded template/adopter/live/quota planning and version-bound
+  apply receipts with no implicit provisioning/cleanup.
+- [ ] Prove empty, existing-custom, no-quota, one-host and stale/partial states.
+- [ ] Supply harness default-template and paired-config integration downstream;
+  keep the portable runtime name-free and the private capacity adapter private.
+- [ ] Prove first useful index/dispatch service roles and full managed harness
+  container on an explicitly admitted/leased controller host.
+- [ ] Add central worktree/bridge monitoring and declared future communication
+  roles without inventing ready capabilities that are not implemented.
+- [ ] Implement explicit Gateway telemetry scope/retention and preservation-safe
+  finalization/retirement contracts before fleet-wide refresh/cleanup.
 
 ### Phase 1 - Reviewed intent and substrate contract
 - [x] Land the machine-fleet vision amendment and this effort through automated
@@ -93,6 +151,13 @@ requirements below are **agent-recommended**, not additional operator mandates.
   installer/update, role/service and credential authorities; retain #5789 scope.
 
 ### Phase 2 - Repeatable first adoption
+- [x] Land the standalone `fleet-manager` boundary amendment and
+  [system proposal](fleet-manager-system.md) before implementing system packaging.
+- [ ] Establish standalone client/controller/connector packaging and explicit
+  install/update/diagnostics/uninstall, with a client-only default and no local
+  Komodo/controller activation on user machines.
+- [ ] Define controller-owned live configuration validation, atomic activation,
+  last-valid-state recovery and explicit restart-required outcomes.
 - [ ] Implement explicit inspect/plan/apply behavior for the chosen adapter:
   no mutation on discovery or mere plugin installation.
 - [x] Prove initial Core deployment, configured first admin, authenticated API
@@ -129,8 +194,25 @@ requirements below are **agent-recommended**, not additional operator mandates.
 
 All entries are **agent-recommended implementation gates**.
 
+- [ ] Three-input reconciliation preserves user overrides/unknown roles and live
+  unowned resources; stale config/inventory/quota invalidates apply.
+- [ ] No quota cannot trigger creation; one-host service-only placement reports
+  unmet roles honestly and preserves external host enrollment requirements.
+- [ ] Refresh and retirement inspect unfinished work, claims, PRs and volumes;
+  no data/resource loss from template drift or process idleness.
+- [ ] Initial index/dispatch and full harness container proofs use actual
+  processes, managed worktrees/plugin loading and configured source auth.
+- [ ] User-controlled monitoring is bounded/redacted and off-fleet analytics
+  export remains disabled without separate explicit policy/consent.
 - [ ] Pure contracts: explicit provider/adapter selection, fixed named operations,
   untrusted/ambiguous input refusal and no raw remote script/URL/executable API.
+- [ ] Client-only fresh install and uninstall on Windows/Linux: no controller,
+  Komodo/database, host daemon, worker mutation or local secret issuer; API
+  credentials are supplied through the existing provider custody contract.
+- [ ] Controller API scope/authorization and per-target receipts, distinct from
+  manager credentials and machine enrollment; client disconnect cannot own work.
+- [ ] Live config invalid-candidate rejection, last-valid-state persistence,
+  atomic replacement, role retirement and restart-required reporting.
 - [ ] Real first-touch Core/Periphery installation and authenticated enrollment;
   no pre-existing admin/API key, host config or browser state hiding setup work.
 - [ ] Repeat and interrupted adoption, rejected enrollment, stale credentials,
@@ -154,6 +236,8 @@ All entries are **agent-recommended implementation gates**.
 
 ## Proposal
 
+[Safe fleet setup and refresh](fleet-setup-reconciliation.md).
+[Standalone fleet-manager system](fleet-manager-system.md).
 [Substrate evaluation and proposed adapter boundary](substrate-evaluation.md).
 Runtime package/API details belong to the implementation contract after review,
 not to the vision. This effort does not acquire or migrate live capacity.
@@ -193,3 +277,25 @@ not to the vision. This effort does not acquire or migrate live capacity.
   Two logical Periphery instances in one local test engine do not satisfy the
   two independent Linux host, service-role packaging, credential rotation,
   stateful placement or safe-update gates.
+
+### 2026-10-10 - Proof merged and standalone boundary selected
+- #6056 merged after current-head Copilot approval and all actual CI gates.
+  The proof remains opt-in and is not a production fleet deployment.
+- Operator confirmed `fleet-manager` as the standalone system and selected
+  remote controller/Gateway ownership with thin authenticated user clients.
+  No ordinary user machine should host Komodo Core as a side effect.
+- Install/uninstall and live-config are requested system requirements, not
+  deferred optional wrappers. This amendment precedes runtime packaging.
+
+### 2026-10-11 - Standalone system amendment merged
+- #6094 merged at `2026-10-11T01:15:18Z` after genuine current-head approval,
+  corrected dependency/auth status descriptions and successful required CI.
+- Public canonical topology is now thin user clients plus a designated remote
+  controller/Gateway and explicitly adopted connectors. The private hosting
+  provider is not a portable dependency or client-side controller.
+- Next implementation slice establishes the standalone distribution/dependency
+  boundary and client-only lifecycle. Server hosting, live-config runtime,
+  authentication persistence and controller APIs remain unchecked plan gates.
+- Native response #6034 remains held on confirmed partial-publication recovery
+  #6038. No lease was hand-edited and the final test-only follow-up stays local;
+  this does not transfer publisher ownership from the existing #5835 campaign.

@@ -451,32 +451,47 @@ def test_fetch_via_tarball_refuses_a_symlinked_libs_root(tmp_path, monkeypatch):
 
 
 def test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir(tmp_path, monkeypatch):
-    """Round-10 review finding: checking only payload.is_symlink() misses a
-    symlinked TOP-LEVEL extraction dir (the codeload <hash>-<ref>/ dir)
-    whose own worktree-manager/ subpath is a real (non-symlink) file
-    within the symlinked-to target -- rdir.is_dir() already follows the
-    symlink to find it, so payload itself would never be a symlink even
-    though the whole tree was reached via a symlinked parent.
+    """Refuse a native directory symlink above a non-symlink payload.
 
-    Unlike the other two symlink-refusal tests above, this scenario's
-    symlink is created by ``tarfile``'s OWN extraction (inside
-    ``_fetch_via_tarball`` under test), not by this test's setup code --
-    so the usual ``_symlink_to_or_skip`` guard can't wrap it directly.
-    Probe the same underlying privilege first and skip identically if
-    it's unavailable (without this, a host lacking
-    ``SeCreateSymbolicLinkPrivilege`` silently fails to materialize the
-    symlink member at all, and the assertion below fails on an unrelated
-    "payload not found" error instead of exercising this check)."""
+    Windows requires a native target path and the directory flag that tarfile's
+    os.symlink call omits.
+    Supply it at the fixture's link-creation seam, retaining real extraction,
+    native filesystem checks, and the production refusal path on every OS.
+    Hosts without symlink-creation privilege use the existing capability skip.
+    """
+    import os
+    from pathlib import Path
     import tarfile
+    from types import SimpleNamespace
 
-    probe_target = tmp_path / "symlink-probe-target"
-    probe_target.mkdir()
-    probe_link = tmp_path / "symlink-probe-link"
-    try:
-        probe_link.symlink_to(probe_target, target_is_directory=True)
-    except OSError as exc:
-        pytest.skip(f"symlink creation unavailable: {exc}")
-    probe_link.unlink()
+    if os.name == "nt":
+        probe_target = tmp_path / "symlink-probe-target"
+        probe_target.mkdir()
+        _symlink_to_or_skip(
+            tmp_path / "symlink-probe", probe_target, target_is_directory=True,
+        )
+
+        def directory_symlink(src: str, dst: str) -> None:
+            assert src == "nested/real-target"
+            assert Path(dst).name == "copilot-extensions-main"
+            os.symlink(str(Path(src)), dst, target_is_directory=True)
+
+        # Replace only tarfile's module reference, not the shared os module.
+        monkeypatch.setattr(
+            tarfile, "os",
+            SimpleNamespace(**(vars(os) | {"symlink": directory_symlink})),
+        )
+
+    original_extract = self_install._safe_extract
+
+    def inspect_extract(tf: tarfile.TarFile, dest: Path) -> None:
+        original_extract(tf, dest)
+        link = dest / "copilot-extensions-main"
+        assert link.is_symlink() and link.is_dir()
+        payload = link / "worktree-manager"
+        assert not payload.is_symlink() and (payload / "pyproject.toml").is_file()
+
+    monkeypatch.setattr(self_install, "_safe_extract", inspect_extract)
 
     outside = tmp_path / "outside-extraction-root"
     (outside / "worktree-manager" / "src" / "worktree_manager").mkdir(parents=True)
@@ -528,6 +543,7 @@ def test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir(tmp_path, monk
     staging = tmp_path / "staging"
     with pytest.raises(OSError, match="symlink|link to"):
         self_install._fetch_via_tarball(staging, "https://codeload.example/fake.tar.gz")
+    assert list(staging.iterdir()) == []
 
 
 @pytest.mark.parametrize("repo,ref,expected", [

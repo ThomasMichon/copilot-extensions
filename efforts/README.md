@@ -10,9 +10,11 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Private PR Source Attribution](active/private-pr-source-attribution/README.md) | Draft; completion proposal | #6068 |
+| [Process Slot Ownership](active/process-slot-ownership/README.md) | Draft; reader-lifetime continuation | #3963; registry presentation separately #5559 |
+| [Process Spawn Reduction](active/process-spawn-reduction/README.md) | Draft | #6086 |
+| [Private PR Source Attribution](active/private-pr-source-attribution/README.md) | Active; originating identity slice | #6068 |
 | [Remote Picker Seed Parity](active/remote-picker-seed-parity/README.md) | Draft; operator-requested parity | #6057 |
-| [Mux Child Window Suppression](active/mux-child-window-suppression/README.md) | Draft | #6040 |
+| [Mux Child Window Suppression](active/mux-child-window-suppression/README.md) | Active | #6040 |
 | [Native Context Handoff Compatibility](active/native-context-handoff-compatibility/README.md) | Active; capability-contract investigation | #6028 |
 | [Linux Role Fleet](active/linux-role-fleet/README.md) | Active; reviewed Komodo-first plan and isolated adoption proof | #6030, #5861 |
 | [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Active; proposal reviewed | #6007 |
@@ -28,6 +30,7 @@ that pattern to this repository.
 | [Lean Session Lifecycle](active/lean-session-lifecycle/README.md) | Draft | #5579, #5664, #2619 |
 | [Session Intelligence and Accounting](active/session-intelligence-and-accounting/README.md) | Active | #5665 |
 | [Operator Attention Contract ("what needs you")](active/operator-attention-contract/README.md) | Active (Phases 1-3 built; `bridge` + `pr` sources in review) | #5668 (core + `dispatch`, merged), #5813 (`bridge` + `pr` with their sibling commands); clients separately |
+| [Supervised-Lane Process Discipline](active/supervised-lane-process-discipline/README.md) | Draft | #5301 |
 | [Worker-Status Observability Hooks](active/worker-status-observability-hooks/README.md) | Draft | #5257 |
 | [Compatibility-Root Decoupling](active/compatibility-root-decoupling/README.md) | Draft | #5293 |
 | [Retire Dead-Letter Status](active/retire-dead-letter-status/README.md) | Draft | #4744 |

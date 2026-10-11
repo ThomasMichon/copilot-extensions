@@ -44,6 +44,31 @@ def test_flags_raw_flag_in_adopting_plugin(repo):
     assert any("agent-foo" in p and "CREATE_NO_WINDOW" in p for p in problems)
 
 
+def test_one_parse_preserves_all_rules_and_refreshes_between_runs(repo, monkeypatch):
+    _mk_plugin(
+        repo, "agent-all", adopts=True,
+        body=("import subprocess\nx = subprocess.CREATE_NEW_CONSOLE\n"
+              "y = subprocess.CREATE_NO_WINDOW\nsubprocess.run(['git', 'status'])\n"),
+    )
+    source = repo / "plugins" / "agent-all" / "src" / "agent_all" / "mod.py"
+    original_parse = guard.ast.parse
+    calls = []
+
+    def parse(text, **kwargs):
+        calls.append(kwargs["filename"])
+        return original_parse(text, **kwargs)
+
+    monkeypatch.setattr(guard.ast, "parse", parse)
+    problems = guard.verify()
+    assert calls == [str(source)]
+    assert any("unsafe 'CREATE_NEW_CONSOLE'" in p for p in problems)
+    assert any("raw 'CREATE_NO_WINDOW'" in p for p in problems)
+    assert any("unsuppressed console spawn of 'git'" in p for p in problems)
+    source.write_text("x = 1\n", encoding="utf-8")
+    assert guard.verify() == []
+    assert calls == [str(source)] * 2
+
+
 def test_ignores_non_adopting_plugin(repo):
     _mk_plugin(repo, "agent-bar", adopts=False,
                body="import subprocess\nx = subprocess.CREATE_NO_WINDOW\n")
@@ -419,4 +444,3 @@ def test_declarative_json_allowlist_file_suppresses(repo, monkeypatch):
     allow.write_text(f"{rel}  reviewed, consumer applies no_window_kwargs\n", encoding="utf-8")
     monkeypatch.setattr(guard, "HEADLESS_GUARD_ALLOWLIST", allow)
     assert guard.verify() == []
-

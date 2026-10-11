@@ -66,7 +66,14 @@
   Plan below.
 - **Umbrella issue:** _TBD — file once this effort's plan clears review_
 - **Sub-issues:** #5890 (closed-signature recurrence and bounded-attempt policy;
-  the existing Phase 3 decision remains open)
+  the existing Phase 3 decision remains open); #6102 (portable local CI-repair
+  container template and dispatch emitter requirements)
+
+**Local execution lane (requirements, not delivered):** the existing cloud
+workflow is not the local `agent-dispatch` worker. The portable container
+template and verified-failure emitter remain outstanding under
+[the local-dispatch slice](local-dispatch-lane.md). This amendment does not
+alter cloud credentials, enable either lane, or select a deployment venue.
 
 ## Guiding Intent
 
@@ -163,6 +170,13 @@ agent that will react to failed promotion runs and attempt targeted test
 fixes."
 
 ## Plan
+
+### Local dispatch lane — outstanding template and emitter
+- [ ] Deliver the portable venue template and dispatch emitter under
+      [the requirements and ownership contract](local-dispatch-lane.md)
+      (#6102), using the existing container/dispatch infrastructure.
+      Resolve the existing #5890 attempt-policy decision before autonomous
+      activation; no competing scheduler or inferred account selection.
 
 ### Phase 1 — Detection + dedup (no autonomous fix yet; report-only) — Done
 - [x] Add a step to `validate-and-promote.yml`'s `full`/`guards-full-sweep`/
@@ -824,6 +838,9 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
 
 ## Validation Plan
 
+- [ ] Satisfy the [local-lane acceptance checks](local-dispatch-lane.md#acceptance)
+      before claiming that a configured container is the actual dispatched
+      task venue or that independent inference/repository auth is verified.
 - [ ] Dry-run Phase 1's detection step against a deliberately-reproduced
       failing run (or the real `agent-worktrees` flake from this effort's
       own Context section, if it recurs) before wiring it to file anything
@@ -867,6 +884,15 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
 _Pending._
 
 ## Journal
+
+### 2026-10-10 — Local-lane requirements documented
+
+- Recorded #6102 as an outstanding portable template/emitter slice in this
+  existing effort, without implementing or activating it. Inference and
+  repository-operation authentication are independent requirements; the cloud
+  workflow's credential configuration is unchanged. #5890 remains the owner
+  of the unresolved recurrence/attempt-policy decision. This is a requirements
+  amendment, not runtime verification or effort completion.
 
 ### 2026-09-25 — Kickoff
 - Effort created from the operator's verbatim request (see Request). The

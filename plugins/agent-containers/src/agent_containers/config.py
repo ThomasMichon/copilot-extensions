@@ -568,7 +568,8 @@ def _knowledge_overlay_config() -> Path | None:
         proc = subprocess.run(
             [*prefix, "state-root", "--json"],
             capture_output=True, text=True, timeout=20,
-            **({"encoding": "utf-8", **_peer_launch.no_window_kwargs()} if own else {}),
+            **_peer_launch.no_window_kwargs(),
+            **({"encoding": "utf-8"} if own else {}),
         )
     except (OSError, subprocess.SubprocessError) as error:
         if own is not None:

@@ -2340,6 +2340,9 @@ function prepareTaskDeliveryCheckpoint(
     if (existing.consumerSession && existing.consumerSession !== sid) {
       return {
         ok: false,
+        claimedBySession: existing.consumerSession,
+        worktree: existing.metadata?.worktree || null,
+        predecessorSession: existing.predecessorSession || existing.metadata?.sessionId || null,
         message:
           `Handoff ${taskId} is already being delivered to ` +
           `${existing.consumerSession}; refusing replay in ${sid || "unknown"}.`,
@@ -2561,7 +2564,12 @@ export function consumeDispatchHandoffTask(
   const prepared = prepareTaskDeliveryCheckpoint(
     cwd, taskId, sid, before, stateDirResolver,
   );
-  if (!prepared.ok) return { ok: false, id: taskId, message: prepared.message };
+  if (!prepared.ok) return {
+    ...prepared,
+    id: taskId,
+    worktree: prepared.worktree || before.metadata?.worktree || null,
+    predecessorSession: prepared.predecessorSession || before.metadata?.sessionId || null,
+  };
   const checkpoint = prepared.checkpoint;
   const checkpointPayload = decodeHandoffPayload(checkpoint.payload || "");
   let decoded = {
@@ -2595,6 +2603,8 @@ export function consumeDispatchHandoffTask(
         ok: false,
         id: taskId,
         claimedBySession,
+        worktree: decoded.metadata?.worktree || null,
+        predecessorSession: predecessorSessionId,
         message: claimedBySession
           ? `${cliMessage}\n\nAlready consumed by session \`${claimedBySession}\`.`
           : cliMessage,
@@ -2688,12 +2698,35 @@ export function formatConsumeResult(
       `${result?.message || "Handoff could not be consumed."}\n\n` +
       "Handoff consumption is blocked. Do not treat the missing brief as " +
       "completion or reconstruct a different objective from session history." +
-      (claimant
-        ? `\n\nClaimant session: \`${claimant}\`. If this handoff was not ` +
-          "expected to already be claimed (e.g. it looks like a duplicate " +
-          "or racing consumption attempt), tell the user and offer to file " +
-          "a bug referencing this session id -- do not file one " +
-          "automatically without asking."
+      (result?.worktree
+        ? `\n\nHandoff worktree: \`${result.worktree}\`.`
+        : "") +
+      (result?.predecessorSession
+        ? `\n\nHandoff predecessor session: \`${result.predecessorSession}\`.`
+        : "") +
+      (claimant && result?.busy
+        ? `\n\nLock holder session: \`${claimant}\`. This transient lock is ` +
+          "shared by consume and abort; it does not establish baton ownership " +
+          "or a head-repair target. Wait for that operation to finish before " +
+          "retrying pickup."
+        : claimant
+        ? `\n\nClaimant session: \`${claimant}\`. Follow the context-handoff ` +
+          "skill's already-claimed recovery procedure: inspect this exact " +
+          "session's authoritative lineage and the associated worktree's " +
+          "head using the owning agent-worktrees session command catalog. " +
+          "Report the deduced true head (which may be a later successor), " +
+          "distinguishing it from an unverified candidate or stale recorded " +
+          "head. Offer to bind the verified continuation session as the new " +
+          "head only if repair is needed and the supported binding operation " +
+          "can safely do so; require explicit user consent and verify the " +
+          "result. Recommend resuming that session and using /consume-handoff " +
+          "there only after authoritative evidence confirms an exact pending " +
+          "baton or interrupted same-claimant delivery; if neither remains, " +
+          "recommend resumption without consumption. Do not replay this claimed baton in " +
+          "the refused session. Same-claimant delivery retries remain safe. " +
+          "If evidence is unavailable or conflicting, report the blocker " +
+          "without inventing a head or offering a speculative bind. Bug " +
+          "filing is not the default recovery."
         : "")
     );
   }

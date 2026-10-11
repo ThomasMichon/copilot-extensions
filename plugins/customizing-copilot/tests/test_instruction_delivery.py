@@ -154,6 +154,42 @@ def test_missing_or_changed_fallback_blocks_resolution_and_sync(tmp_path: Path) 
         projections.resolve_instruction_source(repo, spec.destination)
 
 
+@pytest.mark.parametrize("kind", [[], {}], ids=["array", "object"])
+def test_non_string_delivery_kind_returns_blocking_scan_and_cli_json(
+    tmp_path: Path, kind: object, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo, source, spec = fixture(tmp_path, "inline")
+    assert not projections.sync_repository(repo, [source]).blocking
+    path = repo / spec.destination
+    raw = path.read_bytes()
+    marker = delivery.parse_marker(raw)
+    marker["deliveryKind"] = kind
+    line = next(line for line in raw.splitlines() if line.startswith(delivery.MARKER_PREFIX.encode()))
+    malformed = raw.replace(
+        line, (delivery.MARKER_PREFIX + json.dumps(marker) + " -->").encode()
+    )
+    path.write_bytes(malformed)
+    with pytest.raises(ValueError, match="invalid delivery envelope"):
+        delivery.parse_marker(malformed)
+    result = projections.scan_repository(repo, [source])
+    assert result.blocking > 0
+    assert any("invalid delivery envelope" in finding.message for finding in result.findings)
+
+    module_spec = importlib.util.spec_from_file_location(
+        "non_string_delivery_manager", SCRIPTS / "manage-instruction-projections.py"
+    )
+    manager = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(manager)
+    monkeypatch.setattr(manager, "discover_enabled_sources", lambda *a, **kw: [source])
+    assert manager.main(["scan", str(repo), "--json"]) == 1
+    output = capsys.readouterr()
+    data = json.loads(output.out)
+    assert data["blocking"] > 0
+    assert any("invalid delivery envelope" in finding["message"] for finding in data["findings"])
+    assert "Traceback" not in output.err
+
+
 def test_legacy_lock_migrates_only_with_validated_preimages(tmp_path: Path) -> None:
     repo, source, spec = fixture(tmp_path, "inline")
     assert not projections.sync_repository(repo, [source]).blocking
