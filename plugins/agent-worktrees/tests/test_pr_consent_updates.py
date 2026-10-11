@@ -7,6 +7,7 @@ import pytest
 
 from agent_worktrees import config as cfg
 from agent_worktrees import pr_cli, pr_config
+from agent_worktrees.pr_consent import consent_update_key
 from agent_worktrees import pr_contract as pc
 from agent_worktrees import pr_merge as pm
 from agent_worktrees import pr_merge_cli, pr_watch as prw
@@ -133,6 +134,24 @@ def test_ignored_review_activity_does_not_repeat_consent_update():
         assert pc.Baseline.from_cursor(result.payload["cursor"]).consent_update == (
             cursor.consent_update
         )
+
+
+def test_missing_authoritative_approval_evidence_never_raises():
+    snap = _approved(reviews=())
+    readiness = {
+        "needs_consent": True, "verdict": "APPROVED", "consent_label": "auto-merge",
+    }
+    assert consent_update_key(
+        snap, readiness, flow_profile=pc.PROFILE_PR_AGENT_MERGE,
+    ) == ""
+    unknown_identity = _approved(
+        author="", reviews=(pc.Review(7, "APPROVED", "", commit_id="head"),),
+    )
+    assert not _wait(unknown_identity).matched
+    lowercase = _approved(
+        reviews=(pc.Review(7, "approved", "reviewer", commit_id="head"),),
+    )
+    assert _wait(lowercase).matched
 
 
 def test_fetch_errors_do_not_invent_actionable_state():

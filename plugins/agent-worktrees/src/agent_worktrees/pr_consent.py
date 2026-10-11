@@ -33,15 +33,21 @@ def consent_update_key(
         or (default_branch and snap.base_ref != default_branch)
     ):
         return ""
-    evidence = [
-        snap.head_sha,
-        readiness["consent_label"].lower(),
-        max(
+    approval = max(
+        (
             (r.id, r.user, r.commit_id)
             for r in snap.reviews
             if r.user != snap.author and not r.dismissed
             and r.state.upper() == "APPROVED"
             and r.commit_id in ("", snap.head_sha)
         ),
+        default=None,
+    )
+    if approval is None:
+        return ""
+    evidence = [
+        snap.head_sha,
+        readiness["consent_label"].lower(),
+        approval,
     ]
     return hashlib.sha256(json.dumps(evidence).encode("utf-8")).hexdigest()[:24]
