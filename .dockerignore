@@ -1,0 +1,13 @@
+# Docker build-context excludes for repository-root-context builds (e.g.
+# `docker build -f agent-dispatch-service/Dockerfile .`). Universally safe
+# excludes only -- caches, VCS metadata, and local virtual environments that
+# no Dockerfile's COPY instructions ever need, regardless of which
+# Dockerfile is being built from this context.
+.git
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.venv
+**/.test-venvs
+**/node_modules

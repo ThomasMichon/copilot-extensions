@@ -54,9 +54,71 @@ Relocate the staging root with `$AGENT_DISPATCH_SERVICE_ROOT` /
 
 ## Container image
 
-A reusable container image is planned (Phase 2 of
-[the owning effort](../efforts/active/agent-dispatch-standalone-container/README.md))
-but not yet part of this package.
+`Dockerfile` builds a container image that runs the coordinator directly
+(`python -m agent_dispatch serve` as PID 1) -- no systemd unit, no Scheduled
+Task, no self-update loop (disabled; an image rebuild+redeploy is how this
+service updates in a container). Build from the **repository root**, not
+this directory -- the image needs `plugins/agent-dispatch` plus the handful
+of shared `libs/*` it depends on, in their real relative positions:
+
+```bash
+docker build -f agent-dispatch-service/Dockerfile -t agent-dispatch-service .
+```
+
+Run it with a durable volume for its task database and rendezvous file:
+
+```bash
+docker run -d --name agent-dispatch \
+  -v agent-dispatch-data:/home/dispatch/.agent-dispatch \
+  agent-dispatch-service
+```
+
+By default the coordinator binds **loopback-only** inside the container
+(`AGENT_DISPATCH_HOST` is not overridden, so it keeps the coordinator's own
+safe default) -- reachable only from inside that exact container, which is
+enough to `docker exec` the CLI against it but not for a sibling container.
+To reach it from another container or a published port, set **both**
+`AGENT_DISPATCH_HOST=0.0.0.0` and `AGENT_DISPATCH_TOKEN=<bearer-token>`:
+the coordinator itself refuses an unauthenticated `0.0.0.0` bind ("the
+task-control API must not be exposed on the LAN unauthenticated"), and this
+image does not work around that guard. Per this effort's own deployment
+model (see the owning effort doc), a real fleet deployment reaches the
+coordinator only through the Gateway or a private container network, never
+a directly published public port:
+
+```bash
+docker run -d --name agent-dispatch \
+  -e AGENT_DISPATCH_HOST=0.0.0.0 -e AGENT_DISPATCH_TOKEN=<token> \
+  -e AGENT_DISPATCH_PORT=<port> \
+  -v agent-dispatch-data:/home/dispatch/.agent-dispatch \
+  agent-dispatch-service
+```
+
+`AGENT_DISPATCH_PORT` is intentionally left unset by default -- the
+coordinator binds an OS-assigned dynamic port (the same Stage C behavior
+every plugin-delivered/standalone host already uses), advertised via its
+own rendezvous file. Pin a stable port explicitly when a deployment needs
+one to publish or for another container to dial by a fixed address.
+
+Validated locally: a clean build, a real authenticated `health`/`create`
+round-trip via the `agent-dispatch` CLI (`docker exec`), and a `docker
+restart` with the previously created task still present afterward (the
+task database under the named volume survives a container recreate,
+mirroring the restart-persistence validation this effort's parent
+`harness-gateway-fleet` dotfiles-private effort already applied to its own
+Gateway container).
+
+If your network routes package installs through an approved internal feed
+instead of public PyPI (e.g. company policy on a managed developer
+machine), override the index at build time without changing the
+committed default:
+
+```bash
+docker build -f agent-dispatch-service/Dockerfile \
+  --build-arg PYTHON_INDEX_URL=<your-approved-feed-index-url> \
+  -t agent-dispatch-service .
+```
+
 
 ## Scope
 

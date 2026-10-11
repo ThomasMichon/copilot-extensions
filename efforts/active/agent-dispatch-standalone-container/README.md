@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; Phase 1 standalone package landed
+- **Status:** Active; Phase 1 + Phase 2 landed
 - **Vision:** [machine-fleet](../../../visions/machine-fleet/README.md):
   `standalone-service-installation`, role deployments and container managers
   (role instances may run directly or in containers on explicitly admitted
@@ -156,27 +156,48 @@ for review before any implementation.
   construction -- there is no second implementation to drift.
 
 ### Phase 2 -- Container image
-- [ ] Add a `Dockerfile` (standalone package, or a sibling `docker/` directory)
-  that builds the coordinator's venv from the same sources the standalone
-  package installs, with no systemd/Scheduled Task layer -- the container
-  entrypoint execs `python -m agent_dispatch serve` directly.
-- [ ] Document the exact environment-variable contract the image reads
+- [x] Add a `Dockerfile` (in `agent-dispatch-service/`, built from the
+  repository root so it can reach the handful of shared `libs/*` its
+  dependency chain needs in their real relative positions) that builds the
+  coordinator's venv from the same sources the standalone package installs,
+  with no systemd/Scheduled Task layer -- the container entrypoint execs
+  `python -m agent_dispatch serve` directly, with self-update disabled
+  (`AGENT_DISPATCH_SELF_UPDATE=0` -- an image rebuild+redeploy is how this
+  service updates in a container, not an in-place self-update).
+- [x] Document the exact environment-variable contract the image reads
   (`AGENT_DISPATCH_HOST`/`PORT`/`DB`/`TOKEN`/`CONTROL_TOKEN`/
   `ENFORCE_REGISTERED_REPOS`), a volume mount for the durable task DB, and
-  expected restart/health behavior left to the container runtime.
-- [ ] Prove a clean build + run + restart-persistence cycle on a throwaway
+  expected restart/health behavior left to the container runtime. The image
+  deliberately does **not** default `AGENT_DISPATCH_HOST=0.0.0.0` -- the
+  coordinator itself refuses an unauthenticated LAN bind, and reaching it
+  from another container requires explicitly pairing `AGENT_DISPATCH_HOST=
+  0.0.0.0` with `AGENT_DISPATCH_TOKEN`, documented in the package README.
+- [x] Prove a clean build + run + restart-persistence cycle on a throwaway
   container host (mirroring the validation rigor the parallel
   `harness-gateway-fleet` dotfiles-private effort already applied to its own
   Gateway container: build, run, push/read persistence across `docker
-  restart`, teardown).
+  restart`, teardown). Done for real locally: built the image, ran it with
+  an explicit bearer token, created a real task via the `agent-dispatch` CLI
+  (`docker exec`), `docker restart`ed the container, and confirmed the same
+  task was still present afterward -- the task database under the named
+  volume survives a container recreate. Also found and fixed a real safety
+  gap live: the coordinator's own guard correctly refused to start when the
+  image's first draft hardcoded `AGENT_DISPATCH_HOST=0.0.0.0` with no token
+  ("the task-control API must not be exposed on the LAN unauthenticated") --
+  removed that unsafe default rather than working around the guard.
 
 ### Phase 3 -- Validation and documentation
 - [ ] Prove plugin-delivered and standalone installations are interoperable:
   a coordinator installed one way is indistinguishable (DB format, wire
   protocol, CLI) from one installed the other way.
-- [ ] Document the reusable pattern (package layout, bootstrap shape,
-  container conventions) so a later agent-worktrees or other agent-*
-  containerization effort can follow it without rediscovering these decisions.
+- [x] Document the reusable pattern (package layout, bootstrap shape,
+  container conventions) in `agent-dispatch-service/README.md` so a later
+  agent-worktrees or other agent-* containerization effort can follow it
+  without rediscovering these decisions (repo-root build context for
+  reaching shared `libs/*`, `--no-editable` to keep the final image
+  self-contained, the safe-default-bind + explicit-opt-in-with-token
+  pattern, and the public-PyPI-default-with-build-arg-override pattern for
+  managed-network package-index policy).
 - [ ] Mark Done only after every Plan and Validation Plan item is resolved or
   explicitly transferred to a named follow-on objective.
 
@@ -185,8 +206,10 @@ for review before any implementation.
 - [ ] Standalone bootstrap: fresh-machine install (no Copilot, no marketplace,
   no `git`/`uv` preinstalled) succeeds via `bootstrap.sh`/`bootstrap.ps1`;
   re-running is idempotent/version-gated like `worktree-manager`'s.
-- [ ] Container image: clean build, run, and a real `docker restart` with DB
-  persistence verified (not merely "the process starts").
+- [x] Container image: clean build, run, and a real `docker restart` with DB
+  persistence verified (not merely "the process starts") -- done locally
+  2026-10-11 (see Phase 2 above and the Journal entry below for the exact
+  commands and outcomes).
 - [ ] Plugin-delivered and standalone coordinators interoperate: same DB
   schema/location contract, same CLI/API behavior, no silent divergence.
 - [ ] Existing plugin-delivered install/update/status/start/stop/uninstall
@@ -242,3 +265,74 @@ _Pending._
   `check-version-consistency.py`/`check-changefile-presence.py` are clean.
 - Phase 2 (container image) and Phase 3 (validation/documentation) remain
   open; not started in this slice.
+- Hit and fixed a real CI gap after opening the PR: `check-changefile-
+  presence.py` (which diffs the PR's actual base...head commits, not local
+  uncommitted state) correctly failed on a missing changefile for the new
+  `agent-dispatch-service` package; added one and pushed the fix. PR #6245
+  merged after all checks (including the new out-of-plugin job) passed.
+
+### 2026-10-11 -- Phase 2: container image landed
+- Operator said "proceed"; continued directly into Phase 2 per the reviewed
+  effort doc rather than re-confirming scope.
+- Built `agent-dispatch-service/Dockerfile` (+ a repo-root `.dockerignore`):
+  a two-stage build, repo-root context (to reach `plugins/agent-dispatch`
+  and its `libs/*` dependency chain in their real relative positions),
+  `uv pip install --no-editable` so the final stage is self-contained
+  without needing to carry `/src` along, non-root `dispatch` user, a
+  `VOLUME` for the durable task DB/rendezvous file, and
+  `ENTRYPOINT ["python", "-m", "agent_dispatch", "serve"]` directly --
+  no systemd/Scheduled Task layer, matching the effort's original intent.
+- Hit and fixed two real bugs live during local validation (this machine has
+  Docker Desktop with a real Linux engine):
+  1. **Editable-install trap**: `agent-dispatch`'s `[tool.uv.sources]` marks
+     it editable, so a plain `uv pip install <path>` left the final image's
+     venv pointing back at `/src/plugins/agent-dispatch/src` -- which only
+     exists in the discarded `builder` stage, so the shipped image failed
+     at startup with `No module named agent_dispatch`. Fixed with
+     `uv pip install --no-editable`, which bakes a real, self-contained
+     install into the final stage instead of carrying `/src` along.
+  2. **Unsafe default bind**: the first draft defaulted
+     `AGENT_DISPATCH_HOST=0.0.0.0` in the image. The coordinator's own
+     startup guard correctly refused to run ("the task-control API must not
+     be exposed on the LAN unauthenticated"), exiting with code 2. Removed
+     that default rather than working around the guard -- the image now
+     keeps the coordinator's own safe loopback default, and reaching it from
+     another container requires explicitly pairing
+     `AGENT_DISPATCH_HOST=0.0.0.0` with `AGENT_DISPATCH_TOKEN`, documented
+     in the README.
+- Also hit a real environment constraint, not a Dockerfile bug: this is a
+  Microsoft-managed developer machine with Central Feed Services PyPI
+  enforcement, so the container's own (unconfigured) network egress to
+  `files.pythonhosted.org` was network-blocked (`SSLV3_ALERT_HANDSHAKE_
+  FAILURE`) -- the exact symptom the `working-on-managed-machines` skill
+  documents for uv on an enforced box. Per that skill: never bake a
+  Microsoft-internal feed URL into this **public** repository's committed
+  default (external consumers couldn't reach it, and it doesn't belong in a
+  personal OSS repo); instead added a `PYTHON_INDEX_URL` build `ARG`
+  defaulting to public PyPI (the correct, portable committed default) and
+  overrode it only for local validation via `--build-arg`, never committed.
+- Full local validation performed for real (not simulated): clean image
+  build; ran the container with an explicit bearer token and
+  `AGENT_DISPATCH_HOST=0.0.0.0`/`AGENT_DISPATCH_PORT` pinned; confirmed
+  `agent-dispatch health` (via `docker exec`) reports a real running
+  coordinator (PID 1, correct bind/port, active slot); created a real task
+  via `agent-dispatch create` and captured its ID; `docker restart`ed the
+  container; confirmed via `agent-dispatch show <id>` that the identical
+  task was still present with its original `created_at`/`id` -- the task
+  database under the named volume survives a container recreate, the same
+  persistence guarantee this effort's parent `harness-gateway-fleet`
+  dotfiles-private effort already proved for its own Gateway container.
+  Test container, volume, and image removed after validation.
+- Added `tests/test_dockerfile_shape.py` (static content assertions -- no
+  Docker dependency in ordinary CI): entrypoint shape, no hardcoded
+  unauthenticated `0.0.0.0` default, self-update disabled, `--no-editable`
+  present, public-PyPI-default build arg. The real build+run+restart
+  validation above was performed locally, not wired into per-PR CI (Docker
+  is not otherwise used in this repo's CI; documented as a manually
+  validated gap, the same honest-gap convention the dotfiles-private
+  `agent-index-container` README already uses for its own untested tiers).
+- Documented the full container usage contract (build command, run
+  examples, the safe-bind/token-pairing requirement, the dynamic-port
+  default, the package-index build-arg override) in
+  `agent-dispatch-service/README.md`.
+
