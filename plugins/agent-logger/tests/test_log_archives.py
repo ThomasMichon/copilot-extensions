@@ -17,7 +17,7 @@ from agent_procutil import no_window_kwargs
 from agent_logger.config import Config
 from agent_logger.process_logs import iter_process_log_refs
 from agent_logger.sync import engine, log_archive_cli, log_archives
-from agent_logger.sync.archive_directory import archive_directory
+from agent_logger.sync.archive_directory import _posix_file_flags, archive_directory
 from agent_logger.sync.targets.claim_file import create_claim_file
 
 NAME = "process-1700000000000-2147483647.log"
@@ -150,6 +150,19 @@ def test_non_directory_log_root_is_refused(tmp_path: Path) -> None:
     root.write_bytes(b"not a directory")
     with pytest.raises(ValueError, match="real directory"):
         log_archives.archive_settled_process_logs(root, min_quiet_seconds=600)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX capability refusal")
+@pytest.mark.parametrize("flag", ["O_NOFOLLOW", "O_DIRECTORY", "O_NONBLOCK"])
+def test_missing_safe_posix_flags_fail_explicitly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str,
+) -> None:
+    monkeypatch.delattr(os, flag)
+    with pytest.raises(OSError, match=f"safe archive I/O requires {flag}"):
+        if flag == "O_NONBLOCK":
+            _posix_file_flags()
+        else:
+            log_archives.archive_settled_process_logs(tmp_path, min_quiet_seconds=600)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink fixture")

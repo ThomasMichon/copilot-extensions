@@ -18,10 +18,20 @@ from agent_logger.sync.provenance import (
 )
 
 
-def _posix_file_flags() -> int:
+def _posix_flags(*names: str) -> int:
     if sys.platform == "win32":
         raise OSError("directory-relative file reads require POSIX")
-    return os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+    flags = os.O_RDONLY
+    for name in names:
+        value = getattr(os, name, None)
+        if value is None:
+            raise OSError(errno.ENOTSUP, f"safe archive I/O requires {name}")
+        flags |= value
+    return flags
+
+
+def _posix_file_flags() -> int:
+    return _posix_flags("O_NOFOLLOW", "O_NONBLOCK")
 
 
 @contextmanager
@@ -119,7 +129,7 @@ def archive_directory(path: Path) -> Iterator[ArchiveDirectory]:
                 stack.enter_context(_windows_directory(native_component))
             opened = canonical.stat()
         else:
-            flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+            flags = _posix_flags("O_DIRECTORY", "O_NOFOLLOW")
             for component in components:
                 fd = os.open(component, flags, dir_fd=fd)
                 stack.callback(os.close, fd)
