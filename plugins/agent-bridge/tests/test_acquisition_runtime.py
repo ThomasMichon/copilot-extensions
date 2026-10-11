@@ -58,7 +58,13 @@ def rig(tmp_db, session_manager, mock_acp_client, monkeypatch, tmp_path):
         assert name == "task-worker"
         return SpawnTarget(type="local", cwd=str(tmp_path))
 
-    resolver = SimpleNamespace(resolve_async=resolve)
+    async def provider_run(argv):
+        assert argv[:2] == ["acquisition-bind", "--request-json"]
+        return 0, argv[2], ""
+    resolver = SimpleNamespace(
+        resolve_async=resolve,
+        namespace_resolvers={"dispatch": SimpleNamespace(_run=provider_run)},
+    )
 
     async def command(args, project):
         calls.append((args, project))

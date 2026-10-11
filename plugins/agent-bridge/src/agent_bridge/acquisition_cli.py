@@ -43,3 +43,17 @@ def register(subparsers: Any) -> None:
     parser = subparsers.add_parser("acquire", help="Acquire one task-bound CLI/ACP conversation without fresh fallback")
     parser.add_argument("--request-file", required=True, help="Versioned acquisition JSON; '-' reads stdin")
     parser.set_defaults(func=command)
+    inspect = subparsers.add_parser("acquisition-inspect", help="Read durable bridge acquisition identity")
+    inspect.add_argument("delivery_id")
+    inspect.set_defaults(func=inspect_command)
+
+
+def inspect_command(args: argparse.Namespace) -> None:
+    from . import __main__ as core
+    client = core._get_client()
+    if not client.daemon_supports(ACQUISITION_PROTOCOL_VERSION):
+        raise BridgeClientError(426, "acquisition inspection unsupported")
+    from urllib.parse import quote
+    print(json.dumps(client._request(
+        "GET", f"/api/v1/acquisitions/{quote(args.delivery_id, safe='')}",
+    )))

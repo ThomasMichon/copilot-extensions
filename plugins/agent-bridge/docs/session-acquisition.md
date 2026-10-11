@@ -107,6 +107,10 @@ Native prompt *completion* is distinct from durable admission.
 The delivery includes the exact native `start --owner-session-id` binding,
 not a generated launch-worker ID or ambient predecessor identity. The same
 constructed prompt is used for durable admission and retry reconciliation.
+Before delivery, the registered dispatch provider persists a start receipt after
+independently checking bridge's authenticated durable acquisition inspection.
+The receipt covers CLI worktree owners as well as explicit ACP workers, and
+dispatch compares its exact native identity inside the start transaction.
 
 ## Graceful cutover
 

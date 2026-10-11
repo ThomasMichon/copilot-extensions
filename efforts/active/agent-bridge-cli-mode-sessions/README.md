@@ -777,6 +777,22 @@ from the host's).
 
 ## Journal
 
+### 2026-10-10 — PR review: durable native start authority for CLI and ACP
+
+PR #6123 identified two missing start-authority checks: arbitrary supplied native
+IDs and CLI worktree owners bypassing an explicit-worker prefix requirement.
+Bridge now binds a durable start receipt through the existing dispatch provider
+before delivery. Dispatch independently queries authenticated bridge acquisition
+inspection, validates the real stored result and current reservation, and checks
+the native ID atomically inside start (including replay), for both CLI and ACP.
+Tests reject forged receipt/native IDs and missing CLI owner identity.
+
+The shared validation slot's live holder exited normally; no job was killed or
+released. The bounded hardened-devcontainer `-k acquisition` selection passed
+100 bridge tests (1 skipped), 22 dispatch tests (2 skipped). Ruff F/E9, scoped
+mypy and install contract passed. This correction remains within PR #6123;
+remote/fleet/native integration and remaining Phase 6 gates stay open.
+
 ### 2026-10-10 — Post-await admission and CLI activity review regressions
 
 Strict stopped-receipt delivery now revalidates current task/reservation

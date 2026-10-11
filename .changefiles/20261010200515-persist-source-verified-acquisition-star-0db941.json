@@ -1,0 +1,13 @@
+{
+  "comment": "Persist source-verified acquisition start receipts and atomically enforce exact native IDs for CLI and ACP owners",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

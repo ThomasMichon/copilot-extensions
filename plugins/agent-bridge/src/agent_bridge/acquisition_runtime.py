@@ -9,7 +9,7 @@ from dataclasses import replace
 from typing import Any
 from types import SimpleNamespace
 
-from .acquisition_authority import verify_dispatch, verify_worktree, worktree_command
+from .acquisition_authority import verify_dispatch, verify_worktree, worktree_command, bind_dispatch_receipt
 from .acquisition_contract import (
     AcquisitionRefused,
     AcquisitionRequest,
@@ -431,6 +431,7 @@ class AcquisitionRuntime:
         _, head = await verify_worktree(req)
         if head != result.native_session_id:
             raise AcquisitionRefused("head_changed", "native head changed before delivery")
+        await bind_dispatch_receipt(req, result, self.resolver)
         if req.mode == "cli":
             message, reason = self.db.enqueue_live_message_if_fresh(
                 result.session_id,

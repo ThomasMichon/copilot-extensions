@@ -46,6 +46,13 @@ binding. Claim/start clears prior activity instead of inheriting an earlier
 turn's IDLE. Local supervisor activity samples carry their observation time;
 samples taken before the current claim/start are ignored. An explicitly
 non-resting owned RUNNING turn wins over lingering idle metadata.
+Start authority is not inferred from a worker-name prefix. Before prompt
+delivery, bridge binds the acquisition receipt through the registered dispatch
+provider. The coordinator independently reads the authenticated bridge's durable
+`acquisition-inspect` result and compares the complete task/native/session/mode
+binding before recording it. STARTED admission checks that receipt atomically
+in the task transition transaction for both explicit workers and CLI worktree
+owners; missing or different native IDs refuse, including idempotent replay.
 CLI native-handle activity probes, as well as local ACP probes, timestamp their
 snapshot before the liveness query. A delayed pre-start IDLE response cannot
 restore stale task activity after start.

@@ -838,6 +838,8 @@ def build_parser() -> argparse.ArgumentParser:
         "name", help="Task id, optionally `<task_id>@<venue>`",
     )
     ns_resolve_p.set_defaults(func=_cmd_namespace_resolve)
+    from .acquisition_receipts import register_cli
+    register_cli(sub)
 
     ns_ready_p = sub.add_parser(
         "namespace-ensure-ready",

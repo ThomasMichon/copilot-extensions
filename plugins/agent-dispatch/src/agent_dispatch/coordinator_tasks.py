@@ -320,6 +320,8 @@ def register_task_routes(
     control_token: str | None,
     resolve_owner_session_id: Callable[[str | None], str | None],
 ) -> None:
+    from .acquisition_receipts import register_routes
+    register_routes(app, queue)
     def _require(task: Task | None) -> Task:
         if task is None:
             raise HTTPException(status_code=404, detail="no such task")

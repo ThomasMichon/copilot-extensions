@@ -88,3 +88,28 @@ async def verify_worktree(request: AcquisitionRequest) -> tuple[dict[str, Any], 
     if head.occupied and head.state != "active":
         raise AcquisitionRefused("transition_pending", "ground-layer handoff is pending")
     return row, head.head_session
+
+
+async def bind_dispatch_receipt(
+    request: AcquisitionRequest, result: Any, resolver: Any,
+) -> None:
+    provider = resolver.namespace_resolvers.get("dispatch")
+    run = getattr(provider, "_run", None)
+    if run is None:
+        raise AcquisitionRefused("dispatch_capability_missing", "dispatch cannot persist acquisition receipts")
+    receipt = {
+        field: getattr(result, field) for field in (
+            "task_id", "task_generation", "worktree_id", "session_id",
+            "native_session_id", "mode", "delivery_id",
+        )
+    }
+    receipt["reservation_key"] = request.reservation_key
+    output = await run(["acquisition-bind", "--request-json", json.dumps(receipt)])
+    if output is None or output[0]:
+        raise AcquisitionRefused("dispatch_receipt_refused", "dispatch did not accept native acquisition authority")
+    try:
+        actual = json.loads(output[1])
+    except ValueError as exc:
+        raise AcquisitionRefused("dispatch_receipt_unproven", "dispatch receipt response is invalid") from exc
+    if actual != receipt:
+        raise AcquisitionRefused("dispatch_receipt_unproven", "dispatch receipt response changed native authority")
