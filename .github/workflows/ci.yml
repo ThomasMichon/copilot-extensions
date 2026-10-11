@@ -934,8 +934,29 @@ jobs:
           tools/test_run_tests_in_devcontainer.py
           tools/tests/test_komodo_role_fleet.py
 
+      - id: fleet-contracts
+        name: Detect standalone fleet contract changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
+            '^(fleet-manager/|tools/(run-standalone-tests\.py|standalone_consumers\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|_admission_protocol\.py|_devcontainer_host_admission\.py|test_run_standalone_tests\.py|test_fleet_ci_scope\.py)$|libs/single-instance-lease/|\.github/workflows/ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Test thin fleet planner with installed package and host containment
-        run: python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 60
+        if: steps.fleet-contracts.outputs.run == 'true'
+        run: |
+          uv run --with pytest python -m pytest -q tools/test_fleet_ci_scope.py
+          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 60
 
   agent-index-service-linux:
     name: agent-index-service (ubuntu-latest, out-of-plugin)
@@ -1018,8 +1039,29 @@ jobs:
           tools/test_run_plugin_tests.py
           tools/test_run_standalone_tests.py
 
+      - id: fleet-contracts
+        name: Detect standalone fleet contract changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
+            '^(fleet-manager/|tools/(run-standalone-tests\.py|standalone_consumers\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|_admission_protocol\.py|_devcontainer_host_admission\.py|test_run_standalone_tests\.py|test_fleet_ci_scope\.py)$|libs/single-instance-lease/|\.github/workflows/ci\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Test thin fleet planner with installed package and host containment
-        run: python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 60
+        if: steps.fleet-contracts.outputs.run == 'true'
+        run: |
+          uv run --with pytest python -m pytest -q tools/test_fleet_ci_scope.py
+          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 60
 
   archive-sources-windows:
     name: archive sources (windows-latest)
