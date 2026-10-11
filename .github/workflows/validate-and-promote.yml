@@ -994,7 +994,7 @@ jobs:
                   ["gh", "pr", "view", os.environ["PROMOTION_PR"],
                    "--repo", os.environ["GITHUB_REPOSITORY"],
                    "--json", "state,mergeCommit,headRefName,baseRefName"],
-                  check=True, capture_output=True, text=True,
+                  check=True, stdout=subprocess.PIPE, text=True,
                   timeout=min(60, remaining),
               )
               pr = json.loads(result.stdout)
@@ -1019,6 +1019,29 @@ jobs:
                   break
               if pr["state"] != "OPEN":
                   raise RuntimeError(f"{identity} closed without merging; observed {observed}")
+              remaining = deadline - time.monotonic()
+              if remaining <= 0:
+                  raise TimeoutError(f"{identity} exceeded the merge-wait deadline")
+              checks = subprocess.run(
+                  ["gh", "pr", "checks", os.environ["PROMOTION_PR"],
+                   "--repo", os.environ["GITHUB_REPOSITORY"],
+                   "--required", "--json", "name,bucket,link"],
+                  stdout=subprocess.PIPE, text=True,
+                  timeout=min(60, remaining),
+              )
+              if checks.returncode not in (0, 1, 8):
+                  raise subprocess.CalledProcessError(checks.returncode, checks.args)
+              required = json.loads(checks.stdout)
+              if not isinstance(required, list):
+                  raise RuntimeError(f"{identity} returned an invalid required-check list")
+              failures = [
+                  f"{check['name']} ({check['bucket']}): {check['link']}"
+                  for check in required if check["bucket"] in ("fail", "cancel")
+              ]
+              if failures:
+                  raise RuntimeError(f"{identity} required checks failed: " + "; ".join(failures))
+              if checks.returncode == 1:
+                  raise subprocess.CalledProcessError(checks.returncode, checks.args)
               time.sleep(min(POLL_SECONDS, max(0, deadline - time.monotonic())))
           PY
       - name: Tag the real post-merge commit

@@ -56,13 +56,18 @@ def test_pending_auto_merge_waits_and_outputs_exact_commit(waiter, monkeypatch):
 
     def run(argv, **kwargs):
         calls.append(argv)
-        assert kwargs["check"] is True and kwargs["timeout"] <= 60
+        assert kwargs["stdout"] == subprocess.PIPE and "stderr" not in kwargs
+        assert kwargs["timeout"] <= 60
         assert not output.exists()
+        if argv[2] == "checks":
+            assert "--required" in argv
+            return subprocess.CompletedProcess(argv, 8, '[{"name":"gate","bucket":"pending","link":""}]')
+        assert kwargs["check"] is True
         return subprocess.CompletedProcess(argv, 0, json.dumps(next(replies)))
 
     monkeypatch.setattr(subprocess, "run", run)
     exec(compile(code, str(WORKFLOW), "exec"), {})
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert output.read_text() == f"merge_sha={SHA}\n"
 
 
@@ -98,5 +103,23 @@ def test_provider_error_is_not_a_successful_promotion(waiter, monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(subprocess.CalledProcessError):
+        exec(compile(code, str(WORKFLOW), "exec"), {})
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("bucket", ["fail", "cancel"])
+def test_required_check_failure_is_not_reported_as_merge_timeout(waiter, monkeypatch, bucket):
+    code, output = waiter
+
+    def run(argv, **kwargs):
+        assert "stderr" not in kwargs
+        if argv[2] == "view":
+            return subprocess.CompletedProcess(argv, 0, json.dumps(response("OPEN")))
+        return subprocess.CompletedProcess(argv, 1, json.dumps([
+            {"name": "required gate", "bucket": bucket, "link": "https://example.com/check"},
+        ]))
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(RuntimeError, match="required gate"):
         exec(compile(code, str(WORKFLOW), "exec"), {})
     assert not output.exists()
