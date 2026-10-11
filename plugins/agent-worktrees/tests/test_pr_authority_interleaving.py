@@ -58,7 +58,7 @@ def test_create_pr_contention_public_cli_error(pr_repo, monkeypatch, capfd, json
 def test_fresh_reassociation_survives_but_stale_writer_cannot_restore_prior_pr(tmp_path):
     rec = tracking.create_new_record("test", "worktree/test", str(tmp_path), "ext", "test", "linux", tmp_path)
     rec.prs = [tracking.PRRecord(state="open", branch="pr/test-aaaa",
-                                 repo="example/project", number=42)]
+                                 repo="example/project", number=42, pr_revision=1)]
     tracking.save_record(rec)
     stale = tracking.load_record(rec.yaml_path)
     fresh = tracking.load_record(rec.yaml_path)
