@@ -966,7 +966,10 @@ def main(argv: list[str] | None = None) -> int:
             payload = _enrich_session_payload(payload)
             # Catalog evidence must survive cancellation of slow lifecycle work.
             _write_session_guidance(payload)
-        result = decide(kind, payload)
+        if kind == "postToolUse" and "--local-fallback" in argv[1:]:
+            result = _fallback_post(payload, Path.home())
+        else:
+            result = decide(kind, payload)
         diagnostic = result.pop("_stderr", None)
         if diagnostic:
             sys.stderr.write(str(diagnostic))

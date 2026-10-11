@@ -68,6 +68,18 @@ launchers retain the shared helper's permissive default outside this seam.
 POSIX retains its process-group timeout cleanup. This is not a durable-daemon
 launch or an interactive terminal.
 
+## PowerShell post-tool hook
+
+The legacy-context PowerShell `postToolUse` hook contacts an already-running
+resident monitor inside its existing shell, without launching Python or the
+CLI on success. It uses the monitor's authenticated loopback JSON-line
+transport, not HTTP. An unavailable resident falls back to the deployed
+Python advisory evaluator without resending the request. Explicit installation
+cells retain the existing validated Python client; Bash, pre-tool safety,
+session-start reconciliation and its single-flight owner are unchanged.
+
+This removes a child process, not the shell the hook host itself creates.
+
 ## Same-Machine AHP Sessions
 
 Same-machine Agent Host Protocol (AHP) session ownership now lives in the
