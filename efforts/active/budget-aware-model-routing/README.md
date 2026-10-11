@@ -256,6 +256,19 @@ promotion authority, task queue, or dashboard.
 
 ## Journal
 
+### 2026-10-10 - Quota helper planning and publication reliability
+
+- Added session-attributed quota-helper and advisory pacing intent with variable
+  monthly entitlement and an explicit warning-not-blocking boundary.
+- Removed a publication blocker caused by ignored artifacts of retired vendor
+  trees. Shared discovery now preserves malformed source-bearing copies and
+  excludes artifact-only remnants across synchronization and publication gates.
+- Reduced automatic review-request amplification with a five-minute per-PR
+  cooldown, live-head coalescing, and bounded pending-review waits. Repository
+  tokens perform reads; the licensed account credential performs only the write.
+  Confirmation reads run every 30 seconds for up to ten minutes, with explicit
+  provider reset/backoff diagnostics and no blind write retries.
+
 ### 2026-09-05 - Kickoff
 
 - Public issue #2137 claimed the new delta after confirming #2014 already owns

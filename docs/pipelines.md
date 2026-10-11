@@ -84,6 +84,20 @@ fire for literally anyone — so this repo has removed that rule.) Like
 `main` via a promotion — request a review manually for any PR opened
 before that first promotion completes.
 
+Automatic requests are serialized per PR with a **five-minute cooldown** from
+the most recent native Copilot `review_requested` timeline event. Rapid pushes
+coalesce to the live head; a queued run skips a head already reviewed, or a PR
+that is closed, draft, or retargeted away from `dev`. Independent PRs do not
+share a cooldown, and manual requests remain available. Metadata and confirmation
+reads use `GITHUB_TOKEN`; the licensed owner credential performs only the request
+write. An already-pending Copilot review is awaited for up to five minutes before
+refetching the live head; if it remains pending, the run reports an explicit
+deferral without a duplicate write. Confirmation polls every 30 seconds for up
+to ten minutes. A write failure
+is explicit and reports provider reset/backoff headers when present, without
+blind retries. This reduces duplicate/read amplification but is not a guarantee
+against exhaustion of the owner's shared REST budget by other clients.
+
 Whether a review (Copilot's or anyone else's) must formally *approve* the
 PR before merge is governed by a second ruleset ("dev branch policy:
 review required (maintainer bypass)") plus `.github/CODEOWNERS`

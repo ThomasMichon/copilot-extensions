@@ -639,6 +639,8 @@ jobs:
         run: >-
           python tools/check-vendored-libs-sync.py &&
           python -m pytest -q tools/test_check_vendored_libs_sync.py
+      - name: Automatic review request pacing contract tests
+        run: node --test tools/test_copilot_review_gate.cjs
       - name: Windows headless launch invariants
         run: >-
           python tools/check-headless-launch.py &&

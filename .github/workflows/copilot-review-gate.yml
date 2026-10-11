@@ -65,11 +65,18 @@ on:
 
 permissions:
   contents: read
+  issues: read
   # The default `GITHUB_TOKEN` only ever reads (collaborator status,
   # CODEOWNERS) in this workflow -- the one write call (requesting a
   # review) always uses `MAINTAINER_REVIEW_PAT` instead, supplied
   # explicitly to that step; this permissions block doesn't affect it.
   pull-requests: read
+
+concurrency:
+  # Keep one active and the latest pending run per PR. Never cancel a run
+  # after its review-request write; it must finish confirmation.
+  group: copilot-review-request-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 
 jobs:
   request-review:
@@ -78,7 +85,7 @@ jobs:
       github.event.pull_request.draft == false &&
       (github.event.action != 'edited' || github.event.changes.base != null)
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 25
     steps:
       - name: Determine collaborator / Maintainer status
         id: status
@@ -165,6 +172,8 @@ jobs:
       - name: Request Copilot review as a licensed Maintainer account
         if: steps.status.outputs.is_maintainer == 'true'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          REVIEW_READ_TOKEN: ${{ github.token }}
         with:
           # Authenticated as the owner (a real, licensed account) via a
           # fine-grained PAT scoped to ONLY this repo with ONLY
@@ -174,6 +183,7 @@ jobs:
           # header comment for the underlying reason.
           github-token: ${{ secrets.MAINTAINER_REVIEW_PAT }}
           script: |
+            const reader = require("@actions/github").getOctokit(process.env.REVIEW_READ_TOKEN);
             const author = context.payload.pull_request.user.login;
             const pull_number = context.payload.pull_request.number;
 
@@ -196,16 +206,19 @@ jobs:
             // commit must not count as confirmation of THIS request -- only
             // a review submitted after the snapshot does.
             async function copilotReviewIdsAtHeadSha(headSha) {
-              const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              const reviews = await reader.paginate(reader.rest.pulls.listReviews, {
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 pull_number,
+                per_page: 100,
               });
               return new Set(
                 reviews
                   .filter(
                     (review) =>
-                      review.user.login === "copilot-pull-request-reviewer[bot]" &&
+                      review.user?.login === "copilot-pull-request-reviewer[bot]" &&
+                      ["APPROVED", "COMMENTED", "CHANGES_REQUESTED"].includes(review.state) &&
+                      review.submitted_at &&
                       review.commit_id === headSha,
                   )
                   .map((review) => review.id),
@@ -213,7 +226,7 @@ jobs:
             }
 
             async function copilotIsRequested(preexistingReviewIds, headSha) {
-              const { data } = await github.rest.pulls.listRequestedReviewers({
+              const { data } = await reader.rest.pulls.listRequestedReviewers({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 pull_number,
@@ -237,8 +250,87 @@ jobs:
               return false;
             }
 
-            const headSha = context.payload.pull_request.head.sha;
-            const preexistingReviewIds = await copilotReviewIdsAtHeadSha(headSha);
+            // Native review-request events persist the cooldown across runners
+            // without comments, artifacts, or a second mutable state store.
+            const events = await reader.paginate(reader.rest.issues.listEventsForTimeline, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pull_number,
+              per_page: 100,
+            });
+            let lastRequestAt = 0;
+            for (const event of events) {
+              if (event.event === "review_requested" &&
+                  event.requested_reviewer?.login === "copilot-pull-request-reviewer[bot]") {
+                const timestamp = Date.parse(event.created_at);
+                if (!Number.isFinite(timestamp)) {
+                  throw new Error("Copilot review-request event has an invalid timestamp.");
+                }
+                lastRequestAt = Math.max(lastRequestAt, timestamp);
+              }
+            }
+            const cooldownMs = 5 * 60_000;
+            const waitMs = Math.max(0, lastRequestAt + cooldownMs - Date.now());
+            if (waitMs > cooldownMs) {
+              throw new Error("Copilot review-request event is in the future; refusing an unbounded wait.");
+            }
+            if (waitMs > 0) {
+              core.info(`Coalescing this PR's review requests for ${Math.ceil(waitMs / 1000)} seconds.`);
+              await sleep(waitMs);
+            }
+            // Queued runs target the live head, not the stale triggering push.
+            let { data: livePr } = await reader.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number,
+            });
+            if (livePr.state !== "open" || livePr.draft || livePr.base.ref !== "dev") {
+              core.info("PR is closed, draft, or no longer targets dev; no automatic request.");
+              return;
+            }
+            let headSha = livePr.head.sha;
+            let preexistingReviewIds = await copilotReviewIdsAtHeadSha(headSha);
+            if (preexistingReviewIds.size > 0) {
+              core.info("Copilot has already reviewed the live head; no duplicate automatic request.");
+              return;
+            }
+            // Never issue a second write while Copilot is already reviewing.
+            // Once it finishes, refetch the head: pushes during that review
+            // may still need their own request.
+            let waitedForPending = false;
+            for (let attempt = 0; ; attempt += 1) {
+              const { data: pending } = await reader.rest.pulls.listRequestedReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number,
+              });
+              if (!pending.users.some((user) => user.login === "copilot-pull-request-reviewer[bot]")) {
+                break;
+              }
+              if (attempt === 10) {
+                core.setFailed("Existing Copilot review is still pending after five minutes; deferred without a duplicate request.");
+                return;
+              }
+              waitedForPending = true;
+              await sleep(30_000);
+            }
+            if (waitedForPending) {
+              ({ data: livePr } = await reader.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number,
+              }));
+              if (livePr.state !== "open" || livePr.draft || livePr.base.ref !== "dev") {
+                core.info("PR became ineligible while waiting for its existing review.");
+                return;
+              }
+              headSha = livePr.head.sha;
+              preexistingReviewIds = await copilotReviewIdsAtHeadSha(headSha);
+              if (preexistingReviewIds.size > 0) {
+                core.info("Existing Copilot review completed at the live head; no new request.");
+                return;
+              }
+            }
 
             try {
               await github.rest.pulls.requestReviewers({
@@ -255,6 +347,13 @@ jobs:
               // permission) would silently reopen the exact failure mode
               // this workflow exists to close, with no visible signal.
               core.setFailed(`Could not request Copilot review: ${error.message}`);
+              const headers = error.response?.headers ?? {};
+              if (headers["retry-after"] || headers["x-ratelimit-remaining"] === "0") {
+                core.warning(
+                  `GitHub rate-limit backoff: retry-after=${headers["retry-after"] ?? "unspecified"}; ` +
+                  `reset-epoch=${headers["x-ratelimit-reset"] ?? "unspecified"}. No automatic write retry.`,
+                );
+              }
               return;
             }
 
@@ -263,10 +362,11 @@ jobs:
             // completed review ranges from seconds to several minutes under
             // heavy review-queue load (confirmed: real reviews landing at
             // 3-4+ minutes during a high-PR-volume window produced false
-            // failures here at the previous, tighter bound). 60 x 10s = 10
-            // minutes, inside this job's 12-minute timeout.
-            const attempts = 60;
-            const delayMs = 10_000;
+            // failures here at the previous, tighter bound). 20 x 30s retains
+            // the ten-minute observation horizon at one-third the read volume.
+            // Reads use GITHUB_TOKEN, not the licensed owner's shared quota.
+            const attempts = 20;
+            const delayMs = 30_000;
             for (let attempt = 1; attempt <= attempts; attempt += 1) {
               if (await copilotIsRequested(preexistingReviewIds, headSha)) {
                 core.info(`Confirmed Copilot review requested for ${author}'s PR.`);
