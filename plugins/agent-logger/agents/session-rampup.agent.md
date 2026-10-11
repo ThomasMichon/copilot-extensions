@@ -146,7 +146,9 @@ ownership evidence stay explicitly unknown. Do not recommend deleting a
 completed child merely because its parent finished; verify the child's own
 landing and obligations too.
 
-Reply with **only** this structure (compact, factual, no persona):
+Stop after the audit table; the takeover template below does not apply.
+
+For takeover mode, reply with **only** this structure (compact, factual, no persona):
 
 ```
 ## Ramp-Up Briefing

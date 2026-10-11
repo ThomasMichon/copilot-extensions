@@ -135,8 +135,8 @@ Inspection) -- then:
 
 Make the delegation **audit-only**, not takeover: explicitly permit ephemeral
 digest collation and bounded reads, forbid repository/lifecycle mutations and
-resuming the original work, and request a cited `safe candidate` / `open
-objective` / `unknown` verdict. A report-only audit can create the tool-owned
+resuming the original work, and request a cited `safe candidate` / `preserve`
+/ `unknown` verdict. A report-only audit can create the tool-owned
 ephemeral digest; it must not edit source, settle claims, launch successors,
 or remove worktrees. A few turns can still contain thousands of tool events;
 turn count alone is not a transcript-size bound.
