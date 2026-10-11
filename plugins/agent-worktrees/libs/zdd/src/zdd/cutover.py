@@ -92,6 +92,7 @@ class CutoverResult:
     drain: dict[str, Any] | None = None
     serving_endpoint: Endpoint | None = None
     retirement_requested: bool = False
+    retirement_confirmed: bool = False
     conditional: bool = False
 
     def to_dict(self) -> dict[str, Any]:
@@ -106,6 +107,7 @@ class CutoverResult:
             "drain": self.drain,
         }
         if self.conditional:
+            data["retirement_confirmed"] = self.retirement_confirmed
             data["serving_endpoint"] = (
                 self.serving_endpoint.to_dict() if self.serving_endpoint else None
             )
@@ -598,6 +600,10 @@ class CutoverOrchestrator:
                     old_client.shutdown()
                 result.retirement_requested = conditional is not None
                 result.steps.append("old daemon shutdown requested")
+                if conditional:
+                    conditional.confirm_retired()
+                    result.retirement_confirmed = True
+                    result.steps.append("old daemon exit confirmed")
                 # The retired daemon is the OLD one, so log its port (matching
                 # `drain`); the new port is carried in detail for correlation.
                 self._emit(
@@ -636,7 +642,7 @@ class CutoverOrchestrator:
                 )
                 result.ok = conditional is None
                 log.error("Cutover post-commit error: %s", result.error)
-                if conditional and not result.retirement_requested:
+                if conditional and not result.retirement_confirmed:
                     breadcrumb.write_breadcrumb(
                         self.config_dir, state="draining", old=old_dict,
                         new_port=new_port, new_pid=new_pid, started_at=started_at,

@@ -111,6 +111,11 @@ PID/start identity at the receiving daemon or through an identity-bound native
 handle, with a bounded operation. Address-based shutdown alone is insufficient.
 Failed retirement requests preserve a nonterminal breadcrumb and the successor
 route; later conditional repair refuses until owner-led recovery resolves it.
+The required `confirm_retired(endpoint, timeout)` callback must confirm the
+exact predecessor's exit through an authoritative native process handle.
+`retirement_timeout` defaults to 30 seconds and must be finite and nonnegative.
+False or unavailable exit evidence leaves the attempt failed and its recovery
+breadcrumb nonterminal, even after an accepted shutdown request.
 
 The supported in-process adapter is `run_conditional_cutover(config_dir,
 version=..., request=...)`. Bridge deployment/service restart and Dispatch
@@ -118,8 +123,8 @@ deployment accept the request plus the **observed** `routing_dir` as keyword
 arguments, bypassing ambient configuration, legacy recovery preludes and
 post-cutover force-reaping. These are internal owner operations, not JSON/argv
 serialization of sensitive callbacks. Conditional results add
-`serving_endpoint` and `retirement_requested`; shutdown request is **not**
-confirmed process exit.
+`serving_endpoint`, `retirement_requested` and `retirement_confirmed`; an
+accepted shutdown request is **not** confirmed process exit.
 
 **Remaining adapter obligation:** production daemons do not yet implement
 authoritative effective-config capture and matching health attestation.

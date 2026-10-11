@@ -51,6 +51,7 @@ class RuntimeSnapshot:
     attest: Callable[[Endpoint], RuntimeAttestation] = field(repr=False)
     make_client: Callable[[str], _Client] = field(repr=False)
     retire: Callable[[Endpoint], None] = field(repr=False)
+    confirm_retired: Callable[[Endpoint, float], bool] = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,7 @@ class ConditionalCutover:
     selected_is_newer: Callable[[str, str], bool] = field(repr=False)
     capture_runtime: Callable[[Endpoint], RuntimeSnapshot | None] = field(repr=False)
     routing_lock_timeout: float = 5.0
+    retirement_timeout: float = 30.0
 
 
 class PreparedCutover:
@@ -78,6 +80,8 @@ class PreparedCutover:
         self.new: Endpoint | None = None
         if not math.isfinite(request.routing_lock_timeout) or request.routing_lock_timeout < 0:
             raise ValueError("routing_lock_timeout must be finite and nonnegative")
+        if not math.isfinite(request.retirement_timeout) or request.retirement_timeout < 0:
+            raise ValueError("retirement_timeout must be finite and nonnegative")
         if orch.routing is not routing:
             raise CutoverError("conditional cutover requires native guarded routing")
         record = breadcrumb.read_breadcrumb(orch.config_dir)
@@ -188,6 +192,10 @@ class PreparedCutover:
         self.verify_before_retire()
         self.snapshot.retire(self.old)
 
+    def confirm_retired(self) -> None:
+        if self.snapshot.confirm_retired(self.old, self.request.retirement_timeout) is not True:
+            raise CutoverError("predecessor exit unconfirmed; owner-led recovery required")
+
     def rollback(
         self,
         handle: _Handle,
@@ -291,7 +299,7 @@ def run_conditional_cutover(
 
     Only a captured RuntimeSnapshot can supply spawn/health/control behavior.
     It intentionally skips legacy recovery/reaping preludes and forced process
-    retirement. Retired means shutdown requested, not confirmed process exit.
+    retirement. Success requires adopter-confirmed exact predecessor exit.
     """
     from .cutover import CutoverOrchestrator
 

@@ -99,3 +99,25 @@ def test_route_change_during_undrain_returns_unresolved_result(case):
     assert events == ["spawn", "drain", "undrain"]
     assert routing.read_table(root)["active"] == winner.to_dict()
     assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
+
+
+def test_accepted_shutdown_without_exit_remains_unresolved(case):
+    root, _, events, _, snapshot, request, orch = case
+    confirmations = []
+
+    def confirm(endpoint, timeout):
+        confirmations.append((endpoint.pid, timeout))
+        return False
+
+    result = orch.run(
+        conditional=replace(
+            request, capture_runtime=lambda _: replace(snapshot, confirm_retired=confirm)
+        )
+    )
+    assert not result.ok and result.committed
+    assert result.retirement_requested and not result.retirement_confirmed
+    assert confirmations == [(101, 30.0)]
+    assert events == ["spawn", "drain", "shutdown"]
+    assert routing.read_table(root)["active"]["pid"] == 202
+    assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
+    assert result.to_dict()["retirement_confirmed"] is False

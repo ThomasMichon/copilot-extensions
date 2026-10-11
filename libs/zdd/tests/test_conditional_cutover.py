@@ -73,6 +73,7 @@ def case(tmp_path, monkeypatch):
         attest=health,
         make_client=lambda _: Client(),
         retire=lambda endpoint: Client().shutdown(),
+        confirm_retired=lambda endpoint, timeout: True,
     )
     request = ConditionalCutover(
         expected_active=old,
