@@ -1,5 +1,29 @@
 # Agent Worktrees -- Architecture
 
+## Concurrent PR publication
+
+The clone-wide `agent-worktrees-publish.lock` protects shared remote
+configuration and destination verification, not the duration of a push.
+Publication captures the expanded, verified push URL under that lock, then
+releases it before authentication, pre-push hooks, and network transfer.
+Transport uses a unique process-local remote with an explicit captured push URL;
+authentication uses that destination rather than resolving the mutable remote
+name again. Per-command URL rules prevent a later rewrite
+rule from redirecting the captured URL. No remote is persisted or repointed.
+A changed fork identity before capture
+is still refused.
+
+Unrelated branches can publish concurrently. Same-branch updates retain explicit
+Git expected-object leases and owned-rebase proof, so competing writers are
+accepted or rejected atomically by the remote rather than serialized across the
+whole clone. All pre-push hooks and bounded process-tree timeouts still apply.
+After a successful push, a short locked refresh preserves remote-tracking refs
+only if the named remote still matches the captured destination; a remote
+repoint never credits the old push to the new repository.
+Tracking refresh uses compare-and-swap and never rolls back a newer published
+tip. A refresh failure is reported as a post-push warning, not a false claim
+that the already-successful remote update failed.
+
 ## Two-Layer Design
 
 ```

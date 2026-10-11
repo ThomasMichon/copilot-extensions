@@ -112,6 +112,8 @@ def test_verified_rebase_retains_configured_bound(monkeypatch):
     attempts = []
     proof = SimpleNamespace(source_head="source", branch="change", new_base="base")
     monkeypatch.setattr(pr_publish, "publish_lock", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(git_ops, "git", lambda *a, **k:
+                        __import__("subprocess").CompletedProcess(a, 0, "https://example.test/repo.git\n", ""))
     monkeypatch.setattr(pr_rebase, "verify", lambda *a, **k: proof)
     monkeypatch.setattr(pr_rebase, "_save", lambda *a, **k: None)
 

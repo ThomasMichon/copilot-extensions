@@ -338,9 +338,11 @@ _held = threading.local()
 @contextlib.contextmanager
 def publish_lock(cwd: str, *, acquire_timeout: float | None = None,
                  push_timeout_seconds: float = push_timeout.DEFAULT_PUSH_TIMEOUT):
-    """Serialize changing a remote's URL with pushing through it, across every
-    worktree of the clone (they share one ``.git/config``): the lock lives in the
-    common git dir. Re-entrant within a thread; other threads and processes wait."""
+    """Serialize remote configuration and snapshot verification across worktrees.
+
+    Push transport uses a captured URL outside this lock. Re-entrant within a
+    thread; the file lives in the clone's shared git directory.
+    """
     timeout = publication_deadline.validate(push_timeout_seconds)
     if acquire_timeout is None:
         acquire_timeout = (PUBLISH_LOCK_ACQUIRE_TIMEOUT_S if timeout == push_timeout.DEFAULT_PUSH_TIMEOUT
@@ -369,7 +371,9 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                  force_with_lease: bool = False,
                  force_with_lease_expect: str | None = None,
                  timeout: float = push_timeout.DEFAULT_PUSH_TIMEOUT, repo=None) -> git_ops.PushResult:
-    """``git_ops.push`` for a PR head, under :func:`publish_lock`: when it goes to
+    """Verify the destination under the short configuration lock, then push a
+    pinned URL without holding the clone-wide lock through hooks/network I/O.
+    When it goes to
     the PR's recorded fork, that remote must still name the fork's repo
     (``head_repo``) at push time -- another worktree's fork setup could have
     repointed it since it was chosen."""
@@ -389,6 +393,16 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                 identity = push_identity(remote, cwd=cwd) if got else ""
                 if not want or got != want or not want_identity or identity != want_identity:
                     return git_ops.PushResult(ok=False, stderr=REPOINTED)
+            # get-url expands insteadOf/pushInsteadOf before the snapshot leaves
+            # the lock. A later remote-name repoint cannot redirect transport or auth.
+            urls = git_ops.git("remote", "get-url", "--push", "--all", remote,
+                               cwd=cwd, check=False)
+            destinations = urls.stdout.splitlines() if urls.returncode == 0 else []
+            if len(destinations) != 1 or not destinations[0].strip():
+                return git_ops.PushResult(ok=False, stderr=UNREADABLE_REMOTE)
+            destination = destinations[0].strip()
+        from .git_push_transport import pinned_destination
+        with pinned_destination(remote, destination):
             result = git_ops.push(remote, refspec, cwd=cwd, force_with_lease=force_with_lease,
                                   force_with_lease_expect=force_with_lease_expect, timeout=timeout)
             if repo is not None and force_with_lease_expect and result.stderr == (

@@ -1,0 +1,9 @@
+{
+  "comment": "Release clone-wide remote configuration lock before verified immutable-destination pushes so unrelated agent publications run concurrently",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

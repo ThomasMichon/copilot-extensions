@@ -4631,7 +4631,7 @@ class TestPRFinalizeAndPush:
     def test_a_fork_repointed_after_it_was_chosen_is_refused_at_push_time(self, pr_repo, monkeypatch):
         """Another worktree's fork setup repoints the shared remote between
         resolution and push: the push re-checks under the publication lock,
-        and repointing takes that same lock, so it can't land mid-push."""
+        and a mid-push repoint is safe because transport uses the pinned URL."""
         import threading
 
         from agent_worktrees import pr_publish
@@ -4649,12 +4649,12 @@ class TestPRFinalizeAndPush:
             waiter = threading.Thread(target=repoint, daemon=True)
             waiter.start()
             waiter.join(0.5)
-            pushed.append((remote, refspec, waiter.is_alive()))  # it's still waiting for the lock
+            pushed.append((remote, refspec, waiter.is_alive()))
             return git_ops.PushResult(ok=True)
 
         monkeypatch.setattr(git_ops, "push", fake_push)
         assert pr_publish.push_checked(rec, "fork", branch, cwd=str(wt_path))
-        assert pushed == [("fork", branch, True)]
+        assert pushed == [("fork", branch, False)]
         other = fork_dir.parent / "elsewhere.git"
         _git("init", "--bare", "-b", "master", str(other), cwd=wt_path)
         _git("remote", "set-url", "fork", str(other), cwd=wt_path)  # repointed since it was chosen
