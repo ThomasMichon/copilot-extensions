@@ -127,6 +127,10 @@ After the merge-only pause, the operator authorized resumption:
 - [ ] Implement the version-slot installer and durable configuration/state
   contract, including health-gated activation and rollback.
 - [ ] Preserve existing CLI, configuration and non-container host compatibility.
+  Existing legacy macOS installs remain supported; the new candidate staging
+  adapter initially admits Windows/Linux only. Equivalent owned-descendant
+  supervision and first-touch staging must be proved on Darwin before claiming
+  standalone macOS parity. _(agent-recommended staged platform admission)_
 - [ ] Keep the live native canary healthy across reviewed upgrades; retain a
   validated previous slot, verify worker adoption and protect the warm engine.
 - [ ] Define and test schema/queue rollback limits explicitly rather than assuming

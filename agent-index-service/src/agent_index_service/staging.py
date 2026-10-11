@@ -373,7 +373,10 @@ def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) ->
     private_group = os.name != "nt" and not contained
     supervised = os.name != "nt"
     if supervised and (sys.platform != "linux" or not Path("/proc/self/stat").is_file()):
-        raise CandidateError(f"{operation}: contained descendant supervision unavailable")
+        raise CandidateError(
+            f"{operation}: staging supports Windows and Linux only; "
+            "owned descendant supervision is unavailable on this platform"
+        )
     if private_group:
         kwargs["start_new_session"] = True
     command = ([sys.executable, "-I", "-B", "-c", _CONTAINED_SUPERVISOR,
@@ -391,7 +394,7 @@ def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) ->
             if supervised:
                 token = _start_token(process.pid)
             if os.name == "nt" and job is None:
-                raise CandidateError(f"{operation}: Windows Job containment unavailable")
+                raise _CleanupUnconfirmed(f"{operation}: Windows Job containment unavailable")
             while process.poll() is None:
                 if time.monotonic() >= deadline:
                     raise CandidateError(f"{operation}: timeout")

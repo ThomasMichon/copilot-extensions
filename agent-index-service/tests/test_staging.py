@@ -497,6 +497,46 @@ def test_run_expired_deadline_never_spawns(case, monkeypatch):
 original_run = staging._run
 
 
+def test_windows_job_assignment_failure_is_unconfirmed_and_preserves_candidate(case, monkeypatch):
+    import agent_procutil
+
+    class Process:
+        pid = 123
+        returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -1
+
+        def wait(self, timeout):
+            return self.returncode
+
+    monkeypatch.setattr(agent_procutil, "spawn_sync_in_kill_on_close_job",
+                        lambda *args, **kwargs: (Process(), None))
+    monkeypatch.setattr(staging, "_run", original_run)
+    if os.name != "nt":
+        pytest.skip("Windows Job failure branch")
+    with pytest.raises(staging._CleanupUnconfirmed, match="Job containment unavailable"):
+        stage(case)
+    slot = case.root / "versions" / "0.1.1.dev1"
+    assert slot.exists()
+    assert not (slot / ".install-complete.json").exists()
+
+
+def test_darwin_staging_refuses_spawn_until_owned_supervision_is_supported(case, monkeypatch):
+    import agent_procutil
+
+    monkeypatch.setattr(staging, "_run", original_run)
+    monkeypatch.setattr(staging, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(staging.sys, "platform", "darwin")
+    monkeypatch.setattr(agent_procutil, "spawn_sync_in_kill_on_close_job",
+                        lambda *args, **kwargs: pytest.fail("Darwin must not spawn"))
+    with pytest.raises(CandidateError, match="supports Windows and Linux only"):
+        original_run(["fake"], cwd=case.tmp, env={}, deadline=time.monotonic() + 15)
+
+
 def test_real_lease_error_is_candidate_error(case, monkeypatch):
     class Busy:
         def __init__(self, root):

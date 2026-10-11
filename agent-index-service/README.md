@@ -40,6 +40,13 @@ and bypasses legacy sibling server-venv discovery/foreground redispatch.
 
 ## Stage an immutable native candidate
 
+This initial standalone **staging adapter supports Windows and Linux**. macOS
+staging fails before subprocess launch because the implementation cannot yet
+provide an equivalent owned-descendant cleanup authority there. Existing legacy
+macOS host/client installation remains unchanged; it is not redirected through
+this new adapter. Darwin parity is an explicit deferred lifecycle item, not a
+claim that native compatibility is complete.
+
 `stage` provisions a candidate but never selects it, starts a service or changes
 the host configuration/data/routing. The install root must be an explicit
 absolute dedicated directory, disjoint from the host home/data/routing, bundle,
