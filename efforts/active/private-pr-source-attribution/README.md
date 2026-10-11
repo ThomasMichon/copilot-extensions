@@ -152,6 +152,15 @@ No production secret is read or written by the planning slice.
   the validated current ownership chain; unresolved ancestry or root opt-out
   omits it. Earlier tokens remain historical snapshots.
 
+### 2026-10-10 — Local cache protection slice
+
+- Origin identity landed in #6080; shared owner-key sourcing and portable token
+  encryption remain separate upcoming work.
+- Added a native Windows local-cache protection path for environments without
+  cryptography. Legacy Fernet caches are retained rather than silently reset.
+- Disposable native ARM64 cache protection/read validation passed without vault
+  unlock. Existing Fernet and new DPAPI cache tests passed together.
+
 ### 2026-10-10 — Continuation
 
 - Identified the remaining immediate-versus-originating identity gap after
