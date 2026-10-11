@@ -9,7 +9,7 @@ import sys
 import threading
 
 from . import activity, local_cache_refresh, output, profile_assignment, sessions, tracking, tracking_write, worktree_identity
-from . import codename_tracking, config as cfg
+from . import codename_tracking, config as cfg, machine_identity
 from .launch_trace import append_launch_event
 from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
 from .launch_seed_exec import deferred_command
@@ -461,7 +461,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
         if state.requested_machine:
             config = state.load_config()
-            if state.requested_machine != config.machine:
+            if not machine_identity.is_local_machine(state.requested_machine, config):
                 rc = _try_machine_handoff(config, state.requested_machine)
                 if rc is not None:
                     return rc
@@ -533,7 +533,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # cross-platform resume (e.g. the Windows Worktree Picker launching a
     # WSL worktree) fail closed with a bogus "Worktree not found" instead of
     # SSHing into the requested environment -- confirmed live.
-    same_machine = state.requested_machine == getattr(config, "machine", None)
+    same_machine = machine_identity.is_local_machine(state.requested_machine, config)
     requested_environment = getattr(state.args, "environment", None) or ""
     same_environment = True
     if requested_environment:

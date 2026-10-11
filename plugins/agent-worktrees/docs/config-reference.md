@@ -140,6 +140,13 @@ repos:
 | `profile_assignment` | map | absent/off | Optional balanced assignment policy over existing `copilot_profiles`. Only a user-owned global, knowledge-overlay, or machine-local/per-project block can set `armed: true`. |
 | `repos` | map | `{}` | Per-repo configuration, keyed by repo name. |
 
+### Self-targeted launch identities
+
+Explicit `resolve --machine` targets use the same identity matching as local
+operations: the current key, hostname, identity alias, or display name selects
+a local launch when the requested environment is native. A same-host WSL or
+other-environment target still uses its configured transport.
+
 ### Same-machine AHP sessions
 
 Agent-worktrees no longer owns AHP configuration or the create/verify/dispose

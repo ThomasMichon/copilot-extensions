@@ -1,0 +1,9 @@
+{
+  "comment": "Keep explicit self-host launch aliases local while preserving cross-environment SSH targets",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

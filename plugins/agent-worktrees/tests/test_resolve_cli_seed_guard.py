@@ -62,7 +62,8 @@ def test_resolve_new_with_machine_and_no_seed_is_unaffected(monkeypatch, capfd):
     """The rejection is seed-specific -- an ordinary remote --new (no
     --seed) must still reach the existing remote-dispatch path untouched."""
     state = resolve_cli.ResolveCommandState.from_args(_args(seed=None))
-    state.config = object()  # load_config() short-circuits on a truthy cache
+    state.config = SimpleNamespace(machine="", default_repo=SimpleNamespace(anchor=""))
+    monkeypatch.setattr(resolve_cli.cfg, "load_machines_yaml", lambda _: {})
     called = []
     monkeypatch.setattr(
         resolve_cli, "_emit_remote_plan_for_env",
@@ -157,6 +158,8 @@ def test_resolve_machine_differing_from_the_local_machine_still_dispatches_remot
     is specific to the self-match case, not a blanket skip."""
     state = resolve_cli.ResolveCommandState.from_args(_args(seed=None))
     state.config = SimpleNamespace(machine="a-different-machine")
+    state.config.default_repo = SimpleNamespace(anchor="")
+    monkeypatch.setattr(resolve_cli.cfg, "load_machines_yaml", lambda _: {})
     called = []
     monkeypatch.setattr(
         resolve_cli, "_emit_remote_plan_for_env",
@@ -167,6 +170,49 @@ def test_resolve_machine_differing_from_the_local_machine_still_dispatches_remot
 
     assert rc == 0
     assert called
+
+
+@pytest.mark.parametrize("target", ["EXAMPLE-HOST", "raw-host", "local-alias", "Example Host"])
+@pytest.mark.parametrize("environment,remote", [("Win", False), ("WSL", True)])
+def test_json_launch_canonicalizes_self_target_before_selecting_transport(
+    monkeypatch, tmp_path, target, environment, remote,
+):
+    from agent_worktrees import config as cfg
+
+    entry = cfg.MachineEntry(
+        key="example-host", hostname="raw-host", alias="local-alias",
+        display_name="Example Host",
+    )
+    config = cfg.Config(
+        machine="example-host", platform="windows", repo_name="example", srcroot=str(tmp_path),
+        repos={"example": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path))},
+    )
+    state = resolve_cli.ResolveCommandState.from_args(
+        _args(new_worktree=False, base=True, machine=target, environment=environment)
+    )
+    state.config = config
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _: {entry.key: entry})
+    calls = []
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *args, **kwargs: calls.append("remote") or 7,
+    )
+    monkeypatch.setattr(
+        resolve_cli, "_preflight_launch",
+        lambda *args: SimpleNamespace(error=None),
+    )
+    monkeypatch.setattr(resolve_cli.local_cache_refresh, "prepare_for_launch", lambda *a, **k: None)
+    monkeypatch.setattr(resolve_cli, "_build_launch_cmd", lambda *a, **k: ["local-launch"])
+    monkeypatch.setattr(resolve_cli, "_repo_session_env", lambda *a: {})
+    monkeypatch.setattr(resolve_cli, "_build_env", lambda *a, **k: {})
+    monkeypatch.setattr(
+        resolve_cli.output, "_json_output",
+        lambda plan: calls.append("local") if plan["action"] == "exec" else None,
+    )
+
+    assert resolve_cli._resolve_json_mode(state) == (7 if remote else 0)
+    assert calls == ["remote" if remote else "local"]
 
 
 def test_resolve_worktree_id_with_machine_and_seed_is_rejected_json(capfd):
