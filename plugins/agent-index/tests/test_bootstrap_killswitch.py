@@ -16,6 +16,10 @@ def test_actual_hook_killswitch_precedes_all_runtime_writes(tmp_path, shell, fau
     # Shell startup caches are not Index artifacts; isolate them from the witness home.
     for kind in ("CACHE", "DATA", "CONFIG"):
         environment[f"XDG_{kind}_HOME"] = str(tmp_path / f"shell-{kind.lower()}")
+    for key in ("APPDATA", "LOCALAPPDATA"):
+        directory = tmp_path / f"shell-{key.lower()}"
+        directory.mkdir()
+        environment[key] = str(directory)
     state = Path(environment["BOOTSTRAP_KILLSWITCH_STATE_FILE"])
     state.parent.mkdir()
     state.write_text(json.dumps({"active": True, "reason": "fixture-only pause"}))
