@@ -1,0 +1,9 @@
+{
+  "comment": "Compose independently recoverable session-state and process-log sync health with persistent per-leg partial streaks and freshness.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
