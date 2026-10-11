@@ -84,7 +84,8 @@
         "target_preferences": 27,
         "strict_resume": 28,
         "current_attention": 29,
-        "strict_acquisition": 30
+        "strict_acquisition": 30,
+        "acquisition_retirement_revalidation": 31
       },
       "durable_records": [],
       "source_paths": [

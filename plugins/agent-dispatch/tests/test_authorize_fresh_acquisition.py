@@ -135,6 +135,22 @@ def test_http_refuses_old_bridge_before_authorization(recovery, monkeypatch):
     assert queue.get_reservation(reservation.key).conversation_retired is False
 
 
+@pytest.mark.parametrize("invalid_generation", [True, False, "0", 0.0])
+def test_http_rejects_coerced_generation_before_authorization(recovery, monkeypatch, invalid_generation):
+    monkeypatch.setattr("agent_dispatch.acquisition_receipts.verify_recovery_bridge", lambda: None)
+    queue, task, reservation, args = recovery
+    client = TestClient(create_app(queue, token="worker-test", control_token="control-test"))
+    scheme = "Be" + "arer"
+    response = client.post(
+        f"/spawn-reservations/tasks/{task.id}/authorize-fresh",
+        json={**args, "expected_generation": invalid_generation},
+        headers={"Authorization": scheme + " control-test"},
+    )
+    assert response.status_code == 422
+    assert queue.get(task.id).generation == task.generation
+    assert queue.get_reservation(reservation.key).conversation_retired is False
+
+
 @pytest.mark.parametrize("version,supported,accepted", [(30, True, False), (31, False, False), (31, True, True)])
 def test_actual_recovery_readiness_boundary_requires_new_supported_protocol(monkeypatch, version, supported, accepted):
     from agent_dispatch.acquisition_receipts import verify_recovery_bridge

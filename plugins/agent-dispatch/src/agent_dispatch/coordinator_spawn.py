@@ -105,7 +105,7 @@ class RearmSpawnBody(BaseModel):
 
 
 class AuthorizeFreshBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     reservation_key: str
     worktree: str
     expected_generation: int
