@@ -90,7 +90,9 @@ function Invoke-PostToolHook {
             $payload = if ([string]::IsNullOrWhiteSpace($Raw)) { '{}' } else { $Raw }
             $result = Invoke-ResidentPostTool -Endpoint $endpoint -PayloadJson $payload
             if ($null -ne $result) {
-                [Console]::Out.Write($result)
+                if ($result -ne '{}') {
+                    [Console]::Out.Write($result)
+                }
                 return
             }
         } catch {

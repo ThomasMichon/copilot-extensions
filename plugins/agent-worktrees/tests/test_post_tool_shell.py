@@ -18,6 +18,7 @@ PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPT = PLUGIN / "scripts" / "post-tool-hook.ps1"
 
 
+@pytest.mark.guard
 def test_post_hook_uses_same_shell_and_installs_the_client():
     hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     command = hooks["hooks"]["postToolUse"][0]["powershell"]
@@ -34,6 +35,7 @@ def test_post_hook_uses_same_shell_and_installs_the_client():
     ).read_text(encoding="utf-8")
 
 
+@pytest.mark.guard
 def test_local_advisory_fallback_does_not_retry_daemon(monkeypatch):
     spec = importlib.util.spec_from_file_location(
         "post_tool_python_client", PLUGIN / "scripts" / "hook_client.py"
@@ -78,6 +80,8 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path)
     seen = []
     def decide(kind, payload, deadline):
         seen.append((kind, payload))
+        if payload.get("toolName") == "empty":
+            return {}
         if payload.get("toolName") == "deny":
             return {"permissionDecision": "deny", "permissionDecisionReason": "policy"}
         return {"additionalContext": "resident"}
@@ -97,6 +101,7 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path)
             "function Get-Command { throw 'a client/CLI child was requested' }\n"
             "Invoke-PostToolHook -Raw '{\"toolName\":\"view\"}'\n"
             "Invoke-PostToolHook -Raw '{\"toolName\":\"view\"}'\n"
+            "Invoke-PostToolHook -Raw '{\"toolName\":\"empty\"}'\n"
             "$deny = Invoke-ResidentPostTool -Endpoint "
             "(Get-Content (Join-Path $env:USERPROFILE '.agent-worktrees/status-monitor.lock') "
             "-Raw | ConvertFrom-Json | ForEach-Object {"
@@ -140,6 +145,7 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path)
         assert seen == [
             ("postToolUse", {"toolName": "view"}),
             ("postToolUse", {"toolName": "view"}),
+            ("postToolUse", {"toolName": "empty"}),
             ("postToolUse", {"toolName": "deny"}),
         ]
         bin_dir = root / "bin"
