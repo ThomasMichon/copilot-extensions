@@ -290,6 +290,26 @@ _payload_hash() {
             roots+=("$__f")
         done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
     fi
+    # This plugin's own dependencies[] on shared libraries are resolved
+    # live via [tool.uv.sources] `path = "..."` entries in pyproject.toml
+    # (e.g. "../../libs/work-coalescing-singleton") -- never vendored --
+    # so those libraries' OWN content is just as much a part of this
+    # plugin's actual runtime payload as src/agent_pull_requests is.
+    # Fingerprint each referenced library's COMPLETE directory (not just
+    # its own pyproject.toml): a shared library's source changing without
+    # a version bump here must still be detected as content drift.
+    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
+        local __rel __resolved
+        while IFS= read -r __rel; do
+            __resolved="$(cd "$PLUGIN_DIR" 2>/dev/null && cd "$__rel" 2>/dev/null && pwd)"
+            [[ -n "$__resolved" ]] && roots+=("$__resolved")
+        done < <(
+            sed -n '/^\[tool\.uv\.sources\]/,/^\[/p' "$PLUGIN_DIR/pyproject.toml" |
+            grep -o 'path[[:space:]]*=[[:space:]]*"[^"]*"' |
+            sed -n 's/.*"\([^"]*\)".*/\1/p' |
+            sort
+        )
+    fi
     [[ ${#roots[@]} -gt 0 ]] || { printf ''; return 0; }
     local hash
     if ! hash="$("$py" "$vr" --root "$INSTALL_DIR" fingerprint "${roots[@]}" 2>&1)"; then

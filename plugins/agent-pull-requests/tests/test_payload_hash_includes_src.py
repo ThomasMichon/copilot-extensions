@@ -156,6 +156,40 @@ fi
     assert "UNEXPECTED_SUCCESS" not in result.stdout
 
 
+def test_payload_hash_changes_when_a_uv_sources_path_dependency_changes(tmp_path: Path) -> None:
+    """This plugin's dependencies[] on shared libraries (agent-procutil,
+    agent-work-coalescing-singleton, agent-single-instance-lease) are
+    resolved live via [tool.uv.sources] `path = "..."` entries, never
+    vendored. Those libraries' own content is just as much a part of the
+    actual runtime payload as src/agent_pull_requests -- a change there
+    must be detected too, not just a change under the plugin's own tree."""
+    plugin_dir, _pkg_src_dir = _make_plugin_tree(tmp_path)
+    shared_lib_dir = tmp_path / "libs" / "a-shared-lib"
+    (shared_lib_dir / "src" / "a_shared_lib").mkdir(parents=True)
+    (shared_lib_dir / "src" / "a_shared_lib" / "__init__.py").write_text(
+        "x = 1\n", encoding="utf-8"
+    )
+    (plugin_dir / "pyproject.toml").write_text(
+        '[project]\nname = "agent-pull-requests"\nversion = "1.0.0"\n'
+        "dependencies = [\"a-shared-lib\"]\n\n"
+        "[tool.uv.sources]\n"
+        'a-shared-lib = { path = "../libs/a-shared-lib", editable = true }\n',
+        encoding="utf-8",
+    )
+    install_dir = tmp_path / "install"
+
+    before = _run_payload_hash(plugin_dir, install_dir)
+    (shared_lib_dir / "src" / "a_shared_lib" / "__init__.py").write_text(
+        "x = 2\n", encoding="utf-8"
+    )
+    after = _run_payload_hash(plugin_dir, install_dir)
+    assert before != after, (
+        "_payload_hash() did not change when a [tool.uv.sources] path "
+        "dependency's content changed -- shared library source is still "
+        "excluded from the fingerprint"
+    )
+
+
 def test_payload_hash_matches_canonical_fingerprint_source(tmp_path: Path) -> None:
     """The shell function's output must agree with calling
     fingerprint_source() directly on the same (pyproject.toml, src) roots,
