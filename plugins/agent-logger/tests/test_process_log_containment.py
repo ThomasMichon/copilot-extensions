@@ -177,3 +177,30 @@ def test_process_log_source_roots_native_enumeration_yield_releases_handles(
     assert next(iterator) == ref
     root.parent.rename(tmp_path / "renamed")
     iterator.close()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows listing-to-ZIP boundary")
+def test_process_log_source_roots_native_zip_scan_remains_pinned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger.sync.archive_directory import ArchiveDirectory
+
+    root = tmp_path / "ancestor" / "logs"
+    ref = _evidence(root, "zip", PAYLOAD)
+    original_names = ArchiveDirectory.names
+    checked = False
+
+    def names(directory: ArchiveDirectory) -> list[str]:
+        nonlocal checked
+        found = original_names(directory)
+        with pytest.raises(PermissionError):
+            root.parent.rename(tmp_path / "renamed")
+        checked = True
+        return found
+
+    monkeypatch.setattr(ArchiveDirectory, "names", names)
+    iterator = iter_process_log_refs(root)
+    assert next(iterator) == ref
+    assert checked
+    root.parent.rename(tmp_path / "renamed")
+    iterator.close()
