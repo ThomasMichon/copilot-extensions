@@ -56,12 +56,14 @@ def test_pending_auto_merge_waits_and_outputs_exact_commit(waiter, monkeypatch):
 
     def run(argv, **kwargs):
         calls.append(argv)
-        assert kwargs["stdout"] == subprocess.PIPE and "stderr" not in kwargs
+        assert kwargs["stdout"] == subprocess.PIPE
         assert kwargs["timeout"] <= 60
         assert not output.exists()
         if argv[2] == "checks":
+            assert kwargs["stderr"] == subprocess.PIPE
             assert "--required" in argv
-            return subprocess.CompletedProcess(argv, 8, '[{"name":"gate","bucket":"pending","link":""}]')
+            return subprocess.CompletedProcess(argv, 8, '[{"name":"gate","bucket":"pending","link":""}]', "")
+        assert "stderr" not in kwargs
         assert kwargs["check"] is True
         return subprocess.CompletedProcess(argv, 0, json.dumps(next(replies)))
 
@@ -112,14 +114,47 @@ def test_required_check_failure_is_not_reported_as_merge_timeout(waiter, monkeyp
     code, output = waiter
 
     def run(argv, **kwargs):
-        assert "stderr" not in kwargs
         if argv[2] == "view":
+            assert "stderr" not in kwargs
             return subprocess.CompletedProcess(argv, 0, json.dumps(response("OPEN")))
         return subprocess.CompletedProcess(argv, 1, json.dumps([
             {"name": "required gate", "bucket": bucket, "link": "https://example.com/check"},
-        ]))
+        ]), "")
 
     monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(RuntimeError, match="required gate"):
         exec(compile(code, str(WORKFLOW), "exec"), {})
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("message", [
+    "no checks reported on the 'release/promote-1' branch",
+    "no required checks reported on the 'release/promote-1' branch",
+])
+def test_delayed_required_check_registration_keeps_waiting(waiter, monkeypatch, message):
+    code, output = waiter
+    views = iter([response("OPEN"), response()])
+
+    def run(argv, **kwargs):
+        if argv[2] == "view":
+            return subprocess.CompletedProcess(argv, 0, json.dumps(next(views)))
+        return subprocess.CompletedProcess(argv, 1, "", message + "\n")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    exec(compile(code, str(WORKFLOW), "exec"), {})
+    assert output.read_text() == f"merge_sha={SHA}\n"
+
+
+def test_check_provider_failure_keeps_stderr_visible(waiter, monkeypatch, capsys):
+    code, output = waiter
+
+    def run(argv, **kwargs):
+        if argv[2] == "view":
+            return subprocess.CompletedProcess(argv, 0, json.dumps(response("OPEN")))
+        return subprocess.CompletedProcess(argv, 2, "", "provider refused request\n")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(subprocess.CalledProcessError):
+        exec(compile(code, str(WORKFLOW), "exec"), {})
+    assert "provider refused request" in capsys.readouterr().err
     assert not output.exists()

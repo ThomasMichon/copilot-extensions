@@ -975,6 +975,7 @@ jobs:
           import os
           import re
           import subprocess
+          import sys
           import time
 
           WAIT_SECONDS = 5 * 60 * 60
@@ -1026,9 +1027,23 @@ jobs:
                   ["gh", "pr", "checks", os.environ["PROMOTION_PR"],
                    "--repo", os.environ["GITHUB_REPOSITORY"],
                    "--required", "--json", "name,bucket,link"],
-                  stdout=subprocess.PIPE, text=True,
+                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                   timeout=min(60, remaining),
               )
+              registration_pending = (
+                  checks.returncode == 1
+                  and not checks.stdout.strip()
+                  and checks.stderr.strip() in (
+                      f"no checks reported on the '{os.environ['CANDIDATE_BRANCH']}' branch",
+                      f"no required checks reported on the '{os.environ['CANDIDATE_BRANCH']}' branch",
+                  )
+              )
+              if registration_pending:
+                  print(f"{identity}: required checks have not registered yet", flush=True)
+                  time.sleep(min(POLL_SECONDS, max(0, deadline - time.monotonic())))
+                  continue
+              if checks.stderr:
+                  print(checks.stderr, file=sys.stderr, end="")
               if checks.returncode not in (0, 1, 8):
                   raise subprocess.CalledProcessError(checks.returncode, checks.args)
               required = json.loads(checks.stdout)
