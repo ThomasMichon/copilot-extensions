@@ -373,6 +373,64 @@ def test_load_config_no_harness_when_repo_missing(tmp_path, monkeypatch):
     assert load_config().harness is None
 
 
+class TestCanonicalInRepoConfigPath:
+    """The canonical in-repo location (matching every other plugin's own
+    ``.copilot-extensions/<plugin-id>/...`` convention) is resolved before
+    the legacy bare ``<repo>/containers.yaml``."""
+
+    def _isolate(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("AGENT_CONTAINERS_CONFIG", raising=False)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "agent_containers.config.RUNTIME_DIR", tmp_path / "empty-runtime"
+        )
+
+    def test_canonical_path_is_used_when_present(self, tmp_path, monkeypatch):
+        self._isolate(tmp_path, monkeypatch)
+        canonical_dir = tmp_path / ".copilot-extensions" / "agent-containers"
+        canonical_dir.mkdir(parents=True)
+        (canonical_dir / "containers.yaml").write_text(
+            "exec_user: canonicaluser\n", encoding="utf-8"
+        )
+        assert load_config().exec_user == "canonicaluser"
+
+    def test_legacy_bare_path_still_works_when_canonical_absent(
+        self, tmp_path, monkeypatch
+    ):
+        self._isolate(tmp_path, monkeypatch)
+        (tmp_path / "containers.yaml").write_text(
+            "exec_user: legacyuser\n", encoding="utf-8"
+        )
+        assert load_config().exec_user == "legacyuser"
+
+    def test_canonical_path_wins_when_both_present(self, tmp_path, monkeypatch):
+        self._isolate(tmp_path, monkeypatch)
+        (tmp_path / "containers.yaml").write_text(
+            "exec_user: legacyuser\n", encoding="utf-8"
+        )
+        canonical_dir = tmp_path / ".copilot-extensions" / "agent-containers"
+        canonical_dir.mkdir(parents=True)
+        (canonical_dir / "containers.yaml").write_text(
+            "exec_user: canonicaluser\n", encoding="utf-8"
+        )
+        assert load_config().exec_user == "canonicaluser"
+
+    def test_explicit_env_override_wins_over_both(self, tmp_path, monkeypatch):
+        self._isolate(tmp_path, monkeypatch)
+        (tmp_path / "containers.yaml").write_text(
+            "exec_user: legacyuser\n", encoding="utf-8"
+        )
+        canonical_dir = tmp_path / ".copilot-extensions" / "agent-containers"
+        canonical_dir.mkdir(parents=True)
+        (canonical_dir / "containers.yaml").write_text(
+            "exec_user: canonicaluser\n", encoding="utf-8"
+        )
+        explicit = tmp_path / "explicit-containers.yaml"
+        explicit.write_text("exec_user: explicituser\n", encoding="utf-8")
+        monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(explicit))
+        assert load_config().exec_user == "explicituser"
+
+
 # --- E1e knowledge overlay (config-graft, #947) -------------------------------
 
 class TestKnowledgeOverlay:

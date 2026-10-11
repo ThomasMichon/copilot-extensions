@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve containers.yaml from the canonical in-repo location (<repo>/.copilot-extensions/agent-containers/containers.yaml), matching every other plugin's own .copilot-extensions/<plugin-id>/... convention; the legacy bare <repo>/containers.yaml remains readable as a fallback.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}
