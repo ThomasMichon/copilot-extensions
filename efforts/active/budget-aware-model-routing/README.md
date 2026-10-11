@@ -169,7 +169,6 @@ timestamp is not proof that the provider metadata was refreshed.
 - [ ] Keep marketplace, manifest, package, and runtime versions aligned.
 - [ ] Publish through the repository's normal review and self-merge flow.
 - [ ] Deploy through the unified update path and verify source/runtime identity.
-- [ ] Record evidence, close #2137, and archive this effort.
 
 ### Phase 6 - Agent-owned quota helper and pacing advice
 
@@ -193,6 +192,11 @@ timestamp is not proof that the provider metadata was refreshed.
 - [ ] Add regressions for changing allowance, selected-account mismatch,
   malformed/missing/stale reset, unit ambiguity, cached metadata, and advice-only
   behavior.
+
+### Phase 7 - Completion
+
+- [ ] Resolve every Plan and Validation Plan item, including quota-helper and
+  pacing validation; record evidence, close #2137, and archive this effort.
 
 ## Validation Plan
 
