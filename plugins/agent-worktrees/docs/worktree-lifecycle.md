@@ -108,7 +108,9 @@ always render as `FINAL`. The canonical closure descriptor
 
 Successful explicit `finalize` is also a durable **display** assertion. The
 descriptor's additive `display` projection reports `FINAL` while the record
-remains finalized, without requiring every normal poll to fetch again. An
+remains finalized and its recorded HEAD/branch identity still matches, without
+requiring every normal poll to fetch again. Legacy records without a checkout
+stamp remain conservative until explicitly finalized again. An
 attached concluding shell does not erase that assertion; liveness remains
 visible independently and continues to prevent removal. New claims/session
 activation or follow-ups reopen responsibility through their owning writers;

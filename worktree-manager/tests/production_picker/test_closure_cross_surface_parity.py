@@ -23,12 +23,18 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import pytest
 from pathlib import Path
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import git_ops, sessions, tracking
 
 from worktree_manager.production_picker.picker_tui import derive
+
+
+@pytest.fixture(autouse=True)
+def confirmed_fixture_checkout(monkeypatch):
+    monkeypatch.setattr("agent_worktrees.finalized_checkout.matches", lambda record: True)
 
 
 def _rec(**kw):

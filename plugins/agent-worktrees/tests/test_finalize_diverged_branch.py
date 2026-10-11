@@ -245,6 +245,15 @@ def test_successful_finalize_stays_final_on_fetch_free_status(
         assert cli._render_status_segment(
             str(checkout), fetch=False, plain=True, no_title=True,
         ).strip() == "[FINAL]"
+    _init_identity(checkout)
+    _commit(checkout, "new.txt", "new unlanded work\n")
+    assert "FINAL" not in cli._render_status_segment(
+        str(checkout), fetch=False, plain=True, no_title=True,
+    )
+    _git("checkout", "-q", "--detach", cwd=checkout)
+    assert "FINAL" not in cli._render_status_segment(
+        str(checkout), fetch=False, plain=True, no_title=True,
+    )
 
 
 def test_cleanup_deletes_renamed_branch_and_preserves_orphaned_tracked_branch(

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from . import finalized_checkout
+
 import argparse
 import dataclasses
 import os
@@ -469,6 +471,7 @@ def _render_status_segment(
             turn_count=turns,
             repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
             cross_machine_claims=prune.cross_machine_claim_count(rec),
+            finalized_checkout_current=finalized_checkout.matches(rec),
         )
         display_style = descriptor.display["style"] if descriptor.display else descriptor.style
         bg = _DESCRIPTOR_STYLE_BG.get(display_style, "colour238")
@@ -601,6 +604,7 @@ def _status_segment_json(path: str | None = None, fetch: bool = False) -> dict |
             turn_count=turns,
             repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
             cross_machine_claims=prune.cross_machine_claim_count(rec),
+            finalized_checkout_current=finalized_checkout.matches(rec),
         )
         closure = descriptor.to_dict()
 
