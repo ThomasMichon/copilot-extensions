@@ -441,17 +441,14 @@ class GitHubProvider:
         # 2. Actions check-runs.
         cproc = run_cli(
             [
-                "gh", "api", "--hostname", host,
+                "gh", "api", "--paginate", "--hostname", host,
                 f"/repos/{repo}/commits/{sha}/check-runs",
             ],
             env=self._env(token),
         )
         if cproc.returncode == 0:
-            try:
-                cdata = json.loads(cproc.stdout or "{}")
-            except json.JSONDecodeError:
-                cdata = {}
-            runs = cdata.get("check_runs") if isinstance(cdata, dict) else None
+            from .github_check_pages import check_runs_from_pages
+            runs = check_runs_from_pages(cproc.stdout or "")
             if isinstance(runs, list):
                 runs_readable = True
             if isinstance(runs, list) and runs:

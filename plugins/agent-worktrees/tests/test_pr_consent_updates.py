@@ -242,6 +242,27 @@ def test_review_page_errors_preserve_provider_retry_policy(monkeypatch, detail, 
     assert detail in str(error.value)
 
 
+def test_paginated_check_runs_include_late_failures_and_require_complete_pages(monkeypatch):
+    from agent_worktrees.providers import github
+    first = json.dumps({"total_count": 31, "check_runs": [
+        {"status": "completed", "conclusion": "success"} for _ in range(30)
+    ]})
+    for conclusion, expected in (("failure", "failure"), ("success", "success")):
+        last = json.dumps({"total_count": 31, "check_runs": [
+            {"status": "completed", "conclusion": conclusion},
+        ]})
+        def run(args, **kwargs):
+            if args[-1].endswith("/status"):
+                return subprocess.CompletedProcess([], 0, '{"statuses":[]}', "")
+            assert "--paginate" in args
+            return subprocess.CompletedProcess([], 0, first + "\n" + last, "")
+        monkeypatch.setattr(github, "run_cli", run)
+        assert github.GitHubProvider()._combined_checks_state("owner/repo", "head", "") == expected
+    from agent_worktrees.providers.github_check_pages import check_runs_from_pages
+    assert check_runs_from_pages(first) is None
+    assert check_runs_from_pages(first + "\n{") is None
+
+
 def test_fetch_errors_do_not_invent_actionable_state():
     def fetch():
         raise ProviderError("unavailable", transient=True)

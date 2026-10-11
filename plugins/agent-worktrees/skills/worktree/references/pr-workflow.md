@@ -209,7 +209,9 @@ Only a successful checks rollup or confirmed empty checks (`"none"`) permits
 this wake; unreadable/unknown checks (`""`) and unknown author/reviewer identity
 fail closed. GitHub requires both status and check-run reads to confirm
 success or no checks, rejects unknown completed conclusions, and raises a
-provider error rather than returning incomplete review pages. Approval commit
+provider error rather than returning incomplete review pages. Check-run reads
+paginate and require the reported total count before trusting success.
+Approval commit
 IDs must exactly match the current head for this wake. Self-merge and
 human-merge profiles do not receive updates.
 Azure DevOps currently omits authoritative checks and approval commit evidence
