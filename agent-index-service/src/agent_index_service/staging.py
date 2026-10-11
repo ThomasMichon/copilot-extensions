@@ -424,7 +424,12 @@ def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) ->
         if process is not None and process.poll() is None:
             process.kill()
         if process is not None:
-            process.wait(timeout=15)
+            try:
+                process.wait(timeout=15)
+            except subprocess.TimeoutExpired as exc:
+                raise _CleanupUnconfirmed(
+                    f"{operation}: direct process exit could not be confirmed"
+                ) from exc
         cleanup_deadline = time.monotonic() + 5
         while True:
             try:

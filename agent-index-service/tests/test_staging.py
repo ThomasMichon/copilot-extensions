@@ -553,6 +553,35 @@ def test_windows_job_teardown_uncertainty_preserves_candidate(case, monkeypatch)
     assert not (slot / ".install-complete.json").exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows direct process exit confirmation")
+def test_process_wait_timeout_preserves_candidate(case, monkeypatch):
+    import agent_procutil
+    import subprocess
+
+    class Process:
+        pid = 123
+        returncode = 7
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout):
+            raise subprocess.TimeoutExpired("fixture", timeout)
+
+    class Job:
+        def terminate_and_wait(self, timeout_seconds):
+            pass
+
+    monkeypatch.setattr(agent_procutil, "spawn_sync_in_kill_on_close_job",
+                        lambda *args, **kwargs: (Process(), Job()))
+    monkeypatch.setattr(staging, "_run", original_run)
+    with pytest.raises(staging._CleanupUnconfirmed, match="process exit could not be confirmed"):
+        stage(case)
+    slot = case.root / "versions" / "0.1.1.dev1"
+    assert slot.exists()
+    assert not (slot / ".install-complete.json").exists()
+
+
 def test_darwin_staging_refuses_spawn_until_owned_supervision_is_supported(case, monkeypatch):
     import agent_procutil
 
