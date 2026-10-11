@@ -27,7 +27,7 @@ that pattern to this repository.
 | [Mutable dev slot](active/mutable-dev-slot/README.md) | Active | #5472 |
 | [Machine Transport Convergence](active/machine-transport-convergence/README.md) | Active | #5737, #5738, #5740, #5741, #5972, #5973, #5974, #6039 |
 | [agent-index Standalone Service](active/agent-index-standalone-service/README.md) | Active; proposal reviewed | #5768, #5769 |
-| [agent-dispatch Standalone + Container](active/agent-dispatch-standalone-container/README.md) | Draft | #6177 |
+| [agent-dispatch Standalone + Container](active/agent-dispatch-standalone-container/README.md) | Active; Phase 1 landed | #6177 |
 | [Dispatch Task Lifecycle and Conversations](active/agent-dispatch-monitor-and-confirmed-state/README.md) | Active; submission/output/delivery amendment proposed | #3681 |
 | [Dispatch Tasks-Pane UX](active/agent-dispatch-tasks-pane-ux-overhaul/README.md) | Active; review/history/follow-up amendment proposed | #3681 (backend dependency) |
 | [Lean Session Lifecycle](active/lean-session-lifecycle/README.md) | Draft | #5579, #5664, #2619 |

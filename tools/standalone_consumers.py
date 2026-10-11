@@ -1,3 +1,5 @@
 """Explicit standalone distributions participating in repository releases."""
 
-STANDALONE_CONSUMERS = ("worktree-manager", "agent-index-service", "fleet-manager")
+STANDALONE_CONSUMERS = (
+    "worktree-manager", "agent-index-service", "fleet-manager", "agent-dispatch-service",
+)

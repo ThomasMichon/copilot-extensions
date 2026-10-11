@@ -889,6 +889,22 @@ jobs:
         working-directory: worktree-manager
         run: uv run --extra dev pytest -q
 
+  agent-dispatch-service:
+    name: agent-dispatch-service (out-of-plugin)
+    # agent-dispatch-service is delivered OUTSIDE the plugin pipe (see
+    # tools/standalone_consumers.py), so the per-plugin matrix below never
+    # runs its tests. This dedicated job gives it real CI, mirroring
+    # worktree-manager's own out-of-plugin job shape.
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Test agent-dispatch-service
+        working-directory: agent-dispatch-service
+        run: uv run --extra dev pytest -q
+
   test-runner-linux:
     name: test runner (ubuntu-latest)
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
@@ -1370,6 +1386,7 @@ jobs:
       - windows-python-artifact-builder
       - windows-hooks
       - worktree-manager
+      - agent-dispatch-service
       - agent-index-service-linux
       - agent-index-service-windows
       - test-runner-linux

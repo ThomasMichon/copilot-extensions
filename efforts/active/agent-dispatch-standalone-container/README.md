@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Draft
+- **Status:** Active; Phase 1 standalone package landed
 - **Vision:** [machine-fleet](../../../visions/machine-fleet/README.md):
   `standalone-service-installation`, role deployments and container managers
   (role instances may run directly or in containers on explicitly admitted
@@ -134,21 +134,26 @@ for review before any implementation.
 - [ ] Review this draft with the operator before implementation starts.
 
 ### Phase 1 -- Standalone (non-plugin) package
-- [ ] Decide the package name/location (e.g. a new top-level
-  `agent-dispatch-manager/` sibling to `worktree-manager/`, or another name
-  that avoids confusion with the existing `plugins/agent-dispatch` plugin
-  wrapper) and register it in `tools/standalone_consumers.py`.
-- [ ] Build `bootstrap.sh`/`bootstrap.ps1` mirroring `worktree-manager`'s shape
-  exactly (uv auto-provision, git-or-tarball fetch, versioned self-install,
-  exec passthrough).
-- [ ] Reuse (not fork) the existing coordinator lifecycle from
-  `plugins/agent-dispatch`: either vendor-point at its installer mechanics or
-  factor the shared venv/binstub/service-unit logic so both the plugin-
-  delivered and standalone paths call the same code.
-- [ ] Preserve exact runtime compatibility: the same `~/.agent-dispatch` DB/
-  config layout, the same `AGENT_DISPATCH_*` environment contract, so a host
-  can move between plugin-delivered and standalone installation without data
-  migration.
+- [x] Decide the package name/location: new top-level `agent-dispatch-service/`
+  (mirroring `agent-index-service`'s `<name>-service` naming, since both are
+  headless daemon services, not TUI/manager tools like `worktree-manager`).
+  Registered in `tools/standalone_consumers.py`.
+- [x] Build `bootstrap.sh`/`bootstrap.ps1` mirroring `worktree-manager`'s fetch
+  shape (git-or-tarball fetch, no Copilot/marketplace dependency) -- simpler
+  than worktree-manager's own Python `self-install --apply` step, since
+  agent-dispatch's lifecycle is already a mature bash/PowerShell installer:
+  the bootstrap scripts fetch the repo, then `exec` straight into the
+  existing `plugins/agent-dispatch/scripts/install.{sh,ps1}`.
+- [x] Reuse (not fork) the existing coordinator lifecycle from
+  `plugins/agent-dispatch`: `agent-dispatch-service` depends on the
+  `agent-dispatch` package itself (`[tool.uv.sources]` editable path on
+  `dev`, same convention as every other standalone/plugin pointer) and the
+  bootstrap scripts exec its unmodified `install.{sh,ps1}` directly -- zero
+  lines of installer logic duplicated.
+- [x] Preserve exact runtime compatibility: since the standalone path calls
+  the identical `install.sh`/`install.ps1`, the `~/.agent-dispatch` DB/config
+  layout and `AGENT_DISPATCH_*` environment contract are unchanged by
+  construction -- there is no second implementation to drift.
 
 ### Phase 2 -- Container image
 - [ ] Add a `Dockerfile` (standalone package, or a sibling `docker/` directory)
@@ -209,3 +214,31 @@ _Pending._
   or issue covers agent-dispatch standalone/container packaging.
 - Opened umbrella issue #6177. No code changed in this slice; Phase 1
   implementation has not started pending review of this draft.
+
+### 2026-10-11 -- Phase 1: standalone package landed
+- Operator reviewed and approved the draft (merged via #6180); proceeded with
+  implementation in the same session.
+- Also found a third sibling pattern landed since the draft: `fleet-manager`
+  (PR #6133, merged), confirming top-level-directory + `STANDALONE_CONSUMERS`
+  is the repo's settled convention for a non-plugin distribution, not just a
+  worktree-manager/agent-index-service pair.
+- Built `agent-dispatch-service/`: `bootstrap.sh`/`bootstrap.ps1` (fetch +
+  exec straight into the existing, unmodified `plugins/agent-dispatch`
+  installer -- no new install logic), a thin `pyproject.toml` depending on
+  `agent-dispatch` via the standard editable `[tool.uv.sources]` path
+  pointer, a marker package, and tests (bootstrap script shape/executable-bit
+  guards + a package import smoke test). Registered in
+  `tools/standalone_consumers.py` and wired a dedicated
+  `agent-dispatch-service (out-of-plugin)` CI job mirroring
+  `worktree-manager`'s, added to the required `PR gate` job's `needs:` list.
+- Validated locally end-to-end before opening a PR: `uv run --extra dev
+  pytest -q` (the exact CI invocation) passes 5/5; `python tools/run-
+  standalone-tests.py agent-dispatch-service --prepare` (the registered-
+  component test harness) also passes, confirming the nested
+  `[tool.uv.sources]` path resolution (agent-dispatch-service ->
+  `../plugins/agent-dispatch` -> its own further `../../libs/*` pointers)
+  works through both `uv pip install` and `uv run` invocation shapes; `ruff
+  check --select F,E9` (the exact CI selector) and
+  `check-version-consistency.py`/`check-changefile-presence.py` are clean.
+- Phase 2 (container image) and Phase 3 (validation/documentation) remain
+  open; not started in this slice.
