@@ -37,20 +37,37 @@ def _bash() -> str:
     return bash
 
 
+def _extract_bash_function(text: str, func_name: str) -> str:
+    """Extract a bash function's full definition via brace counting,
+    rather than assuming any particular formatting around its closing
+    brace (e.g. an exact `\\n}\\n` sequence, which is brittle against CRLF
+    line endings or incidental reformatting unrelated to behavior)."""
+    text = text.replace("\r\n", "\n")
+    start_marker = f"{func_name}() {{"
+    assert text.count(start_marker) == 1, f"expected exactly one {func_name}() definition"
+    start = text.index(start_marker)
+    brace_start = start + len(start_marker) - 1  # index of the opening '{'
+    depth = 0
+    i = brace_start
+    while i < len(text):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+        i += 1
+    raise AssertionError(f"unbalanced braces while extracting {func_name}()")
+
+
 def _extract_bootstrap_python() -> str:
     text = _INSTALL_SH.read_text(encoding="utf-8")
-    start = "_bootstrap_python() {"
-    assert text.count(start) == 1, "expected exactly one _bootstrap_python() definition"
-    body = start + text.split(start, 1)[1].split("\n}\n", 1)[0] + "\n}"
-    return body
+    return _extract_bash_function(text, "_bootstrap_python")
 
 
 def _extract_payload_hash() -> str:
     text = _INSTALL_SH.read_text(encoding="utf-8")
-    start = "_payload_hash() {"
-    assert text.count(start) == 1, "expected exactly one _payload_hash() definition"
-    body = start + text.split(start, 1)[1].split("\n}\n", 1)[0] + "\n}"
-    return body
+    return _extract_bash_function(text, "_payload_hash")
 
 
 def _make_plugin_tree(root: Path) -> tuple[Path, Path]:

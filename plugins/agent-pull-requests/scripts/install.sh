@@ -337,9 +337,26 @@ _payload_hash() {
         )
     fi
     [[ ${#roots[@]} -gt 0 ]] || { printf ''; return 0; }
-    local hash
-    if ! hash="$("$py" "$vr" --root "$INSTALL_DIR" fingerprint "${roots[@]}" 2>&1)"; then
-        _fail "Failed to compute payload fingerprint: $hash"
+    # Capture stdout (the hash) and stderr (diagnostics) SEPARATELY: a
+    # bare `2>&1` would merge stderr into the returned hash even on
+    # success, silently contaminating it if the command ever emits a
+    # warning/notice on stderr while still exiting 0.
+    local hash rc err_file err_text
+    err_file="$(mktemp 2>/dev/null)" || err_file=""
+    if [[ -n "$err_file" ]]; then
+        hash="$("$py" "$vr" --root "$INSTALL_DIR" fingerprint "${roots[@]}" 2>"$err_file")"
+        rc=$?
+        err_text="$(cat "$err_file" 2>/dev/null)"
+        rm -f "$err_file"
+    else
+        # mktemp unavailable -- fall back to the old merged-stream
+        # behavior rather than failing outright.
+        hash="$("$py" "$vr" --root "$INSTALL_DIR" fingerprint "${roots[@]}" 2>&1)"
+        rc=$?
+        err_text="$hash"
+    fi
+    if [[ "$rc" -ne 0 ]]; then
+        _fail "Failed to compute payload fingerprint: $err_text"
         return 1
     fi
     printf '%s' "$hash"

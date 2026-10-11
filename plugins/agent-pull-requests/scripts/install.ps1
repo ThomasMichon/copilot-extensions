@@ -350,16 +350,26 @@ function Get-PayloadHash {
         }
     }
     if ($roots.Count -eq 0) { return '' }
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
+    # Capture stdout (the hash) and stderr (diagnostics) SEPARATELY via a
+    # temp file: a bare `2>&1` would merge stderr into the returned hash
+    # even on success, silently contaminating it if the command ever
+    # emits a warning/notice on stderr while still exiting 0.
     $fpArgs = @($vr, '--root', $InstallDir, 'fingerprint') + $roots
-    $output = (& $py @fpArgs 2>&1 | Out-String)
-    $rc = $LASTEXITCODE
-    $ErrorActionPreference = $prevEAP
-    if ($rc -ne 0) {
-        throw "Failed to compute payload fingerprint: $($output.Trim())"
+    $errFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $stdout = (& $py @fpArgs 2>$errFile | Out-String).Trim()
+        $rc = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+        $stderrText = (Get-Content -LiteralPath $errFile -Raw -ErrorAction SilentlyContinue)
+    } finally {
+        Remove-Item -LiteralPath $errFile -ErrorAction SilentlyContinue
     }
-    return $output.Trim()
+    if ($rc -ne 0) {
+        throw "Failed to compute payload fingerprint: $($stderrText.Trim())"
+    }
+    return $stdout
 }
 
 function Invoke-VersionedSlotClean {

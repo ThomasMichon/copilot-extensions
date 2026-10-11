@@ -31,12 +31,28 @@ def _powershell() -> str:
 
 
 def _extract_get_payload_hash() -> str:
-    text = _INSTALL_PS1.read_text(encoding="utf-8")
-    start_marker = "function Get-PayloadHash {"
-    assert text.count(start_marker) == 1, "expected exactly one Get-PayloadHash definition"
-    start = text.index(start_marker)
-    end = text.index("\nfunction ", start + len(start_marker))
-    body = text[start:end]
+    """Extract Get-PayloadHash's exact source text via PowerShell's own
+    AST parser (pwsh/powershell.exe is already a hard requirement for
+    these tests), rather than assuming there is always another top-level
+    `function` keyword following it in the file -- a naive text search for
+    the next `function` would raise ValueError if Get-PayloadHash ever
+    becomes the last function defined."""
+    pwsh = _powershell()
+    script = (
+        "$ast = [System.Management.Automation.Language.Parser]::ParseFile("
+        f"'{_INSTALL_PS1}', [ref]$null, [ref]$null)\n"
+        "$fn = $ast.Find({ param($node) "
+        "$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and "
+        "$node.Name -eq 'Get-PayloadHash' }, $true)\n"
+        "if (-not $fn) { throw 'Get-PayloadHash function not found' }\n"
+        "Write-Output $fn.Extent.Text\n"
+    )
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    body = result.stdout
     # $PSScriptRoot would reflect the TEMP wrapper script's own directory
     # when this extracted function is embedded and run standalone, not the
     # real scripts/ directory versioned_runtime.py actually lives in --
