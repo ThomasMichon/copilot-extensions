@@ -370,6 +370,16 @@ Missing, stale, unauthorized, contradictory, or adapter-failed budget data is a
 visible state. It must never be converted into zero consumption, full remaining
 allowance, or another optimistic success-shaped default.
 
+### session-attributed-advisory-pacing
+
+Quota guidance belongs to the account serving the requesting agent, not an
+unverified default account in a new runtime. Monthly entitlement and reset are
+period-specific facts; acquisition time does not establish provider freshness.
+Run-rate projections inform autonomous concurrency and warn on operator-directed
+launches without imposing a harness budget refusal. Provider enforcement and
+product safety gates remain authoritative. Cooperative sleeps or suspensions are
+sparing, explicit, owner-controlled actions, never side effects of quota reads.
+
 ### one-posture-many-surfaces
 
 Injected guidance, CLI status, dashboards, and routing consumers should derive

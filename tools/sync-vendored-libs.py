@@ -117,6 +117,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import uv_editable_ref as uer  # noqa: E402
+from vendored_lib_inventory import is_artifact_only  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
@@ -180,7 +181,7 @@ def _consumer_dir(consumer: str) -> Path:
 
 
 def _lib_copies() -> dict[str, list[Path]]:
-    """Map ``lib name -> [copy paths]``, mirroring check-vendored-libs-sync.py."""
+    """Inventory source copies without resurrecting retired cache-only paths."""
     copies: dict[str, list[Path]] = {}
     if PLUGINS_DIR.is_dir():
         for plugin in sorted(PLUGINS_DIR.iterdir()):
@@ -188,14 +189,14 @@ def _lib_copies() -> dict[str, list[Path]]:
             if not libs.is_dir():
                 continue
             for lib in sorted(libs.iterdir()):
-                if lib.is_dir():
+                if lib.is_dir() and not is_artifact_only(lib):
                     copies.setdefault(lib.name, []).append(lib)
     for extra in _EXTRA_CONSUMER_DIRS:
         libs = REPO / extra / "libs"
         if not libs.is_dir():
             continue
         for lib in sorted(libs.iterdir()):
-            if lib.is_dir():
+            if lib.is_dir() and not is_artifact_only(lib):
                 copies.setdefault(lib.name, []).append(lib)
     return copies
 

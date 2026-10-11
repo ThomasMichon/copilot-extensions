@@ -183,8 +183,13 @@ the worker (seed for a new session, a message on rejoin).
 
 ## Configuration
 
-`containers.yaml` (looked up via `$AGENT_CONTAINERS_CONFIG`, `./containers.yaml`,
-or `~/.agent-containers/containers.yaml`, then an optional agent-worktrees
+`containers.yaml` (looked up via `$AGENT_CONTAINERS_CONFIG`, then
+`<repo>/.copilot-extensions/agent-containers/containers.yaml` -- the
+canonical in-repo location, matching every other plugin's own
+`.copilot-extensions/<plugin-id>/...` convention, see
+[`docs/configuration.md`](../../docs/configuration.md) -- then the legacy
+bare `./containers.yaml`, which remains readable, then
+`~/.agent-containers/containers.yaml`, then an optional agent-worktrees
 knowledge-overlay fallback when that binstub exists and the current harness is
 bound to external state). Built-in defaults target a generic VS Code dev
 container (`exec_user: vscode`, `workspace_folder: /workspace`,

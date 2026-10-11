@@ -23,7 +23,7 @@ machine-wide, not per project; and `claims owner <kind> <ref>` intentionally
 searches every registered project for a given claim ref, which is a
 different (tracing) use case than this sweep.
 
-Before touching anything, confirm the tooling itself is healthy and get an
+Before mutating anything, confirm the tooling itself is healthy and get an
 authoritative read on what's actually still running:
 
 ```
@@ -42,6 +42,15 @@ orphaned processes over the following minutes -- re-run these checks rather
 than trusting a single snapshot if you suspect recovery is still in
 progress.
 
+Keep inventory output bounded: project the fields needed to shortlist candidates
+before printing full `list --json` records, then fetch exact
+`worktree-status-bundle --worktree <full-id> --json` evidence only for those
+candidates. Its facts are wrapped under `facts.<name>.value`, with confirmation
+and observation metadata alongside the value; do not read missing top-level
+fields as empty claims or known inactivity. Counts and shortlist snapshots are
+not action-time authority. A truncated report or an unavailable probe means
+unknown, not zero.
+
 ## Step 2 -- Release the claims-ledger backlog (mechanical, safe)
 
 A worktree's `status: active` display and its `finalize`/`cleanup`
@@ -53,7 +62,8 @@ ledger cluttered with claims that are already safe to clear:
 <agent-worktrees catalog argv[0]> claims fleet-audit          # read-only inventory
 <agent-worktrees catalog argv[0]> claims sweep                # dry-run: any provably-gone-and-safe claim kind
 <agent-worktrees catalog argv[0]> claims sweep --apply
-<agent-worktrees catalog argv[0]> claims reconcile-at-rest --apply   # any lingering at-rest claim, EXCEPT session claims (their own lifecycle -- see below)
+<agent-worktrees catalog argv[0]> claims reconcile-at-rest           # dry-run: settled claims, excluding sessions
+<agent-worktrees catalog argv[0]> claims reconcile-at-rest --apply
 ```
 
 Both are purpose-built as **never-wedge** operations: `sweep` is explicitly
@@ -78,6 +88,12 @@ blocking claims are cleared. Re-run `cleanup` (report mode) afterward -- releasi
 reclassifies a worktree from `active`/blocked straight to `completed`
 without touching anything else.
 
+When `doctor` identifies stale tracking status, its non-destructive `--fix`
+path can reconcile that metadata. Do not add daemon-health, session-deletion,
+or process-retirement flags merely because a cleanup audit found stale status.
+Session conclusion/deregistration is not part of this mechanical claims pass:
+perform it only after Step 3 establishes objective completion.
+
 ## Step 3 -- Verify session *content*, not just git + claims metadata
 
 **This is the step that's easy to skip and the one that matters most.**
@@ -93,8 +109,8 @@ session id(s) -- `<agent-worktrees catalog argv[0]> list-sessions --worktree
 <full-worktree-id> --json` (see [reference.md](reference.md) § Cross-Machine
 Inspection) -- then:
 
-- **Small session (roughly under a few hundred events / ~10 turns or
-  fewer):** read it directly -- `<agent-worktrees catalog argv[0]>
+- **Small session (both bounded event volume and few turns):** read it
+  directly -- `<agent-worktrees catalog argv[0]>
   session-transcript <session-id> --json`. (The `read-session-digest`
   command from the agent-logger catalog is *not* an alternative direct-read
   path here -- it only reads an already-collated digest and does not ingest
@@ -103,7 +119,7 @@ Inspection) -- then:
   session" case below.) Cheap enough not to need delegation; just check the
   last few user/assistant messages for how it actually ended.
 - **Larger session:** delegate to the **`agent-logger:session-rampup`**
-  sub-agent per the `ramp-up-session` skill instead of reading the raw
+  sub-agent per the `agent-logger:ramp-up-session` skill instead of reading the raw
   transcript yourself -- that's exactly what it exists for (absorbing a
   potentially huge transcript and returning a bounded takeover briefing
   instead of flooding your own context). Ask it for an **explicit verdict**:
@@ -113,6 +129,24 @@ Inspection) -- then:
   real open thread even though git is clean (e.g. an informational/
   diagnosis-only session whose recommendation was never acted on)?
 
+Make the delegation **audit-only**, not takeover: explicitly permit ephemeral
+digest collation and bounded reads, forbid repository/lifecycle mutations and
+resuming the original work, and request a cited `safe candidate` / `preserve`
+/ `unknown` verdict. A report-only audit can create the tool-owned
+ephemeral digest; it must not edit source, settle claims, launch successors,
+or remove worktrees. A few turns can still contain thousands of tool events;
+turn count alone is not a transcript-size bound.
+
+Read a valid effort binding first. If it is missing, use the bounded session
+evidence to locate the canonical effort, including its archived successor:
+missing binding does not prove no effort exists. Compare old summaries with
+later journals, merged PRs, and the effort's actual Plan/Validation Plan.
+For several child worktrees sharing one controller/effort, recover that
+parent's completion evidence once, then verify each child's own landed slice
+and claims. An open parent is not an automatic hold on a completed child whose
+remaining responsibility was explicitly retained by the parent; a merged child
+is not evidence the parent finished.
+
 Only after this step should you treat a worktree as safe to prune, safe to
 leave silently, or in need of a decision from the operator. A `cleanup`
 report of `completed`/`unused` plus a clear claims ledger is necessary but
@@ -120,6 +154,20 @@ report of `completed`/`unused` plus a clear claims ledger is necessary but
 tell you the story resolved.
 
 ## Step 4 -- Respect the tool's own refusals
+
+Only after completing Step 3 for a verified completed, dormant session,
+`conclude-session --worktree <full-id> --session <session-id> --state concluded`
+records completion; `deregister-session --worktree-id <full-id> --session-id
+<session-id>` closes its registration and session claim. Neither substitutes for
+the objective evidence. Do not conclude a live owner or an unfinished relay leg
+to clear a cleanup blocker.
+
+Preview an exact candidate list with subject, PR/base landing evidence,
+objective disposition, outstanding owner, and any unknowns. Obtain the
+repository/operator-required approval, then remove that subset with
+`cleanup --worktree-id <full-id> --json`, never a broader `cleanup --clean`
+than approved. Verify the returned outcome and the expected folder/branch
+absence; report partial results honestly.
 
 Some worktree kinds are intentionally out of scope for the standard
 `cleanup` flow and will say so rather than silently no-op:
@@ -145,6 +193,23 @@ from elsewhere), do not decide unilaterally which side is authoritative.
 Report the finding and hand it back to the operator -- see the
 `tracing-claimant-graphs` skill for walking an ownership chain across
 worktrees/projects when you need to trace it further.
+
+Separate three orphan cases: untracked on-disk directories (`gc --dry-run
+--orphans-only --no-reap-shells --json`), abandoned resource claims (`claims
+orphans` and a selective `claims cleanup <ref-or-source>` dry-run), and missing
+historical session/controller records. An already-absent directory may require
+ledger reconciliation rather than filesystem removal. Unknown locks, access
+denied, missing parents, and incomplete projections remain holds; never force
+delete, elevate, or replace ownership to make a sweep look complete.
+
+Likewise, an empty `handoffs-check` result is not proof that every pending baton
+has a registered successor. Use `context-handoff`'s documented `check-heads`
+surface when auditing that alignment. Distinguish an unconsumed continuation
+from a consumed-but-unlinked baton using exact token/session evidence. Link
+only proven succession through `link-succession`; if an existing predecessor
+conflicts, stop and preserve the evidence. Multi-command repairs are not a
+transaction: inspect the head after each mutation and stop on the first
+refusal rather than running later conclusions as though linking succeeded.
 
 ## Step 6 -- Surface real findings; don't silently discard them
 

@@ -32,10 +32,11 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
 
     monkeypatch.setattr(runner.subprocess, "run", install)
     python = tmp_path / ".test-venvs" / "service" / "bin" / "python"
+    python.parent.parent.mkdir(parents=True)
 
     runner.prepare("agent-index-service", python, smoke=smoke)
 
-    assert calls[0] == ["uv", "venv", str(python.parent.parent)]
+    assert calls[0] == ["uv", "venv", "--allow-existing", str(python.parent.parent)]
     assert calls[1][:5] == ["uv", "pip", "install", "--python", str(python)]
     core_extra = "" if smoke else "[store,server]"
     service_extra = "[test]" if smoke else "[native,test]"
@@ -47,7 +48,7 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
 def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     called = []
-    monkeypatch.setattr(runner, "acquire", lambda wait: called.append(wait))
+    monkeypatch.setattr(runner, "acquire", lambda wait, root: called.append(wait))
 
     with pytest.raises(SystemExit) as exc:
         runner.main([
@@ -58,8 +59,28 @@ def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch
     assert called == []
 
 
+def test_prepare_rejects_managed_launcher_with_host_environment(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    python = tmp_path / ".test-venvs" / "fake" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    released = []
+
+    class Lease:
+        def release(self):
+            released.append(True)
+
+    monkeypatch.setattr(runner, "acquire", lambda *_: Lease())
+    monkeypatch.setattr(runner, "prepare", lambda *_a, **_k: pytest.fail("unexpected preparation"))
+    with pytest.raises(SystemExit) as exc:
+        runner.main(["agent-index-service", "--prepare", "--python", str(python)])
+    assert exc.value.code == 2
+    assert released == [True]
+
+
 @pytest.mark.parametrize("smoke", [False, True])
-def test_run_is_contained_and_releases_shared_host_lease(tmp_path, monkeypatch, smoke):
+def test_run_is_contained_and_releases_interpreter_environment_lease(tmp_path, monkeypatch, smoke):
     root = tmp_path / "agent-index-service"
     (root / "tests").mkdir(parents=True)
     python = tmp_path / "test-python"
@@ -71,7 +92,13 @@ def test_run_is_contained_and_releases_shared_host_lease(tmp_path, monkeypatch, 
         def release(self):
             released.append(True)
 
-    monkeypatch.setattr(runner, "acquire", lambda wait: Lease())
+    environment_root = tmp_path / "actual-environment"
+    environment_root.mkdir()
+    acquisitions = []
+    monkeypatch.setattr(
+        runner, "acquire",
+        lambda wait, root: acquisitions.append((wait, root)) or Lease(),
+    )
     captured = {}
 
     def run(command, **kwargs):
@@ -90,16 +117,20 @@ def test_run_is_contained_and_releases_shared_host_lease(tmp_path, monkeypatch, 
         return 0
 
     monkeypatch.setattr(runner, "run_contained", run)
-    args = ["agent-index-service", "--python", str(python)]
+    args = [
+        "agent-index-service", "--python", str(python),
+        "--environment-root", str(environment_root),
+    ]
     if smoke:
         args.append("--smoke")
     assert runner.main(args) == 0
     assert captured["cwd"] == root
     assert released == [True]
+    assert acquisitions == [(0.0, environment_root)]
 
 
 def test_smoke_rejects_undefined_component_before_admission(monkeypatch):
-    monkeypatch.setattr(runner, "acquire", lambda wait: pytest.fail("unexpected admission"))
+    monkeypatch.setattr(runner, "acquire", lambda wait, root: pytest.fail("unexpected admission"))
     with pytest.raises(SystemExit) as exc:
         runner.main(["worktree-manager", "--smoke"])
     assert exc.value.code == 2
@@ -107,10 +138,123 @@ def test_smoke_rejects_undefined_component_before_admission(monkeypatch):
 
 @pytest.mark.parametrize("timeout", ["nan", "inf", "-inf", "0", "-1"])
 def test_nonfinite_or_nonpositive_timeout_rejected_before_admission(monkeypatch, timeout):
-    monkeypatch.setattr(runner, "acquire", lambda wait: pytest.fail("unexpected admission"))
+    monkeypatch.setattr(runner, "acquire", lambda wait, root: pytest.fail("unexpected admission"))
     with pytest.raises(SystemExit) as exc:
         runner.main(["agent-index-service", f"--timeout={timeout}"])
     assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("wait", ["nan", "inf", "-inf", "-1", "bad"])
+def test_invalid_admission_wait_rejected_before_preparation(monkeypatch, wait):
+    monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
+    monkeypatch.setattr(runner, "prepare", lambda *_a, **_k: pytest.fail("unexpected preparation"))
+    with pytest.raises(SystemExit) as exc:
+        runner.main(["agent-index-service", "--prepare", f"--admission-wait={wait}"])
+    assert exc.value.code == 2
+
+
+def test_nonstandard_custom_launcher_requires_explicit_root_without_execution(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    python = tmp_path / "invalid-python"
+    python.touch()
+    monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
+
+    monkeypatch.setattr(runner.subprocess, "run", lambda *_a, **_k: pytest.fail("candidate executed"))
+    assert runner.main(["agent-index-service", "--python", str(python)]) == 1
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--environment-root", "environment"],
+    ["--python", "launcher", "--environment-root", "environment", "--prepare"],
+])
+def test_explicit_root_does_not_bypass_preparation_guard(monkeypatch, arguments):
+    monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
+    with pytest.raises(SystemExit) as exc:
+        runner.main(["agent-index-service", *arguments])
+    assert exc.value.code == 2
+
+
+def test_standard_root_discovery_never_executes_candidate(tmp_path, monkeypatch):
+    python = tmp_path / "environment" / "bin" / "python"
+    python.parent.parent.mkdir()
+    (python.parent.parent / "pyvenv.cfg").touch()
+    monkeypatch.setattr(runner.subprocess, "run", lambda *_a, **_k: pytest.fail("candidate executed"))
+    assert runner.interpreter_environment(python) == python.parent.parent.resolve()
+    assert not python.exists()
+
+
+def test_explicit_root_cannot_override_discoverable_environment(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    python = tmp_path / "environment" / "bin" / "python"
+    python.parent.parent.mkdir()
+    (python.parent.parent / "pyvenv.cfg").touch()
+    monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
+    with pytest.raises(SystemExit) as exc:
+        runner.main([
+            "agent-index-service", "--python", str(python),
+            "--environment-root", str(tmp_path / "wrong-environment"),
+        ])
+    assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("directory", ["bin", "Scripts"])
+def test_opaque_standard_named_launcher_accepts_explicit_environment(tmp_path, monkeypatch, directory):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    python = tmp_path / "wrappers" / directory / "python"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    actual = tmp_path / "actual-environment"
+    actual.mkdir()
+    acquired = []
+
+    class Lease:
+        def release(self):
+            pass
+
+    monkeypatch.setattr(runner, "acquire", lambda wait, root: acquired.append(root) or Lease())
+    monkeypatch.setattr(runner, "run_contained", lambda *_a, **_k: 0)
+    monkeypatch.setattr(runner.subprocess, "run", lambda *_a, **_k: pytest.fail("candidate probed"))
+    assert runner.main([
+        "agent-index-service", "--python", str(python), "--environment-root", str(actual),
+    ]) == 0
+    assert acquired == [actual]
+    acquired.clear()
+    assert runner.main(["agent-index-service", "--python", str(python)]) == 1
+    assert acquired == []
+
+
+def test_custom_absent_root_is_not_created(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    root = tmp_path / "absent-custom-root"
+    monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
+    with pytest.raises(SystemExit) as exc:
+        runner.main([
+            "agent-index-service", "--python", str(tmp_path / "launcher"),
+            "--environment-root", str(root),
+        ])
+    assert exc.value.code == 2
+    assert not root.exists()
+
+
+def test_custom_symlink_without_configuration_requires_explicit_address(tmp_path, monkeypatch):
+    python = tmp_path / "environment" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    # Portable symlink-contract simulation: following the executable would
+    # reach the base interpreter, not identify the missing-config venv.
+    real_resolve = Path.resolve
+    monkeypatch.setattr(
+        Path, "resolve",
+        lambda path, *args, **kwargs: (
+            Path(sys.executable) if path == python
+            else real_resolve(path, *args, **kwargs)
+        ),
+    )
+    with pytest.raises(ValueError, match="provide --environment-root"):
+        runner.interpreter_environment(python)
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="POSIX outer containment regression uses Linux procfs")

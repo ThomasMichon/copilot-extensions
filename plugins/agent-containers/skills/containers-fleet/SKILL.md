@@ -56,8 +56,10 @@ idle restricted-fleet session evidence for publication without stopping members.
 
 ## Configuration (`containers.yaml`)
 
-Looked up from `$AGENT_CONTAINERS_CONFIG`, `./containers.yaml`,
-`~/.agent-containers/containers.yaml`, then (only when agent-worktrees is present <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
+Looked up from `$AGENT_CONTAINERS_CONFIG`, then
+`<repo>/.copilot-extensions/agent-containers/containers.yaml` (the canonical
+in-repo location), then the legacy bare `./containers.yaml` (still readable),
+then `~/.agent-containers/containers.yaml`, then (only when agent-worktrees is present <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 and the current harness is bound to external state) a knowledge-overlay
 `containers.yaml`. Copy the starter example,
 [`references/containers.yaml`](references/containers.yaml), and adapt. A fleet

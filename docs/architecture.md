@@ -406,7 +406,9 @@ flowchart LR
   `/workspaces/<basename>` checkout, and the git-credential relay are all
   convention-derived; adopt only a repo that deviates.
 - `agent-containers` reads `containers.yaml` (resolved via
-  `$AGENT_CONTAINERS_CONFIG`, `./containers.yaml`, or
+  `$AGENT_CONTAINERS_CONFIG`,
+  `<repo>/.copilot-extensions/agent-containers/containers.yaml` (canonical;
+  legacy bare `./containers.yaml` remains readable), or
   `~/.agent-containers/containers.yaml`) — keep it in the control repo to share
   fleet defaults. Mutable coordination state defaults to
   `~/.agent-containers/`; a

@@ -1,61 +1,13 @@
-# Requests a Copilot code review automatically only for PRs authored by a
-# Maintainer (the CODEOWNERS root roster) -- never automatically for a
-# Contributor, and never for an uninvited outsider. GitHub's
-# `copilot_code_review` ruleset rule (`review_on_push`) has no
-# "collaborators only" condition, so it would otherwise auto-review every
-# PR, including from people who were never granted any access (billed to
-# the repo owner, and giving an unreviewed outsider a free automated pass
-# through the same visible review surface trusted contributors get). This
-# workflow replaces that automatic trigger -- see docs/pipelines.md § Review
-# automation for the ruleset-side change removing the native
-# `copilot_code_review` rule.
+# Delayed fallback for Maintainer-authored PRs only. Native automatic review
+# is deliberately disabled by repository policy; enabling it is a separate
+# trust/billing decision. Manual/native requests get five minutes to start
+# before this job nudges once. No author-seat inference or post-write polling.
 #
-# Why Maintainer-only, not "any invited collaborator": GitHub's
-# `requestReviewers` API call for `copilot-pull-request-reviewer[bot]`
-# returns success with NO exception, and even NO timeline event at all,
-# when made by `github-actions[bot]` (the default `GITHUB_TOKEN`) for a PR
-# whose author is any account other than this repo's owner. The same call,
-# authenticated as a real licensed human account (the owner) instead of the
-# bot identity, reliably works regardless of PR author -- Copilot code
-# review appears to require the review to be attributable to a licensed
-# account (author OR requester), and this repo (a personal, non-org
-# account) has no equivalent of the org-only "members without a Copilot
-# license" policy to cover an unlicensed author. `MAINTAINER_REVIEW_PAT`
-# (a fine-grained PAT for the owner, scoped to ONLY this repo, with ONLY
-# `Pull requests: write` + `Metadata: read` -- no other scopes) exists to
-# make the request as that licensed account instead of the bot. A
-# Maintainer already holds ruleset self-merge bypass (see docs/pipelines.md
-# § Review automation),
-# so requesting on their behalf extends no new trust. A Contributor's PR
-# still requires a Maintainer's own approving review before merge regardless
-# of Copilot's verdict, so leaving Contributors on the manual-only path
-# doesn't weaken the review gate -- the automatic leg was never reliable for
-# a non-owner author, so this workflow no longer attempts (or silently
-# pretends to succeed at) it for them.
-#
-# A maintainer can still manually request Copilot's review on any PR
-# (including a Contributor's or an outsider's) via the normal "Reviewers"
-# sidebar or the REST API at any time -- this workflow only controls the
-# *automatic* path.
-#
-# `edited` is included in `types` below: a PR originally opened against a
-# different base branch and later RETARGETED to `dev` fires `edited` (with
-# `changes.base` present), not any of the other listed types -- without it,
-# such a PR would never get its automatic review. The job itself only acts
-# when `changes.base` is actually present, so an ordinary title/body/label
-# edit doesn't trigger a redundant re-review request.
-#
-# Uses `pull_request_target`, not `pull_request`: a same-repo Write
-# collaborator's own PR would otherwise run their edited copy of this file
-# (which requests `pull-requests: write` and calls a write API, and for
-# Maintainers a repo-scoped PAT), and a fork PR's forced-read-only
-# `GITHUB_TOKEN` under plain `pull_request` would make `requestReviewers`
-# fail outright for a legitimate collaborator who happens to submit via a
-# fork. `pull_request_target` runs the trusted default-branch definition
-# either way. This job never checks out or executes PR content -- only
-# reads PR/collaborator/CODEOWNERS metadata via the REST API -- so it
-# carries none of the classic `pull_request_target` secret-exfiltration
-# risk, and the PAT itself is never passed anything derived from PR content.
+# pull_request_target executes trusted base-branch workflow code. This job
+# never checks out or executes PR content. GITHUB_TOKEN performs all reads;
+# MAINTAINER_REVIEW_PAT performs only the one licensed-account review write.
+# The latter is needed because github-actions[bot] review requests can silently
+# no-op for non-owner authors. Neither token is exposed in output.
 name: Copilot review gate
 
 on:
@@ -65,11 +17,14 @@ on:
 
 permissions:
   contents: read
-  # The default `GITHUB_TOKEN` only ever reads (collaborator status,
-  # CODEOWNERS) in this workflow -- the one write call (requesting a
-  # review) always uses `MAINTAINER_REVIEW_PAT` instead, supplied
-  # explicitly to that step; this permissions block doesn't affect it.
+  issues: read
   pull-requests: read
+
+concurrency:
+  # Retain an active request and coalesce queued events to the latest pending
+  # run per PR. Never cancel in flight across the request write.
+  group: copilot-review-request-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 
 jobs:
   request-review:
@@ -78,7 +33,7 @@ jobs:
       github.event.pull_request.draft == false &&
       (github.event.action != 'edited' || github.event.changes.base != null)
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 8
     steps:
       - name: Determine collaborator / Maintainer status
         id: status
@@ -86,201 +41,115 @@ jobs:
         with:
           script: |
             const author = context.payload.pull_request.user.login;
-
-            // Deliberately NOT `getCollaboratorPermissionLevel` + checking
-            // `permissions.pull`: on a PUBLIC repo, that endpoint reports
-            // `pull: true` (read access) for literally anyone, invited or
-            // not -- public repos grant implicit read to everyone, so
-            // `pull` can never distinguish "invited collaborator" from "any
-            // GitHub user browsing this repo." `checkCollaborator` answers
-            // the actual question ("is this an invited collaborator?"): 204
-            // if yes, 404 if no, independent of the repo's public/private
-            // visibility or the author's permission level.
-            async function isInvitedCollaborator(username) {
-              try {
-                await github.rest.repos.checkCollaborator({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  username,
-                });
-                return true;
-              } catch (error) {
-                if (error.status === 404) {
-                  return false;
-                }
-                throw error;
-              }
-            }
-
-            // The Maintainer roster lives in exactly one place, CODEOWNERS'
-            // own root (`*`) pattern -- read it fresh each run instead of
-            // duplicating the list here, so the two never drift. Reads the
-            // trusted base ref (`dev`), never the PR's own head -- this is
-            // metadata about the base repo, not PR content.
-            async function getMaintainerRoster() {
-              const { data } = await github.rest.repos.getContent({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                path: ".github/CODEOWNERS",
-                ref: context.payload.pull_request.base.ref,
+            // Public read permission does not prove collaborator membership.
+            try {
+              await github.rest.repos.checkCollaborator({
+                ...context.repo,
+                username: author,
               });
-              const text = Buffer.from(data.content, "base64").toString("utf8");
-              // Match the root pattern's first token EXACTLY to `*` -- not
-              // merely a line that starts with `*`, which would also match
-              // an unrelated pattern like `*.md` if one were ever placed
-              // above the root entry.
-              const rootLine = text
-                .split("\n")
-                .map((line) => line.trim())
-                .find((line) => line.split(/\s+/)[0] === "*");
-              if (!rootLine) {
-                throw new Error("CODEOWNERS has no root (`*`) pattern; cannot resolve Maintainer roster.");
-              }
-              return rootLine
-                .split(/\s+/)
-                .slice(1)
-                .map((owner) => owner.replace(/^@/, ""));
-            }
-
-            const trusted = await isInvitedCollaborator(author);
-            if (!trusted) {
-              core.info(
-                `${author} is not an invited collaborator; skipping automatic Copilot review. ` +
-                  "A maintainer may still request one manually via the Reviewers sidebar.",
-              );
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              core.info("Author is not an invited collaborator; automatic review skipped.");
               core.setOutput("is_maintainer", "false");
               return;
             }
-
-            const roster = await getMaintainerRoster();
-            const isMaintainer = roster.includes(author);
-            core.setOutput("is_maintainer", String(isMaintainer));
-            if (!isMaintainer) {
-              core.info(
-                `${author} is an invited collaborator but not a Maintainer; skipping automatic Copilot review. ` +
-                  "A maintainer may still request one manually via the Reviewers sidebar.",
-              );
-            }
+            const { data } = await github.rest.repos.getContent({
+              ...context.repo,
+              path: ".github/CODEOWNERS",
+              ref: context.payload.pull_request.base.ref,
+            });
+            const text = Buffer.from(data.content, "base64").toString("utf8");
+            const root = text.split("\n").map(line => line.trim())
+              .find(line => line.split(/\s+/)[0] === "*");
+            if (!root) throw new Error("CODEOWNERS has no root Maintainer roster.");
+            const roster = root.split(/\s+/).slice(1).map(owner => owner.replace(/^@/, ""));
+            core.setOutput("is_maintainer", String(roster.includes(author)));
 
       - name: Request Copilot review as a licensed Maintainer account
         if: steps.status.outputs.is_maintainer == 'true'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          REVIEW_READ_TOKEN: ${{ github.token }}
         with:
-          # Authenticated as the owner (a real, licensed account) via a
-          # fine-grained PAT scoped to ONLY this repo with ONLY
-          # `Pull requests: write` + `Metadata: read` -- not the default
-          # `GITHUB_TOKEN` (`github-actions[bot]`), whose identical call
-          # silently no-ops for a non-owner PR author. See this file's
-          # header comment for the underlying reason.
           github-token: ${{ secrets.MAINTAINER_REVIEW_PAT }}
           script: |
-            const author = context.payload.pull_request.user.login;
+            const reader = require("@actions/github").getOctokit(process.env.REVIEW_READ_TOKEN);
             const pull_number = context.payload.pull_request.number;
-
-            function sleep(ms) {
-              return new Promise((resolve) => setTimeout(resolve, ms));
-            }
-
-            // A successful `requestReviewers` call does NOT reliably show
-            // Copilot in its own response's `requested_reviewers` -- GitHub
-            // adds the bot reviewer as a short-lived async follow-up, not
-            // synchronously in the same request/response cycle. That's
-            // exactly why the original failure mode was invisible: an API
-            // call that returns 2xx is not proof the reviewer was actually
-            // added. Poll the PR's live requested-reviewer list afterward
-            // instead of trusting the call's own response.
-            //
-            // Snapshot pre-existing Copilot review IDs BEFORE requesting: on
-            // `reopened` or a base-retarget `edited` event the head SHA can
-            // be unchanged, so an older review already sitting at that same
-            // commit must not count as confirmation of THIS request -- only
-            // a review submitted after the snapshot does.
-            async function copilotReviewIdsAtHeadSha(headSha) {
-              const reviews = await github.paginate(github.rest.pulls.listReviews, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number,
-              });
-              return new Set(
-                reviews
-                  .filter(
-                    (review) =>
-                      review.user.login === "copilot-pull-request-reviewer[bot]" &&
-                      review.commit_id === headSha,
-                  )
-                  .map((review) => review.id),
-              );
-            }
-
-            async function copilotIsRequested(preexistingReviewIds, headSha) {
-              const { data } = await github.rest.pulls.listRequestedReviewers({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number,
-              });
-              if (data.users.some((user) => user.login === "copilot-pull-request-reviewer[bot]")) {
-                return true;
-              }
-              // `listRequestedReviewers` only reports reviewers whose review
-              // is still PENDING -- if Copilot finishes fast enough between
-              // polls, it has already left this list, not because the
-              // request failed but because it succeeded and completed.
-              // Accept a NEW review it submitted for the current head
-              // commit as success too (never one that already existed
-              // before this run's request).
-              const currentReviewIds = await copilotReviewIdsAtHeadSha(headSha);
-              for (const id of currentReviewIds) {
-                if (!preexistingReviewIds.has(id)) {
-                  return true;
-                }
-              }
-              return false;
-            }
-
-            const headSha = context.payload.pull_request.head.sha;
-            const preexistingReviewIds = await copilotReviewIdsAtHeadSha(headSha);
-
-            try {
-              await github.rest.pulls.requestReviewers({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number,
-                reviewers: ["copilot-pull-request-reviewer[bot]"],
-              });
-            } catch (error) {
-              // Fail the job (this workflow is non-required/non-blocking,
-              // so this never gates the PR) rather than warn: with the PAT
-              // as the only credential that makes this request work, a
-              // swallowed error here (missing/expired/revoked secret, lost
-              // permission) would silently reopen the exact failure mode
-              // this workflow exists to close, with no visible signal.
-              core.setFailed(`Could not request Copilot review: ${error.message}`);
+            const request = { ...context.repo, pull_number };
+            // One grace-period sleep, not a polling loop. Independent PRs
+            // remain concurrent; queued runs inspect the latest live head.
+            await new Promise(resolve => setTimeout(resolve, 5 * 60_000));
+            const { data: livePr } = await reader.rest.pulls.get(request);
+            if (livePr.state !== "open" || livePr.draft || livePr.base.ref !== "dev") {
+              core.info("PR is closed, draft, or retargeted away from dev; no nudge.");
               return;
             }
-
-            // Observed real-world latency between a successful request and
-            // Copilot actually appearing as a requested reviewer or a
-            // completed review ranges from seconds to several minutes under
-            // heavy review-queue load (confirmed: real reviews landing at
-            // 3-4+ minutes during a high-PR-volume window produced false
-            // failures here at the previous, tighter bound). 60 x 10s = 10
-            // minutes, inside this job's 12-minute timeout.
-            const attempts = 60;
-            const delayMs = 10_000;
-            for (let attempt = 1; attempt <= attempts; attempt += 1) {
-              if (await copilotIsRequested(preexistingReviewIds, headSha)) {
-                core.info(`Confirmed Copilot review requested for ${author}'s PR.`);
-                return;
-              }
-              if (attempt < attempts) {
-                await sleep(delayMs);
-              }
+            const { data: pending } = await reader.rest.pulls.listRequestedReviewers(request);
+            const bot = "copilot-pull-request-reviewer[bot]";
+            if (pending.users.some(user => user.login === bot)) {
+              core.info("Copilot review is pending; no nudge.");
+              return;
             }
-
-            // The API call itself reported success, but Copilot never
-            // actually showed up as a requested reviewer -- this is the
-            // exact silent-no-op this workflow exists to close. Fail loudly
-            // instead of trusting the call's own response.
-            core.setFailed(
-              `requestReviewers reported success, but Copilot never appeared as a requested reviewer on ${author}'s PR after ${attempts} checks.`,
+            const events = await reader.paginate(reader.rest.issues.listEventsForTimeline, {
+              ...context.repo,
+              issue_number: pull_number,
+              per_page: 100,
+            });
+            let reviewEpochAt = 0;
+            let lastRequestAt = 0;
+            for (const event of events) {
+              const epoch = ["base_ref_changed", "reopened"].includes(event.event);
+              const requestEvent = event.event === "review_requested" &&
+                event.requested_reviewer?.login === bot;
+              if (!epoch && !requestEvent) continue;
+              const timestamp = Date.parse(event.created_at);
+              if (!Number.isFinite(timestamp) || timestamp > Date.now()) {
+                throw new Error("Review timeline has an invalid or future timestamp.");
+              }
+              if (epoch) reviewEpochAt = Math.max(reviewEpochAt, timestamp);
+              if (requestEvent) lastRequestAt = Math.max(lastRequestAt, timestamp);
+            }
+            const reviews = await reader.paginate(reader.rest.pulls.listReviews, {
+              ...request,
+              per_page: 100,
+            });
+            if (reviews.some(review =>
+              review.user?.login === bot &&
+              ["APPROVED", "COMMENTED", "CHANGES_REQUESTED"].includes(review.state) &&
+              review.commit_id === livePr.head.sha &&
+              review.submitted_at &&
+              Date.parse(review.submitted_at) > reviewEpochAt
+            )) {
+              core.info("Copilot reviewed the current diff; no nudge.");
+              return;
+            }
+            if (lastRequestAt && Date.now() - lastRequestAt < 5 * 60_000) {
+              core.info("A Copilot request is within its five-minute grace period; no nudge.");
+              return;
+            }
+            // If this run's triggering head has been superseded, the latest
+            // queued synchronize run owns its own full five-minute grace.
+            if (livePr.head.sha !== context.payload.pull_request.head.sha) {
+              core.info("A newer push superseded this event; latest queued run owns the nudge.");
+              return;
+            }
+            try {
+              await github.rest.pulls.requestReviewers({
+                ...request,
+                reviewers: [bot],
+              });
+            } catch (error) {
+              core.setFailed(`Could not request Copilot review: ${error.message}`);
+              const headers = error.response?.headers ?? {};
+              if (headers["retry-after"] || headers["x-ratelimit-remaining"] === "0") {
+                core.warning(
+                  `GitHub rate-limit backoff: retry-after=${headers["retry-after"] ?? "unspecified"}; ` +
+                  `reset-epoch=${headers["x-ratelimit-reset"] ?? "unspecified"}. No automatic write retry.`,
+                );
+              }
+              return;
+            }
+            core.info(
+              "Copilot nudge accepted by GitHub. Review start/completion is not verified " +
+              "by this job; observe the PR review gate. No confirmation polling.",
             );

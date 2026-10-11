@@ -81,6 +81,48 @@ def _seed_pointer_copy(root: Path, rel: str, *, version: str = "0.1.0-dev1") -> 
     )
 
 
+def test_vendor_check_ignores_retired_cache_only_copy(fake_repo: Path):
+    _seed_real_lib(fake_repo, "libs/shared-lib", content="value = 1\n")
+    _seed_editable_pointer_consumer(fake_repo, "plugins/consumer", "shared-lib")
+    remnant = fake_repo / "plugins/consumer/libs/shared-lib"
+    for rel in (".ruff_cache/CACHEDIR.TAG", "src/shared.egg-info/PKG-INFO"):
+        entry = remnant / rel
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        entry.write_text("artifact\n", encoding="utf-8")
+
+    assert check_vendored_libs_sync.verify() == []
+    assert "shared-lib" not in check_vendored_libs_sync._lib_copies()
+
+
+def test_vendor_check_retains_malformed_copy_with_real_source(fake_repo: Path):
+    _seed_real_lib(fake_repo, "libs/shared-lib", content="value = 1\n")
+    _seed_editable_pointer_consumer(fake_repo, "plugins/consumer", "shared-lib")
+    source = fake_repo / "plugins/consumer/libs/shared-lib/src/shared_lib/__init__.py"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("value = 1\n", encoding="utf-8")
+
+    assert any("no version declared" in issue for issue in check_vendored_libs_sync.verify())
+
+
+@pytest.mark.parametrize("package", ["build", "dist", ".venv"])
+def test_inventory_retains_nested_source_named_like_root_artifacts(
+    fake_repo: Path, package: str,
+):
+    source = fake_repo / "plugins/consumer/libs/shared-lib/src" / package / "__init__.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("value = 1\n", encoding="utf-8")
+
+    assert "shared-lib" in check_vendored_libs_sync._lib_copies()
+
+
+def test_inventory_ignores_file_shaped_egg_info(fake_repo: Path):
+    metadata = fake_repo / "plugins/consumer/libs/shared-lib/src/shared.egg-info"
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text("legacy metadata\n", encoding="utf-8")
+
+    assert check_vendored_libs_sync._lib_copies() == {}
+
+
 def test_verify_accepts_a_real_copy_backed_by_canonical_when_a_pointer_peer_exists(
     fake_repo: Path,
 ):
@@ -247,4 +289,3 @@ def test_list_and_main_report_an_editable_pointer_only_lib_too(
     main_out = capsys.readouterr().out
     assert exit_code == 0
     assert "OK (1 shared libs in sync)" in main_out
-

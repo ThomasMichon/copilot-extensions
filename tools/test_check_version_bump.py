@@ -103,6 +103,8 @@ def repo(tmp_path: Path) -> Path:
     (r / "tools" / INSTALLER_ENGINE_REF.name).write_bytes(INSTALLER_ENGINE_REF.read_bytes())
     registry = SCRIPT.parent / "standalone_consumers.py"
     (r / "tools" / registry.name).write_bytes(registry.read_bytes())
+    inventory = SCRIPT.parent / "vendored_lib_inventory.py"
+    (r / "tools" / inventory.name).write_bytes(inventory.read_bytes())
 
     _git(r, "init", "-q")
     _git(r, "config", "user.email", "t@example.com")
@@ -129,6 +131,24 @@ def repo(tmp_path: Path) -> Path:
     # currently points, with nothing to keep in sync by hand.
     _git(r, "symbolic-ref", "refs/remotes/origin/dev", "refs/remotes/origin/main")
     return r
+
+
+def test_library_change_does_not_charge_retired_artifact_only_consumer(repo: Path):
+    _write(repo, ".gitignore", ".ruff_cache/\n*.egg-info/\n")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-qm", "ignore artifact caches")
+    _write(repo, "plugins/retired/libs/shared-lib/.ruff_cache/CACHEDIR.TAG", "cache")
+    _write(repo, "plugins/retired/libs/shared-lib/src/shared.egg-info/PKG-INFO", "metadata")
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 2\n")
+    _set_plugin_version(repo, "alpha", "1.0.0-dev2")
+    _set_plugin_version(repo, "beta", "2.0.0-dev2")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "change library and bump real consumers")
+
+    result = _run(repo)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "retired" not in result.stdout + result.stderr
 
 
 def test_plugin_src_change_without_bump_fails(repo: Path):

@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from _devcontainer_host_admission import acquire
+from _admission_protocol import AlreadyRunningError, acquire
 from plugin_test_containment import ContainmentError, Limits, isolated_environment, run_contained
 from standalone_consumers import STANDALONE_CONSUMERS
 
@@ -23,14 +23,45 @@ def default_python(component: str) -> Path:
     return root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
+def interpreter_environment(python: Path) -> Path:
+    """Discover standard environment roots without executing the interpreter.
+
+    A directory name alone cannot distinguish a venv from an opaque launcher.
+    Custom environments with missing configuration need an explicit address.
+    """
+    parent = python.parent.resolve()
+    if parent.name.lower() in {"bin", "scripts"} and (parent.parent / "pyvenv.cfg").is_file():
+        return parent.parent.resolve()
+    if (parent / "pyvenv.cfg").is_file():
+        return parent
+    current = Path(sys.executable)
+    if python == current.parent.resolve() / current.name:
+        return Path(sys.prefix).resolve()
+    raise ValueError(
+        "cannot discover this custom launcher's environment without executing it; "
+        "provide --environment-root for its actual Python environment"
+    )
+
+
 def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
+    """Provision dependencies in an existing managed environment root.
+
+    The caller must validate and establish that root, then hold its
+    environment-scoped lease throughout preparation and subsequent test use.
+    """
     flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
     root = python.parent.parent
     if not python.is_file():
+        before = root.stat()
         subprocess.run(
-            ["uv", "venv", str(root)], cwd=REPO, check=True,
-            capture_output=True, text=True, **flags,
+            ["uv", "venv", "--allow-existing", str(root)], cwd=REPO, check=True,
+            capture_output=True, text=True,
+            env={key: value for key, value in os.environ.items() if key != "UV_VENV_CLEAR"},
+            **flags,
         )
+        after = root.stat()
+        if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+            raise ValueError("uv replaced the leased environment directory")
     sources: list[str] = []
     if component == "agent-index-service":
         sources = [
@@ -65,6 +96,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("component", choices=STANDALONE_CONSUMERS)
     parser.add_argument("--python", type=Path, help="test interpreter (default: managed venv)")
+    parser.add_argument(
+        "--environment-root", type=Path,
+        help="actual environment used by a nonstandard --python launcher (never probed)",
+    )
     parser.add_argument("--prepare", action="store_true", help="provision declared test dependencies")
     parser.add_argument("--smoke", action="store_true", help="run controller contracts without real deployment cycles")
     parser.add_argument("--admission-wait", type=float, default=0.0)
@@ -72,23 +107,73 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not math.isfinite(args.timeout) or args.timeout <= 0:
         parser.error("--timeout must be finite and positive")
+    if not math.isfinite(args.admission_wait) or args.admission_wait < 0:
+        parser.error("--admission-wait must be a non-negative, finite number")
     if args.smoke and args.component != "agent-index-service":
         parser.error("--smoke is only defined for agent-index-service")
-    python = (args.python or default_python(args.component)).resolve()
+    if args.environment_root and not args.python:
+        parser.error("--environment-root requires --python")
+    if args.environment_root and args.prepare:
+        parser.error("--environment-root cannot be used with --prepare")
+    # Resolving bin/python itself follows a POSIX venv symlink to the base
+    # interpreter and bypasses the venv. Resolve only its containing directory.
+    requested_python = args.python or default_python(args.component)
+    python = requested_python.parent.resolve() / requested_python.name
     root = REPO / args.component
     if args.prepare and not python.is_relative_to((REPO / ".test-venvs").resolve()):
         parser.error("--prepare may only provision an interpreter under repository .test-venvs")
-    if not (root / "tests").is_dir() or (not args.prepare and not python.is_file()):
-        parser.error("component tests and a prepared interpreter are required; use --prepare")
+    if not (root / "tests").is_dir():
+        parser.error("component tests are required")
     limits = Limits(wall_seconds=args.timeout)
     try:
         limits.validate()
     except ValueError as exc:
         parser.error(str(exc))
-    lease = acquire(args.admission_wait)
     try:
+        default = default_python(args.component)
+        managed = python == default.parent.resolve() / default.name
+        managed_prepare = args.prepare and python.parent.name.lower() in {"bin", "scripts"}
+        environment_root = (
+            args.environment_root.resolve() if args.environment_root
+            else python.parent.parent.resolve() if managed or managed_prepare
+            else interpreter_environment(python)
+        )
+        if args.environment_root:
+            try:
+                discovered_root = interpreter_environment(python)
+            except ValueError:
+                pass  # An opaque launcher requires the caller's explicit address.
+            else:
+                if discovered_root != environment_root:
+                    parser.error("--environment-root disagrees with the interpreter's standard environment")
+        if args.prepare and not environment_root.is_relative_to((REPO / ".test-venvs").resolve()):
+            parser.error("--prepare may only provision an environment under repository .test-venvs")
+        if args.prepare:
+            if not managed_prepare or environment_root != python.parent.parent.resolve():
+                parser.error("--prepare requires a standard managed venv launcher")
+            environment_root.mkdir(parents=True, exist_ok=True)
+        elif not environment_root.is_dir():
+            parser.error("test environment root must already exist")
+        lease = acquire(args.admission_wait, environment_root)
+    except AlreadyRunningError as exc:
+        print(
+            f"[BUSY] Test environment {environment_root} is in use: {exc}. "
+            "Use --admission-wait SECONDS to wait for it.",
+            file=sys.stderr,
+        )
+        return 3
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        print(f"standalone tests: {exc}", file=sys.stderr)
+        return 1
+    try:
+        # Availability is meaningful only after a competing rebuild releases
+        # the environment. No candidate code runs before this exclusion.
+        if args.prepare and python.is_file() and not (environment_root / "pyvenv.cfg").is_file():
+            parser.error("--prepare requires a standard managed venv, not a copied host interpreter")
         if args.prepare:
             prepare(args.component, python, smoke=args.smoke)
+        elif not python.is_file():
+            parser.error("a prepared interpreter is required; use --prepare")
         with tempfile.TemporaryDirectory(prefix=f"{args.component}-tests-") as temporary:
             sandbox = Path(temporary)
             env = isolated_environment(os.environ, sandbox)

@@ -57,6 +57,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import uv_editable_ref as uer  # noqa: E402
+from vendored_lib_inventory import is_artifact_only  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
@@ -74,7 +75,9 @@ def _lib_copies() -> dict[str, list[Path]]:
     Scans two shapes: ``plugins/<plugin>/libs/*`` (the common case) and any
     other top-level package directory that vendors libs directly under its
     own ``libs/`` (e.g. ``worktree-manager/libs/*``, which isn't a
-    marketplace plugin and isn't nested under ``plugins/``).
+    marketplace plugin and isn't nested under ``plugins/``). Cache-only
+    remnants of retired copies are not libraries; malformed trees containing
+    source or metadata still join validation.
     """
     copies: dict[str, list[Path]] = {}
     if PLUGINS_DIR.is_dir():
@@ -83,14 +86,14 @@ def _lib_copies() -> dict[str, list[Path]]:
             if not libs.is_dir():
                 continue
             for lib in sorted(libs.iterdir()):
-                if lib.is_dir():
+                if lib.is_dir() and not is_artifact_only(lib):
                     copies.setdefault(lib.name, []).append(lib)
     for extra in uer._EXTRA_CONSUMER_DIRS:
         libs = REPO / extra / "libs"
         if not libs.is_dir():
             continue
         for lib in sorted(libs.iterdir()):
-            if lib.is_dir():
+            if lib.is_dir() and not is_artifact_only(lib):
                 copies.setdefault(lib.name, []).append(lib)
     return copies
 

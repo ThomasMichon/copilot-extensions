@@ -5,8 +5,13 @@ Fleet/agent settings are read from a ``containers.yaml`` file, looked up
 (in order) from:
 
 1. ``$AGENT_CONTAINERS_CONFIG`` if set,
-2. ``./containers.yaml`` in the current working directory,
-3. ``~/.agent-containers/containers.yaml``.
+2. ``<repo>/.copilot-extensions/agent-containers/containers.yaml`` (the
+   canonical in-repo location, matching every other plugin's own
+   ``.copilot-extensions/<plugin-id>/...`` convention -- see
+   ``docs/configuration.md``),
+3. ``./containers.yaml`` in the current working directory (legacy; remains
+   readable for existing repos that haven't migrated),
+4. ``~/.agent-containers/containers.yaml``.
 
 A missing config is fine -- built-in defaults target a generic VS Code dev
 container (user ``vscode``, workspace ``/workspace``). Point them at a real
@@ -56,6 +61,11 @@ STATE_DIR = Path(
 LEASE_FILE = STATE_DIR / "leases.json"
 LOG_FILE = RUNTIME_DIR / "agent-containers.log"
 CONFIG_FILENAME = "containers.yaml"
+# Canonical in-repo config directory, matching every other plugin's own
+# ``.copilot-extensions/<plugin-id>/...`` convention (docs/configuration.md).
+# The bare repo-root ``containers.yaml`` (no constant needed -- just
+# ``CONFIG_FILENAME`` alone) is the legacy location and remains readable.
+CANONICAL_INREPO_CONFIG_DIR = Path(".copilot-extensions") / "agent-containers"
 
 # Label written on fleet containers at `up` time so discovery can find
 # containers that were not created by the VS Code devcontainer flow (which
@@ -662,6 +672,9 @@ def _config_path() -> Path | None:
     if env:
         p = Path(env).expanduser()
         return p if p.exists() else None
+    canonical = Path.cwd() / CANONICAL_INREPO_CONFIG_DIR / CONFIG_FILENAME
+    if canonical.exists():
+        return canonical
     cwd = Path.cwd() / CONFIG_FILENAME
     if cwd.exists():
         return cwd

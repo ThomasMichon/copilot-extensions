@@ -22,10 +22,11 @@ TOOLS_DIR = Path(__file__).resolve().parent
 SCRIPT = TOOLS_DIR / "check-changefile-presence.py"
 # check-version-bump.py itself imports uv_editable_ref and installer_engine_ref
 # -- omitting either produced a silent ModuleNotFoundError that failed EVERY
-# test in this file (and was never caught, because this suite isn't wired
-# into CI at all; see the ci.yml note added alongside this fix).
+# test in this file. The changed-path-gated vendored-library CI step now runs
+# this suite alongside the synchronizer and version-bump regressions.
 DEP_SCRIPTS = ["check-version-bump.py", "changefile.py", "uv_editable_ref.py",
-               "installer_engine_ref.py", "standalone_consumers.py"]
+               "installer_engine_ref.py", "standalone_consumers.py",
+               "vendored_lib_inventory.py"]
 
 
 def _git(repo: Path, *args: str) -> None:

@@ -33,6 +33,8 @@ The caller passes, in its prompt:
 - **session** — an optional specific session UUID (otherwise the most recent
   session for the worktree is used).
 - an optional **focus** — what the operator cares about resuming, if given.
+- **mode** — optional `audit-only`: reconstruct completion evidence without
+  taking over or mutating the target's repository, claims, head, or lifecycle.
 - **effort_argv0** — the optional exact agent-worktrees session-catalog
   `argv[0]` for a local worktree. Never search `PATH` for it. Do not use a local
   path for a remote worktree.
@@ -49,6 +51,13 @@ The caller passes, in its prompt:
   the checkpoints and the tail, sample segments only where they matter.
 
 ## Procedure
+
+For `audit-only`, the caller may authorize tool-owned ephemeral digest
+collation while prohibiting target mutations. Honor a stricter no-filesystem-write
+constraint by reporting missing digest evidence, not by treating metadata as
+completion proof. Do not resume work, finalize, prune, settle claims, conclude
+sessions, or link succession. Report the objective verdict and proposed actions
+only; the caller owns approval and mutation.
 
 ### 1. Produce the base brief
 
@@ -129,7 +138,17 @@ tail's last actions completed or were cut off.
 
 ### 5. Return the briefing
 
-Reply with **only** this structure (compact, factual, no persona):
+For `audit-only`, return a compact cited table instead: subject, landed
+slice, canonical effort status, remaining responsibility/owner, and `safe
+candidate` / `preserve` / `unknown`. Check later journals and archived efforts
+before trusting stale summary flags. Missing effort bindings, transcripts, or
+ownership evidence stay explicitly unknown. Do not recommend deleting a
+completed child merely because its parent finished; verify the child's own
+landing and obligations too.
+
+Stop after the audit table; the takeover template below does not apply.
+
+For takeover mode, reply with **only** this structure (compact, factual, no persona):
 
 ```
 ## Ramp-Up Briefing

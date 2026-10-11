@@ -3,6 +3,8 @@
 from .records import (
     ConnectorRegistration,
     ContractError,
+    CredentialParameters,
+    CredentialResult,
     DriverSnapshot,
     DriverTarget,
     HealthResult,
@@ -19,6 +21,8 @@ from .records import (
 __all__ = [
     "ConnectorRegistration",
     "ContractError",
+    "CredentialParameters",
+    "CredentialResult",
     "DriverSnapshot",
     "DriverTarget",
     "HealthResult",

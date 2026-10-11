@@ -88,19 +88,41 @@ python tools/run-plugin-tests.py agent-dispatch \
 Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
 than repeatedly importing file groups that contain no selected tests.
 
-Every run except `--list` also takes one host-wide admission lease shared by
-every checkout and worktree -- including `--guards`, `--collect-only`, and a
-bare `--prepare-only` pass, since each still rebuilds/updates the on-disk venv
-(and so can rebuild or delete it mid-run via `--reinstall` or a drifted
-dependency fingerprint) a concurrent admitted run may depend on. Only
-`--list` is exempt, since it returns before that venv-management path is ever
-reached. A second run fails fast and names the live holder instead of
-competing for CPU, memory, and process slots. Use a bounded wait when joining
-an existing queue is preferable:
+There is no host-wide test singleton. Each target takes a lease keyed by its
+**concrete environment directory's filesystem identity** (`st_dev`, `st_ino`),
+held across venv preparation,
+dependency-fingerprint rebuilds, `--reinstall`, and all test use. This includes
+`--guards`, `--collect-only`, and `--prepare-only`; `--list` neither establishes
+nor locks an environment. Different plugins or checkouts run independently
+under the unchanged per-job resource and time bounds. Filesystem aliases of
+the same environment, including case-insensitive and bind-mount aliases,
+contend for the same lease. Managed runners establish the directory before
+locking it and preserve its identity through rebuild: only contents are
+cleared under the lease, and `uv venv --allow-existing` preserves the root.
+The installer environment excludes `UV_VENV_CLEAR`, and a post-creation
+identity check detects an unexpected replacement. An absent or unidentifiable
+custom root is rejected; there is no lexical fallback lock key.
+A multi-target run releases
+each target before acquiring the next, so it never holds multiple environment
+locks. A conflicting run fails fast with exit code 3 and names the environment
+and live holder; `--admission-wait` allows a non-negative, finite, bounded wait
+**per target**:
 
 ```bash
 python tools/run-plugin-tests.py agent-worktrees --admission-wait 900
 ```
+
+Environment setup failures are recorded per target without aborting later
+targets; genuine busy contention retains exit code 3. Junction detection is
+guarded for Python versions without `Path.is_junction`.
+
+The existing Linux/Windows runner-contract CI jobs are path-gated to runner
+sources, supporting libraries, tests, and their workflow/documentation. Required
+PR/push runs exclude the `runner_exhaustive` marker, retaining representative
+real-process contention, cleanup, missing-executable, and uv rebuild checks.
+The same jobs run every marked scenario on `workflow_dispatch`, with no
+additional matrix. `tools/test_environment_admission.py` is present in both
+platforms' selectors.
 
 Tests may declare `@pytest.mark.portfolio_tier("T0" ... "T4")` and repeatable
 `@pytest.mark.effect(...)` markers. The injected policy rejects effects that do
@@ -185,11 +207,10 @@ the in-container invocation is assembled; see below for why) and two
 known exceptions to otherwise-transparent passthrough: `--allow-host-state`
 is rejected outright (see below), and a `--max-memory-mb`/`--max-processes`/
 `--max-temp-mb` value above the container's own fixed outer ceiling is
-rejected outright (see below). `--admission-wait` is also consulted by
-the wrapper itself: it acquires the SAME host-wide lease
-`run-plugin-tests.py` would, on the HOST, before any container work
-begins (closing the Phase 2 admission-lease gap below), then still
-passes the flag through unchanged. The wrapper:
+rejected outright (see below). The wrapper validates `--admission-wait` before
+any container work (even for `--list`) and passes it through unchanged. It
+takes no host-wide lease: each invocation has its own container workspace and
+environments; the inner runner retains environment-scoped exclusion. The wrapper:
 
 1. Writes a per-invocation copy of `.devcontainer/test-isolation/devcontainer.json` with
    its workspace volume name made unique to this run, creates that volume
@@ -320,15 +341,30 @@ credential-free tmpfs `$HOME` per container): `--allow-host-state` is
 rejected outright with a clear error (its whole contract is preserving
 the caller's real HOME/config/credentials, which this isolation boundary
 specifically does not expose) -- run `tools/run-plugin-tests.py` directly
-for that case instead. `--admission-wait`'s host-wide heavy-test-slot
-lease had the same structural problem (its lease lives under
-`$HOME`/`XDG_CACHE_HOME`, a fresh tmpfs per container invocation, so
-concurrent wrapped runs would otherwise acquire unrelated per-container
-leases instead of coordinating against one shared host-wide slot) --
-closed in Phase 2: the wrapper itself acquires that same host-wide lease
-on the HOST, before any container work begins, and holds it for the
-run's entire lifetime, so wrapped and bare invocations correctly
-serialize against each other.
+for that case instead. Environment leases remain inside the container:
+the wrapper's unique volume prevents a wrapped invocation from mutating
+another wrapped or bare invocation's cached environment, so they do not
+need to serialize on the host. Each retains its own process/resource
+containment.
+
+The standalone runner (`tools/run-standalone-tests.py`) uses the same
+environment lease protocol for managed venvs and custom `--python`
+interpreters. Standard venv roots are discovered from the canonical containing
+`bin`/`Scripts` directory **with `pyvenv.cfg`** or a known managed target,
+without executing candidate code. Directory names alone are not proof of a
+venv: an opaque wrapper can also live in `bin` or `Scripts`. Known managed
+roots remain identifiable while a competing rebuild removes their contents;
+custom environments with temporarily missing configuration need an explicit
+root. Availability is checked only after the lease is acquired, so
+`--admission-wait` covers the missing-executable race.
+Nonstandard custom launchers require `--environment-root <actual-env-root>`:
+their target cannot be inferred safely without executing them. This explicit
+address must name the environment they actually use, so different launchers
+sharing it contend. The override requires `--python` and cannot be used with
+`--prepare`; it is not an environment-exclusion bypass.
+`--prepare` remains restricted to repository `.test-venvs` interpreters;
+preparation and test use share one held lease. POSIX venv `bin/python`
+symlinks are invoked as venv launchers, not resolved to the base interpreter.
 
 A second exception, for a different reason: the container itself enforces
 FIXED, lower outer resource ceilings (`--memory=14g`, `--pids-limit=512`,

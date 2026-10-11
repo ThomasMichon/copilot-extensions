@@ -346,7 +346,7 @@ jobs:
           # intervening dev commit too, so an unrelated change to any listed
           # file could wrongly trigger this subprocess-heavy suite.
           if git diff --name-only "$base...$head" | grep -Eq \
-            '^tools/(check-version-bump\.py|test_check_version_bump\.py|installer_engine_ref\.py|uv_editable_ref\.py|standalone_consumers\.py|check-changefile-presence\.py|accumulate_bumps\.py)$'; then
+            '^tools/(check-version-bump\.py|test_check_version_bump\.py|vendored_lib_inventory\.py|installer_engine_ref\.py|uv_editable_ref\.py|standalone_consumers\.py|check-changefile-presence\.py|accumulate_bumps\.py)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -544,15 +544,16 @@ jobs:
         # canonical suite is the one this step is designed to keep testing,
         # independent of which pointer form any particular consumer uses.
         # `fleet-contracts` is agent-ssh's uv-editable reference (same
-        # category). `fleet-index-adapter` has no consumer yet (a
-        # machine-fleet-routing-foundation Phase 3 prototype) but is included
-        # here on the same no-install sys.path pattern for the same reason:
-        # its suite is what keeps the adapter contract itself enforced. Its
-        # live-integration tests additionally need `fastapi`/`uvicorn` (to
-        # serve the real, unmodified `agent_index.server.build_app()` over a
-        # real TCP port, not a mocked transport) -- both are already runtime
-        # dependencies of the `agent-index` plugin this adapter proves itself
-        # against, so installing them here adds no new supply-chain surface.
+        # category). `fleet-index-adapter`/`fleet-vault-adapter` have no
+        # consumer yet (machine-fleet-routing-foundation Phase 3 prototypes)
+        # but are included here on the same no-install sys.path pattern for
+        # the same reason: their suites are what keep each adapter contract
+        # itself enforced. `fleet-index-adapter`'s live-integration tests
+        # additionally need `fastapi`/`uvicorn` (to serve the real,
+        # unmodified `agent_index.server.build_app()` over a real TCP port,
+        # not a mocked transport) -- both are already runtime dependencies of
+        # the `agent-index` plugin that adapter proves itself against, so
+        # installing them here adds no new supply-chain surface.
         run: >-
           python -m pip install pytest-asyncio fastapi uvicorn &&
           python -m pytest -q libs/work-coalescing-singleton/tests &&
@@ -568,7 +569,8 @@ jobs:
           python -m pytest -q libs/session-liveness-probe/tests &&
           python -m pytest -q libs/venue-copilot/tests &&
           python -m pytest -q libs/fleet-contracts/tests &&
-          python -m pytest -q libs/fleet-index-adapter/tests
+          python -m pytest -q libs/fleet-index-adapter/tests &&
+          python -m pytest -q libs/fleet-vault-adapter/tests
       - id: zdd-singleton
         name: Detect zdd singleton changes
         shell: bash
@@ -616,10 +618,43 @@ jobs:
           ZDD_SINGLETON_SMOKE_ONLY: "1"
           PYTHONPATH: ${{ github.workspace }}/libs/zdd/src
         run: python -m pytest -q libs/zdd/tests
+      - id: vendored-library-tools
+        name: Detect vendored library tool changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base="$PR_BASE_SHA"
+            head="$PR_HEAD_SHA"
+          elif [ "$EVENT_NAME" = "push" ] && [ "$PUSH_BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            base="$PUSH_BASE_SHA"
+            head="HEAD"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$base...$head")"
+          if printf '%s\n' "$changed" | grep -Eq \
+            '^(\.github/workflows/ci\.yml|tools/(sync-vendored-libs|check-vendored-libs-sync|check-version-bump|check-changefile-presence|vendored_lib_inventory|uv_editable_ref|standalone_consumers|installer_engine_ref|changefile|test_sync_vendored_libs|test_check_vendored_libs_sync|test_check_version_bump|test_check_changefile_presence|test_vendor_publication_inventory)\.py)$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Vendored library materialization regression tests
+        if: steps.vendored-library-tools.outputs.run == 'true'
+        run: >-
+          python -m pytest -q tools/test_sync_vendored_libs.py
+          tools/test_vendor_publication_inventory.py
       - name: Vendored library synchronization
         run: >-
           python tools/check-vendored-libs-sync.py &&
           python -m pytest -q tools/test_check_vendored_libs_sync.py
+      - name: Automatic review request pacing contract tests
+        run: node --test tools/test_copilot_review_gate.cjs
       - name: Windows headless launch invariants
         run: >-
           python tools/check-headless-launch.py &&
@@ -853,16 +888,39 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
+      - id: runner-contracts
+        name: Detect runner contract changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
+            '^(tools/(run-plugin-tests\.py|run-standalone-tests\.py|run_tests_in_devcontainer\.py|_admission_protocol\.py|_devcontainer_.*\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|test_environment_admission\.py|test_run_.*\.py|conftest\.py|standalone_consumers\.py|tests/test_komodo_role_fleet\.py)|libs/(single-instance-lease|agent-procutil)/|\.devcontainer/test-isolation/|\.github/workflows/ci\.yml|TESTING\.md)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Test runner admission and isolation
+        if: steps.runner-contracts.outputs.run == 'true'
         env:
           PYTHONPATH: libs/single-instance-lease/src
+          PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not runner_exhaustive"' || '' }}
         run: >-
           uv run --with pytest --with pyyaml python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
+          tools/test_environment_admission.py
           tools/test_run_plugin_tests.py
           tools/test_run_standalone_tests.py
           tools/test_run_tests_in_devcontainer.py
@@ -913,16 +971,39 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
+      - id: runner-contracts
+        name: Detect runner contract changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
+            '^(tools/(run-plugin-tests\.py|run-standalone-tests\.py|run_tests_in_devcontainer\.py|_admission_protocol\.py|_devcontainer_.*\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|test_environment_admission\.py|test_run_.*\.py|conftest\.py|standalone_consumers\.py|tests/test_komodo_role_fleet\.py)|libs/(single-instance-lease|agent-procutil)/|\.devcontainer/test-isolation/|\.github/workflows/ci\.yml|TESTING\.md)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Test runner admission and isolation
+        if: steps.runner-contracts.outputs.run == 'true'
         env:
           PYTHONPATH: libs/single-instance-lease/src
+          PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not runner_exhaustive"' || '' }}
         run: >-
           uv run --with pytest --with pyyaml python -m pytest -q
           libs/single-instance-lease/tests/test_lease.py
+          tools/test_environment_admission.py
           tools/test_run_plugin_tests.py
           tools/test_run_standalone_tests.py
 
