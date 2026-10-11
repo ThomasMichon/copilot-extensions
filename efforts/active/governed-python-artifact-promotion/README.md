@@ -480,6 +480,17 @@ win grows with build complexity.
   install could select. Switched to measuring from the NEWEST file (every
   file for a version must clear the age floor), updated the docstrings,
   and inverted the test that had codified the old (incorrect) behavior.
+- **Second review round found 1 more real issue:** release-segment
+  comparison was done on RAW tuples without PEP 440's trailing-zero
+  normalization ("1.0" == "1.0.0" == "1" -- a trailing `.0` is never
+  significant), so e.g. seasoned `1.0.0` and `1.0.post1` would wrongly
+  rank the base release above the post release (`(1, 0, 0) > (1, 0)` as
+  plain tuples, even though a post release is newer than its own base
+  release under PEP 440). Fixed by stripping trailing zero elements from
+  `release_segments` inside `_parse_release_version` itself, so every
+  caller gets canonical, directly-comparable tuples; added both a direct
+  equivalence-class test and the exact mixed-spelling integration
+  regression case the review named.
 - **Still open (this effort's own next slice):** actually wire this
   resolver into `resolve_toolchain_lock`/`build_python_artifacts.py`'s CLI
   (a caller-selectable "seasoned public" mode, distinct from and never

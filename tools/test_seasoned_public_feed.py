@@ -52,6 +52,22 @@ class TestResolveSeasonedPublicVersion:
         )
         assert got == "1.0.0"
 
+    def test_trailing_zero_normalization_picks_post_release_over_base(self):
+        # 1.0.post1 is newer than 1.0.0 under PEP 440 (trailing ".0"
+        # segments are insignificant: 1.0 == 1.0.0), but a RAW,
+        # un-normalized tuple comparison would rank (1, 0, 0) above
+        # (1, 0) and wrongly return the base release instead.
+        payload = _releases_payload(
+            {
+                "1.0.0": [_file("2026-01-01T00:00:00.000000Z")],
+                "1.0.post1": [_file("2026-01-02T00:00:00.000000Z")],
+            }
+        )
+        got = spf.resolve_seasoned_public_version(
+            "pkg", min_age_days=7, now=_NOW, fetch=lambda url: payload
+        )
+        assert got == "1.0.post1"
+
     def test_excludes_prerelease_even_if_old_enough(self):
         payload = _releases_payload(
             {
@@ -245,16 +261,22 @@ class TestParseReleaseVersion:
     @pytest.mark.parametrize(
         "version_str,expected",
         [
-            ("1.0.0", (0, (1, 0, 0), -1)),
+            ("1.0.0", (0, (1,), -1)),
             ("2.3", (0, (2, 3), -1)),
             ("1!2.3.4", (1, (2, 3, 4), -1)),
             ("10.20.30", (0, (10, 20, 30), -1)),
-            ("1.0.0.post1", (0, (1, 0, 0), 1)),
+            ("1.0.0.post1", (0, (1,), 1)),
             ("1!2.3.4.post10", (1, (2, 3, 4), 10)),
+            ("1.2.0", (0, (1, 2), -1)),
+            ("0.0.0", (0, (0,), -1)),
         ],
     )
     def test_parses_clean_release_versions(self, version_str, expected):
         assert spf._parse_release_version(version_str) == expected
+
+    def test_trailing_zeros_make_equivalent_releases_equal(self):
+        assert spf._parse_release_version("1.0") == spf._parse_release_version("1.0.0")
+        assert spf._parse_release_version("1.0") == spf._parse_release_version("1")
 
     def test_bare_release_sorts_before_its_own_post_release(self):
         base = spf._parse_release_version("1.0.0")

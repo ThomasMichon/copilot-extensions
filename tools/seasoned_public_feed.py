@@ -89,17 +89,27 @@ def _parse_release_version(version_str: str) -> tuple[int, tuple[int, ...], int]
     numeric release segment, with an optional PEP 440 epoch and/or stable
     ``.postN`` suffix), or ``None`` if ``version_str`` doesn't match that
     narrow shape (including every pre/dev release -- see
-    `_RELEASE_VERSION_RE`'s own docstring). ``post`` is ``-1`` when the
-    version has no ``.postN`` suffix, so a bare release sorts before its
-    own later ``.post1``, matching PEP 440's own ordering rule that an
-    unsuffixed release precedes its post releases."""
+    `_RELEASE_VERSION_RE`'s own docstring).
+
+    ``release_segments`` has its trailing zero elements stripped (PEP
+    440's own release-segment comparison rule: "1.0" == "1.0.0" == "1", a
+    trailing ``.0`` is never significant) -- comparing RAW, un-normalized
+    tuples lexicographically would otherwise rank "1.0.0" as newer than
+    "1.0.post1" (`(1, 0, 0) > (1, 0)` as plain tuples), even though PEP
+    440 says a post release is newer than its own base release. ``post``
+    is ``-1`` when the version has no ``.postN`` suffix, so a bare
+    release sorts before its own later ``.post1``, matching PEP 440's own
+    ordering rule that an unsuffixed release precedes its post
+    releases."""
     match = _RELEASE_VERSION_RE.match(version_str.strip())
     if match is None:
         return None
     epoch = int(match.group(1)) if match.group(1) else 0
-    release = tuple(int(part) for part in match.group(2).split("."))
+    release = [int(part) for part in match.group(2).split(".")]
+    while len(release) > 1 and release[-1] == 0:
+        release.pop()
     post = int(match.group(3)) if match.group(3) else -1
-    return epoch, release, post
+    return epoch, tuple(release), post
 
 
 class SeasonedVersionError(RuntimeError):
