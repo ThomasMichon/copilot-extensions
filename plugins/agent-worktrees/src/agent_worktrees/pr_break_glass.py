@@ -66,7 +66,7 @@ def invocation_attribution() -> InvocationAttribution:
     """Observe the caller context, never substitute the publication target."""
     try:
         user = getpass.getuser()
-    except OSError as exc:
+    except (OSError, KeyError) as exc:
         output.warn(f"Recovery invoker user is unavailable; attribution remains unknown: {exc}")
         user = None
     result = git_ops.git(

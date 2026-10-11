@@ -150,9 +150,10 @@ def test_unknown_invoker_stays_unknown(operation: recovery.RecoveryPreview, tmp_
 
 
 @pytest.mark.guard
-def test_unavailable_caller_context_is_observed_as_unknown(monkeypatch):
+@pytest.mark.parametrize("error", [OSError("caller user unavailable"), KeyError("unknown uid")])
+def test_unavailable_caller_context_is_observed_as_unknown(monkeypatch, error):
     def unavailable_user():
-        raise OSError("caller user unavailable")
+        raise error
 
     monkeypatch.setattr(recovery.getpass, "getuser", unavailable_user)
     monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
