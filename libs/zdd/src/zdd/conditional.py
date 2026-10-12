@@ -108,9 +108,11 @@ class PreparedCutover:
                 "unfinished cutover requires owner-led recovery before conditional repair"
             )
         if (
-            not self.old.pid
+            type(self.old.pid) is not int
             or self.old.pid <= 0
+            or type(self.old.generation) is not int
             or self.old.generation <= 0
+            or not isinstance(self.old.process_start_time, str)
             or not self.old.process_start_time
             or not self.old.process_start_time.isdigit()
         ):
@@ -128,7 +130,9 @@ class PreparedCutover:
             not orch.version
             or not self.old.version
             or orch.version == self.old.version
-            or request.selected_is_newer(orch.version, self.old.version) is not True
+            or _captured_call(
+                "version comparison", request.selected_is_newer, orch.version, self.old.version
+            ) is not True
         ):
             raise CutoverError("selected runtime is not provably newer than serving runtime")
         snapshot = _captured_call("capture", request.capture_runtime, self.old)
@@ -160,6 +164,8 @@ class PreparedCutover:
         if not endpoint.pid or not endpoint.process_start_time:
             return False
         attested = _captured_call("attest", self.snapshot.attest, endpoint)
+        if not isinstance(attested, RuntimeAttestation):
+            raise CutoverError("captured runtime attestation has an invalid shape")
         return (
             (not require_ready or attested.ready is True)
             and attested.pid == endpoint.pid
@@ -295,7 +301,10 @@ class PreparedCutover:
                     lock_deadline=self.deadline(),
                     demote_existing=True,
                 )
-            except (routing.ActivePublicationRefused, routing.RoutingLockTimeout, CutoverError):
+            except (
+                routing.ActivePublicationRefused, routing.RoutingLockTimeout,
+                CutoverError, OSError, ValueError,
+            ):
                 result.steps.append(
                     "rollback pending: owner restoration refused; generations retained"
                 )
@@ -311,7 +320,7 @@ class PreparedCutover:
                 routing.validate_active(
                     self.orch.config_dir, restored, lock_deadline=self.deadline()
                 )
-            except (OSError, CutoverError, routing.ActivePublicationRefused):
+            except (OSError, ValueError, CutoverError, routing.ActivePublicationRefused):
                 result.serving_endpoint = None
                 result.steps.append("rollback pending: predecessor readiness unverified")
                 log.error("Conditional cutover restored predecessor readiness unverified")
@@ -360,7 +369,7 @@ class PreparedCutover:
                         or termination.get("identity_verified") is not True
                     ):
                         raise CutoverError("identity-bound candidate disposal refused")
-        except (OSError, CutoverError):
+        except (OSError, ValueError, CutoverError):
             result.steps.append("rollback pending: candidate disposal refused or failed")
             log.error("Conditional cutover candidate disposal refused or failed")
             return
@@ -398,7 +407,7 @@ def run_conditional_cutover(
         if host == "[::]":
             host = "::"
         if not host:
-            host = "127.0.0.1"
+            host = "0.0.0.0"
         family = socket.AF_INET6 if ":" in host else socket.AF_INET
         with socket.socket(family, socket.SOCK_STREAM) as sock:
             sock.bind((host, 0))

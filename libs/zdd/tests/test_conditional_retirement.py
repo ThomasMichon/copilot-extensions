@@ -177,7 +177,7 @@ def test_legacy_recovery_cannot_race_native_transition(case):
     assert reap["refused"]
 
 
-@pytest.mark.parametrize("bind", ["0.0.0.0", "::", "[::]"])
+@pytest.mark.parametrize("bind", ["", "0.0.0.0", "::", "[::]"])
 def test_free_port_probe_uses_successor_bind_scope(case, monkeypatch, bind):
     import socket
 
@@ -185,7 +185,7 @@ def test_free_port_probe_uses_successor_bind_scope(case, monkeypatch, bind):
     from zdd.cutover import CutoverOrchestrator, CutoverResult
 
     root, old, _, _, _, request, _ = case
-    expected_host = "::" if bind == "[::]" else bind
+    expected_host = "::" if bind == "[::]" else bind or "0.0.0.0"
     observed = []
 
     class Socket:
@@ -619,4 +619,51 @@ def test_rollback_rechecks_predecessor_identity_under_publication_lock(case, mon
     assert not result.ok and not result.rolled_back
     assert events == ["spawn", "drain"]
     assert routing.read_table(root)["active"]["pid"] == 202
+    assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
+
+
+def test_rollback_restoration_io_failure_retains_recovery(case, monkeypatch):
+    root, _, events, _, snapshot, request, orch = case
+    publish = routing.publish_active_with_previous_guarded
+
+    def attest(endpoint):
+        response = snapshot.attest(endpoint)
+        return replace(response, ready=False) if endpoint.pid == 202 and "drain" in events else response
+
+    def fail_restore(*args, **kwargs):
+        expected = kwargs.get("expected_active")
+        if expected is not None and expected.pid == 202:
+            raise PermissionError("fixture routing write unavailable")
+        return publish(*args, **kwargs)
+
+    monkeypatch.setattr(routing, "publish_active_with_previous_guarded", fail_restore)
+    result = orch.run(
+        conditional=replace(
+            request, capture_runtime=lambda _: replace(snapshot, attest=attest)
+        )
+    )
+    assert not result.ok and not result.rolled_back
+    assert events == ["spawn", "drain"]
+    assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
+
+
+def test_corrupt_routing_during_candidate_health_retains_candidate(case):
+    root, _, events, _, snapshot, request, orch = case
+
+    def attest(endpoint):
+        response = snapshot.attest(endpoint)
+        if endpoint.pid == 202:
+            (root / "active.json").write_text("{")
+            return replace(response, ready=False)
+        return response
+
+    result = orch.run(
+        conditional=replace(
+            request, capture_runtime=lambda _: replace(snapshot, attest=attest)
+        ),
+        health_timeout=0,
+    )
+    assert not result.ok and not result.rolled_back
+    assert events == ["spawn"]
+    assert (root / "active.json").read_text() == "{"
     assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
