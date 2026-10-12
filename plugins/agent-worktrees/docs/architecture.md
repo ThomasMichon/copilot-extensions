@@ -19,7 +19,11 @@ options are captured with the destinations and reproduced for transport.
 A changed fork identity before capture
 is still refused.
 
-Unrelated branches can publish concurrently. Same-branch updates retain explicit
+Ordinary incremental publications on unrelated branches can overlap at transport.
+Explicit `--rewrite-pr` retains its outer publication/installation authority
+locks through transport because destructive ownership changes remain serialized;
+the ordinary transport concurrency guarantee does not apply to that path.
+Same-branch updates retain explicit
 Git expected-object leases and owned-rebase proof, so competing writers are
 accepted or rejected atomically by the remote rather than serialized across the
 whole clone. All pre-push hooks and bounded process-tree timeouts still apply.

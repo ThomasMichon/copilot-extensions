@@ -111,7 +111,7 @@ def push_slug(remote: str, *, cwd: str) -> str | None:
     fetch = git_ops.git("remote", "get-url", remote, cwd=cwd, check=False, isolated_repository=True)
     push = git_ops.git("remote", "get-url", "--push", "--all", remote, cwd=cwd,
                        check=False, isolated_repository=True)
-    url = fetch.stdout.strip() if fetch.returncode == 0 else ""
+    url = fetch.stdout.rstrip("\r\n") if fetch.returncode == 0 else ""
     slug = git_ops.slug_from_url(url) if url else None
     if not slug or push.returncode != 0:
         return None
@@ -126,7 +126,7 @@ def push_identity(remote: str, *, cwd: str) -> str:
     if not push_slug(remote, cwd=cwd):
         return ""
     fetch = git_ops.git("remote", "get-url", remote, cwd=cwd, check=False, isolated_repository=True)
-    return _identity(fetch.stdout.strip(), cwd) if fetch.returncode == 0 else ""
+    return _identity(fetch.stdout.rstrip("\r\n"), cwd) if fetch.returncode == 0 else ""
 
 
 def _tip(remote: str, branch: str, worktree_path: str) -> str | None:

@@ -216,6 +216,20 @@ def test_whitespace_sensitive_destination_is_preserved(tmp_path, name):
     assert git(root, "rev-parse", "refs/remotes/origin/exact") == git(root, "rev-parse", "HEAD")
 
 
+@pytest.mark.parametrize("name", [" remote.git", "remote.git "])
+def test_recorded_destination_verification_retains_fetch_whitespace(tmp_path, monkeypatch, name):
+    if os.name == "nt" and name.endswith(" "):
+        pytest.skip("Windows normalizes trailing whitespace in directory names")
+    root, _remote = repository(tmp_path)
+    git(root, "init", "--bare", "-q", str(root / name))
+    git(root, "remote", "set-url", "origin", name)
+    parsed = []
+    monkeypatch.setattr(git_ops, "slug_from_url", lambda url: parsed.append(url) or "example/project")
+    assert pr_publish.push_slug("origin", cwd=str(root)) == "example/project"
+    assert pr_publish.push_identity("origin", cwd=str(root)) == pr_publish._identity(name, str(root))
+    assert parsed and all(url == name for url in parsed)
+
+
 def test_post_push_refresh_lock_wait_is_short_and_failure_is_warning(tmp_path, monkeypatch):
     from contextlib import contextmanager
 
