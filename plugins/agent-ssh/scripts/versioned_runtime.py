@@ -1015,7 +1015,7 @@ def _gc_protected_versions(root: Path, keep, protect_pids: bool, link_name: str)
     cur = current_version(root, link_name)
     if cur:
         protected.add(cur)
-    claim = read_dev_claim(root)
+    claim = read_dev_claim(root, strict=True)
     if claim is not None:
         protected.add(DEV_VERSION)
         previous = claim.get("previous_version")
@@ -1062,25 +1062,34 @@ def dev_claim_path(root: Path) -> Path:
     return root / DEV_CLAIM_FILE
 
 
-def read_dev_claim(root: Path) -> dict | None:
+def read_dev_claim(root: Path, *, strict: bool = False) -> dict | None:
     """Return the current dev-slot claim record, or ``None`` if absent/malformed.
 
-    A malformed or schema-mismatched file is treated as absent (fail-open on
-    read, same posture as the other marker readers in this module) -- it never
-    raises, so callers like :func:`gc` can check it unconditionally.
+    Status reads retain their legacy malformed-as-absent behavior. Cleanup and
+    mutations use ``strict=True``: only a missing file is absent; unreadable or
+    malformed ownership/rollback evidence refuses the operation.
     """
     path = dev_claim_path(root)
     try:
         data = _load_unique_json(path)
+    except FileNotFoundError:
+        return None
     except (OSError, UnicodeError, ValueError):
+        if strict:
+            raise
         return None
-    if not isinstance(data, dict):
+    owner = data.get("owner") if isinstance(data, dict) else None
+    if (not isinstance(data, dict) or data.get("schema") != DEV_CLAIM_SCHEMA
+            or not isinstance(owner, str) or not owner.strip()):
+        if strict:
+            raise ValueError(f"invalid dev claim ownership evidence: {path}")
         return None
-    if data.get("schema") != DEV_CLAIM_SCHEMA:
-        return None
-    owner = data.get("owner")
-    if not isinstance(owner, str) or not owner.strip():
-        return None
+    previous = data.get("previous_version")
+    if strict and previous is not None and (
+        not isinstance(previous, str) or
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", previous) or previous.endswith(".")
+    ):
+        raise ValueError(f"invalid dev claim rollback evidence: {path}")
     return data
 
 
@@ -1102,7 +1111,7 @@ def _claim_dev(root: Path, owner: str, *, host: str | None = None,
     was active before dev mode was ever claimed -- not whatever was current at
     the moment of a second claim call).
     """
-    existing = read_dev_claim(root)
+    existing = read_dev_claim(root, strict=True)
     if existing is not None and existing.get("owner") != owner and not force:
         raise DevClaimConflict(existing)
     same_owner_reclaim = existing is not None and existing.get("owner") == owner
@@ -1143,7 +1152,7 @@ def _release_dev(root: Path, owner: str, *, force: bool = False) -> dict | None:
     or `agent-worktrees finalize`'s obligation-settlement forcing an
     abandoned/stale claim closed.
     """
-    existing = read_dev_claim(root)
+    existing = read_dev_claim(root, strict=True)
     if existing is None:
         return None
     if existing.get("owner") != owner and not force:

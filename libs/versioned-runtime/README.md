@@ -133,7 +133,11 @@ cannot publish a target deleted after an earlier existence probe. Current and
 last-known-good references are protected by GC/toss, including incomplete
 rollback slots. A dev claim also preserves its recorded previous version;
 claim/release serialize against cleanup's selector recheck. Transfer that
-rollback identity to retention before releasing the claim. Unreadable selectors/storage errors propagate rather than
+rollback identity to retention before releasing the claim. Cleanup and claim
+mutations read dev ownership/rollback evidence strictly: only a missing file is
+absent; unreadable or malformed evidence refuses the operation. The public
+status reader retains its legacy malformed-as-absent behavior.
+Unreadable selectors/storage errors propagate rather than
 authorizing reclamation. Incomplete selected numbered identities are refused
 with distinct-generation repair guidance, not detached and rebuilt as failed
 unpublished candidates. Mutable dev cleanup retains its process-evidence and
@@ -150,7 +154,7 @@ gain protection merely because this primitive ships.
 
 Focused native-process tests:
 `python tools/run-plugin-tests.py agent-bridge -k runtime_retention`.
-Four smoke cases run in the existing changed-plugin guard lane; the broader
+Five smoke cases run in the existing changed-plugin guard lane; the broader
 process, death, and ordering matrix runs in the full/manual promotion portfolio.
 
 ## Editing — one source of truth

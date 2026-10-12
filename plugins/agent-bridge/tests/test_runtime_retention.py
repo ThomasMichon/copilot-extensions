@@ -350,3 +350,49 @@ def test_real_cli_gc_respects_then_reclaims_retained_candidate(tmp_path, process
     assert cli_gc() == {"removed": []}
     process.communicate(input="\n", timeout=10)
     assert cli_gc() == {"removed": ["1.0"]}
+
+
+@pytest.mark.parametrize("operation", [
+    pytest.param("gc", marks=pytest.mark.guard), "toss", "slot", "claim", "release",
+])
+def test_unreadable_dev_claim_refuses_cleanup_and_mutation(tmp_path, monkeypatch, operation):
+    install(tmp_path)
+    install(tmp_path, vr.DEV_VERSION)
+    vr.claim_dev(tmp_path, "test-owner", previous_version="1.0")
+    path = vr.dev_claim_path(tmp_path)
+    before = path.read_bytes()
+    load = vr._load_unique_json
+
+    def denied(source):
+        if source == path:
+            raise PermissionError("claim inaccessible")
+        return load(source)
+
+    monkeypatch.setattr(vr, "_load_unique_json", denied)
+    assert vr.read_dev_claim(tmp_path) is None  # compatibility status read only
+    with pytest.raises(PermissionError, match="claim inaccessible"):
+        if operation == "claim":
+            vr.claim_dev(tmp_path, "different-owner", force=True)
+        elif operation == "release":
+            vr.release_dev(tmp_path, "test-owner", force=True)
+        else:
+            cleanup(tmp_path, operation)
+    assert path.read_bytes() == before
+    assert (vr.version_dir(tmp_path, "1.0") / "payload").exists()
+    assert (vr.version_dir(tmp_path, vr.DEV_VERSION) / "payload").exists()
+
+
+@pytest.mark.parametrize("claim", [
+    "not json", "[]", '{"schema": "wrong", "owner": "owner"}',
+    json.dumps({"schema": vr.DEV_CLAIM_SCHEMA, "owner": "owner", "previous_version": 123}),
+])
+def test_malformed_dev_claim_does_not_authorize_cleanup(tmp_path, claim):
+    install(tmp_path)
+    install(tmp_path, vr.DEV_VERSION)
+    vr.dev_claim_path(tmp_path).write_text(claim)
+    with pytest.raises(ValueError):
+        vr.gc(tmp_path)
+    with pytest.raises(ValueError):
+        vr.toss_incomplete(tmp_path)
+    assert vr.version_dir(tmp_path, "1.0").is_dir()
+    assert vr.version_dir(tmp_path, vr.DEV_VERSION).is_dir()

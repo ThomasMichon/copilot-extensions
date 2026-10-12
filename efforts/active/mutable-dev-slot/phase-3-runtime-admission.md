@@ -158,7 +158,7 @@ each adopter is already safe.
       This item remains unchecked until adopting entrypoints retain the owning
       descriptors across their real promotion/drain or rollback lifetimes.
       The single-file bootstrap primitive and its 13 byte-identical copies have
-      an explicit reviewable module-ceiling change from 2,153 to 2,306 lines;
+      an explicit reviewable module-ceiling change from 2,153 to 2,315 lines;
       preserving their existing standalone/offline and artifact resource
       contracts avoids introducing a new deploy-time import/fan-out dependency
       merely to relocate this small kernel-ownership seam.
