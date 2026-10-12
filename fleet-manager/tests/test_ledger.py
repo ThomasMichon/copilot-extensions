@@ -162,6 +162,18 @@ def test_database_identity_schema_and_existing_database_refusal(tmp_path):
         ledger(foreign)
 
 
+def test_view_only_foreign_database_is_preserved_not_adopted(tmp_path):
+    path = tmp_path / "foreign-view.db"
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE VIEW unrelated AS SELECT 1 AS value")
+        before = connection.execute("SELECT type,name,sql FROM sqlite_master").fetchall()
+    with pytest.raises(PlanError, match="unrecognized"):
+        ledger(path)
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("SELECT type,name,sql FROM sqlite_master").fetchall() == before
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
+
+
 def test_real_process_exit_leaves_uncommitted_receipt_rolled_back(tmp_path):
     path = tmp_path / "journal.db"
     store, request = ledger(path), intent()

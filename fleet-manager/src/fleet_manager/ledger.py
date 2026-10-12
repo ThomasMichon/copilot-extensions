@@ -22,7 +22,7 @@ class OperationLedger:
                 raise PlanError("unsupported operation ledger schema")
             if version == 0:
                 existing = connection.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table'"
+                    "SELECT 1 FROM sqlite_master"
                 ).fetchone()
                 if existing:
                     raise PlanError("unrecognized operation ledger database")
