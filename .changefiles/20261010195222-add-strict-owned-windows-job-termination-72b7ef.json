@@ -1,9 +1,0 @@
-{
-  "comment": "Add strict owned Windows Job termination with empty-job confirmation and failure reporting.",
-  "changes": [
-    {
-      "plugin": "agent-procutil",
-      "type": "patch"
-    }
-  ]
-}

@@ -79,6 +79,13 @@ Native failure, invalid/expired timeout or an already-closed handle is an
 explicit error; uncertainty retains the handle for retry. This API grants no
 authority over unrelated processes and never substitutes a name-based kill.
 
+For build transactions that must own every descendant, synchronous spawn uses
+`require_job=True, allow_breakaway=False`. Assignment failure kills the still
+suspended child before it executes; the owned Job does not permit breakaway.
+Conflicting breakaway creation flags are rejected. The default
+`allow_breakaway=True` remains compatible with existing callers that deliberately
+launch survivable daemons.
+
 ## Vendoring
 
 **In dev**, most consumers' `pyproject.toml` reference this library through

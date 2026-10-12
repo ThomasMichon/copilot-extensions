@@ -11,6 +11,7 @@ license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
     "agent-index>=0.10.12.dev1",
+    "agent-procutil>=0.1.0.dev8",
     "pyyaml>=6.0",
     "packaging>=23",
     "tomli>=2.0; python_version < '3.11'",

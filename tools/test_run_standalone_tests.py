@@ -50,7 +50,10 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
         if "--override" in command:
             override = Path(command[command.index("--override") + 1])
             core_extra = "" if smoke else "[store,server]"
-            assert override.read_text() == f"agent-index{core_extra} @ {metadata.parent.as_uri()}\n"
+            assert override.read_text() == (
+                f"agent-index{core_extra} @ {metadata.parent.as_uri()}\n"
+                f"agent-procutil @ {(tmp_path / 'libs' / 'agent-procutil').as_uri()}\n"
+            )
 
     monkeypatch.setattr(runner.subprocess, "run", install)
     python = tmp_path / ".test-venvs" / "service" / "bin" / "python"

@@ -474,15 +474,22 @@ def spawn_sync_in_kill_on_close_job(
 
     With ``require_job=True``, failed Windows Job assignment kills the still
     suspended child before it can launch descendants and raises explicitly.
-    ``allow_breakaway=False`` additionally prevents descendants escaping this Job.
-    The default remains permissive for callers whose service children must
-    deliberately outlive the command.
+    ``allow_breakaway=False`` prohibits descendants from escaping this Job and
+    rejects an explicit CREATE_BREAKAWAY_FROM_JOB flag on the initial child.
+    The default permits explicit breakaway, preserving legacy daemon semantics.
     Otherwise, if job creation or assignment fails, the child still runs (resumed) and is
     returned with ``job_handle=None`` so existing cleanup paths remain in
     charge -- containment is a best-effort hardening layer, not a hard
     dependency for the child to execute at all. Off Windows this is a plain
     ``subprocess.Popen`` call returning ``(process, None)``.
     """
+    if type(allow_breakaway) is not bool:
+        raise ValueError("allow_breakaway must be a boolean")
+    if (
+        not allow_breakaway
+        and int(kwargs.get("creationflags", 0)) & _CREATE_BREAKAWAY_FROM_JOB
+    ):
+        raise ValueError("CREATE_BREAKAWAY_FROM_JOB conflicts with allow_breakaway=False")
     if not _is_windows():
         return subprocess.Popen(argv, **kwargs), None  # noqa: S603 - argv list, no shell
 
@@ -498,11 +505,15 @@ def spawn_sync_in_kill_on_close_job(
             job_handle = _assign_suspended_to_kill_on_close_job(pid)
         else:
             job_handle = _assign_suspended_to_kill_on_close_job(pid, allow_breakaway=False)
-        if job_handle is None and require_job:
+        if job_handle is None and (require_job or not allow_breakaway):
             process.kill()
             process.wait(timeout=5)
             raise RuntimeError("Windows descendant Job assignment failed before child resume")
         if not _resume_suspended_process(pid):
+            if require_job or not allow_breakaway:
+                process.kill()
+                process.wait(timeout=5)
+                raise RuntimeError(f"failed to resume suspended process {pid}")
             log.debug("killing pid %s because suspended-start resume failed", pid)
             try:
                 process.kill()

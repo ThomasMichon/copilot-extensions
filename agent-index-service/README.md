@@ -88,6 +88,9 @@ Windows staging requires strict owned Job termination and an empty-Job
 confirmation before candidate deletion. Best-effort handle closure alone is
 not accepted as proof that every descendant has exited; any teardown uncertainty
 preserves the incomplete candidate and fails explicitly.
+The child must also acquire its non-breakaway Job while still suspended.
+Assignment failure never resumes it. Legacy process-helper callers retain their
+existing breakaway behavior; staging explicitly selects the stricter mode.
 
 `candidates` is read-only, including when the root does not exist. Completion
 marker absence is reported as incomplete, including a crash after receipt
@@ -236,6 +239,10 @@ Released installs require `agent-index>=0.10.12.dev1`; earlier released cores
 lack the explicit-source seam. The test runner alone overrides the core's frozen
 `dev` source version while installing that same checkout's core. This does not
 relax wheel metadata or the runtime compatibility check for ordinary installs.
+Staging also requires `agent-procutil>=0.1.0.dev8` for strict assignment and
+non-breakaway ownership. Local test preparation selects the same-checkout helper
+explicitly despite its frozen `dev` version; real wheel bundles must satisfy
+the released dependency floor.
 Smoke preparation installs only the base core and test extra; native storage
 and hosting extras are reserved for full/manual/promotion execution.
 

@@ -408,3 +408,16 @@ boundaries from implementation decisions and deployment-specific policy.
   canonical completion markers rather than receipt presence. The updated full
   installed Windows suite and real offline uv fixture passed 359 tests with
   two Linux-specific process cases delegated to fresh-container validation.
+- Windows staging ownership must be acquired while the child is suspended,
+  with required Job assignment and no permitted descendant breakaway. An empty
+  permissive Job alone is not an ownership proof. The shared helper adds an
+  explicit strict mode while preserving legacy defaults; the service declares
+  its required released helper floor. The invalid shared-library-named
+  changefile is removed; the already-declared consuming-program fanout remains
+  the release authority.
+- Strict spawn tests passed 63 cases, including actual denied Windows breakaway
+  creation and failed assignment before child code executes. The complete
+  installed native staging suite and real offline uv fixture passed 371 tests
+  with two Linux-specific process skips. Authority fixtures/registry are
+  recaptured for the new helper bytes; targeted bridge authority validation
+  passed 41 tests with platform skips. No service activation is introduced.

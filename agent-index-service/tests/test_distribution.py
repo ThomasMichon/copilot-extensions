@@ -52,6 +52,12 @@ def test_normal_wheel_metadata_and_console_program(tmp_path):
             assert not requirement.specifier.contains("0.1.0.dev210", prereleases=True)
             assert not requirement.specifier.contains("0.10.11.dev1", prereleases=True)
             assert requirement.specifier.contains("0.10.12.dev1", prereleases=True)
+        procutil = next(
+            Requirement(req) for req in requirements
+            if Requirement(req).name == "agent-procutil"
+        )
+        assert not procutil.specifier.contains("0.1.0.dev7", prereleases=True)
+        assert procutil.specifier.contains("0.1.0.dev8", prereleases=True)
         assert all(" @ " not in req and "file:" not in req for req in requirements)
         entries = next(name for name in members if name.endswith(".dist-info/entry_points.txt"))
         assert "agent-index-service = agent_index_service.__main__:main" in (

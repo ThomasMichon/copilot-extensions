@@ -44,6 +44,12 @@ def test_real_wheels_verify_and_reject_frozen_pre_seam_core(tmp_path):
         )
         if source.name == "agent-index":
             core_build = build
+        if source.name == "agent-procutil":
+            metadata = build / "pyproject.toml"
+            metadata.write_text(re.sub(
+                r'^version\s*=\s*"[^"]+"', 'version = "0.1.0-dev8"',
+                metadata.read_text(encoding="utf-8"), count=1, flags=re.MULTILINE,
+            ), encoding="utf-8")
         result = subprocess.run(
             [sys.executable, "-c",
              f"from setuptools.build_meta import build_wheel; build_wheel({str(bundle)!r})"],

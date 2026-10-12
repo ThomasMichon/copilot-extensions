@@ -468,7 +468,8 @@ def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) ->
             try:
                 process, job = spawn_sync_in_kill_on_close_job(
                     command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
-                    stdout=stream, stderr=subprocess.DEVNULL, **kwargs,
+                    stdout=stream, stderr=subprocess.DEVNULL,
+                    require_job=True, allow_breakaway=False, **kwargs,
                 )
             except BaseException as exc:
                 # A shared spawn helper can raise after creating a suspended child.

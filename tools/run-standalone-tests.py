@@ -108,7 +108,11 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
             override = Path(temporary) / "overrides.txt"
             core = (REPO / "plugins" / "agent-index").resolve().as_uri()
             core_extra = "" if smoke else "[store,server]"
-            override.write_text(f"agent-index{core_extra} @ {core}\n", encoding="utf-8")
+            procutil = (REPO / "libs" / "agent-procutil").resolve().as_uri()
+            override.write_text(
+                f"agent-index{core_extra} @ {core}\nagent-procutil @ {procutil}\n",
+                encoding="utf-8",
+            )
             overrides = ["--override", str(override)]
         subprocess.run(
             ["uv", "pip", "install", "--python", str(python), *overrides, *sources],
