@@ -5,7 +5,8 @@
 - **Branch(es):** serial proposal and implementation PRs
 - **Created:** 2026-10-10
 - **Status:** Draft
-- **Status detail:** Report-only capability landed in #6303; live pilot
+- **Status detail:** Report-only dev slice landed in #6303; publication,
+  installed capability verification, and live pilot
   parameters/execution and later authority graduation remain gated.
 - **Vision:** `visions/plugins/agent-dispatch/README.md` scheduled production
   and durable goals; `visions/plugins/agent-worktrees/README.md` accountable
@@ -145,6 +146,8 @@ not standing authorization, pilot approval, or scheduling approval.
 - [ ] Select transcript completeness, trusted completion-verification, and
   private report-destination requirements for the audit pilot.
 - [x] Obtain explicit approval to implement the audit-only capability.
+- [ ] Complete the capability's promotion to main and verify its installed
+  runtime/charter before the live pilot; a dev merge is not deployment.
 - [ ] Obtain explicit approval to run the bounded live audit pilot.
 
 ### Phase 2 - Implement an audit-only pilot
@@ -155,8 +158,9 @@ Mutation-fencing implementation is not an audit gate._
 
 - [x] Operator approves starting with a report/steering-oriented dispatch
   charter and gradual, separately approved authority graduation.
-- [x] Publish the manually invoked report-only recipe and its receipt checker
-  (#6303); independent semantic verification remains mandatory.
+- [x] Land the manually invoked report-only recipe and its receipt checker
+  on dev (#6303); independent semantic verification remains mandatory.
+- [ ] Publish that capability through promotion to main.
 - [ ] Implement deterministic discovery and one exclusive bounded worker using
   the existing registrar/supervisor if recurring production is later approved;
   the initial one-off recipe requires an explicit candidate roster.
@@ -275,14 +279,16 @@ registration, or apply-mode pilot has been started by this effort.
 - Live candidate selection, run approval, posted candidate cards, apply-mode,
   mutation fencing, and recurring/default activation remain separate gates.
 
-### 2026-10-12 - Report-only capability landed
+### 2026-10-12 - Report-only dev slice landed
 
 - #6303 merged to dev as `0ca3d894124663652b46fe7f9731512aff3b48a5`
   after a genuine current-head approving review with zero findings and
   successful CI, including both live required checks. No gate was bypassed.
 - The one-off recipe, report-only charter, trigger skill, structural receipt
   checker, CLI/local-MCP/HTTP-MCP controls, and focused FINAL coverage are
-  published. Installing them does not activate a worker or producer.
+  merged to dev. Promotion to main and installed capability verification
+  remain pending; this is not a release/deployment completion claim.
+  Installing them does not activate a worker or producer.
 - Review fixes preserved unspecified verification defaults, enforced
   report-file containment before reads, handled older-Python resolution
   loops, and derived recipe creation defaults from the ordinary parser.
@@ -293,7 +299,8 @@ registration, or apply-mode pilot has been started by this effort.
 - Structural report validation and local test receipts are not evidence of
   a successful live agentic audit or of candidate mutation absence. The
   live pilot's remaining safety cases stay open.
-- Next gate: approve exact local project/candidate roster, budget, private
+- Next gates: finish publication/installed capability verification, then
+  approve exact local project/candidate roster, budget, private
   writable report destination, evidence completeness standard, and independent
   reviewer before any live audit. Establish fetch-free evidence reads;
   observer commands that may refresh Git or lifecycle state are not assumed
