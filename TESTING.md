@@ -108,6 +108,13 @@ The stalled descendant/captured-pipe case lives separately in
 `test_first_install_bootstrap_watchdog.py` and runs only in the full suite,
 not the required guard lane.
 
+FINAL stamp regressions use one immutable real-Git template and isolated
+per-test copies. The changed-plugin guard lane runs four smoke cases:
+serialized stamp/poll persistence, a tracked edit invalidating the stamp,
+the production cached-display/removal split, and a retained at-rest claim.
+The remaining checkout/obligation matrix runs in the existing full
+promotion/scheduled/manual suite, not as an unconditional new PR matrix.
+
 There is no host-wide test singleton. Each target takes a lease keyed by its
 **concrete environment directory's filesystem identity** (`st_dev`, `st_ino`),
 held across venv preparation,

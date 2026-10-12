@@ -68,6 +68,7 @@ def finalized_repository(tmp_path, finalized_repository_template):
     )
 
 
+@pytest.mark.guard
 def test_real_git_snapshot_survives_roundtrip_and_repeated_polling(finalized_repository):
     import json
 
@@ -78,7 +79,8 @@ def test_real_git_snapshot_survives_roundtrip_and_repeated_polling(finalized_rep
 
 
 @pytest.mark.parametrize("change", [
-    "untracked", "staged", "modified", "deleted", "head", "branch", "reopened",
+    "untracked", "staged", pytest.param("modified", marks=pytest.mark.guard),
+    "deleted", "head", "branch", "reopened",
 ])
 def test_real_git_changed_checkout_invalidates_stamp(finalized_repository, change):
     from pathlib import Path
@@ -112,7 +114,8 @@ def test_real_detached_head_stamp_is_supported(finalized_repository):
 
 
 @pytest.mark.parametrize("responsibility", [
-    "none", "active-claim", "at-rest-claim", "released-claim",
+    pytest.param("none", marks=pytest.mark.guard), "active-claim",
+    pytest.param("at-rest-claim", marks=pytest.mark.guard), "released-claim",
     "settled-session", "follow-up", "open-pr", "handoff", "reopened",
 ])
 def test_real_stamp_production_display_never_grants_cached_removal(
