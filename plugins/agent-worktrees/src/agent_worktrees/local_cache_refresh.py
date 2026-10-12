@@ -158,8 +158,6 @@ SESSIONSTART_MAX_TIMEOUT_S = 5.0
 # out and pays this grace in a given call, so a deadline-derived budget
 # reserves it once, not per subprocess.
 _RUN_BOUNDED_CLEANUP_GRACE_S = 5.0
-# Bound global identity discovery so rendering retains part of the budget.
-_RESOLUTION_TIMEOUT_S = 2.0
 # The scope name resolve_active_plugins() uses for a plugin's machine-wide
 # (non-project-specific) activation -- see ActivePlugin.root_for_scope().
 _GLOBAL_SCOPE = "global"
@@ -175,7 +173,9 @@ def _select_global_root(home: Path) -> Path | None:
     try:
         from plugin_activation import resolve_active_plugins
 
-        report = resolve_active_plugins(home=home, include_projects=False)
+        report = resolve_active_plugins(
+            home=home, include_projects=False, plugin_names=(_SIBLING_PLUGIN_NAME,),
+        )
     except Exception as exc:
         _LOG.warning("Global projection renderer discovery failed: %s", exc)
         return None
@@ -269,16 +269,15 @@ def refresh_local_cache(
     home: Path | None = None,
     timeout: float = DEFAULT_TIMEOUT_S,
 ) -> RefreshResult:
-    """Best-effort refresh of every enabled source's gitignored
-    non-discovered ``context-locals/**/*.local.md`` body under ``repo_root``.
+    """Refresh enabled sources' gitignored, auto-discovered local instructions.
 
     Call at create, resume, JSON launch planning and sessionStart. Results report
     actual installation; nonzero exits, invalid output and timeouts cannot
     silently become success. ``timeout`` is the hard, enforced ceiling
     on this call's **own** cost (not counting ``push_timeout.run_
     bounded``'s own cleanup grace -- see ``_RUN_BOUNDED_CLEANUP_GRACE_S``),
-    split between resolving the sibling's CLI (capped at
-    ``_RESOLUTION_TIMEOUT_S``) and rendering with the actual remaining time.
+    shared between resolving the sibling's CLI and rendering with the actual
+    remaining time; no separate cold-start discovery cutoff is imposed.
     Both run via
     ``push_timeout.run_bounded`` rather than a plain ``subprocess.run(
     timeout=...)``, which only terminates its direct child -- both the
@@ -295,9 +294,8 @@ def refresh_local_cache(
         if timeout <= 0:
             return _report(RefreshResult("timeout", detail="no refresh budget remains"))
         repo_root = _checkout_root(repo_root)
-        resolution_timeout = min(timeout, _RESOLUTION_TIMEOUT_S)
         outcomes: list[RefreshResult] = []
-        script = _resolve_cli_script(home, timeout=resolution_timeout, outcomes=outcomes)
+        script = _resolve_cli_script(home, timeout=timeout, outcomes=outcomes)
         if script is None:
             return _report(
                 outcomes[-1] if outcomes else RefreshResult(

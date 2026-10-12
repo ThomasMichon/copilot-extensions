@@ -474,7 +474,7 @@ class TestRefreshLocalCache:
             / "test-plugin"
             / "fallback.instructions.md"
         )
-        local_sibling = repo / ".github" / "copilot" / "context-locals" / destination.parent.name / "fallback.local.md"
+        local_sibling = repo / ".github" / "instructions" / destination.parent.name / "fallback.local.instructions.md"
         assert not local_sibling.exists()
 
         monkeypatch.setattr(lcr, "_resolve_agent_worktrees_path", lambda: (None, False))
@@ -790,7 +790,7 @@ class TestRefreshLocalCache:
     async def test_skips_the_render_when_resolution_consumes_the_whole_budget(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        """A tiny overall ``timeout`` (smaller than ``_RESOLUTION_TIMEOUT_S``)
+        """A tiny overall ``timeout``
         must never go negative/zero into the render call -- it must simply
         skip rendering this round, never raise or pass a bogus timeout."""
         script = tmp_path / "manage-instruction-projections.py"
@@ -929,7 +929,7 @@ class TestRefreshLocalCache:
         monkeypatch.setattr(lcr, "_resolve_agent_worktrees_path", lambda: (None, False))
         monkeypatch.setattr(lcr, "_run_bounded_result", runner)
         await lcr.refresh_local_cache(tmp_path)
-        assert resolver.await_args.kwargs["timeout"] == lcr._RESOLUTION_TIMEOUT_S
+        assert resolver.await_args.kwargs["timeout"] == lcr.LOCAL_SPAWN_MAX_TIMEOUT_S
         assert runner.await_args.kwargs["timeout"] == pytest.approx(4.9)
 
     @pytest.mark.asyncio

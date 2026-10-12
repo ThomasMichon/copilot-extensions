@@ -43,6 +43,56 @@ def _renderer_json(*, changed=None, unchanged=None, warnings=0, blocking=0):
     })
 
 
+def test_renderer_identity_lookup_does_not_resolve_unrelated_plugins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from plugin_activation import resolver
+    home = tmp_path / "home"
+    root = home / ".copilot" / "installed-plugins" / "test-market" / "customizing-copilot"
+    root.mkdir(parents=True)
+    (root / "plugin.json").write_text('{"name":"customizing-copilot","version":"1.0.0"}')
+    settings = home / ".copilot" / "settings.json"
+    settings.write_text(json.dumps({"enabledPlugins": {
+        "customizing-copilot@test-market": True, "unrelated@test-market": True,
+    }}))
+    real_installed = resolver._installed_root
+    visited: list[str] = []
+
+    def installed(copilot_home, source):
+        visited.append(source)
+        assert source != "unrelated@test-market"
+        return real_installed(copilot_home, source)
+
+    monkeypatch.setattr(resolver, "_installed_root", installed)
+    assert lcr._select_global_root(home) == root
+    assert visited == ["customizing-copilot@test-market"]
+
+
+def test_identity_lookup_shares_overall_budget_without_two_second_cutoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_worktrees import push_timeout
+    clock = iter([100.0, 103.0])
+    monkeypatch.setattr(lcr.time, "monotonic", lambda: next(clock))
+    lookup_timeouts: list[float] = []
+    render_timeouts: list[float] = []
+
+    def resolve(_home, *, timeout, outcomes):
+        lookup_timeouts.append(timeout)
+        return tmp_path / "renderer.py"
+
+    def run(argv, **kwargs):
+        render_timeouts.append(kwargs["timeout"])
+        return subprocess.CompletedProcess(argv, 0, _renderer_json(changed=["local"]), "")
+
+    monkeypatch.setattr(lcr, "_resolve_cli_script", resolve)
+    monkeypatch.setattr(lcr, "_resolve_own_agent_worktrees_command", lambda: None)
+    monkeypatch.setattr(push_timeout, "run_bounded", run)
+    assert lcr.refresh_local_cache(tmp_path, timeout=10).status == "ready"
+    assert lookup_timeouts == [10]
+    assert render_timeouts == [7]
+
+
 @pytest.mark.parametrize(
     "blocking,changed,returncode,expected",
     [(0, ["local"], 0, "ready"), (1, ["local"], 1, "partial"),
@@ -165,7 +215,7 @@ def test_real_global_discovery_and_renderer_fit_sessionstart_budget(tmp_path, mo
                 "legacyMarkers": [f"{name}:static-fallback"],
             }],
         }), encoding="utf-8")
-        siblings.append(repo / ".github" / "copilot" / "context-locals" / name / "fallback.local.md")
+        siblings.append(repo / ".github" / "instructions" / name / "fallback.local.instructions.md")
     monkeypatch.setattr(lcr, "_resolve_own_agent_worktrees_command", lambda: None)
     started = time.monotonic()
     first = lcr.refresh_local_cache(repo, home=home, timeout=lcr.SESSIONSTART_MAX_TIMEOUT_S)
@@ -667,9 +717,9 @@ class TestRefreshLocalCache:
         try:
             # Must not raise -- refresh_local_cache absorbs the timeout.
             # timeout is split between the (mocked, instant) resolution
-            # step and the render subprocess -- see _RESOLUTION_TIMEOUT_S.
+            # step and the render subprocess using one overall deadline.
             lcr.refresh_local_cache(
-                repo, home=tmp_path, timeout=lcr._RESOLUTION_TIMEOUT_S + 1.0
+                repo, home=tmp_path, timeout=3.0
             )
 
             deadline = time.monotonic() + 10

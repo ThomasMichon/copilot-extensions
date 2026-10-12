@@ -6,7 +6,7 @@ renders provenance-marked repository instruction files, and maintains the
 checked-in projection lock. It never executes plugin code, and never removes
 a checked-in projection or the lock itself -- ``render_local_cache()`` is the
 one exception: it may reconcile away an *owned*, gitignored, worktree-local
-``context-locals/**/*.local.md`` body that no longer matches a declared
+``*.local.instructions.md`` body that no longer matches a declared
 source, or retire a verified untracked legacy local after new publication
 (see ``docs/patterns/worktree-scoped-dynamic-guidance.md``),
 never a checked-in file.
@@ -895,7 +895,7 @@ def render_local_cache(
     repo_root: Path, discover_sources: Callable[[], Iterable[object]]
 ) -> Result:
     """Render every enabled source's current body outside automatic discovery,
-    at its gitignored ``context-locals/**/*.local.md`` path; never mutate the checked-in
+    at its gitignored ``*.local.instructions.md`` path; never mutate the checked-in
     destination, the projection lock, or any git state.
 
     Purely local and offline: this never fetches a newer plugin version --
@@ -907,7 +907,7 @@ def render_local_cache(
     behaves exactly as if no tracking concept applied -- see
     :func:`_resolve_git_tracked_paths`), specifically so it can refuse to
     manage a destination git already tracks (see the last bullet below) --
-    the ``context-locals/**/*.local.md`` path is not necessarily gitignored
+    the ``*.local.instructions.md`` path is not necessarily gitignored
     until the adopting repo has actually adopted that still-separate
     convention. Safe to call from any session regardless of the caller's
     repository push/PR permissions, and safe to call unconditionally on
@@ -1188,13 +1188,13 @@ def _render_local_cache_locked(
                     "this local-cache destination is tracked by git (or its "
                     "tracked status could not be confirmed in a git working "
                     "tree); refusing to manage it until it is confirmed "
-                    "untracked and the context-locals/**/*.local.md ignore rule "
+                    "untracked and the *.local.instructions.md ignore rule "
                     "is in place",
                 )
                 continue
             if local_destination not in ignored_paths:
                 result.add(WARNING, "projection-local-cache-ignore", local_destination,
-                           "new local body is not ignored by git; adopt context-locals ignore coverage first")
+                           "local instructions are not ignored by git; adopt *.local.instructions.md ignore coverage first")
                 continue
             current = _read_existing_local_cache(path)
             if current == rendered.content:
@@ -1301,7 +1301,7 @@ def _render_local_cache_locked(
                 "tracked status could not be confirmed in a git working "
                 "tree); leaving it in place rather than deleting a "
                 "possibly-tracked file -- untrack it and add the "
-                "context-locals/**/*.local.md ignore rule",
+                "*.local.instructions.md ignore rule",
             )
             continue
         try:

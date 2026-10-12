@@ -266,9 +266,10 @@ its lock -- privileged, PR-gated, consent-gated by design (see Phase 5).
 `instruction_projections.render_local_cache(repo_root, discover_sources)` is
 a deliberately **un**privileged sibling: it renders each enabled source's
 *current* full body into gitignored
-`.github/copilot/context-locals/<plugin>/<sourceId>.local.md`,
-outside automatic instruction discovery (nested paths preserved).
-`local_sibling_destination()` retains its API name but computes the new path.
+`.github/instructions/<plugin>/<sourceId>.local.instructions.md`,
+available for automatic instruction discovery (nested paths preserved).
+`local_sibling_destination()` computes the sibling path. Checked-in selectors
+remain pointers; reviewed fallback bodies stay outside automatic discovery.
 Legacy local reads remain canonically authenticated; after new publication only
 verified canonical untracked legacy files are retired. Edited/foreign/tracked
 files remain with visible findings. There is no consent check and no

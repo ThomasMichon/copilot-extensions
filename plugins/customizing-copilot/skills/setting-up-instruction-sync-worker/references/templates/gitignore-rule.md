@@ -1,15 +1,15 @@
-# `.gitignore` convention template (non-discovered local bodies)
+# `.gitignore` convention template (auto-discovered local instructions)
 
 Every repo that adopts this skill's scaffolding also needs the
-`.github/copilot/context-locals/**/*.local.md` ignore rule this worktree-scoped
+`.github/instructions/**/*.local.instructions.md` ignore rule this worktree-scoped
 dynamic-guidance mechanism depends on (see
 `docs/patterns/worktree-scoped-dynamic-guidance.md` §1) -- without it, a
-`render_local_cache()` body is an ordinary untracked file outside instruction
-discovery, one accidental `git add -A` away from being
+`render_local_cache()` body is automatically discoverable but must remain
+untracked, one accidental `git add -A` away from being
 committed by mistake.
 
 Add these repository-root-relative rules to the adopting repo's `.gitignore`.
-Retain the legacy rule during migration. This is an ordinary repo mutation: propose
+Retain the compatibility rule during migration. This is an ordinary repo mutation: propose
 it through that repo's normal PR/contribution flow, same as any other
 change to a repo you don't unilaterally own (see the setup skill's own
 `.gitignore` section for the full repo-write-authority rationale):
@@ -36,7 +36,7 @@ of leaving each adopting repo to discover the gap only after a stray commit.
 
 ## Validation
 
-- `git check-ignore -v .github/copilot/context-locals/<plugin>/<sourceId>.local.md`
+- `git check-ignore -v .github/instructions/<plugin>/<sourceId>.local.instructions.md`
   exits `0` and names this rule, once added.
 - A fresh `render_local_cache()` call against the adopting repo produces no
   `projection-local-cache-tracked` finding for any sibling it writes.

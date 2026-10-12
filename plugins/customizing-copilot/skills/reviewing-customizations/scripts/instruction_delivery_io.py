@@ -78,7 +78,7 @@ def orphan_fallbacks(
 
 def iter_local_files(root: Path, io: DeliveryIO) -> list[Path]:
     try:
-        directory = io.safe(root, PurePosixPath(".github/copilot/context-locals"))
+        directory = io.safe(root, PurePosixPath(".github/instructions"))
     except ValueError:
         return []
     found: list[Path] = []
@@ -86,7 +86,7 @@ def iter_local_files(root: Path, io: DeliveryIO) -> list[Path]:
         directories[:] = [
             name for name in directories if not io.indirect(Path(current) / name)
         ]
-        found.extend(Path(current) / name for name in names if name.endswith(".local.md"))
+        found.extend(Path(current) / name for name in names if name.endswith(".local.instructions.md"))
     return found
 
 
@@ -304,23 +304,23 @@ def report_unmanaged_legacy_locals(
     root: Path, destinations: set[str], io: DeliveryIO, result: object
 ) -> None:
     try:
-        directory = io.safe(root, PurePosixPath(".github/instructions"))
+        directory = io.safe(root, PurePosixPath(".github/copilot/context-locals"))
         expected = {delivery.legacy_local_destination(path) for path in destinations}
         for current, directories, names in os.walk(directory):
             directories[:] = [
                 name for name in directories if not io.indirect(Path(current) / name)
             ]
             for name in names:
-                if not name.endswith(".local.instructions.md"):
+                if not name.endswith(".local.md"):
                     continue
                 relative = (Path(current) / name).relative_to(root).as_posix()
                 if relative not in expected:
                     result.add(
                         "warning", "projection-local-cache-legacy", relative,
-                        "legacy auto-discovered body has no enabled canonical migration owner; retained",
+                        "compatibility body has no enabled canonical migration owner; retained",
                     )
     except (OSError, ValueError) as exc:
-        result.add("warning", "projection-local-cache-legacy", ".github/instructions", str(exc))
+        result.add("warning", "projection-local-cache-legacy", ".github/copilot/context-locals", str(exc))
 
 
 def new_source_admission(
@@ -361,7 +361,7 @@ def inventory(
         except (OSError, ValueError):
             continue
         kind = (
-            "legacy_local_bodies" if path.name.endswith(".local.instructions.md")
+            "local_bodies" if path.name.endswith(".local.instructions.md")
             else "selectors" if marker.get("deliveryKind") == "selector"
             else "inline_kernels"
         )
@@ -380,9 +380,9 @@ def inventory(
                     raw = io.read(io.safe(root, PurePosixPath(relative)), 2 * 1024 * 1024)
                     marker = delivery.parse_marker(raw)
                     delivery.validate_local_template(raw, marker)
-                    if delivery.local_destination(str(marker["destination"])) != relative:
+                    if delivery.legacy_local_destination(str(marker["destination"])) != relative:
                         raise ValueError("local body path does not match provenance")
-                    groups["local_bodies"].append(metrics(relative, raw))
+                    groups["legacy_local_bodies"].append(metrics(relative, raw))
                 except (OSError, ValueError, KeyError) as exc:
                     errors.append({"path": relative, "error": str(exc)})
     for entry in entries.values():
@@ -400,7 +400,7 @@ def inventory(
                 "files": rows, "count": len(rows),
                 "bytes": sum(row["bytes"] for row in rows),
                 "characters": sum(row["characters"] for row in rows),
-                "automatically_discovered": name not in {"reviewed_fallbacks", "local_bodies"},
+                "automatically_discovered": name not in {"reviewed_fallbacks", "legacy_local_bodies"},
             } for name, rows in groups.items()
         },
         "validation_errors": errors,

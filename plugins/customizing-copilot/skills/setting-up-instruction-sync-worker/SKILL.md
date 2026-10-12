@@ -131,8 +131,8 @@ permissionless; gate the *ignore-rule commit* like any other repo change.
 
 Scaffold, from
 [`references/templates/gitignore-rule.md`](references/templates/gitignore-rule.md):
-repository-root rules `.github/copilot/context-locals/**/*.local.md` and
-`.github/instructions/**/*.local.instructions.md` (legacy migration).
+repository-root rule `.github/instructions/**/*.local.instructions.md`;
+retain `.github/copilot/context-locals/**/*.local.md` for compatibility.
 Full locals now live outside automatic instruction discovery; retain the legacy
 ignore rule while ownership-validated migration retires old locals.
 The legacy rule does not make the orphan scan's git-tracked check work --

@@ -98,7 +98,7 @@ def test_exact_version_hash_authority(
     path = local_path(repo, spec.destination)
     path.write_bytes(body.content)
     selection = projections.resolve_instruction_source(repo, spec.destination, [source])
-    assert selection["selectedPath"].endswith(".local.md") == local_wins
+    assert selection["selectedPath"].endswith(".local.instructions.md") == local_wins
 
 
 @pytest.mark.parametrize("field,value", [
@@ -145,7 +145,7 @@ def test_legacy_body_is_readable_but_not_receipt_capable(tmp_path: Path) -> None
     )
     local_path(repo, spec.destination).write_bytes(legacy.content)
     selection = projections.resolve_instruction_source(repo, spec.destination, [source])
-    assert selection["selectedPath"].endswith(".local.md")
+    assert selection["selectedPath"].endswith(".local.instructions.md")
     assert not selection["receiptCapable"]
 
 
@@ -267,7 +267,7 @@ def test_unpaired_source_requires_enabled_canonical_ownership(tmp_path: Path) ->
     with pytest.raises(ValueError, match="verified enabled"):
         projections.resolve_instruction_source(repo, spec.destination)
     selected = projections.resolve_instruction_source(repo, spec.destination, [source])
-    assert selected["selectedPath"].endswith(".local.md")
+    assert selected["selectedPath"].endswith(".local.instructions.md")
     assert selected["receiptCapable"]
     local.write_bytes(local.read_bytes().replace(b"authorization.", b"authorization!"))
     with pytest.raises(ValueError, match="canonical template"):
