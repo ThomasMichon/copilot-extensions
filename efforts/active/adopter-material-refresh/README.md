@@ -206,7 +206,7 @@ repository creation, or private-environment capture was part of that proposal.
   payload in a separately claimed changefile-bearing slice, not by inventing
   alternate mechanics in these root waypoints. No plugin payload is modified
   by the documentation participant.
-- Local validation: twenty-one focused guard fixtures, F/E9 lint, real primary-path
+- Local validation: twenty-two focused guard fixtures, F/E9 lint, real primary-path
   navigation (including exact casing), runbook/plugin identifiers, canonical
   effort/vision structure, and staged size checks pass. Root references are
   retained through the primary family; existing preview files are untouched.
@@ -231,6 +231,8 @@ repository creation, or private-environment capture was part of that proposal.
   angle-bracket destinations retain spaces in inline/reference links. Focused
   fixtures cover those rendered-navigation boundaries without changing runtime
   behavior or introducing another documentation pipeline.
+- Reference definitions preserve the first normalized label, matching rendered
+  Markdown even when later definitions change casing or whitespace.
 
 ### 2026-10-08 — Independent planning seed
 - Captured the original material concern and both literal follow-up selections.

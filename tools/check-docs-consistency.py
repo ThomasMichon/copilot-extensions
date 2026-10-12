@@ -114,17 +114,15 @@ def local_links(text: str, include_images: bool = True) -> list[str]:
         text = re.sub(r"<img\b[^>]*>", "", text, flags=re.I)
     inline = r"!?\[[^\]\n]*\]\(\s*(?:<([^>\n]+)>|([^\s)>]+))(?:\s+[^)]*)?\)"
     links = [angled or bare for angled, bare in re.findall(inline, text)]
-    definitions = {}
-    for label, angled, bare in re.findall(
-        r"^\s*\[([^\]\n]+)\]:\s*(?:<([^>\n]+)>|([^\s>]+))", text, re.M
-    ):
-        definitions[label] = angled or bare
-
     def reference_key(label: str) -> str:
         return " ".join(label.split()).casefold()
 
-    definitions = {reference_key(key): value for key, value in definitions.items()}
-    remaining = re.sub(r"^\s*\[[^\]\n]+\]:[^\n]*$", "", text, flags=re.M)
+    definitions = {}
+    for label, angled, bare in re.findall(
+        r"^ {0,3}\[([^\]\n]+)\]:\s*(?:<([^>\n]+)>|([^\s>]+))", text, re.M
+    ):
+        definitions.setdefault(reference_key(label), angled or bare)
+    remaining = re.sub(r"^ {0,3}\[[^\]\n]+\]:[^\n]*$", "", text, flags=re.M)
     remaining = re.sub(inline, "", remaining)
 
     def full_reference(match: re.Match) -> str:

@@ -195,3 +195,16 @@ def test_angle_destinations_preserve_spaces_inline_and_reference(tmp_path):
         "[shortcut]: <guide one.md#ready>\n", encoding="utf-8")
     (tmp_path / "guide one.md").write_text("# Ready\n", encoding="utf-8")
     assert not mod.check_adopter_navigation(tmp_path, ("README.md",), {})
+
+
+def test_first_normalized_reference_definition_wins(tmp_path):
+    (tmp_path / "guide.md").write_text("# Guide\n", encoding="utf-8")
+    for first, second, expected_problem in (
+        ("[Guide]: missing.md", "[Guide]: guide.md", True),
+        ("[My Guide]: missing.md", "[MY  GUIDE]: guide.md", True),
+        ("[My Guide]: guide.md", "[my guide]: missing.md", False),
+    ):
+        label = "Guide" if first.startswith("[Guide]") else "My Guide"
+        text = f"[{label}]\n{first}\n{second}\n"
+        (tmp_path / "README.md").write_text(text, encoding="utf-8")
+        assert bool(mod.check_adopter_navigation(tmp_path, ("README.md",), {})) == expected_problem
