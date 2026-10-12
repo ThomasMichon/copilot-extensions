@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import base64
 import csv
+import configparser
 import hashlib
 import io
 import json
@@ -254,7 +255,10 @@ def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = No
                             digest.update(chunk)
                             archive.write(chunk)
                     archive.seek(0)
-                    validate_wheel(archive, wheel)
+                    validate_wheel(
+                        archive, wheel,
+                        source_dir=candidate_root / wheel["source"] if candidate_root is not None else None,
+                    )
                 if f"sha256:{digest.hexdigest()}" != wheel["sha256"]:
                     raise PromotionArtifactError(f"{path.name}: wheel digest mismatch")
     except (
@@ -266,7 +270,9 @@ def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = No
         raise PromotionArtifactError(f"{path.name}: cannot read artifact bundle: {exc}") from exc
 
 
-def validate_wheel(archive: BinaryIO, wheel: dict) -> None:
+def validate_wheel(
+    archive: BinaryIO, wheel: dict, *, source_dir: Path | None = None,
+) -> None:
     """Validate wheel bytes, metadata and RECORD without extracting package code."""
     from build_python_artifacts import parse_wheel_filename
 
@@ -314,6 +320,7 @@ def validate_wheel(archive: BinaryIO, wheel: dict) -> None:
             if (
                 any(header.defects for header in headers.values())
                 or wheel_metadata.get_all("Wheel-Version") != ["1.0"]
+                or wheel_metadata.get_all("Root-Is-Purelib") not in (["true"], ["false"])
                 or wheel_metadata.get_all("Generator") != [wheel["generator"]]
                 or len(tags) != len(set(tags)) or set(tags) != expected_tags
                 or len(names_header) != 1
@@ -330,6 +337,7 @@ def validate_wheel(archive: BinaryIO, wheel: dict) -> None:
                 or {row[0] for row in rows} != {member.filename for member in members if not member.is_dir()}
             ):
                 raise PromotionArtifactError("wheel RECORD member set mismatch")
+            verified_hashes = {}
             for name, recorded_hash, recorded_size in rows:
                 if name == prefix + "RECORD":
                     if recorded_hash or recorded_size:
@@ -342,6 +350,9 @@ def validate_wheel(archive: BinaryIO, wheel: dict) -> None:
                 encoded = base64.urlsafe_b64encode(digest.digest()).rstrip(b"=").decode("ascii")
                 if recorded_hash != f"sha256={encoded}" or recorded_size != str(bundle.getinfo(name).file_size):
                     raise PromotionArtifactError("wheel RECORD digest or size mismatch")
+                verified_hashes[name] = digest.hexdigest()
+            if source_dir is not None:
+                validate_wheel_sources(bundle, verified_hashes, source_dir=source_dir, prefix=prefix)
     except (
         OSError, UnicodeDecodeError, zipfile.BadZipFile, RuntimeError, NotImplementedError,
         csv.Error,
@@ -349,6 +360,130 @@ def validate_wheel(archive: BinaryIO, wheel: dict) -> None:
         if isinstance(exc, PromotionArtifactError):
             raise
         raise PromotionArtifactError(f"{wheel['filename']}: invalid wheel archive: {exc}") from exc
+
+
+def validate_wheel_sources(
+    bundle: zipfile.ZipFile, hashes: dict[str, str], *, source_dir: Path, prefix: str,
+) -> None:
+    """Bind static setuptools payload bytes and generated entry points to source data."""
+    try:
+        data = tomllib.loads((source_dir / "pyproject.toml").read_text(encoding="utf-8"))
+        tool = data.get("tool", {})
+        settings = tool.get("setuptools", {}) if isinstance(tool, dict) else None
+        if not isinstance(settings, dict):
+            raise PromotionArtifactError("invalid setuptools source configuration")
+        modules = settings.get("py-modules")
+        packages = settings.get("packages", {})
+        if not isinstance(packages, dict) or set(packages) - {"find"}:
+            raise PromotionArtifactError("unsupported wheel source package layout")
+        find = packages.get("find", {})
+        if not isinstance(find, dict) or set(find) - {"where"} or find.get("where", ["src"]) != ["src"]:
+            raise PromotionArtifactError("unsupported wheel source discovery configuration")
+        if modules is not None:
+            if not isinstance(modules, list) or any(
+                not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name)
+                for name in modules
+            ) or packages:
+                raise PromotionArtifactError("unsupported wheel source module layout")
+            base = source_dir
+            required_python = {name + ".py" for name in modules}
+        else:
+            base = source_dir / "src"
+            if not base.resolve().is_relative_to(source_dir.resolve()) or base.is_symlink():
+                raise PromotionArtifactError("wheel source root escapes candidate")
+            required_python = {
+                path.relative_to(base).as_posix() for path in base.rglob("*.py")
+                if not any(
+                    part in ("__pycache__", "build", "dist") or part.endswith(".egg-info")
+                    for part in path.relative_to(base).parts
+                )
+            }
+        if settings.get("package-dir", {"": str(base.relative_to(source_dir))}) != {
+            "": str(base.relative_to(source_dir)),
+        }:
+            raise PromotionArtifactError("unsupported wheel source package-dir mapping")
+        payload = {name for name in hashes if not name.startswith(prefix)}
+        if {name for name in payload if name.endswith(".py")} != required_python:
+            raise PromotionArtifactError("wheel Python member set differs from candidate source")
+        for name in payload:
+            path = base / name
+            if (
+                not path.resolve().is_relative_to(source_dir.resolve())
+                or not path.is_file() or path.is_symlink() or _digest(path) != hashes[name]
+            ):
+                raise PromotionArtifactError(f"{name}: wheel payload differs from candidate source")
+        package_data = settings.get("package-data", {})
+        if not isinstance(package_data, dict):
+            raise PromotionArtifactError("invalid wheel package-data configuration")
+        for package, patterns in package_data.items():
+            if not isinstance(package, str) or not isinstance(patterns, list) or any(
+                not isinstance(pattern, str) or "\\" in pattern or pattern.startswith("/")
+                or ".." in pattern.split("/") for pattern in patterns
+            ):
+                raise PromotionArtifactError("unsupported wheel package-data pattern")
+            if package == "*":
+                roots = {base / Path(name).parent for name in required_python}
+            elif re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", package):
+                roots = {base.joinpath(*package.split("."))}
+            else:
+                raise PromotionArtifactError("invalid wheel package-data package")
+            required_data = {
+                path.relative_to(base).as_posix()
+                for root in roots for pattern in patterns for path in root.glob(pattern) if path.is_file()
+            }
+            if not required_data.issubset(payload):
+                raise PromotionArtifactError("wheel omits declared candidate package data")
+        project = data["project"]
+        entries = project.get("entry-points", {})
+        if not isinstance(entries, dict) or any(
+            not isinstance(group, str) or not isinstance(values, dict) or any(
+                not isinstance(name, str) or not name or not isinstance(value, str) or not value
+                for name, value in values.items()
+            ) for group, values in entries.items()
+        ):
+            raise PromotionArtifactError("invalid candidate entry-point declarations")
+        expected_entries = dict(entries)
+        for field, group in (("scripts", "console_scripts"), ("gui-scripts", "gui_scripts")):
+            values = project.get(field, {})
+            if not isinstance(values, dict) or any(
+                not isinstance(name, str) or not name or not isinstance(value, str) or not value
+                for name, value in values.items()
+            ):
+                raise PromotionArtifactError("invalid candidate script declarations")
+            if values:
+                if group in expected_entries:
+                    raise PromotionArtifactError("ambiguous candidate entry-point group")
+                expected_entries[group] = values
+        entries_name = prefix + "entry_points.txt"
+        actual_entries = {}
+        if entries_name in hashes:
+            parser = configparser.ConfigParser(interpolation=None)
+            parser.optionxform = str
+            parser.read_string(bundle.read(entries_name).decode("utf-8"))
+            actual_entries = {section: dict(parser[section]) for section in parser.sections()}
+        if actual_entries != expected_entries:
+            raise PromotionArtifactError("wheel entry points differ from candidate source")
+        top_name = prefix + "top_level.txt"
+        if top_name in hashes:
+            expected_top = {name.split("/")[0].removesuffix(".py") for name in required_python}
+            if set(bundle.read(top_name).decode("utf-8").split()) != expected_top:
+                raise PromotionArtifactError("wheel top-level modules differ from candidate source")
+        generated = {"WHEEL", "METADATA", "RECORD", "entry_points.txt", "top_level.txt"}
+        for name in hashes:
+            if not name.startswith(prefix) or name[len(prefix):] in generated:
+                continue
+            relative = name[len(prefix):].removeprefix("licenses/")
+            path = source_dir / relative
+            if (
+                not path.resolve().is_relative_to(source_dir.resolve())
+                or not path.is_file() or path.is_symlink() or _digest(path) != hashes[name]
+            ):
+                raise PromotionArtifactError(f"{name}: generated wheel member is not candidate source data")
+    except (
+        OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, KeyError, TypeError,
+        ValueError, configparser.Error,
+    ) as exc:
+        raise PromotionArtifactError(f"cannot bind wheel payload to candidate source: {exc}") from exc
 
 
 def validate_manifest(manifest: dict) -> None:

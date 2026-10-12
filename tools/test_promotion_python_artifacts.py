@@ -33,16 +33,20 @@ no_ambient_git_identity = _identity_fixture
 DEV, MAIN, TREE = "a" * 40, "b" * 40, "c" * 40
 
 
-def _wheel_bytes(name: str, version: str) -> bytes:
+def _wheel_bytes(
+    name: str, version: str, *, payload: bytes = b"VALUE = 'first-party fixture'\n",
+    members: dict[str, bytes] | None = None, flat: bool = False,
+) -> bytes:
     prefix = f"{name}-{version}.dist-info/"
     files = {
-        f"{name}/__init__.py": b"VALUE = 'first-party fixture'\n",
+        name + ".py" if flat else f"{name}/__init__.py": payload,
         prefix + "WHEEL": (
             "Wheel-Version: 1.0\nGenerator: setuptools (80.9.0)\n"
             "Root-Is-Purelib: true\nTag: py3-none-any\n"
         ).encode(),
         prefix + "METADATA": f"Metadata-Version: 2.4\nName: {name}\nVersion: {version}\n".encode(),
     }
+    files.update(members or {})
     record = io.StringIO(newline="")
     writer = csv.writer(record)
     for path, payload in sorted(files.items()):
@@ -529,6 +533,9 @@ def test_bundle_rejects_unsafe_wheels(tmp_path, mutation):
 def _fake_builder(repo: Path) -> None:
     project = repo / "plugins" / "demo-plugin" / "pyproject.toml"
     project.write_text('[project]\nname = "demo"\nversion = "0.1.0-dev1"\n', encoding="utf-8")
+    package = project.parent / "src" / "demo"
+    package.mkdir(parents=True, exist_ok=True)
+    (package / "__init__.py").write_bytes(b"VALUE = 'first-party fixture'\n")
     template = _manifest(repo / "fixture-wheels")
     shutil.rmtree(repo / "fixture-wheels")
     (repo / "tools" / "build_python_artifacts.py").write_text(
@@ -595,6 +602,8 @@ def test_real_export_subprocess_uses_bumped_candidate_without_polluting_it(repo,
     (other / "pyproject.toml").write_text(
         '[project]\nname = "other"\nversion = "1.0"\n', encoding="utf-8",
     )
+    (other / "src" / "other").mkdir(parents=True)
+    (other / "src" / "other" / "__init__.py").write_bytes(b"VALUE = 'first-party fixture'\n")
     (repo / ".changefiles").mkdir()
     (repo / ".changefiles" / "bump.json").write_text(json.dumps({
         "comment": "test", "changes": [{"plugin": "demo-plugin", "type": "patch"}],
@@ -744,6 +753,8 @@ def _publish_fixture(tmp_path, monkeypatch):
     plugin_dir = tmp_path / "plugins" / "demo"
     plugin_dir.mkdir(parents=True)
     (plugin_dir / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "1.0"\n')
+    (plugin_dir / "src" / "demo").mkdir(parents=True)
+    (plugin_dir / "src" / "demo" / "__init__.py").write_bytes(b"VALUE = 'first-party fixture'\n")
     index = _index(directory, candidate_root=tmp_path)
     monkeypatch.setattr(promotion, "_git", lambda argv, **kw: MAIN if argv[1].endswith("^") else TREE)
     monkeypatch.setattr(promotion, "_tree_excluding_state", lambda *a, **kw: TREE)

@@ -527,6 +527,17 @@ win grows with build complexity.
   interface zipfile requires. Wheel bytes now stream into a standard
   TemporaryFile, keeping memory bounded and preserving the real seekable
   file contract on the supported floor.
+- The final payload-binding review separated two previously independent
+  truths: a source hash and a valid wheel can both be genuine while the
+  wheel's installed code is not from that source. Trusted signing/publication
+  now compares every payload-file hash with candidate source, requires a
+  complete Python module set and declared package data, and derives generated
+  entry points from project declarations. The static mapper covers existing
+  src packages and declared flat modules; unsupported generated/compiled
+  outputs fail closed pending a verified mapping. A separate bounded test
+  component covers exact/changed/injected/missing code/data, generated metadata,
+  and a fully self-consistent forged wheel that must fail before any release
+  API call. Linux, Windows and the native 3.10 CI selectors include it.
 
 ### 2026-10-12 - Phase 2 slice 4: explicit public build-toolchain integration
 
