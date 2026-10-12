@@ -35,6 +35,28 @@ not discover nested workflow directories. Initial exact ownership paths must be
 specified and owner-reviewed before activation; broad directory exemptions are
 not the default.
 
+## Phase execution gates
+
+Phase numbers refer to the parent effort. The campaign driver executes each
+slice and owns its PRs/evidence. The repository owner additionally authorizes
+Phase 4 critical main PRs and any separately requested administrative mutation.
+No delegated executor is implied; assign one explicitly before delegation.
+
+| Phase | Prerequisite | Required evidence | Abort condition | Reversible recovery |
+|-------|--------------|-------------------|-----------------|---------------------|
+| 0 - Baseline | Operator mandate and reconciled coordination | Reviewed plan, classified workflow/dependency inventory and live policy snapshot | Competing owner, unclear trust boundary or missing baseline | Keep existing pipeline; correct plan before execution |
+| 1 - Safe reductions | Phase 0; existing gates cover the specific removed work | Event-normalized counts, preserved required coverage/contexts and live review delivery | Lost coverage, missing required status or stalled release/review delivery | Revert the affected reduction through its authorized PR lane; preserve existing release gate |
+| 2 - Preservation | Phase 0; no active manifest | Strict-path unit/real-Git tests and released inert support | Ambiguous paths, changed legacy behavior without a manifest or incomplete provenance | Revert dev implementation; never activate the manifest |
+| 3 - Admission | Phase 2 for composition-dependent work; independent admission work may follow Phase 0 | Negative trust tests, final-tree evidence, helper compatibility and enforced freshness | Spoofable claimed boundary, unsafe execution or unfenced stale merge | Keep new writer disabled and old gates active; revert inert additions |
+| 4 - Activation | Phases 2 and 3 proven and support released | Owner-reviewed allowlist, exclusive writer, live canary, repair survival and rollback | Missing proof, dual writer, stale control input or policy restoration failure | Fence publication, drain admitted runs, revert activation and restore captured policies before resume |
+| 5 - Consolidation | Phase 1 baseline; Phases 3/4 only for reductions using their new guarantees | Coverage-equivalent exact-input reuse, migrated callers/checks and named repair ownership | Distinct coverage lost, orphaned required check or unowned failure | Restore the affected old lane/context before disabling its replacement |
+| 6 - Completion | All preceding scoped gates resolved | Two cycles, failure/recovery, rejection/repair proof and final policy/performance audit | Unresolved validation or unsupported throughput claim | Remain Active; revert offending slices or transfer unresolved work to a named tracked objective |
+
+Each implementation PR records its exact before/after identities, commands,
+results and applicable rollback commit. Policy/credential changes require a
+separate bounded confirmation; these recovery descriptions do not authorize
+automatic bypass or direct-main source changes.
+
 ## Composition
 
 Extend, do not replace, the existing changefile/materialization composer:

@@ -76,11 +76,17 @@ reconciled with the other planning agent's public handoff on #6237.
 
 ## Plan
 
+All slices use the execution gates in [design.md](design.md#phase-execution-gates).
+The campaign driver owns implementation/review; the repository owner alone
+authorizes critical main-path acceptance or a bounded administrative change.
+
 ### Phase 0 - Reviewed contract and baseline
 
 - [ ] Land this vision/effort through ordinary dev plan review.
 - [ ] Snapshot branch protection, rulesets, environments, workflow catalog,
   credentials and in-flight releases; identify enforced freshness and admission.
+- [ ] Classify every workflow and its helper/action dependencies, including
+  required contexts, event filters, credentials and failure-remediation owner.
 - [ ] Measure runs/jobs/checks per contributor update, dev advance and release;
   reviewer queue/start latency and observed throttling. Distinguish GitHub
   Actions concurrency from Copilot service limits; do not assume one shared quota.
@@ -141,6 +147,8 @@ reconciled with the other planning agent's public handoff on #6237.
   gates are required and proven; migrate old contexts/callers before deletion.
 - [ ] Reconcile repair ownership with #6142 and existing remediation effort;
   disabled repair automation must escalate to a named owner.
+- [ ] Route Dependabot contribution PRs to dev; remove redundant rejected
+  release-branch contribution runs without weakening dependency validation.
 
 ### Phase 6 - Observe and complete
 
@@ -161,6 +169,9 @@ reconciled with the other planning agent's public handoff on #6237.
   no-op/repeated release, provenance and rollback at pinned commits.
 - [ ] Negative admission: outsider/admin mixed source-plus-control PR,
   unapproved metadata, forged check/artifact and self-authorizing allowlist fail.
+- [ ] Fork isolation: untrusted head code cannot execute in privileged
+  `pull_request_target` jobs, receive release credentials or use trusted
+  persistent self-hosted runners; external approval remains required.
 - [ ] Final composition: incompatible wrapper/helper, altered recipes and
   missing/skipped/cancelled/mismatched evidence block publication.
 - [ ] Race: main advances after candidate creation; stale publication cannot
