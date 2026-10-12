@@ -61,6 +61,22 @@ agent-worktrees attribution opt-out from other repositories. Presence/format
 validation establishes neither cryptographic provenance nor actual ownership;
 the optional encrypted identity remains an owner's reverse-lookup mechanism.
 
+### Enforcement trust boundary
+
+This requirement inherits the repository's already accepted required-check
+context-name limitation, documented in `docs/pipelines.md` and the
+`workflow-lockdown-guard.yml` header. GitHub binds the check by context name
+under the GitHub Actions publisher; a malicious trusted Write contributor can
+attempt to forge the same context from an untrusted workflow. This plan accepts
+that existing residual risk for attribution too: it enforces normal submissions
+and accidental/manual-tool omissions, not a cryptographically hard boundary
+against a collaborator deliberately forging CI.
+
+A stronger adversarial guarantee would require a separately trusted publisher
+pinned by `integration_id`; it is not silently claimed or introduced by this
+change. Live validation must cite the actual trusted workflow's run and
+definition, not infer successful deployment from a same-named check alone.
+
 ## Validation
 
 - [ ] Missing, malformed, duplicate/conflicting fields, private/raw fields and
