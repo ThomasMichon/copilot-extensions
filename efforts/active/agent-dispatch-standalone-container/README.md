@@ -4,7 +4,9 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; Phase 1 + Phase 2 landed; release-promotion regression fixed
+- **Status:** Active; Phase 1 + Phase 2 landed; release-promotion regression
+  fixed; Phase 3 interoperability proof done -- fresh-machine bootstrap
+  validation and the plugin-delivered-flows-unaffected check remain open
 - **Vision:** [machine-fleet](../../../visions/machine-fleet/README.md):
   `standalone-service-installation`, role deployments and container managers
   (role instances may run directly or in containers on explicitly admitted
@@ -187,9 +189,12 @@ for review before any implementation.
   removed that unsafe default rather than working around the guard.
 
 ### Phase 3 -- Validation and documentation
-- [ ] Prove plugin-delivered and standalone installations are interoperable:
+- [x] Prove plugin-delivered and standalone installations are interoperable:
   a coordinator installed one way is indistinguishable (DB format, wire
-  protocol, CLI) from one installed the other way.
+  protocol, CLI) from one installed the other way -- done 2026-10-12, see
+  the Journal entry below for the isolated cross-version CLI round-trip
+  (scratch `0.1.2.dev205` venv <-> plugin-delivered `0.16.7-dev1`) that
+  proves it.
 - [x] Document the reusable pattern (package layout, bootstrap shape,
   container conventions) in `agent-dispatch-service/README.md` so a later
   agent-worktrees or other agent-* containerization effort can follow it
@@ -210,8 +215,10 @@ for review before any implementation.
   persistence verified (not merely "the process starts") -- done locally
   2026-10-11 (see Phase 2 above and the Journal entry below for the exact
   commands and outcomes).
-- [ ] Plugin-delivered and standalone coordinators interoperate: same DB
-  schema/location contract, same CLI/API behavior, no silent divergence.
+- [x] Plugin-delivered and standalone coordinators interoperate: same DB
+  schema/location contract, same CLI/API behavior, no silent divergence --
+  done 2026-10-12 (isolated real coordinator + cross-version CLI
+  round-trip; see Journal).
 - [ ] Existing plugin-delivered install/update/status/start/stop/uninstall
   flows remain unaffected; this effort adds a parallel path, not a
   replacement.
@@ -387,3 +394,54 @@ _Pending._
   pass), the existing `tools/test_run_standalone_tests.py` suite (28
   passed, 1 unrelated skip), and a full Docker rebuild + smoke run with the
   new flat-install Dockerfile step.
+- #6277 (the fix above) merged into `dev`, reconciled with a separate,
+  already-merged #6262 (a narrower materializer allowlist exception for the
+  same symptom, landed first); confirmed no conflict and that both sets of
+  tests (#6262's 82 new tests plus this change) pass together. Replied to
+  the reporting session via agent-bridge confirming resolution.
+
+### 2026-10-12 -- Phase 3: plugin-delivered/standalone interoperability proven
+- Proved the "a coordinator installed one way is indistinguishable from one
+  installed the other way" claim directly, with a real cross-version wire
+  round-trip rather than by inspection alone: `bootstrap.ps1` already hands
+  off to the identical, unmodified `plugins/agent-dispatch/scripts/install.ps1`
+  every plugin-delivered host uses (confirmed by reading it), so the only
+  thing that can differ between a "standalone" and a "plugin-delivered"
+  agent-dispatch is which version of the same `agent_dispatch` package got
+  installed -- proving interop across two *different* versions is a strictly
+  stronger proof than proving it for one shared version.
+- Built an isolated scratch venv (`uv venv` + `uv pip install -e
+  plugins/agent-dispatch`) pinned at `agent-dispatch==0.1.2.dev205` (the
+  floor `agent-dispatch-service`'s `pyproject.toml` depends on) alongside
+  this machine's already-installed plugin-delivered CLI at `0.16.7-dev1`.
+  Started a fully isolated coordinator from the scratch venv bound to
+  `127.0.0.1:48765` with its own scratch DB file, `AGENT_DISPATCH_RUN_DIR`,
+  and `AGENT_DISPATCH_ROUTING_DIR` -- this isolation is required: the CLI's
+  `client_url()` resolution prefers the host-wide zdd routing table over any
+  `AGENT_DISPATCH_DB`/`--url` the caller might expect to matter, so the
+  **first** attempt (without an explicit `AGENT_DISPATCH_URL` override on
+  the CLI calls) silently talked to this machine's real production
+  coordinator instead of the scratch one -- caught immediately via the
+  returned task's `version` field, and the accidentally-created production
+  task was abandoned right away (`agent-dispatch abandon ... --permit`).
+  Learning worth preserving: always pin `AGENT_DISPATCH_URL` explicitly
+  (never rely on `AGENT_DISPATCH_DB`/host/port alone) when standing up a
+  throwaway/test coordinator on a host that already runs a real one.
+- With isolation corrected (explicit `AGENT_DISPATCH_URL` on every CLI
+  call, `AGENT_DISPATCH_RUN_DIR`/`AGENT_DISPATCH_ROUTING_DIR` on the scratch
+  coordinator only): created a task with the scratch venv's CLI
+  (`0.1.2.dev205`); read it back byte-for-byte identical via the
+  plugin-delivered CLI (`0.16.7-dev1`), including via `list --repo`; then
+  read it back again with the scratch venv's CLI. Same DB row, same JSON
+  shape, same status-transition error semantics (a `claim` without a valid
+  worktree context and a premature `complete` both produced the identical,
+  expected errors from either CLI). This demonstrates DB schema, wire
+  protocol, and CLI behavior are install-path-independent by construction
+  (both paths install the literal same package), not merely asserted.
+  Scratch coordinator, venv, and DB removed after validation; verified via
+  `netstat` that no listener remained on the scratch port.
+- Checked off the corresponding Plan and Validation Plan items below. The
+  remaining two Validation Plan items (standalone bootstrap fresh-machine
+  install; existing plugin-delivered flows unaffected) are pre-existing,
+  lower-priority gaps already called out in Phase 1/2 -- not newly
+  discovered by this slice -- and are left open for a future pass.
