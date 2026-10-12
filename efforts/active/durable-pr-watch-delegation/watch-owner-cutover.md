@@ -31,18 +31,27 @@ authority, or retirement state must acquire that same lease; only read-only
 audits may run without it. A competing attempt waits or refuses explicitly,
 never proceeds under a separate guard. Revalidate receipt, governance, and
 exact-instance ownership after acquiring the lease and immediately before
-each destructive action.
+each destructive action. On-demand owner startup also participates in this
+guard so it cannot race a cold selection transaction.
 
 1. The owning installer provisions and validates an immutable completed target
    under the exact installation identity. Activation discovers only an
    attributable incumbent in that installation. No incumbent means no daemon
-   is started solely because an install/update occurred.
+   is started solely because an install/update occurred. Confirm absence under
+   the shared lease; an unreachable lease holder is not an absent incumbent.
 2. A durable installation transaction binds prior marker/manifest/route,
    completed target, receipt generations, process identity, and random
    transaction authorization. Runtime selection and service routing are
    recoverable parts of that transaction, not independent success-shaped
    writes. Recheck governance before selection, promotion, and reconciliation.
-3. Spawn a headless passive target through its installation-local launcher.
+   With no incumbent, perform cold activation: commit only the completed
+   target's selected marker and manifest through that recoverable transaction,
+   without spawning a passive, publishing a service route, or adopting watch
+   state. Recover interrupted cold selection to coherent prior or target
+   metadata without starting a daemon. Later on-demand startup resolves that
+   committed selection. Steps 3 through 7 apply only to a live-owner cutover.
+3. With an attributable incumbent, spawn a headless passive target through its
+   installation-local launcher.
    It exposes instance-specific readiness and ownership evidence only. It
    does not restore active subscriptions, start polling/callbacks, mutate watch
    state, or publish shared active discovery. Context alone is not promotion
@@ -142,7 +151,10 @@ authorize interrupting a shared process.
   promotion/recovery. Crash after consumer effect but before ACK still
   replays safely. Unrelated subscriptions continue after adoption.
 - First-touch installation without an incumbent does not start a new resident
-  daemon. First upgrade from a lease-only owner preserves pending state and
+  daemon or publish a route. Its marker and manifest select the completed
+  target; interruptions converge to coherent selection metadata without
+  activation. A racing on-demand startup uses the serialized committed
+  selection. First upgrade from a lease-only owner preserves pending state and
   refuses an unreachable holder rather than starting a duplicate.
 - Two independently governed cells invoke the actual shipped PR-owner payload,
   retain separate state and endpoints, and cannot observe, stop, promote,
