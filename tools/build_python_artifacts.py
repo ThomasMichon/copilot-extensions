@@ -47,7 +47,7 @@ artifact set's identity folds together:
   same source/tags/toolchain but byte-different wheels must never collide
   on the same `artifact_id`.
 
-**Manifest schema note (version 2):** ``build_toolchain`` is a structured
+**Manifest schema note (version 3):** ``build_toolchain`` is a structured
 record (``{"packages": {"setuptools": "...", "wheel": "...", "packaging":
 "..."}, "lock_id": "sha256:..."}``) describing the one locked toolchain
 every wheel in the set was built against -- not schema version 1's ad hoc
@@ -55,7 +55,11 @@ list of per-wheel ``Generator:`` strings gathered after the fact.
 ``packaging`` is locked alongside ``setuptools``/``wheel`` so this tool's
 own ``[build-system].requires`` verification can run inside the locked,
 governed-feed-sourced venv rather than depending on ``packaging`` being
-importable in whatever process runs this tool.
+importable in whatever process runs this tool. Resolved locks also record
+source policy and interpreter provenance, both included in ``lock_id``.
+The default remains governed-only. Public promotion runners may explicitly
+select ``--toolchain-source seasoned-public --toolchain-min-age-days 7``;
+this build-tooling exception never applies to consumer runtime dependencies.
 
 Usage::
 
@@ -70,7 +74,6 @@ Usage::
 """
 from __future__ import annotations
 
-import argparse
 import contextlib
 import hashlib
 import json
@@ -108,7 +111,7 @@ REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
 LIBS_DIR = REPO / "libs"
 MANIFEST_SCHEMA = "copilot-extensions.python-artifact-manifest"
-MANIFEST_SCHEMA_VERSION = 2
+MANIFEST_SCHEMA_VERSION = 3
 
 _GENERATOR_RE = re.compile(r"^Generator:\s*(.+?)\s*$", re.MULTILINE)
 _BUILD_TAG_RE = re.compile(r"^[0-9][^-]*$")
@@ -944,10 +947,7 @@ def build_plugin_artifacts(
             "abi_tag": identity_tags["abi_tag"],
             "platform_tag": identity_tags["platform_tag"],
             "payload_hash": payload_hash,
-            "build_toolchain": {
-                "packages": dict(sorted(toolchain.packages.items())),
-                "lock_id": toolchain.lock_id,
-            },
+            "build_toolchain": toolchain.record,
             "artifact_id": artifact_id,
             "wheels": entries,
         }
@@ -959,36 +959,8 @@ def build_plugin_artifacts(
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("plugin", help="plugin name under plugins/")
-    ap.add_argument("--out-dir", required=True, type=Path)
-    ap.add_argument(
-        "--python", help="interpreter used to create the locked toolchain venv"
-    )
-    ap.add_argument(
-        "--toolchain-venv",
-        type=Path,
-        help=(
-            "reuse (or create) a locked build-toolchain venv at this path -- "
-            "pass the SAME path across multiple invocations in one promotion "
-            "run so every plugin built in that run shares one pinned "
-            "setuptools/wheel toolchain; omit for a disposable, single-"
-            "invocation toolchain lock"
-        ),
-    )
-    args = ap.parse_args()
-    try:
-        toolchain = None
-        if args.toolchain_venv is not None:
-            toolchain = resolve_toolchain_lock(args.toolchain_venv, python=args.python)
-        manifest = build_plugin_artifacts(
-            args.plugin, out_dir=args.out_dir, python=args.python, toolchain=toolchain
-        )
-    except ArtifactBuildError as exc:
-        print(f"build-python-artifacts: FAILED: {exc}", file=sys.stderr)
-        return 1
-    print(json.dumps(manifest, indent=2, sort_keys=True))
-    return 0
+    from artifact_builder_cli import main as run
+    return run(build_plugin_artifacts, __doc__ or "")
 
 
 if __name__ == "__main__":

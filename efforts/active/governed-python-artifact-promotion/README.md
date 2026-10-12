@@ -309,8 +309,9 @@ answer against the actual repository/CI configuration:
   governed feed would likely already carry by the time a managed device
   consumes a release built this way, not an exact substitute for querying
   one directly. See `tools/seasoned_public_feed.py` and this Journal's
-  2026-10-10 entry. Still open: wiring this resolver into
-  `resolve_toolchain_lock`/the CLI and the actual workflow job.
+  2026-10-10 entry. The API/CLI now expose an explicit `seasoned-public`
+  build-tooling mode with policy/pins/interpreter-bound reuse and manifest
+  provenance. Still open: invoking the builder in the actual promotion job.
 
 ## Validation Plan
 
@@ -407,6 +408,28 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-12 - Phase 2 slice 4: explicit public build-toolchain integration
+
+- The default API/CLI path remains governed-only and fails without an
+  affirmatively trusted feed. Public promotion runners can explicitly select
+  `seasoned-public`; no failure ever switches between policies.
+- Public exact pins share one metadata clock and install as binaries from one
+  sanitized explicit index. The resolver and existing build-requirement gate
+  reject incompatible or insufficient pins without relaxing seasoning.
+- Both policies use the existing staging/atomic publication and concurrent
+  reuse machinery. Public markers and schema-3 manifests name the real source
+  policy; policy, seasoning, pins, and resolved interpreter participate in
+  reuse and artifact identity. Reused public pins are rechecked.
+- Extracted the CLI/source-policy concerns instead of crossing the module-size
+  cap. `docs/pipelines.md` describes the standalone contract. Promotion
+  invocation, signing/publication, dependency-closure admission, and verified
+  installer consumption remain open.
+- Validation: existing builder/resolver contracts plus focused public-policy
+  regressions; path-scoped hosted smoke exercises a fresh public toolchain and
+  real wheel builds sharing one lock. Public-mode package installation is not
+  run on a managed device. Full installer clean-room and external consumption
+  matrices remain owned by later phases, which change those paths.
 
 ### 2026-10-10 - Phase 2 slice 3: seasoned public-PyPI version resolution for public CI runners
 
