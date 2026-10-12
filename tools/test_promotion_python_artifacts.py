@@ -982,7 +982,7 @@ def test_workflow_separates_candidate_execution_signing_and_release_authority():
     checkout = next(step for step in steps if step.get("uses") == "actions/checkout@v4")
     assert checkout["with"]["ref"] == "${{ github.sha }}"
     assert checkout["with"]["persist-credentials"] is False
-    validator = next(step for step in steps if "run" in step)
+    validator = next(step for step in steps if "promotion_python_artifacts.py validate" in step.get("run", ""))
     assert "promotion_python_artifacts.py validate" in validator["run"]
     assert "promote_release.py" not in json.dumps(signer)
     assert "build_python_artifacts.py" not in json.dumps(signer)
@@ -1006,7 +1006,7 @@ def test_workflow_separates_candidate_execution_signing_and_release_authority():
     assert publishing["env"]["MERGE_SHA"] == "${{ needs.promote.outputs.merge_sha }}"
     assert "GH_TOKEN" not in publishing["env"]
     assert "ARTIFACT_VERIFY_TOKEN" not in publishing["env"]
-    publisher_step = next(step for step in publishing["steps"] if "run" in step)
+    publisher_step = next(step for step in publishing["steps"] if "publish_python_artifacts.py publish" in step.get("run", ""))
     assert publisher_step["env"]["GH_TOKEN"] == "${{ secrets.APERTURE_RELEASE_TOKEN }}"
     assert publisher_step["env"]["ARTIFACT_VERIFY_TOKEN"] == "${{ github.token }}"
     assert all("env" not in step for step in publishing["steps"] if "uses" in step)

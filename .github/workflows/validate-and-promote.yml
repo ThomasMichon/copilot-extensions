@@ -417,6 +417,12 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
+      - name: Provision hash-pinned metadata validator tooling for export validation
+        run: |
+          uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
+          uv pip install --python "$RUNNER_TEMP/artifact-validator/bin/python" \
+            --no-config --no-deps --only-binary :all: --require-hashes \
+            --index-url https://pypi.org/simple -r tools/artifact_validation_requirements.txt
       - name: Build the composed, versioned promotion candidate without release authority
         id: build
         env:
@@ -426,7 +432,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin dev main
-          python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
+          "$RUNNER_TEMP/artifact-validator/bin/python" tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
             --build-python-artifacts-dir "$ARTIFACT_DIR" \
             --toolchain-source seasoned-public --toolchain-min-age-days 7
           if [ -f "$ARTIFACT_DIR/python-artifacts.json" ]; then
@@ -465,6 +471,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Provision hash-pinned metadata validator tooling from trusted sources
+        run: |
+          uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
+          uv pip install --python "$RUNNER_TEMP/artifact-validator/bin/python" \
+            --no-config --no-deps --only-binary :all: --require-hashes \
+            --index-url https://pypi.org/simple -r tools/artifact_validation_requirements.txt
       - uses: actions/download-artifact@v4
         if: needs.build-python-artifacts.outputs.exported == 'true'
         with:
@@ -477,7 +490,7 @@ jobs:
           ARTIFACT_DIR: ${{ runner.temp }}/python-artifacts
         run: |
           git fetch origin main
-          python tools/promotion_python_artifacts.py validate --out-dir "$ARTIFACT_DIR" \
+          "$RUNNER_TEMP/artifact-validator/bin/python" tools/promotion_python_artifacts.py validate --out-dir "$ARTIFACT_DIR" \
             --dev-head "$DEV_SHA" --main-before "$(git rev-parse origin/main)"
       - name: Attest the validated index and every first-party bundle
         if: needs.build-python-artifacts.outputs.exported == 'true'
@@ -838,6 +851,19 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+      - uses: astral-sh/setup-uv@v9.0.0
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Provision hash-pinned metadata validator tooling without release authority
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
+          uv pip install --python "$RUNNER_TEMP/artifact-validator/bin/python" \
+            --no-config --no-deps --only-binary :all: --require-hashes \
+            --index-url https://pypi.org/simple -r tools/artifact_validation_requirements.txt
       - name: Download this run's signed Python artifacts
         if: steps.decide.outputs.proceed == 'true' && needs.python-artifacts.outputs.exported == 'true'
         uses: actions/download-artifact@v4
@@ -928,13 +954,13 @@ jobs:
           COVERAGE_BASELINES_DIR: coverage-baselines
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$PUSH_INPUT" = "false" ]; then
-            output=$(python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
+            output=$("$RUNNER_TEMP/artifact-validator/bin/python" tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
               --coverage-baselines-dir "$COVERAGE_BASELINES_DIR" \
               --python-artifacts-dir python-artifacts)
             echo "$output"
             echo "land=false" >> "$GITHUB_OUTPUT"
           else
-            output=$(python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
+            output=$("$RUNNER_TEMP/artifact-validator/bin/python" tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
               --push --candidate-branch "$CANDIDATE_BRANCH" \
               --coverage-baselines-dir "$COVERAGE_BASELINES_DIR" \
               --python-artifacts-dir python-artifacts)
@@ -1225,6 +1251,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Provision hash-pinned metadata validator tooling without release credentials
+        run: |
+          uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
+          uv pip install --python "$RUNNER_TEMP/artifact-validator/bin/python" \
+            --no-config --no-deps --only-binary :all: --require-hashes \
+            --index-url https://pypi.org/simple -r tools/artifact_validation_requirements.txt
       - uses: actions/download-artifact@v4
         with:
           name: promotion-python-artifacts
@@ -1236,7 +1269,7 @@ jobs:
         run: |
           git fetch origin main
           git merge-base --is-ancestor "$MERGE_SHA" origin/main
-          python tools/publish_python_artifacts.py publish --directory python-artifacts \
+          "$RUNNER_TEMP/artifact-validator/bin/python" tools/publish_python_artifacts.py publish --directory python-artifacts \
             --repository "$GITHUB_REPOSITORY" --signer-digest "${{ github.workflow_sha }}" \
             --source-digest "${{ github.sha }}" --source-ref "$GITHUB_REF" \
             --merged-commit "$MERGE_SHA" --dev-head "$DEV_SHA"

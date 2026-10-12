@@ -16,9 +16,11 @@ import subprocess
 import sys
 import tempfile
 import zipfile
+from collections import Counter
 from pathlib import Path
 from email import policy
 from email.parser import Parser
+from email.message import Message
 from typing import BinaryIO
 
 try:
@@ -352,7 +354,10 @@ def validate_wheel(
                     raise PromotionArtifactError("wheel RECORD digest or size mismatch")
                 verified_hashes[name] = digest.hexdigest()
             if source_dir is not None:
-                validate_wheel_sources(bundle, verified_hashes, source_dir=source_dir, prefix=prefix)
+                validate_wheel_sources(
+                    bundle, verified_hashes, source_dir=source_dir, prefix=prefix,
+                    metadata=package_metadata,
+                )
     except (
         OSError, UnicodeDecodeError, zipfile.BadZipFile, RuntimeError, NotImplementedError,
         csv.Error,
@@ -364,6 +369,7 @@ def validate_wheel(
 
 def validate_wheel_sources(
     bundle: zipfile.ZipFile, hashes: dict[str, str], *, source_dir: Path, prefix: str,
+    metadata: Message,
 ) -> None:
     """Bind static setuptools payload bytes and generated entry points to source data."""
     try:
@@ -434,6 +440,7 @@ def validate_wheel_sources(
             if not required_data.issubset(payload):
                 raise PromotionArtifactError("wheel omits declared candidate package data")
         project = data["project"]
+        validate_runtime_metadata(project, metadata)
         entries = project.get("entry-points", {})
         if not isinstance(entries, dict) or any(
             not isinstance(group, str) or not isinstance(values, dict) or any(
@@ -484,6 +491,69 @@ def validate_wheel_sources(
         ValueError, configparser.Error,
     ) as exc:
         raise PromotionArtifactError(f"cannot bind wheel payload to candidate source: {exc}") from exc
+
+
+def validate_runtime_metadata(project: dict, metadata: Message) -> None:
+    """Compare runtime declarations using the standard PEP 440/508 parser."""
+    try:
+        from packaging.markers import Marker
+        from packaging.requirements import Requirement
+        from packaging.specifiers import SpecifierSet
+        from packaging.utils import canonicalize_name
+    except ImportError as exc:
+        raise PromotionArtifactError(
+            "runtime metadata validation requires packaging; use tools/artifact_validation_requirements.txt"
+        ) from exc
+    dynamic = project.get("dynamic", [])
+    if not isinstance(dynamic, list) or any(not isinstance(field, str) for field in dynamic):
+        raise PromotionArtifactError("invalid candidate dynamic metadata declarations")
+    if set(dynamic) & {"dependencies", "optional-dependencies", "requires-python"}:
+        raise PromotionArtifactError("dynamic runtime metadata has no trusted static source binding")
+    dependencies = project.get("dependencies", [])
+    optional = project.get("optional-dependencies", {})
+    if not isinstance(dependencies, list) or not isinstance(optional, dict) or any(
+        not isinstance(extra, str) or not isinstance(values, list) for extra, values in optional.items()
+    ):
+        raise PromotionArtifactError("invalid candidate runtime dependency declarations")
+
+    def requirement_key(value: str, extra: str | None = None) -> tuple:
+        if not isinstance(value, str):
+            raise PromotionArtifactError("runtime requirements must be strings")
+        requirement = Requirement(value)
+        if requirement.url is not None:
+            raise PromotionArtifactError("direct runtime URLs cannot bypass governed-feed declarations")
+        if extra is not None:
+            marker = f"({requirement.marker}) and " if requirement.marker is not None else ""
+            requirement.marker = Marker(marker + f"extra == {extra!r}")
+        return (
+            canonicalize_name(requirement.name, validate=True),
+            tuple(sorted(canonicalize_name(name, validate=True) for name in requirement.extras)),
+            requirement.specifier,
+            str(requirement.marker) if requirement.marker is not None else None,
+        )
+
+    extras = [canonicalize_name(extra, validate=True) for extra in optional]
+    if len(extras) != len(set(extras)):
+        raise PromotionArtifactError("ambiguous normalized candidate extras")
+    if Counter(canonicalize_name(value, validate=True) for value in metadata.get_all("Provides-Extra", [])) != Counter(extras):
+        raise PromotionArtifactError("wheel extras differ from candidate runtime declarations")
+    expected = Counter(requirement_key(value) for value in dependencies)
+    for extra, values in optional.items():
+        expected.update(
+            requirement_key(value, canonicalize_name(extra, validate=True)) for value in values
+        )
+    if Counter(requirement_key(value) for value in metadata.get_all("Requires-Dist", [])) != expected:
+        raise PromotionArtifactError("wheel runtime dependencies differ from candidate")
+    python = project.get("requires-python")
+    actual_python = metadata.get_all("Requires-Python", [])
+    if python is None:
+        if actual_python:
+            raise PromotionArtifactError("wheel adds an undeclared Python requirement")
+    elif (
+        not isinstance(python, str) or len(actual_python) != 1
+        or SpecifierSet(actual_python[0]) != SpecifierSet(python)
+    ):
+        raise PromotionArtifactError("wheel Python requirement differs from candidate")
 
 
 def validate_manifest(manifest: dict) -> None:

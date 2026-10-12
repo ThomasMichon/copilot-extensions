@@ -100,3 +100,80 @@ def test_declared_flat_python_modules_bind_to_root_source(tmp_path, monkeypatch)
     artifacts.validate_wheel(
         io.BytesIO(_wheel_bytes("demo", "1.0", flat=True)), manifest["wheels"][0], source_dir=source,
     )
+
+
+@pytest.mark.parametrize("case", [
+    "match", "removed-dependency", "injected-dependency", "changed-marker", "extra",
+    "missing-extra", "duplicate-extra", "python-floor", "missing-python", "duplicate-python",
+    "unconditional-extra-dep", "direct-url", "dynamic", "ambiguous-extras",
+])
+def test_runtime_metadata_cannot_change_candidate_install_behavior(tmp_path, monkeypatch, case):
+    directory, entry = _publish_fixture(tmp_path, monkeypatch)
+    with zipfile.ZipFile(directory / entry["filename"]) as bundle:
+        manifest = json.loads(bundle.read("manifest.json"))
+    source = tmp_path / "plugins" / "demo"
+    dependencies = ["Some_Pkg[ssl] >= 1.0, <3; python_version >= '3.10'"]
+    optional = {"Dev_Tools": ["pytest>=8; sys_platform == 'win32'"]}
+    headers = [
+        "Metadata-Version: 2.4", "Name: demo", "Version: 1.0",
+        "Requires-Python: <4,>=3.10", "Provides-Extra: dev-tools",
+        'Requires-Dist: Some-Pkg[ssl]<3,>=1.0; python_version >= "3.10"',
+        'Requires-Dist: pytest>=8; (sys_platform == "win32") and extra == "dev-tools"',
+    ]
+    if case == "removed-dependency":
+        headers.pop(5)
+    elif case == "injected-dependency":
+        headers.append("Requires-Dist: undeclared-package>=1")
+    elif case == "changed-marker":
+        headers[5] = headers[5].replace('>= "3.10"', '>= "3.11"')
+    elif case == "extra":
+        headers[4] = "Provides-Extra: other"
+    elif case == "missing-extra":
+        headers.pop(4)
+    elif case == "duplicate-extra":
+        headers.append(headers[4])
+    elif case == "python-floor":
+        headers[3] = "Requires-Python: >=3.11"
+    elif case == "missing-python":
+        headers.pop(3)
+    elif case == "duplicate-python":
+        headers.append(headers[3])
+    elif case == "unconditional-extra-dep":
+        headers[6] = "Requires-Dist: pytest>=8"
+    elif case == "direct-url":
+        dependencies.append("example @ https://packages.example.invalid/example.whl")
+        headers.append("Requires-Dist: " + dependencies[-1])
+    elif case == "ambiguous-extras":
+        optional["dev-tools"] = []
+    (source / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\nversion = "1.0"\nrequires-python = ">=3.10,<4"\n'
+        + ('dynamic = ["dependencies"]\n' if case == "dynamic" else "")
+        + "dependencies = " + json.dumps(dependencies) + "\n[project.optional-dependencies]\n"
+        + "\n".join(json.dumps(extra) + " = " + json.dumps(values) for extra, values in optional.items())
+        + "\n"
+    )
+    archive = io.BytesIO(_wheel_bytes("demo", "1.0", members={
+        "demo-1.0.dist-info/METADATA": ("\n".join(headers) + "\n").encode(),
+    }))
+    if case == "match":
+        artifacts.validate_wheel(archive, manifest["wheels"][0], source_dir=source)
+    else:
+        with pytest.raises(artifacts.PromotionArtifactError):
+            artifacts.validate_wheel(archive, manifest["wheels"][0], source_dir=source)
+
+
+def test_validator_provisioning_never_exposes_release_authority():
+    import yaml
+    root = Path(__file__).resolve().parent.parent
+    jobs = yaml.safe_load((root / ".github" / "workflows" / "validate-and-promote.yml").read_text())["jobs"]
+    for job in ("build-python-artifacts", "python-artifacts", "promote", "publish-python-artifacts"):
+        provision = next(
+            step for step in jobs[job]["steps"]
+            if "uv pip install" in step.get("run", "") and "artifact_validation_requirements.txt" in step["run"]
+        )
+        assert "--require-hashes" in provision["run"]
+        assert "--no-deps" in provision["run"] and "--only-binary :all:" in provision["run"]
+        assert "--index-url https://pypi.org/simple" in provision["run"]
+        assert "secrets." not in json.dumps(provision)
+        if job == "promote":
+            assert provision["env"]["GH_TOKEN"] == "${{ github.token }}"

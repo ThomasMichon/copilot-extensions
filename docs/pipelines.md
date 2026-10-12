@@ -89,6 +89,17 @@ Each declared wheel must itself be a safe ZIP with one matching distribution's
 distribution/version and tags with the validated manifest, reject unsafe wheel
 members, and verify complete RECORD hashes/sizes. An opaque byte string with a
 `.whl` filename and a matching outer digest is not a wheel.
+`Requires-Dist`, `Requires-Python` and `Provides-Extra` must match the static
+project declarations, including optional-dependency markers and normalized
+extras. Direct runtime URLs and dynamic runtime declarations are rejected, not
+certified as governed-feed admission. The standard PEP parser is hash-pinned
+in `tools/artifact_validation_requirements.txt`; hosted jobs provision it in
+an isolated validator venv from the explicit approved public tooling source.
+Its pinned wheel predates the seasoning floor, installs with no dependencies
+or source builds, and is never bundled in first-party assets. Provisioning
+receives no release-write token. Local callers supply `packaging` through
+their governed tooling environment; no command silently provisions a public
+dependency on a managed device.
 The signer also binds actual payload files to the candidate: every installed
 file must byte-match its static setuptools source path, the Python member set
 must be complete, and declared package data must be present. Generated console
@@ -119,7 +130,7 @@ A no-content-change or paused run builds and
 publishes nothing.
 
 Only after the exact candidate PR really merges does publication recheck its
-actual parent/content tree and project set and revalidates archive contents.
+actual parent/content tree and project set and revalidate archive contents.
 Assets live under the deterministic
 `<plugin>-v<version>` GitHub Release tag. Each ZIP filename includes the
 manifest's content-addressed `artifact_id`, permitting independently attested

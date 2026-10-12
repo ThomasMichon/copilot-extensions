@@ -538,6 +538,15 @@ win grows with build complexity.
   component covers exact/changed/injected/missing code/data, generated metadata,
   and a fully self-consistent forged wheel that must fail before any release
   API call. Linux, Windows and the native 3.10 CI selectors include it.
+- Runtime metadata is source-bound too: trusted validation derives
+  Requires-Dist, Requires-Python and normalized extras from static project
+  declarations, including optional-dependency markers. Direct URLs and
+  dynamic runtime declarations fail rather than bypassing consumer feed
+  admission. A hash-pinned, long-seasoned packaging wheel supplies the
+  standard PEP parser in isolated hosted validator venvs; provisioning runs
+  without release authority and never changes managed-device feed policy.
+  The final documentation-impact description now includes the isolated
+  agent-worktrees guard-fixture repair and its mandatory changefile.
 
 ### 2026-10-12 - Phase 2 slice 4: explicit public build-toolchain integration
 
