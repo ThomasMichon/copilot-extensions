@@ -5,7 +5,7 @@
   picker-support plugins)
 - **Branch(es):** per-slice worktrees
 - **Created:** 2026-10-06
-- **Status:** Active <!-- Phase 1 landed (status + local toggle glue); Phase 2 landed (native --machine); Phase 3 landed (status-only config_sections entry); the toggle-from-Picker follow-on is tracked in ThomasMichon/copilot-extensions#6044 -->
+- **Status:** Active <!-- Phases 1-3 landed; Phase 4 local Picker controls proposed; remote UI/validation transferred to #6283 -->
 - **Vision:** [`visions/picker`](../../../visions/picker/README.md)'s
   plugin-pivot-extensibility behavior (a plugin's own pivot manifest
   contributes Picker surface without Picker-side code) and
@@ -14,7 +14,7 @@
   a declaration, which is exactly why this section can be a thin override
   toggle rather than a repo edit).
 - **Umbrella issue:** See effort
-- **Sub-issues:** none yet
+- **Sub-issues:** #6282 (local Picker controls), #6283 (remote UI and validation)
 - **Related efforts:**
   [`agent-dispatch-recipe-library`](../../2026/10/08%20agent-dispatch-recipe-library/README.md)
   (shipped the `extends:`/recipe-template model this section surfaces),
@@ -33,10 +33,10 @@ declarative task-worker pools (registrar declarations, most commonly a
 `general-task-worker`/`goal-driven`/`repository-issue-loop` `extends:`
 instantiation) from the Worktree Manager Picker's ⚙ **Configuration** menu,
 without requiring them to know any `agent-dispatch` CLI invocation. This is
-deliberately an MVP scoped to today's `ConfigSection` contract (one-shot,
-non-interactive subprocess, ≤200-char status line) — report a pool's size and
-active/overridden state, and flip `agent-dispatch supervise override
-enable|disable` for it. A richer "browse global then repo templates and
+deliberately an MVP: bounded commands report pool size and local override
+state, while the Manager hosts a small selection form and confirmation before
+applying `agent-dispatch supervise override enable|disable`. The status-only
+CLI retains its ≤200-char output contract. A richer "browse global then repo templates and
 activate one" experience is out of scope here; it depends on
 `agent-dispatch-tasks-pane-ux-overhaul`'s Phase 9 (inline Registrars
 viewer/editor, not started), which is new `engine.py` surface, not a
@@ -137,6 +137,17 @@ linked from here)._
 This effort scopes that ask down to its MVP-feasible slice; the
 browse-and-activate template picker is explicitly deferred (see Guiding
 Intent).
+
+### 2026-10-12 operator direction
+
+> Yes, the workers-config-section effort sounds good
+
+The operator selected:
+
+> Local pool selection and confirmed Enable/Disable; track remote UI separately
+
+This resumes the local toggle slice after the shared confirmation gate landed
+in #6096. It does not authorize remote-machine controls or template activation.
 
 ## Plan
 
@@ -276,12 +287,40 @@ Intent).
       (19 + 11 tests, all green) with zero Picker-side code changes --
       `pivot_manifest.py`'s parsing was already fully general, exactly as
       this item predicted.
-- [ ] Wire Phase 2's `--machine` support into the config section once a
+- [x] Deferred to `ThomasMichon/copilot-extensions#6283`: Wire Phase 2's `--machine` support into the config section once a
       multi-machine affordance is in scope (may ship as a Phase 3 follow-on
       rather than blocking the single-machine MVP). Deferred -- the
       no-name summary mode is inherently single-machine (it reports this
       machine's own discovered pools); a cross-machine summary view is a
       genuinely separate UI shape, not a small addition to this one.
+
+### Phase 4 — Local pool selection and confirmed toggles
+
+- [ ] Reconcile with the Configuration Workbench vision's
+      `machine-local-adjustments` and `domain-configuration-panels` behaviors:
+      the Manager hosts generic interaction; agent-dispatch owns discovery,
+      validation and user-local override persistence. No daemon or repository
+      writer is introduced.
+- [ ] _(agent-recommended implementation)_ Extend `ConfigSection` with an
+      optional `configure_action` using the existing manifest field parser,
+      dynamic `options_command` protocol and form-template substitution.
+      Keep its existing `run` as the read-only status query. After a successful
+      status query, show the optional form with that status and an **Apply**
+      button; ordinary sections remain one-shot commands.
+- [ ] Reuse the existing form/confirmation screen. The form selects a local
+      pool and an explicit Enable/Disable action, with an optional disable
+      reason. Opening, loading options and cancelling never mutate state.
+      Confirmation occurs after fields are collected and defaults to Cancel.
+      Show the selected pool and action in the confirmation, not just the
+      generic Workers title. Enabling clears a local disable override; it
+      does not promise the declaration or running pool is active.
+- [ ] Add a read-only pool-options command and a strict UI mutation mode:
+      reject absent or ambiguous declarations before writing overrides.
+      Preserve the existing CLI status and deliberately permissive named
+      override behavior for non-UI callers.
+- [ ] Wire only the plugin-owned Workers manifest; keep Manager code generic.
+      Update the public manifest contract and worker-control documentation.
+- [ ] Land through the normal reviewed PR flow and journal the actual outcome.
 
 ## Validation Plan
 
@@ -301,9 +340,11 @@ Intent).
       available in this environment); deferred to whoever next drives one.
 - [ ] Toggling disable/enable from the Picker round-trips to
       `agent-dispatch supervise override list` reflecting the change.
-      Blocked on `#6044` (the toggle is not yet wired into the Picker at
-      all, by design -- see Phase 3's own items above).
-- [ ] A `--machine`-targeted toggle round-trips against a second real or
+      Exercise the real native Picker form and confirmation against an isolated
+      fixture pool and override store. Assert Cancel performs no write, Disable
+      creates the logical override and Enable removes it. Preserve the
+      declaration byte-for-byte, and surface command failures explicitly.
+- [x] Deferred to `ThomasMichon/copilot-extensions#6283`: A `--machine`-targeted toggle round-trips against a second real or
       test machine over `remote_dispatch.py`'s SSH transport. **Partially
       covered:** proven against a mocked SSH transport (the same style
       `remote_dispatch.py`'s own existing tests use) -- a live second
@@ -321,6 +362,18 @@ no-name summary mode is proposal-level work in its own right; see that
 phase's first Plan item for the rationale.)_
 
 ## Journal
+
+### 2026-10-12 — Local toggle slice resumed; remote scope transferred
+
+- Corrected the completion boundary: the archived recipe-library effort is
+  separate from this still-active effort. The shared confirmation fix (#6096)
+  resolves #6044, not the remaining Workers form wiring.
+- Operator chose local pool selection and confirmed Enable/Disable; remote
+  UI and second-machine validation move to #6283. Local implementation and
+  real Picker/override round-trip are tracked in #6282.
+- Proposed Phase 4 before implementation: reuse generic manifest fields and
+  form confirmation through an optional configuration action, preserving the
+  existing read-only status query and user-local-only mutation boundary.
 
 ### 2026-10-10 — Phase 3 landed: status-only `config_sections` Workers entry
 - Resolved a prior handoff's own closing claim ("needs the separate

@@ -39,7 +39,7 @@ that pattern to this repository.
 | [ai-attribution Audience-Based Disclosure Policy](active/ai-attribution-audience-policy/README.md) | Active (Phase 1 done) | #2965 |
 | [Devcontainer Test Isolation](active/devcontainer-test-isolation/README.md) | Done; pending archive | #5040 |
 | [agent-dispatch Recipe Composability](active/agent-dispatch-recipe-composability/README.md) | Active | #4959 |
-| [agent-dispatch Workers Configuration Section](active/agent-dispatch-workers-config-section/README.md) | Draft | See effort |
+| [agent-dispatch Workers Configuration Section](active/agent-dispatch-workers-config-section/README.md) | Active; local Picker toggle plan | #6282; remote UI/validation #6283 |
 | [Configurable token-command sourcing](active/token-command-sourcing/README.md) | Draft | _pending_ |
 | [CI Identifier Leak Guard](active/ci-identifier-leak-guard/README.md) | Active | #3923 |
 | [CI Reliability & Flakiness Telemetry](active/ci-flakiness-telemetry-and-reliability/README.md) | Active | _pending_ |
