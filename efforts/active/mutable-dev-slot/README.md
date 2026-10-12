@@ -148,8 +148,10 @@ operator directive to remove the explicit claimed-dev exception.
       Internal ownership bookkeeping must not require a manual old-tip,
       re-publish, restore-tip sequence. Preserve exact saved leases, destination
       and worktree/ref authority, real concurrency refusal, and normal hooks.
-      Delivered through #5835, repaired under #6244/#6256, normally promoted,
-      and verified in the installed CLI. Consumer guidance refresh cleared its
+      Delivered through #5835 with publication regressions repaired by #6256.
+      Independent bridge-fixture (#6244) and materialization (#6262) promotion
+      blockers cleared before normal promotion and installed-CLI verification.
+      Consumer guidance refresh cleared its
       reviewed flow; the merged plan's PR claim was reconciled.
 
 - [ ] Review the shared
