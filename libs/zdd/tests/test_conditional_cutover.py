@@ -39,7 +39,7 @@ def case(tmp_path, monkeypatch):
     class Client:
         def drain(self, **kwargs):
             events.append("drain")
-            return {"drained": True}
+            return {"drained": True, "clean": True, "forced": False}
 
         def undrain(self):
             events.append("undrain")
@@ -84,6 +84,8 @@ def case(tmp_path, monkeypatch):
         drain_predecessor=lambda old, new, timeout: Client().drain(
             timeout=timeout, poll=1.0, force=False
         ),
+        undrain_predecessor=lambda old: Client().undrain(),
+        adopt_successor=lambda new: Client().adopt_relay(),
     )
     request = ConditionalCutover(
         expected_active=old,

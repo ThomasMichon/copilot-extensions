@@ -653,6 +653,11 @@ def _audit_daemon_health(
 
     findings: list[dict[str, object]] = []
     try:
+        from .diagnostic_recovery import conditional_recovery_report
+
+        conditional_report = conditional_recovery_report(ctx)
+        if conditional_report is not None:
+            return conditional_report
         try:
             candidates = _candidate_map(ctx.list_candidates())
         except (OSError, subprocess.SubprocessError) as exc:
@@ -747,7 +752,7 @@ def _target_pid_sequence(report: dict[str, object]) -> list[tuple[str, dict[str,
     return targets
 
 
-def apply_daemon_health(
+def _apply_daemon_health_locked(
     ctx: DiagnosticContext,
     *,
     now: datetime | None = None,
@@ -800,7 +805,7 @@ def apply_daemon_health(
                     }
                 )
                 break
-            recovery = breadcrumb.recover_stale_cutover(
+            recovery = breadcrumb._recover_stale_cutover_locked(
                 ctx.config_dir,
                 ctx.make_client,
             )
@@ -954,3 +959,11 @@ def apply_daemon_health(
     finally:
         if guard is not None and hasattr(guard, "release"):
             guard.release()
+
+
+def apply_daemon_health(
+    ctx: DiagnosticContext, *, now: datetime | None = None,
+) -> dict[str, object]:
+    from .diagnostic_recovery import guarded_apply
+
+    return guarded_apply(ctx, now=now)

@@ -84,7 +84,7 @@ def test_route_change_during_undrain_returns_unresolved_result(case):
     class Client:
         def drain(self, **kwargs):
             base_client.drain(**kwargs)
-            return {"drained": False}
+            return {"drained": False, "clean": False, "forced": False}
 
         def undrain(self):
             base_client.undrain()
@@ -96,6 +96,7 @@ def test_route_change_during_undrain_returns_unresolved_result(case):
             request, capture_runtime=lambda _: replace(
                 snapshot, make_client=lambda _: Client(),
                 drain_predecessor=lambda old, new, timeout: Client().drain(timeout=timeout),
+                undrain_predecessor=lambda old: Client().undrain(),
             )
         )
     )
@@ -391,7 +392,10 @@ def test_relay_adoption_never_serializes_captured_secrets(case, caplog, phase):
 
     result = orch.run(
         conditional=replace(
-            request, capture_runtime=lambda _: replace(snapshot, make_client=client)
+            request, capture_runtime=lambda _: replace(
+                snapshot, make_client=client,
+                adopt_successor=lambda endpoint: client(endpoint.base_url).adopt_relay(),
+            )
         )
     )
     assert secret not in repr(result.to_dict())
@@ -486,4 +490,104 @@ def test_drain_cutover_errors_cannot_leak_captured_credentials(case, caplog):
     assert not result.ok and not result.committed
     assert result.error == "captured runtime drain failed (CutoverError)"
     assert secret not in repr(result.to_dict()) + caplog.text
+    assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
+
+
+def test_conditional_drain_sanitizes_response_and_reports_only_busy_count(case):
+    _, _, _, _, snapshot, request, orch = case
+    secret = "fixture-sensitive-response-value"
+    response = {
+        "drained": False, "clean": False, "forced": False,
+        "busy_sessions": [secret], "credential": secret,
+    }
+    result = orch.run(
+        conditional=replace(
+            request,
+            capture_runtime=lambda _: replace(snapshot, drain_predecessor=lambda *_: response),
+        )
+    )
+    assert not result.ok
+    assert result.drain == {
+        "drained": False, "clean": False, "forced": False, "busy_sessions_count": 1,
+    }
+    assert secret not in repr(result.to_dict())
+
+
+@pytest.mark.parametrize("invalid", [
+    {"forced": True}, {"clean": None}, {"clean": False}, {"drained": 1},
+])
+def test_conditional_drain_requires_unforced_boolean_evidence(case, invalid):
+    root, _, events, _, snapshot, request, orch = case
+    response = {"drained": True, "clean": True, "forced": False, **invalid}
+    result = orch.run(
+        conditional=replace(
+            request,
+            capture_runtime=lambda _: replace(snapshot, drain_predecessor=lambda *_: response),
+        )
+    )
+    assert not result.ok and not result.committed
+    assert "shutdown" not in events
+    assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
+
+
+def test_receiver_bound_undrain_refuses_a_later_route_owner(case):
+    import time
+
+    root, old, events, _, snapshot, request, orch = case
+    winner = replace(old, pid=303, generation=30, process_start_time="3030")
+    captured = []
+
+    def attest(endpoint):
+        response = snapshot.attest(endpoint)
+        return replace(response, ready=False) if endpoint.pid == 202 and "drain" in events else response
+
+    def undrain(restored):
+        captured.append(restored)
+        routing._atomic_write(root / "active.json", {"active": winner.to_dict()})
+        with routing.routing_lock(root, deadline=time.monotonic() + 1):
+            active = routing.Endpoint.from_dict(routing.read_table(root)["active"])
+            if active != restored:
+                raise CutoverError("receiver refuses lost restoration ownership")
+            pytest.fail("receiver must not reopen the replaced predecessor")
+
+    result = orch.run(
+        conditional=replace(
+            request,
+            capture_runtime=lambda _: replace(
+                snapshot, attest=attest, undrain_predecessor=undrain,
+            ),
+        )
+    )
+    assert captured[0].pid == old.pid and captured[0].generation > old.generation
+    assert not result.ok and not result.rolled_back
+    assert events == ["spawn", "drain"]
+    assert routing.read_table(root)["active"] == winner.to_dict()
+    assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
+
+
+def test_receiver_bound_adoption_refuses_a_later_route_owner(case):
+    import time
+
+    root, old, events, _, snapshot, request, orch = case
+    winner = replace(old, pid=303, generation=30, process_start_time="3030")
+    captured = []
+
+    def adopt(successor):
+        captured.append(successor)
+        routing._atomic_write(root / "active.json", {"active": winner.to_dict()})
+        with routing.routing_lock(root, deadline=time.monotonic() + 1):
+            active = routing.Endpoint.from_dict(routing.read_table(root)["active"])
+            if active != successor:
+                raise CutoverError("receiver refuses changed adoption ownership")
+            pytest.fail("receiver must not adopt relay for a replaced successor")
+
+    result = orch.run(
+        conditional=replace(
+            request, capture_runtime=lambda _: replace(snapshot, adopt_successor=adopt),
+        )
+    )
+    assert captured[0].pid == 202
+    assert not result.ok and result.committed
+    assert events == ["spawn", "drain", "shutdown"]
+    assert result.serving_endpoint is None
     assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))

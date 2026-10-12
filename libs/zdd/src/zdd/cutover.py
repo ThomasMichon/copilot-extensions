@@ -575,13 +575,21 @@ class CutoverOrchestrator:
                     f"forced={drain_res.get('forced')}"
                 )
                 if not drain_res.get("drained"):
+                    busy_work = drain_res.get(
+                        "busy_sessions_count" if conditional else "busy_sessions"
+                    )
                     self._emit(
                         lifecycle.DRAIN, lifecycle.FAIL, port=old.port,
-                        detail={"busy_sessions": drain_res.get("busy_sessions")},
+                        detail={"busy_sessions": busy_work},
                     )
+                    if conditional:
+                        raise CutoverError(
+                            f"conditional predecessor drain incomplete (busy: {busy_work}); "
+                            "retirement refused"
+                        )
                     raise CutoverError(
                         "old daemon did not drain "
-                        f"(busy: {drain_res.get('busy_sessions')}); "
+                        f"(busy: {busy_work}); "
                         "rerun with force to proceed"
                     )
                 self._emit(
@@ -656,7 +664,10 @@ class CutoverOrchestrator:
 
             # Best-effort: hand the credential relay (9857) to the new daemon
             # once the old one has released it.
-            self._adopt_relay(new_port, result, make_client=make_client)
+            self._adopt_relay(
+                new_port, result, make_client=make_client,
+                adopt_relay=conditional.adopt_successor if conditional else None,
+            )
 
             if conditional:
                 conditional.complete(result)
@@ -743,11 +754,15 @@ class CutoverOrchestrator:
     def _adopt_relay(
         self, new_port: int, result: CutoverResult,
         *, make_client: Callable[[str], _Client] | None = None,
+        adopt_relay: Callable[[], dict] | None = None,
     ) -> None:
         """Best-effort: bind the credential relay on the new daemon (non-fatal)."""
         try:
-            new_client = (make_client or self.make_client)(self._base_url(new_port))
-            adopt = new_client.adopt_relay()
+            if adopt_relay is not None:
+                adopt = adopt_relay()
+            else:
+                new_client = (make_client or self.make_client)(self._base_url(new_port))
+                adopt = new_client.adopt_relay()
             adopted = adopt.get("adopted")
             if adopted is not None and type(adopted) is not bool:
                 raise CutoverError("relay adoption response has an invalid boolean")

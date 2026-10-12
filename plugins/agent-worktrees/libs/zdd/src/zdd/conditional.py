@@ -66,6 +66,8 @@ class RuntimeSnapshot:
     retire: Callable[[Endpoint, Endpoint], None] = field(repr=False)
     confirm_retired: Callable[[Endpoint, float], bool] = field(repr=False)
     drain_predecessor: Callable[[Endpoint, Endpoint, float], dict] = field(repr=False)
+    undrain_predecessor: Callable[[Endpoint], None] = field(repr=False)
+    adopt_successor: Callable[[Endpoint], dict] = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -215,13 +217,38 @@ class PreparedCutover:
         self.verify_before_retire()
         if self.new is None:
             raise CutoverError("successor identity unavailable before predecessor drain")
-        return _captured_call(
+        response = _captured_call(
             "drain", self.snapshot.drain_predecessor, self.old, self.new, timeout
         )
+        if not isinstance(response, dict) or any(
+            type(response.get(key)) is not bool for key in ("drained", "clean", "forced")
+        ):
+            raise CutoverError("conditional drain response has invalid boolean evidence")
+        if response["forced"]:
+            raise CutoverError("conditional drain was forced; retirement refused")
+        if response["drained"] and not response["clean"]:
+            raise CutoverError("conditional drain did not prove clean completion")
+        busy = response.get("busy_sessions")
+        if busy is not None and not isinstance(busy, list):
+            raise CutoverError("conditional drain response has invalid busy-work evidence")
+        if response["drained"] and busy:
+            raise CutoverError("conditional drain response contradicts busy-work evidence")
+        return {
+            "drained": response["drained"], "clean": response["clean"],
+            "forced": False, "busy_sessions_count": len(busy) if busy is not None else None,
+        }
 
     def confirm_retired(self) -> None:
         if self.snapshot.confirm_retired(self.old, self.request.retirement_timeout) is not True:
             raise CutoverError("predecessor exit unconfirmed; owner-led recovery required")
+
+    def adopt_successor(self) -> dict:
+        if self.new is None or not self.matches(self.new):
+            raise CutoverError("successor identity unavailable before relay adoption")
+        routing.validate_active(
+            self.orch.config_dir, self.new, lock_deadline=self.deadline()
+        )
+        return _captured_call("adopt", self.snapshot.adopt_successor, self.new)
 
     def complete(self, result: CutoverResult) -> None:
         """Publish success and clear recovery only for the verified routed owner."""
@@ -276,8 +303,7 @@ class PreparedCutover:
                 return
             try:
                 _captured_call(
-                    "undrain",
-                    lambda: self.snapshot.make_client(restored.base_url).undrain(),
+                    "undrain", self.snapshot.undrain_predecessor, restored,
                 )
                 if not self.matches(restored):
                     raise CutoverError("restored predecessor is not ready")

@@ -119,6 +119,13 @@ receiver's native routing authority before opening its drain gate. Both
 published endpoint identities are supplied; caller-side validation alone does
 not close a publication race. Ordinary address-based drain is never used by
 the conditional path. Production IPC must supply this receiver-bound operation.
+`undrain_predecessor(restored)` and `adopt_successor(successor)` likewise validate
+the exact receiver process and expected active publication under native routing
+authority before reopening admission or adopting the relay. Ordinary client
+methods are not used for conditional control. Drain evidence must contain boolean
+`drained`, `clean` and `forced` fields; successful retirement requires clean,
+unforced completion. Public results allowlist these flags and a busy-work count,
+not arbitrary captured response values or work identifiers.
 Failed retirement requests preserve a nonterminal breadcrumb and the successor
 route; later conditional repair refuses until owner-led recovery resolves it.
 The required `confirm_retired(endpoint, timeout)` callback must confirm the
@@ -182,6 +189,10 @@ OS handle tied to the target process's start time.
 On Linux, portable Python builds without Python-level pidfd exports reuse the
 existing native libc pidfd adapter. If neither backend exists, identity-bound
 termination remains explicitly unavailable; there is no numeric-PID fallback.
+Generic diagnostics acquires native cutover authority before applying repairs.
+Conditional or unverifiable recovery state is non-repairable and requires its
+owner, regardless of reachability or duplicate-process classification; retained
+promoted generations cannot be discarded by the generic cleanup path.
 
 ### `zdd.singleton_manager` -- Linux supervision across cutover and exec
 
