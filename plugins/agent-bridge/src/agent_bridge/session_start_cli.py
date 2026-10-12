@@ -161,6 +161,39 @@ def _find_caller_session(client, agent_name: str, caller_id: str | None) -> dict
     return None
 
 
+def _sender_repo_for_target(client, agent_name: str) -> str | None:
+    """Derive a preference only for targets whose resolver consumes it."""
+    repo, separator, venue = agent_name.partition("@")
+    if separator and repo.strip() and venue.strip():
+        return None
+    list_agents = getattr(client, "list_agents", None)
+    if list_agents is not None:
+        from .session_targeting_cli import _match_agents
+
+        inventory = list_agents()
+        names = _match_agents(agent_name, inventory)
+        matches = [
+            item for item in inventory
+            if isinstance(item, dict) and item.get("name") in names
+        ]
+        if len(matches) > 1:
+            # The resolver rejects ambiguity before it considers a preference.
+            return None
+        if len(matches) == 1:
+            entry = matches[0]
+            if ("derived" in entry and not entry["derived"]) or (
+                "host" in entry and not entry["host"]
+            ):
+                return None
+            if entry.get("derived") and entry.get("host"):
+                return _core()._sender_repo()
+    if ":" in agent_name:
+        # A namespaced provider owns its target; an unlisted namespace remains
+        # directly resolvable even when provider enumeration is incomplete.
+        return None
+    return _core()._sender_repo()
+
+
 def _start_agent_session(
     client,
     agent_name: str,
@@ -208,7 +241,7 @@ def _start_agent_session(
             target_dir=target_dir,
             caller_id=caller_id,
             caller_session_id=core._get_caller_session_id(),
-            sender_repo=core._sender_repo(),
+            sender_repo=_sender_repo_for_target(client, agent_name),
             force_new=force_new,
             caller_owner_ref=core._worktrees_get("owner-ref"),
             worktree_id=worktree_id,

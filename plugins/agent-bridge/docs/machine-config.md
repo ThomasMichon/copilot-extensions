@@ -41,6 +41,11 @@ Explicit `--project` and `<repo>@<venue>` targets retain precedence; unmanaged
 callers keep CWD/default resolution. This selects a project, not allocation
 authority: knowledge-only restrictions and cross-space claim gates still apply.
 
+Session startup derives that preference only for bare derived machine targets.
+Repository-qualified targets, namespaced providers, and named non-machine agents
+do not consume it and therefore do not evaluate managed-owner preference metadata.
+This preserves explicit-target precedence without weakening allocation checks.
+
 ## Quick Setup
 
 ### Auto-adopt from a repo
