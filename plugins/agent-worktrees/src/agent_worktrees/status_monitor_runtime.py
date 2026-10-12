@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -20,6 +21,7 @@ from agent_procutil import windowless_python
 from . import activity, locks, output, sessions_pane_retire, stale_runtime_reap, tracking
 from . import config as cfg
 from . import status_updater_cli
+from .status_monitor_python import direct_monitor_python
 
 
 def _core():
@@ -626,9 +628,12 @@ def _spawn_detached(argv: list[str]) -> bool:
     }
     kwargs.update(_core().windowless_daemon_kwargs(breakaway=True))
     try:
+        argv[0], extra_env = direct_monitor_python(argv[0])
+        kwargs["env"].update(extra_env)
         subprocess.Popen(argv, **kwargs)  # detached: fixed, trusted argv
         return True
-    except Exception:
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Cannot spawn status-monitor: %s", exc)
         return False
 
 

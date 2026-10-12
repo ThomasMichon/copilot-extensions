@@ -22,6 +22,7 @@ from zdd import routing
 from zdd.cutover import CutoverOrchestrator
 
 from . import locks, procs
+from .status_monitor_python import direct_monitor_python
 
 _BIND = "127.0.0.1"
 _READ_TIMEOUT_S = 5.0
@@ -295,6 +296,8 @@ def spawn_passive(runtime_python: str, *, port: int):
         str(port),
     ]
     if os.name == "nt":
+        argv[0], extra_env = direct_monitor_python(runtime_python)
+        child_env.update(extra_env)
         kwargs.update(core.windowless_daemon_kwargs(breakaway=True))
     else:
         argv[0] = windowless_python(runtime_python)
