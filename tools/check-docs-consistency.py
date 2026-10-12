@@ -62,12 +62,13 @@ def prose(text: str) -> str:
     result = []
     fence = ""
     for line in text.splitlines():
-        match = re.match(r"^\s*(`{3,}|~{3,})", line)
+        match = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
         if match:
-            marker = match.group(1)
+            marker, info = match.groups()
             if not fence:
-                fence = marker
-            elif marker[0] == fence[0] and len(marker) >= len(fence):
+                if marker[0] != "`" or "`" not in info:
+                    fence = marker
+            elif marker[0] == fence[0] and len(marker) >= len(fence) and not info.strip():
                 fence = ""
             continue
         if not fence:
@@ -75,10 +76,14 @@ def prose(text: str) -> str:
     return re.sub(r"<!--.*?-->", "", "\n".join(result), flags=re.S)
 
 
-def local_links(text: str) -> list[str]:
+def local_links(text: str, include_images: bool = True) -> list[str]:
     """Inline/reference Markdown links and HTML image/link destinations."""
     text = prose(text)
     text = re.sub(r"(`+).*?\1", "", text)
+    if not include_images:
+        text = re.sub(r"!\[[^\]\n]*\]\([^)]+\)|!\[[^\]\n]*\]\[[^\]\n]*\]|!\[[^\]\n]*\]",
+                      "", text)
+        text = re.sub(r"<img\b[^>]*>", "", text, flags=re.I)
     inline = r"!?\[[^\]\n]*\]\(\s*<?([^\s)>]+)>?(?:\s+[^)]*)?\)"
     links = re.findall(inline, text)
     definitions = dict(re.findall(r"^\s*\[([^\]\n]+)\]:\s*<?([^\s>]+)>?", text, re.M))
@@ -129,7 +134,8 @@ def heading_anchors(text: str) -> set[str]:
 def exact_path(path: Path, repo: Path) -> bool:
     try:
         parts = path.relative_to(repo).parts
-    except ValueError:
+        path.resolve(strict=True).relative_to(repo)
+    except (ValueError, OSError, RuntimeError):
         return False
     current = repo
     for part in parts:
@@ -154,16 +160,19 @@ def check_adopter_navigation(
             problems.append(f"  {name}: adopter page missing or wrong case")
             continue
         destinations: set[str] = set()
-        for link in local_links(page.read_text(encoding="utf-8")):
+        text = page.read_text(encoding="utf-8")
+        navigation = set(local_links(text, include_images=False))
+        for link in local_links(text):
             url = urlsplit(link)
             target = Path(os.path.abspath(page.parent / unquote(url.path))) if url.path else page
             if not exact_path(target, repo):
                 problems.append(f"  {name}: local target missing/outside repo/wrong case: {link}")
                 continue
-            destinations.add(target.relative_to(repo).as_posix())
+            if link in navigation:
+                destinations.add(target.relative_to(repo).as_posix())
             if url.fragment:
                 document = target / "README.md" if target.is_dir() else target
-                if document.suffix.lower() != ".md" or not document.is_file():
+                if document.suffix.lower() != ".md" or not exact_path(document, repo):
                     problems.append(f"  {name}: anchor target is not a Markdown page: {link}")
                     continue
                 if document not in anchor_cache:

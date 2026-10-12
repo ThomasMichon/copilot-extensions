@@ -70,7 +70,9 @@ Existing publication safeguards provide distinct checks:
 These are mechanical checks, not a claim that all documentation is current.
 The navigation check covers inline/reference-style Markdown links, ATX heading
 and explicit anchors, and HTML links/images on the designated primary pages;
-code samples and comments are excluded.
+fenced code, inline code, and comments are excluded. Images are checked as
+assets but cannot satisfy reading-path hyperlinks. Resolved local targets,
+including a directory's README anchor target, must remain inside the repo.
 Authors must also verify changed navigation outside the guarded primary path, ground support claims
 in the owner implementation, and have semantic claims reviewed. Extend an
 existing guard for an objective navigation or ownership invariant rather than

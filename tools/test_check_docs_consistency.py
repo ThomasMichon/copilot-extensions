@@ -4,6 +4,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 SPEC = importlib.util.spec_from_file_location(
     "docs_consistency", Path(__file__).with_name("check-docs-consistency.py"))
 assert SPEC is not None and SPEC.loader is not None
@@ -99,3 +101,69 @@ def test_collapsed_and_shortcut_reference_labels_share_normalization(tmp_path):
     (tmp_path / "guide.md").write_text("# Ready\n", encoding="utf-8")
     assert mod.local_links(text) == ["guide.md#ready", "guide.md#ready"]
     assert not mod.check_adopter_navigation(tmp_path, ("README.md",), {})
+
+
+def test_four_space_literals_do_not_open_a_fence(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "    ```\n\n[broken](missing.md)\n\n    ```\n", encoding="utf-8")
+    assert mod.check_adopter_navigation(tmp_path, ("README.md",), {})
+
+
+def test_fence_info_cannot_close_an_open_fence(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "```md\n``` not a closer\n[example](missing.md)\n```\n", encoding="utf-8")
+    assert not mod.check_adopter_navigation(tmp_path, ("README.md",), {})
+
+
+def test_images_do_not_satisfy_reading_edges(tmp_path):
+    (tmp_path / "guide.md").write_text("# Guide\n", encoding="utf-8")
+    for text in (
+        "![preview](guide.md)", '<img src="guide.md">',
+        "![preview][owner]\n[owner]: guide.md",
+        "![preview][]\n[preview]: guide.md",
+        "![preview]\n[preview]: guide.md",
+    ):
+        (tmp_path / "README.md").write_text(text, encoding="utf-8")
+        assert mod.check_adopter_navigation(
+            tmp_path, ("README.md",), {"README.md": ("guide.md",)})
+
+
+def test_resolved_escape_is_rejected_without_reading(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    escape = repo / "escape.md"
+    escape.write_text("# Placeholder\n", encoding="utf-8")
+    (repo / "README.md").write_text("[outside](escape.md#outside)\n", encoding="utf-8")
+    original = Path.resolve
+
+    def resolve(path, *args, **kwargs):
+        if path == escape:
+            return tmp_path / "outside.md"
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    assert mod.check_adopter_navigation(repo, ("README.md",), {})
+
+
+def test_real_symlink_and_directory_readme_escape(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside.md"
+    outside.write_text("# Outside\n", encoding="utf-8")
+    guide = repo / "guide"
+    guide.mkdir()
+    try:
+        (repo / "escape.md").symlink_to(outside)
+        (guide / "README.md").symlink_to(outside)
+    except OSError:
+        pytest.skip("This platform/account cannot create a symlink")
+    original = Path.read_text
+
+    def read(path, *args, **kwargs):
+        assert path.resolve() != outside, "External Markdown must not be read"
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    for link in ("escape.md#outside", "guide/#outside"):
+        (repo / "README.md").write_text(f"[outside]({link})\n", encoding="utf-8")
+        assert mod.check_adopter_navigation(repo, ("README.md",), {})
