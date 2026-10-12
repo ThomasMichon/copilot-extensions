@@ -866,9 +866,7 @@ class TestMergeChunkResults:
 
 
 class TestBaselineCollectionErrorContract:
-    """Fast, mocked tests for the two non-clean collection outcomes --
-    neither spawns a real subprocess, so both run in the always-on
-    synthetic lane alongside `TestSelectTests`/`TestComputeFallbackSet`."""
+    """Fast mocked error contracts plus an explicitly opt-in subprocess case."""
 
     @pytest.mark.parametrize("stdout,stderr", [
         ("collection failed", ""),

@@ -285,3 +285,21 @@ credential changes, broad policy weakening or unreviewed releases.
 - Existing fix #6335 under #6331/#6334 owns that layout repair. Later stale-tip
   test failures have a merged owner repair #6353. No competing fix or gate
   bypass is introduced. Observe a new green release before claiming live proof.
+
+### 2026-10-12 - First-wave live publication verified
+
+- Normal release run `38305079883` passed full source suites, all nine enrolled
+  baselines, final promotion, exact PR wait and actual post-merge tagging.
+  Generated #6358 merged at `21:01:09Z` as main `67661d853e8f`; recorded dev
+  input `1fe40334e3e0` includes #6308, #6313 and #6314 by Git ancestry.
+- Old standalone reviewer and identifier workflow files are absent from main.
+  Natural PR event `38308273017` has both guard and review jobs in one run.
+  Natural CI completions `38308478256` and `38308078379` have both scanner and
+  ancestry jobs in one run, with successful independent outcomes.
+- This proves workflow-invocation consolidation is live; it does not prove
+  overall Copilot throughput from a few samples or eliminate job/check records.
+  #6359 separately targets unnecessary executed ancestry jobs on PR completions.
+- #6319 is closed as duplicate, transferred to #6320. The production diagnostic
+  implementation remains #6321's, with only unique regression coverage here.
+  Main optional validation duplication and complete campaign measurement remain
+  unresolved gates; no completion declaration or policy bypass is implied.
