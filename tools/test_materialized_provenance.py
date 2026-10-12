@@ -198,6 +198,8 @@ def test_receipt_special_or_multiple_link_file_fails_before_read(source, tmp_pat
 def test_candidate_fails_closed(
     source: tuple[Path, str], tmp_path: Path, fault: str,
 ) -> None:
+    if fault == "mode" and os.name == "nt":
+        pytest.skip("Windows chmod does not represent POSIX executable permissions")
     root, head = source
     dest = tmp_path / "candidate"
     PROVENANCE.build(dest, source_root=root)
