@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 INSTALL_SH = Path(__file__).resolve().parent.parent / "scripts" / "install.sh"
 INSTALL_PS1 = Path(__file__).resolve().parent.parent / "scripts" / "install.ps1"
 
@@ -40,6 +42,57 @@ def _ps1_text() -> str:
 
 def test_install_sh_exists():
     assert INSTALL_SH.is_file(), f"missing {INSTALL_SH}"
+
+
+def _shell_function(name: str) -> str:
+    text = _text()
+    start = text.index(f"{name}() {{")
+    return text[start : text.index("\n}\n", start)]
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("function", ["_install_service", "_install_supervisor_unit"])
+def test_systemd_restart_limits_in_unit_section(function: str) -> None:
+    body = _shell_function(function)
+    unit = body[body.index("[Unit]\n") : body.index("\n[Service]\n")]
+    settings = dict(line.split("=", 1) for line in unit.splitlines() if "=" in line)
+    assert settings["StartLimitIntervalSec"] == "120"
+    assert settings["StartLimitBurst"] == "5"
+    assert body.count("StartLimitIntervalSec=") == 1
+    assert body.count("StartLimitBurst=") == 1
+
+
+@pytest.mark.guard
+def test_coordinator_reset_precedes_restart_but_not_graceful_refresh() -> None:
+    body = _shell_function("_install_service")
+    no_restart = body.index('if [[ "${1:-}" == "--no-restart" ]]; then')
+    end_gate = body.index("\n    fi", no_restart)
+    reset = body.index('systemctl --user reset-failed "$SYSTEMD_UNIT"')
+    restart = body.index('systemctl --user restart "$SYSTEMD_UNIT"')
+    assert no_restart < body.index("return 0", no_restart) < end_gate < reset < restart
+    assert "reset-failed" not in body[no_restart:end_gate]
+    assert "systemctl --user restart" not in body[no_restart:end_gate]
+
+
+@pytest.mark.guard
+def test_supervisor_reset_is_audited_and_preserves_enablement_gates() -> None:
+    body = _shell_function("_install_supervisor_unit")
+    gate = body.index('[[ "$mode" == "serve" ]] || _supervisor_labels_configured')
+    disabled = body.index('if [[ "$prior_enabled" == disabled')
+    disabled_return = body.index("return 0", disabled)
+    enable = body.index('_supervisor_action enable "$unit" "$env_file" configured-opt-in')
+    reset = body.index('_supervisor_action reset-failed "$unit" "$env_file" configured-opt-in')
+    restart = body.index('_supervisor_action restart "$unit" "$env_file" configured-opt-in')
+    inert = body.index('_supervisor_action stop "$unit" "$env_file" installer-inert')
+    assert gate < disabled < disabled_return < enable < reset < restart < inert
+    for mask in ("masked", "masked-runtime"):
+        masked = body.index(f'if [[ "$prior_enabled" == {mask} ]]; then')
+        assert masked < body.index("return 0", masked) < reset
+    assert body.count("reset-failed") == 1
+    assert "reset-failed" not in body[inert:]
+    action = _shell_function("_supervisor_action")
+    assert action.index('_supervisor_audit "$action"') < action.index('systemctl --user "$action"')
+    assert '"$env_file" fail "$rc"' in action
 
 
 def test_supervisor_unit_name_and_launcher_defined():

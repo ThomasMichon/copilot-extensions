@@ -42,6 +42,7 @@ def test_shell_actions_audit_exact_results_preserve_disable_and_profile_scope(tm
         'is-enabled) if [[ -f "$STATE/runtime-mask" ]]; then echo masked-runtime; exit 1; elif [[ -f "$STATE/$unit.enabled" ]]; then echo enabled; else echo disabled; exit 1; fi;;\n'
         'is-active) if [[ -f "$STATE/$unit.active" ]]; then echo active; else echo inactive; exit 3; fi;;\n'
         'enable) touch "$STATE/$unit.enabled";;\n'
+        'reset-failed) :;;\n'
         'start|restart) [[ ! -f "$STATE/fail" ]] || exit 7; touch "$STATE/$unit.active";;\n'
         'disable) rm -f "$STATE/$unit.enabled";;\n'
         'stop) rm -f "$STATE/$unit.active";;\n'
@@ -91,6 +92,7 @@ def test_shell_actions_audit_exact_results_preserve_disable_and_profile_scope(tm
     events = [json.loads(line) for line in (runtime / "evidence.jsonl").read_text().splitlines()]
     assert [(e["action"], e["outcome"]) for e in events] == [
         ("supervisor-enable", "begin"), ("supervisor-enable", "ok"),
+        ("supervisor-reset-failed", "begin"), ("supervisor-reset-failed", "ok"),
         ("supervisor-restart", "begin"), ("supervisor-restart", "ok"),
         ("supervisor-selection", "skipped"),
         ("supervisor-restart", "begin"), ("supervisor-restart", "fail"),
@@ -99,14 +101,23 @@ def test_shell_actions_audit_exact_results_preserve_disable_and_profile_scope(tm
         ("supervisor-stop", "begin"), ("supervisor-stop", "ok"),
         ("supervisor-disable", "begin"), ("supervisor-disable", "ok"),
     ]
-    assert events[4]["detail"]["native_enabled"] == "masked-runtime"
-    assert events[6]["detail"]["exit_code"] == 7
-    assert events[7]["detail"]["reason"] == "prior-native-disabled"
-    assert events[7]["detail"]["configured_enabled"] is True
-    assert events[7]["detail"]["native_enablement_provenance"] == "unknown"
-    assert events[8]["detail"]["profile"] == "example"
-    assert events[10]["detail"]["reason"] == "installer-inert"
-    assert events[10]["detail"]["configured_enabled"] is False
+    assert events[6]["detail"]["native_enabled"] == "masked-runtime"
+    assert events[8]["detail"]["exit_code"] == 7
+    assert events[9]["detail"]["reason"] == "prior-native-disabled"
+    assert events[9]["detail"]["configured_enabled"] is True
+    assert events[9]["detail"]["native_enablement_provenance"] == "unknown"
+    assert events[10]["detail"]["profile"] == "example"
+    assert events[12]["detail"]["reason"] == "installer-inert"
+    assert events[12]["detail"]["configured_enabled"] is False
+    calls = [
+        call for call in (state / "calls").read_text().splitlines()
+        if call.split()[0] in {"enable", "reset-failed", "restart"}
+    ]
+    reset = calls.index(f"reset-failed {unit}")
+    assert calls[reset - 1 : reset + 2] == [
+        f"enable {unit}", f"reset-failed {unit}", f"restart {unit}",
+    ]
+    assert calls.count(f"reset-failed {unit}") == 1
     assert not (state / f"{unit}.enabled").exists()
     assert not (state / f"{profile}.active").exists()
 

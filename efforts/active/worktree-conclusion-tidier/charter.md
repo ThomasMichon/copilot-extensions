@@ -1,7 +1,10 @@
 # Proposed worker charter
 
-This is an **agent-recommended draft**, not an executable declaration or
-standing authorization. Parent contract: [README.md](README.md).
+This remains a **design-only draft**, not an executable declaration or
+standing authorization. The operator agreed the authority baseline and the
+four clarifications recorded in [README.md](README.md); pilot parameters,
+implementation/execution, apply authority, and scheduling require their
+separate approvals.
 
 ## Purpose and non-goals
 
@@ -42,7 +45,7 @@ simultaneously concluding the same workspace.
 - Exclude the worker's own workspace, anchors, system/bridge-owned worktrees,
   live/unknown sessions, protected repositories, and ambiguous ownership.
 - Suggested pilot limits: five candidates, 30 minutes, one agent at a time,
-  zero source-code changes and no new downstream resources.
+  zero source-code changes and no new downstream execution resources.
 - Daily adoption, if later approved: one bounded occurrence, at most one
   pending/running sweep; coalesce missed days instead of replaying a backlog.
 - Persist a resume cursor and evidence fingerprint. Revisit an unchanged hold
@@ -54,6 +57,14 @@ work faster than the dedicated lane can conclude it. A budget limit records
 remaining candidates and stops; it is never an excuse to reduce evidence or
 skip gates.
 
+The worker's own approved dispatch/run/report infrastructure is distinct
+from downstream execution allocations. It must not create child worktrees,
+worker sessions, executable tasks, borrowed venues, or implementation PRs to
+finish a candidate's objective. An explicitly approved apply-mode filing
+policy may permit issues or inert candidate-attention records; these records
+must not launch execution or manufacture responsibility transfer. Audit mode
+only proposes them in its report.
+
 ## Authority matrix
 
 | Operation | Audit pilot | Possible approved apply pilot |
@@ -62,6 +73,7 @@ skip gates.
 | Determine proposed conclusion and cite evidence | Yes | Yes |
 | Correct stale issue/effort bookkeeping | Propose only | Exact authorized record, resolved identity and writable worktree, normal publication flow |
 | File a deduplicated unresolved question | Propose only | Only under explicit filing policy; preserve context, destination, owner/acceptance and requested decision |
+| Post candidate steering/attention | Propose in report only | Only under an explicit posting policy; park the candidate, never the sweep or an execution allocation |
 | Clear legacy follow-up | No | Only after its complete roster is proven done or an already-authorized durable transfer is accepted |
 | Release an effort binding/archive effort | No | Only through the effort lifecycle after all gates are met, or explicit accepted transfer |
 | Reconcile already-at-rest resource claims | No | Candidate-scoped reviewed preview, then supported apply; never session/active/unknown claims |
@@ -89,7 +101,11 @@ restrictions remain in force.
 4. Classify each candidate as concluded, authorized-bookkeeping-pending,
    unfinished-owner-work, decision-needed, or evidence/safety-hold. List every
    outstanding item and its durable home; do not silently drop side requests.
-5. In audit mode, record proposed actions only. In approved apply mode,
+5. In audit mode, record proposed actions and steering questions only in the
+   approved report destination; do not post issues, cards, or comments.
+   Tool-owned ephemeral evidence collation and the approved worker's own
+   dispatch progress/result records are allowed, not candidate mutations.
+   In approved apply mode,
    perform only the allowed items, land and verify any durable record update,
    then refresh the candidate snapshot before disposition/lifecycle changes.
 6. Invoke ordinary selected-worktree finalization/cleanup only when the entire
@@ -103,8 +119,10 @@ An issue records work; it does not by itself accept an old worktree's
 responsibility. Transfer requires an existing operator authorization or
 explicit recipient acceptance, an exact remaining roster, and a durable
 receiving objective. Keep the original effort open until its lifecycle
-permits release. If no recipient is available, post the decision to attention
-and retain the workspace. Never create a recipient identity to pass a gate.
+permits release. If no recipient is available, retain the workspace and
+record the proposed decision in the audit report, or post it only under an
+approved apply-mode attention policy. Never create a recipient identity to
+pass a gate.
 
 ### Mutation fencing is an implementation gate
 
@@ -113,8 +131,13 @@ lock. Earlier semantic mutations also need protection: a new head, live
 session, claim, user edit, or changed objective can invalidate an old review.
 Discovery snapshots and pre-action re-reads alone are not a writer fence.
 
-Before apply mode, prove that the existing owner APIs can enforce candidate
-reservation plus expected revisions for each authorized mutation, or add the
+An explicitly approved read-only audit may identify fencing gaps without
+implementing their remedies. Its conclusions are snapshot-bound proposals,
+never cached authority for a later apply run.
+
+Before implementing an apply-capable worker, prove that the existing owner
+APIs can enforce candidate reservation plus expected revisions for each
+authorized mutation, or add the
 necessary ground-layer compare-and-apply operation through separate review.
 Fail closed on conflicts. Never implement a parallel lock/registry that the
 actual lifecycle writers ignore. Unknown-outcome writes require reconciliation
@@ -128,23 +151,27 @@ not. A merged downstream PR must be verified in its actual repository and
 base. Remote absence, unreachable credentials, stale sessions, or an
 uninspectable child are holds. No raw remote cleanup or global claim sweep.
 
-The tidier may group repeated systemic blockers under one existing issue,
-with a bounded evidence delta. Filing that defect neither closes the affected
-objective nor grants permission to bypass the defect's safety gate.
+In audit mode, propose grouping repeated systemic blockers under one existing
+issue in the report. An apply pilot may post a bounded evidence delta only
+under its approved filing policy. Filing that defect neither closes the
+affected objective nor grants permission to bypass the defect's safety gate.
 
 ## Results and operator attention
 
 ### Candidate-scoped steering, not a blocked sweep
 
-The worker may propose a structured question through dispatch's existing
+The worker may propose a structured question using dispatch's existing
 steering/attention contract. Each question names one candidate, evidence
-fingerprint, exact decision, allowed choices, and consequences. Posting it
-parks that candidate; the worker continues other eligible candidates and
-can finish the bounded sweep with a `decision-needed` result.
+fingerprint, exact decision, allowed choices, and consequences. Audit mode
+includes the question only in its report. An apply pilot may post it under
+an explicit attention policy; posting parks that candidate, not the sweep.
+The worker continues other eligible candidates and can finish the bounded
+sweep with a `decision-needed` result.
 
-The unanswered question must outlive the daily worker and deduplicate across
-runs. A later answer schedules a narrow follow-up under the original
-candidate reservation, then revalidates the current state before acting.
+An approved posted question must outlive the daily worker and deduplicate
+across runs. A later answer may select a narrow follow-up only through
+separately approved execution machinery and under the original candidate
+reservation. The worker revalidates the current state before acting.
 An answer is not retroactive cleanup permission if the head, claims, or
 objective changed. No timeout implies consent, no invented response or
 recipient, and no automatic full-sweep wake for each question.
@@ -178,17 +205,21 @@ progress and accepted task ownership.
 
 ## Rollout and acceptance decisions
 
-Before a tidier pilot, #6063 must establish stable explicit-finalization
-display. A successful finalize stamps FINAL; routine fetch-free polling must
-not demote it to MERGED. Fresh removal authorization remains separate, and
-genuinely reopened responsibility must invalidate the conclusion. Otherwise
-the worker would spend its budget rediscovering work already concluded.
+The FINAL prerequisite #6063 is satisfied by #6070, released through #6233,
+with installed behavior verified. Successful finalize stamps FINAL; routine
+fetch-free polling preserves it, while genuinely reopened responsibility
+invalidates the conclusion. Fresh removal authorization remains separate.
+This completed prerequisite neither authorizes a pilot nor removes any
+candidate evidence or safety check.
 
-1. Review this charter, including scope, evidence threshold, filing authority,
-   reservation semantics and budgets.
+1. Complete the remaining charter decisions, including scope, evidence
+   threshold/evaluator, private report destination, filing authority,
+   reservation semantics and budgets. The design-only baseline agreement
+   does not select these parameters.
 2. Approve an audit-only pilot on named candidates; manually compare its
    conclusions with full source/session evidence.
-3. Approve a separate safe-action pilot with a specific operation allowlist.
+3. Resolve mutation fencing before implementing apply capability, then
+   approve a separate safe-action pilot with a specific operation allowlist.
    Test adversarial resume/edit/claim races and unknown-outcome retries.
 4. Evaluate correct holds, false conclusions, preserved responsibility,
    duplicate records, net worktree growth/reduction, and cost per useful

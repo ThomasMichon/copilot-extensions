@@ -95,6 +95,16 @@ and platform rollout validation remain distinct from those proofs.
 `Restart=on-failure` still does not restart a deliberately stopped unit or a
 successful exit.
 
+The Linux coordinator and supervisor units limit starts to five within a
+120-second window (`StartLimitIntervalSec=120`, `StartLimitBurst=5`). Their
+five- and ten-second restart delays therefore cannot evade the circuit breaker
+during a persistent failure. Installer activation clears the start-rate latch
+with `reset-failed` before requesting a restart; supervisor recovery uses the
+same audited native-action seam as enablement and restart. Disabled, masked,
+and inert supervisors remain gated off. A coordinator unit refresh after a
+successful graceful cutover (`--no-restart`) neither resets the latch nor
+restarts the coordinator.
+
 Windows and non-native launchers retain their existing spawned-successor
 handoff. The native ownership gate is Linux-only and requires exact main-PID
 and cgroup identity. Valid native-unit metadata with an unreadable or mismatched

@@ -1404,6 +1404,9 @@ ENVEOF
 [Unit]
 Description=agent-dispatch -- portable agent task-queue coordinator
 After=network.target
+# Keep persistent failures inside a bounded restart window despite RestartSec.
+StartLimitIntervalSec=120
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -1427,6 +1430,8 @@ EOF
         _ok "Coordinator unit refreshed ($SYSTEMD_UNIT); not restarted -- the graceful cutover already brought the new coordinator up"
         return 0
     fi
+    # Clear the start-rate latch before activating a repaired build.
+    systemctl --user reset-failed "$SYSTEMD_UNIT" 2>/dev/null || true
     systemctl --user restart "$SYSTEMD_UNIT" 2>/dev/null || true
     if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
         _ok "Coordinator service installed + started ($SYSTEMD_UNIT)"
@@ -1797,6 +1802,8 @@ _install_supervisor_unit() {
 Description=agent-dispatch -- embody spawn supervisor (labeled queued tasks -> host embody autopilots)
 After=network.target $SYSTEMD_UNIT
 Wants=$SYSTEMD_UNIT
+StartLimitIntervalSec=120
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -1828,6 +1835,7 @@ EOF
             return 0
         fi
         _supervisor_action enable "$unit" "$env_file" configured-opt-in
+        _supervisor_action reset-failed "$unit" "$env_file" configured-opt-in
         _supervisor_action restart "$unit" "$env_file" configured-opt-in
         if systemctl --user is-active "$unit" &>/dev/null; then
             if [[ "$mode" == "serve" ]]; then
