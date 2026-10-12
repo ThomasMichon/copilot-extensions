@@ -111,6 +111,10 @@ stated outcome, not separately operator-specified line items.)_
 - [ ] Add regression coverage for all three known races (terminate failure,
   concurrent-publish-during-wait, zombie/PID-reuse) before considering the
   phase done.
+- [ ] Define bounded recovery when successor spawn fails or the successor
+  exits before metadata publication after predecessor retirement. Specify the
+  deadline, retry/recovery owner and visible failed/deferred outcome; a restart
+  cannot be declared complete with an unbounded zero-serving interval.
 - [ ] Define and implement the reader-side ownership observation required by
   `a-reader-never-observes-a-false-resident`: distinguish no owner from an
   acquired lease whose resident metadata is not yet published, and distinguish
@@ -161,6 +165,10 @@ and replacement/cutover proofs belong to the later phase PRs.)_
   races against the old code (red), then pass against the fix (green); full
   `tests/test_status_monitor.py` suite stays green; lint
   (`ruff check --select F,E9`) and `tools/check-module-size.py` clean.
+- [ ] Restart activation-failure proof: inject spawn failure and successor exit
+  before publication after predecessor retirement. Demonstrate bounded recovery
+  or an explicit reported failure/deferred state, preserved identity-scoped
+  metadata and no overlapping active residents before Phase 1 closes.
 - [ ] Phase 2: new activation-path regression tests exercise muxless and
   superseded-runtime replacement and an actual cutover transition (not only
   mocked control-server calls). Demonstrate that a legitimate replacement

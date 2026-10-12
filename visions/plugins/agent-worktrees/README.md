@@ -9,11 +9,6 @@
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
-## Child visions
-
-- [Pull requests](pull-requests/README.md) - provider-neutral publication and review capability.
-- [Status-monitor singleton](status-monitor-singleton/README.md) - lifecycle exclusivity and bounded serving coverage.
-
 ## Purpose & Intent
 
 agent-worktrees makes a repository worktree a durable, accountable **unit of
@@ -807,6 +802,8 @@ manager, or session-host implementation.
 
 ## See Also
 
+- Child vision: [Pull requests](pull-requests/README.md) - provider-neutral publication and review capability.
+- Child vision: [Status-monitor singleton](status-monitor-singleton/README.md) - lifecycle exclusivity and bounded serving coverage.
 - Parent vision: [agent-fabric](../../agent-fabric/README.md)
 - Cross-cutting sibling:
   [session-hosting](../../session-hosting/README.md) — pluggable ownership of

@@ -101,10 +101,13 @@ previously published, never "whatever happens to be in the well-known
 location right now."
 
 ### graceful-loss-is-silent-and-prompt
-A process that loses the exclusivity race, or recognizes mid-transition
-that a legitimate successor has already taken over, exits promptly without
-retrying, without logging it as an error, and without leaving its own
-metadata behind for a reader to trip over.
+A contender that never acquired ownership loses the exclusivity race and
+exits promptly without retrying or treating ordinary contention as an error.
+An incumbent relinquishes ownership only through the coordinated safe drain
+boundary: admitted work drains within a bounded deadline before retirement,
+without overlapping the successor's active service. Drain failure is reported
+and handled explicitly rather than discarding in-flight work. Each process
+cleans only metadata proven to belong to its own identity.
 
 ## Behaviors
 
