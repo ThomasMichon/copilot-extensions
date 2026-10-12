@@ -12,7 +12,10 @@ import pytest
 
 from agent_worktrees import git_ops, git_tree_diff
 
-pytestmark = pytest.mark.contract("agent_worktrees.classify_tree_objects")
+pytestmark = [
+    pytest.mark.contract("agent_worktrees.classify_tree_objects"),
+    pytest.mark.guard,
+]
 
 _BASE = "1" * 40
 _BRANCH = "2" * 40
@@ -88,7 +91,8 @@ def _model(monkeypatch, tmp_path, comparisons, *, fetch=False):
     return info, calls
 
 
-@pytest.mark.portfolio_tier("T0")
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.effect("filesystem")
 @pytest.mark.parametrize("branch,upstream,expected", [
     (_raw("file"), _raw("file", _UPSTREAM, _BRANCH), "wip"),
     (_raw("file"), _raw("unrelated"), "completed"),
@@ -127,7 +131,8 @@ def test_classifier_batches_objects_without_masking_unmerged_paths(
         )
 
 
-@pytest.mark.portfolio_tier("T0")
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.effect("filesystem")
 @pytest.mark.parametrize("stage", [0, 1])
 @pytest.mark.parametrize("failure", [
     _result(_raw("partial"), code=128),
@@ -147,7 +152,8 @@ def test_failed_tree_evidence_is_unknown_never_completed(
     assert caplog.records
 
 
-@pytest.mark.portfolio_tier("T0")
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.effect("filesystem")
 def test_many_paths_still_use_two_tree_reads_and_no_blob_children(monkeypatch, tmp_path):
     branch = "".join(_raw(str(index)) for index in range(1000))
     info, calls = _model(monkeypatch, tmp_path, [
