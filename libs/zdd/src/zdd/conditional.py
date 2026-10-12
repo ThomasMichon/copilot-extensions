@@ -52,6 +52,7 @@ class RuntimeSnapshot:
     make_client: Callable[[str], _Client] = field(repr=False)
     retire: Callable[[Endpoint], None] = field(repr=False)
     confirm_retired: Callable[[Endpoint, float], bool] = field(repr=False)
+    drain_predecessor: Callable[[Endpoint, Endpoint, float], dict] = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -193,6 +194,13 @@ class PreparedCutover:
         """The adopter must condition shutdown on identity at the receiver."""
         self.verify_before_retire()
         self.snapshot.retire(self.old)
+
+    def drain_predecessor(self, timeout: float) -> dict:
+        """The receiver must atomically validate both identities before drain."""
+        self.verify_before_retire()
+        if self.new is None:
+            raise CutoverError("successor identity unavailable before predecessor drain")
+        return self.snapshot.drain_predecessor(self.old, self.new, timeout)
 
     def confirm_retired(self) -> None:
         if self.snapshot.confirm_retired(self.old, self.request.retirement_timeout) is not True:

@@ -74,6 +74,9 @@ def case(tmp_path, monkeypatch):
         make_client=lambda _: Client(),
         retire=lambda endpoint: Client().shutdown(),
         confirm_retired=lambda endpoint, timeout: True,
+        drain_predecessor=lambda old, new, timeout: Client().drain(
+            timeout=timeout, poll=1.0, force=False
+        ),
     )
     request = ConditionalCutover(
         expected_active=old,
@@ -287,7 +290,10 @@ def test_conditional_post_flip_route_winner_prevents_rollback_and_retirement(cas
     result = orch.run(
         conditional=replace(
             request,
-            capture_runtime=lambda _: replace(snapshot, make_client=lambda _: Client()),
+            capture_runtime=lambda _: replace(
+                snapshot, make_client=lambda _: Client(),
+                drain_predecessor=lambda old, new, timeout: Client().drain(timeout=timeout),
+            ),
         )
     )
     assert not result.ok and not result.committed and not result.rolled_back
@@ -321,7 +327,10 @@ def test_conditional_post_flip_lock_contention_retains_generations_and_recovery(
         result = orch.run(
             conditional=replace(
                 request,
-                capture_runtime=lambda _: replace(snapshot, make_client=lambda _: Client()),
+                capture_runtime=lambda _: replace(
+                    snapshot, make_client=lambda _: Client(),
+                    drain_predecessor=lambda old, new, timeout: Client().drain(timeout=timeout),
+                ),
             )
         )
         assert time.monotonic() - started < 1

@@ -558,8 +558,9 @@ class CutoverOrchestrator:
                     new_port=new_port, new_pid=new_pid, started_at=started_at,
                 )
                 self._emit(lifecycle.DRAIN, lifecycle.BEGIN, port=old.port)
-                drain_res = old_client.drain(
-                    timeout=drain_timeout, poll=1.0, force=force
+                drain_res = (
+                    conditional.drain_predecessor(drain_timeout) if conditional else
+                    old_client.drain(timeout=drain_timeout, poll=1.0, force=force)
                 )
                 result.drain = drain_res
                 result.steps.append(

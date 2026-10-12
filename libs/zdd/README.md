@@ -109,6 +109,12 @@ rather than terminating it. Only never-promoted candidates can be disposed.
 The snapshot's required `retire(endpoint)` callback must enforce expected
 PID/start identity at the receiving daemon or through an identity-bound native
 handle, with a bounded operation. Address-based shutdown alone is insufficient.
+The required `drain_predecessor(old, successor, timeout)` callback must validate
+the predecessor's PID/start identity and the exact successor route under the
+receiver's native routing authority before opening its drain gate. Both
+published endpoint identities are supplied; caller-side validation alone does
+not close a publication race. Ordinary address-based drain is never used by
+the conditional path. Production IPC must supply this receiver-bound operation.
 Failed retirement requests preserve a nonterminal breadcrumb and the successor
 route; later conditional repair refuses until owner-led recovery resolves it.
 The required `confirm_retired(endpoint, timeout)` callback must confirm the

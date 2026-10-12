@@ -93,7 +93,10 @@ def test_route_change_during_undrain_returns_unresolved_result(case):
 
     result = orch.run(
         conditional=replace(
-            request, capture_runtime=lambda _: replace(snapshot, make_client=lambda _: Client())
+            request, capture_runtime=lambda _: replace(
+                snapshot, make_client=lambda _: Client(),
+                drain_predecessor=lambda old, new, timeout: Client().drain(timeout=timeout),
+            )
         )
     )
     assert not result.ok and not result.rolled_back and not result.committed
@@ -331,3 +334,40 @@ def test_route_winner_during_exit_confirmation_cannot_report_success(case):
     assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
     assert routing.read_table(root)["active"] == winner.to_dict()
     assert events == ["spawn", "drain", "shutdown"]
+
+
+def test_receiver_bound_drain_refuses_route_changed_after_caller_check(case, monkeypatch):
+    import time
+
+    from zdd.conditional import PreparedCutover
+
+    root, old, events, _, snapshot, request, orch = case
+    winner = replace(old, pid=303, generation=30, process_start_time="3030")
+    verify = PreparedCutover.verify_before_retire
+    captured = []
+
+    def change_after_check(self):
+        verify(self)
+        routing._atomic_write(root / "active.json", {"active": winner.to_dict()})
+
+    def drain(predecessor, successor, timeout):
+        captured.append((predecessor, successor, timeout))
+        with routing.routing_lock(root, deadline=time.monotonic() + 1):
+            active = routing.Endpoint.from_dict(routing.read_table(root)["active"])
+            if active != successor:
+                raise CutoverError("receiver refuses changed successor ownership")
+            pytest.fail("the receiver must not open its drain gate")
+
+    monkeypatch.setattr(PreparedCutover, "verify_before_retire", change_after_check)
+    result = orch.run(
+        conditional=replace(
+            request, capture_runtime=lambda _: replace(snapshot, drain_predecessor=drain)
+        )
+    )
+    assert not result.ok and not result.committed
+    assert captured[0][0] == old
+    assert captured[0][1].pid == 202
+    assert captured[0][1].generation > old.generation
+    assert events == ["spawn"]
+    assert routing.read_table(root)["active"] == winner.to_dict()
+    assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
