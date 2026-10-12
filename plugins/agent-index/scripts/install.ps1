@@ -1309,16 +1309,16 @@ function New-IndexVenv {
 }
 
 function Install-ServerVenv {
-    <# Optional host-only sibling runtime, matching config.server_venv_python().
+    <# Required host-only sibling runtime, matching config.server_venv_python().
        New-IndexVenv keeps signed-Python/SSH policy consistent across runtimes.
-       Failures warn and retain the existing shared-venv service fallback. #>
+       Failures return false so the primary installer refuses activation. #>
     param(
         [Parameter(Mandatory)][string]$InstallRole,
         [Parameter(Mandatory)][AllowNull()][string]$PythonCmd
     )
     if ($InstallRole -ne 'host') {
         Write-Skip 'Server venv: skipped (client role never runs the service)'
-        return
+        return $true
     }
 
     $serverVenvDir = Join-Path $VenvDir 'server'
@@ -1328,24 +1328,28 @@ function Install-ServerVenv {
     try {
     try {
     if (-not (New-IndexVenv -Dir $serverVenvDir -Python $serverVenvPython -PythonCmd $PythonCmd)) {
-            Write-Warn "Server venv creation failed -- $serverVenvPython not found (spawn_passive falls back to the shared venv)"
-            return
+            Write-Warn "Server venv creation failed -- $serverVenvPython not found"
+            return $false
     }
     } catch [System.IO.IOException], [System.UnauthorizedAccessException], [System.Management.Automation.RuntimeException] {
-        Write-Warn "Server venv repair failed: $($_.Exception.Message) -- spawn_passive falls back to the shared venv"
-        return
+        Write-Warn "Server venv repair failed: $($_.Exception.Message)"
+        return $false
     }
 
-    $ZddDir = Resolve-Zdd
-    if ($ZddDir) {
+    foreach ($libName in @('zdd', 'agent-procutil', 'dropin-registry')) {
+        $libDir = Resolve-VendoredLib -LibName $libName
+        if (-not $libDir) {
+            Write-Warn "Server venv dependency source is missing: $libName"
+            return $false
+        }
         if ($script:UvCommand) {
-            Invoke-IndexUvPipInstall --python $serverVenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet | Out-Null
+            Invoke-IndexUvPipInstall --python $serverVenvPython "$libDir" --quiet | Out-Null
         } else {
-            & $serverVenvPython -m pip install "$ZddDir" 2>&1 | Out-Null
+            & $serverVenvPython -m pip install "$libDir" 2>&1 | Out-Null
         }
         if ($LASTEXITCODE -ne 0) {
-            Write-Warn "Server venv zdd install failed (exit $LASTEXITCODE) -- spawn_passive falls back to the shared venv"
-            return
+            Write-Warn "Server venv $libName install failed (exit $LASTEXITCODE)"
+            return $false
         }
     }
     Remove-ConsoleTrampolines -VenvDir $serverVenvDir
@@ -1357,12 +1361,22 @@ function Install-ServerVenv {
         $srvOut = & $serverVenvPython -m pip install $serverPkgSpec 2>&1 | Out-String
     }
     if ($LASTEXITCODE -ne 0) {
-        Write-Warn 'Server venv package install failed -- spawn_passive falls back to the shared venv'
+        Write-Warn 'Server venv package install failed'
         Write-Host $srvOut
-        return
+        return $false
     }
     Remove-ConsoleTrampolines -VenvDir $serverVenvDir
+    $healthOut = & $serverVenvPython -I -c 'import fastapi, uvicorn, numpy, pyarrow, lancedb; import agent_index.server' 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "Server venv failed host dependency health validation: $healthOut"
+        return $false
+    }
+    if (-not (Test-RuntimeOrigin -Python $serverVenvPython -Slot $serverVenvDir)) {
+        Write-Warn 'Server venv failed package-origin health validation'
+        return $false
+    }
     Write-Ok "Server venv provisioned: $serverVenvDir"
+    return $true
     } finally {
         $ErrorActionPreference = $prevEAP
     }
@@ -1527,22 +1541,19 @@ function Install-Runtime {
         }
     }
     Remove-ConsoleTrampolines -VenvDir $VenvDir
-    # A host runs the local indexing/vector-store stack and the FastAPI/uvicorn
-    # server, so it needs the [store,server] extras (numpy, pyarrow, lancedb,
-    # tree-sitter*, mcp, fastapi, uvicorn, pydantic); a client stays on the
-    # light base deps only (no local store, no server -- see
-    # agent-index-server-venv-split, which will eventually move [server] into
-    # its own dedicated per-version venv instead of this shared one). This is
-    # distinct from -- and must never pull in -- the durable agent-index-engine
-    # program (torch), which is provisioned exclusively by `engine`/
-    # `engine-update` (see durable-vs-versioned-runtime.md). Resolve role
-    # BEFORE the package install so a host's versioned venv actually carries
-    # what its own service/search/index code imports -- Get-ActivationRole
-    # falls back to Get-MachineRole, so this is correct even before any
-    # per-repo role config exists.
+    $DropinDir = Resolve-VendoredLib -LibName 'dropin-registry'
+    if (-not $DropinDir) { Write-Fail 'Cannot locate dropin-registry dependency source'; exit 1 }
+    if ($script:UvCommand) {
+        Invoke-IndexUvPipInstall --python $VenvPython "$DropinDir" --quiet | Out-Null
+    } else {
+        & $VenvPython -m pip install "$DropinDir" 2>&1 | Out-Null
+    }
+    if ($LASTEXITCODE -ne 0) { Write-Fail 'dropin-registry install failed'; exit 1 }
+    # Both roles have a light primary CLI. Only a host receives a complete
+    # sibling service runtime; the durable embedding engine remains explicit.
     $installRole = Get-ActivationRole
     if ($installRole -eq 'unconfigured') { $installRole = Get-MachineRole }
-    $pkgSpec = if ($installRole -eq 'host') { "$PluginDir[store,server]" } else { "$PluginDir" }
+    $pkgSpec = "$PluginDir"
     if ($script:UvCommand) {
         $out = Invoke-IndexUvPipInstall --python $VenvPython $pkgSpec | Out-String
     } else {
@@ -1558,7 +1569,10 @@ function Install-Runtime {
     Remove-ConsoleTrampolines -VenvDir $VenvDir
     Write-Ok 'Package installed: agent-index'
 
-    Install-ServerVenv -InstallRole $installRole -PythonCmd $pythonCmd
+    if (-not (Install-ServerVenv -InstallRole $installRole -PythonCmd $pythonCmd)) {
+        Write-Fail 'Required host runtime failed provisioning -- not activating'
+        exit 1
+    }
 
     $prevVersion = ''
     if ($VersionedRuntime) {

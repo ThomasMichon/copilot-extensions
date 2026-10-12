@@ -11,13 +11,17 @@ without spawning a real child process.
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import stat
+import sys
+import venv
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from agent_index import __main__ as cli
 from agent_index import config
@@ -76,6 +80,104 @@ def test_cmd_start_runs_in_process_unchanged_with_no_server_venv(monkeypatch):
 
     assert cli.cmd_start(_args()) == 0
     assert calls == [("127.0.0.1", 0, False)]
+
+
+def test_cmd_start_reports_missing_host_runtime_without_importing_server(monkeypatch, capsys):
+    monkeypatch.setattr(config.importlib.util, "find_spec", lambda _name: None)
+    monkeypatch.setattr(cli, "serve", lambda *_a, **_kw: pytest.fail("light runtime must not serve"))
+    assert cli.cmd_start(_args()) == 1
+    assert "host runtime is unavailable" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["search", "needle", "--limit", "2", "--json"],
+        ["similar", "chunk", "--source", "sample"],
+        ["clusters", "--exact-dupes-only"],
+        ["index", "--full", "--source", "sample"],
+        ["index-worker", "--task", "task"],
+        ["mcp"],
+    ],
+)
+def test_host_store_commands_forward_original_arguments(monkeypatch, tmp_path, arguments):
+    from agent_index import transport
+
+    server_python = tmp_path / "server" / "python3"
+    _make_executable(server_python)
+    monkeypatch.setenv(config.SERVER_VENV_PYTHON_ENV, str(server_python))
+    monkeypatch.setattr(transport, "plan_route", lambda: ("host", None))
+    monkeypatch.setattr(transport, "maybe_delegate", lambda *_a: None)
+    captured = []
+    monkeypatch.setattr(
+        cli.subprocess,
+        "Popen",
+        lambda cmd, **_kw: captured.append(cmd) or _FakeProcess(7),
+    )
+    assert cli.main(arguments) == 7
+    assert captured == [
+        [str(server_python), "-I", "-X", "utf8", "-m", "agent_index", *arguments]
+    ]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows windowless read-command contract")
+def test_noninteractive_host_query_is_windowless_and_relays_interrupt(monkeypatch, tmp_path):
+    server_python = tmp_path / "server" / "python.exe"
+    _make_executable(server_python)
+    monkeypatch.setenv(config.SERVER_VENV_PYTHON_ENV, str(server_python))
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False)
+    process = _FakeProcess(7, raise_first_wait=True)
+    captured = {}
+
+    def popen(_cmd, **kwargs):
+        captured.update(kwargs)
+        return process
+
+    monkeypatch.setattr(cli.subprocess, "Popen", popen)
+    assert cli._dispatch_to_server_venv(
+        _args(), "search", raw_args=["search", "query", "--json"]
+    ) == 7
+    assert captured["creationflags"] == no_window_kwargs()["creationflags"]
+    assert process.terminated
+
+
+def test_real_host_process_preserves_query_arguments_and_exit_code(monkeypatch, tmp_path):
+    from agent_index import transport
+
+    runtime = tmp_path / "server-runtime"
+    venv.EnvBuilder(with_pip=False).create(runtime)
+    if os.name == "nt":
+        python = runtime / "Scripts" / "python.exe"
+        site_packages = runtime / "Lib" / "site-packages"
+    else:
+        python = runtime / "bin" / "python"
+        version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+        site_packages = runtime / "lib" / version / "site-packages"
+    package = site_packages / "agent_index"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    report = tmp_path / "forwarded.json"
+    (package / "__main__.py").write_text(
+        "import json, sys\nfrom pathlib import Path\n"
+        f"Path({str(report)!r}).write_text(json.dumps(sys.argv[1:]), encoding='utf-8')\n"
+        "raise SystemExit(7)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv(config.SOURCE_MODE_ENV, raising=False)
+    monkeypatch.setenv(config.SERVER_VENV_PYTHON_ENV, str(python))
+    monkeypatch.setenv(config.HOME_ENV, str(tmp_path))
+    monkeypatch.setattr(transport, "plan_route", lambda: ("host", None))
+    monkeypatch.setattr(transport, "maybe_delegate", lambda *_a: None)
+    popen = cli.subprocess.Popen
+
+    def spawn(cmd, **kwargs):
+        kwargs.update(no_window_kwargs())
+        return popen(cmd, **kwargs)
+
+    monkeypatch.setattr(cli.subprocess, "Popen", spawn)
+    arguments = ["search", "query with spaces", "--source", "sample", "--limit", "2", "--json"]
+    assert cli.main(arguments) == 7
+    assert json.loads(report.read_text(encoding="utf-8")) == arguments
 
 
 def test_cmd_start_dispatches_to_the_server_venv_when_provisioned(monkeypatch, tmp_path):

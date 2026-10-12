@@ -97,7 +97,11 @@ function Get-Command {{
 function Get-SignedBasePython {{ return $null }}
 function Get-ActivationRole {{ return 'client' }}
 function Resolve-Zdd {{ return '{pkg}' }}
-function Resolve-VendoredLib {{ param($LibName) return $null }}
+function Resolve-VendoredLib {{
+    param($LibName)
+    if ($LibName -eq 'dropin-registry') {{ return '{pkg}' }}
+    return $null
+}}
 function Remove-ConsoleTrampolines {{ param($VenvDir) }}
 function Get-VersionedCurrent {{ return '' }}
 function Invoke-VersionedSlotClean {{ }}

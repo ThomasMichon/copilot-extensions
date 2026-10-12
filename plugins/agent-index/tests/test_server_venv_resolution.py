@@ -1,22 +1,4 @@
-"""agent-index-server-venv-split: sibling SERVER venv interpreter resolution.
-
-``config.server_venv_python()`` is deliberately inert scaffolding today --
-no installer yet provisions a ``server`` sibling, so every existing
-single-venv layout must keep resolving to ``None`` and every caller must keep
-falling back to its current behavior unchanged. These tests pin both that
-inertness and the resolution convention itself, so a future installer change
-can start actually provisioning the sibling venv with no further code changes
-needed here.
-
-The convention is deliberately name-agnostic about the venv root (a
-``server`` subdirectory of whatever directory contains the current
-interpreter's own ``Scripts``/``bin`` folder) -- a real deployed process
-never runs from a directory literally named ``.venv`` (marker-only
-activation pins the interpreter straight to ``versions/<version>/Scripts``
-or ``.../bin``; see ``Invoke-VersionedActivate``'s own ``--no-link``), so
-the resolver must not assume that name, only the ``Scripts``/``bin`` shape
-one level up.
-"""
+"""Slot-local server resolution and explicit unavailable-host outcomes."""
 
 from __future__ import annotations
 
@@ -25,6 +7,8 @@ import stat
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from agent_index import __main__, config
 
@@ -115,6 +99,56 @@ def test_env_override_to_missing_path_falls_back_to_none(monkeypatch, tmp_path):
     monkeypatch.setenv(config.SERVER_VENV_PYTHON_ENV, str(tmp_path / "nonexistent"))
 
     assert config.server_venv_python() is None
+
+
+def test_current_runtime_override_normalizes_parent_segments(monkeypatch, tmp_path):
+    current = tmp_path / "venv" / "bin" / "python3"
+    _make_executable(current)
+    monkeypatch.delenv(config.SOURCE_MODE_ENV, raising=False)
+    monkeypatch.setattr(sys, "executable", str(current))
+    monkeypatch.setenv(
+        config.SERVER_VENV_PYTHON_ENV, str(current.parent / ".." / "bin" / current.name)
+    )
+    assert config.host_runtime_python() == current
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX venv interpreter symlink contract")
+def test_resolves_slot_sibling_without_following_base_interpreter_symlink(monkeypatch, tmp_path):
+    current = tmp_path / "versions" / "1.2.3" / "bin" / "python3"
+    server = current.parent.parent / "server" / "bin" / "python3"
+    current.parent.mkdir(parents=True)
+    server.parent.mkdir(parents=True)
+    current.symlink_to(sys.executable)
+    server.symlink_to(sys.executable)
+    monkeypatch.delenv(config.SERVER_VENV_PYTHON_ENV, raising=False)
+    monkeypatch.setattr(sys, "executable", str(current))
+    assert config.server_venv_python() == server
+    assert config.host_runtime_python() == server
+
+
+def test_missing_host_dependencies_refuse_light_runtime_fallback(monkeypatch, tmp_path):
+    monkeypatch.delenv(config.SOURCE_MODE_ENV, raising=False)
+    monkeypatch.delenv(config.SERVER_VENV_PYTHON_ENV, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "bin" / "python3"))
+    monkeypatch.setattr(config.importlib.util, "find_spec", lambda _name: None)
+    with pytest.raises(RuntimeError, match="host runtime is unavailable"):
+        config.host_runtime_python()
+
+
+def test_missing_explicit_server_is_not_replaced_by_complete_current_runtime(monkeypatch, tmp_path):
+    monkeypatch.delenv(config.SOURCE_MODE_ENV, raising=False)
+    monkeypatch.setenv(config.SERVER_VENV_PYTHON_ENV, str(tmp_path / "missing"))
+    with pytest.raises(RuntimeError, match="configured agent-index server interpreter"):
+        config.host_runtime_python()
+
+
+def test_complete_owned_host_runtime_needs_no_sibling(monkeypatch, tmp_path):
+    current = tmp_path / "bin" / "python3"
+    monkeypatch.delenv(config.SOURCE_MODE_ENV, raising=False)
+    monkeypatch.delenv(config.SERVER_VENV_PYTHON_ENV, raising=False)
+    monkeypatch.setattr(sys, "executable", str(current))
+    monkeypatch.setattr(config.importlib.util, "find_spec", lambda _name: object())
+    assert config.host_runtime_python() == current
 
 
 def test_spawn_passive_uses_server_venv_python_when_provisioned(

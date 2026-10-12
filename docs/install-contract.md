@@ -2078,7 +2078,7 @@ mechanics move into the engine.
 
 `agent-index` uses canonical references on `dev` and shared acquisition,
 native capture, transient retries and manifest writing. Its versioned CLI,
-optional host-server sibling and separately provisioned durable embedding venv
+host-only server sibling and separately provisioned durable embedding venv
 all use those shared build mechanics. Signed-Python discovery, signature/venv
 health validation, dependency order, Torch/CUDA feeds, engine configuration and
 every activation/service lifecycle remain local. Signed results are accepted
@@ -2094,6 +2094,12 @@ while the independent embedding engine keeps its uv-first policy.
 PowerShell package paths consult only the executable accepted by `Ensure-Uv`;
 a rejected but still-discoverable PATH uv is never selected again for packages.
 If no validated uv remains, CLI/server/engine package paths use Python/pip.
+Native primary CLI environments are base-only for both roles. Host candidates
+must provision their slot-owned `[store,server]` sibling, including local base
+libraries, and pass dependency/package-origin health before completion and
+activation. Hosted commands dispatch to that runtime; missing host dependencies
+never silently fall back to the light CLI. A complete service cell or standalone
+explicit-source host continues using its already-owned complete runtime.
 Index uv acquisition and executable validation use one installation-wide guard
 shared by CLI and durable-engine callers. Windows uses the existing mutex
 adapter's `Uv` scope; POSIX uses fd7 with the same OS advisory locking and

@@ -15,7 +15,7 @@ from test_install_engine_adoption import FAKE_PYTHON, environment, function, run
 
 
 @pytest.mark.parametrize("failure", ["filesystem", "probe"])
-def test_optional_server_repair_exception_warns_and_restores_preference(tmp_path, failure):
+def test_required_server_repair_exception_refuses_activation_and_restores_preference(tmp_path, failure):
     (tmp_path / "slot/server").mkdir(parents=True)
     injection = (
         "function Test-IndexVenv { param($Dir,$Python) throw 'probe fixture failure' }"
@@ -31,14 +31,14 @@ $ErrorActionPreference = 'Stop'
 function Write-Warn {{ param($Msg) [Console]::Error.WriteLine($Msg) }}
 {injection}
 function Resolve-Zdd {{ throw 'package install must not follow failed repair' }}
-Install-ServerVenv -InstallRole host -PythonCmd forbidden
+if (Install-ServerVenv -InstallRole host -PythonCmd forbidden) {{ throw 'failed host was accepted' }}
 if ($ErrorActionPreference -ne 'Stop') {{ throw 'preference was not restored' }}
-'primary-continues'
+'host-activation-refused'
 """)
     assert result.returncode == 0, result.stderr
-    assert "primary-continues" in result.stdout
+    assert "host-activation-refused" in result.stdout
     assert f"{failure} fixture failure" in result.stderr
-    assert "falls back to the shared venv" in result.stderr
+    assert "falls back to the shared venv" not in result.stderr
 
 
 def publication_fixture(tmp_path: Path) -> tuple[str, Path]:

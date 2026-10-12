@@ -1,0 +1,9 @@
+{
+  "comment": "Keep native primary CLI base-only and require a healthy slot-owned host runtime with complete command forwarding",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

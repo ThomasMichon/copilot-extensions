@@ -1,20 +1,14 @@
-"""agent-index-server-venv-split: installer provisioning of the sibling
-SERVER venv (Plan item 1).
-
-``config.server_venv_python()`` (see ``test_server_venv_resolution.py``) has
-resolved a ``server`` subdirectory of the current interpreter's own venv root
-since ``ThomasMichon/copilot-extensions#4530`` -- but until an installer
-actually creates that sibling and installs ``agent-index[store,server]`` into
-it, the resolver has nothing to find and every caller keeps falling back to
-its current behavior. These tests pin the installer side of that contract:
-the sibling is provisioned inside the current runtime slot (so per-version GC
-already covers it for free), host-role only, and never allowed to fail the
-primary client install/update.
-"""
+"""Native host stacks live only in the required, slot-owned server sibling."""
 
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
+from agent_procutil import no_window_kwargs
 
 PLUGIN = Path(__file__).resolve().parents[1]
 
@@ -73,11 +67,7 @@ def test_server_venv_installs_store_and_server_extras():
     assert '${PLUGIN_DIR}[store,server]' in sh_fn
 
 
-def test_server_venv_provisioning_never_fails_the_primary_install():
-    """Every failure branch in the provisioning helper must WARN, never FAIL
-    -- config.server_venv_python() already tolerates an absent sibling by
-    falling back to the shared venv/in-process serve(), so a provisioning
-    failure here must never abort the primary client install/update."""
+def test_failed_server_venv_prevents_host_activation():
     ps, sh = _read_scripts()
     ps_fn = ps.split("function Install-ServerVenv {", 1)[1].split(
         "\nfunction Install-Runtime {", 1
@@ -85,10 +75,34 @@ def test_server_venv_provisioning_never_fails_the_primary_install():
     sh_fn = sh.split("_install_server_venv() {", 1)[1].split(
         "\n_ensure_runtime() {", 1
     )[0]
-    assert "Write-Fail" not in ps_fn
-    assert "exit 1" not in ps_fn
-    assert "_fail" not in sh_fn
-    assert "exit 1" not in sh_fn
+    assert "return $false" in ps_fn
+    assert "return 1" in sh_fn
+    assert "import fastapi, uvicorn, numpy, pyarrow, lancedb" in ps_fn
+    assert "import fastapi, uvicorn, numpy, pyarrow, lancedb" in sh_fn
+    assert "Test-RuntimeOrigin -Python $serverVenvPython -Slot $serverVenvDir" in ps_fn
+    assert '_runtime_origin_under "$server_venv_python" "$server_venv_dir"' in sh_fn
+    assert "Required host runtime failed provisioning -- not activating" in ps
+    assert "Required host runtime failed provisioning -- not activating" in sh
+
+
+def test_native_primary_runtime_is_base_only():
+    ps, sh = _read_scripts()
+    ps_runtime = ps.split("function Install-Runtime {", 1)[1].split(
+        "\nfunction Write-Manifest {", 1
+    )[0]
+    sh_runtime = sh.split("_ensure_runtime() {", 1)[1].split(
+        "\n_write_manifest() {", 1
+    )[0]
+    assert "$PluginDir[store,server]" not in ps_runtime
+    assert "${PLUGIN_DIR}[store,server]" not in sh_runtime
+    assert '$pkgSpec = "$PluginDir"' in ps_runtime
+    assert 'local pkg="$PLUGIN_DIR"' in sh_runtime
+
+
+def test_server_preinstalls_all_local_base_libraries_for_pip():
+    ps, sh = _read_scripts()
+    assert "@('zdd', 'agent-procutil', 'dropin-registry')" in ps
+    assert "for lib_name in zdd agent-procutil dropin-registry" in sh
 
 
 def test_server_venv_provisioning_is_called_after_the_main_package_install():
@@ -132,3 +146,65 @@ def test_server_venv_prefers_signed_python_copies_mode_before_uv_fallback():
     assert signed_idx < copies_idx < uv_idx
     assert "Test-IndexVenv -Dir $Dir -Python $Python" in shared
     assert "retrying with uv" in shared
+
+
+@pytest.mark.parametrize(
+    "case,role,expected,library_count",
+    [
+        ("client", "client", True, 0),
+        ("creation-failed", "host", False, 0),
+        ("missing-library", "host", False, 2),
+        ("package-failed", "host", False, 3),
+    ],
+)
+def test_real_powershell_server_provisioning_outcomes(
+    tmp_path, case, role, expected, library_count
+):
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+    ps, _sh = _read_scripts()
+    function = "function Install-ServerVenv {" + ps.split(
+        "function Install-ServerVenv {", 1
+    )[1].split("\nfunction Install-Runtime {", 1)[0]
+    script = f"""
+$ErrorActionPreference = 'Stop'
+$case = '{case}'
+$VenvDir = '{tmp_path}'
+$PluginDir = '{tmp_path}'
+$script:UvCommand = 'fixture-uv'
+$script:Libraries = @()
+function Write-Skip {{ param($Message) }}
+function Write-Warn {{ param($Message) [Console]::Error.WriteLine($Message) }}
+function Write-Ok {{ param($Message) }}
+function Remove-ConsoleTrampolines {{ param($VenvDir) }}
+function New-IndexVenv {{ param($Dir, $Python, $PythonCmd) return $case -ne 'creation-failed' }}
+function Resolve-VendoredLib {{
+    param($LibName)
+    if ($case -eq 'missing-library' -and $LibName -eq 'dropin-registry') {{ return $null }}
+    $script:Libraries += $LibName
+    return "fixture-lib-$LibName"
+}}
+function Invoke-IndexUvPipInstall {{
+    $global:LASTEXITCODE = 0
+    if ($case -eq 'package-failed' -and ($args -join ' ') -match '\\[store,server\\]') {{
+        $global:LASTEXITCODE = 9
+    }}
+}}
+{function}
+$ok = Install-ServerVenv -InstallRole '{role}' -PythonCmd 'fixture-python'
+@{{ok = $ok; libraries = @($script:Libraries)}} | ConvertTo-Json -Compress
+"""
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=25,
+        check=False,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    outcome = json.loads(result.stdout)
+    assert outcome["ok"] is expected
+    assert len(outcome["libraries"]) == library_count
