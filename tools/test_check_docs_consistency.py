@@ -167,3 +167,31 @@ def test_real_symlink_and_directory_readme_escape(tmp_path, monkeypatch):
     for link in ("escape.md#outside", "guide/#outside"):
         (repo / "README.md").write_text(f"[outside]({link})\n", encoding="utf-8")
         assert mod.check_adopter_navigation(repo, ("README.md",), {})
+
+
+def test_commented_fences_do_not_hide_rendered_links(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "<!--\n```\n-->\n[broken](missing.md)\n", encoding="utf-8")
+    assert mod.check_adopter_navigation(tmp_path, ("README.md",), {})
+
+
+def test_comment_openers_inside_real_fences_remain_literal(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "```md\n<!--\n```\n[broken](missing.md)\n", encoding="utf-8")
+    assert mod.check_adopter_navigation(tmp_path, ("README.md",), {})
+
+
+def test_inline_code_comment_openers_do_not_hide_navigation(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "`<!--` [broken](missing.md)\n", encoding="utf-8")
+    assert mod.check_adopter_navigation(tmp_path, ("README.md",), {})
+
+
+def test_angle_destinations_preserve_spaces_inline_and_reference(tmp_path):
+    (tmp_path / "README.md").write_text(
+        '[guide](<guide one.md#ready> "Title")\n'
+        "[guide][owner]\n[shortcut]\n"
+        '[owner]: <guide one.md#ready> "Owner"\n'
+        "[shortcut]: <guide one.md#ready>\n", encoding="utf-8")
+    (tmp_path / "guide one.md").write_text("# Ready\n", encoding="utf-8")
+    assert not mod.check_adopter_navigation(tmp_path, ("README.md",), {})

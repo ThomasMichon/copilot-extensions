@@ -11,7 +11,7 @@ component owns its command and support contract.
 |------|------------|----------|
 | Customize an agent's working context | [customizing-copilot](../plugins/customizing-copilot/README.md) | Skills for authoring/diagnosis; no supplied operator topology |
 | Work in isolated local git sessions | [agent-worktrees](../plugins/agent-worktrees/docs/getting-started.md) | Standalone local worktrees are supported without mesh siblings |
-| Query a PR by explicit repo address | [agent-pull-requests](../plugins/agent-pull-requests/README.md) | Current extracted CLI ships status; broader PR extraction is staged |
+| Query/create/merge/wait for a PR by explicit repo address | [agent-pull-requests](../plugins/agent-pull-requests/README.md) | Implemented API-first verbs without a local checkout; current account resolution uses agent-worktrees |
 | Message live agents | [agent-bridge](../plugins/agent-bridge/README.md) | Persistent session transport; not the durable task queue |
 | Queue, claim, and supervise work | [agent-dispatch](../plugins/agent-dispatch/README.md) | Durable task/supervisor contract; configure before starting loops |
 | Continue long-running objectives | [context-handoff](../plugins/context-handoff/README.md) | Continuity and baton storage; hosting/cutover remains a separate owner |

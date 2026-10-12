@@ -34,7 +34,7 @@ establish a hosted controller or container manager.
 | Plugin | Kind | Legacy runtime home | Global command surface (legacy wrapper / project binstubs) | Lifecycle |
 |--------|------|--------------|---------|-----------|
 | [agent-worktrees](../plugins/agent-worktrees/) | Session plugin (skills + `sessionStart` hook) | `~/.agent-worktrees/` | `~/.local/bin/agent-worktrees` + per-project binstubs | Per session (launched by binstub); runtime auto-updates on session start |
-| [agent-pull-requests](../plugins/agent-pull-requests/) | Cross-repo PR CLI | `~/.agent-pull-requests/` | `~/.local/bin/agent-pull-requests` | On-demand CLI; current runtime-backed slice shells through `agent-worktrees repos gh <owner/repo> -- ...` for GitHub account/token resolution and does not require a local checkout |
+| [agent-pull-requests](../plugins/agent-pull-requests/) | Cross-repo PR CLI | `~/.agent-pull-requests/` | `~/.local/bin/agent-pull-requests` | On-demand status/create/merge/wait without a local checkout; current GitHub account/token resolution uses `agent-worktrees repos gh <owner/repo> -- ...` |
 | [agent-bridge](../plugins/agent-bridge/) | Persistent HTTP service | `~/.agent-bridge/` | `~/.local/bin/agent-bridge` | Always-on daemon (Windows scheduled task / Linux systemd user unit) |
 | [agent-codespaces](../plugins/agent-codespaces/) | CLI + credential relay | `~/.agent-codespaces/` | `~/.local/bin/agent-codespaces` | On-demand CLI; self-registers a `codespace:` namespace **provider** (+ credential relay) with the agent-bridge daemon via a `~/.agent-bridge/providers.d/` manifest — the daemon drives its binstub over a process boundary |
 | [agent-containers](../plugins/agent-containers/) | CLI + `container:` provider | `~/.agent-containers/` | `~/.local/bin/agent-containers` | On-demand CLI; self-registers a `container:` namespace **provider** with the agent-bridge daemon via a `~/.agent-bridge/providers.d/` manifest (process-boundary binstub invocation) |
@@ -350,16 +350,16 @@ agent-logger is the reference cold-store provider (see its own plugin docs);
 
 ## Ports
 
-Steady-state, **a service adds zero fixed listening ports**: it binds an
-OS-assigned ephemeral port and advertises it through discovery, so the table
-below is a shrinking list of *legacy fixed* endpoints, not a contract to
-maintain (dotfiles #694).
+Endpoint owners publish live discovery state rather than assigning a universal
+port map. Explicit port pinning and documented compatibility routes are
+component-specific; the table below distinguishes dynamic defaults from
+remaining fixed endpoints.
 
 | Port | Owner | Purpose |
 |------|-------|---------|
 | **dynamic** (ephemeral) | agent-bridge daemon | HTTP API the CLI talks to. Binds an OS-assigned port and publishes it to the routing table (`active.json`); clients resolve it there — `agent-bridge status` reads the live port. The former fixed **9280/9281** (Windows/WSL) is retired as a default; a positive `port:` in `config.yaml` (or `--port`) still pins one, and `9280` remains only a last-resort client fallback. |
 | **9281** | agent-bridge elevated sub-daemon | Fixed loopback port for the Windows admin sub-daemon (`elevated.py` `ELEVATED_PORT`), reached via `acp-connect ws://127.0.0.1:9281/...`. Not yet migrated to discovery. |
-| **9857** | agent-codespaces credential relay | TCP server the CodeSpace reaches over an SSH reverse tunnel (`-R 9857`) to fetch git/GitHub/Azure credentials. Starts with the bridge service. Not yet migrated to discovery (the CodeSpace-side path already uses live-port discovery; the host bind still targets 9857). |
+| **dynamic** by default | credential relay hosted by agent-bridge | `credentials.relay_port: 0` selects an OS-assigned port published by the daemon; agent-codespaces follows it for the SSH reverse-forward. A positive value pins a port; `9857` is only a last-resort compatibility fallback. See the [relay owner workflow](../plugins/agent-codespaces/skills/codespaces-lifecycle/SKILL.md#credential-relay). |
 
 ## Agent plugins vs harness plugins — and two senses of "harness"
 
@@ -439,18 +439,18 @@ for `.agent-codespaces/config.yaml`.
 
 ## Credential relay
 
-The relay lets a CodeSpace authenticate to GitHub and Azure DevOps using **your
-host's** credentials — no PATs stored in the CodeSpace. All requests pass a
+The relay forwards selected host credentials to a CodeSpace on request rather
+than requiring baked-in PATs. All requests pass a
 policy gate (action allowlist + per-source host/resource allowlists).
 
 ```mermaid
 sequenceDiagram
     participant Space as CodeSpace (git / gh)
-    participant Tunnel as SSH reverse tunnel :9857
+    participant Tunnel as SSH reverse tunnel (live port)
     participant Relay as Credential relay (host)
     participant Src as Source (GCM / gh auth / az)
     Space->>Tunnel: git-credential request
-    Tunnel->>Relay: forward to 127.0.0.1:9857
+    Tunnel->>Relay: forward to discovered loopback endpoint
     Relay->>Relay: policy gate (action + host/resource allowlist)
     Relay->>Src: fetch credential
     Src-->>Relay: token

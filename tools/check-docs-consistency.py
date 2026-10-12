@@ -61,19 +61,47 @@ def prose(text: str) -> str:
     """Exclude examples and comments from executable navigation."""
     result = []
     fence = ""
+    comment = False
     for line in text.splitlines():
         match = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
-        if match:
-            marker, info = match.groups()
-            if not fence:
-                if marker[0] != "`" or "`" not in info:
-                    fence = marker
-            elif marker[0] == fence[0] and len(marker) >= len(fence) and not info.strip():
-                fence = ""
+        if fence:
+            if match:
+                marker, info = match.groups()
+                if marker[0] == fence[0] and len(marker) >= len(fence) and not info.strip():
+                    fence = ""
             continue
-        if not fence:
-            result.append(line)
-    return re.sub(r"<!--.*?-->", "", "\n".join(result), flags=re.S)
+        if match and not comment:
+            marker, info = match.groups()
+            if marker[0] != "`" or "`" not in info:
+                fence = marker
+                continue
+        visible = []
+        cursor = 0
+        while cursor < len(line):
+            if comment:
+                end = line.find("-->", cursor)
+                if end < 0:
+                    break
+                comment = False
+                cursor = end + 3
+                continue
+            if line.startswith("<!--", cursor):
+                comment = True
+                cursor += 4
+                continue
+            if line[cursor] == "`":
+                marker = re.match(r"`+", line[cursor:]).group()
+                start = cursor + len(marker)
+                end = re.search(r"(?<!`)" + re.escape(marker) + r"(?!`)", line[start:])
+                if end:
+                    stop = start + end.end()
+                    visible.append(line[cursor:stop])
+                    cursor = stop
+                    continue
+            visible.append(line[cursor])
+            cursor += 1
+        result.append("".join(visible))
+    return "\n".join(result)
 
 
 def local_links(text: str, include_images: bool = True) -> list[str]:
@@ -84,9 +112,13 @@ def local_links(text: str, include_images: bool = True) -> list[str]:
         text = re.sub(r"!\[[^\]\n]*\]\([^)]+\)|!\[[^\]\n]*\]\[[^\]\n]*\]|!\[[^\]\n]*\]",
                       "", text)
         text = re.sub(r"<img\b[^>]*>", "", text, flags=re.I)
-    inline = r"!?\[[^\]\n]*\]\(\s*<?([^\s)>]+)>?(?:\s+[^)]*)?\)"
-    links = re.findall(inline, text)
-    definitions = dict(re.findall(r"^\s*\[([^\]\n]+)\]:\s*<?([^\s>]+)>?", text, re.M))
+    inline = r"!?\[[^\]\n]*\]\(\s*(?:<([^>\n]+)>|([^\s)>]+))(?:\s+[^)]*)?\)"
+    links = [angled or bare for angled, bare in re.findall(inline, text)]
+    definitions = {}
+    for label, angled, bare in re.findall(
+        r"^\s*\[([^\]\n]+)\]:\s*(?:<([^>\n]+)>|([^\s>]+))", text, re.M
+    ):
+        definitions[label] = angled or bare
 
     def reference_key(label: str) -> str:
         return " ".join(label.split()).casefold()

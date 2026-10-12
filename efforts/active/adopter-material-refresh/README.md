@@ -206,7 +206,7 @@ repository creation, or private-environment capture was part of that proposal.
   payload in a separately claimed changefile-bearing slice, not by inventing
   alternate mechanics in these root waypoints. No plugin payload is modified
   by the documentation participant.
-- Local validation: seventeen focused guard fixtures, F/E9 lint, real primary-path
+- Local validation: twenty-one focused guard fixtures, F/E9 lint, real primary-path
   navigation (including exact casing), runbook/plugin identifiers, canonical
   effort/vision structure, and staged size checks pass. Root references are
   retained through the primary family; existing preview files are untouched.
@@ -222,6 +222,14 @@ repository creation, or private-environment capture was part of that proposal.
 - Guard fixtures also prove fence indentation/closure, image-vs-hyperlink
   reading edges, exact casing, and resolved symlink containment (including a
   directory README anchor) without reading external targets.
+- The current pull-request owner implements status/create/merge/wait; primary
+  capability pages expose those verbs and the account-resolution dependency.
+  The composition reference now describes the relay's discovered dynamic port,
+  explicit pinning, and compatibility fallback rather than a fixed default.
+- Comment state is interpreted before fence markers outside real code, and
+  angle-bracket destinations retain spaces in inline/reference links. Focused
+  fixtures cover those rendered-navigation boundaries without changing runtime
+  behavior or introducing another documentation pipeline.
 
 ### 2026-10-08 — Independent planning seed
 - Captured the original material concern and both literal follow-up selections.

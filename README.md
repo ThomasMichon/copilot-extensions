@@ -44,7 +44,7 @@ daemon.
 ## Capability families
 
 - **Workspace and source control:** isolated worktrees, repository adoption,
-  lifecycle tracking, and explicitly addressed pull-request status.
+  lifecycle tracking, and explicitly addressed pull-request operations.
 - **Coordination and continuity:** live session messaging, durable queued
   tasks, context handoffs, and opt-in remote drivability.
 - **Execution venues and connectivity:** GitHub Codespaces, local Docker
@@ -69,7 +69,7 @@ that every feature or platform is supported by every component.
 | Plugin | What to use it for |
 |--------|--------------------|
 | [agent-worktrees](plugins/agent-worktrees/) | Local worktree sessions, repo adoption, tracked lifecycle, and project commands |
-| [agent-pull-requests](plugins/agent-pull-requests/) | Explicit `owner/repo` pull-request status without a local checkout; broader extraction is staged work |
+| [agent-pull-requests](plugins/agent-pull-requests/) | Explicit `owner/repo` PR status/create/merge/wait without a local checkout; account resolution uses agent-worktrees |
 | [agent-bridge](plugins/agent-bridge/) | Persistent live session communication across adopted boundaries |
 | [agent-codespaces](plugins/agent-codespaces/) | GitHub Codespace lifecycle and optional bridge/credential-relay integration |
 | [agent-containers](plugins/agent-containers/) | Local Docker fleet lifecycle, leases, and container dispatch |
