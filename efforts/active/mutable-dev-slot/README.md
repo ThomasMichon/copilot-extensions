@@ -142,18 +142,21 @@ operator directive to remove the explicit claimed-dev exception.
 
 ### Phase 3 — Rollout to the remaining vendoring plugins
 
-- [x] Finish publisher prerequisite #5817 before runtime-admission implementation:
+- [ ] Finish publisher prerequisite #5817 before runtime-admission implementation:
       an updated, legitimately owned existing PR must publish through one
       supported command, including compatible legacy evidence reconciliation.
       Internal ownership bookkeeping must not require a manual old-tip,
       re-publish, restore-tip sequence. Preserve exact saved leases, destination
       and worktree/ref authority, real concurrency refusal, and normal hooks.
-      Completion verified on 2026-10-12: #5835 and publication repair #6256
+      Initial delivery verified on 2026-10-12: #5835 and publication repair #6256
       are merged; normal release promotions #6263/#6267 are merged; unified
       update selected agent-worktrees `1.24.50-dev1` and the installed CLI
       exposes `--rewrite-pr`. Independent promotion blockers #6244/#6262
       were resolved before those releases. Consumer guidance refresh cleared its
       reviewed flow; the merged plan's PR claim was reconciled.
+      Reopened for the in-scope revised-legacy-record correction #6299, merged
+      after that deployment. Its normal promotion and installed verification
+      are still required before this prerequisite is complete.
 
 - [ ] Review the shared
       [runtime-admission/build-coalescing slice](phase-3-runtime-admission.md)
@@ -227,6 +230,17 @@ operator directive to remove the explicit claimed-dev exception.
       this worktree mid-effort.
 
 ## Journal
+
+### 2026-10-12 — Revised legacy compatibility follow-up reopens the gate
+
+The #6297 completion review identified #6299, which closes an additional
+compatible-legacy case under #5817: a nonzero metadata revision must not alone
+block an intentional owned rewrite when fresh numbered-provider, source-branch,
+source-repository and exact-head evidence match. #6299 merged after the
+`1.24.50-dev1` deployment recorded below. The prerequisite is reopened pending
+normal promotion and installed verification of that follow-up; the earlier
+deployment evidence remains true for the narrower candidate, not proof that
+the revised-record compatibility requirement is already installed.
 
 ### 2026-10-12 — Publisher prerequisite deployed and consumer refreshed
 
