@@ -294,7 +294,7 @@ def add_parsers(sub) -> None:
     )
     parser.add_argument("--profile", help="Copilot backend profile name (skips Tab toggle)")
     parser.add_argument(
-        "--defer-new-seed", action="store_true", default=True,
+        "--defer-new-seed", action="store_true", default=None,
         help="Keep creation prompts queued until the returned command executes",
     )
     parser.add_argument("--stage-launch-seed", action="store_true", help="Require typed launch-seed staging")
@@ -365,6 +365,8 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         from .launch_request import cmd_request
 
         return cmd_request(args)
+    if getattr(args, "defer_new_seed", None) is None:
+        args.defer_new_seed = True
     append_launch_event("resolve_handler_start")
     try:
         state = ResolveCommandState.from_args(args)

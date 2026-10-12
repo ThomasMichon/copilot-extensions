@@ -361,9 +361,9 @@ def test_unsupported_shell_is_rejected_before_remote_admission(shell):
 
 @pytest.mark.parametrize("selector", [["--new"], ["--base"], ["--worktree-id", "wt-a"],
                                       ["--codename", "one-two"]])
-def test_structured_request_rejects_ordinary_selector_before_mutation(selector, capfd):
+def test_structured_request_rejects_ordinary_selector_before_mutation(selector):
     import argparse
-    from agent_worktrees import resolve_cli
+    from agent_worktrees import output, resolve_cli
 
     parsers = argparse.ArgumentParser().add_subparsers()
     resolve_cli.add_parsers(parsers)
@@ -371,19 +371,55 @@ def test_structured_request_rejects_ordinary_selector_before_mutation(selector, 
     args = parsers.choices["resolve"].parse_args(
         ["--json", "--launch-request-b64", encoded, *selector],
     )
-    assert resolve_cli.cmd_resolve(args) == 3
-    assert "Structured launch requests require" in json.loads(capfd.readouterr().out)["error"]
+    with output.capture_json_output() as captured:
+        assert resolve_cli.cmd_resolve(args) == 3
+    assert "Structured launch requests require" in json.loads(captured.getvalue())["error"]
 
 
-def test_malformed_base64_returns_structured_cli_error(capfd):
+@pytest.mark.parametrize("mode", ["admission", "status"])
+@pytest.mark.parametrize("modifier", [
+    ["--bridge"], ["--profile", "demo"], ["--parent-session", "session"],
+    ["--caller-worktree", "wt-caller"], ["--owner-ref", "host/demo/wt-caller"],
+    ["--environment", "Linux"], ["--target-no-mux"], ["--stage-launch-seed"],
+    ["--defer-new-seed"], ["--no-mux"], ["--no-fast-forward"], ["--no-resume"],
+    ["--recovery"], ["--seed", "task"], ["--seed-id", "intent"],
+    ["--machine", "target"], ["--dry-run"], ["--auto"], ["--bare-resume"],
+    ["--restore"], ["copilot-positional-argument"],
+])
+def test_structured_request_rejects_all_nonprotocol_modifiers(
+    mode, modifier, monkeypatch,
+):
     import argparse
-    from agent_worktrees import resolve_cli
+    from agent_worktrees import output, resolve_cli
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("nonprotocol modifier reached admission or status")
+
+    monkeypatch.setattr(request, "execute", forbidden)
+    monkeypatch.setattr(request, "inspect", forbidden)
+    parsers = argparse.ArgumentParser().add_subparsers(dest="command")
+    resolve_cli.add_parsers(parsers)
+    encoded = base64.b64encode(json.dumps(_intent("new")).encode()).decode()
+    protocol = (
+        ["--launch-request-b64", encoded] if mode == "admission"
+        else ["--launch-request-status", "a" * 32]
+    )
+    args = parsers.choices["resolve"].parse_args(["--json", *protocol, *modifier])
+    with output.capture_json_output() as captured:
+        assert resolve_cli.cmd_resolve(args) == 3
+    assert "Structured launch requests require" in json.loads(captured.getvalue())["error"]
+
+
+def test_malformed_base64_returns_structured_cli_error():
+    import argparse
+    from agent_worktrees import output, resolve_cli
 
     parsers = argparse.ArgumentParser().add_subparsers()
     resolve_cli.add_parsers(parsers)
     args = parsers.choices["resolve"].parse_args(["--json", "--launch-request-b64", "!invalid!"])
-    assert resolve_cli.cmd_resolve(args) == 3
-    assert "Launch request <invalid> failed" in json.loads(capfd.readouterr().out)["error"]
+    with output.capture_json_output() as captured:
+        assert resolve_cli.cmd_resolve(args) == 3
+    assert "Launch request <invalid> failed" in json.loads(captured.getvalue())["error"]
 
 
 @pytest.mark.parametrize("selectors", [[], ["--codename", "one-two"], ["--worktree-id"],

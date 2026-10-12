@@ -16,6 +16,9 @@ is bounded to 7168 bytes (7 KiB, including JSON metadata) and carries version 1,
 `request_id`, `kind` (`new` or `resume`), `worktree_id` (null for New), `text`
 and Boolean `no_mux`. POSIX shell arguments are quoted; PowerShell commands
 are encoded. Prompt text never enters the interactive SSH launch string.
+Structured admission/status accepts only its protocol options and `--json`;
+ordinary resolve selectors, modifiers and positional Copilot arguments are
+rejected before reading or mutating target launch state.
 
 The target's existing tracking-write daemon owns admission and seed staging.
 Admission retains a text-free fingerprint and allocated worktree/intent IDs

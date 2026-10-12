@@ -900,6 +900,34 @@ def test_resolve_without_seed_omits_seed_flag(monkeypatch):
     ec.resolve_launch_plan("dotfiles", new=True, seed="")
 
 
+@pytest.mark.parametrize("new", [False, True])
+@pytest.mark.parametrize("target,seed,timeout,expected", [
+    ("target", "task", 30, 240),
+    ("target", "task", 500, 500),
+    (None, "task", 30, 30),
+    ("target", None, 30, 30),
+    ("target", "", 30, 30),
+    (None, None, 500, 500),
+])
+def test_resolve_remote_prompt_timeout_floor(new, target, seed, timeout, expected, monkeypatch):
+    seen = []
+
+    def run_json(project, args, *, timeout):
+        seen.append(timeout)
+        return {
+            **_RESUME_PLAN, "seed_pending": bool(seed),
+            "seed_id": "intent" if seed else None,
+            "seed_kind": ("new" if new else "resume") if seed else None,
+        }
+
+    monkeypatch.setattr(ec, "run_json", run_json)
+    ec.resolve_launch_plan(
+        "dotfiles", new=new, worktree_id=None if new else "wt-a",
+        target_machine=target, seed=seed, timeout=timeout,
+    )
+    assert seen == [expected]
+
+
 def test_resolve_base_sends_base_flag(monkeypatch):
     def handler(cmd, kw):
         assert "--base" in cmd

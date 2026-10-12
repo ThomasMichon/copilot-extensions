@@ -218,9 +218,10 @@ def cmd_request(args) -> int:
     from . import output
     request_id = None
     try:
-        forbidden = ("machine", "seed", "seed_id", "dry_run", "new_worktree",
-                     "worktree_id", "codename", "base", "bare_resume", "restore", "auto")
-        if not args.json or any(getattr(args, key, None) for key in forbidden):
+        protocol_options = {"command", "json", "launch_request_b64", "launch_request_status"}
+        if not args.json or any(
+            value for key, value in vars(args).items() if key not in protocol_options
+        ):
             raise ValueError("Structured launch requests require local --json execution")
         if args.launch_request_status:
             request_id = args.launch_request_status

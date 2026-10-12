@@ -303,3 +303,20 @@ hiding the problem or silently dropping text.
   injected receipt-write failure for both kinds; unstaged Resume is explicitly
   `admission-incomplete`. The test fixture uses its actual registered project,
   retaining receiving-side authority rather than mocking it away. Lint passes.
+- **2026-10-12** -- Current-head CI passed, but review correctly found remaining
+  non-protocol resolve modifiers bypassed ordinary validation. Structured
+  admission/status now rejects every populated non-protocol option before
+  reading or mutating target state; ordinary resolves retain their default
+  deferred-New behavior. The 48-case focused CLI portfolio passes, including
+  both request modes across 21 modifiers. Added the remote timeout-floor
+  matrix; all 31 Manager resolve compatibility cases pass, preserving local,
+  seedless and larger caller timeout values.
+  Native FD capture teardown caused contained CLI runs to time out. Switched
+  these JSON assertions to the repository's real-output capture helper rather
+  than raising containment budgets. Expanded admission and ordinary delivery
+  checks passed 159 cases (one native POSIX skip), with one native PowerShell
+  consumer timing out. That fixture omitted the launch plan's working-directory
+  contract and ran setup in the source checkout. It now launches in its isolated
+  worktree directory, and its exact prompt/provenance/discard assertions pass
+  through real PowerShell. No cold-check or receiving-authority guard was
+  weakened. Required current-head review/CI and delivered rollout remain open.
