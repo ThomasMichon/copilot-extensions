@@ -677,7 +677,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$base"...HEAD | grep -Eq \
-            '^tools/(build_python_artifacts\.py|build_toolchain_lock\.py|governed_feed_trust\.py|uv_editable_ref\.py|test_build_python_artifacts\.py)$'; then
+            '^tools/(build_python_artifacts\.py|build_toolchain_lock\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_seasoned_public_feed\.py|test_build_python_artifacts\.py)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -690,7 +690,7 @@ jobs:
         # paths (TESTING.md's "Gate specialized suites by changed paths"
         # invariant) since this is a large, subprocess-adjacent suite most
         # PRs never touch.
-        run: python -m pytest -q tools/test_build_python_artifacts.py
+        run: python -m pytest -q tools/test_build_python_artifacts.py tools/test_seasoned_public_feed.py
       - name: Asyncio timeout handlers (Python 3.10 daemon)
         # The agent-bridge daemon venv is pinned to Python 3.10 (uv venv
         # --python 3.10), where asyncio.wait_for raises asyncio.TimeoutError --

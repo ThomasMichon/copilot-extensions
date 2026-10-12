@@ -162,12 +162,10 @@ def resolve_seasoned_public_version(
     ) is None:
         raise SeasonedVersionError("package must be a valid Python distribution name")
     package = re.sub(r"[-_.]+", "-", package).lower()
-    if min_age_days < 0:
+    if type(min_age_days) is not int or min_age_days < 0:
         raise SeasonedVersionError(
-            f"min_age_days={min_age_days!r} is negative -- this would "
-            "disable the seasoning control entirely (and could even admit "
-            "a future-dated upload); refusing rather than silently "
-            "treating every release as old enough"
+            f"min_age_days={min_age_days!r} must be a non-negative integer "
+            "-- invalid values could disable seasoning or admit future-dated uploads"
         )
     if now is None:
         now = datetime.now(timezone.utc)

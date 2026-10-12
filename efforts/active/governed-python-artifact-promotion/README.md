@@ -19,6 +19,12 @@ a public package index for third-party dependencies, and no release bundles
 a complete virtual environment or a single packaged binary as its primary
 distribution unit.
 
+Public promotion runners may explicitly source the build toolchain
+(`setuptools`, `wheel`, `packaging`) from seasoned public releases. This
+approved exception does not apply to managed-device runtime dependency
+resolution, does not certify availability on any consumer's governed feed,
+and does not permit third-party dependency bytes in published artifact sets.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
@@ -72,6 +78,12 @@ distribution unit.
 > what the governed feed currently carries (governed feeds can lag public
 > releases by about a week). A single packaged binary is not an acceptable
 > distribution strategy.
+
+**2026-10-10 clarification:** the original request's governed-feed-only
+rule remains binding for managed-device dependencies. Public promotion
+build tooling has the explicit exception described in Guiding Intent above;
+the earlier wording must not be read as requiring public runners to reach a
+private consumer feed. Consumer-side admission still checks the actual feed.
 
 ## Plan
 
@@ -234,8 +246,9 @@ answer against the actual repository/CI configuration:
   build environment (which silently resolves "whatever satisfies the floor
   today," unrecorded and unreproducible run-to-run). Instead, promotion
   resolves one shared **build-toolchain lock** per promotion run (exact
-  `setuptools`/`wheel` versions, resolved from the governed feed like every
-  other third-party dependency in this effort -- never a public index),
+  `setuptools`/`wheel` versions, resolved from a governed feed on managed
+  machines, or seasoned public releases in the explicitly opted-in public
+  promotion-runner mode),
   installs it into a controlled build venv, and builds every plugin/lib
   wheel in that run with `--no-build-isolation` against that one locked
   venv. The resolved toolchain lock's hash becomes a component of each
@@ -501,6 +514,19 @@ win grows with build complexity.
   including real response-read failure handling through the fetch helper;
   touched Python lint passes. Test-count descriptions now refer to coverage
   rather than a count that becomes stale with each review round.
+- **2026-10-12 required-CI follow-through:** the artifact-builder path
+  gate now includes both resolver files and runs their suite alongside the
+  existing builder suite. Age settings must be non-negative integers;
+  NaN, infinity, floats, strings and booleans are rejected before fetching.
+  The combined lane exposed four Windows fixture failures: drive colons
+  were being split as POSIX XDG separators, and root-relative paths then
+  resolved on the checkout's drive rather than the temporary drive. The
+  fixtures now select the temporary drive and omit drive prefixes from
+  their simulated POSIX paths, without changing production feed discovery.
+  All 255 combined cases pass locally (56 resolver cases); touched Python
+  lint passes. Guiding Intent, the original Request's clarification,
+  build-hermeticity policy and umbrella issue #4876 now consistently scope
+  the approved public-feed exception to promotion build tooling only.
 - **Still open (this effort's own next slice):** actually wire this
   resolver into `resolve_toolchain_lock`/`build_python_artifacts.py`'s CLI
   (a caller-selectable "seasoned public" mode, distinct from and never

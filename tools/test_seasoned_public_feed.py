@@ -138,10 +138,18 @@ class TestResolveSeasonedPublicVersion:
 
     def test_negative_min_age_days_rejected(self):
         payload = _releases_payload({"1.0.0": [_file("2026-10-09T00:00:00.000000Z")]})
-        with pytest.raises(spf.SeasonedVersionError, match="negative"):
+        with pytest.raises(spf.SeasonedVersionError, match="non-negative integer"):
             spf.resolve_seasoned_public_version(
                 "pkg", min_age_days=-1, now=_NOW, fetch=lambda url: payload
             )
+
+    @pytest.mark.parametrize("age", [float("nan"), float("inf"), 1.5, "7", None, True, False])
+    def test_non_integer_age_rejected_before_fetch(self, age):
+        def unexpected_fetch(url):
+            pytest.fail("invalid age must not make a request")
+
+        with pytest.raises(spf.SeasonedVersionError, match="non-negative integer"):
+            spf.resolve_seasoned_public_version("pkg", min_age_days=age, fetch=unexpected_fetch)
 
     def test_wrong_json_root_shape_raises_seasoned_version_error(self):
         payload = json.dumps([1, 2, 3]).encode("utf-8")
