@@ -8,7 +8,7 @@
 - **Vision:** extends `visions/plugin-services` §Features/`self-contained-runtime`
   + §Features/`immutable-versioned-runtime` (see Context)
 - **Umbrella issue:** _TBD — file once this effort's plan clears review_
-- **Sub-issues:** _TBD_
+- **Sub-issues:** #6389 (build/serving convergence); #6390 (Index installer result boundary); existing adopter and cutover owners remain in the linked audit.
 
 ## Guiding Intent
 
@@ -177,6 +177,17 @@ as independent per-plugin PRs; see Coordination._
 > of other key differentiators, like supporting scheduled tasks, zdd
 > cutover, draining, etc. We shouldn't have to keep fixing per-app
 > installers, they should all use the same flow.
+
+2026-10-12 follow-up, verbatim:
+
+> Great. Ensure we update or file upstream issues, update any relevant efforts,
+> and otherwise durably capture these concerns. I think we have an effort to
+> standardize installers, so is works with that. Use context management tools
+> to inline-handoff and keep driving here
+
+The referenced concerns are the [serving-convergence audit](serving-convergence-audit.md).
+This follow-up requests durable tracking and effort integration, not immediate
+implementation of every recommendation or takeover of another participant's work.
 
 ## Plan
 
@@ -454,8 +465,29 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 - [ ] **#438** agent-bridge: <repo> update leaves the running daemon on the old version; installer should own the zero-downtime cutover (restart == drain-safe deploy)
   - The installer owning zero-downtime cutover is the same immutable-runtime-deploy scope this effort covers.
 
+### Serving convergence follow-up — 2026-10-12 audit
+
+- [x] Record the source-pinned suite audit and deduplicated issue/owner map in
+      [serving-convergence-audit.md](serving-convergence-audit.md). This completes
+      the requested capture slice, not implementation or live acceptance.
+- [ ] **#6389** _(agent-recommended)_: separate build/selection success from
+      serving convergence, including updater current-version skips, bootstrap
+      parity, explicit partial/deferred outcomes and retry from a completed
+      immutable slot without rebuilding.
+- [ ] **#6390** _(agent-recommended)_: preserve Index native deploy failures at
+      the installer boundary and reconcile healthy-but-old non-systemd services.
+- [ ] Coordinate adapter acceptance with existing #438, #3959, #5558, #2386,
+      #6143 and #5769 owners; retain #6373's narrow monitor PID-adapter scope.
+      #5956 separately owns the reviewed engine/full-entrypoint applicability
+      decision. This amendment neither removes Worktrees' engine exception nor
+      pulls all service-specific lifecycle logic into the shared build engine.
+
 ## Validation Plan
 
+- [ ] _(agent-recommended)_: exercise the [serving-convergence cases](serving-convergence-audit.md#validation-cases)
+      for each applicable adopter. Record build, selected generation, expected
+      serving identity/readiness and exact predecessor retirement independently;
+      structural guard success or HTTP 200 alone is not live acceptance.
 - [ ] Temporary Docker producers satisfy the reservation, identity, actual
       finalize-gate and close-out checks in
       [their scoped validation plan](temporary-container-obligations.md#validation-plan).
@@ -543,6 +575,23 @@ immutable-versioned-runtime slot contract. No scheduled task, no sibling
 installs, no service-specific config needed for this class of plugin.
 
 ## Journal
+
+### 2026-10-12 — Suite-wide serving-convergence audit captured
+
+- The read-only audit covers 14 public `agent-*` plugins: 12 runtime providers
+  and two payload-only N/A entries. Its pinned matrix and seven causal chains
+  are linked from [the audit supplement](serving-convergence-audit.md).
+- Shared build machinery is substantially uniform; service convergence is not.
+  Current manifests/completed slots can coexist with healthy older services.
+  This is additional semantic acceptance, not a reversal of completed adopter
+  conversions or the September Phase 0 mechanics audit.
+- Filed #6389 and #6390 after searching existing coverage; cross-linked #5703,
+  #438, #6143, #5769 and #5956. Existing conditional cutover, Dispatch/pool,
+  Index role/Job-survival and monitor PID owners remain responsible for their
+  slices. #6369/#6374's merged fingerprint correction is recorded separately.
+- No installer code, service, runtime slot or live deployment was changed by
+  this capture. Implementation and live convergence remain open. The new
+  acceptance recommendations are explicitly agent-recommended.
 
 ### 2026-10-12 — Include practical session-start permission repair
 
