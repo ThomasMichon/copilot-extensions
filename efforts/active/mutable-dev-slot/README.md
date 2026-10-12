@@ -231,6 +231,50 @@ operator directive to remove the explicit claimed-dev exception.
 
 ## Journal
 
+### 2026-10-12 — Promotion baseline diagnostics preserve both streams
+
+The reopened publisher gate remains blocked on normal promotion and installed
+verification. Promotion run `38250657887` passed its test jobs but could not
+produce the required agent-worktrees coverage baseline: collection exited 2,
+and its coverage warning on stderr hid pytest's stdout diagnostics. The bounded
+fix-forward slice landed independently in #6321, which labels and retains both
+streams in `BaselineCollectionError`; it does not accept partial coverage or
+relax the full-pass baseline requirement. The overlapping #6326 was explicitly
+closed as superseded at the operator's direction. This journal preserves the
+effort's state without carrying a competing collector implementation.
+
+The synthetic coverage-selection suite passed 120 tests with 7 opt-in skips,
+including the stdout/stderr and timeout regression matrix. A real captured
+subprocess smoke preserved both streams and exit 2. Two filename-chunking test
+expectations now use native `Path` separators, resolving the Windows failures
+encountered in this run without changing the POSIX-only project-venv contract;
+#6321 independently includes those path corrections. Touched Python lint
+passed. These checks describe the superseded local candidate, not a new
+validation claim for #6321. Clean-room install validation is inapplicable to
+this repository-tool diagnostic change. Linux collection and its underlying
+failure still require the normal promotion lane; these checks do not prove a
+baseline was earned. No runtime-retention implementation or deployment gate is
+checked off by this diagnostic slice.
+
+### 2026-10-12 — Shared construction ownership merged
+
+The bounded, dependency-free Python `construction_lease()` API landed through
+#6290 after current-head Copilot approval with zero findings and required CI
+success. Its canonical helper and all 13 vendored copies use persistent
+installation/version-scoped kernel locks, recheck lock-file identity, distinguish
+bounded contention from storage failures, and release ownership on normal,
+error, cancellation, and process-death paths. Native competing-process tests
+exercise one construction among matching callers and admission revalidation
+after the winner publishes, including refusal of different content.
+
+This is a shared prerequisite, not installer adoption or parent completion.
+Candidate/rollback retention, create-once immutable publication, the complete
+agent-worktrees adopter, portfolio rollout, and their validation remain open.
+The next shared retention implementation stays behind the reopened publisher
+prerequisite's normal promotion and installed-verification gate above; it must
+coordinate with the separately continuing publisher worker rather than duplicate
+that worker's changes.
+
 ### 2026-10-12 — Revised legacy compatibility follow-up reopens the gate
 
 The #6297 completion review identified #6299, which closes an additional
