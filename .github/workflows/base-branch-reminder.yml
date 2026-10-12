@@ -20,8 +20,8 @@
 # the operator direction that prompted this file: avoid over-enabling
 # functionality for an uninvited contributor by accident.
 #
-# Uses `pull_request_target` (the same mechanism as copilot-review-gate.yml
-# and workflow-lockdown-guard.yml -- see either file's header for the full
+# Uses `pull_request_target` (the same mechanism as workflow-lockdown-guard.yml
+# -- see that file's header for the full
 # rationale): it runs the TRUSTED workflow definition from the repository's
 # actual default branch regardless of the PR author's trust level, and is
 # NOT subject to the fork-approval gate that blocks `pull_request`-triggered

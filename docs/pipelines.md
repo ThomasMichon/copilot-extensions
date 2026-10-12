@@ -59,7 +59,8 @@ below).
 
 ### 3. Review automation
 
-`.github/workflows/copilot-review-gate.yml` requests a Copilot review
+The `request-review-if-maintainer` job in
+`.github/workflows/workflow-lockdown-guard.yml` requests a Copilot review
 automatically, but **only** for a PR authored by a **Maintainer** (the
 CODEOWNERS root roster, owner included) — not merely any invited
 collaborator. A Contributor's PR gets no automatic request (a Maintainer
@@ -79,7 +80,7 @@ trust), and a Contributor's PR still needs a Maintainer's own approving
 review regardless of Copilot's verdict. (The ruleset-native
 `copilot_code_review` auto-review rule has no such condition — it would
 fire for literally anyone — so this repo has removed that rule.) Like
-`workflow-lockdown-guard.yml` below, this workflow runs on
+the required guard job below, the review job runs on
 `pull_request_target`, so it can't fire until its own file has reached
 `main` via a promotion — request a review manually for any PR opened
 before that first promotion completes.
@@ -256,7 +257,7 @@ support**, only the strictest built-in fork-PR-approval gate (Settings →
 Actions → General → "Fork pull request workflows" → **"Require approval
 for all outside collaborators"**), which already blocks every Actions run
 (including CI) from starting until a Maintainer manually approves it, plus
-`copilot-review-gate.yml`'s own collaborator check (above) for review. A
+the trusted review job's own collaborator check (above) for review. A
 Maintainer can still manually approve a run or request a review for an
 outside PR at their discretion — this only removes the automatic path for
 someone the repo owner never invited.
@@ -281,8 +282,7 @@ targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `ci.yml` | `pull_request`, `push` (`main`/`dev`), `workflow_dispatch` | The fast smoke-CI suite (guards, lint, per-plugin tests) that gates every PR. Contains `main-gate` (rejects a non-promotion PR against `main`) and the `PR gate` fixed-name required-check aggregate, including native Windows archive-source/chronicler smoke when `agent-logger` is selected. |
-| `copilot-review-gate.yml` | `pull_request_target` → `dev` | Requests an automatic Copilot review, Maintainer-authored PRs only (see [Review automation](#3-review-automation)). |
-| `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` | Required check: fails if a protected path (`.github/workflows/`, `.github/actions/`, `.github/CODEOWNERS`) is touched by anyone but the repo owner (see [Workflow/CODEOWNERS lockdown](#4-workflowcodeowners-lockdown)). |
+| `workflow-lockdown-guard.yml` (`Trusted PR policy`) | `pull_request_target` → `dev` | One trusted run hosts the unchanged required `workflow-lockdown-guard` check and the Maintainer-only review fallback, with independent jobs and job-scoped review permissions/concurrency. No PR code executes. |
 | `base-branch-reminder.yml` | `pull_request_target` → `main` | Posts a one-time comment asking a non-owner author to retarget a PR against `main` to `dev` (see [If you opened a PR against `main` by mistake](#if-you-opened-a-pr-against-main-by-mistake)). Never checks out or executes PR code. |
 | `trusted-ci.yml` | `pull_request_target`, paths-scoped to `.github/workflows/trusted-ci.yml`/`libs/**`/`agent-bridge`/`tools/**` | Opt-in (`vars.TRUSTED_SELF_HOSTED_CI`), collaborator-gated self-hosted CI lane for paths too sensitive/expensive for the standard runner pool; includes its own file so a change to the gate itself also re-runs it. |
 

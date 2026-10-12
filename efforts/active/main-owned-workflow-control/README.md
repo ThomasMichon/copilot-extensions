@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees; ordinary changes target `dev`
 - **Created:** 2026-10-12
-- **Status:** Draft; implementation waits for plan review
+- **Status:** Active; reviewed plan, first consolidation slice in progress
 - **Vision:** `visions/main-owned-workflow-control/README.md`
 - **Umbrella issue:** #6237
 - **Related campaigns:** #3336; `promotion-failure-reactive-fix-agent`; #6142
@@ -82,7 +82,7 @@ authorizes critical main-path acceptance or a bounded administrative change.
 
 ### Phase 0 - Reviewed contract and baseline
 
-- [ ] Land this vision/effort through ordinary dev plan review.
+- [x] Land this vision/effort through ordinary dev plan review (#6284).
 - [ ] Snapshot branch protection, rulesets, environments, workflow catalog,
   credentials and in-flight releases; identify enforced freshness and admission.
 - [ ] Classify every workflow and its helper/action dependencies, including
@@ -207,3 +207,16 @@ credential changes, broad policy weakening or unreviewed releases.
   status checks to improve review capacity. Ownership is an enabling mechanism.
 - Reordered the proposed plan so safe reductions under existing gates come first;
   preserved all validation, isolation and direct-main scope restrictions.
+
+### 2026-10-12 - Reviewed plan and first consolidation slice
+
+- #6284 received Copilot approval and merged after the required PR aggregate and
+  workflow lockdown checks passed. Native auto-merge still awaited codeowner
+  review; the owner-profile merge bypassed only the accepted review gate.
+- First slice combines the existing trusted review fallback and lockdown into
+  one `pull_request_target` invocation, without changing their scripts or the
+  required check identity. Review concurrency/permissions remain job-scoped;
+  the guard cannot wait behind the five-minute review fallback.
+- Baseline recent 100 runs had 23 review-fallback and 23 lockdown runs. The
+  intended reduction is one invocation per shared PR event, not fewer coverage
+  tiers. Live post-promotion proof and final counts remain outstanding.
