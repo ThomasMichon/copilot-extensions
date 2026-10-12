@@ -236,3 +236,31 @@ def test_all_sequential_waypoints_are_required(tmp_path):
         page.write_text("# No next link\n", encoding="utf-8")
         assert mod.check_adopter_navigation(
             tmp_path, (source,), {source: (target,)})
+
+
+def test_html_attributes_use_real_names_spacing_and_first_value(tmp_path):
+    text = (
+        '<a data-href="missing.md" href = "guide.md" href="missing.md">guide</a>\n'
+        '<img data-src="missing.svg" src = "image.svg">\n'
+        '<a data-id="fake" id = "actual"></a>\n'
+    )
+    (tmp_path / "README.md").write_text(text, encoding="utf-8")
+    (tmp_path / "guide.md").write_text("# Guide\n", encoding="utf-8")
+    (tmp_path / "image.svg").write_text("<svg/>", encoding="utf-8")
+    assert mod.local_links(text) == ["guide.md", "image.svg"]
+    assert "actual" in mod.heading_anchors(text)
+    assert "fake" not in mod.heading_anchors(text)
+    assert not mod.check_adopter_navigation(
+        tmp_path, ("README.md",), {"README.md": ("guide.md",)})
+
+
+def test_html_data_attributes_are_not_edges_and_spaced_real_targets_are_checked(tmp_path):
+    page = tmp_path / "README.md"
+    page.write_text('<a data-href="guide.md">not a link</a>', encoding="utf-8")
+    assert not mod.check_adopter_navigation(tmp_path, ("README.md",), {})
+    assert mod.check_adopter_navigation(
+        tmp_path, ("README.md",), {"README.md": ("guide.md",)})
+    page.write_text(
+        '<a href = "missing.md">broken</a><img src = "missing.svg">',
+        encoding="utf-8")
+    assert len(mod.check_adopter_navigation(tmp_path, ("README.md",), {})) == 2

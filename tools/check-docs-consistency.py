@@ -33,6 +33,7 @@ import json
 import os
 import re
 import sys
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -132,6 +133,34 @@ def prose(text: str, keep_inline: bool = False) -> str:
     return "\n".join(result)
 
 
+class HtmlTargets(HTMLParser):
+    def __init__(self, include_images: bool = True):
+        super().__init__(convert_charrefs=True)
+        self.include_images = include_images
+        self.links: list[str] = []
+        self.anchors: set[str] = set()
+
+    def handle_starttag(self, tag, attrs):
+        values = {}
+        for name, value in attrs:
+            values.setdefault(name, value)
+        if tag == "a" and values.get("href"):
+            self.links.append(values["href"])
+        if tag == "img" and self.include_images and values.get("src"):
+            self.links.append(values["src"])
+        if values.get("id"):
+            self.anchors.add(values["id"])
+        if tag == "a" and values.get("name"):
+            self.anchors.add(values["name"])
+
+
+def html_targets(text: str, include_images: bool = True) -> HtmlTargets:
+    parser = HtmlTargets(include_images)
+    parser.feed(text)
+    parser.close()
+    return parser
+
+
 def local_links(text: str, include_images: bool = True) -> list[str]:
     """Inline/reference links and HTML targets in the primary-page syntax."""
     text = prose(text)
@@ -165,14 +194,12 @@ def local_links(text: str, include_images: bool = True) -> list[str]:
         destination = definitions.get(reference_key(reference))
         if destination:
             links.append(destination)
-    links.extend(re.findall(r"<(?:a|img)\b[^>]*?\b(?:href|src)=[\"']([^\"']+)[\"']",
-                            text, re.I))
+    links.extend(html_targets(text, include_images).links)
     return [link for link in links if not urlsplit(link).scheme and not link.startswith("//")]
 
 
 def heading_anchors(text: str) -> set[str]:
-    anchors = set(re.findall(r"<a\b[^>]*?\b(?:id|name)=[\"']([^\"']+)[\"']",
-                             prose(text), re.I))
+    anchors = html_targets(prose(text)).anchors
     seen: set[str] = set()
     for heading in re.findall(r"^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$", prose(text, keep_inline=True), re.M):
         code = []
