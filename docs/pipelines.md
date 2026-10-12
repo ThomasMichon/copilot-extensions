@@ -11,8 +11,9 @@ of — link here rather than restating any of it.
 
 ## Python artifact-builder toolchain policy
 
-`tools/build_python_artifacts.py` remains a standalone builder, not yet part
-of promotion. Its default `--toolchain-source governed` requires an
+`tools/build_python_artifacts.py` can run standalone and is also invoked by
+promotion's credential-separated `python-artifacts` job. Its default
+`--toolchain-source governed` requires an
 affirmatively trusted governed feed. There is no automatic public fallback.
 Public promotion runners may explicitly choose
 `--toolchain-source seasoned-public --toolchain-min-age-days 7` (seven days
@@ -47,6 +48,59 @@ contain no `validated_index_identity` claim.
 Path-scoped CI runs a fresh public toolchain plus real first-party wheel
 builds on a public hosted runner. Managed machines should retain governed
 mode when exercising the builder locally.
+
+### Promotion artifact transfer, signing and publication
+
+After the full validation gate, `python-artifacts` runs from the default
+branch's pinned workflow/tools without `main-promotion` or the release PAT.
+It calls `promote_release.py --build-python-artifacts-dir <dir>` without
+`--push`, using the explicitly opted-in seasoned public toolchain. Promotion
+first seeds shipped versions, consumes new changefiles and materializes
+vendored sources. Wheel builds run in a second disposable checkout of the
+resulting candidate commit, so build residue cannot change the promoted tree.
+Every Python plugin shares one toolchain venv; every bundle contains only its
+own wheel, required first-party library wheels and schema-3 manifest.
+
+The transfer index binds the exact validated dev SHA, pinned main parent,
+composed content-tree SHA, complete project/version set, and bundle digests.
+The content tree excludes only existing release-state and coverage-pointer
+bookkeeping. `actions/attest-build-provenance` signs both this index and each
+bundle using GitHub OIDC, with `contents: read`, `id-token: write` and
+`attestations: write`. Neither signing authority nor release-write authority
+substitutes for the other. Manual promotion must run from the default branch;
+an otherwise-valid dev-ref dispatch cannot supply the trusted signing workflow.
+
+The privileged job downloads only the same run's named transfer artifact.
+Before consuming metadata, `gh attestation verify` requires this repository,
+the exact promotion workflow path and workflow digest, the source digest/ref,
+and a GitHub-hosted runner. Verification uses the read-only workflow token,
+not the release PAT. `promote_release.py --python-artifacts-dir <dir>`
+recomputes composition and refuses missing/corrupt/mis-targeted artifacts
+before pushing a candidate. A no-content-change or paused run builds and
+publishes nothing.
+
+Only after the exact candidate PR really merges does publication recheck its
+actual parent/content tree and project set. Assets live under the deterministic
+`<plugin>-v<version>` GitHub Release tag. Each ZIP filename includes the
+manifest's content-addressed `artifact_id`, permitting independently attested
+rebuilds without replacing a prior asset. No upload uses `--clobber`; an
+already-present same-name asset is accepted only when GitHub's reported SHA-256
+digest matches. Publication is its own job so a partial upload can be retried
+with **Re-run failed jobs**, reusing the successful signer and exact merge
+outputs rather than repeating promotion. It also enters the failure reporter.
+Transfer artifacts expire after two days; durable release-asset
+retention remains a separately tracked policy.
+
+These first-party sets are **not yet an installer fast path**. Third-party
+closure/admission, verified shared-installer consumption and retention remain
+open in `efforts/active/governed-python-artifact-promotion/README.md`. No
+published bundle contains third-party runtime dependency bytes or certifies a
+consumer's governed feed.
+
+For manual runs, dispatch this workflow on the default branch. The gate
+resolves its live dev tip and applies the same ancestor proof as automated
+dispatch; it does not mistake the generated main workflow commit for a dev
+candidate. Other workflow refs cannot enter the signing job.
 
 ## Branch model at a glance
 

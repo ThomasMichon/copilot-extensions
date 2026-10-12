@@ -610,6 +610,10 @@ def promote(
     tag_prefix: str = "promote",
     candidate_branch: str | None = None,
     coverage_baselines_dir: Path | None = None,
+    build_python_artifacts_dir: Path | None = None,
+    python_artifacts_dir: Path | None = None,
+    toolchain_source: str = "governed",
+    toolchain_min_age_days: int | None = None,
 ) -> dict:
     """Run one full promotion cycle. Returns a report dict; never raises for
     "nothing to promote" (reported via ``report["promoted"] is False``).
@@ -645,6 +649,10 @@ def promote(
     -- with no real `dev` content change -- never forces a vacuous
     promotion."""
     dev_head = _rev_parse(dev_ref, cwd=repo)
+    if build_python_artifacts_dir is not None and (
+        push or python_artifacts_dir is not None
+    ):
+        raise PromotionError("artifact export must be a separate, non-pushing preparation")
     if dev_head is None:
         raise PromotionError(f"cannot resolve dev ref: {dev_ref!r}")
     main_head = _rev_parse(main_ref, cwd=repo)
@@ -718,6 +726,20 @@ def promote(
         if content_tree == main_content_tree:
             return {"promoted": False, "reason": "no content change vs. main", **summary}
 
+        from promotion_python_artifacts import (
+            PromotionArtifactError, candidate_projects, export_artifacts, validate_artifacts,
+        )
+
+        if python_artifacts_dir is not None:
+            try:
+                validate_artifacts(
+                    python_artifacts_dir, content_tree=content_tree,
+                    dev_head=dev_head, main_before=main_head,
+                    projects=candidate_projects(scratch),
+                )
+            except PromotionArtifactError as exc:
+                raise PromotionError(str(exc)) from exc
+
         base = _git(["merge-base", main_head, dev_head], cwd=repo, check=False) or main_head
         message = format_promotion_message(dev_range=(base, dev_head), summary=summary)
         tag_name = f"{tag_prefix}-{time.strftime('%Y%m%d%H%M%S')}"
@@ -739,6 +761,16 @@ def promote(
         commit = _git(
             ["commit-tree", new_tree, "-p", main_head, "-m", message], cwd=scratch
         )
+        if build_python_artifacts_dir is not None:
+            try:
+                export_artifacts(
+                    repo=repo, commit=commit, content_tree=content_tree,
+                    dev_head=dev_head, main_before=main_head,
+                    out_dir=build_python_artifacts_dir, source_policy=toolchain_source,
+                    min_age_days=toolchain_min_age_days,
+                )
+            except PromotionArtifactError as exc:
+                raise PromotionError(str(exc)) from exc
         tag_name = f"{tag_name}-{commit[:8]}"
 
         if push and candidate_branch:
@@ -761,6 +793,7 @@ def promote(
             "pushed": push,
             "candidate_branch": candidate_branch if (push and candidate_branch) else None,
             "coverage_baselines_written": baselines_written,
+            "python_artifacts_exported": build_python_artifacts_dir is not None,
             **summary,
         }
     finally:
@@ -792,13 +825,28 @@ def main(argv: list[str] | None = None) -> int:
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="default: do not push")
     mode.add_argument("--push", action="store_true", help="push the generated commit + tag")
+    artifacts = ap.add_mutually_exclusive_group()
+    artifacts.add_argument("--build-python-artifacts-dir", type=Path)
+    artifacts.add_argument("--python-artifacts-dir", type=Path)
+    ap.add_argument(
+        "--toolchain-source", choices=("governed", "seasoned-public"), default="governed"
+    )
+    ap.add_argument("--toolchain-min-age-days", type=int, default=None)
     args = ap.parse_args(argv)
+    if args.build_python_artifacts_dir is not None and args.push:
+        ap.error("build artifacts without --push, in a credential-separated job")
+    if args.toolchain_min_age_days is not None and args.toolchain_source != "seasoned-public":
+        ap.error("--toolchain-min-age-days requires --toolchain-source seasoned-public")
 
     try:
         report = promote(
             repo=args.repo, dev_ref=args.dev_ref, main_ref=args.main_ref,
             push=args.push, force=args.force, candidate_branch=args.candidate_branch,
             coverage_baselines_dir=args.coverage_baselines_dir,
+            build_python_artifacts_dir=args.build_python_artifacts_dir,
+            python_artifacts_dir=args.python_artifacts_dir,
+            toolchain_source=args.toolchain_source,
+            toolchain_min_age_days=args.toolchain_min_age_days,
         )
     except PromotionPaused as exc:
         # A pause is an expected, intentional operator action (part of the
@@ -843,6 +891,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  projection-synced: {path}")
     for plugin in report.get("coverage_baselines_written", []):
         print(f"  coverage-baseline-checked-in: {plugin}")
+    if report.get("python_artifacts_exported"):
+        print("  python-artifacts-exported: true")
     if report.get("candidate_branch"):
         print(f"  pushed candidate branch: {report['candidate_branch']} "
               "(land it on main via a real PR + merge; tag the actual merged commit)")

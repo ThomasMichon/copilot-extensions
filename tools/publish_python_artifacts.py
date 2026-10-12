@@ -1,0 +1,139 @@
+"""Verify promotion artifact signing identity and publish immutable release assets."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+from promotion_python_artifacts import (
+    INDEX_NAME, PromotionArtifactError, candidate_projects, validate_artifacts,
+)
+
+
+def _gh(argv: list[str], *, verification: bool = False) -> subprocess.CompletedProcess:
+    env = os.environ.copy()
+    if verification and "ARTIFACT_VERIFY_TOKEN" in env:
+        env["GH_TOKEN"] = env["ARTIFACT_VERIFY_TOKEN"]
+    env.pop("ARTIFACT_VERIFY_TOKEN", None)
+    return subprocess.run(
+        ["gh", *argv], capture_output=True, text=True, env=env,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+
+
+def _check(result: subprocess.CompletedProcess) -> str:
+    if result.returncode:
+        raise PromotionArtifactError(
+            f"gh failed ({result.returncode}):\n{result.stdout}\n{result.stderr}"
+        )
+    return result.stdout
+
+
+def verify_attestations(
+    directory: Path, *, repository: str, signer_digest: str, source_digest: str,
+    source_ref: str,
+) -> None:
+    """Require the pinned hosted promotion workflow, never repo-write authority."""
+    if (
+        not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
+        or not re.fullmatch(r"[0-9a-f]{40}", signer_digest)
+        or not re.fullmatch(r"[0-9a-f]{40}", source_digest)
+        or not re.fullmatch(r"refs/heads/[A-Za-z0-9_./-]+", source_ref)
+    ):
+        raise PromotionArtifactError("invalid expected attestation identity")
+    index = directory / INDEX_NAME
+    if not index.is_file() or index.is_symlink():
+        raise PromotionArtifactError("missing or unsafe promotion artifact index")
+    # Verify the index before using any publisher-controlled identity fields.
+    paths = [index, *sorted(directory.glob("*.zip"))]
+    for path in paths:
+        if path.is_symlink() or not path.is_file():
+            raise PromotionArtifactError(f"{path.name}: unsafe attestation subject")
+        _check(_gh([
+            "attestation", "verify", str(path), "--repo", repository,
+            "--signer-workflow", f"{repository}/.github/workflows/validate-and-promote.yml",
+            "--signer-digest", signer_digest, "--source-digest", source_digest,
+            "--source-ref", source_ref, "--deny-self-hosted-runners",
+        ], verification=True))
+
+
+def publish_artifacts(
+    directory: Path, *, repository: str, merged_commit: str, dev_head: str, repo: Path,
+) -> None:
+    """Publish only after verifying the actual merged candidate's exact composition."""
+    import promote_release as promotion
+
+    if not re.fullmatch(r"[0-9a-f]{40}", merged_commit):
+        raise PromotionArtifactError("invalid merged promotion commit")
+    tree = promotion._git(["rev-parse", f"{merged_commit}^{{tree}}"], cwd=repo)
+    main_before = promotion._git(["rev-parse", f"{merged_commit}^"], cwd=repo)
+    scratch = promotion.add_scratch_worktree(merged_commit, repo=repo)
+    try:
+        index = validate_artifacts(
+            directory, content_tree=promotion._tree_excluding_state(tree, repo=repo),
+            dev_head=dev_head, main_before=main_before, projects=candidate_projects(scratch),
+        )
+    finally:
+        promotion.remove_scratch_worktree(scratch, repo=repo)
+    for entry in index["artifacts"]:
+        tag = f"{entry['plugin']}-v{entry['version']}"
+        asset = str(directory / entry["filename"])
+        result = _gh(["api", f"repos/{repository}/releases/tags/{tag}"])
+        if result.returncode:
+            if "(HTTP 404)" not in result.stderr:
+                _check(result)
+            _check(_gh([
+                "release", "create", tag, "--repo", repository, "--target", merged_commit,
+                "--title", tag, "--notes",
+                "Attested first-party Python wheels. Runtime dependency admission is "
+                "consumer-side; these assets contain no third-party runtime packages.",
+                asset,
+            ]))
+            continue
+        try:
+            release = json.loads(result.stdout)
+            matches = [a for a in release["assets"] if a["name"] == entry["filename"]]
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise PromotionArtifactError(f"{tag}: invalid release response") from exc
+        if matches:
+            if len(matches) != 1 or matches[0].get("digest") != f"sha256:{entry['sha256']}":
+                raise PromotionArtifactError(f"{tag}: existing immutable asset digest mismatch")
+            continue
+        _check(_gh(["release", "upload", tag, "--repo", repository, asset]))
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("operation", choices=("verify", "publish"))
+    parser.add_argument("--directory", required=True, type=Path)
+    parser.add_argument("--repository", required=True)
+    parser.add_argument("--signer-digest", required=True)
+    parser.add_argument("--source-digest", required=True)
+    parser.add_argument("--source-ref", required=True)
+    parser.add_argument("--merged-commit")
+    parser.add_argument("--dev-head")
+    args = parser.parse_args(argv)
+    if args.operation == "publish" and (not args.merged_commit or not args.dev_head):
+        parser.error("publish requires --merged-commit and --dev-head")
+    try:
+        verify_attestations(
+            args.directory, repository=args.repository, signer_digest=args.signer_digest,
+            source_digest=args.source_digest, source_ref=args.source_ref,
+        )
+        if args.operation == "publish":
+            publish_artifacts(
+                args.directory, repository=args.repository, merged_commit=args.merged_commit,
+                dev_head=args.dev_head, repo=Path(__file__).resolve().parent.parent,
+            )
+    except PromotionArtifactError as exc:
+        print(f"promotion-python-artifacts: FAILED: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

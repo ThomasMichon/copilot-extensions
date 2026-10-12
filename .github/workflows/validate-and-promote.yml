@@ -129,6 +129,8 @@ jobs:
         with:
           fetch-depth: 0
       - id: check
+        env:
+          DEFAULT_REF: refs/heads/${{ github.event.repository.default_branch }}
         run: |
           # Resolve the candidate sha per trigger type, then apply the
           # IDENTICAL ancestor proof to all of them -- never trust a
@@ -150,12 +152,12 @@ jobs:
           # reaches this point ends up validating and promoting whatever
           # `dev` actually is *right now* -- an evicted/stale dispatch is
           # never lost, because whichever dispatch happens to trigger this
-          # job next always converges on the same, freshest target. This
-          # is the same "wholesale-replace catches up everything
-          # accumulated" philosophy this whole pipeline already relies on,
-          # just applied one hop earlier. `workflow_dispatch`'s own
-          # `github.sha` is unchanged (whatever ref a human dispatched
-          # against) -- previously short-circuited straight to
+          # job next always converges on the same, freshest target.
+          # Manual dispatch from the trusted default-branch workflow also
+          # resolves the live dev tip: its own generated main SHA is not
+          # a dev ancestor. Other refs still undergo the ancestry proof,
+          # but cannot enter the default-branch-only artifact signing job.
+          # Manual dispatch previously short-circuited straight to
           # `is_dev=true` for it, never verified against `dev` at all --
           # safe only by accident, because every downstream promotion call
           # hard-coded `origin/dev` regardless of this job's own `sha`
@@ -167,7 +169,7 @@ jobs:
           # proof for every trigger closes that gap regardless of who/what
           # dispatched this run.
           git fetch origin dev
-          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "repository_dispatch" ] || [ "$GITHUB_REF" = "$DEFAULT_REF" ]; then
             sha="$(git rev-parse origin/dev)"
           else
             sha="${{ github.sha }}"
@@ -393,6 +395,60 @@ jobs:
       - name: Large files (full sweep, unconditional)
         run: python tools/check-large-files.py --all
 
+  python-artifacts:
+    name: Build and attest first-party Python artifacts
+    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep]
+    if: >-
+      needs.gate.outputs.is_dev == 'true' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      exported: ${{ steps.build.outputs.exported }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Build the composed, versioned promotion candidate without release authority
+        id: build
+        env:
+          DEV_SHA: ${{ needs.gate.outputs.sha }}
+          ARTIFACT_DIR: ${{ runner.temp }}/python-artifacts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin dev main
+          python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
+            --build-python-artifacts-dir "$ARTIFACT_DIR" \
+            --toolchain-source seasoned-public --toolchain-min-age-days 7
+          if [ -f "$ARTIFACT_DIR/python-artifacts.json" ]; then
+            echo "exported=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exported=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Attest the exact transfer index and every first-party bundle
+        if: steps.build.outputs.exported == 'true'
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: ${{ runner.temp }}/python-artifacts/*
+      - uses: actions/upload-artifact@v4
+        if: steps.build.outputs.exported == 'true'
+        with:
+          name: promotion-python-artifacts
+          path: ${{ runner.temp }}/python-artifacts/*
+          if-no-files-found: error
+          retention-days: 2
+
   report-failure:
     name: report failure (Phase 1 watchdog; detection + dedup only, no fix attempt)
     # Phase 1 of the promotion-failure-reactive-fix-agent effort
@@ -421,7 +477,7 @@ jobs:
     # exists to react automatically to real validation runs), so the fix is
     # to just never offer that path, rather than trying to harden a job
     # whose own YAML could be attacker-controlled.
-    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep]
+    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep, python-artifacts, publish-python-artifacts]
     if: >-
       always() &&
       github.event_name == 'repository_dispatch' &&
@@ -430,7 +486,9 @@ jobs:
        needs.worktree-manager.result == 'failure' ||
        needs.agent-index-service-linux.result == 'failure' ||
        needs.agent-index-service-windows.result == 'failure' ||
-       needs.guards-full-sweep.result == 'failure')
+       needs.guards-full-sweep.result == 'failure' ||
+       needs.python-artifacts.result == 'failure' ||
+       needs.publish-python-artifacts.result == 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -600,7 +658,7 @@ jobs:
 
   promote:
     name: Promote dev -> main
-    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep]
+    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep, python-artifacts]
     # `always()`: `full`/`worktree-manager`/`guards-full-sweep` are legitimately
     # `skipped` (not `success`) whenever `gate` found `is_dev == 'false'` --
     # the default implicit `if` (require every `needs` job to have succeeded)
@@ -609,7 +667,13 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     environment: main-promotion
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
     timeout-minutes: 330
+    outputs:
+      merge_sha: ${{ steps.merged.outputs.merge_sha }}
     # Environment gating (configured 2026-09-25, repo Settings, not this
     # file): `main-promotion` restricts its deployment_branch_policy to
     # protected branches only (`dev`/`main`) and deliberately carries NO
@@ -710,7 +774,7 @@ jobs:
           # is_dev was true, so full/worktree-manager/guards-full-sweep were
           # NOT skipped by their own `if:` above -- they must have genuinely
           # run and succeeded, or we refuse to promote unvalidated content.
-          for r in "${{ needs.full.result }}" "${{ needs.worktree-manager.result }}" "${{ needs.agent-index-service-linux.result }}" "${{ needs.agent-index-service-windows.result }}" "${{ needs.guards-full-sweep.result }}"; do
+          for r in "${{ needs.full.result }}" "${{ needs.worktree-manager.result }}" "${{ needs.agent-index-service-linux.result }}" "${{ needs.agent-index-service-windows.result }}" "${{ needs.guards-full-sweep.result }}" "${{ needs.python-artifacts.result }}"; do
             if [ "$r" != "success" ]; then
               echo "proceed=false" >> "$GITHUB_OUTPUT"
               echo "::error::Validation did not pass ($r) -- refusing to promote."
@@ -730,6 +794,20 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Download this run's signed Python artifacts
+        if: steps.decide.outputs.proceed == 'true' && needs.python-artifacts.outputs.exported == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: promotion-python-artifacts
+          path: python-artifacts
+      - name: Verify the hosted, pinned promotion signer before using artifact metadata
+        if: steps.decide.outputs.proceed == 'true' && needs.python-artifacts.outputs.exported == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python tools/publish_python_artifacts.py verify --directory python-artifacts \
+            --repository "$GITHUB_REPOSITORY" --signer-digest "${{ github.workflow_sha }}" \
+            --source-digest "${{ github.sha }}" --source-ref "$GITHUB_REF"
       - name: Download coverage baselines (pilot plugins only; best-effort)
         if: steps.decide.outputs.proceed == 'true'
         # Not every promotion run has a baseline artifact yet (only the
@@ -807,13 +885,15 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$PUSH_INPUT" = "false" ]; then
             output=$(python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
-              --coverage-baselines-dir "$COVERAGE_BASELINES_DIR")
+              --coverage-baselines-dir "$COVERAGE_BASELINES_DIR" \
+              --python-artifacts-dir python-artifacts)
             echo "$output"
             echo "land=false" >> "$GITHUB_OUTPUT"
           else
             output=$(python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
               --push --candidate-branch "$CANDIDATE_BRANCH" \
-              --coverage-baselines-dir "$COVERAGE_BASELINES_DIR")
+              --coverage-baselines-dir "$COVERAGE_BASELINES_DIR" \
+              --python-artifacts-dir python-artifacts)
             echo "$output"
             echo "land=true" >> "$GITHUB_OUTPUT"
             # Consumed changefiles are no longer swept off `dev` by this
@@ -1077,3 +1157,41 @@ jobs:
       # `dev_head` in `.github/release-pipeline-state.json` on `main`,
       # regardless of whether it's still physically present on `dev`, so
       # decoupling deletion cadence from promotion cadence is safe.
+
+  publish-python-artifacts:
+    name: Publish attested first-party Python artifacts
+    needs: [gate, python-artifacts, promote]
+    if: needs.promote.outputs.merge_sha != '' && needs.python-artifacts.outputs.exported == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: main-promotion
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
+    env:
+      GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+      ARTIFACT_VERIFY_TOKEN: ${{ github.token }}
+      MERGE_SHA: ${{ needs.promote.outputs.merge_sha }}
+      DEV_SHA: ${{ needs.gate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: promotion-python-artifacts
+          path: python-artifacts
+      - name: Verify the actual merge and publish without replacing any prior asset
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$MERGE_SHA" origin/main
+          python tools/publish_python_artifacts.py publish --directory python-artifacts \
+            --repository "$GITHUB_REPOSITORY" --signer-digest "${{ github.workflow_sha }}" \
+            --source-digest "${{ github.sha }}" --source-ref "$GITHUB_REF" \
+            --merged-commit "$MERGE_SHA" --dev-head "$DEV_SHA"

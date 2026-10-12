@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-slice (see Coordination)
 - **Created:** 2026-10-01
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** extends `visions/installer/README.md`, `visions/plugin-services/installation-cells/README.md`, and the agent-index runtime vision; this effort does not replace any of them
 - **Umbrella issue:** [#4876](https://github.com/ThomasMichon/copilot-extensions/issues/4876)
 - **Sub-issues:** _pending_
@@ -142,7 +142,7 @@ private consumer feed. Consumer-side admission still checks the actual feed.
       wheel's own `Generator:` is verified to match the locked toolchain
       exactly, failing closed on any drift. The manifest's `build_toolchain`
       field is now a structured lock record (`{"packages": {...},
-      "lock_id": "sha256:..."}`, schema version 2) rather than schema
+      "provenance": {...}, "lock_id": "sha256:..."}`, schema version 3) rather than schema
       version 1's ad hoc per-wheel generator list, and `lock_id` folds into
       `artifact_id`. Smoke-tested for real: building `agent-bridge` then
       `agent-worktrees` against the SAME `--toolchain-venv` produced
@@ -408,6 +408,36 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-12 - Phase 2 slice 5: composed promotion artifact integration
+
+- Slice 4 merged as #6318 (`1703cc42bf8c23182f6a9793d14bd4d56b6d4228`).
+  Its final current-head review approved with no open or previously missed
+  findings; all five threads were resolved and required CI passed.
+- Added an explicit non-pushing preparation path that exports first-party
+  bundles from the actual bumped/materialized candidate, using a second
+  disposable checkout so backend residue cannot enter the promotion tree.
+- The promotion workflow builds/signs separately from `main-promotion` and
+  its release PAT. Both the transfer index and every bundle receive native
+  GitHub provenance attestations. Verification constrains repository,
+  workflow path/digest, source ref/digest and hosted-runner identity, using
+  the read-only workflow token rather than requiring new PAT permissions.
+- The release writer validates the same dev/main/content-tree and complete
+  project set before candidate push, then rechecks the actual merged commit
+  before publishing content-addressed assets under plugin/version releases.
+  Existing assets are never clobbered. Failed transfer/signing/builds block
+  promotion and enter the existing failure reporter.
+- Local validation: 379 combined promotion/builder/resolver cases passed,
+  including real Git composition and a real candidate subprocess exporting
+  two first-party sets through one shared lock without source-tree pollution.
+  Touched lint, headless-launch and module-size guards pass.
+  Hosted fresh-toolchain/wheel-bundle smoke and actual attestation/release
+  evidence remain to be recorded. Managed-device public installation was not
+  run; consumer clean-room/install/rollback paths are unchanged and belong
+  to Phase 3. Native OIDC signing can only be proved by the trusted
+  default-branch promotion job after this workflow reaches that branch.
+  Dependency closure/admission, shared-installer consumption, the full
+  consumer/platform matrix and durable retention remain open.
 
 ### 2026-10-12 - Phase 2 slice 4: explicit public build-toolchain integration
 
