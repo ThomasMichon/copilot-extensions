@@ -208,6 +208,28 @@ approval counts, not all of them):
   exists rather than naming dynamic matrix jobs directly) apply to
   everyone with no bypass, including every Maintainer.
 
+#### Review escape hatch is separate from CI enforcement
+
+The `dev` classic protection's `enforce_admins` setting is enabled. An owner
+merge using `--admin` therefore cannot waive the existing required CI context.
+The separate review-required ruleset still grants Maintainers their existing
+pull-request-scoped review bypass: a stuck or imperfect Copilot review does not
+remove the worst-case self-merge escape hatch.
+
+Agents must not reach for that review escape hatch prematurely. Follow
+`CONTRIBUTING.md`'s review loop, address blocking findings and independently
+confirm every configured required context has completed successfully for the
+current head. A successful rollup of *reported* checks is not enough when a
+required check has not registered. Missing or unreadable required evidence blocks.
+
+Administrative recovery remains available for genuine infrastructure deadlock,
+but changing enforcement requires an explicit human decision for the named
+incident and PR, bounded scope, recorded before-state and restoration proof.
+There is no standing agent permission to disable CI enforcement, add a bypass
+actor, or wave away an ordinary test failure. The review escape hatch does not
+relax the dev contribution route or the critical-workflow/metadata-only main
+repair boundary.
+
 #### Onboarding a Maintainer
 
 The repository owner applies both halves of the existing Maintainer tier:

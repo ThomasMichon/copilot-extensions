@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees; ordinary changes target `dev`
 - **Created:** 2026-10-12
-- **Status:** Active; reviewed plan, first consolidation slice in progress
+- **Status:** Active; first wave live, candidate/validation consolidation open
 - **Vision:** `visions/main-owned-workflow-control/README.md`
 - **Umbrella issue:** #6237
 - **Related campaigns:** #3336; `promotion-failure-reactive-fix-agent`; #6142
@@ -70,6 +70,10 @@ Related review-request repair #6233 was already released; do not repeat it.
 > run more often without getting throttled. The main-owned-workflow-control
 > is a means to an end, but not the highest priority.
 
+> Yes, noting we always still need an escape hatch. The Copilot reviewer still
+> isn't perfect, so we as maintainers always need a way to forcbly self-merge as
+> a worst-case, but we don't want agents reaching for that button prematurely.
+
 The operator confirmed the explicit main-owned control/dev-owned content model.
 The detailed decomposition and validation cases below are **agent-recommended**,
 reconciled with the other planning agent's public handoff on #6237.
@@ -101,8 +105,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
-- [ ] Coalesce or prevent redundant event-triggered runs, not merely mark all
+- [x] Coalesce or prevent redundant event-triggered runs, not merely mark all
   jobs skipped; preserve timely contributor feedback and review delivery.
+  #6308/#6314 reduce trusted invocations; released #6359 prevents irrelevant
+  PR ancestry runner allocation. Natural events verified both remaining jobs.
 - [ ] Measure before/after run and check counts and review latency over comparable
   events; retain distinct heavy/platform/installation coverage.
 - [ ] Deploy only the minimal critical control repair required to unblock the
@@ -313,3 +319,30 @@ credential changes, broad policy weakening or unreviewed releases.
   required checks passed. It prevents PR CI completions from allocating an
   ancestry-filter runner, retaining success/ancestry checks for push/manual
   events. Release and live skip evidence for that latest slice remain pending.
+
+### 2026-10-12 - Missing-check incident and operator-authorized recovery
+
+- #6323 was prematurely merged as `145f6dfb01cf`: the watcher treated reported
+  green checks as complete while the required PR aggregate had not registered.
+  The driver also failed to treat its absence as blocking. Owner-profile merge
+  used admin escalation, and classic protection still exempted admins.
+- The driver disclosed the incident immediately; the operator directed actual
+  CI/promotion observation and repair of any failures. Exact-head CI
+  `38310113011` later passed with both named required contexts explicitly green.
+  Covering dev CI passed, and release `38313645096` validated dev
+  `cbb7256268e6`, including `145f6dfb01cf` by Git ancestry.
+- Generated #6377 merged at `22:40:12Z` as main `677cc12041a4`, with exact PR
+  wait and post-merge tagging successful. No CI failure needed fixing in this
+  recovery. Later success does not retroactively justify the premature merge.
+- #6367 tracks the tooling defect. Pending or absent required contexts now block
+  the driving session independently of its watcher rollup.
+- The operator authorized enabling `dev`'s existing `enforce_admins` setting.
+  Live readback confirmed true, the same required aggregate and strict=false;
+  review-required ruleset and its existing Maintainer bypass actors unchanged.
+  No additional workflow/check, main policy or credential was introduced.
+- The operator explicitly retained a worst-case review self-merge escape hatch,
+  without premature agent use. CI enforcement changes require separate bounded
+  human recovery authorization, never an inferred routine exemption.
+- The first-wave publication/recovery watches are complete. Remaining main
+  duplicate validation, stronger candidate assurance and normalized review
+  capacity measurement remain open campaign gates.
