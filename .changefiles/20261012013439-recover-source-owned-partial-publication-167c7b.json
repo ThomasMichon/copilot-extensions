@@ -1,0 +1,9 @@
+{
+  "comment": "Recover source-owned partial publication across a verified rebase without adopting concurrent remote work",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

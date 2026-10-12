@@ -690,6 +690,15 @@ re-verifies the current source, pins its exact object, runs real pre-push hooks,
 and retains the exact **last-observed remote head** lease. Fetching a reviewer
 update never silently advances that lease. After a successful rewrite, tracking
 refreshes the base, head and patch together.
+If an earlier source push reached the remote but its acknowledgement was lost,
+a later rebase can leave the saved lease behind. Recovery never adopts today's
+tip blindly: the Git remote and provider must independently agree, and that tip
+must descend from the saved head and be contained in the verified pre-rebase
+source. The complete source replay is checked again and the recovered exact tip
+fences the one bounded retry. The audit retains both the saved head and transport
+lease; tracking advances only after successful publication. Unconfirmed tips,
+concurrent commits outside that original source, changed associations or
+destinations remain explicit refusals.
 The destination is recorded only as a SHA-256 fingerprint; raw Git push URLs
 can carry credentials and are never copied into the checkpoint.
 Proof queries disable Git replacement objects, including ancestry, patch and

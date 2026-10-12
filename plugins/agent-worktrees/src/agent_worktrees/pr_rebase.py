@@ -6,7 +6,7 @@ import json
 import hashlib
 import re
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from agent_procutil import no_window_kwargs
@@ -30,6 +30,7 @@ class RebaseProof:
     source_head: str
     patches: tuple[str, ...]
     conflict_replays: tuple[tuple[str, str], ...]
+    transport_expected_head: str = ""
 
 
 def _git(*args: str, cwd: str) -> str:
@@ -327,7 +328,8 @@ def record_synced(worktree_id: str, config, cwd: str) -> None:
 
 
 def push(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
-         timeout: float = push_timeout.DEFAULT_PUSH_TIMEOUT) -> git_ops.PushResult:
+         timeout: float = push_timeout.DEFAULT_PUSH_TIMEOUT,
+         reconcile_head: str = "") -> git_ops.PushResult:
     """The only non-ancestral publish path: a freshly verified owned-PR replay."""
     try:
         reasons: list[str] = []
@@ -336,13 +338,37 @@ def push(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
             return git_ops.PushResult(
                 ok=False, stderr="Refusing unproved PR rewrite: " + reasons[0],
             )
+        lease = expected
+        if reconcile_head:
+            from . import pr_publish
+            pr = pr_publish._pr_for(record, proof.branch)
+            if not (
+                re.fullmatch(r"[0-9a-f]{40,64}", reconcile_head)
+                and _ancestor(expected, reconcile_head, cwd)
+                and _ancestor(reconcile_head, proof.old_source, cwd)
+                and pr_publish._tip(remote, proof.branch, cwd) == reconcile_head
+                and pr_publish._provider_head(repo, pr) == reconcile_head
+            ):
+                return git_ops.PushResult(
+                    ok=False, stderr="Refusing partial publication recovery: remote head is not independently confirmed source lineage.",
+                )
+            lease = reconcile_head
+            proof = replace(proof, transport_expected_head=lease)
         _save(proof, cwd)
         # Pin the verified source object; never race a moving local branch.
         from .git_push_transport import push as transport
         result = transport(
             remote, f"{proof.source_head}:refs/heads/{proof.branch}", cwd=cwd,
-            force_with_lease_expect=expected, timeout=timeout,
+            force_with_lease_expect=lease, timeout=timeout,
         )
+        if not result and not reconcile_head and "stale info" in result.stderr:
+            from . import pr_publish
+            observed = pr_publish._tip(remote, proof.branch, cwd)
+            if observed:
+                return push(
+                    record, repo, remote, refspec, expected,
+                    cwd=cwd, timeout=timeout, reconcile_head=observed,
+                )
         if result:
             result.rebase_base_sha = proof.new_base
             result.published_head_sha = proof.source_head

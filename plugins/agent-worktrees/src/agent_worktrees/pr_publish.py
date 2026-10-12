@@ -446,6 +446,12 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                 tip = _tip(remote, destination.removeprefix("refs/heads/"), cwd)
                 if tip and git_ops.is_commit_ancestor(tip, source, cwd=cwd):
                     result = git_ops.push(remote, refspec, cwd=cwd, timeout=timeout)
+                elif tip and repo is not None:
+                    from . import pr_rebase
+                    result = pr_rebase.push(
+                        record, repo, remote, refspec, force_with_lease_expect,
+                        cwd=cwd, timeout=timeout, reconcile_head=tip,
+                    )
             if repo is not None and force_with_lease_expect and result.stderr == (
                 f"Refusing: {force_with_lease_expect} not an ancestor."
             ):
