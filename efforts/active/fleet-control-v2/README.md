@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; plan reviewed, contract-slice assignment pending
+- **Status:** Active; release/role snapshot contract slice in implementation
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts. Existing dependencies #5789, #6030, #5861, #5862 retain ownership.
@@ -27,7 +27,7 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Plan steward | Plan/vision reconciliation, issue coordination and review stewardship | Managed planning worktree; umbrella issue |
-| Contract implementer | First reviewed local/Gateway/node operation slice after ownership assignment | Separate managed worktree; assigned sub-issue |
+| Contract implementer | Release/role snapshot contract under #6240; later operation slice separately assigned | Managed implementation worktree; assigned sub-issue |
 | Existing campaign owners | Routing, standalone client, role deployment and provider integration | Existing campaign issues and canonical efforts |
 | Adopter | Configuration, capacity, enrollment and live activation approval | Explicit downstream adoption workflow |
 
@@ -77,11 +77,15 @@ Operator direction, captured verbatim:
 > organization please). Then, get this reviewed via PR, and prepare to start
 > driving it via effort buildout"
 
+> "Sounds good. Continue driving."
+
 The operator confirmed the slug `fleet-control-v2`. Personal artifact delivery
 is handled outside this public repository. The architecture details, phase
 breakdown and validation below are **agent-recommended** elaborations of the
 approved direction. No runtime or live rollout authorization is inferred from
-"prepare".
+"prepare". The subsequent direction authorizes driving the recommended contract
+implementation; live enrollment, deployment and destructive retirement still
+require their own approval.
 
 ## Plan
 
@@ -91,7 +95,7 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [x] Confirm canonical effort placement and slug; deduplicate and claim #6236.
 - [x] Land the effort, [architecture proposal](architecture.md), and explicit
   integrated-product vision/pattern amendments through actual PR review.
-- [ ] Re-read the merged plan; coordinate existing campaign owners and assign
+- [x] Re-read the merged plan; coordinate existing campaign owners and assign
   non-overlapping sub-issues before any runtime implementation.
 - [ ] Capture actual launch/update/recovery baseline and select first vertical
   slice acceptance criteria; do not invent performance targets from package counts.
@@ -187,3 +191,15 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 - Next gate is coordinating the existing campaign owners and assigning distinct
   contract slices. The full effort, runtime proof, adoption and retirement remain
   open. No runtime implementation or live deployment began.
+
+### 2026-10-12 - First bounded contract slice
+- Operator authorized continued driving after selecting release/role/readiness
+  contracts as the first starting point.
+- Rechecked #6240 and adjacent work; #6133 is merged and the standalone client
+  remains an offline planner. Assigned the first #6240 implementation slice and
+  retained routing/auth/deployment campaign ownership.
+- Transitioned the implementation participant to Phase 1 for the bounded #6240
+  slice; canonical operation/node-receipt implementation remains unassigned.
+- Added strict release role declarations and explicit non-mutating observation
+  inspection. Snapshot readiness is not a live probe or signed-artifact proof.
+  Installation, Gateway/node service execution and migration remain pending.
