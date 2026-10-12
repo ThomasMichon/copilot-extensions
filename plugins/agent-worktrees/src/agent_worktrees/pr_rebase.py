@@ -286,7 +286,9 @@ def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
     )
     if conflicts is None:
         return refuse("The manual replay did not preserve source trees and commit identity.")
-    url = _git("remote", "get-url", "--push", remote, cwd=cwd)
+    from .git_push_transport import captured_urls
+    captured = captured_urls(remote)
+    url = captured[0] if captured else _git("remote", "get-url", "--push", remote, cwd=cwd)
     if not url:
         return refuse("The verified destination has no readable push URL.")
     return RebaseProof(
