@@ -5,20 +5,20 @@
   picker-support plugins)
 - **Branch(es):** per-slice worktrees
 - **Created:** 2026-10-06
-- **Status:** Active <!-- Phase 4 local controls implemented and validated; implementation review/merge pending; remote scope transferred to #6283 -->
-- **Vision:** [`visions/picker`](../../../visions/picker/README.md)'s
+- **Status:** Done <!-- Local controls landed in #6306; remote UI/validation transferred to #6283 -->
+- **Vision:** [`visions/picker`](../../../../visions/picker/README.md)'s
   plugin-pivot-extensibility behavior (a plugin's own pivot manifest
   contributes Picker surface without Picker-side code) and
-  [`visions/plugins/agent-dispatch`](../../../visions/plugins/agent-dispatch/README.md)'s
+  [`visions/plugins/agent-dispatch`](../../../../visions/plugins/agent-dispatch/README.md)'s
   overrides-take-precedence behavior (a user-local override always wins over
   a declaration, which is exactly why this section can be a thin override
   toggle rather than a repo edit).
 - **Umbrella issue:** See effort
 - **Sub-issues:** #6282 (local Picker controls), #6283 (remote UI and validation)
 - **Related efforts:**
-  [`agent-dispatch-recipe-library`](../../2026/10/08%20agent-dispatch-recipe-library/README.md)
+  [`agent-dispatch-recipe-library`](../08%20agent-dispatch-recipe-library/README.md)
   (shipped the `extends:`/recipe-template model this section surfaces),
-  [`agent-dispatch-tasks-pane-ux-overhaul`](../agent-dispatch-tasks-pane-ux-overhaul/README.md)
+  [`agent-dispatch-tasks-pane-ux-overhaul`](../../../active/agent-dispatch-tasks-pane-ux-overhaul/README.md)
   Phase 9 (the richer Configuration → Registrars viewer/editor; this effort's
   MVP is a narrower, pre-existing-primitive-only slice that does not block on
   or duplicate that phase). A private operator peer effort in a downstream
@@ -320,7 +320,9 @@ in #6096. It does not authorize remote-machine controls or template activation.
       override behavior for non-UI callers.
 - [x] Wire only the plugin-owned Workers manifest; keep Manager code generic.
       Update the public manifest contract and worker-control documentation.
-- [ ] Land through the normal reviewed PR flow and journal the actual outcome.
+- [x] Land through the normal reviewed PR flow and journal the actual outcome.
+      **Landed:** #6306, after an exact-head zero-finding approval and successful
+      required CI.
 
 ## Validation Plan
 
@@ -362,11 +364,29 @@ in #6096. It does not authorize remote-machine controls or template activation.
 
 ## Proposal
 
-_Pending — Phase 1's exact query/glue shape firms this up. (Phase 3's own
-no-name summary mode is proposal-level work in its own right; see that
-phase's first Plan item for the rationale.)_
+The Phase 4 local-control plan was reviewed in #6287 and implemented in #6306.
+Remote UI and second-machine validation remain a separate tracked objective
+in #6283.
 
 ## Journal
+
+### 2026-10-12 — Local scope landed; effort complete
+
+- Implementation #6306 merged to `dev` after a zero-finding automated approval
+  on the protected-name fix and successful required CI. Local issue #6282 is
+  closed. This is a landed source change, not a claim that an installed host has
+  already received the promoted release.
+- Local proof includes the real native Picker form and Cancel-default
+  confirmation against the actual registrar/override CLI in isolated state.
+  Disable/Enable round-trip through `supervise override list`; Cancel and stale
+  or ambiguous target refusal leave the store unchanged; declarations retain
+  their bytes. The acceptance fixture uses a valid leading-hyphen pool name.
+- All Plan and Validation Plan items are resolved. The two remote-scope entries
+  remain explicit transfers to open #6283; no remote implementation or
+  second-machine proof is inferred from the local result.
+- Archived the canonical effort and removed it from the active index. Runtime
+  truth is documented in the Manager contribution contract and dispatch README.
+  The completed effort binding is released after this archive change lands.
 
 ### 2026-10-12 — Reviewed local plan executed and native round-trip proven
 
