@@ -46,7 +46,6 @@ project scans; both process boundaries remain timeout-contained.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -328,21 +327,34 @@ def refresh_local_cache(
 
 
 def _worker_directory(root: Path) -> Path:
-    from . import config
+    from . import git_ops
 
-    identity = hashlib.sha256(os.path.normcase(str(root)).encode("utf-8")).hexdigest()
-    return config.install_dir() / "local-guidance" / identity
+    result = git_ops.git(
+        "rev-parse", "--absolute-git-dir", cwd=str(root),
+        check=False, isolated_repository=True, timeout=1.0,
+    )
+    if result.returncode or not result.stdout.strip():
+        raise ValueError("cannot resolve this checkout's Git administrative directory")
+    return Path(result.stdout.strip()) / "agent-worktrees-local-guidance"
 
 
 def _queue_refresh(cwd: str) -> RefreshResult:
     from agent_procutil import windowless_daemon_kwargs
+    from single_instance_lease import AlreadyRunningError, SingleInstance
     from . import status_monitor_runtime
 
     root = _checkout_root(cwd).resolve()
     directory = _worker_directory(root)
     directory.mkdir(parents=True, exist_ok=True)
     log_path = directory / "refresh.log"
-    with log_path.open("a", encoding="utf-8") as log:
+    probe = SingleInstance(directory, service="local-guidance")
+    try:
+        probe.acquire()
+    except AlreadyRunningError:
+        return RefreshResult("queued", detail=f"refresh already active; not yet delivered; result: {log_path}")
+    else:
+        probe.release()
+    with log_path.open("w", encoding="utf-8") as log:
         proc = subprocess.Popen(
             [sys.executable, "-m", "agent_worktrees.local_cache_refresh", "--refresh", str(root)],
             stdin=subprocess.DEVNULL, stdout=log, stderr=log,
@@ -382,7 +394,7 @@ def sessionstart_diagnostic(cwd: str, *, deadline: float | None) -> str:
     authenticated existing caches or reviewed fallbacks until publication.
     """
     try:
-        if deadline is not None and deadline - time.time() < 1.0:
+        if deadline is not None and deadline - time.time() < 1.5:
             return RefreshResult("skipped", detail="backup refresh deadline too short").diagnostic + "\n"
         return _queue_refresh(cwd).diagnostic + "\n"
     except Exception as exc:

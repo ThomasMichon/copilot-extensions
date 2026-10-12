@@ -324,8 +324,13 @@ resolves to the checkout root. An expired or nearly exhausted hook budget skips
 dispatch with an explicit diagnostic, and spawn failures remain visible.
 
 The hook reports **queued**, not installed or loaded. The worker's actual result,
-including publication counts or failures, is written to the installation-cell
-`local-guidance/<checkout-hash>/refresh.log` named by that diagnostic.
+including publication counts or failures, is written to
+`<checkout-git-dir>/agent-worktrees-local-guidance/refresh.log` named by that
+diagnostic. These are ephemeral checkout artifacts, not a runtime or service
+registration root: a linked worktree uses its own Git administrative directory,
+so the normal finalization/GC Git worktree removal reclaims its lease and log.
+The log holds the latest attempt rather than an append-only history; dispatch
+leaves an active worker's log intact and does not start another worker.
 Creation and resume still perform synchronous primary publication before launch.
 The asynchronous backup can race instruction discovery and first-turn reads:
 neither a successful spawn nor a completed cache write proves model admission.

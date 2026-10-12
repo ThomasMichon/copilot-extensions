@@ -182,7 +182,12 @@ def test_real_global_discovery_and_renderer_fit_launch_budget(tmp_path, monkeypa
         encoding="utf-8",
     )
     repo = tmp_path / "repo"
-    (repo / ".git").mkdir(parents=True)
+    repo.mkdir(parents=True)
+    subprocess.run(
+        ["git", "init", "--quiet", str(repo)], check=True, capture_output=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    (repo / ".gitignore").write_text("**/*.local.instructions.md\n", encoding="utf-8")
     (home / ".copilot" / "config.json").write_text(
         json.dumps({"trustedFolders": [str(repo)] if trusted else []}), encoding="utf-8",
     )
@@ -241,7 +246,8 @@ def test_real_global_discovery_and_renderer_fit_launch_budget(tmp_path, monkeypa
 
     def spawn(argv, **kwargs):
         process = popen(argv, **kwargs)
-        processes.append(process)
+        if "--refresh" in argv:
+            processes.append(process)
         return process
 
     monkeypatch.setattr(lcr.subprocess, "Popen", spawn)
@@ -1013,6 +1019,9 @@ class TestSessionstartDiagnostic:
         calls = []
         waits = []
         monkeypatch.setattr(lcr, "_worker_directory", lambda root: tmp_path / "worker")
+        (tmp_path / "worker").mkdir()
+        log_path = tmp_path / "worker" / "refresh.log"
+        log_path.write_text("old result\n" * 100_000, encoding="utf-8")
         monkeypatch.setattr(status_monitor_runtime, "_daemon_cwd", lambda: str(tmp_path))
         monkeypatch.setattr(status_monitor_runtime, "_daemon_environment", lambda: {"HOME": str(tmp_path)})
         monkeypatch.setattr(
@@ -1037,10 +1046,53 @@ class TestSessionstartDiagnostic:
         assert kwargs["stdin"] == subprocess.DEVNULL
         assert kwargs["stdout"] is kwargs["stderr"]
         assert kwargs["start_new_session"]
+        assert log_path.stat().st_size == 0
         deadline = time.monotonic() + 1
         while not waits and time.monotonic() < deadline:
             time.sleep(0.01)
         assert waits
+
+    def test_active_worker_keeps_its_log_and_is_not_redispatched(self, tmp_path, monkeypatch):
+        from single_instance_lease import SingleInstance
+
+        monkeypatch.setattr(lcr, "_worker_directory", lambda root: tmp_path)
+        log_path = tmp_path / "refresh.log"
+        log_path.write_text("current worker result", encoding="utf-8")
+        monkeypatch.setattr(
+            lcr.subprocess, "Popen", lambda *a, **k: pytest.fail("worker already owns checkout"),
+        )
+        lease = SingleInstance(tmp_path, service="local-guidance")
+        lease.acquire()
+        try:
+            result = lcr._queue_refresh(str(tmp_path))
+        finally:
+            lease.release()
+        assert result.status == "queued"
+        assert "refresh already active" in result.detail
+        assert log_path.read_text() == "current worker result"
+
+    def test_git_worktree_removal_reclaims_worker_metadata(self, tmp_path):
+        anchor = tmp_path / "anchor"
+        checkout = tmp_path / "checkout"
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+        def git(*args):
+            subprocess.run(
+                ["git", *args], check=True, capture_output=True, creationflags=flags,
+            )
+
+        git("init", "--quiet", str(anchor))
+        git(
+            "-C", str(anchor), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+            "-c", "commit.gpgsign=false", "commit", "--quiet", "--allow-empty", "-m", "Fixture",
+        )
+        git("-C", str(anchor), "worktree", "add", "--quiet", "--detach", str(checkout), "HEAD")
+        directory = lcr._worker_directory(checkout.resolve())
+        assert directory.parent.parent == anchor / ".git" / "worktrees"
+        directory.mkdir()
+        (directory / "refresh.log").write_text("latest result", encoding="utf-8")
+        git("-C", str(anchor), "worktree", "remove", str(checkout))
+        assert not directory.exists()
 
     def test_only_one_worker_renders_a_repository(self, tmp_path, monkeypatch, capsys):
         from single_instance_lease import SingleInstance
