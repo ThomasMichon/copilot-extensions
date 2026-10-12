@@ -276,7 +276,10 @@ login. This command is manual/on-demand only; it is never triggered
 automatically by any launch path.
 
 Imports use owner-only temporary files, file fsync, atomic replacement, and
-best-effort containing-directory fsync where supported. Concurrent
+best-effort containing-directory fsync where supported.
+Owner permissions are restored before writing even when the process umask
+masks owner bits; Windows and ACL-backed filesystems retain their existing
+best-effort mode enforcement. Concurrent
 `copilot-login` imports to the same config serialize their read/merge/write
 transactions through `.config.json.copilot-login.lock` beside the config.
 The OS releases the lock when its holder exits; keep the lock file in place.

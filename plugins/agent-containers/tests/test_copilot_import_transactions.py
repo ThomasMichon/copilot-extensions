@@ -32,6 +32,45 @@ def test_import_fsyncs_directory_after_replacement(
     assert observed == [tmp_path]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner permission bits")
+def test_import_restores_owner_bits_under_restrictive_umask(tmp_path: Path) -> None:
+    # Isolate the process-wide umask from the test runner and its threads.
+    script = """
+import os, stat, sys
+from pathlib import Path
+from agent_containers.resolver import host_copilot_cli_token, import_copilot_cli_token
+path = Path(sys.argv[1])
+os.umask(0o777)
+import_copilot_cli_token("fixture-user", "fixture-secret", path)
+assert stat.S_IMODE(path.stat().st_mode) == 0o600
+assert host_copilot_cli_token("fixture-user", path) == "fixture-secret"
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path / "config.json")],
+        env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+        capture_output=True, text=True, timeout=30,
+        creationflags=no_window_flags(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+
+
+def test_import_applies_acl_compatible_mode_before_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checked: list[Path] = []
+    monkeypatch.setattr(resolver, "strict_posix_modes", lambda path: False)
+
+    def check_empty_temp(path: Path, mode: int) -> None:
+        assert mode == 0o600
+        assert path.stat().st_size == 0
+        checked.append(path)
+
+    monkeypatch.setattr(resolver, "enforce_mode", check_empty_temp)
+    resolver.import_copilot_cli_token("fixture-user", "fixture-secret", tmp_path / "config.json")
+    assert len(checked) == 1
+
+
 @pytest.mark.parametrize("failure", ["fsync", "replace"])
 def test_import_cleans_its_temp_after_publication_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,

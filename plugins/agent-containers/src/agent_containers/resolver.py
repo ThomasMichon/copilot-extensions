@@ -51,7 +51,7 @@ from .lifecycle import (
     restricted_policy_errors,
     start_container,
 )
-from .private_state import fsync_directory, private_file_lock
+from .private_state import enforce_mode, fsync_directory, private_file_lock, strict_posix_modes
 from .ssh_transport import prepare_ssh_config
 
 if TYPE_CHECKING:
@@ -317,6 +317,10 @@ def _import_copilot_cli_token_locked(account: str, token: str, path: Path) -> No
     try:
         fd = os.open(str(tmp_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         created = True
+        if os.name != "nt" and strict_posix_modes(tmp_path):
+            os.fchmod(fd, 0o600)
+        else:
+            enforce_mode(tmp_path, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
             fd = -1
             stream.write(rendered)
