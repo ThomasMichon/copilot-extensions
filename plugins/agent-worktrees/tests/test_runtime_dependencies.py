@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from agent_procutil import no_window_kwargs
 from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 try:
     import tomllib
@@ -29,9 +30,27 @@ UI_PACKAGES = {
 @pytest.mark.guard
 def test_runtime_dependencies_do_not_install_ui_stack() -> None:
     project = tomllib.loads((PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    names = {Requirement(value).name.lower() for value in project["project"]["dependencies"]}
+    names = {
+        canonicalize_name(Requirement(value).name)
+        for value in project["project"]["dependencies"]
+    }
     assert names.isdisjoint(UI_PACKAGES)
     assert "packaging" in names
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize(
+    "ui_requirement",
+    ["Textual", "RICH", "Pygments", "markdown_it_py", "Markdown.IT.Py", "markdown--it--py"],
+)
+def test_dependency_guard_rejects_equivalent_ui_names(tmp_path, monkeypatch, ui_requirement):
+    (tmp_path / "pyproject.toml").write_text(
+        f'[project]\ndependencies = ["packaging>=23", "{ui_requirement}"]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys.modules[__name__], "PLUGIN_ROOT", tmp_path)
+    with pytest.raises(AssertionError):
+        test_runtime_dependencies_do_not_install_ui_stack()
 
 
 @pytest.mark.guard
