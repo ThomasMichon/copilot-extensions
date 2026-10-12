@@ -601,7 +601,12 @@ def _resolve_target(
 
     try:
         agents = client.list_agents()
-    except BridgeClientError:
+    except BridgeClientError as exc:
+        print(
+            f"[WARN] Agent roster unavailable (HTTP {exc.status}); "
+            "trying direct resolution for the requested target.",
+            file=sys.stderr,
+        )
         agents = []
 
     matches = _match_agents(target, agents)
@@ -626,6 +631,7 @@ def _resolve_target(
             charter=charter,
             target_dir=target_dir,
             worktree_id=worktree_id,
+            agent_inventory=agents,
         )
 
     try:
@@ -640,6 +646,7 @@ def _resolve_target(
             charter=charter,
             target_dir=target_dir,
             worktree_id=worktree_id,
+            agent_inventory=agents,
         )
     except BridgeClientError as exc:
         if exc.status != 404:

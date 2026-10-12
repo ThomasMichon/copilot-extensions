@@ -161,16 +161,17 @@ def _find_caller_session(client, agent_name: str, caller_id: str | None) -> dict
     return None
 
 
-def _sender_repo_for_target(client, agent_name: str) -> str | None:
+def _sender_repo_for_target(
+    agent_name: str, *, agent_inventory: list[dict] | None = None,
+) -> str | None:
     """Derive a preference only for targets whose resolver consumes it."""
     repo, separator, venue = agent_name.partition("@")
     if separator and repo.strip() and venue.strip():
         return None
-    list_agents = getattr(client, "list_agents", None)
-    if list_agents is not None:
+    if agent_inventory is not None:
         from .session_targeting_cli import _match_agents
 
-        inventory = list_agents()
+        inventory = agent_inventory
         names = _match_agents(agent_name, inventory)
         matches = [
             item for item in inventory
@@ -206,6 +207,7 @@ def _start_agent_session(
     charter: str | None = None,
     target_dir: str | None = None,
     worktree_id: str | None = None,
+    agent_inventory: list[dict] | None = None,
 ) -> str:
     core = _core()
     from .client import BridgeClientError
@@ -241,7 +243,7 @@ def _start_agent_session(
             target_dir=target_dir,
             caller_id=caller_id,
             caller_session_id=core._get_caller_session_id(),
-            sender_repo=_sender_repo_for_target(client, agent_name),
+            sender_repo=_sender_repo_for_target(agent_name, agent_inventory=agent_inventory),
             force_new=force_new,
             caller_owner_ref=core._worktrees_get("owner-ref"),
             worktree_id=worktree_id,
@@ -278,6 +280,7 @@ def _start_agent_session(
                     charter=charter,
                     target_dir=target_dir,
                     worktree_id=worktree_id,
+                    agent_inventory=agent_inventory,
                 )
             if session.get("status", "") == "running":
                 if not force:
@@ -299,6 +302,7 @@ def _start_agent_session(
                     charter=charter,
                     target_dir=target_dir,
                     worktree_id=worktree_id,
+                    agent_inventory=agent_inventory,
                 )
             return _reuse_existing(client, session, agent_name)
         raise

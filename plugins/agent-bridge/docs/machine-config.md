@@ -45,6 +45,10 @@ Session startup derives that preference only for bare derived machine targets.
 Repository-qualified targets, namespaced providers, and named non-machine agents
 do not consume it and therefore do not evaluate managed-owner preference metadata.
 This preserves explicit-target precedence without weakening allocation checks.
+The start path reuses the existing roster snapshot rather than performing a
+second lookup. A failed roster read is reported as degraded and direct
+namespace/qualified resolution remains available; it is not reported as an
+empty authoritative catalog.
 
 ## Quick Setup
 
