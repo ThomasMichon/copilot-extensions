@@ -1,6 +1,11 @@
 ---
 name: budget-guidance-setup
-description: Install or refresh the budget-guidance runtime and configure its offline static budget reading. Use when setting up budget-guidance, installing its CLI, or creating a manual budget posture configuration.
+description: |
+  Installs or refreshes the budget-guidance runtime and configures its offline static budget reading.
+  Trigger phrases include:
+  - 'setting up budget-guidance'
+  - 'installing budget-guidance'
+  - 'manual budget posture configuration'
 ---
 
 # Budget Guidance Setup

@@ -37,11 +37,19 @@ def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return value
 
 
-def load_json(path: Path) -> dict[str, Any]:
+def load_json(path: Path, *, max_bytes: int | None = None) -> dict[str, Any]:
     """Load a JSON object while preserving decimals and rejecting duplicates."""
     try:
+        if max_bytes is None:
+            text = path.read_text(encoding="utf-8")
+        else:
+            with path.open("rb") as stream:
+                data = stream.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                raise ModelError(f"JSON input exceeds {max_bytes} bytes")
+            text = data.decode("utf-8")
         value = json.loads(
-            path.read_text(encoding="utf-8"),
+            text,
             parse_float=Decimal,
             parse_int=Decimal,
             object_pairs_hook=_strict_object,

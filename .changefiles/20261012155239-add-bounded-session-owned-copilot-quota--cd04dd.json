@@ -1,0 +1,9 @@
+{
+  "comment": "Add bounded session-owned Copilot quota reading and explicit cached freshness diagnostics",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}

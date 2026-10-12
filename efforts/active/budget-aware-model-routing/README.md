@@ -256,6 +256,20 @@ promotion authority, task queue, or dashboard.
 
 ## Journal
 
+### 2026-10-12 - Session-owned quota acquisition slice
+
+- Added an on-demand skill, bounded incumbent-session SDK quota helper, and
+  allowlisted capture-inspection CLI. The helper refuses mismatched requesting
+  sessions before RPC and never creates, refreshes, resumes, or stops a client.
+- Distinguished cached session projection from provider observation freshness.
+  Runtime quota values retain unit, unlimited entitlement, reset, runtime, and
+  session attribution diagnostics; fresh read timestamps do not become fresh
+  provider evidence.
+- Deliberately left forecasting and concurrency advice unavailable for these
+  cached readings. Raw account reset reconciliation, independently attributable
+  provider freshness, same-period rate evidence, and integration remain open.
+  This is a partial Phase 6 slice, not effort completion.
+
 ### 2026-10-10 - Quota helper planning and publication reliability
 
 - Added session-attributed quota-helper and advisory pacing intent with variable
