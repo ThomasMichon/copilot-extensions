@@ -2408,6 +2408,24 @@ class TestSenderRepoFallback:
         assert target.project == "SPO.Core"  # sender repo, not the dotfiles default
 
     @pytest.mark.asyncio
+    async def test_owning_harness_survives_knowledge_default_and_unavailable_cwd_probe(self, monkeypatch):
+        from agent_bridge import __main__ as cli
+
+        self.agents["dev6"].project = "knowledge-fixture"
+        monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", None)
+        monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "host/harness-fixture/wt#session")
+        monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "session")
+        monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
+        with self._resolver():
+            resolver = AgentResolver(self.agents, self.machines)
+            target = await resolver.resolve_async("dev6", sender_repo=cli._sender_repo())
+            explicit = await resolver.resolve_async(
+                "product-fixture@dev6", sender_repo=cli._sender_repo(),
+            )
+        assert target.project == "harness-fixture"
+        assert explicit.project == "product-fixture"
+
+    @pytest.mark.asyncio
     async def test_bare_machine_no_sender_keeps_default(self):
         with self._resolver():
             r = AgentResolver(self.agents, self.machines)

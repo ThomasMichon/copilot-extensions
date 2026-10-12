@@ -31,6 +31,8 @@ def test_sender_repo_uses_override(monkeypatch):
 
 
 def test_sender_repo_falls_back_to_cwd(monkeypatch):
+    monkeypatch.delenv("AGENT_WORKTREES_OWNER_REF", raising=False)
+    monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
     monkeypatch.setattr(m, "_worktrees_get", lambda key: "cwd-project")
     _reset()
     assert m._sender_repo() == "cwd-project"

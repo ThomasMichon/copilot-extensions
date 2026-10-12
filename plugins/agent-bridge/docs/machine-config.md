@@ -27,6 +27,15 @@ an explicit `agents_config` file:
 | `machines.yaml` | Machine inventory (SSH environments, readiness, roles, descriptions, and capabilities) **plus** `control_plane.project`. agent-bridge derives one control-plane agent per (machine, SSH environment), and `<repo>@<machine>` agents from each repo's `.agent-worktrees/related.yaml`. |
 | `acp-agents.json` | **Deprecated.** Hand-authored agent list. Still honored if a profile sets `agents_config` (explicit entries win over derived ones), but no longer required — the roster is derived from topology. |
 
+For a bare machine target, a managed caller's current, session-matching
+worktree owner reference supplies the preferred project before a CWD lookup.
+Thus a parent harness can dispatch into its own worktrees even when its
+knowledge companion owns the topology or a helper runs from the knowledge
+checkout. A stale/malformed owner reference never supplies that preference.
+Explicit `--project` and `<repo>@<venue>` targets retain precedence; unmanaged
+callers keep CWD/default resolution. This selects a project, not allocation
+authority: knowledge-only restrictions and cross-space claim gates still apply.
+
 ## Quick Setup
 
 ### Auto-adopt from a repo

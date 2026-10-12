@@ -225,6 +225,11 @@ def _get_caller_session_id() -> str | None:
 def _sender_repo() -> str | None:
     if _PROJECT_OVERRIDE:
         return _PROJECT_OVERRIDE
+    from .caller_project import owning_project
+
+    project = owning_project()
+    if project:
+        return project
     return _worktrees_get("project")
 
 

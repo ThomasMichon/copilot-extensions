@@ -1,0 +1,9 @@
+{
+  "comment": "Prefer the session-owned caller project for bare machine targets so knowledge-owned topology does not select a knowledge-only worktree.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
