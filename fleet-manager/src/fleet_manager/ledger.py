@@ -79,8 +79,9 @@ class OperationLedger:
         if set(objects) != {("table", name) for name in columns}:
             raise PlanError("unrecognized operation ledger schema")
         for name, expected in columns.items():
-            actual = tuple(row[1] for row in connection.execute(f"PRAGMA table_info({name})"))
-            if actual != expected:
+            actual = tuple((row[1], row[6]) for row in
+                           connection.execute(f"PRAGMA table_xinfo({name})"))
+            if actual != tuple((column, 0) for column in expected):
                 raise PlanError("unrecognized operation ledger columns")
 
     @contextmanager

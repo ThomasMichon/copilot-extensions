@@ -201,23 +201,27 @@ def test_schema_upgrade_refuses_foreign_node_state_without_mutation(tmp_path):
         assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
 
 
+@pytest.mark.parametrize("version", [1, 2])
 @pytest.mark.parametrize("sql", [
     "CREATE VIEW sqlitexforeign AS SELECT 1",
     "ALTER TABLE receipts ADD COLUMN foreign_value TEXT",
+    "ALTER TABLE receipts ADD COLUMN generated_value TEXT GENERATED ALWAYS AS (status) VIRTUAL",
+    "ALTER TABLE receipts ADD COLUMN generated_value TEXT GENERATED ALWAYS AS (status) STORED",
 ])
-def test_schema_upgrade_preserves_unknown_inventory_or_columns(tmp_path, sql):
+def test_schema_upgrade_preserves_unknown_inventory_or_columns(tmp_path, sql, version):
     path = tmp_path / "gateway.db"
     gateway(path)
     with closing(sqlite3.connect(path)) as connection:
-        connection.execute("DROP TABLE result_streams")
-        connection.execute("PRAGMA user_version=1")
+        if version == 1:
+            connection.execute("DROP TABLE result_streams")
+            connection.execute("PRAGMA user_version=1")
         connection.execute(sql)
         before = connection.execute("SELECT type,name,sql FROM sqlite_master").fetchall()
     with pytest.raises(PlanError, match="unrecognized"):
         gateway(path)
     with closing(sqlite3.connect(path)) as connection:
         assert connection.execute("SELECT type,name,sql FROM sqlite_master").fetchall() == before
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == version
 
 
 PROCESS = """
