@@ -682,7 +682,9 @@ jobs:
           --base ${{ github.event.pull_request.base.sha }}
           --head ${{ github.event.pull_request.head.sha }}
       - name: Docs consistency
-        run: python tools/check-docs-consistency.py
+        run: |
+          python -m pytest -q tools/test_check_docs_consistency.py
+          python tools/check-docs-consistency.py
       - name: Runbook references
         run: python tools/check-runbook-references.py
       - name: Trusted self-hosted CI contract

@@ -20,6 +20,7 @@ repo via the Copilot CLI marketplace.
 
 | To... | Go to |
 |-------|-------|
+| Follow the **adopter reading path** | `docs/README.md` → installation/capabilities/adoption; exact mechanics stay plugin-owned |
 | Know **which plugins exist** (+ versions) | `.github/plugin/marketplace.json` (source of truth), rendered in `README.md` and `docs/architecture.md` |
 | Understand **how the suite works today** (as-is) | `docs/architecture.md` |
 | Maintain **adopter documentation and its reading flow** | `docs/documentation-architecture.md` + `visions/documentation/README.md`; documentation-impact review in `CONTRIBUTING.md` |

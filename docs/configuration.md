@@ -1,5 +1,9 @@
 # Configuration — In the Repo vs On the Machine
 
+Read [installation](installation.md) for payload/runtime readiness and
+[adoption](adoption.md) for integration choices. This page maps ownership and
+locations; it is not a second schema or command reference.
+
 Every piece of configuration in this suite lives in one of two homes, and picking
 the right one is the whole game:
 
@@ -69,7 +73,7 @@ then re-run adoption when the machine-local projection needs refreshing.
 | File | Purpose | Written by |
 |------|---------|-----------|
 | `~/.copilot/settings.json` | Per-user CLI settings — **experimental mode**, personal plugin toggles | you (once per machine) |
-| `~/.copilot-extensions/installation-mode.json` | OS-profile-pinned desired installation mode: legacy by default, with namespaced opt-in and exact marketplace/plugin overrides | configurator / you |
+| `~/.copilot-extensions/installation-mode.json` | OS-profile-pinned desired installation mode: legacy by default, with namespaced opt-in and exact marketplace/plugin overrides | you, through explicit machine-local policy |
 | `~/.copilot-extensions/maintenance` + `maintenance.json` | Existence gate plus strict ownership sidecar that quiesces new plugin activity during user-wide surgical maintenance | maintenance command / you |
 | `~/.agent-worktrees/config.yaml` | Machine-wide defaults: `srcroot`, `machine`, `platform`, `copilot_profiles` | `install` |
 | `~/.agent-worktrees/repos.yaml` · `projects.yaml` | The repos registry + adopted-projects registry (checkout paths, class) | `repos` / `register` |
@@ -80,6 +84,12 @@ then re-run adoption when the machine-local projection needs refreshing.
 | `~/.agent-mcp/bridges/<name>` | A **personal / cross-repo** agent-mcp bridge config | you (per the `agent-mcp:agent-mcp` skill) |
 | `~/.budget-guidance/config.json` | Inert, per-user current budget readings and source authority | you / `budget-guidance-setup` |
 | `~/.agent-*/deploy-manifest.json`, runtime state | Per-machine runtime footprint (version, source, venv) | `install` / `update` |
+
+The table is an ownership map, not a requirement to create every file.
+Resolve actual runtime roots and command paths from the selected plugin's
+installation context; `~/.agent-*` entries are documented legacy locations,
+not safe hardcoded cross-plugin discovery paths. See
+[agent-facing invocation](architecture.md#agent-facing-invocation-and-command-glossaries).
 
 ### Marketplace installation cells
 
@@ -157,6 +167,8 @@ unqualified state automatically. See
   [agent-worktrees config-reference § Config sources](../plugins/agent-worktrees/docs/config-reference.md#config-sources-layered).
 
 ## See also
+
+- [Adopter documentation index](README.md) and [reference index](reference-index.md).
 
 - [Pattern: install-vs-adopt-boundary](patterns/install-vs-adopt-boundary.md) —
   which lifecycle verb may write what (the rule this page rests on).

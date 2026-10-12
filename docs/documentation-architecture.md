@@ -11,12 +11,15 @@ intent. This page records the existing surfaces and the maintenance pattern.
 | Surface | Role | Authority boundary |
 |---------|------|--------------------|
 | [Root README](../README.md) | Public front door and plugin discovery | Orient and route; plugin manifests and references ground claims |
+| [Adopter index](README.md) | Primary reading path | Route by task without requiring every reference |
+| [Installation](installation.md), [capabilities](capabilities.md), [adoption](adoption.md) | First-use, selection, and integration waypoints | Summarize supported boundaries; exact mechanics remain component-owned |
+| [Reference index](reference-index.md) | Deeper reference discovery | Preserve component and planning links without duplicating mechanics |
 | [Architecture](architecture.md) | Current composition, payload/runtime split, invocation and service relationships | Runtime model, not standing future intent |
 | [Configuration](configuration.md) | Repository, machine, user, and installation-cell ownership | Route exact schemas and precedence to their plugin owner |
 | [Harness runbook](harness-runbook.md) | An opinionated assembly procedure | A chosen workflow, not mandatory installation of every capability |
 | [Patterns](patterns/README.md) | Reusable design conventions and invariants | How contributors build; not an adopter command catalog |
 | `plugins/<name>/README.md`, `docs/`, `skills/` | Component setup, behavior, commands, recovery | The owning plugin's detailed contract |
-| [Visions](../visions/README.md) | Standing should-be | Never proof that a feature is available |
+| [Visions](../visions/README.md) | Standing should-be | Not evidence that a feature is available |
 | [Efforts](../efforts/README.md) and issues | Coordination and implementation evidence | Progress is not a capability guarantee |
 | [Contributing](../CONTRIBUTING.md), [testing](../TESTING.md), [pipelines](pipelines.md) | Publication and validation procedure | Contributor workflow, not the initial adopter path |
 
@@ -35,9 +38,10 @@ Configuration explains ownership before exposing component-specific settings.
 
 A waypoint may summarize why a component is useful, but should link to its
 installer, command glossary, or skill for exact mechanics. Moving introductory
-prose out of the README must preserve reference discovery. A dedicated adopter
-index and capability/adoption waypoint can implement this pattern without
-moving plugin-owned references.
+prose out of the README must preserve reference discovery. The
+[adopter index](README.md), [selection map](capabilities.md), and
+[adoption waypoint](adoption.md) implement this pattern without moving
+plugin-owned references.
 
 Examples must be labeled as hypothetical deployments. They illustrate choices,
 not a shipped bundle, a universal platform promise, or a provider integration
@@ -54,7 +58,8 @@ Preserve accurate references and reconcile architectural intent separately.
 Existing publication safeguards provide distinct checks:
 
 - `tools/check-docs-consistency.py`: marketplace coverage in the README,
-  enumerated plugin skills, and recognized catalog-count claims.
+  enumerated plugin skills, recognized catalog-count claims, and local
+  paths/anchors plus reading-path edges in the primary adopter pages.
 - `tools/check-runbook-references.py`: runbook skill and plugin references.
 - `tools/check-effort-vision-structure.py`: canonical planning and vision
   section contracts.
@@ -63,7 +68,10 @@ Existing publication safeguards provide distinct checks:
 - `tools/check-large-files.py`: publication-size limits.
 
 These are mechanical checks, not a claim that all documentation is current.
-Authors must also verify changed local links and anchors, ground support claims
+The navigation check covers inline/reference-style Markdown links, ATX heading
+and explicit anchors, and HTML links/images on the designated primary pages;
+code samples and comments are excluded.
+Authors must also verify changed navigation outside the guarded primary path, ground support claims
 in the owner implementation, and have semantic claims reviewed. Extend an
 existing guard for an objective navigation or ownership invariant rather than
 introducing a competing documentation pipeline or a phrase blacklist.

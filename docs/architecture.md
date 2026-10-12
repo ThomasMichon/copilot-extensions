@@ -1,29 +1,27 @@
 # Architecture Overview
 
-How the 24 copilot-extensions plugins fit together — install topology,
-runtimes, ports, and the credential relay. **Thirteen ship a runtime** (currently
-a `uv`-built venv under a plugin-owned root such as `~/.agent-*` or
-`~/.budget-guidance`, deployed by the plugin's own installer) plus generated
-payload-local agent commands and session command glossaries; compatibility
-management wrappers remain in `~/.local/bin` during the installation-cell
-migration. **Eleven are payload-only** — `efforts` (skills), `visions`
-(skills), `context-handoff` (hook + session extension + skill), `customizing-copilot`
-(skills), `copilot-extensions-harness` (skills + static instruction projections),
-`wsl-setup` (skills), and
-`harness-knowledge` (skills), `ai-attribution` (hook + skill),
-`delegation-guidance` (hook + skill), `agent-conduct-guidance`
-(instruction projection + skill), and `agent-remote-driver` (SDK extension)
-deploy entirely from the marketplace
-payload with no installer. For per-plugin internals, follow the links in each
-section.
+This is the current composition/reference page, not a supplied operator
+harness or a future-feature catalog. New adopters can start with
+[installation](installation.md), [capability selection](capabilities.md), and
+[adoption](adoption.md); the [documentation index](README.md) maps the reading
+path. Exact commands and schemas remain owned by the linked components.
+
+How the plugins fit together: installation topology, runtimes, endpoints, and
+credential relay. Runtime-backed plugins deploy a plugin-owned Python package
+with `uv`, generated payload-local commands, and session command glossaries.
+Compatibility management wrappers remain in `~/.local/bin` during the
+installation-cell migration. Payload-only plugins load their skills, hooks,
+and extensions without a separate Python runtime package.
+The [marketplace manifest](../.github/plugin/marketplace.json) owns the roster;
+the lifecycle tables below classify its components without duplicating a
+second prose inventory. For component internals, follow the owner links.
 
 ## The plugins
 
-The independently packaged [fleet-manager](../fleet-manager/README.md) is the
-fleet system's standalone entry point. Its initial stdlib-only CLI performs
-offline preservation-safe config/capacity planning; controller, connector,
-install/uninstall and authenticated deployment surfaces remain implementation
-work. Installing the client does not host a controller or container manager.
+The independently packaged [fleet-manager](../fleet-manager/README.md) is a
+standalone product, not a marketplace plugin. Its owner page defines current
+planning, release, and deployment scope. Installing a client does not itself
+establish a hosted controller or container manager.
 
 ### Runtime plugins (installer-deployed runtime + payload-local commands)
 
@@ -382,8 +380,10 @@ customizing-copilot) are **payload-only**. The full taxonomy is
 
 ## The control-harness repo
 
-A teammate's own repo (a dotfiles-style hub, `my-control-harness` in examples)
-is the single source of truth the mesh plugins read from. Where each config file
+A control repo can supply shared policy and topology to selected mesh plugins;
+it is one composition choice, not a prerequisite for every plugin.
+`my-control-harness` below is a **hypothetical example**, not a shipped harness
+or fixed identity. Where each config file
 belongs — in the repo (committed) vs machine-local (`~/`) — is laid out in
 [Configuration — In the Repo vs On the Machine](configuration.md).
 
@@ -422,8 +422,8 @@ flowchart LR
   filesystem-visible `$AGENT_CONTAINERS_STATE_DIR` so admission records remain
   atomic across both environments.
 
-> agent-mcp is **not** wired to the control repo — its bridge configs are
-> per-agent files: preferably **in-repo** (`--config .github/agents/<name>.mcp.yaml`)
+> agent-mcp's transport configuration is **per-agent**, not dependent on the
+> mesh topology — preferably **in-repo** (`--config .github/agents/<name>.mcp.yaml`)
 > for repo-scoped agents, or **user-global** under `~/.agent-mcp/bridges/<name>`
 > for personal/cross-repo MCPs.
 
