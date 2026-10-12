@@ -11,13 +11,17 @@
 
 ## Guiding Intent
 
-Make critical release control independently repairable without admitting
-unvalidated content or unwanted contributions. Preserve an explicitly bounded
-main-owned control layer across validated dev promotion. All other contribution,
-including admin-authored implementation, continues through dev.
+Reduce redundant status checks and overall pipeline executions so Copilot review
+can run more often without unnecessary throttling. Preserve validation assurance
+and contribution gates while removing repeat work, redundant triggers and
+ownerless automation. Main-owned workflow control is a means to that outcome,
+not the campaign's highest-priority deliverable.
 
-Workflow ownership is a separate completion gate from validation consolidation.
-The latter starts only after ownership and final-candidate enforcement are proven.
+Make critical control independently repairable only where needed for safe
+consolidation. All other contribution, including admin-authored implementation,
+continues through dev. A safe reduction under existing proven gates does not
+wait for the entire ownership migration. Record ownership and consolidation
+completion separately; neither alone completes the overall objective.
 
 ## Participants
 
@@ -61,6 +65,11 @@ Related review-request repair #6233 was already released; do not repeat it.
 
 > Sounds good. I'll put you in charge of this, start driving
 
+> Ultimately, your goal is consolidation and elimination of redundant status
+> checks, to produce fewer overall pipeline runs so that Copilot reviews can
+> run more often without getting throttled. The main-owned-workflow-control
+> is a means to an end, but not the highest priority.
+
 The operator confirmed the explicit main-owned control/dev-owned content model.
 The detailed decomposition and validation cases below are **agent-recommended**,
 reconciled with the other planning agent's public handoff on #6237.
@@ -72,11 +81,28 @@ reconciled with the other planning agent's public handoff on #6237.
 - [ ] Land this vision/effort through ordinary dev plan review.
 - [ ] Snapshot branch protection, rulesets, environments, workflow catalog,
   credentials and in-flight releases; identify enforced freshness and admission.
+- [ ] Measure runs/jobs/checks per contributor update, dev advance and release;
+  reviewer queue/start latency and observed throttling. Distinguish GitHub
+  Actions concurrency from Copilot service limits; do not assume one shared quota.
+- [ ] Rank safe redundant trigger/check removals under existing gates ahead of
+  ownership work that is not needed for those reductions.
 - [ ] Resolve the trusted-check publication limitation explicitly: the common
   Actions app and a check name cannot prevent deliberate Write-actor spoofing.
   Do not claim stronger guarantees than the selected enforceable boundary.
 
-### Phase 1 - Inert preservation support
+### Phase 1 - Earliest safe run and check reductions
+
+- [ ] Remove redundant release-shaped PR and main-push validation only where
+  existing trusted gates and exact-SHA release evidence cover the removed work;
+  first prove no generated-output coverage or required context is lost.
+- [ ] Coalesce or prevent redundant event-triggered runs, not merely mark all
+  jobs skipped; preserve timely contributor feedback and review delivery.
+- [ ] Measure before/after run and check counts and review latency over comparable
+  events; retain distinct heavy/platform/installation coverage.
+- [ ] Deploy only the minimal critical control repair required to unblock the
+  next safe consolidation slice, through the narrow owner-reviewed main path.
+
+### Phase 2 - Inert preservation support where needed
 
 - [ ] Extend the existing composer with strict, exact-path preservation from
   pinned main; absent manifest retains existing behavior.
@@ -85,7 +111,7 @@ reconciled with the other planning agent's public handoff on #6237.
 - [ ] Land implementation, tests and related documentation via dev, then promote
   while no preservation manifest is active.
 
-### Phase 2 - Trusted admission and composed validation
+### Phase 3 - Trusted admission and composed validation
 
 - [ ] Implement full-diff owner authorization on both relevant targets,
   protecting wrappers, metadata and promoted implementation/actions.
@@ -93,7 +119,7 @@ reconciled with the other planning agent's public handoff on #6237.
   exact dev/main evidence; fence stale candidates before merge.
 - [ ] Prove failure/rejection and rollback contracts before activation.
 
-### Phase 3 - Narrow main control activation
+### Phase 4 - Narrow main control activation
 
 - [ ] Establish reviewed critical workflow/metadata allowlist; no helper source,
   tests or docs admitted directly to main.
@@ -105,9 +131,10 @@ reconciled with the other planning agent's public handoff on #6237.
 - [ ] Restore/verify any separately authorized temporary policy adjustment
   before resuming ordinary publication; no new bypass actor or broad credential.
 
-### Phase 4 - Independent consolidation gate
+### Phase 5 - Finish validation and automation consolidation
 
-- [ ] Record ownership completion separately before pruning duplicate validation.
+- [ ] Record ownership completion separately; it is not the prerequisite for
+  Phase 1 reductions proven safe under existing protection.
 - [ ] Establish one exact-input validation contract and compact generated
   candidate gate; preserve distinct heavy/platform/installation coverage.
 - [ ] Remove redundant promotion-PR/main-push validations only after replacement
@@ -115,12 +142,15 @@ reconciled with the other planning agent's public handoff on #6237.
 - [ ] Reconcile repair ownership with #6142 and existing remediation effort;
   disabled repair automation must escalate to a named owner.
 
-### Phase 5 - Observe and complete
+### Phase 6 - Observe and complete
 
 - [ ] Observe two release cycles, supersession, controlled failure/recovery,
   independent main control repair and rejected untrusted admission.
 - [ ] Update as-is docs/patterns, audit final policies and record measured
   redundancy reduction with unchanged required coverage.
+- [ ] Demonstrate fewer overall runs/checks on comparable event sets and report
+  observed Copilot review throughput/latency; state any independent service
+  throttling that remains rather than claiming consolidation fixed it.
 - [ ] Resolve every validation item before completion and archival.
 
 ## Validation Plan
@@ -159,3 +189,10 @@ credential changes, broad policy weakening or unreviewed releases.
 - Reconciled the other planning agent's #6237 handoff: publish one canonical
   effort, use same-composed-commit implementations and preserve exact paths.
 - Current migration has made no workflow, secret, environment or policy changes.
+
+### 2026-10-12 - Operator priority correction
+
+- Primary completion gate is consolidation and elimination of redundant runs and
+  status checks to improve review capacity. Ownership is an enabling mechanism.
+- Reordered the proposed plan so safe reductions under existing gates come first;
+  preserved all validation, isolation and direct-main scope restrictions.

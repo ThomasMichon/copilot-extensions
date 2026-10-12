@@ -2,6 +2,19 @@
 
 Parent contract: [README.md](README.md).
 
+## Primary outcome and sequencing
+
+The operator's primary goal is fewer redundant status checks and fewer overall
+pipeline runs, so Copilot reviews can run more often without throttling.
+Main-owned control is a means to that end, not a higher-priority rewrite.
+Take safe reductions covered by existing proven gates first. Introduce ownership
+changes only when the next reduction or critical repair needs them.
+
+Measure event-normalized runs, jobs, reported checks, reviewer start/queue latency
+and observed throttle responses. Skipping jobs is not equivalent to eliminating
+a workflow invocation. Actions runner concurrency and Copilot service quotas may
+be independent; do not promise a causal improvement without observed evidence.
+
 ## Ownership
 
 Keep main as GitHub's default and consumable release branch. Critical control
@@ -82,10 +95,12 @@ and caller references migrate before old definitions disappear.
 
 ## Separate validation consolidation
 
-After ownership is proven, consolidate one contributor gate, one exact-SHA
+Consolidate one contributor gate, one exact-SHA
 trunk/release gate and one reusable deep/platform scheduler. Execute identical
 tests once per identical trusted input tuple; retain Windows, heavy, stress and
 fresh-install coverage. Promotion PRs should run compact candidate verification,
 not ordinary lint again. Name a component owner and release steward for every
 failure, deduplicate signatures and escalate when the bounded repair worker is
 disabled. Reconcile existing #6142 rather than introducing a second repair loop.
+Ownership and candidate enforcement are prerequisites only for reductions that
+depend on their new guarantees, not for every redundant event or optional check.
