@@ -97,6 +97,10 @@ install state without merging repository settings. Installed inventory,
 repository trust, and activation are separate authorities; ordinary plugin
 loading does not require experimental mode. Follow
 [the installation owner's scope contract](../plugins/customizing-copilot/skills/installing-plugins/SKILL.md).
+The separately documented session-extension path also requires the user-global
+`experimental` setting; see [installation](installation.md#load-the-marketplace-payload)
+and the [install contract](install-contract.md). Do not apply that extension
+prerequisite to every ordinary plugin payload.
 
 ### Marketplace installation cells
 

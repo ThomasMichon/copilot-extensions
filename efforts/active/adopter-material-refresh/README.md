@@ -219,6 +219,9 @@ repository creation, or private-environment capture was part of that proposal.
   from user-level session-extension activation. The guard covers shortcut,
   collapsed, and full reference links without treating unused definitions or
   labels inside other link forms as navigation.
+- Selected session extensions retain the separately documented user-global
+  experimental activation gate from the install contract; ordinary payload
+  loading does not inherit that prerequisite.
 - Guard fixtures also prove fence indentation/closure, image-vs-hyperlink
   reading edges, exact casing, and resolved symlink containment (including a
   directory README anchor) without reading external targets.

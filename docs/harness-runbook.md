@@ -220,6 +220,9 @@ across every plugin or platform; see [installation requirements](installation.md
   experimental mode. Repository settings are trust-gated; session extensions
   require user-level enablement because their loader does not merge repo
   settings. Follow the [installation scope contract](installation.md#load-the-marketplace-payload).
+- **For selected session extensions**, additionally enable user-global
+  `"experimental": true` per the [install contract](install-contract.md).
+  This does not make ordinary plugin loading experimental.
 - Provider CLIs only for selected integrations (`gh` for GitHub access/token
   workflows; `docker` for container fleet operations).
 

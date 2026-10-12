@@ -52,6 +52,10 @@ extension loader reads user-level `enabledPlugins` and persisted install
 state without merging repository settings. For a selected extension-backed
 capability, use deliberate user-level enablement/global installation and
 verify that the extension loaded; a repo-only payload setting is not enough.
+For this documented session-extension path, also set `"experimental": true`
+in `~/.copilot/settings.json`, as required by the
+[session-extension install contract](install-contract.md).
+This additional extension gate is distinct from ordinary plugin loading.
 Installed inventory alone is not activation. See the
 [installation owner's scoping caveats](../plugins/customizing-copilot/skills/installing-plugins/SKILL.md)
 and the [configuration ownership map](configuration.md).
