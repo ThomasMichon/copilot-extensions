@@ -110,6 +110,12 @@ remain compatible, but this workflow must not create independent machine keys.
 - [ ] Keep adopter-specific tags and repository names in adopter configuration,
   never in the public plugin's defaults.
 
+### Phase 5 — Required dev PR source metadata
+
+- [ ] Review and implement the repository-specific required metadata gate,
+  automation origins, manual repair guidance and silent operator-only
+  exception in [dev-pr-enforcement.md](dev-pr-enforcement.md) (#6295).
+
 ## Validation Plan
 
 - [ ] Root identity round trips from a multi-repo ownership chain while public
