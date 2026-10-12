@@ -22,7 +22,7 @@ that pattern to this repository.
 | [Linux Role Fleet](active/linux-role-fleet/README.md) | Active; reviewed Komodo-first plan and isolated adoption proof | #6030, #5861 |
 | [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Active; proposal reviewed | #6007 |
 | [Versioned Singleton Manager](active/versioned-singleton-manager/README.md) | Active | #5655 |
-| [Adopter Material Refresh](active/adopter-material-refresh/README.md) | Draft; independent planning proposal | #5799 |
+| [Adopter Material Refresh](active/adopter-material-refresh/README.md) | Active; bounded documentation slice claimed, preview assets unassigned | #5799 |
 | [Machine Fleet Routing Foundation](active/machine-fleet-routing-foundation/README.md) | Active; contract implementation | #5789 |
 | [Mutable dev slot](active/mutable-dev-slot/README.md) | Active | #5472 |
 | [Machine Transport Convergence](active/machine-transport-convergence/README.md) | Active | #5737, #5738, #5740, #5741, #5972, #5973, #5974, #6039 |

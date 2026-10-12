@@ -33,8 +33,9 @@ is not sufficient evidence for a present-tense capability claim.
 ## Coordination
 
 - **Topology:** serial per-phase PRs; one coherent material family per slice.
-- **Host (owns PRs):** planning lead for the proposal; explicitly claimed
-  execution lead for subsequent material PRs.
+- **Host (owns PRs):** planning lead for the proposal; documentation slice lead
+  for the bounded structure/prose direction and implementation PRs. A future
+  execution lead must explicitly claim the remaining material work.
 - **Delegates:** none assigned. A future lead may use disjoint, bounded evidence
   or asset scopes while retaining integration and publication ownership.
 - **Handoff:** planning publication transfers execution to the independent
