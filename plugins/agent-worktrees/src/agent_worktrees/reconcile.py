@@ -209,8 +209,9 @@ def _versions_equal(a: str | None, b: str | None) -> bool:
     keeps the source spelling (``0.4.0-dev176``). These are the **same** version,
     so a raw string compare would wrongly see drift and redeploy on every launch
     (found deploying agent-bridge's running-version marker, dotfiles #533). Fast
-    path on exact match; then ``packaging`` semantics when available; else a
-    separator-canonical fallback (``-``/``_`` -> ``.``) so this needs no hard dep.
+    path on exact match; then the required ``packaging`` dependency's semantics.
+    Invalid versions, or a damaged runtime missing that dependency, retain a
+    separator-canonical fallback (``-``/``_`` -> ``.``).
     """
     if a == b:
         return True
@@ -238,8 +239,9 @@ def _version_lt(a: str | None, b: str | None) -> bool:
     marketplace payload (dotfiles #1366). Returns ``False`` on any ambiguity
     (missing, equal, or unorderable versions) so a genuine *forward* update is
     never suppressed. Tolerates the ``0.4.0-dev5`` vs ``0.4.0.dev5`` spelling via
-    ``packaging`` (same normalization as :func:`_versions_equal`); without
-    ``packaging`` we cannot order reliably, so we conservatively return ``False``.
+    the required ``packaging`` dependency (same normalization as
+    :func:`_versions_equal`). If a damaged runtime lacks it, we cannot order
+    reliably, so we conservatively return ``False``.
     """
     if a is None or b is None or a == b:
         return False
