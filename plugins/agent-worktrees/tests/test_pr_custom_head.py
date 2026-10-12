@@ -70,7 +70,7 @@ def test_custom_head_rejects_unproven_or_stale_authority(pr_repo, monkeypatch):
     baseline = copy.deepcopy(record)
     saved_observation = vars(observed).copy()
     for mutation in ("unattested", "foreign-owner", "destination", "stale-head", "foreign-pr",
-                     "foreign-branch", "foreign-repo", "closed", "nonexclusive", "missing-provider", "unrecorded-provider"):
+                     "foreign-branch", "foreign-repo", "closed", "nonexclusive", "missing-provider", "unrecorded-provider", "shared-feature"):
         record = copy.deepcopy(baseline)
         vars(observed).update(saved_observation)
         with monkeypatch.context() as patch:
@@ -92,6 +92,9 @@ def test_custom_head_rejects_unproven_or_stale_authority(pr_repo, monkeypatch):
                 observed.state = "closed"
             elif mutation == "unrecorded-provider":
                 record.pr.provider = ""
+            elif mutation == "shared-feature":
+                record.pr.branch = observed.head_ref = "feature/shared"
+                record.pr.rewrite_owner = f"{record.worktree_id}:feature/shared"
             elif mutation == "nonexclusive":
                 patch.setattr(pr_custom_head.pr_authority, "assert_exclusive",
                               lambda *a, **k: (_ for _ in ()).throw(ValueError("foreign ledger")))

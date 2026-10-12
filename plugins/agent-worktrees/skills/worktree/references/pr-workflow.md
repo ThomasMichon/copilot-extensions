@@ -965,6 +965,8 @@ checks the same numbered open PR, head ref, expected full head SHA, destination
 identity, remote tip and exclusive ledger ownership. Missing, foreign or stale
 evidence fails closed; suffixes remain the default naming convenience, not the
 only proof of ownership.
+Suffix-free `feature/*` remains the coordinated shared-branch namespace and
+never qualifies for this exception, even when its host opened an attested PR.
 
 Legacy feature-branch checkouts, unowned `set-pr` associations, shared/default
 and release branches, missing leases, changed destinations and dirty trees

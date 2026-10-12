@@ -10,6 +10,11 @@ from .providers.pr_source import same_repository
 def saved_attestation(record, repo, pr, expected: str) -> bool:
     """Require complete historical publication identity before credential resolution."""
     return not (
+        (pr.branch.startswith("feature/") and not any(
+            suffix and (pr.branch.endswith("-" + suffix) or pr.branch == f"feature/{suffix}")
+            for suffix in (git_ops.worktree_suffix(record.worktree_id), record.codename)
+        ))
+        or
         pr.rewrite_owner != f"{record.worktree_id}:{pr.branch}"
         or not pr.rewrite_identity or not pr.number or not pr.repo or not pr.url
         or pr.head_sha != expected or pr.state not in ("open", "active")
