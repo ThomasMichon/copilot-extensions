@@ -273,3 +273,15 @@ credential changes, broad policy weakening or unreviewed releases.
 - #6323 therefore contributes no production diagnostic change; its actual
   collector failure regression and native-path test expectations remain useful.
   The real missing-baseline repair stays open under #6319.
+
+### 2026-10-12 - Repair ownership and evidence refreshed
+
+- #6315 merged as `8fdb86fe39f6` after current-head approval and required
+  checks passed. Dependency routing is dev-landed, not yet claimed released.
+- Duplicate diagnostic tracker #6319 transferred to the already-owned #6320.
+  The later run `38289187893` produced all nine baseline artifacts, including
+  worktrees artifact `11766276761`; its publication instead failed the strict
+  no-overwrite materialization check at three migrated vendor destinations.
+- Existing fix #6335 under #6331/#6334 owns that layout repair. Later stale-tip
+  test failures have a merged owner repair #6353. No competing fix or gate
+  bypass is introduced. Observe a new green release before claiming live proof.
