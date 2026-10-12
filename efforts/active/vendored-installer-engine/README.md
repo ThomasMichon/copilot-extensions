@@ -405,6 +405,11 @@ engine under this effort.
       this before completing the remaining adopters). Implementation merged
       as PR #5885; release and live deployment verification remain paused
       at the operator's request.
+- [ ] Resolve the POSIX installer/stamp permission mismatch before the stricter
+      startup admission ships. New installer-created artifacts must not inherit
+      group/other write access from `umask 0002`. Include practical, bounded
+      session-start repair per the 2026-10-12 operator clarification below;
+      the exact migration protocol and its adversarial proof remain pending.
 - [x] `agent-dispatch` — PR #5832 merged, release #5866 promoted the
       adopter, and the normal update verified payload/runtime `0.14.0-dev1`
       with a healthy routed coordinator and running supervisor.
@@ -538,6 +543,30 @@ immutable-versioned-runtime slot contract. No scheduled task, no sibling
 installs, no service-specific config needed for this class of plugin.
 
 ## Journal
+
+### 2026-10-12 — Include practical session-start permission repair
+
+- Operator clarification, verbatim:
+  > session-start should also do repair if practical
+- The actual compatibility issue is distinct from the rejected claim that
+  `mkdir(..., 0755)` gains write bits from a umask. Legacy installer shell
+  redirections request `0666`, while `chmod +x` can preserve inherited shared
+  write bits. These artifacts can therefore fail the stricter stamp admission
+  under a common `0002` umask.
+- The scope now includes preventing unsafe new installer artifact modes and
+  practical repair during dependency-light session stamping. This does not
+  authorize session-start provisioning, service/engine startup or broad
+  filesystem permission normalization.
+- **Agent-recommended design constraints, not implemented:** bind repair to
+  verified creator ownership and exact no-follow identities; retain refusal
+  for foreign owners, links, multiple-link files and unsafe surrounding
+  namespaces. Do not infer trust in previously writable marker contents:
+  canonical stamp/launcher bytes and supersession decisions need explicit
+  treatment. Permissions changed after admission must still be rechecked.
+  State any installer-created ancestor that cannot be repaired safely rather
+  than silently broadening the repair boundary.
+- The migration protocol, its review and real installer-to-hook/adversarial
+  regressions remain pending. No live artifact permission was changed.
 
 ### 2026-10-10 — Temporary Docker accountability proposal; implementation gated
 
