@@ -10,8 +10,9 @@ from test_session_catalog import _record, _wire
 
 
 @pytest.mark.parametrize("cancel", [False, True])
+@pytest.mark.usefixtures("monkeypatch_config")
 def test_stale_catalog_head_preserves_handoff_and_rebind(
-    tmp_path, monkeypatch, monkeypatch_config, cancel,
+    tmp_path, monkeypatch, cancel,
 ):
     rec = _record(
         "wt-cancel",
