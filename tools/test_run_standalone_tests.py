@@ -75,6 +75,8 @@ def test_manager_preparation_retains_source_payload_layout(tmp_path, monkeypatch
     calls = []
     monkeypatch.setattr(runner.subprocess, "run", lambda argv, **kwargs: calls.append(argv))
     python = tmp_path / ".test-venvs" / "worktree-manager" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.touch()
     runner.prepare("worktree-manager", python)
     assert calls[-1][-2:] == ["--editable", str(tmp_path / "worktree-manager") + "[dev]"]
 

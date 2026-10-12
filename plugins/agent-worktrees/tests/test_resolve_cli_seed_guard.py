@@ -311,8 +311,8 @@ def test_resolve_worktree_id_with_machine_and_seed_preview_is_rejected_json(capf
 
 
 @pytest.mark.parametrize("new", [False, True])
-def test_remote_prompt_cli_routes_same_seed_selectors_and_no_mux(monkeypatch, new):
-    config = SimpleNamespace(machine="local")
+def test_remote_prompt_cli_routes_same_seed_selectors_and_no_mux(monkeypatch, tmp_path, new):
+    config = _config(tmp_path, "local")
     monkeypatch.setattr(resolve_cli.cfg, "load_config", lambda *a, **k: config)
     called = []
     monkeypatch.setattr(

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from . import config as cfg
 from . import launch_seed_state, tracking, tracking_write
+from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
 
 MAX_REQUEST_BYTES = 8192
 
@@ -160,6 +161,7 @@ def _apply_stage(args: dict) -> dict:
             raise ValueError("Launch request identity mismatch")
         path = directory / f"{receipt['worktree_id']}.yaml"
         with tracking._RecordLock(path, require_sidecar=True):
+            require_project_record_mutation(tracking.load_record(path))
             seed = launch_seed_state.peek(path)
             if receipt.get("accepted"):
                 if seed is None or seed.seed_id != receipt["seed_id"]:
@@ -273,7 +275,7 @@ def _guard(handler):
     def apply(args):
         try:
             return handler(args)
-        except (ValueError, OSError, TimeoutError) as exc:
+        except (ValueError, OSError, TimeoutError, ExecutionSpaceError) as exc:
             # Domain refusals must reach the client, not close the daemon socket.
             return {"error": str(exc)}
     return apply

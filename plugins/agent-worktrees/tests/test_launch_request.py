@@ -22,6 +22,13 @@ def _intent(kind="resume", text="line one\n'\";$() \u2603"):
 def authority(tmp_path, monkeypatch):
     monkeypatch.setattr(request.cfg, "tracking_dir", lambda: tmp_path)
     monkeypatch.setattr(request.cfg, "detect_platform", lambda: "windows")
+    for project in ("demo", "demo-repo"):
+        directory = request.cfg.project_dir(project)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "config.yaml").write_text(json.dumps({
+            "repo_name": project, "machine": "test",
+            "repos": {project: {"anchor": str(tmp_path), "default_branch": "dev"}},
+        }))
     server = tracking_write.start_server(tracking_write.compute)
     server.start()
     endpoint = tracking_write.rendezvous_fields(server)
@@ -171,7 +178,11 @@ def test_structured_cli_uses_no_selector_and_returns_no_seed_text(tmp_path, auth
 
     tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
                                "demo", "test", "windows", tmp_path)
-    monkeypatch.setattr(request.cfg, "load_config", lambda: authority)
+    load_config = request.cfg.load_config
+    monkeypatch.setattr(
+        request.cfg, "load_config",
+        lambda *a, **k: load_config(*a, **k) if k.get("project") else authority,
+    )
     parsers = argparse.ArgumentParser().add_subparsers(dest="command")
     resolve_cli.add_parsers(parsers)
     encoded = base64.b64encode(json.dumps(_intent()).encode()).decode()
