@@ -38,6 +38,7 @@ import re
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 #: Default seasoning window, in days, applied when a caller doesn't name
@@ -130,13 +131,13 @@ def _default_fetch(url: str) -> bytes:
         return response.read()
 
 
-def resolve_seasoned_public_version(
+def _resolve_seasoned_release(
     package: str,
     *,
     min_age_days: int = DEFAULT_MIN_AGE_DAYS,
     now: datetime | None = None,
     fetch: Callable[[str], bytes] = _default_fetch,
-) -> str:
+) -> tuple[str, list[dict]]:
     """The newest public-PyPI release of ``package`` whose NEWEST uploaded
     file is at least ``min_age_days`` old as of ``now`` (defaults to the
     real current UTC time), excluding any release PyPI reports as yanked
@@ -281,4 +282,39 @@ def resolve_seasoned_public_version(
         )
 
     candidates.sort()
-    return candidates[-1][1]
+    version = candidates[-1][1]
+    return version, releases[version]
+
+
+def resolve_seasoned_public_version(
+    package: str, *, min_age_days: int = DEFAULT_MIN_AGE_DAYS,
+    now: datetime | None = None, fetch: Callable[[str], bytes] = _default_fetch,
+) -> str:
+    """Newest stable, non-yanked version whose newest file clears the age floor."""
+    return _resolve_seasoned_release(
+        package, min_age_days=min_age_days, now=now, fetch=fetch
+    )[0]
+
+
+@dataclass(frozen=True)
+class SeasonedPublicRelease:
+    version: str
+    hashes: tuple[str, ...]
+
+
+def resolve_seasoned_public_release(
+    package: str, *, min_age_days: int = DEFAULT_MIN_AGE_DAYS,
+    now: datetime | None = None, fetch: Callable[[str], bytes] = _default_fetch,
+) -> SeasonedPublicRelease:
+    """Bind the age decision to eligible file bytes, not a mutable live version."""
+    version, files = _resolve_seasoned_release(
+        package, min_age_days=min_age_days, now=now, fetch=fetch
+    )
+    hashes = set()
+    for file in files:
+        digests = file.get("digests")
+        digest = digests.get("sha256") if isinstance(digests, dict) else None
+        if not isinstance(digest, str) or re.fullmatch(r"[0-9a-fA-F]{64}", digest) is None:
+            raise SeasonedVersionError(f"{package} {version}: missing or invalid file SHA-256")
+        hashes.add(digest.lower())
+    return SeasonedPublicRelease(version, tuple(sorted(hashes)))

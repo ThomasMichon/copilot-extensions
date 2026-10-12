@@ -26,10 +26,15 @@ explicit public index. An incompatible pin set fails resolution; it never
 relaxes a pin or the seasoning floor. Every source's build requirements are
 also checked against the locked interpreter before building. Seasoning is an
 age floor, not proof that any consumer's governed feed has mirrored a version.
+The metadata snapshot's eligible SHA-256 file hashes are carried into a
+`--require-hashes` install. A wheel uploaded to the same version after that
+snapshot cannot silently win live-index selection: its bytes fail verification
+before the toolchain is published. Hash mode also refuses any unpinned
+transitive build-tool dependency.
 
 Manifest schema 3 records toolchain source policy and resolved interpreter in
 `build_toolchain.provenance`; public provenance additionally records the
-index, seasoning floor, and exact pins. These fields participate in
+index, seasoning floor, exact pins, and eligible file hashes. These fields participate in
 `lock_id`, hence `artifact_id`. Caller-supplied toolchain locks with missing
 or inconsistent provenance are rejected before any wheel is built.
 Shared `--toolchain-venv` reuse checks the

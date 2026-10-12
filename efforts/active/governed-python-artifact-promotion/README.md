@@ -433,6 +433,12 @@ win grows with build complexity.
 - Review follow-through: schema-3 records reject caller-supplied locks lacking
   valid source/interpreter provenance before wheel building, not merely after
   resolution. Both fixture locks and negative regressions exercise this rule.
+- Age-floor race follow-through: snapshot-qualified file SHA-256 hashes travel
+  with exact pins into `uv pip install --require-hashes`. A later upload to the
+  same version cannot supply unseasoned bytes; unknown hashes and unpinned
+  transitive dependencies fail before publication. File hashes also bind reuse
+  and artifact provenance. A real offline uv regression proves rejection of a
+  same-version wheel absent from the eligible hash snapshot.
 
 ### 2026-10-10 - Phase 2 slice 3: seasoned public-PyPI version resolution for public CI runners
 

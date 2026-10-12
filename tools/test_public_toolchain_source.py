@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -12,8 +15,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import artifact_builder_cli as cli
 import build_toolchain_lock as btl
 import public_toolchain_source as public
+from seasoned_public_feed import SeasonedPublicRelease
 
 PINS = {"setuptools": "84.0.0", "wheel": "0.46.0", "packaging": "25.0"}
+HASHES = {name: ("a" * 64,) for name in PINS}
 
 
 @pytest.fixture
@@ -29,7 +34,8 @@ def isolated(monkeypatch):
         lambda env: pytest.fail("public mode must not label an ambient index governed"),
     )
     monkeypatch.setattr(
-        public, "resolve_seasoned_public_version", lambda name, **kwargs: PINS[name],
+        public, "resolve_seasoned_public_release",
+        lambda name, **kwargs: SeasonedPublicRelease(PINS[name], HASHES[name]),
     )
     calls = []
 
@@ -43,7 +49,11 @@ def isolated(monkeypatch):
             config = Path(kwargs["env"]["UV_CONFIG_FILE"]).read_text(encoding="utf-8")
             assert 'url = "https://pypi.org/simple"' in config
             assert cmd[3:5] == ["--only-binary", ":all:"]
-            assert set(cmd[7:]) == {f"{name}=={version}" for name, version in PINS.items()}
+            assert cmd[7:9] == ["--require-hashes", "--requirements"]
+            lines = Path(cmd[9]).read_text().splitlines()
+            assert set(lines) == {
+                f"{name}=={version} --hash=sha256:{'a' * 64}" for name, version in PINS.items()
+            }
             assert "UV_INDEX" not in kwargs["env"]
             assert "UV_DEFAULT_INDEX" not in kwargs["env"]
         else:
@@ -65,13 +75,13 @@ def test_public_toolchain_pins_and_reuses(tmp_path, monkeypatch, isolated):
     assert sum(cmd[:3] == ["uv", "pip", "install"] for cmd, _ in isolated) == 1
     marker = json.loads((venv / btl._PROVENANCE_MARKER_NAME).read_text())
     assert marker == {
-        **public.PublicToolchainSource(7, PINS).provenance, "python": "/python/3.12",
+        **public.PublicToolchainSource(7, PINS, HASHES).provenance, "python": "/python/3.12",
     }
     assert "validated_index_identity" not in marker
     assert first.record["provenance"] == marker
 
 
-@pytest.mark.parametrize("change", ["age", "pins", "python", "policy"])
+@pytest.mark.parametrize("change", ["age", "pins", "python", "policy", "hashes"])
 def test_distinct_source_identity_preserves_occupied_slot(tmp_path, monkeypatch, isolated, change):
     venv = tmp_path / "shared"
     first = btl.resolve_toolchain_lock(venv, source_policy="seasoned-public")
@@ -84,6 +94,15 @@ def test_distinct_source_identity_preserves_occupied_slot(tmp_path, monkeypatch,
         monkeypatch.setitem(PINS, "wheel", "0.45.0")
     elif change == "python":
         monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python, env: "/python/3.13")
+    elif change == "hashes":
+        monkeypatch.setitem(HASHES, "wheel", ("b" * 64,))
+        monkeypatch.setattr(btl, "_query_toolchain_versions", lambda python: dict(PINS))
+        original_run = btl.subprocess.run
+        def run(cmd, **kwargs):
+            if cmd[:3] == ["uv", "pip", "install"]:
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            return original_run(cmd, **kwargs)
+        monkeypatch.setattr(btl.subprocess, "run", run)
     else:
         policy = "governed"
         monkeypatch.setattr(btl, "_validated_trusted_index_url", lambda env: ("https://feed.example/simple", None))
@@ -121,7 +140,7 @@ def test_reused_pin_tampering_fails_closed(tmp_path, monkeypatch, isolated):
 def test_metadata_error_never_creates_venv(tmp_path, monkeypatch, isolated):
     def fail(*args, **kwargs):
         raise public.SeasonedVersionError("metadata unavailable")
-    monkeypatch.setattr(public, "resolve_seasoned_public_version", fail)
+    monkeypatch.setattr(public, "resolve_seasoned_public_release", fail)
     with pytest.raises(btl.ArtifactBuildError, match="metadata unavailable") as error:
         btl.resolve_toolchain_lock(tmp_path / "venv", source_policy="seasoned-public")
     assert isinstance(error.value.__cause__, public.SeasonedVersionError)
@@ -164,16 +183,16 @@ def test_metadata_queries_share_one_clock(monkeypatch):
     def resolve(name, **kwargs):
         clocks.append(kwargs["now"])
         assert kwargs["min_age_days"] == 10
-        return PINS[name]
-    monkeypatch.setattr(public, "resolve_seasoned_public_version", resolve)
+        return SeasonedPublicRelease(PINS[name], HASHES[name])
+    monkeypatch.setattr(public, "resolve_seasoned_public_release", resolve)
     assert public.resolve_public_source(tuple(PINS), 10).packages == PINS
     assert len(set(clocks)) == 1
 
 
 @pytest.mark.parametrize("age", [-1, True, 1.5, "7", None])
 def test_invalid_age_rejected_before_network(monkeypatch, age):
-    from seasoned_public_feed import resolve_seasoned_public_version
-    monkeypatch.setattr(public, "resolve_seasoned_public_version", resolve_seasoned_public_version)
+    from seasoned_public_feed import resolve_seasoned_public_release
+    monkeypatch.setattr(public, "resolve_seasoned_public_release", resolve_seasoned_public_release)
     with pytest.raises(btl.ArtifactBuildError, match="non-negative integer"):
         public.resolve_public_source(tuple(PINS), age)
 
@@ -227,10 +246,43 @@ def test_cli_default_preserves_builder_validation_order(monkeypatch, capsys):
     {"python": "/python", "source_policy": "unknown"},
     {"python": "/python", "source_policy": "governed"},
     {"python": "/python", "source_policy": "seasoned-public", "packages": PINS},
-    {**public.PublicToolchainSource(7, PINS).provenance, "python": "/python", "min_age_days": -1},
-    {**public.PublicToolchainSource(7, PINS).provenance, "python": "/python", "packages": {}},
+    {**public.PublicToolchainSource(7, PINS, HASHES).provenance, "python": "/python", "min_age_days": -1},
+    {**public.PublicToolchainSource(7, PINS, HASHES).provenance, "python": "/python", "packages": {}},
 ])
 def test_schema_three_record_rejects_incomplete_or_mismatched_provenance(provenance):
     lock = btl.ToolchainLock(Path("/python"), dict(PINS), provenance=provenance)
     with pytest.raises(btl.ArtifactBuildError, match="provenance"):
         _ = lock.record
+
+
+def test_real_uv_refuses_late_file_not_in_seasoned_snapshot(tmp_path):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("real uv contract requires uv on PATH")
+    env = btl.sanitize_subprocess_env()
+    btl.strip_package_source_env_vars(env, strip_credentials=True)
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    venv = tmp_path / "venv"
+    created = subprocess.run(
+        [uv, "venv", "--offline", "--no-config", "--python", sys.executable, str(venv)],
+        capture_output=True, text=True, env=env, timeout=30, **flags,
+    )
+    assert created.returncode == 0, created.stderr
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    wheel = wheels / "demo_toolchain-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("demo_toolchain-1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: demo-toolchain\nVersion: 1.0\n")
+        archive.writestr("demo_toolchain-1.0.dist-info/WHEEL", "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
+        archive.writestr("demo_toolchain-1.0.dist-info/RECORD", "")
+    source = public.PublicToolchainSource(7, {"demo-toolchain": "1.0"}, {"demo-toolchain": ("a" * 64,)})
+    installed = subprocess.run(
+        [uv, "pip", "install", "--no-config", "--no-index", "--no-cache",
+         "--find-links", str(wheels), "--python", str(btl._venv_python_path(venv)),
+         *source.install_args(tmp_path)],
+        capture_output=True, text=True, env=env, timeout=30, **flags,
+    )
+    assert installed.returncode != 0
+    assert "hash mismatch" in installed.stderr.lower()
+    actual = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    assert actual in installed.stderr

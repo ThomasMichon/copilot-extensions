@@ -738,8 +738,7 @@ def resolve_toolchain_lock(
                     "uv", "pip", "install",
                     *(["--only-binary", ":all:"] if public else []),
                     "--python", str(staging_venv_python),
-                    *([f"{name}=={version}" for name, version in public.packages.items()]
-                      if public else _LOCKED_TOOLCHAIN_PACKAGES),
+                    *(public.install_args(staging_venv_dir) if public else _LOCKED_TOOLCHAIN_PACKAGES),
                 ],
                 capture_output=True, text=True, env=install_env,
             )

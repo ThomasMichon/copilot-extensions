@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import http.client
-import importlib.util
+import importlib
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,10 +12,8 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO / "tools" / "seasoned_public_feed.py"
 
-_SPEC = importlib.util.spec_from_file_location("seasoned_public_feed", MODULE_PATH)
-assert _SPEC is not None and _SPEC.loader is not None
-spf = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(spf)
+sys.path.insert(0, str(MODULE_PATH.parent))
+spf = importlib.import_module("seasoned_public_feed")
 
 _NOW = datetime(2026, 10, 10, tzinfo=timezone.utc)
 
@@ -25,6 +24,32 @@ def _releases_payload(releases: dict) -> bytes:
 
 def _file(upload_time: str, *, yanked: bool = False) -> dict:
     return {"upload_time_iso_8601": upload_time, "yanked": yanked}
+
+def test_release_retains_only_selected_seasoned_file_hashes():
+    old = {**_file("2026-01-01T00:00:00Z"), "digests": {"sha256": "a" * 64}}
+    late = {**_file("2026-10-09T00:00:00Z"), "digests": {"sha256": "b" * 64}}
+    payload = _releases_payload({"1.0": [old], "2.0": [late]})
+    release = spf.resolve_seasoned_public_release("pkg", now=_NOW, fetch=lambda url: payload)
+    assert release.version == "1.0"
+    assert release.hashes == ("a" * 64,)
+
+
+@pytest.mark.parametrize("digests", [None, {}, {"sha256": ""}, {"sha256": "g" * 64}, {"sha256": "a" * 63}])
+def test_release_hash_missing_or_invalid_fails_closed(digests):
+    payload = _releases_payload({
+        "1.0": [{**_file("2026-01-01T00:00:00Z"), "digests": digests}],
+    })
+    with pytest.raises(spf.SeasonedVersionError, match="SHA-256"):
+        spf.resolve_seasoned_public_release("pkg", now=_NOW, fetch=lambda url: payload)
+
+
+def test_release_hashes_are_normalized_deduplicated_and_sorted():
+    files = [{**_file("2026-01-01T00:00:00Z"), "digests": {"sha256": value}}
+             for value in ("b" * 64, "A" * 64, "a" * 64)]
+    release = spf.resolve_seasoned_public_release(
+        "pkg", now=_NOW, fetch=lambda url: _releases_payload({"1.0": files}),
+    )
+    assert release.hashes == ("a" * 64, "b" * 64)
 
 
 class TestResolveSeasonedPublicVersion:

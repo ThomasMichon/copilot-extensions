@@ -3,15 +3,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
 from governed_feed_trust import ArtifactBuildError, _opaque_index_identity
-from seasoned_public_feed import SeasonedVersionError, resolve_seasoned_public_version
+from seasoned_public_feed import SeasonedVersionError, resolve_seasoned_public_release
 
 
 @dataclass(frozen=True)
 class PublicToolchainSource:
     min_age_days: int
     packages: dict[str, str]
+    hashes: dict[str, tuple[str, ...]]
 
     @property
     def provenance(self) -> dict:
@@ -20,7 +22,16 @@ class PublicToolchainSource:
             "index": "https://pypi.org/simple",
             "min_age_days": self.min_age_days,
             "packages": dict(sorted(self.packages.items())),
+            "file_hashes": {name: list(values) for name, values in sorted(self.hashes.items())},
         }
+
+    def install_args(self, directory: Path) -> list[str]:
+        requirements = directory / "public-toolchain-requirements.txt"
+        requirements.write_text("\n".join(
+            f"{name}=={version} " + " ".join(f"--hash=sha256:{digest}" for digest in self.hashes[name])
+            for name, version in sorted(self.packages.items())
+        ) + "\n", encoding="utf-8")
+        return ["--require-hashes", "--requirements", str(requirements)]
 
     def verify(self, packages: dict[str, str]) -> None:
         if packages != self.packages:
@@ -35,13 +46,16 @@ def resolve_public_source(
 ) -> PublicToolchainSource:
     now = datetime.now(timezone.utc)
     try:
-        pins = {
-            name: resolve_seasoned_public_version(name, min_age_days=min_age_days, now=now)
+        releases = {
+            name: resolve_seasoned_public_release(name, min_age_days=min_age_days, now=now)
             for name in packages
         }
     except SeasonedVersionError as exc:
         raise ArtifactBuildError(f"could not resolve seasoned public toolchain: {exc}") from exc
-    return PublicToolchainSource(min_age_days, pins)
+    return PublicToolchainSource(
+        min_age_days, {name: release.version for name, release in releases.items()},
+        {name: release.hashes for name, release in releases.items()},
+    )
 
 
 def source_provenance(source: str | PublicToolchainSource) -> dict:
@@ -60,8 +74,17 @@ def validate_lock_provenance(provenance: dict | None, packages: dict[str, str]) 
             raise ArtifactBuildError("governed toolchain requires validated index provenance")
     elif policy == "seasoned-public":
         age = provenance.get("min_age_days")
+        hashes = provenance.get("file_hashes")
+        if not isinstance(hashes, dict) or set(hashes) != set(packages) or any(
+            not isinstance(values, list) or not values or any(
+                not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest)
+                for digest in values
+            ) for values in hashes.values()
+        ):
+            raise ArtifactBuildError("public toolchain requires eligible file-hash provenance")
         if type(age) is not int or age < 0 or provenance != {
-            **PublicToolchainSource(age, packages).provenance, "python": provenance["python"],
+            **PublicToolchainSource(age, packages, {name: tuple(values) for name, values in hashes.items()}).provenance,
+            "python": provenance["python"],
         }:
             raise ArtifactBuildError("public toolchain provenance does not match its policy and pins")
     else:
