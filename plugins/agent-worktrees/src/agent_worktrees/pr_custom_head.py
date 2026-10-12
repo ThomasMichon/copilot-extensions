@@ -50,6 +50,7 @@ def verify_attested(record, repo, pr, remote: str, expected: str, *, cwd: str,
             remote_tip = pr_publish._tip(remote, pr.branch, cwd)
         return (
             observed.number == pr.number and observed.state.lower() == "open"
+            and observed.url.rstrip("/") == pr.url.rstrip("/")
             and not observed.merged and observed.head_sha == expected
             and observed.head_ref == pr.branch and bool(observed.head_url)
             and same_repository(pr_publish._identity(observed.head_url, cwd), identity, pr.provider)

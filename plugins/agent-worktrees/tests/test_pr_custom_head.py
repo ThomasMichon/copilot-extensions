@@ -27,6 +27,7 @@ def _attested(pr_repo, monkeypatch):
     observed = SimpleNamespace(
         number=42, state="open", merged=False, head_sha=old,
         head_ref=branch, head_url="https://example.com/example/project",
+        url=pr.url,
     )
     monkeypatch.setattr(git_ops, "remote_slug", lambda *a, **k: "example/project")
     monkeypatch.setattr(git_ops, "_auth_config_args", lambda *a, **k: [])
@@ -70,7 +71,7 @@ def test_custom_head_rejects_unproven_or_stale_authority(pr_repo, monkeypatch):
     baseline = copy.deepcopy(record)
     saved_observation = vars(observed).copy()
     for mutation in ("unattested", "foreign-owner", "destination", "stale-head", "foreign-pr",
-                     "foreign-branch", "foreign-repo", "closed", "nonexclusive", "missing-provider", "unrecorded-provider", "shared-feature"):
+                     "foreign-branch", "foreign-repo", "closed", "nonexclusive", "missing-provider", "unrecorded-provider", "shared-feature", "endpoint-drift"):
         record = copy.deepcopy(baseline)
         vars(observed).update(saved_observation)
         with monkeypatch.context() as patch:
@@ -95,6 +96,8 @@ def test_custom_head_rejects_unproven_or_stale_authority(pr_repo, monkeypatch):
             elif mutation == "shared-feature":
                 record.pr.branch = observed.head_ref = "feature/shared"
                 record.pr.rewrite_owner = f"{record.worktree_id}:feature/shared"
+            elif mutation == "endpoint-drift":
+                observed.url = "https://other.example/example/project/pulls/42"
             elif mutation == "nonexclusive":
                 patch.setattr(pr_custom_head.pr_authority, "assert_exclusive",
                               lambda *a, **k: (_ for _ in ()).throw(ValueError("foreign ledger")))
