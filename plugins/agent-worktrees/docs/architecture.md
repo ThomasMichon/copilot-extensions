@@ -14,7 +14,7 @@ executes the resolved original hook with unchanged stdin, URL and environment,
 and its original logical remote as `$1`, preserving remote-scoped validation and
 failure propagation. No remote is persisted or repointed. The temporary remote
 has no fetch mapping, so Git cannot race the guarded tracking refresh.
-Remote-scoped receive-pack, proxy/auth method, remote-helper, mirror and push
+Remote-scoped receive/upload-pack, proxy/auth method, remote-helper, mirror and push
 options are captured with the destinations and reproduced for transport.
 A changed fork identity before capture
 is still refused.

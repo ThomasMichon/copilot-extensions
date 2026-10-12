@@ -17,7 +17,7 @@ from . import git_ops, push_timeout
 _destination: ContextVar[
     tuple[str, tuple[str, ...], tuple[tuple[str, str], ...]] | None
 ] = ContextVar("push_destination", default=None)
-REMOTE_TRANSPORT_SETTINGS = ("receivepack", "proxy", "proxyauthmethod", "vcs", "mirror", "pushoption")
+REMOTE_TRANSPORT_SETTINGS = ("receivepack", "uploadpack", "proxy", "proxyauthmethod", "vcs", "mirror", "pushoption")
 
 
 @contextmanager
@@ -134,7 +134,7 @@ def published_ref(remote: str, destinations: tuple[str, ...], target: str,
     alias = f"agent-worktrees-observe-{uuid.uuid4().hex}-url"
     pinned = _destination.get()
     probe_settings = tuple((key, value) for key, value in (pinned[2] if pinned else ())
-                           if key in ("proxy", "proxyauthmethod", "vcs"))
+                           if key in ("uploadpack", "proxy", "proxyauthmethod", "vcs"))
     probe_remote = f"agent-worktrees-probe-{uuid.uuid4().hex}"
     with _url_aliases([(destinations[0], alias)]) as alias_args:
         published = git_ops.git(

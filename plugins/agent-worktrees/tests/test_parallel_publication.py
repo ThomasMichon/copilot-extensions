@@ -353,6 +353,23 @@ def test_remote_receivepack_is_preserved(tmp_path):
                        check=False).returncode != 0
 
 
+@pytest.mark.parametrize("uploadpack", ["git-upload-pack", "nonexistent-test-upload-pack"])
+def test_remote_uploadpack_is_preserved_for_published_ref(tmp_path, uploadpack):
+    root, remote = repository(tmp_path)
+    git(root, "config", "remote.origin.uploadpack", uploadpack)
+    result = pr_publish.push_checked(None, "origin", "HEAD:refs/heads/custom", cwd=str(root))
+    assert result, result.stderr
+    published = git(remote, "rev-parse", "refs/heads/custom")
+    tracked = git_ops.git("rev-parse", "--verify", "refs/remotes/origin/custom",
+                          cwd=root, check=False)
+    if uploadpack == "git-upload-pack":
+        assert not result.stderr
+        assert tracked.returncode == 0 and tracked.stdout.strip() == published
+    else:
+        assert "Cannot observe published remote ref" in result.stderr
+        assert tracked.returncode != 0
+
+
 def test_equals_sign_destination_is_pinned_without_config_key_corruption(tmp_path):
     root, remote = repository(tmp_path)
     renamed = remote.with_name("repo=mirror.git")
