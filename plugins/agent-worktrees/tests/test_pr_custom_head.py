@@ -37,7 +37,6 @@ def _attested(pr_repo, monkeypatch):
     return config, record, path, remote, old, observed
 
 
-@pytest.mark.guard
 def test_attested_custom_branch_proves_source_owned_sync(pr_repo, monkeypatch):
     from agent_worktrees import pr_rebase
 
@@ -66,7 +65,6 @@ def test_attested_custom_branch_proves_source_owned_sync(pr_repo, monkeypatch):
     assert _git("--git-dir", str(remote), "rev-parse", observed.head_ref, cwd=path) == proof.source_head
 
 
-@pytest.mark.guard
 def test_custom_head_rejects_unproven_or_stale_authority(pr_repo, monkeypatch):
     config, record, path, remote, old, observed = _attested(pr_repo, monkeypatch)
     baseline = copy.deepcopy(record)
@@ -103,7 +101,6 @@ def test_custom_head_rejects_unproven_or_stale_authority(pr_repo, monkeypatch):
             assert not pr_custom_head.verify_attested(record, config.default_repo, record.pr, "origin", old, cwd=str(path)), mutation
 
 
-@pytest.mark.guard
 def test_public_explicit_rewrite_round_trip_and_stale_live_head(pr_repo, monkeypatch):
     from agent_worktrees import finalize, pr_ops, pr_rewrite
 
@@ -128,7 +125,6 @@ def test_public_explicit_rewrite_round_trip_and_stale_live_head(pr_repo, monkeyp
     assert _git("--git-dir", str(remote), "rev-parse", observed.head_ref, cwd=path) == published
 
 
-@pytest.mark.guard
 def test_fork_head_identity_is_distinct_from_base_pr_repository(pr_repo, monkeypatch):
     config, record, path, remote, old, observed = _attested(pr_repo, monkeypatch)
     record.pr.rewrite_identity = "example.com/contributor/project"
