@@ -741,7 +741,8 @@ class AgentRosterCache(_DiscoveryMixin):
             if resolver is None:
                 raise LookupError(f"namespace '{ns}:' no longer registered")
             if resolver is not provider_ref:
-                raise LookupError(f"namespace '{ns}:' provider replaced before scan started")
+                log.debug("Namespace '%s:' provider replaced before scan started", ns)
+                return
             # This cache owns the advertised refresh cadence -- a resolver's
             # own separate, shorter result TTL (e.g. `CliNamespaceResolver`'s
             # internal `_list_cache`) must never let a scan this cache
@@ -781,7 +782,8 @@ class AgentRosterCache(_DiscoveryMixin):
         # them as fresh.
         live_ref = self._namespace_resolver_ref(ns)
         if (
-            entry is None
+            self._stopping
+            or entry is None
             or entry.provider_ref is not provider_ref
             or entry.generation != generation
             or live_ref is not provider_ref

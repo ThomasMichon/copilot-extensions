@@ -296,8 +296,10 @@ async def test_provider_replacement_keeps_cancel_resistant_scan_owned_until_shut
     cache = AgentRosterCache(resolver, refresh_interval=60.0)
     release = asyncio.Event()
     cancelled = asyncio.Event()
+    started = asyncio.Event()
 
     async def scan() -> list[NamespaceAgentInfo]:
+        started.set()
         while not release.is_set():
             try:
                 await release.wait()
@@ -307,7 +309,7 @@ async def test_provider_replacement_keeps_cancel_resistant_scan_owned_until_shut
 
     original.outcomes = [scan]
     old_task = cache._refresh_namespace("ns")
-    await asyncio.sleep(0)
+    await asyncio.wait_for(started.wait(), timeout=2)
     replacement = _ControllableResolver("ns")
     resolver.unregister_namespace_resolver("ns")
     resolver.register_namespace_resolver(replacement)
@@ -326,6 +328,40 @@ async def test_provider_replacement_keeps_cancel_resistant_scan_owned_until_shut
     assert old_task.done()
     assert old_task not in cache._owned_scans
     assert cache._entries["ns"].rows == []
+
+
+@pytest.mark.asyncio
+async def test_stop_fences_result_of_retained_cancellation_resistant_holder() -> None:
+    resolver, provider = _make_resolver_with_namespace()
+    cache = AgentRosterCache(resolver, refresh_interval=60)
+    cache._CANCELLATION_GRACE = 0.01
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def scan() -> list[NamespaceAgentInfo]:
+        started.set()
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                continue
+        return [_agent("late")]
+
+    provider.outcomes = [scan]
+    holder = cache._refresh_namespace("ns")
+    await asyncio.wait_for(started.wait(), timeout=2)
+    try:
+        await asyncio.wait_for(cache.stop(), timeout=2)
+        assert not holder.done()
+        assert holder in cache._owned_scans
+        release.set()
+        await asyncio.wait_for(holder, timeout=2)
+        assert cache._entries["ns"].rows == []
+        assert cache._entries["ns"].state.value == "uninitialized"
+        assert holder not in cache._owned_scans
+    finally:
+        release.set()
+        await asyncio.wait_for(holder, timeout=2)
 
 
 

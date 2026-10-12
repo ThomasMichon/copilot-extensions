@@ -228,3 +228,16 @@ own provider capture. A deterministic replacement-before-yield regression
 proves A performs no read, B performs exactly one, and only B's rows publish.
 The full roster-cache contract passes (50 passed, one skipped); touched lint
 and the install contract remain clean.
+
+### 2026-10-12 - Reconciliation and shutdown publication fence
+
+Reconciled the effort index with newer upstream entries without reverting
+their status. Review then identified that a cancellation-resistant holder
+could finish after bounded shutdown and publish into the stopped cache.
+Publication now rejects results while stopping; retained ownership remains
+observable until task completion. An event-gated shutdown regression proves
+the late result cannot change rows or state. Provider replacement before
+scan start is logged as normal discarded work, not a failed scan warning,
+and the replacement shutdown fixture uses an explicit start handshake.
+The targeted roster contract passes (51 passed, one skipped); native worker
+exit and budget/circuit gates remain unresolved.
