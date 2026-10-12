@@ -108,6 +108,21 @@ test("multiline code spans hide examples without changing actual comment fields"
   assert.equal(gate.validate("<!-- documented example\n" + marker + "\n-->\n\n" + marker), null);
 });
 
+test("indented or container-prefixed fence content cannot close another fence", () => {
+  for (const body of [
+    "```html\n    ```\n" + marker + "\n```",
+    "~~~html\n    ~~~\n" + marker + "\n~~~",
+    "```html\n> ```\n" + marker + "\n```",
+    "```html\n- ```\n" + marker + "\n```",
+    "- ```html\n      ```\n  " + marker + "\n  ```",
+    "> ```html\n>     ```\n" + marker + "\n> ```",
+  ]) {
+    assert.ok(gate.validate(body));
+    assert.equal(gate.validate(body + "\n\n" + marker), null);
+  }
+  assert.equal(gate.validate("    ```not a fence\n\n" + marker), null);
+});
+
 test("current description is reread and body-only repairs change the verdict", async () => {
   let current = pr("");
   const github = { rest: { pulls: { get: async () => ({ data: current }) } } };

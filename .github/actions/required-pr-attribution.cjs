@@ -37,15 +37,32 @@ const REPAIR = [
 function mapVisibleLines(body, visible, hidden = () => null) {
   let fence = null;
   return body.split(/\r?\n/).map((line) => {
-    // Strip Markdown containers only for fence detection, never for metadata.
-    const fenceLine = line.replace(/^[ \t]*(?:(?:>[ \t]*|(?:[-+*]|\d{1,9}[.)])[ \t]+)[ \t]*)*/, "");
-    const match = fenceLine.match(/^(`{3,}|~{3,})(.*)$/);
-    if (match && (fence || match[1][0] !== "`" || !match[2].includes("`"))) {
-      if (!fence) fence = match[1];
-      else if (match[1][0] === fence[0] && match[1].length >= fence.length && !match[2].trim()) fence = null;
+    let rest = line;
+    let quotes = 0;
+    let prefix;
+    while ((prefix = rest.match(/^ {0,3}>[ \t]?/))) {
+      quotes++;
+      rest = rest.slice(prefix[0].length);
+    }
+    if (fence) {
+      const close = rest.match(/^( *)(`{3,}|~{3,})[ \t]*$/);
+      if (quotes === fence.quotes && close &&
+          close[1].length >= fence.indent && close[1].length <= fence.indent + 3 &&
+          close[2][0] === fence.delimiter[0] && close[2].length >= fence.delimiter.length) fence = null;
       return hidden(line);
     }
-    return fence === null ? visible(line) : hidden(line);
+    let indent = 0;
+    // List prefixes apply to openers, not to arbitrary content inside a fence.
+    while ((prefix = rest.match(/^ *(?:[-+*]|\d{1,9}[.)])[ \t]+/))) {
+      indent += prefix[0].length;
+      rest = rest.slice(prefix[0].length);
+    }
+    const open = rest.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (open && (open[1][0] !== "`" || !open[2].includes("`"))) {
+      fence = { delimiter: open[1], quotes, indent };
+      return hidden(line);
+    }
+    return visible(line);
   }).filter((line) => line !== null).join("\n");
 }
 
