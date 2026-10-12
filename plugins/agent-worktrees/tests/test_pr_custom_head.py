@@ -42,6 +42,11 @@ def test_attested_custom_branch_proves_source_owned_sync(pr_repo, monkeypatch):
     from agent_worktrees import pr_rebase
 
     config, record, path, remote, old, observed = _attested(pr_repo, monkeypatch)
+    def full_config_authority(actual_config, *args, **kwargs):
+        assert actual_config.default_repo.remote == config.default_repo.remote
+        assert actual_config.repo_name == config.repo_name
+        return ()
+    monkeypatch.setattr(pr_custom_head.pr_authority, "assert_exclusive", full_config_authority)
     _advance(config, path)
     assert git_collab.sync_forward(record.worktree_id, config)
     refreshed = _record(record.worktree_id)

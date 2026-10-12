@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
+from . import config as cfg
 from . import git_ops, pr_authority, pr_publish, providers
 from .providers.pr_source import same_repository
 
@@ -28,7 +27,7 @@ cannot be replaced by matching strings supplied through set-pr.
         if pr.repo.lower() != (git_ops.remote_slug(repo.remote, cwd=cwd) or "").lower():
             return False
         pr_authority.assert_exclusive(
-            SimpleNamespace(repo_name=record.repo), record, pr, identity=identity,
+            cfg.load_config(project=record.repo), record, pr, identity=identity,
         )
         provider = providers.get_provider(pr.provider)
         observed = provider.get_pull(

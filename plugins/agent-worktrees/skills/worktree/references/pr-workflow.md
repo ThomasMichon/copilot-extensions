@@ -630,7 +630,8 @@ publish with `push-changes` (or repeat `create-pr`). Inspect and validate the
 resolution before publishing.
 
 A non-ancestral update is authorized only for a unique, live, tracked private
-`pr/`, legacy `feature/`, or contributor `user/` head carrying this worktree's suffix or codename.
+`pr/`, legacy `feature/`, or contributor `user/` head carrying this worktree's
+suffix/codename or freshly proving its previously attested custom-head ownership.
 The current checkout must be its recorded `worktree/<id>` branch (or that
 same tracked private head in the legacy checked-out-feature flow). An exact
 legacy bare-id record resolves to its canonical `worktree/<id>` branch.
