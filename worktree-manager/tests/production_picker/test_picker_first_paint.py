@@ -546,6 +546,9 @@ def test_skeleton_does_not_touch_src_local(monkeypatch):
     assert screen.loader is None
     assert screen.machines
     assert screen.machines[1][:3] == ("Local Win", "raw-hostname", "Win")
+    rendered = screen.tab_bar(100, True).plain
+    assert "Local Win" in rendered
+    assert "raw-hostname" not in rendered
     screen.local_index()
     assert screen.machine_state(0) == "ready"
     assert screen.machine_state(1) == "loading"

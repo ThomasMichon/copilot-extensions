@@ -754,6 +754,32 @@ def test_get_project_scalars_skip_worktree_identity(
     assert calls == [False] * len(expected)
 
 
+def test_get_project_scalar_preserves_explicit_session_target(
+    adopted_repo, active_myproj, monkeypatch, capsys,
+):
+    _anchor, _wt_root, _wt_path, _wt_id, conf = adopted_repo
+    calls = []
+
+    def activate_session(session_id):
+        calls.append(("session", session_id))
+        return "target-worktree"
+
+    def load_config(*_args, **kwargs):
+        calls.append(("config", kwargs["include_control_plane_related_pr"]))
+        return conf
+
+    def unexpected_lookup(*_args, **_kwargs):
+        raise AssertionError("scalar must not resolve checkout after project activation")
+
+    monkeypatch.setattr(m, "_activate_session_binding", activate_session)
+    monkeypatch.setattr(cfg, "load_config", load_config)
+    monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", unexpected_lookup)
+    monkeypatch.setattr(m, "_worktree_path_for_id", unexpected_lookup)
+    assert m.cmd_get(types.SimpleNamespace(key="machine", session_id="target-session")) == 0
+    assert capsys.readouterr().out.strip() == conf.machine
+    assert calls == [("session", "target-session"), ("config", False)]
+
+
 def test_get_non_pr_key_skips_control_plane_related_pr(
     adopted_repo, active_myproj, monkeypatch, capsys,
 ):

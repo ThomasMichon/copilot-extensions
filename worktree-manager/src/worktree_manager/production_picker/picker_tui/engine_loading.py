@@ -141,6 +141,7 @@ class PickerScreenLoadingMixin:
                 "ready": True,
                 "source_kind": "machine-ssh",
                 "source_id": None,
+                "machine_label": "Local",
                 "capabilities": {},
             },
         ]
