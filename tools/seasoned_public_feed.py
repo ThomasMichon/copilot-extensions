@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""Seasoned public-PyPI version resolution, for build contexts that have no
-network path to the corporate governed feed at all (a public GitHub-hosted
-CI runner cannot reach ``packagefeedproxy.microsoft.io``).
+"""Seasoned public-PyPI version resolution for public build runners
+without access to a consumer's private governed package feed.
 
 Part of the `governed-python-artifact-promotion` effort's Phase 2 pipeline
 wiring (`efforts/active/governed-python-artifact-promotion/README.md`):
@@ -158,6 +157,11 @@ def resolve_seasoned_public_version(
     any network/HTTP failure, a response that doesn't parse as the
     expected PyPI JSON shape, or when no qualifying release exists at all
     (every release is too new, yanked, or a pre-release)."""
+    if not isinstance(package, str) or re.fullmatch(
+        r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?", package
+    ) is None:
+        raise SeasonedVersionError("package must be a valid Python distribution name")
+    package = re.sub(r"[-_.]+", "-", package).lower()
     if min_age_days < 0:
         raise SeasonedVersionError(
             f"min_age_days={min_age_days!r} is negative -- this would "
@@ -185,10 +189,14 @@ def resolve_seasoned_public_version(
         raise SeasonedVersionError(
             f"{package}: could not reach PyPI JSON API at {url}: {exc.reason}"
         ) from exc
+    except TimeoutError as exc:
+        raise SeasonedVersionError(
+            f"{package}: PyPI JSON API request or response read timed out"
+        ) from exc
 
     try:
         data = json.loads(raw)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise SeasonedVersionError(
             f"{package}: PyPI JSON API response is not valid JSON"
         ) from exc
@@ -199,7 +207,7 @@ def resolve_seasoned_public_version(
             f"{package}: PyPI JSON API response has no 'releases' object"
         )
 
-    candidates: list[tuple[tuple[int, tuple[int, ...]], str]] = []
+    candidates: list[tuple[tuple[int, tuple[int, ...], int], str]] = []
     for version_str, files in releases.items():
         if not isinstance(files, list) or not files:
             # No uploaded files at all for this version string (PyPI

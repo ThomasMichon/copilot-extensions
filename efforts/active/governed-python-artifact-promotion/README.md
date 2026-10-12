@@ -404,7 +404,7 @@ win grows with build complexity.
   design, and correct for every other caller of this tool (a managed
   machine, always governed-feed-reachable) -- but `validate-and-promote.yml`
   runs on **public GitHub-hosted runners**, which have no network path to
-  the corporate governed feed (`packagefeedproxy.microsoft.io`) at all.
+  a consumer's private governed feed.
   Raised this to the operator rather than silently picking a resolution
   myself. Decision: the public runner resolves the build toolchain
   (`setuptools`/`wheel`/`packaging` -- build tooling, not a plugin's own
@@ -446,7 +446,7 @@ win grows with build complexity.
   `fetch` parameter so tests exercise the actual selection logic against
   fixed, synthetic responses rather than real (slow, flaky, not
   reproducible) calls to pypi.org.
-- 32 unit tests (`tools/test_seasoned_public_feed.py`): newest-seasoned
+- Resolver regression coverage (`tools/test_seasoned_public_feed.py`): newest-seasoned
   selection (including a stable `.postN` release), yanked/pre-release
   exclusion (including when they'd otherwise be the newest-and-old-enough
   candidate), newest-file age measurement, the exact min-age-days
@@ -491,6 +491,16 @@ win grows with build complexity.
   caller gets canonical, directly-comparable tuples; added both a direct
   equivalence-class test and the exact mixed-spelling integration
   regression case the review named.
+- **2026-10-12 review follow-through:** validate distribution names before
+  any request and normalize them using PEP 503 name normalization, preventing
+  path/query/fragment characters from changing the request target. Corrected
+  the candidate-key type to include the post-release component. Response-read
+  timeouts and malformed Unicode now raise `SeasonedVersionError` with their
+  original cause. The existing trailing-zero normalization already addresses
+  the carried-over sorting finding. All 49 collected resolver cases pass,
+  including real response-read failure handling through the fetch helper;
+  touched Python lint passes. Test-count descriptions now refer to coverage
+  rather than a count that becomes stale with each review round.
 - **Still open (this effort's own next slice):** actually wire this
   resolver into `resolve_toolchain_lock`/`build_python_artifacts.py`'s CLI
   (a caller-selectable "seasoned public" mode, distinct from and never

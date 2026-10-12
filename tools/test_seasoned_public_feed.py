@@ -27,6 +27,45 @@ def _file(upload_time: str, *, yanked: bool = False) -> dict:
 
 
 class TestResolveSeasonedPublicVersion:
+    @pytest.mark.parametrize("package", ["", "bad name", "../pkg", "a/b", "a?b", "a#b", "a%2Fb", "-pkg", "pkg-", None])
+    def test_invalid_package_rejected_before_fetch(self, package):
+        def unexpected_fetch(url):
+            pytest.fail("invalid distribution name must not make a request")
+
+        with pytest.raises(spf.SeasonedVersionError, match="distribution name"):
+            spf.resolve_seasoned_public_version(package, fetch=unexpected_fetch)
+
+    def test_distribution_name_normalized_in_request(self):
+        urls = []
+
+        def fetch(url):
+            urls.append(url)
+            return _releases_payload({"1.0": [_file("2026-01-01T00:00:00Z")]})
+
+        assert spf.resolve_seasoned_public_version("Some_Pkg.Name", now=_NOW, fetch=fetch) == "1.0"
+        assert urls == ["https://pypi.org/pypi/some-pkg-name/json"]
+
+    def test_response_read_timeout_wrapped(self, monkeypatch):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                raise TimeoutError("response read stalled")
+
+        monkeypatch.setattr(spf.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+        with pytest.raises(spf.SeasonedVersionError, match="timed out") as caught:
+            spf.resolve_seasoned_public_version("pkg", now=_NOW)
+        assert isinstance(caught.value.__cause__, TimeoutError)
+
+    def test_invalid_unicode_wrapped(self):
+        with pytest.raises(spf.SeasonedVersionError, match="not valid JSON") as caught:
+            spf.resolve_seasoned_public_version("pkg", fetch=lambda url: b"\xff")
+        assert isinstance(caught.value.__cause__, UnicodeDecodeError)
+
     def test_picks_newest_seasoned_release(self):
         payload = _releases_payload(
             {
