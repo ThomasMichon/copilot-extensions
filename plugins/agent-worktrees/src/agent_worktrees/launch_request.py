@@ -251,7 +251,11 @@ def inspect(request_id: str) -> dict:
     receipt = json.loads(admission.read_text(encoding="utf-8"))
     path = directory / f"{receipt['worktree_id']}.yaml"
     seed = launch_seed_state.peek(path)
-    available = bool(receipt.get("accepted")) and seed is not None and seed.seed_id == receipt["seed_id"]
+    creation_complete = receipt["kind"] == "resume" or bool(receipt.get("creation_complete"))
+    available = (
+        creation_complete and seed is not None
+        and seed.seed_id == receipt["seed_id"] and seed.kind == receipt["kind"]
+    )
     return {
         "version": 1, "request_id": request_id, "worktree_id": receipt["worktree_id"],
         "seed_id": receipt["seed_id"], "seed_kind": receipt["kind"],
@@ -259,7 +263,8 @@ def inspect(request_id: str) -> dict:
         "state": (
             "handoff-unconfirmed" if available and seed.handoff_id else
             "staged" if available else
-            "completed-or-superseded" if receipt.get("accepted") else "creation-incomplete"
+            "completed-or-superseded" if receipt.get("accepted") else
+            "creation-incomplete" if not creation_complete else "admission-incomplete"
         ),
     }
 

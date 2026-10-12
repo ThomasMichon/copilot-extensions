@@ -289,3 +289,17 @@ hiding the problem or silently dropping text.
   unreachable on a bounded recheck, so its native conversation lane and source
   worktree disposition remain open. Candidate proof is still not delivered
   Picker proof; release, rollout and effort closure are outstanding.
+- **2026-10-12** -- Operator authorized transferring the unreachable native
+  Windows conversation lane and its managed source-worktree disposition to
+  #6370. This is an explicit tracked deferral, not a Windows SSH pass or
+  permission to clear another session's ownership. The latest POSIX candidate
+  admission/transport portfolio passes 47 cases (one PowerShell skip), including
+  the full 7 KiB native Bash process round-trip.
+  Refreshed review exposed the crash between durable seed staging and acceptance
+  receipt publication. Read-only recovery now recognizes the matching durable
+  seed for Resume or a fully created New allocation even before that final
+  receipt write, while preserving handoff uncertainty and refusing unfinished
+  New creation. Eight focused daemon recovery/supersession cases pass, including
+  injected receipt-write failure for both kinds; unstaged Resume is explicitly
+  `admission-incomplete`. The test fixture uses its actual registered project,
+  retaining receiving-side authority rather than mocking it away. Lint passes.

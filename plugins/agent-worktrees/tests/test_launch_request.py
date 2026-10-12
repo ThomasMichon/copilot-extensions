@@ -172,6 +172,73 @@ def test_changed_request_cannot_reuse_an_admitted_identity(tmp_path, authority):
         request.execute(authority, {**intent, "text": "changed"})
 
 
+@pytest.mark.parametrize("kind", ["new", "resume"])
+@pytest.mark.parametrize("handoff", [False, True])
+def test_status_recovers_committed_seed_before_acceptance_receipt(
+    tmp_path, authority, monkeypatch, kind, handoff,
+):
+    from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
+
+    config = _create_config(tmp_path)
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    if kind == "resume":
+        tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
+                                   config.repo_name, "test", "windows", tmp_path)
+    intent = _intent(kind)
+    admission = request._admission_path(tmp_path, intent["request_id"])
+    write = tracking._atomic_write
+
+    def interrupt_acceptance(path, text):
+        if path == admission and json.loads(text).get("accepted"):
+            raise OSError("interrupted after durable seed staging")
+        return write(path, text)
+
+    monkeypatch.setattr(tracking, "_atomic_write", interrupt_acceptance)
+    with pytest.raises(ValueError, match="after durable seed staging"):
+        request.execute(config, intent)
+    receipt_before = admission.read_bytes()
+    receipt = json.loads(receipt_before)
+    assert not receipt.get("accepted")
+    if kind == "new":
+        assert receipt["creation_complete"]
+    record = tmp_path / f"{receipt['worktree_id']}.yaml"
+    seed = launch_seed_state.peek(record)
+    assert seed.seed_id == intent["request_id"] and seed.kind == kind
+    if handoff:
+        launch_seed_state.take(record, seed_id=seed.seed_id)
+    status = request.inspect(intent["request_id"])
+    assert status["state"] == ("handoff-unconfirmed" if handoff else "staged")
+    assert status["ready"] is not handoff
+    assert admission.read_bytes() == receipt_before
+    assert len(tracking.list_records(tmp_path)) == 1
+
+
+def test_status_never_exposes_incomplete_new_creation_as_ready(tmp_path, authority):
+    record = tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
+                                       "demo", "test", "windows", tmp_path)
+    intent = _intent("new")
+    request._dispatch("launch_request_admit", {
+        "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
+        "fingerprint": "fixture", "kind": "new", "worktree_id": "wt-a",
+        "timestamp": "20261010-120000",
+    })
+    launch_seed_state.stage(record.yaml_path, kind="new", text=intent["text"],
+                            seed_id=intent["request_id"])
+    status = request.inspect(intent["request_id"])
+    assert not status["ready"] and status["state"] == "creation-incomplete"
+
+
+def test_status_unstaged_resume_is_admission_incomplete(tmp_path, authority):
+    intent = _intent()
+    request._dispatch("launch_request_admit", {
+        "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
+        "fingerprint": "fixture", "kind": "resume", "worktree_id": "wt-a",
+        "timestamp": "20261010-120000",
+    })
+    status = request.inspect(intent["request_id"])
+    assert not status["ready"] and status["state"] == "admission-incomplete"
+
+
 def test_structured_cli_uses_no_selector_and_returns_no_seed_text(tmp_path, authority, monkeypatch, capsys):
     import argparse
     from agent_worktrees import resolve_cli

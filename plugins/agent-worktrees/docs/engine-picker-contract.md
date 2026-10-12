@@ -26,10 +26,13 @@ backend boundary perform cold checks, reservation, failed-start release and
 successful handoff discard.
 
 `resolve --json --launch-request-status <request-id>` is read-only recovery.
-It returns `staged`, `handoff-unconfirmed`, `creation-incomplete` or
+It returns `staged`, `handoff-unconfirmed`, `creation-incomplete`,
+`admission-incomplete` or
 `completed-or-superseded`, plus the allocated identities. A repeated admitted
 request cannot allocate another New worktree or restore a completed/replaced
-prompt. A target without the request capability rejects before mutation.
+prompt. A matching durable seed is recoverable even if acceptance-receipt
+publication was interrupted, but an incomplete New creation is never ready.
+A target without the request capability rejects before mutation.
 
 ## Provider-backed source registry
 
