@@ -609,12 +609,9 @@ def _daemon_cwd() -> str:
     return os.path.expanduser("~")
 
 def _spawn_detached(argv: list[str]) -> bool:
-    """Spawn a survivable, windowless daemon rooted at its own install dir
-    (not the caller's cwd -- see ``_daemon_cwd``). Never raises. On Windows
-    the console-subsystem interpreter is intentionally retained and launched
-    under ``CREATE_NO_WINDOW``: its periodic console children then inherit
-    one hidden console tree instead of each allocating a Default Terminal
-    host from a consoleless ``pythonw`` parent."""
+    """Spawn in the install dir; never raises. Windows uses direct console
+    Python under ``CREATE_NO_WINDOW``: PID ownership is unambiguous and periodic
+    children inherit one hidden console tree."""
     override = _core_helper("_spawn_detached", _spawn_detached)
     if override is not _spawn_detached:
         return override(argv)
