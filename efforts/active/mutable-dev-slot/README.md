@@ -148,10 +148,11 @@ operator directive to remove the explicit claimed-dev exception.
       Internal ownership bookkeeping must not require a manual old-tip,
       re-publish, restore-tip sequence. Preserve exact saved leases, destination
       and worktree/ref authority, real concurrency refusal, and normal hooks.
-      Delivered through #5835 with publication regressions repaired by #6256.
-      Independent bridge-fixture (#6244) and materialization (#6262) promotion
-      blockers cleared before normal promotion and installed-CLI verification.
-      Consumer guidance refresh cleared its
+      Completion verified on 2026-10-12: #5835 and publication repair #6256
+      are merged; normal release promotions #6263/#6267 are merged; unified
+      update selected agent-worktrees `1.24.50-dev1` and the installed CLI
+      exposes `--rewrite-pr`. Independent promotion blockers #6244/#6262
+      were resolved before those releases. Consumer guidance refresh cleared its
       reviewed flow; the merged plan's PR claim was reconciled.
 
 - [ ] Review the shared
@@ -243,11 +244,15 @@ Consumer refresh exposed a missing Windows LF attribute for reviewed fallback
 bodies. Byte-equivalent normalization and the generated sync landed through
 the consumer's reviewed flow after clean automated review and required
 validation. The old merged-plan #5788 obligation is now released. Publisher
-prerequisite completion does not close Phase 3: construction coalescing,
-candidate/rollback retention, complete guard/dev/distinct-generation adopter
-flows and remaining guidance/validation are still owed.
+prerequisite completion does not close Phase 3. Remaining work includes
+construction coalescing, candidate/rollback retention, per-adopter immutable-slot
+refusal, claimed dev/release, distinct-generation health repair, and the
+remaining guidance and validation.
 
 ### 2026-10-11 — Publisher prerequisite merged; release gate remains
+
+This historical entry records the state at merge. The 2026-10-12 entry above
+records the subsequent verified release, deployment and consumer refresh.
 
 The one-command compatible-legacy update and exact-lease publication fixes
 merged as #5835 (`2724ce210191de4b66700a4ecd526e0368abaf31`).
