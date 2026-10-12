@@ -18,23 +18,42 @@ def workflow():
     return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
 
-def execute_script(script, *, files=(), author="outsider", collaborator=True, roster="owner"):
+def execute_script(
+    script, *, files=(), author="outsider", collaborator=True, roster="owner",
+    request_error=False,
+):
     payload = json.dumps({
         "script": script, "files": list(files), "author": author,
-        "collaborator": collaborator, "roster": roster,
+        "collaborator": collaborator, "roster": roster, "request_error": request_error,
     })
     harness = """
 const input = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
-const result = { failures: [], outputs: {} };
+const result = { failures: [], warnings: [], outputs: {} };
 const core = {
   info() {},
-  setFailed(message) { result.failures.push(message); },
+  warning(message) { result.warnings.push(message); },
+  setFailed(message) { result.failures.push(message); process.exitCode = 1; },
   setOutput(key, value) { result.outputs[key] = value; },
 };
 const github = {
-  paginate: async () => input.files,
+  paginate: async method => method === github.rest.pulls.listFiles ? input.files : [],
   rest: {
-    pulls: { listFiles() {} },
+    issues: { listEventsForTimeline() {} },
+    pulls: {
+      listFiles() {}, listReviews() {},
+      async get() {
+        return { data: { state: "open", draft: false, base: { ref: "dev" }, head: { sha: "a".repeat(40) } } };
+      },
+      async listRequestedReviewers() { return { data: { users: [] } }; },
+      async requestReviewers() {
+        if (input.request_error) {
+          throw Object.assign(new Error("rate limited"), {
+            response: { headers: { "retry-after": "60" } },
+          });
+        }
+        result.requested = true;
+      },
+    },
     repos: {
       async checkCollaborator() {
         if (!input.collaborator) throw Object.assign(new Error("not found"), {status: 404});
@@ -45,9 +64,13 @@ const github = {
     },
   },
 };
+github.constructor = function() { return github; };
+global.setTimeout = resolve => { resolve(); return 0; };
 const context = {
   repo: { owner: "owner", repo: "project" },
-  payload: { pull_request: { number: 1, user: { login: input.author }, base: { ref: "dev" } } },
+  payload: { pull_request: {
+    number: 1, user: { login: input.author }, base: { ref: "dev" }, head: { sha: "a".repeat(40) },
+  } },
 };
 process.env.ALLOWED_LOGIN = "owner";
 const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
@@ -56,16 +79,19 @@ new AsyncFunction("github", "core", "context", input.script)(github, core, conte
   .catch(error => { console.error(error); process.exitCode = 1; });
 """
     completed = subprocess.run(
-        ["node", "-e", harness], input=payload, check=True, capture_output=True,
+        ["node", "-e", harness], input=payload, check=False, capture_output=True,
         text=True, timeout=15,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
-    return json.loads(completed.stdout)
+    result = json.loads(completed.stdout)
+    assert completed.returncode == int(bool(result["failures"])), completed.stderr
+    return result
 
 
 def test_one_trusted_entry_point_preserves_both_checks(workflow):
     triggers = workflow.get("on", workflow.get(True))
     assert set(triggers) == {"pull_request_target"}
+    assert workflow["name"] == "Workflow lockdown guard"
     assert triggers["pull_request_target"]["branches"] == ["dev"]
     assert set(triggers["pull_request_target"]["types"]) == {
         "opened", "reopened", "synchronize", "edited", "ready_for_review",
@@ -119,3 +145,19 @@ def test_review_billing_stays_limited_to_invited_maintainers(
     script = workflow["jobs"]["request-review"]["steps"][0]["with"]["script"]
     result = execute_script(script, author=author, collaborator=collaborator)
     assert result["outputs"]["is_maintainer"] == expected
+
+
+def test_review_request_failure_reports_backoff_and_fails_the_step(workflow):
+    script = workflow["jobs"]["request-review"]["steps"][1]["with"]["script"]
+    result = execute_script(script, request_error=True)
+    assert result["failures"] == ["Could not request Copilot review: rate limited"]
+    assert len(result["warnings"]) == 1
+    assert "retry-after=60" in result["warnings"][0]
+    assert "requested" not in result
+
+
+def test_review_request_success_uses_the_same_embedded_script(workflow):
+    script = workflow["jobs"]["request-review"]["steps"][1]["with"]["script"]
+    result = execute_script(script)
+    assert not result["failures"]
+    assert result["requested"] is True

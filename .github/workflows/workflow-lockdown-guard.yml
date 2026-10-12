@@ -112,7 +112,7 @@
 # would sit forever waiting on a required check that never runs. Re-running
 # on every other `edited` PR field (title, body, labels) too is harmless --
 # the check is small, fast, and always recomputes the same correct result.
-name: Trusted PR policy
+name: Workflow lockdown guard
 
 on:
   pull_request_target:
