@@ -1408,9 +1408,18 @@ function Get-AdoptedProjects {
 function Deploy-SelfProvisioningBinstub {
     <# Deploy the agent-dispatch CLI binstubs into ~/.local/bin, SELF-PROVISIONING
        (#1393): fast-path the built versioned slot's python; if no slot is built
-       yet (a `stamp` deferred the venv), provision on first use by running the
-       slot-local snapshot's `scripts/install.ps1 provision`, then dispatch. Opt
-       out with AGENT_DISPATCH_NO_SELFPROVISION=1.
+       yet (a `stamp` deferred the venv), provision on first use. The primary
+       first-use path fetches and runs the UPSTREAM installer
+       (agent-dispatch-service/bootstrap.ps1 on `main`, the same Copilot-
+       independent entrypoint the standalone package uses) rather than relying
+       on the plugin's own already-staged payload -- this is the transition
+       toward a single installer source of truth (agent-dispatch-standalone-
+       container effort, Phase 4). The locally stamped snapshot's
+       `scripts/install.ps1 provision` remains a fallback for offline/network-
+       restricted hosts (set AGENT_DISPATCH_PROVISION_OFFLINE=1 to skip the
+       network attempt and go straight to it); it is expected to be dropped
+       once the on-demand fetch path is validated. Opt out of provisioning
+       entirely with AGENT_DISPATCH_NO_SELFPROVISION=1.
 
        Primary agent-dispatch.ps1 (ExternalScript, resolved ahead of the .cmd in
        the same dir; forwards argv verbatim via @args) + agent-dispatch.cmd
@@ -1471,15 +1480,40 @@ function _Resolve-Py {
 $_py = _Resolve-Py
 if ($_py) { & $_py -m agent_dispatch @args; exit $LASTEXITCODE }
 if ($env:AGENT_DISPATCH_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-dispatch] runtime not provisioned (AGENT_DISPATCH_NO_SELFPROVISION set).'); exit 1 }
-$_snap = ''
-try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
-$_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
-if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-dispatch] cannot self-provision: snapshot installer not found. Re-enable the plugin, then retry.'); exit 127 }
 [Console]::Error.WriteLine('[agent-dispatch] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
 [Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-dispatch eta_seconds=120 reason=first-use')
 $_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
 $_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
-& $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+# Primary path (agent-dispatch-standalone-container Phase 4): fetch and run the
+# UPSTREAM installer -- the same Copilot-independent bootstrap the standalone
+# agent-dispatch-service package uses -- rather than relying on this plugin's
+# own already-staged payload. This is a deliberate transition toward a single
+# installer source of truth; the locally stamped snapshot below remains only as
+# an offline/network-restricted fallback and is expected to be dropped once
+# this path is validated. AGENT_DISPATCH_PROVISION_OFFLINE=1 skips straight to
+# the fallback (e.g. an air-gapped host).
+$_provisioned = $false
+if (-not $env:AGENT_DISPATCH_PROVISION_OFFLINE) {
+    $_bootUrl = 'https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/agent-dispatch-service/bootstrap.ps1'
+    $_bootFile = Join-Path ([IO.Path]::GetTempPath()) "agent-dispatch-bootstrap-$PID.ps1"
+    try {
+        [Console]::Error.WriteLine('[agent-dispatch] fetching upstream installer (agent-dispatch-service/bootstrap.ps1, main)...')
+        Invoke-WebRequest -Uri $_bootUrl -UseBasicParsing -TimeoutSec 20 -OutFile $_bootFile
+        & $_exe -NoProfile -ExecutionPolicy Bypass -File $_bootFile provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+        if ($LASTEXITCODE -eq 0) { $_provisioned = $true }
+    } catch {
+        [Console]::Error.WriteLine("[agent-dispatch] upstream installer fetch/run failed ($($_.Exception.Message)); falling back to the locally stamped snapshot.")
+    } finally {
+        Remove-Item -LiteralPath $_bootFile -Force -ErrorAction SilentlyContinue
+    }
+}
+if (-not $_provisioned) {
+    $_snap = ''
+    try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
+    $_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
+    if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-dispatch] cannot self-provision: no upstream installer reachable (set AGENT_DISPATCH_PROVISION_OFFLINE=1 to skip that attempt) and no local snapshot installer found. Re-enable the plugin, then retry.'); exit 127 }
+    & $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+}
 $_py = _Resolve-Py
 if ($_py) { & $_py -m agent_dispatch @args; exit $LASTEXITCODE }
 [Console]::Error.WriteLine('[agent-dispatch] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')

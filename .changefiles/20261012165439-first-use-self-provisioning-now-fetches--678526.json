@@ -1,0 +1,9 @@
+{
+  "comment": "First-use self-provisioning now fetches and runs the upstream installer (agent-dispatch-service/bootstrap.{sh,ps1}, main) on demand instead of the plugin's own staged payload copy, which remains only as an offline fallback (AGENT_DISPATCH_PROVISION_OFFLINE=1 to force it).",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "minor"
+    }
+  ]
+}

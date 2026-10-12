@@ -864,7 +864,16 @@ _adopted_projects() {
 # Deploy the self-provisioning binstub (install-on-first-use). Fast path execs the
 # venv's `python -m agent_dispatch`; otherwise it provisions on first use --
 # announcing (a human line + a machine-readable ::agent-provisioning:: signal so a
-# caller can extend its timeout), lock-serialized, fail-fast.
+# caller can extend its timeout), lock-serialized, fail-fast. The primary
+# first-use path fetches and runs the UPSTREAM installer
+# (agent-dispatch-service/bootstrap.sh on `main`, the same Copilot-independent
+# entrypoint the standalone package uses) rather than relying on this plugin's
+# own already-staged payload -- a deliberate transition toward a single
+# installer source of truth (agent-dispatch-standalone-container effort,
+# Phase 4). The locally stamped snapshot's scripts/install.sh remains only as
+# an offline/network-restricted fallback (AGENT_DISPATCH_PROVISION_OFFLINE=1
+# skips straight to it) and is expected to be dropped once the on-demand fetch
+# path is validated.
 deploy_binstub() {
     mkdir -p "$LOCAL_BIN" "$INSTALL_DIR/bin"
     local machine="${AGENT_DISPATCH_SUPERVISE_MACHINE:-}"
@@ -920,20 +929,44 @@ mkdir -p "$_root"
 _status="$_root/.provision-status"
 printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
 printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
-_install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
-[ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
-if [ ! -f "$_install" ]; then
-    printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
-    exit 127
-fi
 _lock="$_root/.provision.lock"
 exec 9>"$_lock"
 command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
 _resolve
 [ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_dispatch "$@"
 printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-bash "$_install" provision >&2
-_rc=$?
+# Primary path (agent-dispatch-standalone-container Phase 4): fetch and run the
+# UPSTREAM installer -- the same Copilot-independent bootstrap the standalone
+# agent-dispatch-service package uses -- rather than relying on this plugin's
+# own already-staged payload. This is a deliberate transition toward a single
+# installer source of truth; the locally stamped snapshot below remains only
+# as an offline/network-restricted fallback and is expected to be dropped once
+# this path is validated. AGENT_DISPATCH_PROVISION_OFFLINE=1 skips straight to
+# the fallback (e.g. an air-gapped host).
+_rc=1
+_boot_url="https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/agent-dispatch-service/bootstrap.sh"
+if [ -z "${AGENT_DISPATCH_PROVISION_OFFLINE:-}" ]; then
+    _boot_file="$(mktemp "${TMPDIR:-/tmp}/agent-dispatch-bootstrap.XXXXXX")"
+    printf '%s\n' "[$_name] fetching upstream installer (agent-dispatch-service/bootstrap.sh, main)..." >&2
+    if (command -v curl >/dev/null 2>&1 && curl -fsSL "$_boot_url" -o "$_boot_file") || \
+       (command -v wget >/dev/null 2>&1 && wget -qO "$_boot_file" "$_boot_url"); then
+        bash "$_boot_file" provision >&2
+        _rc=$?
+    else
+        printf '%s\n' "[$_name] upstream installer fetch failed; falling back to the locally stamped snapshot." >&2
+    fi
+    rm -f "$_boot_file"
+fi
+if [ "$_rc" -ne 0 ]; then
+    _install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
+    [ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
+    if [ -f "$_install" ]; then
+        bash "$_install" provision >&2
+        _rc=$?
+    else
+        printf '%s\n' "[$_name] cannot self-provision: no upstream installer reachable (set AGENT_DISPATCH_PROVISION_OFFLINE=1 to skip that attempt) and no local snapshot installer found. Ensure the plugin is enabled, then retry." >&2
+    fi
+fi
 _resolve
 if [ "$_rc" -eq 0 ] && [ -n "$AGENT_RT_PY" ]; then
     printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
@@ -944,7 +977,7 @@ if [ "$_rc" -eq 0 ]; then
     printf '%s\n' "[$_name] provisioning reported success but no runtime slot resolved." >&2
     _rc=1
 else
-    printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2
+    printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry (bootstrap: curl -fsSL $_boot_url | bash -s provision), or run the local snapshot installer manually if present." >&2
 fi
 exit "$_rc"
 STUBEOF
