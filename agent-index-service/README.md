@@ -62,7 +62,12 @@ more SHA-256 hashes per requirement; no includes, VCS/editable/direct URLs,
 environment markers, duplicate pins or replacements of bundled distributions.
 Feed policy comes from the explicitly supplied operator-owned uv TOML, not a
 hardcoded public registry. An offline wheelhouse is supported through that
-policy. Build/probe environments use a minimal platform allowlist and only the
+policy.
+Policy validation requires an explicit default index (`default-index`,
+`index-url` or a `[[index]]` with `default = true`), or explicit
+`offline = true` / `no-index = true`. An unrelated nonempty TOML table is not
+admitted, because it would leave uv's built-in registry fallback active.
+Build/probe environments use a minimal platform allowlist and only the
 explicit Python/uv/runtime directories on PATH. Ambient tokens, proxies, CA
 overrides, compiler flags and loader injections are not inherited. Additional
 proxy/CA environment injection is not supported by this adapter; required

@@ -25,6 +25,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
@@ -231,6 +232,36 @@ def _uv_policy(data: bytes) -> None:
         raise CandidateError("invalid explicit uv TOML configuration") from exc
     if not policy:
         raise CandidateError("explicit uv configuration must not be empty")
+    pip = policy.get("pip", {})
+    if not isinstance(pip, dict):
+        raise CandidateError("uv pip policy must be a table")
+    if any(section.get(key) is True for section in (policy, pip)
+           for key in ("offline", "no-index")):
+        return
+
+    def explicit_index(value: Any) -> bool:
+        if not isinstance(value, str) or not value or value != value.strip():
+            return False
+        try:
+            parsed = urlsplit(value)
+        except ValueError:
+            return False
+        return (
+            parsed.scheme in {"http", "https"} and bool(parsed.hostname)
+        ) or (parsed.scheme == "file" and bool(parsed.path))
+
+    if any(explicit_index(section.get(key)) for section in (policy, pip)
+           for key in ("default-index", "index-url")):
+        return
+    indexes = policy.get("index", [])
+    if isinstance(indexes, list) and any(
+        isinstance(index, dict) and index.get("default") is True
+        and explicit_index(index.get("url")) for index in indexes
+    ):
+        return
+    raise CandidateError(
+        "uv policy must explicitly select a default index or offline/no-index mode"
+    )
 
 
 def _platform_environment() -> dict[str, str]:

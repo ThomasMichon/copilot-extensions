@@ -227,12 +227,27 @@ def test_bad_lock_zero_mutation(case, text):
     assert not case.calls
 
 
-@pytest.mark.parametrize("text", ["", "[broken", "index-url = 1\nindex-url = 2"])
+@pytest.mark.parametrize("text", [
+    "", "[broken", "index-url = 1\nindex-url = 2", "preview = true",
+    'index-url = ""', 'index-url = "not-a-url"', "offline = false",
+    '[[index]]\nurl = "https://governed.invalid/simple"\n',
+    '[[index]]\nurl = "https://governed.invalid/simple"\ndefault = false\n',
+])
 def test_bad_uv_configuration_zero_mutation(case, text):
     case.build.uv_config.write_text(text)
     with pytest.raises(CandidateError):
         stage(case)
     assert not case.root.exists()
+
+
+@pytest.mark.parametrize("text", [
+    "offline = true", "no-index = true", "[pip]\nno-index = true",
+    'default-index = "https://governed.invalid/simple"',
+    '[pip]\nindex-url = "https://governed.invalid/simple"',
+    '[[index]]\nurl = "https://governed.invalid/simple"\ndefault = true\n',
+])
+def test_explicit_uv_feed_modes_are_admitted_without_implicit_registry_fallback(text):
+    staging._uv_policy(text.encode())
 
 
 @pytest.mark.parametrize("kind", [
