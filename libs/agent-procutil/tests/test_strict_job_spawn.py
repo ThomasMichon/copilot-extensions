@@ -111,7 +111,7 @@ def test_real_assignment_failure_runs_no_child_code(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="real Windows no-breakaway Job proof")
-def test_real_job_refuses_breakaway_child_and_reaps_ordinary_child(tmp_path):
+def test_real_job_contains_rejected_or_accepted_breakaway_child(tmp_path):
     receipt = tmp_path / "job-result.json"
     script = """
 import json,os,subprocess,sys,time
@@ -125,10 +125,7 @@ try:
 except OSError as error:
     result={'denied':True,'winerror':error.winerror}
 else:
-    # If containment is broken, terminate the exact child we created; never a PID/name sweep.
-    escaped.terminate()
-    escaped.wait(timeout=10)
-    result={'denied':False}
+    result={'denied':False,'breakaway':escaped.pid}
 result.update(parent=os.getpid(),ordinary=ordinary.pid)
 Path(sys.argv[1]).write_text(json.dumps(result))
 time.sleep(120)
@@ -140,6 +137,15 @@ time.sleep(120)
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         **pu.no_window_kwargs(),
     )
+    handles = []
+    kernel = pu._kernel32()
+    pu._configure_job_teardown_api(kernel)
+    kernel.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    kernel.OpenProcess.restype = ctypes.c_void_p
+    kernel.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    kernel.WaitForSingleObject.restype = ctypes.c_uint32
+    kernel.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    kernel.TerminateProcess.restype = ctypes.c_int
     try:
         assert job is not None
         until = time.monotonic() + 15
@@ -149,20 +155,34 @@ time.sleep(120)
         assert receipt.exists()
         result = json.loads(receipt.read_text())
         assert result["parent"] == process.pid
-        assert result["denied"] is True
-        assert result["winerror"] == 5
-        kernel = pu._kernel32()
-        pu._configure_job_teardown_api(kernel)
+        if result["denied"]:
+            assert result["winerror"] == 5
+        children = [result["ordinary"]]
+        if not result["denied"]:
+            children.append(result["breakaway"])
+        for pid in children:
+            handle = kernel.OpenProcess(0x00100000 | 0x0001, False, pid)
+            assert handle, "owned child exited before containment witness"
+            handles.append(handle)
         info = pu._JobBasicAccountingInformation()
         returned = ctypes.c_uint32()
         assert kernel.QueryInformationJobObject(
             job.handle, 1, ctypes.byref(info), ctypes.sizeof(info), ctypes.byref(returned),
         )
-        assert info.ActiveProcesses >= 2
+        assert info.ActiveProcesses >= 1 + len(children)
         job.terminate_and_wait(15.0)
         assert job.handle is None
         process.wait(timeout=15)
+        for handle in handles:
+            assert kernel.WaitForSingleObject(handle, 3000) == 0, "owned child escaped strict Job"
     finally:
         if job is not None and job.handle is not None:
             job.terminate_and_wait(15.0)
         process.wait(timeout=15)
+        for handle in handles:
+            try:
+                if kernel.WaitForSingleObject(handle, 0) != 0:
+                    assert kernel.TerminateProcess(handle, 1)
+                    assert kernel.WaitForSingleObject(handle, 3000) == 0
+            finally:
+                assert kernel.CloseHandle(handle)
