@@ -40,6 +40,17 @@ def test_initial_stale_publication_dispatches_only_proven_recovery(monkeypatch, 
         pytest.fail(f"unexpected Git metadata probe: {args}")
     monkeypatch.setattr(git_ops, "git", metadata)
 
+    def git(*args, **kwargs):
+        if args[:2] == ("remote", "get-url"):
+            return SimpleNamespace(
+                returncode=0, stdout="https://github.com/owner/repo.git\n", stderr=""
+            )
+        if args[:3] == ("config", "--null", "--get-all"):
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
+        pytest.fail(f"unexpected fixture Git command: {args!r}")
+
+    monkeypatch.setattr(git_ops, "git", git)
+
     def push(*args, **kwargs):
         pushes.append((args, kwargs))
         return stale if len(pushes) == 1 else success
