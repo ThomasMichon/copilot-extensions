@@ -104,8 +104,10 @@ Assets live under the deterministic
 manifest's content-addressed `artifact_id`, permitting independently attested
 rebuilds without replacing a prior asset. No upload uses `--clobber`; an
 already-present same-name asset is accepted only when GitHub's reported SHA-256
-digest matches. Publication is its own job so a partial upload can be retried
-with **Re-run failed jobs**, reusing the successful signer and exact merge
+digest matches. Its release PAT and verification token are scoped to the final
+publisher step, not exposed to checkout, Python setup or artifact-download
+actions. Publication is its own job so a partial upload can be retried with
+**Re-run failed jobs**, reusing the successful signer and exact merge
 outputs rather than repeating promotion. It also enters the failure reporter.
 Transfer artifacts expire after two days; durable release-asset
 retention remains a separately tracked policy.

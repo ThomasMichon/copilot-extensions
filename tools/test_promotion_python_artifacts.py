@@ -698,6 +698,11 @@ def test_workflow_separates_candidate_execution_signing_and_release_authority():
     assert "needs.promote.outputs.merge_sha != ''" in publishing["if"]
     assert jobs["promote"]["outputs"]["merge_sha"] == "${{ steps.merged.outputs.merge_sha }}"
     assert publishing["env"]["MERGE_SHA"] == "${{ needs.promote.outputs.merge_sha }}"
-    assert publishing["env"]["ARTIFACT_VERIFY_TOKEN"] == "${{ github.token }}"
+    assert "GH_TOKEN" not in publishing["env"]
+    assert "ARTIFACT_VERIFY_TOKEN" not in publishing["env"]
+    publisher_step = next(step for step in publishing["steps"] if "run" in step)
+    assert publisher_step["env"]["GH_TOKEN"] == "${{ secrets.APERTURE_RELEASE_TOKEN }}"
+    assert publisher_step["env"]["ARTIFACT_VERIFY_TOKEN"] == "${{ github.token }}"
+    assert all("env" not in step for step in publishing["steps"] if "uses" in step)
     assert "id-token" not in publishing["permissions"]
     assert "publish-python-artifacts" in jobs["report-failure"]["needs"]

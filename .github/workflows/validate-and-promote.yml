@@ -1214,8 +1214,6 @@ jobs:
       actions: read
       attestations: read
     env:
-      GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
-      ARTIFACT_VERIFY_TOKEN: ${{ github.token }}
       MERGE_SHA: ${{ needs.promote.outputs.merge_sha }}
       DEV_SHA: ${{ needs.gate.outputs.sha }}
     steps:
@@ -1232,6 +1230,9 @@ jobs:
           name: promotion-python-artifacts
           path: python-artifacts
       - name: Verify the actual merge and publish without replacing any prior asset
+        env:
+          GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+          ARTIFACT_VERIFY_TOKEN: ${{ github.token }}
         run: |
           git fetch origin main
           git merge-base --is-ancestor "$MERGE_SHA" origin/main
