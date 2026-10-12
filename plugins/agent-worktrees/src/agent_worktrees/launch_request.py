@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import contextlib
 import hashlib
 import json
@@ -20,7 +21,10 @@ MAX_REQUEST_BYTES = 8192
 def decode(encoded: str) -> dict:
     if len(encoded) > MAX_REQUEST_BYTES * 2:
         raise ValueError("Launch request exceeds the transport limit")
-    raw = base64.b64decode(encoded, validate=True)
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except binascii.Error as exc:
+        raise ValueError("Invalid Base64 launch request") from exc
     if len(raw) > MAX_REQUEST_BYTES:
         raise ValueError("Launch request exceeds the transport limit")
     def unique_object(pairs):

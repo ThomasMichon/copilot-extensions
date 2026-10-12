@@ -15,6 +15,7 @@ from .launch_request import MAX_REQUEST_BYTES
 
 
 def shell_command(shell: str, argv: list[str]) -> str:
+    shell = shell.lower()
     if shell.lower() in ("pwsh", "powershell", "powershell.exe", "pwsh.exe"):
         script = "& " + " ".join("'" + part.replace("'", "''") + "'" for part in argv)
         script += "; exit $LASTEXITCODE"
