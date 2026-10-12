@@ -1,9 +1,0 @@
-{
-  "comment": "Validate local session refresh against non-discovered instruction body paths.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Run legacy PowerShell post-tool daemon requests inside the existing hook shell with local advisory fallback",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

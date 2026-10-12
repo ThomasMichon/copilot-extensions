@@ -1,9 +1,0 @@
-{
-  "comment": "Add source-bound operator confirmation and private invocation audit for PR recovery",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

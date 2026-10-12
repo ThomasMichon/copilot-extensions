@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve freshly loaded PR reassociation authority while retaining stale-writer and destination guards",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

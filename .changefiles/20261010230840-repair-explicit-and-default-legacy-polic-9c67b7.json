@@ -1,9 +1,0 @@
-{
-  "comment": "Repair explicit and default legacy policy handling in payload runtime gates",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

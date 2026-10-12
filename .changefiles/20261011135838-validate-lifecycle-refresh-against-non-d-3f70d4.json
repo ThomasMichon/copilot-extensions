@@ -1,9 +1,0 @@
-{
-  "comment": "Validate lifecycle refresh against non-discovered local instruction body paths.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

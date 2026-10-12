@@ -1,9 +1,0 @@
-{
-  "comment": "Phase 2: container image (Dockerfile), no systemd layer, safe-default bind",
-  "changes": [
-    {
-      "plugin": "agent-dispatch-service",
-      "type": "dev"
-    }
-  ]
-}

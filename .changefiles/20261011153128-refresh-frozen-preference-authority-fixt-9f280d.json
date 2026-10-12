@@ -1,9 +1,0 @@
-{
-  "comment": "Refresh frozen preference authority fixture bindings after reviewed process containment update",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Keep merged-blocked descriptor fixture internally consistent after adding durable FINAL display.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

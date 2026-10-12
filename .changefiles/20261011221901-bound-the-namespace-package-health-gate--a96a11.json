@@ -1,9 +1,0 @@
-{
-  "comment": "Bound the namespace-package health-gate fixture independently of payload growth and exercise real namespace imports.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

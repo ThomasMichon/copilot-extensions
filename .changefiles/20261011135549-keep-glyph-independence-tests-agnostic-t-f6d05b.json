@@ -1,9 +1,0 @@
-{
-  "comment": "Keep glyph independence tests agnostic to conservative legacy FINAL descriptor labels.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

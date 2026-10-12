@@ -1,9 +1,0 @@
-{
-  "comment": "Bound systemd coordinator and supervisor restart failures and clear start-rate limits before installer activation",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

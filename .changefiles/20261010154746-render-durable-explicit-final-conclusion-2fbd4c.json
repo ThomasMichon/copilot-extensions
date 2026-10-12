@@ -1,9 +1,0 @@
-{
-  "comment": "Render durable explicit FINAL conclusion in the Picker while retaining fresh removal and liveness facts.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

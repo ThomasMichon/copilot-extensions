@@ -1,9 +1,0 @@
-{
-  "comment": "Align reserved coordinator-exit test with neutral profile working directory",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

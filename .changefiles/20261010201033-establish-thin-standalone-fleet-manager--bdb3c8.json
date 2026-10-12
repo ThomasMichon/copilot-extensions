@@ -1,9 +1,0 @@
-{
-  "comment": "Establish thin standalone fleet-manager entry point with preservation-safe offline config/inventory/quota planning and revision-bound plan validation",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve Job helper defaults while adding opt-in strict descendant ownership",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

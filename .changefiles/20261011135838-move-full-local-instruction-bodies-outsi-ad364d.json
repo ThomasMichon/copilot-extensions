@@ -1,9 +1,0 @@
-{
-  "comment": "Move full local instruction bodies outside automatic discovery with authenticated legacy migration.",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Make cache misses read-only and refuse rekeying existing keyless cache",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

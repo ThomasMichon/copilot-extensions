@@ -1,9 +1,0 @@
-{
-  "comment": "Resolve native-service worktree owners through completed installed runtimes and check owner availability before acquisition marking.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}
