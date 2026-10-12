@@ -264,3 +264,28 @@ def test_html_data_attributes_are_not_edges_and_spaced_real_targets_are_checked(
         '<a href = "missing.md">broken</a><img src = "missing.svg">',
         encoding="utf-8")
     assert len(mod.check_adopter_navigation(tmp_path, ("README.md",), {})) == 2
+
+
+def test_primary_page_directory_is_reported_without_reading(tmp_path):
+    (tmp_path / "README.md").mkdir()
+    assert mod.check_adopter_navigation(tmp_path, ("README.md",), {})
+
+
+def test_directory_readme_anchor_target_is_not_read(tmp_path):
+    (tmp_path / "guide").mkdir()
+    (tmp_path / "guide" / "README.md").mkdir()
+    (tmp_path / "README.md").write_text("[guide](guide/#ready)", encoding="utf-8")
+    assert mod.check_adopter_navigation(tmp_path, ("README.md",), {})
+
+
+def test_legacy_readers_also_report_markdown_directories(tmp_path, monkeypatch):
+    readme = tmp_path / "README.md"
+    readme.mkdir()
+    plugins = tmp_path / "plugins"
+    (plugins / "example" / "README.md").mkdir(parents=True)
+    monkeypatch.setattr(mod, "README", readme)
+    monkeypatch.setattr(mod, "REPO", tmp_path)
+    monkeypatch.setattr(mod, "PLUGINS_DIR", plugins)
+    assert mod.check_readme_completeness([])
+    assert mod.check_plugin_skill_lists(["example"])
+    assert mod.check_counts({"total": 0, "runtime": 0, "payload": 0, "cc_skills": 0})

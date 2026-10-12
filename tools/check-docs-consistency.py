@@ -251,8 +251,8 @@ def check_adopter_navigation(
     anchor_cache: dict[Path, set[str]] = {}
     for name in pages:
         page = repo / name
-        if not exact_path(page, repo):
-            problems.append(f"  {name}: adopter page missing or wrong case")
+        if not exact_path(page, repo) or not page.is_file():
+            problems.append(f"  {name}: adopter page missing, not a file, or wrong case")
             continue
         destinations: set[str] = set()
         text = page.read_text(encoding="utf-8")
@@ -267,7 +267,8 @@ def check_adopter_navigation(
                 destinations.add(target.relative_to(repo).as_posix())
             if url.fragment:
                 document = target / "README.md" if target.is_dir() else target
-                if document.suffix.lower() != ".md" or not exact_path(document, repo):
+                if (document.suffix.lower() != ".md" or not exact_path(document, repo)
+                        or not document.is_file()):
                     problems.append(f"  {name}: anchor target is not a Markdown page: {link}")
                     continue
                 if document not in anchor_cache:
@@ -311,6 +312,8 @@ def _num(token: str) -> int | None:
 
 
 def check_readme_completeness(names: list[str]) -> list[str]:
+    if not README.is_file():
+        return ["  README.md: expected a Markdown file"]
     text = README.read_text(encoding="utf-8")
     return [f"  README.md: plugin `{n}` is not linked (`](plugins/{n}/` absent)"
             for n in names if f"](plugins/{n}/" not in text]
@@ -321,6 +324,9 @@ def check_plugin_skill_lists(names: list[str]) -> list[str]:
     for n in names:
         readme = PLUGINS_DIR / n / "README.md"
         if not readme.exists():
+            continue
+        if not readme.is_file():
+            problems.append(f"  plugins/{n}/README.md: expected a Markdown file")
             continue
         listed = set(re.findall(r"skills/([a-z0-9-]+)/SKILL\.md", readme.read_text(encoding="utf-8")))
         if not listed:
@@ -352,6 +358,9 @@ def check_counts(expected: dict[str, int]) -> list[str]:
     problems: list[str] = []
     for md in sorted(REPO.glob("**/*.md")):
         if ".worktrees" in md.parts or "node_modules" in md.parts:
+            continue
+        if not md.is_file():
+            problems.append(f"  {md.relative_to(REPO)}: expected a Markdown file")
             continue
         raw = md.read_text(encoding="utf-8")
         # Strip markdown emphasis so "**five**" / "`five`" still match.

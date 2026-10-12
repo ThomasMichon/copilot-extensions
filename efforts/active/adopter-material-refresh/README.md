@@ -206,7 +206,7 @@ repository creation, or private-environment capture was part of that proposal.
   payload in a separately claimed changefile-bearing slice, not by inventing
   alternate mechanics in these root waypoints. No plugin payload is modified
   by the documentation participant.
-- Local validation: twenty-six focused guard fixtures, F/E9 lint, real primary-path
+- Local validation: twenty-nine focused guard fixtures, F/E9 lint, real primary-path
   navigation (including exact casing), runbook/plugin identifiers, canonical
   effort/vision structure, and staged size checks pass. Root references are
   retained through the primary family; existing preview files are untouched.
