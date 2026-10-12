@@ -22,7 +22,7 @@ that pattern to this repository.
 | [Linux Role Fleet](active/linux-role-fleet/README.md) | Active; reviewed Komodo-first plan and isolated adoption proof | #6030, #5861 |
 | [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Active; proposal reviewed | #6007 |
 | [Versioned Singleton Manager](active/versioned-singleton-manager/README.md) | Active | #5655 |
-| [Adopter Material Refresh](active/adopter-material-refresh/README.md) | Active; bounded documentation slice claimed, preview assets unassigned | #5799 |
+| [Adopter Material Refresh](active/adopter-material-refresh/README.md) | Active; primary documentation slice complete, preview/reference work unassigned | #5799 |
 | [Machine Fleet Routing Foundation](active/machine-fleet-routing-foundation/README.md) | Active; contract implementation | #5789 |
 | [Mutable dev slot](active/mutable-dev-slot/README.md) | Active | #5472 |
 | [Machine Transport Convergence](active/machine-transport-convergence/README.md) | Active | #5737, #5738, #5740, #5741, #5972, #5973, #5974, #6039 |
@@ -64,7 +64,7 @@ that pattern to this repository.
 | [agent-bridge Contract Evolution](active/agent-bridge-contract-evolution/README.md) | Draft | #1460 |
 | [agent-bridge AHP Convergence](active/agent-bridge-ahp-convergence/README.md) | Draft | #1266, #1308 |
 | [agent-bridge Delegation Convergence](active/agent-bridge-delegation-convergence/README.md) | Active | #1448 |
-| [agent-bridge Attention Waits](active/agent-bridge-attention-waits/README.md) | Draft | #1450 |
+| [agent-bridge Attention Waits](2026/09/03%20agent-bridge-attention-waits/README.md) | Draft | #1450 |
 | [agent-bridge Session Discovery](active/agent-bridge-session-discovery/README.md) | Draft | #2530 |
 | [agent-bridge CLI-Mode Sessions](active/agent-bridge-cli-mode-sessions/README.md) | Active | See effort |
 | [Proposed Alignment/Convergence of Observable agent-bridge CLI Sessions](active/agent-bridge-cli-session-alignment/README.md) | Active | See effort |
@@ -75,7 +75,7 @@ that pattern to this repository.
 | [Review Automation Reliability](active/review-automation-reliability/README.md) | Draft | See effort |
 | [Marketplace-Scoped Installations](active/marketplace-scoped-installations/README.md) | Active | #1096 |
 | [Native-Construct Convergence](active/native-construct-convergence/README.md) | Active | #985 |
-| [Plugin Process Hygiene](active/plugin-process-hygiene/README.md) | Active | #736 |
+| [Plugin Process Hygiene](2026/09/13%20plugin-process-hygiene/README.md) | Active | #736 |
 | [Tiered Payload Provisioning](active/tiered-payload-provisioning/README.md) | Draft | See effort |
 | [Governed Python Artifact Promotion](active/governed-python-artifact-promotion/README.md) | Draft | #4876 |
 | [Progressive Context Disclosure](active/progressive-context-disclosure/README.md) | Active | #1612 |
