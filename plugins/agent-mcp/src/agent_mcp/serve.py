@@ -518,16 +518,21 @@ class Server:
         except (ConnectionResetError, BrokenPipeError):
             pass
         finally:
-            # The refcount MUST drop on detach even if teardown fails, or the host
-            # would believe a session is still attached and never idle-evict. Drop
-            # it first, then tear the session down fail-soft.
-            self._attached -= 1
-            self._touch()  # last detach starts the host's idle-eviction clock
+            # The reservation covers request drain and teardown, including
+            # caller cancellation, but must still release if cleanup fails.
             try:
-                await session.aclose()
-            except Exception as exc:  # teardown must not wedge the handler/refcount
-                log.warning("session aclose error for %s: %s", bridge, exc)
-            log.info("session detached: %s (%d live)", bridge, self._attached)
+                cleanup = asyncio.create_task(session.aclose())
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    await asyncio.gather(cleanup, return_exceptions=True)
+                    raise
+                except Exception as exc:
+                    log.warning("session aclose error for %s: %s", bridge, exc)
+            finally:
+                self._attached -= 1
+                self._touch()
+                log.info("session detached: %s (%d live)", bridge, self._attached)
 
     def _acquire_lease(self) -> bool:
         """Take the single-instance lease; return ``False`` to stand down.

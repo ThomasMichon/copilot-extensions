@@ -782,6 +782,85 @@ async def test_detach_decrements_refcount_even_if_aclose_raises(tmp_path, monkey
             await asyncio.wait_for(task, timeout=5)
 
 
+@pytest.mark.parametrize("completion", ["normal", "error", "cancel"])
+async def test_attach_reservation_covers_request_drain_and_teardown(
+    tmp_path, monkeypatch, completion,
+):
+    import time
+    from agent_mcp.serve import BridgeSession, open_attached_session
+
+    request_entered, request_release = asyncio.Event(), asyncio.Event()
+    close_entered, teardown_entered, teardown_release = (
+        asyncio.Event(), asyncio.Event(), asyncio.Event())
+    handlers = []
+    original_start = BridgeSession.start
+    original_dispatch = BridgeSession._dispatch
+    original_close = BridgeSession.aclose
+
+    async def record_start(session):
+        handlers.append(asyncio.current_task())
+        await original_start(session)
+
+    async def blocked_request(session, msg):
+        request_entered.set()
+        await request_release.wait()
+        await original_dispatch(session, msg)
+
+    async def blocked_close(session):
+        close_entered.set()
+        await original_close(session)
+        teardown_entered.set()
+        await teardown_release.wait()
+        if completion == "error":
+            raise RuntimeError("fixture teardown failure")
+
+    monkeypatch.setattr(BridgeSession, "start", record_start)
+    monkeypatch.setattr(BridgeSession, "_dispatch", blocked_request)
+    monkeypatch.setattr(BridgeSession, "aclose", blocked_close)
+    sock = tmp_path / "serve.sock"
+    server = Server(sock, idle_timeout=0.3, enable_lease=False)
+    host = asyncio.create_task(server.serve_forever())
+    writer = None
+    try:
+        await _await_socket(sock)
+        _reader, writer = await open_attached_session(
+            sock, str(_write_bridge_config(tmp_path)))
+        writer.write(b'{"jsonrpc":"2.0","id":1,"method":"ping"}\n')
+        await writer.drain()
+        await asyncio.wait_for(request_entered.wait(), timeout=5)
+        writer.close()
+        await asyncio.wait_for(close_entered.wait(), timeout=5)
+        if completion == "cancel":
+            handlers[0].cancel()
+            await asyncio.sleep(0)
+        assert server._control_dispatch({
+            "op": "drain", "token": server._control_token})["busy_sessions"] == 1
+        server._last_active = time.monotonic() - 10
+        server._maybe_idle_evict()
+        assert not server._stop.is_set()
+        request_release.set()
+        await asyncio.wait_for(teardown_entered.wait(), timeout=5)
+        assert server._control_dispatch({
+            "op": "drain", "token": server._control_token})["busy_sessions"] == 1
+        server._last_active = time.monotonic() - 10
+        server._maybe_idle_evict()
+        assert not server._stop.is_set()
+        teardown_release.set()
+        await asyncio.wait_for(
+            asyncio.gather(*handlers, return_exceptions=True), timeout=5)
+        assert server._control_dispatch({
+            "op": "drain", "token": server._control_token})["busy_sessions"] == 0
+        assert server.attached == 0
+    finally:
+        request_release.set()
+        teardown_release.set()
+        if writer is not None:
+            writer.close()
+        await asyncio.gather(*handlers, return_exceptions=True)
+        server.stop()
+        await asyncio.wait_for(host, timeout=5)
+
+
 @pytest.mark.skipif(not _HAS_AF_UNIX, reason="POSIX broken-symlink bind")
 async def test_serve_forever_binds_over_a_broken_symlink(tmp_path):
     """Regression test: on POSIX the fixed cutover handle is a symlink to a

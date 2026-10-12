@@ -159,6 +159,8 @@ remains an explicit unauthenticated choice.
 MCP `BridgeSession`, one-shot `call`, materialized stubs, and warm `serve`
 calls all use this enforcement core. Warm-pool shutdown closes admission and
 drains pending opens as well as registered calls before host retirement.
+Attached-session liveness remains reserved through request drain and teardown,
+including handler cancellation, and releases even if teardown fails.
 Discovery starts only the trusted catalog
 target. Materialized schemas retain the required selector; `defer` and
 `code-mode` expose the common contract and every real downstream call they
