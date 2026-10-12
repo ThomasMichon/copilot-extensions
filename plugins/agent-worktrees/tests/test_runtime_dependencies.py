@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -17,13 +18,19 @@ except ModuleNotFoundError:
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+UI_PACKAGES = {
+    "textual": "textual",
+    "rich": "rich",
+    "pygments": "pygments",
+    "markdown-it-py": "markdown_it",
+}
 
 
 @pytest.mark.guard
 def test_runtime_dependencies_do_not_install_ui_stack() -> None:
     project = tomllib.loads((PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     names = {Requirement(value).name.lower() for value in project["project"]["dependencies"]}
-    assert names.isdisjoint({"textual", "rich", "pygments", "markdown-it-py"})
+    assert names.isdisjoint(UI_PACKAGES)
     assert "packaging" in names
 
 
@@ -31,11 +38,17 @@ def test_runtime_dependencies_do_not_install_ui_stack() -> None:
 def test_cli_version_guard_and_manager_handoff_work_without_ui_imports() -> None:
     code = """
 import importlib.abc
+import json
 import sys
+
+ui_roots = set(json.loads(sys.argv[2]))
+attempted_ui_imports = []
 
 class NoUiImports(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split(".")[0] in {"textual", "rich", "pygments", "markdown_it"}:
+        if fullname.split(".")[0] in ui_roots:
+            attempted_ui_imports.append(fullname)
+            print("UI import attempted: " + fullname, file=sys.stderr, flush=True)
             raise ImportError("UI dependency is unavailable: " + fullname)
 
 sys.meta_path.insert(0, NoUiImports())
@@ -51,6 +64,7 @@ except SystemExit as exc:
     result = exc.code
 assert result == 0, result
 from agent_worktrees import manager_launch_cli
+assert not attempted_ui_imports, attempted_ui_imports
 manager_code = (
     "import sys; "
     "assert sys.argv[1:] == ['--project', 'example']; "
@@ -62,14 +76,18 @@ raise SystemExit(manager_launch_cli._exec_worktree_manager(
 ))
 """
     result = subprocess.run(
-        [sys.executable, "-I", "-X", "utf8", "-c", code, str(PLUGIN_ROOT / "src")],
+        [
+            sys.executable, "-I", "-X", "utf8", "-c", code,
+            str(PLUGIN_ROOT / "src"), json.dumps(list(UI_PACKAGES.values())),
+        ],
         capture_output=True,
         text=True,
         encoding="utf-8",
-        timeout=20,
+        timeout=25,
         check=False,
         **no_window_kwargs(),
     )
     assert result.returncode == 7, result.stdout + result.stderr
+    assert "UI import attempted:" not in result.stderr
     assert "usage:" in result.stdout
     assert "manager process handoff" in result.stdout
