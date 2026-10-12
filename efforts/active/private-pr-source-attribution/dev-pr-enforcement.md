@@ -22,19 +22,27 @@ Operator decisions:
 - The operator enabled `attribution-exempt` as a silent exception. Agents must
   never apply or remove it. CI diagnostics must not mention its presence,
   absence, name, or use as a repair path.
+- After plan review, the operator authorized a distinct required
+  `source-attribution` context and extension of the existing no-bypass ruleset
+  only after deployment/verification. This prevents already-open PRs from
+  relying on old green lockdown checks that never examined source metadata.
 
 ## Plan
 
-- [ ] Clear this proposal's automated review gate before implementing it.
+- [x] Clear this proposal's automated review gate before implementing it (#6296).
 - [ ] Require a structurally valid source marker in the current PR body for
   every PR targeting `dev`, regardless of author, branch, or changed paths.
   Ordinary managed sources use `<!-- agent-worktrees:source
   codename=<assigned-public-handle> -->`, with optional `root` and `enc`.
   Repository automation uses the same comment envelope with a public
-  `workflow=<workflow-file-slug>` origin and optional run ID.
+  `workflow=<workflow-file-slug>` origin and optional run ID. gh-aw's existing
+  compiler-controlled `gh-aw-workflow-id` comment is an accepted native
+  workflow origin, avoiding a second model-generated marker or artifact rewrite.
 - [ ] _(agent-recommended)_ Reuse the existing independently required trusted
-  `workflow-lockdown-guard` path rather than adding an initially unenforced
-  check or letting PR-head changes disable their own metadata validation.
+  `workflow-lockdown-guard` workflow path; publish the separately required
+  source context from that same trusted workflow and activate its no-bypass
+  rule only after live verification. Do not let PR-head changes disable their
+  own metadata validation.
   Never check out or execute PR-head content in this trusted metadata job.
 - [ ] _(agent-recommended)_ Read current PR metadata through the GitHub API and
   reevaluate on opening, pushing, reopening, body/base edits, and label changes.
@@ -99,3 +107,9 @@ definition, not infer successful deployment from a same-named check alone.
   capturing evidence rather than merging it.
 - [ ] Implementation passes current-head review/required CI, merges, promotes,
   and receives live required-check evidence before this phase is complete.
+
+## Journal
+
+- #6296 reviewed and merged before implementation. The rollout refinement
+  above was explicitly authorized afterward; it preserves the same trusted
+  workflow and accepted publisher boundary while covering existing PRs.

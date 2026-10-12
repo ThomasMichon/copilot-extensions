@@ -296,6 +296,10 @@ jobs:
         run: python -m pip install --upgrade pip pytest pyyaml ruff
       - name: Version consistency
         run: python tools/check-version-consistency.py
+      - name: Required source metadata contract tests
+        run: |
+          node --test .github/actions/required-pr-attribution.test.cjs
+          python -m pytest -q tools/test_required_source_attribution_workflow.py
       - name: Changefile presence (touched plugins must have a pending changefile; PR-into-dev only)
         # Every plugin whose content -- or a vendored lib it ships -- changes in
         # a PR targeting `dev` must carry a pending changefile (tools/changefile.py),

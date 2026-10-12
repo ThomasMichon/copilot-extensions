@@ -1,0 +1,9 @@
+{
+  "comment": "Document mandatory source metadata repair for manually opened pull requests and operator-only policy restrictions",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

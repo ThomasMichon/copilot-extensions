@@ -1,0 +1,54 @@
+"""Trusted metadata wiring, event repair, and automation origin contracts."""
+from pathlib import Path
+
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def load(name):
+    text = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+    if name.endswith(".md"):
+        text = text.removeprefix("---\n").split("\n---\n", 1)[0]
+    return yaml.load(text, Loader=yaml.BaseLoader)
+
+
+def test_metadata_events_and_trusted_checkout_do_not_execute_pr_content():
+    workflow = load("workflow-lockdown-guard.yml")
+    trigger = workflow["on"]["pull_request_target"]
+    assert trigger["branches"] == ["dev"]
+    assert {"opened", "reopened", "synchronize", "edited", "labeled", "unlabeled"} <= set(trigger["types"])
+    source = workflow["jobs"]["source-attribution"]
+    assert source["name"] == "source-attribution"
+    assert source["if"] == "github.event_name == 'pull_request_target'"
+    checkout = source["steps"][0]
+    assert checkout["with"] == {"ref": "${{ github.workflow_sha }}", "persist-credentials": "false"}
+    assert "required-pr-attribution.cjs" in source["steps"][1]["with"]["script"]
+    protected = workflow["jobs"]["workflow-lockdown-guard"]
+    assert protected["if"] == "github.event_name == 'pull_request_target'"
+    assert "protectedPrefixes" in protected["steps"][0]["with"]["script"]
+
+
+def test_existing_heads_are_refreshed_from_only_the_default_branch():
+    workflow = load("workflow-lockdown-guard.yml")
+    refresh = workflow["jobs"]["refresh-source-attribution"]
+    assert workflow["on"]["push"]["branches"] == ["main"]
+    assert "github.event.repository.default_branch" in refresh["if"]
+    assert refresh["permissions"] == {
+        "contents": "read", "pull-requests": "read", "checks": "write",
+    }
+    assert refresh["steps"][0]["with"]["ref"] == "${{ github.workflow_sha }}"
+    assert ".backfill(" in refresh["steps"][1]["with"]["script"]
+    assert "labeled" in workflow["jobs"]["request-review"]["if"]
+    assert "unlabeled" in workflow["jobs"]["request-review"]["if"]
+
+
+def test_contract_tests_are_wired_and_dev_cleanup_has_a_workflow_origin():
+    steps = load("ci.yml")["jobs"]["checks"]["steps"]
+    assert any("required-pr-attribution.test.cjs" in step.get("run", "") for step in steps)
+    assert any("test_required_source_attribution_workflow.py" in step.get("run", "") for step in steps)
+    purge = (ROOT / ".github" / "workflows" / "purge-consumed-changefiles.yml").read_text(encoding="utf-8")
+    assert "agent-worktrees:source workflow=purge-consumed-changefiles run=$GITHUB_RUN_ID" in purge
+    assert '"$origin"' in purge
+    agentic = load("ci-failure-fix-attempt.md")
+    assert agentic["safe-outputs"]["create-pull-request"]["base-branch"] == "dev"

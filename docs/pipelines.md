@@ -291,10 +291,39 @@ account — it's an Enterprise-only feature.)
 > completes and a subsequent PR confirms the check actually reports
 > successfully — only then is it flipped to `active`.
 
+### Required dev source metadata
+
+`source-attribution` is a distinct check in the same trusted
+`workflow-lockdown-guard.yml` workflow. Its script is checked out at
+`github.workflow_sha`, never the PR head, and reads the current description
+through the GitHub API. Body/base edits and metadata changes reevaluate the
+same head; repository automation and manually opened PRs are covered too.
+CONTRIBUTING.md and failure output publish the accepted codename, workflow and
+native gh-aw origin forms and concrete manual repair steps. Encryption remains
+optional, and syntax validation is not proof of actual source ownership.
+
+Pushes to the default release branch and trusted manual dispatches refresh the
+distinct context on current open dev PR heads without editing their descriptions
+or labels. Unchanged metadata/validator decisions are deduplicated and writes
+are paced. This refresh closes the rollout gap for already-open PRs whose old
+green lockdown runs never examined attribution.
+
+**Activation is separate from implementation merge.** After promotion to
+`main`, verify a real source-check failure and a body-only repair from the
+actual trusted workflow. Only then extend the existing no-bypass required-check
+ruleset with `source-attribution`, preserving its other checks and conditions.
+Do not report enforcement live based only on a dev merge or an unrelated
+same-named check. The existing context-name/publisher forgery residual risk
+described above applies here too.
+
+Source-policy decisions do not waive protected-path authorization, review, or
+other required CI. Agents repair missing metadata and do not apply or remove
+operator-only policy labels.
+
 ### Everyone else
 
 Anyone who hasn't been invited as a collaborator at all **gets no
-automatic CI, no automatic Copilot review, and no agentic-workflow
+automatic code CI, no automatic Copilot review, and no agentic-workflow
 support**, only the strictest built-in fork-PR-approval gate (Settings →
 Actions → General → "Fork pull request workflows" → **"Require approval
 for all outside collaborators"**), which already blocks every Actions run
@@ -302,7 +331,8 @@ for all outside collaborators"**), which already blocks every Actions run
 the trusted review job's own collaborator check (above) for review. A
 Maintainer can still manually approve a run or request a review for an
 outside PR at their discretion — this only removes the automatic path for
-someone the repo owner never invited.
+someone the repo owner never invited. Trusted metadata checks may still run
+without executing any fork/PR-head content.
 
 **This also means an unapproved fork PR against `main` gets zero automated
 feedback**, including from `main-gate` (below) — GitHub holds the *entire*

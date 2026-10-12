@@ -21,6 +21,72 @@ its destination.
 
 ## Contribution flow (PR-required)
 
+### Required source attribution on dev PRs
+
+Every PR targeting `dev`, including manually opened and automated PRs, must
+carry one source-attribution comment in its description. Opening with the
+managed `create-pr` flow supplies this automatically; bypassing that flow does
+not waive the metadata requirement.
+
+For a managed source, the minimal format is:
+
+```html
+<!-- agent-worktrees:source codename=<assigned-public-handle> -->
+```
+
+Use the worktree's actual assigned public codename, not a fabricated label.
+Optional `root` is another assigned public handle; optional `enc` is the
+base64 AWI1 envelope produced by the shared-key attribution tools. Handles are
+lowercase alphanumeric segments joined by hyphens, at most 64 characters.
+Encryption is optional; never publish raw machine, worktree or session fields.
+Place the comment on its own line outside code fences or quoted examples.
+
+Repository automation instead supplies its public workflow origin:
+
+```html
+<!-- agent-worktrees:source workflow=purge-consumed-changefiles run=123456789 -->
+```
+
+Workflow slugs use lowercase alphanumeric segments joined by hyphens or
+underscores (64 characters maximum). `run` is optional and, when present,
+contains 1-20 decimal digits. Codename and workflow forms cannot be mixed;
+unknown fields, duplicates and multiple source comments are refused.
+This is structural origin metadata, not cryptographic proof of authorship.
+
+gh-aw workflows already append their compiler-controlled origin after body
+sanitization. When no managed source comment is present, their native form is
+also accepted:
+
+```html
+<!-- gh-aw-workflow-id: ci-failure-fix-attempt -->
+```
+
+This reuses the existing automation publisher rather than relying on an agent
+to add a second marker or rewriting its safe-output artifacts.
+
+**Manual repair:** retain the authored description in a UTF-8 file. From the
+managed source worktree, use the exact agent-worktrees command in the session
+catalog:
+
+```text
+<agent-worktrees catalog argv[0]> attribution-prepare --body-file authored-pr.md
+<agent-worktrees catalog argv[0]> repos gh <owner/repo> -- pr edit <number> --body-file prepared-pr.md
+```
+
+Save the first command's prepared output as UTF-8 `prepared-pr.md` before
+running the second. If preparation is not installed yet, append the minimal
+comment manually using the actual codename from managed worktree creation or
+listing. Do not overwrite authored prose, guess a source, weaken privacy
+settings, or silently switch accounts. If no publishable source exists, stop
+and ask the operator. **Agents must repair metadata, not apply or remove
+operator-only policy labels to bypass CI.**
+
+The trusted `source-attribution` check reads current PR metadata and reevaluates
+description/base edits and metadata changes, so a body-only repair needs no
+dummy commit. Its required-context rollout occurs only after the trusted
+workflow has reached `main` and is verified; old green checks from earlier
+workflow versions do not substitute for this distinct requirement.
+
 **PRs target `dev`, not `main`.** `main` is regenerated wholesale by a CI
 promotion pipeline (`.github/workflows/validate-and-promote.yml`,
 dev-branch-release-pipeline effort, ThomasMichon/copilot-extensions#3336) —
