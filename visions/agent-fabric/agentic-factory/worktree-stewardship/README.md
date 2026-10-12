@@ -18,8 +18,10 @@ authority; it is not another cleanup queue.
 A settled charter carries the founding objective, canonical effort where
 applicable, restrictions, sufficient done criteria, and retained progress.
 Operator consent admits that responsibility into registered supervision.
-Evidence-backed task cards support proposals and decisions; worktree and task
-owners retain identity, claims, control, and completion authority.
+Evidence-backed task cards support proposals and decisions. Worktree and task
+owners retain identity, claims, and execution control. Workers submit completion
+claims; only the operator or evaluator designated by the task's confirmation
+policy accepts completion. Stewardship does not grant workers self-confirmation.
 
 ## Features
 
