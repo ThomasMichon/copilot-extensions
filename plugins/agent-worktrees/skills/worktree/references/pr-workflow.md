@@ -694,7 +694,10 @@ If an earlier source push reached the remote but its acknowledgement was lost,
 a later rebase can leave the saved lease behind. Recovery never adopts today's
 tip blindly: the Git remote and provider must independently agree, and that tip
 must descend from the saved head and be contained in the verified pre-rebase
-source. The complete source replay is checked again and the recovered exact tip
+source. The provider must still report the same live PR number, source ref,
+full source repository identity and expected base; closed/merged or retargeted
+PRs cannot be reconciled from their SHA alone.
+The complete source replay is checked again and the recovered exact tip
 fences the one bounded retry. The audit retains both the saved head and transport
 lease; tracking advances only after successful publication. Unconfirmed tips,
 concurrent commits outside that original source, changed associations or

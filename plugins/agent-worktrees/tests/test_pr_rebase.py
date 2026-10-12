@@ -89,7 +89,7 @@ def _partial_success_then_rebase(pr_repo, monkeypatch):
 
 def test_partial_success_before_rebase_recovers_only_verified_source_lineage(pr_repo, monkeypatch):
     config, wid, path, remote, branch, old, accepted = _partial_success_then_rebase(pr_repo, monkeypatch)
-    monkeypatch.setattr(pr_publish, "_provider_head", lambda repo, pr: accepted)
+    monkeypatch.setattr(pr_publish, "_provider_head", lambda repo, pr, **kwargs: accepted)
     tip = _git("rev-parse", "HEAD", cwd=path)
     assert not git_ops.is_commit_ancestor(accepted, tip, cwd=path)
     assert finalize.push_changes(wid, config)
@@ -120,7 +120,7 @@ def test_partial_success_recovery_rejects_unconfirmed_or_unrelated_remote_heads(
         if provider == "foreign":
             _git("push", "origin", branch, cwd=other)
     observed = "" if provider == "unavailable" else "0" * 40 if provider == "different" else remote_head
-    def provider_head(repo, pr):
+    def provider_head(repo, pr, **kwargs):
         if provider == "racing":
             _git("push", "origin", branch, cwd=other)
             return accepted

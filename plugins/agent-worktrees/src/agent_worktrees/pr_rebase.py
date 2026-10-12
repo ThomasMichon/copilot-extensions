@@ -347,7 +347,10 @@ def push(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
                 and _ancestor(expected, reconcile_head, cwd)
                 and _ancestor(reconcile_head, proof.old_source, cwd)
                 and pr_publish._tip(remote, proof.branch, cwd) == reconcile_head
-                and pr_publish._provider_head(repo, pr) == reconcile_head
+                and pr_publish._provider_head(
+                    repo, pr, expected_ref=proof.branch,
+                    expected_identity=pr_publish.push_identity(remote, cwd=cwd),
+                ) == reconcile_head
             ):
                 return git_ops.PushResult(
                     ok=False, stderr="Refusing partial publication recovery: remote head is not independently confirmed source lineage.",

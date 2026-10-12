@@ -149,7 +149,7 @@ def _tip(remote: str, branch: str, worktree_path: str) -> str | None:
     return ""
 
 
-def _provider_head(repo, pr) -> str:
+def _provider_head(repo, pr, *, expected_ref: str = "", expected_identity: str = "") -> str:
     """The PR's actual head commit, from the provider; "" when it can't be read."""
     number, slug = getattr(pr, "number", None), getattr(pr, "repo", "") or ""
     if not number or "/" not in slug:
@@ -162,6 +162,13 @@ def _provider_head(repo, pr) -> str:
         result = provider.get_pull(slug, int(number),
                                    api_base=getattr(prcfg, "api_base", "") or "",
                                    token=providers.account_token_for_slug(slug, prcfg))
+        if expected_ref and (
+            result.state not in ("open", "active") or result.merged
+            or result.number != int(number) or result.head_ref != expected_ref
+            or result.base_ref != repo.default_branch
+            or not result.head_url or _identity(result.head_url, "") != expected_identity
+        ):
+            return ""
         return (getattr(result, "head_sha", "") or "").strip()
     except Exception:
         return ""
