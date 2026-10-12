@@ -991,16 +991,21 @@ publication transaction; mismatches remain refused.
 
 For an attested legacy open PR without publication ownership,
 `push-changes --rewrite-pr` reconciles ownership in the same command, even
-after rebasing. Compatibility requires a pre-generation record, a numbered
+after rebasing or squashing its own commits. The flag is the host's explicit
+confirmation of intentional rewriting; automatic replay proof is not required.
+Compatibility requires a numbered
 provider PR and URL, and its previously saved full destination identity
 or an HTTPS provider PR URL identifying that same repository and PR number.
 The provider and remote must both still hold the exact saved lease; the
 usual owning-worktree, private-ref and installation-wide exclusivity checks
 remain mandatory. Ownership is persisted only after those checks, without
-switching to or re-publishing the old tip. Partial ownership, a corrected
-generation or missing destination evidence requires explicit reconciliation.
-A manual PR identity or branch correction
-invalidates ownership; a matching-looking suffix is never proof by itself.
+switching to or re-publishing the old tip. A nonzero metadata generation alone
+does not disqualify the owning host. Such a legacy record must additionally match
+the provider's current numbered PR, source branch, source repository and saved
+head exactly before ownership is reconciled. Partial ownership or missing
+destination evidence still requires explicit reconciliation. An inconsistent
+PR identity or branch correction remains refused; a matching-looking suffix is
+never proof by itself.
 
 #### Operator-confirmed break glass
 

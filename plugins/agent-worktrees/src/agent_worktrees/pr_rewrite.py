@@ -53,7 +53,7 @@ def _validate(worktree_id: str, config: Config, record: tracking.WorktreeRecord 
     if pr.repo and pr.repo.lower() != (git_ops.remote_slug(repo.remote, cwd=cwd) or "").lower():
         raise ValueError("Tracked PR belongs to another repository; nothing was pushed.")
     if not recovery and (pr.rewrite_owner != f"{worktree_id}:{pr.branch}" or not pr.rewrite_identity):
-        if (pr.rewrite_owner or pr.rewrite_identity or pr.pr_revision != 0
+        if (pr.rewrite_owner or pr.rewrite_identity
                 or not legacy_identity(pr, cwd) or pr.number is None or not pr.url):
             raise ValueError("Missing publication ownership or compatible legacy evidence; inspect the tracked PR.")
     if (pr.branch in {repo.default_branch, "main", "master", "dev", branch, *hooks._protected_branches(cwd)}
@@ -114,6 +114,7 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                 raise ValueError("Tracked PR changed while preparing the rewrite; nothing was pushed.")
             recovery = recovery_reason is not None
             pr = _validate(worktree_id, config, fresh, cwd, recovery=recovery)
+            legacy_revalidation = not pr.rewrite_owner and pr.pr_revision > 0
             target = pr_publish.push_target(repo, pr, cwd)
             if target is None:
                 raise ValueError(pr_publish.UNREADABLE_REMOTE)
@@ -128,7 +129,7 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                 observed = observe_pr(config, pr)
                 if observed.merged or observed.state.lower() != "open" or observed.head_sha != pr.head_sha:
                     raise ValueError("Provider PR is not open at the recorded head; inspect and reconcile it.")
-                if recovery and (
+                if (recovery or legacy_revalidation) and (
                     observed.number != pr.number or observed.head_ref != pr.branch
                     or not observed.head_url
                     or not same_repository(
