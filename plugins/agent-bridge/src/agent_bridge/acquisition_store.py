@@ -98,29 +98,44 @@ class AcquisitionStore:
         self, request: AcquisitionRequest, session: str, native: str,
     ) -> bool:
         rows = self.db.execute_read(
-            "SELECT e.data_json FROM acquisition_attempts a "
+            "SELECT a.delivery_id,a.state,a.refusal_code,e.stage,e.data_json "
+            "FROM acquisition_attempts a "
             "JOIN acquisition_effects e USING(delivery_id) "
-            "WHERE a.worktree_id=? AND a.state='refused' "
-            "AND a.refusal_code='superseded_before_delivery' AND e.stage='launched'",
+            "WHERE a.worktree_id=?",
             (request.worktree_id,),
         )
+        proven = False
         for row in rows:
             data = json.loads(row["data_json"])
             previous = data["_request"]
-            result = data["result"]
+            result = data.get("result", {})
             if (
                 previous.get("conversation_retired") is True
                 and previous.get("task_generation") == request.task_generation
                 and previous.get("task_id") == request.task_id
                 and previous.get("target") == request.target
                 and previous.get("mode") == request.mode
-                and result.get("acquired") == "created"
                 and result.get("session_id") == session
                 and result.get("native_session_id") == native
                 and native not in data.get("retired_native_ids", [])
             ):
-                return True
-        return False
+                if row["delivery_id"] != request.delivery_id:
+                    admission = self.db.execute_read(
+                        "SELECT 1 FROM turns WHERE acquisition_delivery_id=? AND session_id=? "
+                        "UNION ALL SELECT 1 FROM live_messages "
+                        "WHERE idempotency_key=? AND session_id=?",
+                        (row["delivery_id"], session, f"acquisition:{row['delivery_id']}", session),
+                    )
+                    if row["state"] == "completed" or admission:
+                        return False
+                if (
+                    row["state"] == "refused"
+                    and row["refusal_code"] == "superseded_before_delivery"
+                    and row["stage"] == "launched"
+                    and result.get("acquired") == "created"
+                ):
+                    proven = True
+        return proven
 
     def stage(self, request: AcquisitionRequest, stage: str, **data: Any) -> None:
         previous = self.db.execute_read(

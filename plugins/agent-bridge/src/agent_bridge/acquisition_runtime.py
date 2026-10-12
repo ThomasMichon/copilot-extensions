@@ -459,7 +459,9 @@ class AcquisitionRuntime:
             rows = [
                 row
                 for row in self.db.list_fresh_live_sessions(req.worktree_id, now=time.time())
-                if row.get("driven_by") == driver
+                if (row.get("driven_by") == driver or (
+                    decision and decision.retirement_recovered and decision.acquired == "reused"
+                ))
                 and (expected is None or row["session_id"] == expected)
             ]
             if len(rows) == 1:
@@ -649,7 +651,7 @@ class AcquisitionRuntime:
                     )
                 session_id, native = session.session_id, session.acp_session_id
             else:
-                session_id, native = await self._cli_native(req, cli_driver(req))
+                session_id, native = await self._cli_native(req, cli_driver(req), recovery_decision)
             if data.get("native_session_id") and data["native_session_id"] != native:
                 raise AcquisitionRefused(
                     "native_identity_changed", "recovered launch changed native identity"
@@ -807,7 +809,12 @@ class AcquisitionRuntime:
                         )
                     session, native = found[0].session_id, found[0].acp_session_id
                 else:
-                    session, native = await self._cli_native(previous, cli_driver(previous))
+                    recovery_decision = AcquisitionDecision(
+                        data["acquired"], retirement_recovered=data.get("retirement_recovered", False),
+                        conversation=ConversationEvidence(**data["retirement_conversation"])
+                        if data.get("retirement_recovered") else None,
+                    )
+                    session, native = await self._cli_native(previous, cli_driver(previous), recovery_decision)
                 if previous.mode == "acp":
                     await self._restore_recovered_head(req, session, native)
                     _, head = await verify_worktree(req)

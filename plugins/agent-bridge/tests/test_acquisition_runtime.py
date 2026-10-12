@@ -765,7 +765,8 @@ async def test_retirement_recovery_settles_admitted_turn_without_duplicate(rig, 
         # Settling a superseded receipt is distinct from admitting another turn.
         rig.source["acquisition_reservation"]["key"] = "reservation-c"
         current = retry.model_copy(update={"reservation_key": "reservation-c", "delivery_id": "delivery-c"})
-        await rig.runtime._reconcile_prior(current, {"path": "unused"}, rig.head["id"])
+        with pytest.raises(AcquisitionRefused):
+            await rig.runtime.acquire(current)
     else:
         await rig.runtime.acquire(retry)
     table = "live_messages" if mode == "cli" else "turns"
@@ -776,6 +777,74 @@ async def test_retirement_recovery_settles_admitted_turn_without_duplicate(rig, 
     for session in rig.manager.list_sessions():
         if session._prompt_task:
             await session._prompt_task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["cli", "acp"])
+async def test_completed_retirement_recovery_cannot_authorize_another_delivery(rig, mode):
+    rig.source["task"]["generation"] = 1
+    rig.source["acquisition_reservation"].update(
+        worktree_ownership="reused", conversation_retired=True,
+    )
+    first = req(mode=mode, allocation="reused", conversation_retired=True, task_generation=1)
+    deliver = rig.runtime._deliver
+    rig.runtime._deliver = AsyncMock(side_effect=RuntimeError("before delivery"))
+    with pytest.raises(RuntimeError):
+        await rig.runtime.acquire(first)
+    rig.runtime._deliver = deliver
+    rig.source["acquisition_reservation"]["key"] = "reservation-b"
+    second = first.model_copy(update={"reservation_key": "reservation-b", "delivery_id": "delivery-b"})
+    result = await rig.runtime.acquire(second)
+    for session in rig.manager.list_sessions():
+        if session._prompt_task:
+            await session._prompt_task
+    rig.db.execute_write("UPDATE live_messages SET delivered_at=?, outcome='applied'", (time.time(),))
+    rig.source["acquisition_reservation"]["key"] = "reservation-c"
+    third = first.model_copy(update={"reservation_key": "reservation-c", "delivery_id": "delivery-c"})
+    assert not rig.runtime.store.retirement_recovery_proven(
+        third, result.session_id, result.native_session_id,
+    )
+    with pytest.raises(AcquisitionRefused):
+        await rig.runtime.acquire(third)
+    assert await rig.runtime.acquire(second) == result
+    table = "live_messages" if mode == "cli" else "turns"
+    assert rig.db.execute_read(f"SELECT COUNT(*) AS n FROM {table}")[0]["n"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("new_attempt", [False, True])
+async def test_cli_retirement_recovery_survives_launching_with_previous_driver(rig, monkeypatch, new_attempt):
+    rig.source["task"]["generation"] = 1
+    rig.source["acquisition_reservation"].update(
+        worktree_ownership="reused", conversation_retired=True,
+    )
+    first = req(mode="cli", allocation="reused", conversation_retired=True, task_generation=1)
+    deliver = rig.runtime._deliver
+    rig.runtime._deliver = AsyncMock(side_effect=RuntimeError("before delivery"))
+    with pytest.raises(RuntimeError):
+        await rig.runtime.acquire(first)
+    rig.runtime._deliver = deliver
+    stage = rig.runtime.store.stage
+    def interrupted(request, name, **data):
+        if request.delivery_id == "delivery-b" and name == "launched":
+            raise RuntimeError("after reuse before receipt")
+        stage(request, name, **data)
+    monkeypatch.setattr(rig.runtime.store, "stage", interrupted)
+    rig.source["acquisition_reservation"]["key"] = "reservation-b"
+    second = first.model_copy(update={"reservation_key": "reservation-b", "delivery_id": "delivery-b"})
+    with pytest.raises(RuntimeError, match="after reuse before receipt"):
+        await rig.runtime.acquire(second)
+    monkeypatch.setattr(rig.runtime.store, "stage", stage)
+    current = second
+    if new_attempt:
+        rig.source["acquisition_reservation"]["key"] = "reservation-c"
+        current = first.model_copy(update={"reservation_key": "reservation-c", "delivery_id": "delivery-c"})
+    result = await rig.runtime.acquire(current)
+    assert result.native_session_id == rig.head["id"]
+    assert await rig.runtime.acquire(current) == result
+    assert rig.db.execute_read("SELECT COUNT(*) AS n FROM live_messages")[0]["n"] == 1
+    assert len([args for args, _ in rig.calls if args[0] == "embody" and "--dry-run" not in args]) == 1
+    assert not rig.db.execute_read("SELECT * FROM acquisition_launch_gates")
 
 
 @pytest.mark.asyncio
