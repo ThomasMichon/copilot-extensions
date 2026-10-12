@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from agent_bridge import __main__ as cli
-from agent_bridge.caller_project import owning_project
+from agent_bridge.caller_project import CallerProjectContextError, owning_project
 
 
 @pytest.fixture(autouse=True)
@@ -37,13 +37,21 @@ def test_explicit_project_override_wins(monkeypatch):
     ("host/harness/worktree#session#extra", "session"),
     ("host/harness/worktree#" + "s" * 129, "s" * 129),
     ("host/harness/worktree#unsafe!session", "unsafe!session"),
+    ("", "session"),
+    ("  ", "session"),
 ])
-def test_unproven_owner_does_not_rebind_project(monkeypatch, reference, session):
+def test_invalid_managed_owner_refuses_cwd_fallback(monkeypatch, capsys, reference, session):
     monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", reference)
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", session)
-    monkeypatch.setattr(cli, "_worktrees_get", lambda key: "cwd-project")
-    assert owning_project() is None
-    assert cli._sender_repo() == "cwd-project"
+    calls = []
+    monkeypatch.setattr(cli, "_worktrees_get", lambda key: calls.append(key) or "knowledge")
+    with pytest.raises(CallerProjectContextError):
+        owning_project()
+    with pytest.raises(SystemExit) as error:
+        cli._sender_repo()
+    assert error.value.code == 2
+    assert "rebind the worktree" in capsys.readouterr().err
+    assert calls == []
 
 
 def test_unmanaged_cli_uses_existing_cwd_resolution(monkeypatch):

@@ -31,7 +31,10 @@ For a bare machine target, a managed caller's current, session-matching
 worktree owner reference supplies the preferred project before a CWD lookup.
 Thus a parent harness can dispatch into its own worktrees even when its
 knowledge companion owns the topology or a helper runs from the knowledge
-checkout. A stale/malformed owner reference never supplies that preference.
+checkout. A declared owner reference that is stale, malformed, empty, or lacks
+a valid session identity refuses dispatch with an actionable rebind diagnostic;
+it never silently falls back to the knowledge checkout. With no declared owner,
+ordinary unmanaged CWD/default resolution remains available.
 Explicit `--project` and `<repo>@<venue>` targets retain precedence; unmanaged
 callers keep CWD/default resolution. This selects a project, not allocation
 authority: knowledge-only restrictions and cross-space claim gates still apply.

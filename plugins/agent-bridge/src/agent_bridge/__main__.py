@@ -225,9 +225,13 @@ def _get_caller_session_id() -> str | None:
 def _sender_repo() -> str | None:
     if _PROJECT_OVERRIDE:
         return _PROJECT_OVERRIDE
-    from .caller_project import owning_project
+    from .caller_project import CallerProjectContextError, owning_project
 
-    project = owning_project()
+    try:
+        project = owning_project()
+    except CallerProjectContextError as exc:
+        print(f"[FAIL] {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
     if project:
         return project
     return _worktrees_get("project")
