@@ -9,7 +9,6 @@ import tempfile
 from pathlib import Path
 
 from build_toolchain_lock import ArtifactBuildError, resolve_toolchain_lock
-from seasoned_public_feed import DEFAULT_MIN_AGE_DAYS
 
 
 def main(builder, description: str) -> int:
@@ -42,8 +41,7 @@ def main(builder, description: str) -> int:
                 venv = root / "venv"
             toolchain = resolve_toolchain_lock(
                 venv, python=args.python, source_policy=args.toolchain_source,
-                min_age_days=(DEFAULT_MIN_AGE_DAYS if args.toolchain_min_age_days is None
-                              else args.toolchain_min_age_days),
+                min_age_days=args.toolchain_min_age_days,
             )
             manifest = builder(
                 args.plugin, out_dir=args.out_dir, python=args.python, toolchain=toolchain

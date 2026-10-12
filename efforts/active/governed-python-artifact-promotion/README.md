@@ -437,6 +437,8 @@ win grows with build complexity.
   including non-JSON values, with an explicit artifact-build error.
   Public hash arrays must be sorted and unique, preserving a single canonical
   identity for each eligible digest set.
+  The API uses an omitted-seasoning sentinel, so even an explicit seven-day
+  argument is rejected in governed mode rather than silently ignored.
 - Age-floor race follow-through: snapshot-qualified file SHA-256 hashes travel
   with exact pins into `uv pip install --require-hashes`. A later upload to the
   same version cannot supply unseasoned bytes; unknown hashes and unpinned

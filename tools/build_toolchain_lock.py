@@ -554,7 +554,7 @@ def _publish_staging_venv(
 
 def resolve_toolchain_lock(
     venv_dir: Path, *, python: str | None = None,
-    source_policy: str = "governed", min_age_days: int = DEFAULT_MIN_AGE_DAYS,
+    source_policy: str = "governed", min_age_days: int | None = None,
 ) -> ToolchainLock:
     """Resolves one pinned build-toolchain venv and returns its exact
     installed ``setuptools``/``wheel``/``packaging`` versions.
@@ -593,9 +593,10 @@ def resolve_toolchain_lock(
     env = dict(os.environ)
     if source_policy not in ("governed", "seasoned-public"):
         raise ArtifactBuildError(f"unknown toolchain source policy: {source_policy!r}")
-    if source_policy == "governed" and min_age_days != DEFAULT_MIN_AGE_DAYS:
+    if source_policy == "governed" and min_age_days is not None:
         raise ArtifactBuildError("min_age_days applies only to seasoned-public toolchains")
-    public = resolve_public_source(_LOCKED_TOOLCHAIN_PACKAGES, min_age_days) if source_policy == "seasoned-public" else None
+    age = DEFAULT_MIN_AGE_DAYS if min_age_days is None else min_age_days
+    public = resolve_public_source(_LOCKED_TOOLCHAIN_PACKAGES, age) if source_policy == "seasoned-public" else None
     validated = (public.provenance["index"], None) if public else _validated_trusted_index_url(env)
     if validated is None:
         raise ArtifactBuildError(

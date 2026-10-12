@@ -115,7 +115,9 @@ def test_distinct_source_identity_preserves_occupied_slot(tmp_path, monkeypatch,
                 return subprocess.CompletedProcess(cmd, 0, "", "")
             return original_run(cmd, **kwargs)
         monkeypatch.setattr(btl.subprocess, "run", run)
-    second = btl.resolve_toolchain_lock(venv, source_policy=policy, min_age_days=age)
+    second = btl.resolve_toolchain_lock(
+        venv, source_policy=policy, min_age_days=age if policy == "seasoned-public" else None,
+    )
     assert second.venv_python != first.venv_python
     assert second.lock_id != first.lock_id
     assert (venv / btl._PROVENANCE_MARKER_NAME).read_bytes() == original
@@ -161,9 +163,10 @@ def test_unknown_policy_rejected_before_io(tmp_path, monkeypatch):
         btl.resolve_toolchain_lock(tmp_path / "venv", source_policy="typo")
 
 
-def test_governed_api_rejects_unused_seasoning(tmp_path):
+@pytest.mark.parametrize("age", [0, 7, 10, False])
+def test_governed_api_rejects_unused_seasoning(tmp_path, age):
     with pytest.raises(btl.ArtifactBuildError, match="only to seasoned-public"):
-        btl.resolve_toolchain_lock(tmp_path / "venv", min_age_days=10)
+        btl.resolve_toolchain_lock(tmp_path / "venv", min_age_days=age)
 
 
 def test_incompatible_pin_solver_failure_is_not_relaxed(tmp_path, monkeypatch, isolated):
@@ -239,6 +242,16 @@ def test_cli_default_preserves_builder_validation_order(monkeypatch, capsys):
         raise btl.ArtifactBuildError("invalid plugin before provisioning")
     assert cli.main(build, "demo") == 1
     assert "invalid plugin before provisioning" in capsys.readouterr().err
+
+
+def test_cli_shared_governed_default_does_not_supply_seasoning(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["builder", "demo", "--out-dir", "out",
+                                    "--toolchain-venv", str(tmp_path / "shared")])
+    def resolve(path, **kwargs):
+        assert kwargs == {"python": None, "source_policy": "governed", "min_age_days": None}
+        return btl.ToolchainLock(path / "python", dict(PINS))
+    monkeypatch.setattr(cli, "resolve_toolchain_lock", resolve)
+    assert cli.main(lambda *args, **kwargs: {"ok": True}, "demo") == 0
 
 
 @pytest.mark.parametrize("provenance", [
