@@ -54,6 +54,13 @@ def case(tmp_path, monkeypatch):
 
     handle = Handle()
 
+    def terminate_identity(pid, start):
+        assert pid == handle.pid and start == str(pid * 10)
+        handle.terminate()
+        return {"killed": True, "identity_verified": True}
+
+    monkeypatch.setattr("zdd.diagnostics.terminate_pid_if_identity", terminate_identity)
+
     def spawn(port):
         events.append("spawn")
         return handle
@@ -72,7 +79,7 @@ def case(tmp_path, monkeypatch):
         spawn_passive=spawn,
         attest=health,
         make_client=lambda _: Client(),
-        retire=lambda endpoint: Client().shutdown(),
+        retire=lambda endpoint, successor: Client().shutdown(),
         confirm_retired=lambda endpoint, timeout: True,
         drain_predecessor=lambda old, new, timeout: Client().drain(
             timeout=timeout, poll=1.0, force=False

@@ -50,7 +50,7 @@ class RuntimeSnapshot:
     spawn_passive: Callable[[int], _Handle] = field(repr=False)
     attest: Callable[[Endpoint], RuntimeAttestation] = field(repr=False)
     make_client: Callable[[str], _Client] = field(repr=False)
-    retire: Callable[[Endpoint], None] = field(repr=False)
+    retire: Callable[[Endpoint, Endpoint], None] = field(repr=False)
     confirm_retired: Callable[[Endpoint, float], bool] = field(repr=False)
     drain_predecessor: Callable[[Endpoint, Endpoint, float], dict] = field(repr=False)
 
@@ -193,7 +193,9 @@ class PreparedCutover:
     def retire_predecessor(self) -> None:
         """The adopter must condition shutdown on identity at the receiver."""
         self.verify_before_retire()
-        self.snapshot.retire(self.old)
+        if self.new is None:
+            raise CutoverError("successor identity unavailable before predecessor retirement")
+        self.snapshot.retire(self.old, self.new)
 
     def drain_predecessor(self, timeout: float) -> dict:
         """The receiver must atomically validate both identities before drain."""
@@ -305,7 +307,14 @@ class PreparedCutover:
                         )
                     ):
                         raise CutoverError("candidate identity changed before disposal")
-                    handle.terminate()
+                    termination = diagnostics.terminate_pid_if_identity(
+                        self.new.pid, self.new.process_start_time
+                    )
+                    if (
+                        termination.get("killed") is not True
+                        or termination.get("identity_verified") is not True
+                    ):
+                        raise CutoverError("identity-bound candidate disposal refused")
         except (OSError, CutoverError):
             result.steps.append("rollback pending: candidate disposal refused or failed")
             log.error("Conditional cutover candidate disposal refused or failed")

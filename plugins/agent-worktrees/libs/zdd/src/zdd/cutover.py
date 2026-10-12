@@ -668,6 +668,8 @@ class CutoverOrchestrator:
                     else f"post-commit error (new daemon is live): {exc}"
                 )
                 result.ok = conditional is None
+                if conditional:
+                    result.serving_endpoint = None
                 log.error("Cutover post-commit error: %s", result.error)
                 if conditional:
                     write_breadcrumb(

@@ -106,9 +106,13 @@ unconditional callers retain their existing unbounded routing-lock behavior.
 Restoration must attest ready after undrain. A previously promoted successor
 may have admitted work, so rollback retains it with unresolved recovery state
 rather than terminating it. Only never-promoted candidates can be disposed.
-The snapshot's required `retire(endpoint)` callback must enforce expected
+The snapshot's required `retire(old, successor)` callback must enforce expected
 PID/start identity at the receiving daemon or through an identity-bound native
 handle, with a bounded operation. Address-based shutdown alone is insufficient.
+The receiver must atomically verify the exact successor still owns the active
+route before retiring its predecessor; re-promotion of the predecessor refuses
+retirement. Never-promoted candidate disposal uses a verified pidfd/native
+handle, not a numeric-PID `terminate()` request.
 The required `drain_predecessor(old, successor, timeout)` callback must validate
 the predecessor's PID/start identity and the exact successor route under the
 receiver's native routing authority before opening its drain gate. Both

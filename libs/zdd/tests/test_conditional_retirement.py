@@ -15,7 +15,7 @@ case = test_conditional_cutover.case
 def test_failed_retirement_retains_recovery_and_blocks_next_attempt(case):
     root, _, events, _, snapshot, request, orch = case
 
-    def retire(endpoint):
+    def retire(endpoint, successor):
         raise OSError("fixture transport failed")
 
     result = orch.run(
@@ -61,7 +61,7 @@ def test_receiver_identity_refusal_does_not_shutdown_replacement(case):
     root, old, events, _, snapshot, request, orch = case
     expected = []
 
-    def retire(endpoint):
+    def retire(endpoint, successor):
         expected.append(endpoint)
         raise CutoverError("receiver identity no longer matches")
 
@@ -398,3 +398,56 @@ def test_relay_adoption_never_serializes_captured_secrets(case, caplog, phase):
     assert secret not in caplog.text
     if phase != "client":
         assert any("relay adopt failed" in step for step in result.steps)
+
+
+def test_receiver_bound_retirement_refuses_repromoted_predecessor(case):
+    import time
+
+    root, old, events, _, snapshot, request, orch = case
+    captured = []
+
+    def retire(predecessor, successor):
+        captured.append((predecessor, successor))
+        routing._atomic_write(
+            root / "active.json",
+            {"active": replace(old, generation=30).to_dict()},
+        )
+        with routing.routing_lock(root, deadline=time.monotonic() + 1):
+            active = routing.Endpoint.from_dict(routing.read_table(root)["active"])
+            if active != successor:
+                raise CutoverError("receiver refuses changed successor ownership")
+            pytest.fail("receiver must not shut down the repromoted predecessor")
+
+    result = orch.run(
+        conditional=replace(
+            request, capture_runtime=lambda _: replace(snapshot, retire=retire)
+        )
+    )
+    assert captured[0][0] == old and captured[0][1].pid == 202
+    assert not result.ok and result.committed and not result.retirement_requested
+    assert result.serving_endpoint is None
+    assert events == ["spawn", "drain"]
+    assert routing.read_table(root)["active"]["pid"] == old.pid
+    assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
+
+
+def test_identity_bound_candidate_disposal_refusal_retains_recovery(case, monkeypatch):
+    root, _, events, _, snapshot, request, orch = case
+
+    def attest(endpoint):
+        response = snapshot.attest(endpoint)
+        return replace(response, ready=False) if endpoint.pid == 202 else response
+
+    monkeypatch.setattr(
+        "zdd.diagnostics.terminate_pid_if_identity",
+        lambda *_: {"killed": False, "identity_verified": False},
+    )
+    result = orch.run(
+        conditional=replace(
+            request, capture_runtime=lambda _: replace(snapshot, attest=attest)
+        ),
+        health_timeout=0,
+    )
+    assert not result.ok and not result.rolled_back
+    assert events == ["spawn"]
+    assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
