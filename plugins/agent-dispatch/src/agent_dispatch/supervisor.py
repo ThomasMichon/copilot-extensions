@@ -3703,7 +3703,7 @@ class Supervisor:
                         before_reserve.get("status"),
                     )
                     break
-                resp = self.client.reserve_spawn(task["id"], reserved_by=self.supervisor_id)
+                resp = self.client.reserve_spawn(task["id"], reserved_by=self.supervisor_id, **({"coordinator_launch": True} if task.get("source") == "ci-repair" else {}))
             except DispatchError:
                 continue
             if resp.get("coordinator_launch") and (resp["coordinator_launch"].get("ok") or resp["reservation"].get("state") != "failed"): return spawned + ([task["id"]] if resp["coordinator_launch"].get("ok") else [])

@@ -558,6 +558,27 @@ def test_terminal_coordinator_failure_does_not_starve_next_task(tmp_path, monkey
     assert calls == [first.id, second.id]
 
 
+def test_client_deadlines_are_scoped_to_delayed_ci_operations():
+    from agent_dispatch.client import DispatchClient
+    calls = []
+    def post(path, **kwargs):
+        body = kwargs["json"]
+        delayed = body.get("task_id") == "ci-task"
+        budget = kwargs.get("timeout", 10)
+        assert budget > (31 if delayed else 1)
+        calls.append((path, kwargs))
+        return SimpleNamespace(status_code=200, json=lambda: {"ok": True})
+    client = object.__new__(DispatchClient)
+    client._http = SimpleNamespace(post=post)
+    client.reserve_spawn("ordinary")
+    client.claim("ordinary-worker", task_id="ordinary")
+    assert all("timeout" not in kwargs for _, kwargs in calls)
+    client.reserve_spawn("ci-task", coordinator_launch=True)
+    client.claim("ci-worker", capabilities=["ci-repair-admitted"], task_id="ci-task")
+    assert calls[-2][1]["timeout"] == 180
+    assert calls[-1][1]["timeout"] == 60
+
+
 def test_watchdog_source_cli_uses_only_scoped_wrapper(monkeypatch, capsys):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "tools"))
     source = importlib.import_module("agent_dispatch.producers.ci_failure_source")

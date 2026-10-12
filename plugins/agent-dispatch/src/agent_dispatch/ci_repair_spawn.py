@@ -52,7 +52,7 @@ def authority_snapshot(conn, task) -> tuple:
 def claim_admissions(queue, worker_id, caps, repo, task_id) -> dict:
     """Probe only eligible CI tasks outside any coordinator write transaction."""
     admitted = {}
-    if "ci-repair-admitted" not in caps:
+    if "ci-repair-admitted" not in caps or not task_id:
         return admitted
     with queue._connect() as conn:
         rows = conn.execute("SELECT id FROM tasks WHERE source = 'ci-repair' AND status = 'queued'").fetchall()
