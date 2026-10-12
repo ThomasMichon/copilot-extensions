@@ -9,7 +9,7 @@ import sys
 import pytest
 
 from test_ensure_service_hooks import PLUGIN
-from test_session_stamp_security import _hook, _run
+from test_session_stamp_security import _hook, _run, private_stamp_umask  # noqa: F401
 
 
 def _active_hook(

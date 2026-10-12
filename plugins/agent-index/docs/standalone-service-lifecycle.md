@@ -46,7 +46,10 @@ supervision.
   directory handles, validates file identity/type and creator ownership,
   and keeps the installer's existing `.publication.lock` inode open without
   truncation throughout metadata publication. POSIX uses nonblocking `fcntl`
-  locking even without the `flock` executable. Windows rejects reparse points
+  locking even without the `flock` executable. Publication roots and metadata
+  must be owned by the effective user and reject group/other write permission;
+  pinned-root permissions are rechecked before each file operation. Ordinary
+  read-only group/other access remains permitted. Windows rejects reparse points
   using opened handles, denies delete sharing to pin ancestors, checks owner
   SIDs and retains the installer's publication mutex. Windows accepts the token
   user or an enabled `SE_GROUP_OWNER` group (never mere membership, a disabled

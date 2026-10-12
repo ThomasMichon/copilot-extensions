@@ -1,6 +1,7 @@
 """Actual hook refusal precedes any write through an unowned filesystem link."""
 from __future__ import annotations
 
+from collections.abc import Iterator
 import errno
 import importlib.util
 import json
@@ -13,6 +14,15 @@ import pytest
 
 from test_ensure_service_hooks import PLUGIN, _shell_command
 from test_runtime_gate import _fixture
+
+
+@pytest.fixture(autouse=True)
+def private_stamp_umask() -> Iterator[None]:
+    previous = os.umask(0o022)
+    try:
+        yield
+    finally:
+        os.umask(previous)
 
 
 def _hook(tmp_path: Path, shell: str = "bash") -> tuple[list[str], dict[str, str], Path]:
@@ -44,6 +54,67 @@ def _hook(tmp_path: Path, shell: str = "bash") -> tuple[list[str], dict[str, str
 def _run(command: list[str], environment: dict[str, str], repo: Path):
     return subprocess.run(command, cwd=repo, env=environment, capture_output=True,
                           text=True, timeout=20)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mutation permissions")
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("mode", [0o770, 0o707, 0o777])
+def test_actual_hook_refuses_shared_writable_root_before_publication(
+    tmp_path: Path, shell: str, mode: int,
+) -> None:
+    command, environment, repo = _hook(tmp_path, shell)
+    root = Path(environment["AGENT_INDEX_HOME"])
+    root.mkdir()
+    root.chmod(mode)
+    before = root.stat()
+    result = _run(command, environment, repo)
+    assert result.returncode != 0
+    assert result.stdout == "{}"
+    assert "not privately owned" in result.stderr
+    assert list(root.iterdir()) == []
+    after = root.stat()
+    assert (after.st_ino, after.st_mtime_ns, after.st_mode) == (
+        before.st_ino, before.st_mtime_ns, before.st_mode,
+    )
+    assert not (Path(environment["HOME"]) / ".local").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mutation permissions")
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("name", [".publication.lock", "payload-dir", "stamped-version"])
+def test_actual_hook_refuses_shared_writable_metadata(
+    tmp_path: Path, shell: str, name: str,
+) -> None:
+    command, environment, repo = _hook(tmp_path, shell)
+    root = Path(environment["AGENT_INDEX_HOME"])
+    root.mkdir()
+    path = root / name
+    path.write_bytes(b"unmodified shared file")
+    path.chmod(0o666)
+    before = path.stat()
+    result = _run(command, environment, repo)
+    assert result.returncode != 0
+    assert result.stdout == "{}"
+    assert "not privately owned" in result.stderr
+    assert path.read_bytes() == b"unmodified shared file"
+    after = path.stat()
+    assert (after.st_ino, after.st_mtime_ns, after.st_mode) == (
+        before.st_ino, before.st_mtime_ns, before.st_mode,
+    )
+    assert set(p.name for p in root.iterdir()) <= {name, ".publication.lock"}
+    assert not (Path(environment["HOME"]) / ".local").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mutation permissions")
+def test_publication_rechecks_root_mutation_permissions(tmp_path: Path) -> None:
+    module = _stamp_module()
+    root = tmp_path / "root"
+    root.mkdir()
+    with module.Directory(root) as directory:
+        root.chmod(0o777)
+        with pytest.raises(ValueError, match="not privately owned"):
+            directory.publish("payload-dir", b"not published")
+    assert list(root.iterdir()) == []
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX link and inode adversaries")

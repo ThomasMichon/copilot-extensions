@@ -187,6 +187,12 @@ def _windows_owned(fd: int) -> bool:
         kernel.CloseHandle(token)
 
 
+def _posix_private(info: os.stat_result) -> bool:
+    return info.st_uid == os.geteuid() and not info.st_mode & (
+        stat.S_IWGRP | stat.S_IWOTH
+    )
+
+
 class Directory:
     """Hold every ancestor open; POSIX mutations are relative to directory fds."""
 
@@ -206,8 +212,8 @@ class Directory:
                 current = current / component
                 self.fd = self._directory(current, self.fd)
             if not (_windows_owned(self.fd) if os.name == "nt" else
-                    os.fstat(self.fd).st_uid == os.geteuid()):
-                raise ValueError(f"stamp directory is not owned by this user: {self.path}")
+                    _posix_private(os.fstat(self.fd))):
+                raise ValueError(f"stamp directory is not privately owned by this user: {self.path}")
             return self
         except BaseException:
             self.stack.close()
@@ -244,6 +250,8 @@ class Directory:
         return fd
 
     def verify(self) -> None:
+        if os.name != "nt" and not _posix_private(os.fstat(self.fd)):
+            raise ValueError(f"stamp directory is not privately owned: {self.path}")
         for parent, path, fd in self.bindings:
             info = os.fstat(fd)
             entry = (os.stat(path, follow_symlinks=False)
@@ -277,8 +285,8 @@ class Directory:
             info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise ValueError(f"stamp file must be a single-link regular file: {name}")
-            if not (_windows_owned(fd) if os.name == "nt" else info.st_uid == os.geteuid()):
-                raise ValueError(f"stamp file is not owned by this user: {name}")
+            if not (_windows_owned(fd) if os.name == "nt" else _posix_private(info)):
+                raise ValueError(f"stamp file is not privately owned by this user: {name}")
             entry = os.stat(self.path / name, follow_symlinks=False) if os.name == "nt" else (
                 os.stat(name, dir_fd=self.fd, follow_symlinks=False)
             )

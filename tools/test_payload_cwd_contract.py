@@ -112,12 +112,12 @@ def _wait_for_smoke_receipt(
     timeout: float = 15,
 ) -> dict[str, object]:
     deadline = time.monotonic() + timeout
-    last_error: FileNotFoundError | json.JSONDecodeError | None = None
+    last_error: FileNotFoundError | json.JSONDecodeError | UnicodeDecodeError | None = None
     while True:
         child_exit = poll()
         try:
             data = json.loads(receipt.read_text(encoding="utf-8-sig"))
-        except (FileNotFoundError, json.JSONDecodeError) as error:
+        except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError) as error:
             last_error = error
         else:
             if not isinstance(data, dict):
@@ -159,6 +159,26 @@ def test_smoke_receipt_parses_after_observing_child_exit(tmp_path: Path) -> None
         return 0
 
     assert _wait_for_smoke_receipt(receipt, finish_child) == {"staged": True}
+
+
+def test_smoke_receipt_retries_partial_utf8(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receipt = tmp_path / "smoke.json"
+    receipt.write_bytes(b'{"working_dir":"\xc3')
+
+    def complete_receipt(_delay: float) -> None:
+        receipt.write_bytes(b'{"working_dir":"\xc3\xa9"}')
+
+    monkeypatch.setattr(time, "sleep", complete_receipt)
+    assert _wait_for_smoke_receipt(receipt, lambda: None) == {"working_dir": "\u00e9"}
+
+
+def test_smoke_receipt_rejects_partial_utf8_after_child_exit(tmp_path: Path) -> None:
+    receipt = tmp_path / "smoke.json"
+    receipt.write_bytes(b'{"working_dir":"\xc3')
+    with pytest.raises(pytest.fail.Exception, match="no complete staged receipt"):
+        _wait_for_smoke_receipt(receipt, lambda: 0)
 
 
 def test_smoke_receipt_timeout_is_explicit(tmp_path: Path) -> None:
