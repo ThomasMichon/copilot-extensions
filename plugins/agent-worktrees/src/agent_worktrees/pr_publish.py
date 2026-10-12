@@ -35,7 +35,7 @@ PROBE_TIMEOUT = 30.0
 #: while holding the publication lock: ``git_ops.push`` retries once without its auth
 #: override after a failure, each attempt bounded by the push timeout; plus buffer
 #: for scheduling/cleanup.
-PUBLISH_LOCK_ACQUIRE_TIMEOUT_S = 2 * push_timeout.DEFAULT_PUSH_TIMEOUT + 30.0
+PUBLISH_LOCK_ACQUIRE_TIMEOUT_S = publication_deadline.lock_wait(push_timeout.DEFAULT_PUSH_TIMEOUT)
 PUBLISH_LOCK_RETRY_INTERVAL_S = 0.1
 #: A scheme's own port: naming it explicitly is still the same destination.
 _DEFAULT_PORTS = {"http": 80, "https": 443, "ssh": 22, "git": 9418}

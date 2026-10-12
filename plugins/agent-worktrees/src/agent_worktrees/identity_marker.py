@@ -17,21 +17,18 @@ that actually wires it into a published marker (see
 ``true`` mode already discloses the underlying worktree identity in plaintext, and
 ``false`` (anonymous opt-out) never publishes any marker, encrypted or not.
 
-Key custody (operator-confirmed design, effort README): a single raw
-base64-encoded 32-byte key file, deliberately **not** machine-bound (no
-DPAPI/KEK wrapping, unlike :mod:`agent_vault.kek`) so the SAME key decrypts
-markers from every one of the operator's machines. The default location is
-OneDrive-rooted specifically so the file travels with the operator rather
-than staying pinned to one machine -- the whole point of this marker versus
-the existing SSH-scan-based codename resolution, which must ask every known
-machine in turn. This is intentionally a lighter-weight mechanism than
-agent-vault (no KeePass database, no daemon, no MFA) -- a low-stakes
-reverse-lookup convenience, not a secrets vault.
+Key custody uses one base64-encoded 32-byte owner key shared across machines.
+A configured agent-vault payload retrieves that common synced entry through
+its protected local cache only: no implicit unlock or key creation. DPAPI/KEK
+protection wraps only the local cached copy, not the portable identity key.
+An explicit file override remains compatible with that same shared key;
+without a configured vault source, legacy OneDrive file resolution remains.
+Configured vault failures never silently select another source.
 
-The key is never auto-generated on a publish path: :func:`load_identity_key`
-only reads an already-provisioned file and returns ``None`` (the layer is
-simply omitted) when none resolves. :func:`generate_identity_key` is the
-explicit, operator-invoked provisioning step.
+The key is never auto-generated on publication: :func:`load_identity_key`
+reads an already-provisioned file or protected vault cache and returns ``None``
+when unavailable. :func:`generate_identity_key` is explicit file provisioning
+for legacy adopters and refuses generation when a vault source is configured.
 
 Kept as its own module (mirroring :mod:`agent_worktrees.root_chain`'s own
 rationale) rather than growing ``pr_ops.py``/``tracking.py``/``config.py``,

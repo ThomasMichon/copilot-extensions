@@ -10,6 +10,7 @@ import os
 import signal
 import subprocess
 import threading
+import time
 
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 
@@ -18,6 +19,18 @@ ARGV_ENV = "AGENT_WORKTREES_IDENTITY_VAULT_ARGV"
 ENTRY_ENV = "AGENT_WORKTREES_IDENTITY_VAULT_ENTRY"
 DEFAULT_ENTRY = "Identity/PR-attribution"
 _READ_TIMEOUT = 15
+
+
+def _wait_without_reaping(pid: int) -> int:
+    deadline = time.monotonic() + 2
+    while True:
+        # Retain the leader's PID/PGID until group cleanup; wait() would release it.
+        status = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        if status is not None:
+            return status.si_status
+        if time.monotonic() >= deadline:
+            raise subprocess.TimeoutExpired("vault key reader", 2)
+        time.sleep(0.01)
 
 
 def _read_key_output(argv: list[str]) -> bytes:
@@ -38,25 +51,33 @@ def _read_key_output(argv: list[str]) -> bytes:
 
     reader = threading.Thread(target=read, daemon=True)
     reader.start()
+    owns_group_identity = True
     try:
         if not done.wait(_READ_TIMEOUT) or not output or len(output[0]) > 128:
             raise ValueError("vault key output invalid or timed out")
-        if process.wait(timeout=2):
+        if os.name == "nt":
+            status = process.wait(timeout=2)
+        else:
+            try:
+                status = _wait_without_reaping(process.pid)
+            except ChildProcessError:
+                owns_group_identity = False
+                raise ValueError("vault key reader identity no longer owned") from None
+        if status:
             raise ValueError("vault cache read failed")
         return output[0]
     finally:
         if job is not None:
             job.close()
-        elif os.name != "nt":
+        elif os.name != "nt" and owns_group_identity:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
             except OSError:
                 log.warning("Vault key reader process-group cleanup failed.")
-                if process.poll() is None:
-                    process.kill()
-        elif process.poll() is None:
+                process.kill()
+        elif os.name == "nt" and process.poll() is None:
             process.kill()
         try:
             process.wait(timeout=5)
