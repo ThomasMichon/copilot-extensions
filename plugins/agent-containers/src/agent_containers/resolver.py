@@ -51,7 +51,7 @@ from .lifecycle import (
     restricted_policy_errors,
     start_container,
 )
-from .private_state import private_file_lock
+from .private_state import fsync_directory, private_file_lock
 from .ssh_transport import prepare_ssh_config
 
 if TYPE_CHECKING:
@@ -324,6 +324,7 @@ def _import_copilot_cli_token_locked(account: str, token: str, path: Path) -> No
             os.fsync(stream.fileno())
         tmp_path.replace(path)
         created = False  # replaced onto `path` -- nothing left at tmp_path to clean up
+        fsync_directory(path.parent)
     finally:
         if fd >= 0:
             os.close(fd)

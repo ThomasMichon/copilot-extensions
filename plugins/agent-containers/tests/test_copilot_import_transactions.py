@@ -16,6 +16,22 @@ from agent_containers import resolver
 from agent_containers.private_state import private_file_lock
 
 
+def test_import_fsyncs_directory_after_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = tmp_path / "config.json"
+    observed: list[Path] = []
+
+    def observe_sync(directory: Path) -> None:
+        assert resolver.host_copilot_cli_token("fixture-user", config) == "fixture-secret"
+        assert not list(tmp_path.glob(".*.tmp"))
+        observed.append(directory)
+
+    monkeypatch.setattr(resolver, "fsync_directory", observe_sync)
+    resolver.import_copilot_cli_token("fixture-user", "fixture-secret", config)
+    assert observed == [tmp_path]
+
+
 @pytest.mark.parametrize("failure", ["fsync", "replace"])
 def test_import_cleans_its_temp_after_publication_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,

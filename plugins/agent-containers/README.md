@@ -275,7 +275,8 @@ launch of this (or any other) fleet configured with that same
 login. This command is manual/on-demand only; it is never triggered
 automatically by any launch path.
 
-Imports use owner-only temporary files and atomic replacement. Concurrent
+Imports use owner-only temporary files, file fsync, atomic replacement, and
+best-effort containing-directory fsync where supported. Concurrent
 `copilot-login` imports to the same config serialize their read/merge/write
 transactions through `.config.json.copilot-login.lock` beside the config.
 The OS releases the lock when its holder exits; keep the lock file in place.
