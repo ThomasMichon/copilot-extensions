@@ -75,8 +75,8 @@ No report, steering answer, or confirmation grants apply-mode permission.
 
 def validate_params(values: dict[str, str]) -> None:
     for key in ("scope",):
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", values[key]):
-            raise ValueError(f"{key} must be an exact registered project name")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", values[key]):
+            raise ValueError(f"{key} must be an exact registered project name (1-64 characters)")
     raw_candidates = values["candidates"]
     candidates = (
         json.loads(raw_candidates) if raw_candidates.lstrip().startswith("[")

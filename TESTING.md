@@ -114,6 +114,10 @@ serialized stamp/poll persistence, a tracked edit invalidating the stamp,
 the production cached-display/removal split, and a retained at-rest claim.
 The remaining checkout/obligation matrix runs in the existing full
 promotion/scheduled/manual suite, not as an unconditional new PR matrix.
+The report-only audit recipe's pure parameter/receipt/path checks and
+service-free CLI render smoke also run in the changed-dispatch guard lane.
+Native symlink escape coverage runs where the test environment permits
+creating symlinks; a platform refusal is reported as a skip, not a pass.
 
 There is no host-wide test singleton. Each target takes a lease keyed by its
 **concrete environment directory's filesystem identity** (`st_dev`, `st_ino`),

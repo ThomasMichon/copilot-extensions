@@ -221,7 +221,13 @@ def _cmd_recipes_check_report(args: argparse.Namespace) -> int:
 
     try:
         rendered = render_recipe("worktree-audit", _parse_recipe_params(args.param))
-        with Path(args.report).open("rb") as stream:
+        root = Path(rendered.params["report_dir"]).resolve(strict=True)
+        if not root.is_dir():
+            raise ValueError("approved report_dir must be an existing directory")
+        report_path = Path(args.report).resolve(strict=True)
+        if report_path == root or not report_path.is_relative_to(root):
+            raise ValueError("report must be inside the approved report_dir after resolving symlinks")
+        with report_path.open("rb") as stream:
             data = stream.read(65537)
         if len(data) > 65536:
             raise ValueError("report exceeds the 64 KiB result limit")
@@ -229,7 +235,9 @@ def _cmd_recipes_check_report(args: argparse.Namespace) -> int:
     except (RecipeError, ValueError, OSError) as exc:
         print(f"agent-dispatch: {exc}", file=sys.stderr)
         return 2
-    return _emit({"valid": True, "semantic_verification": False, "report": args.report})
+    return _emit({
+        "valid": True, "semantic_verification": False, "report": str(report_path),
+    })
 
 
 def _cmd_recipes_drive(args: argparse.Namespace) -> int:

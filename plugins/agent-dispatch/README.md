@@ -1586,6 +1586,9 @@ finalization, removal or recurring producer is authorized.
 `recipes check-report --report <path>` with the original four parameters
 checks the `worktree-conclusion-audit/v1` report's exact roster, empty
 `actions_taken`, bounds, evidence references and retained-work reasons.
+Before reading, it resolves the approved directory and report path, rejects
+reports outside that directory (including traversal/symlink escapes), and
+requires an existing approved directory.
 It does not prove evidence truth or that no mutations occurred. A human or
 separately authorized trusted evaluator corroborates those before confirming
 the submitted report. This is an advisory charter, not an OS-level read-only

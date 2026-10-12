@@ -13,6 +13,8 @@ from agent_dispatch import recipes, worker_charter
 from agent_dispatch.__main__ import build_parser
 from agent_dispatch.recipes import worktree_audit
 
+pytestmark = pytest.mark.guard
+
 
 def _params(tmp_path):
     return {
@@ -63,7 +65,7 @@ def test_render_has_bounded_report_only_contract_and_stable_roster(tmp_path):
 
 
 @pytest.mark.parametrize("key,value", [
-    ("scope", "../project"), ("candidates", "[not-json"),
+    ("scope", "../project"), ("scope", "a" * 65), ("candidates", "[not-json"),
     ("candidates", "[]"), ("candidates", '["wt-a","wt-a"]'),
     ("candidates", '["../wt"]'), ("candidates", '[true]'),
     ("candidates", json.dumps([f"wt-{i}" for i in range(6)])),
@@ -82,6 +84,11 @@ def test_comma_roster_matches_json_roster_on_windows_friendly_surface(tmp_path):
     array = recipes.render_recipe("worktree-audit", values)
     assert comma.params == array.params
     assert recipes.dedup_key_for(comma) == recipes.dedup_key_for(array)
+
+
+def test_scope_accepts_canonical_64_character_boundary(tmp_path):
+    rendered = recipes.render_recipe("worktree-audit", {**_params(tmp_path), "scope": "a" * 64})
+    assert len(rendered.params["scope"]) == 64
 
 
 def test_kick_requires_verification_and_sets_scope_exclusivity(tmp_path, monkeypatch):
@@ -156,6 +163,52 @@ def test_report_file_contract_preserves_bom_and_surfaces_read_failures(tmp_path,
     assert args.func(args) == (0 if mode == "bom" else 2)
     if mode != "bom":
         assert "agent-dispatch:" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("mode", ["outside", "traversal", "sibling-prefix", "symlink"])
+def test_checker_rejects_outside_report_before_reading(tmp_path, mode, monkeypatch, capsys):
+    root = tmp_path / "private"
+    root.mkdir()
+    values = recipes.render_recipe(
+        "worktree-audit", {**_params(tmp_path), "report_dir": str(root)},
+    ).params
+    outside_dir = tmp_path / ("private-other" if mode == "sibling-prefix" else "outside")
+    outside_dir.mkdir()
+    outside = outside_dir / "report.json"
+    outside.write_text(json.dumps(_report(values)), encoding="utf-8")
+    selected = outside
+    if mode == "traversal":
+        selected = root / ".." / "outside" / "report.json"
+    elif mode == "symlink":
+        selected = root / "report.json"
+        try:
+            selected.symlink_to(outside)
+        except OSError as exc:
+            pytest.skip(f"native symlink creation unavailable: {exc}")
+    original_open = Path.open
+
+    def refuse_outside_read(path, *args, **kwargs):
+        if path.resolve() == outside.resolve():
+            pytest.fail("outside report was opened before containment rejection")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", refuse_outside_read)
+    args = build_parser().parse_args(
+        [*_args("check-report", values), "--report", str(selected)],
+    )
+    assert args.func(args) == 2
+    assert "inside the approved report_dir" in capsys.readouterr().err
+
+
+def test_checker_requires_existing_directory_not_a_file(tmp_path, capsys):
+    not_directory = tmp_path / "file"
+    not_directory.write_text("not a directory", encoding="utf-8")
+    values = {**_params(tmp_path), "report_dir": str(not_directory)}
+    args = build_parser().parse_args(
+        [*_args("check-report", values), "--report", str(tmp_path / "report.json")],
+    )
+    assert args.func(args) == 2
+    assert "existing directory" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("fault", [
