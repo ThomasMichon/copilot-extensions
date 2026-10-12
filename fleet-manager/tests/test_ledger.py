@@ -55,28 +55,28 @@ def test_inspection_does_not_reserve_writer_slot_or_read_uncommitted_changes(tmp
         writer.execute("BEGIN IMMEDIATE")
         writer.execute("UPDATE outbox SET state='uncertain'")
         assert store.inspect(request)["state"] == "pending"
-
-
-def test_post_initialization_operations_do_not_recreate_removed_database(tmp_path):
-        store, request = ledger(tmp_path / "journal.db"), intent()
-        store.admit(request)
-        store.path.unlink()
-        for action in (
-            lambda: store.inspect(request), lambda: store.admit(request),
-            lambda: store.record_receipt(request, receipt(request, "accepted", 1)),
-        ):
-            with pytest.raises(sqlite3.OperationalError):
-                action()
-            assert not store.path.exists()
-
-
-def test_verified_uri_handles_reserved_filename_characters(tmp_path):
-        store, request = ledger(tmp_path / "journal # percent %.db"), intent()
-        store.admit(request)
-        assert store.inspect(request)["state"] == "pending"
     finally:
         writer.rollback()
         writer.close()
+    assert store.inspect(request)["state"] == "pending"
+
+
+def test_post_initialization_operations_do_not_recreate_removed_database(tmp_path):
+    store, request = ledger(tmp_path / "journal.db"), intent()
+    store.admit(request)
+    store.path.unlink()
+    for action in (
+        lambda: store.inspect(request), lambda: store.admit(request),
+        lambda: store.record_receipt(request, receipt(request, "accepted", 1)),
+    ):
+        with pytest.raises(sqlite3.OperationalError):
+            action()
+        assert not store.path.exists()
+
+
+def test_verified_uri_handles_reserved_filename_characters(tmp_path):
+    store, request = ledger(tmp_path / "journal # percent %.db"), intent()
+    store.admit(request)
     assert store.inspect(request)["state"] == "pending"
 
 
