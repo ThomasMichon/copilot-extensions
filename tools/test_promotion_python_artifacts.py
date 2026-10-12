@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import stat
 import subprocess
 import sys
 import zipfile
@@ -31,6 +32,7 @@ def _manifest(directory: Path, *, role: str = "plugin") -> dict:
     wheel = directory / "demo-1.0-py3-none-any.whl"
     wheel.write_bytes(b"first-party wheel")
     return {
+        "schema": "copilot-extensions.python-artifact-manifest", "schema_version": 3,
         "plugin": "demo", "version": "1.0", "artifact_id": "sha256:" + "d" * 64,
         "wheels": [{
             "filename": wheel.name, "role": role, "sha256": f"sha256:{artifacts._digest(wheel)}",
@@ -69,6 +71,123 @@ def test_bundle_and_transfer_roundtrip(tmp_path):
         assert set(bundle.namelist()) == {"manifest.json", "demo-1.0-py3-none-any.whl"}
         assert json.loads(bundle.read("manifest.json"))["plugin"] == "demo"
         assert bundle.read("demo-1.0-py3-none-any.whl") == b"first-party wheel"
+
+
+@pytest.mark.parametrize("mutation", [
+    "plugin", "version", "artifact_id", "schema", "schema-version", "list-manifest",
+    "wheel-digest", "bare-digest", "third-party", "no-plugin", "two-plugins",
+    "duplicate-record", "list-record", "missing-wheels", "traversal", "backslash",
+    "missing-member", "extra-member", "duplicate-member", "symlink", "directory",
+    "oversized-manifest", "oversized-bundle", "invalid-json", "invalid-zip",
+])
+def test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_digest(
+    tmp_path, monkeypatch, mutation,
+):
+    directory = tmp_path / "export"
+    index = _index(directory)
+    entry = index["artifacts"][0]
+    path = directory / entry["filename"]
+    with zipfile.ZipFile(path) as bundle:
+        manifest = json.loads(bundle.read("manifest.json"))
+        wheel_name = manifest["wheels"][0]["filename"]
+        wheel_bytes = bundle.read(wheel_name)
+    members = [(wheel_name, wheel_bytes)]
+    if mutation in ("plugin", "version", "artifact_id", "schema"):
+        manifest[mutation] = "wrong"
+    elif mutation == "schema-version":
+        manifest["schema_version"] = True
+    elif mutation == "list-manifest":
+        manifest = []
+    elif mutation == "wheel-digest":
+        members = [(wheel_name, b"altered")]
+    elif mutation == "bare-digest":
+        manifest["wheels"][0]["sha256"] = "a" * 64
+    elif mutation == "third-party":
+        manifest["wheels"][0]["role"] = "third-party"
+    elif mutation == "no-plugin":
+        manifest["wheels"][0]["role"] = "vendored-lib"
+    elif mutation == "two-plugins":
+        extra = dict(manifest["wheels"][0], filename="other.whl")
+        manifest["wheels"].append(extra)
+        members.append(("other.whl", wheel_bytes))
+    elif mutation == "duplicate-record":
+        manifest["wheels"].append(dict(manifest["wheels"][0]))
+    elif mutation == "list-record":
+        manifest["wheels"] = [[]]
+    elif mutation == "missing-wheels":
+        del manifest["wheels"]
+    elif mutation in ("traversal", "backslash"):
+        name = "../escape.whl" if mutation == "traversal" else "..\\escape.whl"
+        manifest["wheels"][0]["filename"] = name
+        members = [(name, wheel_bytes)]
+    elif mutation == "missing-member":
+        members = []
+    elif mutation == "extra-member":
+        members.append(("third-party.whl", b"undeclared"))
+    elif mutation == "duplicate-member":
+        members.append(members[0])
+    elif mutation == "symlink":
+        link = zipfile.ZipInfo(wheel_name)
+        link.create_system = 3
+        link.external_attr = (stat.S_IFLNK | 0o777) << 16
+        members = [(link, wheel_bytes)]
+    elif mutation == "directory":
+        members.append(("directory/", b""))
+    elif mutation == "oversized-manifest":
+        monkeypatch.setattr(artifacts, "_MANIFEST_LIMIT", 1)
+    elif mutation == "oversized-bundle":
+        monkeypatch.setattr(artifacts, "_BUNDLE_LIMIT", 1)
+    with zipfile.ZipFile(path, "w") as bundle:
+        bundle.writestr(
+            "manifest.json", b"not json" if mutation == "invalid-json" else json.dumps(manifest),
+        )
+        for name, payload in members:
+            if mutation == "duplicate-member" and name in bundle.namelist():
+                with pytest.warns(UserWarning, match="Duplicate name"):
+                    bundle.writestr(name, payload)
+                continue
+            bundle.writestr(name, payload)
+    if mutation == "invalid-zip":
+        path.write_bytes(b"not a ZIP")
+    entry["sha256"] = artifacts._digest(path)
+    _write_index(directory, index)
+    with pytest.raises(artifacts.PromotionArtifactError):
+        _validate(directory)
+
+
+def test_trusted_validate_cli_does_not_import_build_or_candidate_code(tmp_path):
+    directory = tmp_path / "export"
+    _index(directory)
+    tools = tmp_path / "trusted-tools"
+    tools.mkdir()
+    shutil.copy(Path(artifacts.__file__), tools / "promotion_python_artifacts.py")
+    (tools / "build_toolchain_lock.py").write_text("raise RuntimeError('must not execute')")
+    result = artifacts._run([
+        sys.executable, str(tools / "promotion_python_artifacts.py"), "validate",
+        "--out-dir", str(directory), "--dev-head", DEV, "--main-before", MAIN,
+    ], cwd=tools)
+    assert result == ""
+
+
+def test_validator_accepts_declared_vendored_library_wheel(tmp_path):
+    directory = tmp_path / "export"
+    index = _index(directory)
+    path = directory / index["artifacts"][0]["filename"]
+    with zipfile.ZipFile(path) as bundle:
+        manifest = json.loads(bundle.read("manifest.json"))
+        name = manifest["wheels"][0]["filename"]
+        payload = bundle.read(name)
+    manifest["wheels"].append({
+        "filename": "library-1.0-py3-none-any.whl", "role": "vendored-lib",
+        "sha256": "sha256:" + hashlib.sha256(b"library").hexdigest(),
+    })
+    with zipfile.ZipFile(path, "w") as bundle:
+        bundle.writestr("manifest.json", json.dumps(manifest))
+        bundle.writestr(name, payload)
+        bundle.writestr("library-1.0-py3-none-any.whl", b"library")
+    index["artifacts"][0]["sha256"] = artifacts._digest(path)
+    _write_index(directory, index)
+    assert _validate(directory) == index
 
 
 @pytest.mark.parametrize("payload", [b"", b"chunked digest" * 200000], ids=["empty", "multi-chunk"])
@@ -159,7 +278,8 @@ def build_plugin_artifacts(plugin, *, out_dir, toolchain):
     wheel = out_dir / 'demo-1.0-py3-none-any.whl'
     wheel.write_bytes(b'wheel')
     pathlib.Path('backend-residue.txt').write_text('must not enter promotion')
-    return {'plugin': plugin, 'version': version, 'artifact_id': 'sha256:' + 'd' * 64,
+    return {'schema': 'copilot-extensions.python-artifact-manifest', 'schema_version': 3,
+            'plugin': plugin, 'version': version, 'artifact_id': 'sha256:' + 'd' * 64,
             'wheels': [{'role': 'plugin', 'filename': wheel.name, 'sha256': 'sha256:' + hashlib.sha256(b'wheel').hexdigest()}]}
 """, encoding="utf-8",
     )
@@ -391,17 +511,52 @@ def test_actual_merge_composition_mismatch_blocks_all_release_writes(tmp_path, m
     assert not calls
 
 
-def test_workflow_separates_signing_from_release_authority_and_gates_publication():
+def test_invalid_bundle_blocks_publication_even_with_valid_index_digest(tmp_path, monkeypatch):
+    directory, entry = _publish_fixture(tmp_path, monkeypatch)
+    path = directory / entry["filename"]
+    path.write_bytes(b"not a ZIP")
+    index = json.loads((directory / artifacts.INDEX_NAME).read_text())
+    index["artifacts"][0]["sha256"] = artifacts._digest(path)
+    _write_index(directory, index)
+    calls = []
+    monkeypatch.setattr(publisher, "_gh", lambda *a, **kw: calls.append(a))
+    with pytest.raises(artifacts.PromotionArtifactError, match="cannot read artifact bundle"):
+        publisher.publish_artifacts(
+            directory, repository="example/plugins", merged_commit=TREE, dev_head=DEV,
+            repo=tmp_path,
+        )
+    assert not calls
+
+
+def test_workflow_separates_candidate_execution_signing_and_release_authority():
     root = Path(__file__).resolve().parent.parent
     workflow = yaml.safe_load((root / ".github" / "workflows" / "validate-and-promote.yml").read_text())
     jobs = workflow["jobs"]
-    builder = jobs["python-artifacts"]
-    assert builder["permissions"] == {
+    builder, signer = jobs["build-python-artifacts"], jobs["python-artifacts"]
+    assert builder["permissions"] == {"contents": "read"}
+    assert signer["permissions"] == {
         "contents": "read", "id-token": "write", "attestations": "write",
     }
     assert "environment" not in builder
     assert "APERTURE_RELEASE_TOKEN" not in json.dumps(builder)
     assert "default_branch" in builder["if"]
+    assert "default_branch" in signer["if"]
+    assert "environment" not in signer
+    assert "APERTURE_RELEASE_TOKEN" not in json.dumps(signer)
+    assert "build-python-artifacts" in signer["needs"]
+    steps = signer["steps"]
+    checkout = next(step for step in steps if step.get("uses") == "actions/checkout@v4")
+    assert checkout["with"]["ref"] == "${{ github.sha }}"
+    assert checkout["with"]["persist-credentials"] is False
+    validator = next(step for step in steps if "run" in step)
+    assert "promotion_python_artifacts.py validate" in validator["run"]
+    assert "promote_release.py" not in json.dumps(signer)
+    assert "build_python_artifacts.py" not in json.dumps(signer)
+    attestation = next(step for step in steps if "attest-build-provenance" in step.get("uses", ""))
+    assert steps.index(validator) < steps.index(attestation)
+    assert not any("attest-build-provenance" in step.get("uses", "") for step in builder["steps"])
+    assert "build-python-artifacts" in jobs["report-failure"]["needs"]
+    assert "needs.build-python-artifacts.result" in jobs["report-failure"]["if"]
     gate = next(step for step in jobs["gate"]["steps"] if step.get("id") == "check")
     assert gate["env"]["DEFAULT_REF"] == "refs/heads/${{ github.event.repository.default_branch }}"
     assert '[ "$GITHUB_REF" = "$DEFAULT_REF" ]' in gate["run"]

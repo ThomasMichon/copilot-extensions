@@ -51,20 +51,29 @@ mode when exercising the builder locally.
 
 ### Promotion artifact transfer, signing and publication
 
-After the full validation gate, `python-artifacts` runs from the default
+After the full validation gate, `build-python-artifacts` runs from the default
 branch's pinned workflow/tools without `main-promotion` or the release PAT.
 It calls `promote_release.py --build-python-artifacts-dir <dir>` without
 `--push`, using the explicitly opted-in seasoned public toolchain. Promotion
 first seeds shipped versions, consumes new changefiles and materializes
 vendored sources. Wheel builds run in a second disposable checkout of the
 resulting candidate commit, so build residue cannot change the promoted tree.
-Every Python plugin shares one toolchain venv; every bundle contains only its
+This candidate-executing job has only `contents: read`, no OIDC or attestation
+permissions, and no persisted checkout credentials. Every Python plugin
+shares one toolchain venv; every bundle contains only its
 own wheel, required first-party library wheels and schema-3 manifest.
 
 The transfer index binds the exact validated dev SHA, pinned main parent,
 composed content-tree SHA, complete project/version set, and bundle digests.
 The content tree excludes only existing release-state and coverage-pointer
-bookkeeping. `actions/attest-build-provenance` signs both this index and each
+bookkeeping. A fresh `python-artifacts` job checks out only the pinned trusted
+default-branch tools and downloads the unsigned bundles; it never executes
+candidate tools or build backends. Its non-executing validator checks the
+expected dev/main identities, manifest schema and plugin/version/artifact ID
+binding, exact declared first-party member set, and every wheel's SHA-256.
+It rejects duplicate, extra, missing, non-regular or unsafe members, with a
+1 MiB manifest limit and 512 MiB total uncompressed bundle limit.
+`actions/attest-build-provenance` then signs both this index and each
 bundle using GitHub OIDC, with `contents: read`, `id-token: write` and
 `attestations: write`. Neither signing authority nor release-write authority
 substitutes for the other. Manual promotion must run from the default branch;
@@ -79,11 +88,13 @@ the exact promotion workflow path and workflow digest, the source digest/ref,
 and a GitHub-hosted runner. Verification uses the read-only workflow token,
 not the release PAT. `promote_release.py --python-artifacts-dir <dir>`
 recomputes composition and refuses missing/corrupt/mis-targeted artifacts
-before pushing a candidate. A no-content-change or paused run builds and
+before pushing a candidate, including repeating the archive-content checks.
+A no-content-change or paused run builds and
 publishes nothing.
 
 Only after the exact candidate PR really merges does publication recheck its
-actual parent/content tree and project set. Assets live under the deterministic
+actual parent/content tree and project set and revalidates archive contents.
+Assets live under the deterministic
 `<plugin>-v<version>` GitHub Release tag. Each ZIP filename includes the
 manifest's content-addressed `artifact_id`, permitting independently attested
 rebuilds without replacing a prior asset. No upload uses `--clobber`; an

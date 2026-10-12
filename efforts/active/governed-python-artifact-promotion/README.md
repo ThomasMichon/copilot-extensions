@@ -465,6 +465,16 @@ win grows with build complexity.
   creates its tag. The real subprocess regression checks this boundary.
   Dependency closure/admission, shared-installer consumption, the full
   consumer/platform matrix and durable retention remain open.
+- The final integration review found two trust-boundary defects before merge.
+  Candidate execution now runs with read-only contents permission in its own
+  build job; a fresh default-branch-only signer never imports candidate code
+  or runs build backends. Its trusted, non-extracting archive validator checks
+  schema-3 identity, the exact declared first-party wheel member set, regular
+  member types, bounded uncompressed sizes and every wheel digest before
+  signing. The same validator runs before promotion and publication, so an
+  attacker-controlled outer ZIP digest cannot conceal malformed contents.
+  Focused regressions cover archive mutations with recomputed outer digests
+  and a real validator subprocess that must not import build tooling.
 
 ### 2026-10-12 - Phase 2 slice 4: explicit public build-toolchain integration
 

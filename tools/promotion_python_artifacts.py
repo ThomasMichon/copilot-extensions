@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,8 @@ _SHA = re.compile(r"[0-9a-f]{40}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _PLUGIN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _VERSION = re.compile(r"[0-9][A-Za-z0-9.+-]*")
+_MANIFEST_LIMIT = 1 << 20
+_BUNDLE_LIMIT = 512 << 20
 
 
 class PromotionArtifactError(RuntimeError):
@@ -174,6 +177,70 @@ def export_artifacts(
             shutil.rmtree(staging)
 
 
+def validate_bundle(path: Path, entry: dict) -> None:
+    """Inspect untrusted ZIP bytes without extracting or executing candidate code."""
+    try:
+        with zipfile.ZipFile(path) as bundle:
+            members = bundle.infolist()
+            names = [member.filename for member in members]
+            if (
+                len(names) != len(set(names)) or "manifest.json" not in names
+                or sum(member.file_size for member in members) > _BUNDLE_LIMIT
+                or any(
+                    member.is_dir() or member.flag_bits & 1
+                    or stat.S_IFMT(member.external_attr >> 16) not in (0, stat.S_IFREG)
+                    for member in members
+                )
+            ):
+                raise PromotionArtifactError(f"{path.name}: unsafe bundle members")
+            if bundle.getinfo("manifest.json").file_size > _MANIFEST_LIMIT:
+                raise PromotionArtifactError(f"{path.name}: oversized artifact manifest")
+            manifest = json.loads(bundle.read("manifest.json"))
+            if (
+                not isinstance(manifest, dict)
+                or manifest.get("schema") != "copilot-extensions.python-artifact-manifest"
+                or type(manifest.get("schema_version")) is not int
+                or manifest["schema_version"] != 3
+                or any(manifest.get(key) != entry[key] for key in ("plugin", "version", "artifact_id"))
+            ):
+                raise PromotionArtifactError(f"{path.name}: artifact manifest identity mismatch")
+            wheels = manifest.get("wheels")
+            if not isinstance(wheels, list) or not wheels:
+                raise PromotionArtifactError(f"{path.name}: missing first-party wheel records")
+            declared = {"manifest.json"}
+            plugin_wheels = 0
+            for wheel in wheels:
+                if not isinstance(wheel, dict):
+                    raise PromotionArtifactError(f"{path.name}: invalid wheel record")
+                name, digest, role = wheel.get("filename"), wheel.get("sha256"), wheel.get("role")
+                if (
+                    role not in ("plugin", "vendored-lib")
+                    or not isinstance(name, str) or "/" in name or "\\" in name
+                    or not name.endswith(".whl") or name in declared
+                    or not isinstance(digest, str) or not digest.startswith("sha256:")
+                    or not _DIGEST.fullmatch(digest[7:])
+                ):
+                    raise PromotionArtifactError(f"{path.name}: invalid first-party wheel record")
+                declared.add(name)
+                plugin_wheels += role == "plugin"
+            if plugin_wheels != 1 or set(names) != declared:
+                raise PromotionArtifactError(f"{path.name}: first-party wheel member set mismatch")
+            for wheel in wheels:
+                digest = hashlib.sha256()
+                with bundle.open(wheel["filename"]) as stream:
+                    for chunk in iter(lambda: stream.read(1 << 20), b""):
+                        digest.update(chunk)
+                if f"sha256:{digest.hexdigest()}" != wheel["sha256"]:
+                    raise PromotionArtifactError(f"{path.name}: wheel digest mismatch")
+    except (
+        OSError, UnicodeDecodeError, json.JSONDecodeError, zipfile.BadZipFile,
+        RuntimeError, NotImplementedError,
+    ) as exc:
+        if isinstance(exc, PromotionArtifactError):
+            raise
+        raise PromotionArtifactError(f"{path.name}: cannot read artifact bundle: {exc}") from exc
+
+
 def validate_artifacts(
     directory: Path, *, content_tree: str, dev_head: str, main_before: str,
     projects: dict[str, str] | None = None,
@@ -193,7 +260,7 @@ def validate_artifacts(
             ("dev_head", dev_head), ("main_before", main_before),
             ("content_tree", content_tree),
         ):
-            if not _SHA.fullmatch(expected) or index.get(field) != expected:
+            if not isinstance(expected, str) or not _SHA.fullmatch(expected) or index.get(field) != expected:
                 raise PromotionArtifactError(f"promotion artifact {field} mismatch")
         entries = index.get("artifacts")
         if not isinstance(entries, list):
@@ -220,6 +287,7 @@ def validate_artifacts(
             path = directory / name
             if path.is_symlink() or not path.is_file() or _digest(path) != digest:
                 raise PromotionArtifactError(f"{name}: artifact digest mismatch")
+            validate_bundle(path, entry)
         if {path.name for path in directory.iterdir()} != names:
             raise PromotionArtifactError("unexpected files in promotion artifact directory")
         if projects is not None and {
@@ -233,14 +301,34 @@ def validate_artifacts(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("operation", nargs="?", choices=("build", "validate"), default="build")
     parser.add_argument("--out-dir", required=True, type=Path)
+    parser.add_argument("--dev-head")
+    parser.add_argument("--main-before")
     parser.add_argument(
         "--toolchain-source", choices=("governed", "seasoned-public"), default="governed",
     )
     parser.add_argument("--toolchain-min-age-days", type=int, default=None)
     args = parser.parse_args(argv)
+    if args.operation == "validate":
+        if not args.dev_head or not args.main_before:
+            parser.error("validate requires --dev-head and --main-before")
+        try:
+            index_path = args.out_dir / INDEX_NAME
+            if index_path.is_symlink():
+                raise PromotionArtifactError("artifact index must not be a symlink")
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            if not isinstance(index, dict):
+                raise PromotionArtifactError("invalid artifact index")
+            validate_artifacts(
+                args.out_dir, content_tree=index.get("content_tree"),
+                dev_head=args.dev_head, main_before=args.main_before,
+            )
+        except (PromotionArtifactError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            print(f"promotion-python-artifacts: FAILED: {exc}", file=sys.stderr)
+            return 1
+        return 0
     from build_toolchain_lock import ArtifactBuildError
-
     try:
         build_candidate_bundles(
             Path(__file__).resolve().parent.parent, args.out_dir,

@@ -395,8 +395,8 @@ jobs:
       - name: Large files (full sweep, unconditional)
         run: python tools/check-large-files.py --all
 
-  python-artifacts:
-    name: Build and attest first-party Python artifacts
+  build-python-artifacts:
+    name: Build first-party Python artifacts without signing authority
     needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep]
     if: >-
       needs.gate.outputs.is_dev == 'true' &&
@@ -405,8 +405,6 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      id-token: write
-      attestations: write
     outputs:
       exported: ${{ steps.build.outputs.exported }}
     steps:
@@ -436,13 +434,58 @@ jobs:
           else
             echo "exported=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Attest the exact transfer index and every first-party bundle
+      - uses: actions/upload-artifact@v4
         if: steps.build.outputs.exported == 'true'
+        with:
+          name: unsigned-promotion-python-artifacts
+          path: ${{ runner.temp }}/python-artifacts/*
+          if-no-files-found: error
+          retention-days: 2
+
+  python-artifacts:
+    name: Validate and attest first-party Python artifacts
+    needs: [gate, build-python-artifacts]
+    if: >-
+      needs.gate.outputs.is_dev == 'true' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      exported: ${{ needs.build-python-artifacts.outputs.exported }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        if: needs.build-python-artifacts.outputs.exported == 'true'
+        with:
+          name: unsigned-promotion-python-artifacts
+          path: ${{ runner.temp }}/python-artifacts
+      - name: Validate untrusted bundles using only trusted default-branch code
+        if: needs.build-python-artifacts.outputs.exported == 'true'
+        env:
+          DEV_SHA: ${{ needs.gate.outputs.sha }}
+          ARTIFACT_DIR: ${{ runner.temp }}/python-artifacts
+        run: |
+          git fetch origin main
+          python tools/promotion_python_artifacts.py validate --out-dir "$ARTIFACT_DIR" \
+            --dev-head "$DEV_SHA" --main-before "$(git rev-parse origin/main)"
+      - name: Attest the validated index and every first-party bundle
+        if: needs.build-python-artifacts.outputs.exported == 'true'
         uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
         with:
           subject-path: ${{ runner.temp }}/python-artifacts/*
       - uses: actions/upload-artifact@v4
-        if: steps.build.outputs.exported == 'true'
+        if: needs.build-python-artifacts.outputs.exported == 'true'
         with:
           name: promotion-python-artifacts
           path: ${{ runner.temp }}/python-artifacts/*
@@ -477,7 +520,7 @@ jobs:
     # exists to react automatically to real validation runs), so the fix is
     # to just never offer that path, rather than trying to harden a job
     # whose own YAML could be attacker-controlled.
-    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep, python-artifacts, publish-python-artifacts]
+    needs: [gate, full, worktree-manager, agent-index-service-linux, agent-index-service-windows, guards-full-sweep, build-python-artifacts, python-artifacts, publish-python-artifacts]
     if: >-
       always() &&
       github.event_name == 'repository_dispatch' &&
@@ -487,6 +530,7 @@ jobs:
        needs.agent-index-service-linux.result == 'failure' ||
        needs.agent-index-service-windows.result == 'failure' ||
        needs.guards-full-sweep.result == 'failure' ||
+       needs.build-python-artifacts.result == 'failure' ||
        needs.python-artifacts.result == 'failure' ||
        needs.publish-python-artifacts.result == 'failure')
     runs-on: ubuntu-latest
