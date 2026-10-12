@@ -161,10 +161,12 @@ def resolve_active_plugins(
     *,
     home: str | Path | None = None,
     include_projects: bool = True,
+    plugin_names: tuple[str, ...] | None = None,
 ) -> ActivationReport:
     """Resolve sources with tri-state authority; optionally restrict to global.
 
     Global-only callers do not inspect registered projects or their overrides.
+    Named callers resolve only those plugins, retaining marketplace ambiguity checks.
     """
     user_home = Path(home).expanduser() if home is not None else Path.home()
     copilot_home = user_home / ".copilot"
@@ -176,10 +178,13 @@ def resolve_active_plugins(
     source_findings: dict[str, list[Finding]] = defaultdict(list)
     source_indeterminate: set[str] = set()
     memo = MarketplaceMemo()
+    selected_names = frozenset(plugin_names) if plugin_names is not None else None
 
     global_settings = _user_settings(copilot_home)
     registry_findings.extend(global_settings.findings)
     for source in global_settings.settings.enabled_sources():
+        if selected_names is not None and split_source(source)[0] not in selected_names:
+            continue
         scope = "global"
         scopes[source].add(scope)
         candidate = _local_root(source, global_settings, base=copilot_home, _memo=memo)
@@ -202,6 +207,8 @@ def resolve_active_plugins(
             settings_authorities.append(project_settings.authority)
             registry_findings.extend(project_settings.findings)
             for source in project_settings.settings.enabled_sources():
+                if selected_names is not None and split_source(source)[0] not in selected_names:
+                    continue
                 scope = f"project:{project}"
                 scopes[source].add(scope)
                 candidate = _local_root(source, project_settings, base=root, _memo=memo)
