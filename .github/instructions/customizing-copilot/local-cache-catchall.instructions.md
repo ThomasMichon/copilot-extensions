@@ -1,17 +1,18 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"b0458cf83dc10c9796a41432eb0d5acee1716334d0f09953afdb213a097085fe","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/customizing-copilot/local-cache-catchall.instructions.md","plugin":"customizing-copilot@copilot-extensions","pluginVersion":"0.2.16-dev1","renderedBytes":3936,"schema":"copilot-extensions.instruction-projection","sourceId":"local-cache-catchall","template":"instructions/local-cache-catchall.instructions.md","templateBytes":2910,"templateSha256":"9fc412126ccfcb63aac8f90ce6d69871eccff49c7193c41c6ba3ee0bb35bb4e7","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"1988de482c2df00cc4b51a0f4b905ebf2b136d43b57e7872fd0875c84893a882","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/customizing-copilot/local-cache-catchall.instructions.md","plugin":"customizing-copilot@copilot-extensions","pluginVersion":"0.2.17-dev1","renderedBytes":4055,"schema":"copilot-extensions.instruction-projection","sourceId":"local-cache-catchall","template":"instructions/local-cache-catchall.instructions.md","templateBytes":2990,"templateSha256":"ca2267ca42b12a7e4c696d33c86edcc62077e2251af2d6fee013d17bb516cd1b","version":1} -->
 
 
-> If `local-cache-catchall.local.instructions.md` exists here, compare
+> If `.github/copilot/context-locals/customizing-copilot/local-cache-catchall.local.md` is available, compare
 > `pluginVersion` and prefer whichever is newer. On a tie,
 > compare `templateSha256`: matching means prefer local;
 > differing means prefer this checked-in file.
 
 Before dependent/consequential action, acquire authoritative applicable
 guidance. Resolution failure is a visible blocker, never authorization.
-Inventory `.github/instructions/**/*.local.instructions.md` after startup:
+Inventory `.github/copilot/context-locals/**/*.local.md` after startup.
+During migration also inventory `.github/instructions/**/*.local.instructions.md`:
 a hook may have written bodies after automatic instruction discovery.
 Missing local caches are normal; use each selector's reviewed fallback.
 
@@ -53,4 +54,4 @@ context reconstruction, and after source changes. Persist no loaded-state
 claims. These instructions, selectors and inventories do not attest that any
 other body has reached the model.
 
-<!-- copilot-guidance-body-end:v1 {"bindingSha256":"241dd2f8613ed3e638f2d92f5c4a1372dcba26be74b6cd6c45690355733e9cbf"} -->
+<!-- copilot-guidance-body-end:v1 {"bindingSha256":"c640595339b67a5d00bb2cfa824c1f51e6e9757163726bd639b4491cd37799f8"} -->

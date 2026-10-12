@@ -49,6 +49,12 @@ def fixture(root: Path, mode: str = "selector") -> tuple[Path, SimpleNamespace, 
     return repo, source, specs[0]
 
 
+def local_path(repo: Path, destination: str) -> Path:
+    path = repo / projections.local_sibling_destination(destination)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def test_selector_has_no_body_receipt_and_fallback_is_not_discovered(tmp_path: Path) -> None:
     repo, source, spec = fixture(tmp_path)
     result = projections.sync_repository(repo, [source])
@@ -89,10 +95,10 @@ def test_exact_version_hash_authority(
     }))
     (source.payload_root / "instructions/rules.instructions.md").write_bytes(local_spec.template_content)
     body = projections.render_projection(local_spec, include_prefer_local=False)
-    path = repo / projections.local_sibling_destination(spec.destination)
+    path = local_path(repo, spec.destination)
     path.write_bytes(body.content)
     selection = projections.resolve_instruction_source(repo, spec.destination, [source])
-    assert selection["selectedPath"].endswith(".local.instructions.md") == local_wins
+    assert selection["selectedPath"].endswith(".local.md") == local_wins
 
 
 @pytest.mark.parametrize("field,value", [
@@ -107,7 +113,7 @@ def test_wrong_local_identity_is_rejected(
     body = projections.render_projection(spec, include_prefer_local=False)
     marker = dict(body.marker) | {field: value}
     raw, _ = delivery.render_body(spec.template_content, marker)
-    (repo / projections.local_sibling_destination(spec.destination)).write_bytes(raw)
+    local_path(repo, spec.destination).write_bytes(raw)
     selection = projections.resolve_instruction_source(repo, spec.destination, [source])
     assert selection["selectedPath"] == delivery.fallback_destination(spec.destination)
     assert "rejected" in selection["diagnostic"]
@@ -137,9 +143,9 @@ def test_legacy_body_is_readable_but_not_receipt_capable(tmp_path: Path) -> None
     legacy = projections.render_projection(
         replace(spec, delivery_mode="inline", delivery_declared=False), include_prefer_local=False
     )
-    (repo / projections.local_sibling_destination(spec.destination)).write_bytes(legacy.content)
+    local_path(repo, spec.destination).write_bytes(legacy.content)
     selection = projections.resolve_instruction_source(repo, spec.destination, [source])
-    assert selection["selectedPath"].endswith(".local.instructions.md")
+    assert selection["selectedPath"].endswith(".local.md")
     assert not selection["receiptCapable"]
 
 
@@ -261,7 +267,7 @@ def test_unpaired_source_requires_enabled_canonical_ownership(tmp_path: Path) ->
     with pytest.raises(ValueError, match="verified enabled"):
         projections.resolve_instruction_source(repo, spec.destination)
     selected = projections.resolve_instruction_source(repo, spec.destination, [source])
-    assert selected["selectedPath"].endswith(".local.instructions.md")
+    assert selected["selectedPath"].endswith(".local.md")
     assert selected["receiptCapable"]
     local.write_bytes(local.read_bytes().replace(b"authorization.", b"authorization!"))
     with pytest.raises(ValueError, match="canonical template"):
@@ -275,7 +281,7 @@ def test_legacy_tampering_cannot_hide_behind_provenance(tmp_path: Path) -> None:
         replace(spec, delivery_mode="inline", delivery_declared=False),
         include_prefer_local=False,
     ).content.replace(b"authorization.", b"authorization!")
-    (repo / projections.local_sibling_destination(spec.destination)).write_bytes(legacy)
+    local_path(repo, spec.destination).write_bytes(legacy)
     selected = projections.resolve_instruction_source(repo, spec.destination, [source])
     assert selected["selectedPath"] == delivery.fallback_destination(spec.destination)
     assert "canonical template hash" in selected["diagnostic"]
@@ -287,7 +293,7 @@ def test_fake_discovery_before_late_write_and_new_context(tmp_path: Path) -> Non
     initial_prompt = (repo / spec.destination).read_bytes()
     assert not delivery.complete_body(initial_prompt, delivery.parse_marker(initial_prompt))
     late = projections.render_projection(spec, include_prefer_local=False)
-    (repo / projections.local_sibling_destination(spec.destination)).write_bytes(late.content)
+    local_path(repo, spec.destination).write_bytes(late.content)
     selected = projections.resolve_instruction_source(repo, spec.destination, [source])
     assert selected["receiptCapable"] and selected["modelAdmission"] == "unknown"
     assert not delivery.complete_body(initial_prompt, late.marker)
@@ -629,7 +635,7 @@ def test_self_signed_paired_local_cannot_forge_payload_authority(
     )
     body = projections.render_projection(forged, include_prefer_local=False)
     assert delivery.complete_body(body.content, body.marker)
-    (repo / projections.local_sibling_destination(spec.destination)).write_bytes(body.content)
+    local_path(repo, spec.destination).write_bytes(body.content)
     result = projections.resolve_instruction_source(
         repo, spec.destination, [source] if enabled else None
     )
@@ -644,7 +650,7 @@ def test_resolve_cli_from_settings_authenticates_paired_cache(
     assert not projections.sync_repository(repo, [source]).blocking
     forged = replace(spec, plugin_version="99.0.0")
     raw = projections.render_projection(forged, include_prefer_local=False).content
-    (repo / projections.local_sibling_destination(spec.destination)).write_bytes(raw)
+    local_path(repo, spec.destination).write_bytes(raw)
     module_spec = importlib.util.spec_from_file_location(
         "paired_auth_manager", SCRIPTS / "manage-instruction-projections.py"
     )
@@ -818,7 +824,7 @@ def test_literal_selector_resolver_argv_executes_without_preconfigured_path(
         }}},
     }))
     assert not projections.sync_repository(repo, [source]).blocking
-    local = repo / projections.local_sibling_destination(spec.destination)
+    local = local_path(repo, spec.destination)
     local.write_bytes(projections.render_projection(spec, include_prefer_local=False).content)
     selector = (repo / spec.destination).read_text()
     argv = next(json.loads(line) for line in selector.splitlines() if line.startswith('["<python>"'))

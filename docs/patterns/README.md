@@ -307,7 +307,7 @@ core of the principles above; a reviewer checks a change against these.
   too large and too stable to belong in the session-scoped file above, but
   relying solely on a consumer repo's checked-in copy leaves ordinary
   contributors unable to self-correct sync-lag they lack push rights to fix.
-  A gitignored `*.local.instructions.md` sibling, refreshed at worktree
+  A gitignored non-discovered `context-locals/**/*.local.md` body, refreshed at worktree
   create/resume (backed up by `sessionStart`), sits between the checked-in
   floor and the fully computed session file. (Serves *Vision harness-guidance
   §Behaviors/ambient-delivery-fails-open*,

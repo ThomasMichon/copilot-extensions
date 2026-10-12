@@ -270,7 +270,7 @@ def refresh_local_cache(
     timeout: float = DEFAULT_TIMEOUT_S,
 ) -> RefreshResult:
     """Best-effort refresh of every enabled source's gitignored
-    ``*.local.instructions.md`` sibling under ``repo_root``.
+    non-discovered ``context-locals/**/*.local.md`` body under ``repo_root``.
 
     Call at create, resume, JSON launch planning and sessionStart. Results report
     actual installation; nonzero exits, invalid output and timeouts cannot

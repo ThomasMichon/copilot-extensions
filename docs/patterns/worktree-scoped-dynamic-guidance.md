@@ -62,28 +62,31 @@ reviewed body as the source of truth would leave two gaps:
 ## Standard approach
 
 A third delivery tier, **worktree-scoped** rather than session-scoped or
-purely checked-in: a gitignored, locally re-rendered cache that lives beside
-the checked-in projection for as long as the worktree exists, refreshed at
+purely checked-in: a gitignored, locally re-rendered cache that lives outside
+the instruction tree for as long as the worktree exists, refreshed at
 worktree lifecycle boundaries rather than every session start.
 
-### 1. The gitignored sibling file
+### 1. The gitignored non-discovered local body
 
 Every projection destination
 `.github/instructions/<plugin>/<sourceId>.instructions.md` gains a gitignored
-sibling at `.github/instructions/<plugin>/<sourceId>.local.instructions.md`,
+body at `.github/copilot/context-locals/<plugin>/<sourceId>.local.md`,
 **except** a source that opts out via its own declaration's
 `skipLocalCache: true` (the repo-wide catch-all in step 3 is the one shipped
-example: its own sibling would match its own
-`**/*.local.instructions.md` scan glob and get read back, repeating the
-identical directive for no benefit). The consumer repo's
-`.github/instructions/.gitignore` (or an equivalent
-recursive rule) covers the whole tree:
+example: its own body would join its recovery inventory and get read back,
+repeating the identical directive for no benefit). The consumer repo's root
+`.gitignore` covers the new body tree and legacy siblings during migration:
 
 ```gitignore
-**/*.local.instructions.md
+.github/copilot/context-locals/**/*.local.md
+.github/instructions/**/*.local.instructions.md
 ```
 
-The sibling holds a fresh re-render of the **currently installed** payload --
+Nested destination subdirectories are preserved. Both local bodies and reviewed
+fallbacks are ordinary Markdown outside instruction roots, referenced using
+code spans rather than automatic imports. The historical API name
+`local_sibling_destination()` now returns this derived local-body path.
+The body holds a fresh re-render of the **currently installed** payload --
 never a network fetch, never a marketplace check, purely a local, offline
 render from whatever plugin payload already sits on disk. Keeping installed
 payloads themselves current remains the scheduled `projection-reflect` sync
@@ -140,6 +143,18 @@ artifacts. There is no shadow/update-blocking mechanism in this contract.
 Absent destinations use exclusive no-clobber publication; a concurrently
 created unowned file is never replaced. Consent, lock and output integrity are
 rechecked after publication, with best-effort rollback on failure.
+Legacy local compatibility reads still authenticate enabled canonical bytes;
+legacy markers alone are never authority. After publishing the new canonical
+body, migration retires an old auto-discovered local only when its bytes match
+the enabled canonical template rendered with its validated recorded version,
+tracking confirms it is untracked, and its path
+and preimage remain unchanged. Foreign, edited, tracked, or unsafe legacy
+files are retained with visible findings. They can remain auto-discovered until
+the adopter resolves the finding; relocation never silently deletes them.
+Git worktrees must first adopt ignore coverage for the new tree: until
+`git check-ignore` confirms coverage, publication and legacy retirement are
+skipped with `projection-local-cache-ignore`. Plain non-Git directories remain
+supported. Tracking/ignore probes are batched, never one Git process per body.
 These checks are not filesystem content CAS or protection against
 noncooperating filesystem attackers. Supported local filesystems must provide
 exclusive hard-link publication and atomic rename; unsupported filesystems
@@ -231,7 +246,8 @@ changes, resume or reconstruction; persist no loaded-state. No global coverage
 file is required.
 
 The scanner separates automatically discovered selectors, inline kernels and
-local bodies from reviewed on-demand fallbacks. Actual admission and selective
+legacy locals from non-discovered current local bodies and reviewed fallbacks.
+Actual admission and selective
 reads remain unknown without runtime evidence; character/4 estimates are only
 heuristics. Sandbox fake prompt/CLI tests establish ordering and envelope
 contracts, not native CLI/App/no-hook/resume/new-context behavior or provider

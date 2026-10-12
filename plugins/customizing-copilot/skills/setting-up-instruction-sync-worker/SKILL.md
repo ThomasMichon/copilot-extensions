@@ -131,9 +131,11 @@ permissionless; gate the *ignore-rule commit* like any other repo change.
 
 Scaffold, from
 [`references/templates/gitignore-rule.md`](references/templates/gitignore-rule.md):
-`**/*.local.instructions.md` under `.github/instructions/` (a dedicated
-`.github/instructions/.gitignore`, or an equivalent repo-root recursive
-rule). This rule does not make the orphan scan's git-tracked check work --
+repository-root rules `.github/copilot/context-locals/**/*.local.md` and
+`.github/instructions/**/*.local.instructions.md` (legacy migration).
+Full locals now live outside automatic instruction discovery; retain the legacy
+ignore rule while ownership-validated migration retires old locals.
+The legacy rule does not make the orphan scan's git-tracked check work --
 `git ls-files` already excludes every untracked file regardless of ignore
 matching, so a freshly rendered, unignored local-cache file is still
 excluded correctly without it. What the rule actually prevents is a later

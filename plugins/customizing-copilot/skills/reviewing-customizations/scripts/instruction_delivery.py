@@ -72,9 +72,9 @@ def render_projection(
     body = "".join(lines[closing + 1 :])
     preamble = ""
     if include_prefer_local:
-        local = PurePosixPath(spec.destination).name.removesuffix(".instructions.md")
+        local = local_destination(spec.destination)
         preamble = (
-            f"\n> If `{local}.local.instructions.md` exists here, compare\n"
+            f"\n> If `{local}` is available, compare\n"
             "> `pluginVersion` and prefer whichever is newer. On a tie,\n"
             "> compare `templateSha256`: matching means prefer local;\n"
             "> differing means prefer this checked-in file.\n"
@@ -89,6 +89,28 @@ def render_projection(
             return content, marker, None
         marker["renderedBytes"] = len(content)
     raise ValueError("rendered byte count did not stabilize")
+
+
+def local_destination(destination: str) -> str:
+    if destination.endswith(".local.instructions.md"):
+        raise ValueError("destination is already a local cache path")
+    path = PurePosixPath(destination)
+    if (
+        path.parts[:2] != (".github", "instructions")
+        or len(path.parts) < 4 or not path.name.endswith(".instructions.md")
+    ):
+        raise ValueError("invalid selector destination")
+    return str(
+        PurePosixPath(".github/copilot/context-locals")
+        / PurePosixPath(*path.parts[2:]).with_name(
+            path.name.removesuffix(".instructions.md") + ".local.md"
+        )
+    )
+
+
+def legacy_local_destination(destination: str) -> str:
+    local_destination(destination)
+    return destination.removesuffix(".instructions.md") + ".local.instructions.md"
 
 
 def _unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -145,6 +167,10 @@ def fallback_destination(destination: str) -> str:
         or not path.name.endswith(".instructions.md")
     ):
         raise ValueError("invalid selector destination")
+    if path.name.removesuffix(".instructions.md").casefold() in {
+        "agents", "claude", "gemini", "copilot-instructions",
+    }:
+        raise ValueError("fallback name would match automatic instruction discovery")
     return str(
         PurePosixPath(".github/copilot/context-fallbacks")
         / PurePosixPath(*path.parts[2:]).with_name(
@@ -231,7 +257,7 @@ def render_selector(provenance: Mapping[str, object]) -> tuple[bytes, dict]:
     marker["version"] = 2
     marker["deliveryKind"] = "selector"
     destination = str(marker["destination"])
-    local = destination.removesuffix(".instructions.md") + ".local.instructions.md"
+    local = local_destination(destination)
     fallback = fallback_destination(destination)
     command = resolver_argv(destination)
     body = (

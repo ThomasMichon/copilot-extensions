@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import os
-from dataclasses import dataclass
+import subprocess
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import Callable, Mapping, Sequence
 
@@ -75,6 +76,51 @@ def orphan_fallbacks(
     return found
 
 
+def iter_local_files(root: Path, io: DeliveryIO) -> list[Path]:
+    try:
+        directory = io.safe(root, PurePosixPath(".github/copilot/context-locals"))
+    except ValueError:
+        return []
+    found: list[Path] = []
+    for current, directories, names in os.walk(directory):
+        directories[:] = [
+            name for name in directories if not io.indirect(Path(current) / name)
+        ]
+        found.extend(Path(current) / name for name in names if name.endswith(".local.md"))
+    return found
+
+
+def ignored_local_paths(root: Path, relatives: list[str]) -> set[str]:
+    if not relatives:
+        return set()
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env.update(LC_ALL="C", LANG="C")
+    flags = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+    try:
+        probe = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True, timeout=5, env=env, **flags,
+        )
+        if probe.returncode != 0:
+            if b"not a git repository" not in probe.stderr.lower():
+                return set()
+            return set(relatives)
+        if probe.stdout.strip() != b"true":
+            return set()
+        proc = subprocess.run(
+            ["git", "-C", str(root), "check-ignore", "--no-index", "-z", "--stdin"],
+            input=b"\0".join(path.encode() for path in relatives) + b"\0",
+            capture_output=True, timeout=5, env=env, **flags,
+        )
+        if proc.returncode not in (0, 1):
+            return set()
+        return {p for p in proc.stdout.decode("utf-8").split("\0") if p}
+    except FileNotFoundError:
+        return set() if any((p / ".git").exists() for p in [root, *root.parents]) else set(relatives)
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return set()
+
+
 def resolve_source(
     root: Path, entry: Mapping[str, object], io: DeliveryIO,
     canonical: tuple[bytes, bytes] | None = None,
@@ -94,11 +140,16 @@ def resolve_source(
     reviewed = delivery.parse_marker(fallback_raw)
     delivery.validate_candidate(reviewed, entry)
     selected, marker, raw = reviewed_path, reviewed, fallback_raw
-    local_path = str(entry["destination"]).removesuffix(".instructions.md") + ".local.instructions.md"
+    local_paths = [
+        delivery.local_destination(str(entry["destination"])),
+        delivery.legacy_local_destination(str(entry["destination"])),
+    ]
     diagnostic: str | None = None
-    try:
-        candidate = io.safe(root, PurePosixPath(local_path))
-        if candidate.exists():
+    for local_path in local_paths:
+        try:
+            candidate = io.safe(root, PurePosixPath(local_path))
+            if not candidate.exists():
+                continue
             candidate_raw = io.read(candidate, 2 * 1024 * 1024)
             candidate_marker = delivery.parse_marker(candidate_raw)
             delivery.validate_candidate(candidate_marker, entry)
@@ -113,8 +164,9 @@ def resolve_source(
                 raise ValueError("local candidate differs from enabled canonical render")
             if delivery.local_wins(candidate_marker, reviewed):
                 selected, marker, raw = local_path, candidate_marker, candidate_raw
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        diagnostic = f"local candidate rejected: {exc}"
+                break
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            diagnostic = f"local candidate rejected: {exc}"
     return {
         "schema": "copilot-extensions.instruction-source-selection",
         "version": 1,
@@ -176,12 +228,18 @@ def plan_fallback_change(
 def resolve_unpaired(
     root: Path, destination: str, expected: bytes, legacy: bytes, io: DeliveryIO
 ) -> dict[str, object]:
-    local = destination.removesuffix(".instructions.md") + ".local.instructions.md"
-    raw = io.read(io.safe(root, PurePosixPath(local)), 2 * 1024 * 1024)
-    if raw not in (expected, legacy):
+    for local in [delivery.local_destination(destination), delivery.legacy_local_destination(destination)]:
+        try:
+            raw = io.read(io.safe(root, PurePosixPath(local)), 2 * 1024 * 1024)
+            if raw not in (expected, legacy):
+                continue
+            marker = delivery.parse_marker(raw)
+            delivery.validate_local_template(raw, marker)
+            break
+        except (OSError, ValueError):
+            continue
+    else:
         raise ValueError("unpaired local source differs from its enabled canonical template")
-    marker = delivery.parse_marker(raw)
-    delivery.validate_local_template(raw, marker)
     return {
         "schema": "copilot-extensions.instruction-source-selection",
         "version": 1, "selectedPath": local, "identity": delivery.identity(marker),
@@ -192,6 +250,77 @@ def resolve_unpaired(
         "receiptCapable": delivery.complete_body(raw, marker),
         "modelAdmission": "unknown", "diagnostic": "verified enabled, unpaired source",
     }
+
+
+def require_untracked(
+    relative: str,
+    probe: Callable[[list[str]], tuple[set[str], bool]],
+) -> None:
+    tracked, inconclusive = probe([relative])
+    if relative in tracked or inconclusive:
+        raise ValueError("local body became tracked or tracking status is unknown")
+
+
+def retire_legacy_local(
+    root: Path, spec: delivery.Projection, io: DeliveryIO, result: object,
+    tracked_paths: set[str], inconclusive: bool,
+    recheck_tracking: Callable[[list[str]], tuple[set[str], bool]],
+) -> None:
+    legacy = delivery.legacy_local_destination(spec.destination)
+    try:
+        path = io.safe(root, PurePosixPath(legacy))
+        if not path.exists():
+            return
+        raw = io.read(path, 2 * 1024 * 1024)
+        marker = delivery.parse_marker(raw)
+        delivery.validate_local_template(raw, marker)
+        expected = delivery.canonical_renders(spec)
+        delivery.version_key(marker.get("pluginVersion"))
+        prior = delivery.canonical_renders(replace(spec, plugin_version=marker["pluginVersion"]))
+        if raw not in prior:
+            raise ValueError("legacy local is not the current enabled canonical body")
+        if legacy in tracked_paths or inconclusive:
+            raise ValueError("legacy local is tracked or tracking status is unknown")
+        new = io.safe(root, PurePosixPath(delivery.local_destination(spec.destination)))
+        if io.read(new, 2 * 1024 * 1024) != expected[0]:
+            raise ValueError("new canonical local body is not published")
+        path = io.safe(root, PurePosixPath(legacy))
+        if io.read(path, 2 * 1024 * 1024) != raw:
+            raise ValueError("legacy local changed after validation")
+        latest_tracked, latest_inconclusive = recheck_tracking([legacy])
+        if legacy in latest_tracked or latest_inconclusive:
+            raise ValueError("legacy local became tracked or tracking status is unknown")
+        path = io.safe(root, PurePosixPath(legacy))
+        if io.read(path, 2 * 1024 * 1024) != raw:
+            raise ValueError("legacy local changed during tracking validation")
+        path.unlink()
+        result.changed.append(legacy)
+        result.removed.append(legacy)
+    except (OSError, ValueError) as exc:
+        result.add("warning", "projection-local-cache-legacy", legacy, str(exc))
+
+
+def report_unmanaged_legacy_locals(
+    root: Path, destinations: set[str], io: DeliveryIO, result: object
+) -> None:
+    try:
+        directory = io.safe(root, PurePosixPath(".github/instructions"))
+        expected = {delivery.legacy_local_destination(path) for path in destinations}
+        for current, directories, names in os.walk(directory):
+            directories[:] = [
+                name for name in directories if not io.indirect(Path(current) / name)
+            ]
+            for name in names:
+                if not name.endswith(".local.instructions.md"):
+                    continue
+                relative = (Path(current) / name).relative_to(root).as_posix()
+                if relative not in expected:
+                    result.add(
+                        "warning", "projection-local-cache-legacy", relative,
+                        "legacy auto-discovered body has no enabled canonical migration owner; retained",
+                    )
+    except (OSError, ValueError) as exc:
+        result.add("warning", "projection-local-cache-legacy", ".github/instructions", str(exc))
 
 
 def new_source_admission(
@@ -213,6 +342,7 @@ def inventory(
 ) -> dict[str, object]:
     groups: dict[str, list[dict[str, object]]] = {
         "selectors": [], "inline_kernels": [], "local_bodies": [], "reviewed_fallbacks": [],
+        "legacy_local_bodies": [],
     }
     errors: list[dict[str, str]] = []
 
@@ -231,11 +361,30 @@ def inventory(
         except (OSError, ValueError):
             continue
         kind = (
-            "local_bodies" if path.name.endswith(".local.instructions.md")
+            "legacy_local_bodies" if path.name.endswith(".local.instructions.md")
             else "selectors" if marker.get("deliveryKind") == "selector"
             else "inline_kernels"
         )
         groups[kind].append(metrics(relative, raw))
+    directory = io.safe(root, PurePosixPath(".github/copilot/context-locals"))
+    if directory.exists():
+        for current, directories, names in os.walk(directory):
+            directories[:] = [
+                name for name in directories if not io.indirect(Path(current) / name)
+            ]
+            for name in names:
+                if not name.endswith(".local.md"):
+                    continue
+                relative = (Path(current) / name).relative_to(root).as_posix()
+                try:
+                    raw = io.read(io.safe(root, PurePosixPath(relative)), 2 * 1024 * 1024)
+                    marker = delivery.parse_marker(raw)
+                    delivery.validate_local_template(raw, marker)
+                    if delivery.local_destination(str(marker["destination"])) != relative:
+                        raise ValueError("local body path does not match provenance")
+                    groups["local_bodies"].append(metrics(relative, raw))
+                except (OSError, ValueError, KeyError) as exc:
+                    errors.append({"path": relative, "error": str(exc)})
     for entry in entries.values():
         if entry.get("deliveryMode") != "selector":
             continue
@@ -251,7 +400,7 @@ def inventory(
                 "files": rows, "count": len(rows),
                 "bytes": sum(row["bytes"] for row in rows),
                 "characters": sum(row["characters"] for row in rows),
-                "automatically_discovered": name != "reviewed_fallbacks",
+                "automatically_discovered": name not in {"reviewed_fallbacks", "local_bodies"},
             } for name, rows in groups.items()
         },
         "validation_errors": errors,

@@ -165,7 +165,7 @@ def test_real_global_discovery_and_renderer_fit_sessionstart_budget(tmp_path, mo
                 "legacyMarkers": [f"{name}:static-fallback"],
             }],
         }), encoding="utf-8")
-        siblings.append(repo / ".github" / "instructions" / name / "fallback.local.instructions.md")
+        siblings.append(repo / ".github" / "copilot" / "context-locals" / name / "fallback.local.md")
     monkeypatch.setattr(lcr, "_resolve_own_agent_worktrees_command", lambda: None)
     started = time.monotonic()
     first = lcr.refresh_local_cache(repo, home=home, timeout=lcr.SESSIONSTART_MAX_TIMEOUT_S)

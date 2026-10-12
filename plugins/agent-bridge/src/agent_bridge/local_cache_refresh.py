@@ -8,7 +8,7 @@ This is the ``agent-bridge`` counterpart to
 ``agent_worktrees.local_cache_refresh`` (see
 ``docs/patterns/worktree-scoped-dynamic-guidance.md`` and
 ``efforts/2026/10/03 local-cache-delivery-primacy`` Phase 2): the same
-"render the worktree's gitignored ``*.local.instructions.md`` siblings
+"render the worktree's gitignored non-discovered ``context-locals/**/*.local.md`` bodies
 before the agent reads anything" mechanism, pre-rendering a spawn-path
 ``agent-worktrees``/``agent-bridge`` itself drive, that `create`/`resume`/
 ``sessionStart`` already cover for an interactively-launched session.
@@ -579,7 +579,7 @@ async def refresh_local_cache(
     timeout: float = LOCAL_SPAWN_MAX_TIMEOUT_S,
 ) -> RefreshResult:
     """Best-effort refresh of every enabled source's gitignored
-    ``*.local.instructions.md`` sibling under ``repo_root``, before a local
+    non-discovered local body under ``repo_root``, before a local
     spawn's Copilot CLI process is launched.
 
     Call this only for a ``target.type == "local"`` spawn whose ``target.
