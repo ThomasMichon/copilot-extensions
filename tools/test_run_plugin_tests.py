@@ -52,6 +52,37 @@ def test_worker_launch_uses_canonical_headlessness(monkeypatch, tmp_path):
     ]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX creation permissions")
+def test_pytest_group_parent_is_created_without_shared_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *_args, **_kwargs: Path(sys.executable))
+    monkeypatch.setattr(runner, "_test_file_groups", lambda *_args, **_kwargs: [[]])
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
+    observed: list[int] = []
+
+    def capture(command: list[str], **_kwargs: object) -> int:
+        import stat
+
+        directory = Path(next(arg.split("=", 1)[1] for arg in command if arg.startswith("--basetemp="))).parent
+        observed.append(stat.S_IMODE(directory.stat().st_mode))
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", capture)
+    previous = os.umask(0o002)
+    try:
+        assert runner.run_plugin(
+            "example", "unused", reinstall=False, kexpr=None,
+            limits=containment.Limits(), plugin_timeout=60,
+            test_timeout=10, max_files_per_subsuite=25,
+        ) == 0
+    finally:
+        os.umask(previous)
+    assert observed == [0o700]
+
+
 def test_containment_owner_launch_preserves_process_contract(monkeypatch, tmp_path):
     captured = {}
 

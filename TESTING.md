@@ -67,7 +67,9 @@ plugin, XDG, and temporary state beneath a per-run sandbox; owns the pytest
 process job/group and its ordinary descendants; and enforces budgets at three
 time scales: 30 seconds per test, 300 seconds per sequential 25-file sub-suite,
 and 900 seconds across the plugin. Each sub-suite also defaults to 128
-processes, 4096 MiB of process-tree memory, and 2048 MiB of temporary storage:
+processes, 4096 MiB of process-tree memory, and 2048 MiB of temporary storage.
+The pytest group parent is created with mode `0700` on POSIX, so an inherited
+shared-write umask cannot expose the fixture namespace.
 
 On Windows, contained runs also set the installer test-mode contract
 `COPILOT_EXTENSIONS_TEST_CONTAINED=1`. Conforming installers virtualize

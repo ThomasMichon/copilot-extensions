@@ -6,12 +6,44 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from stamp_fixture import no_shared_write_umask  # noqa: F401
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
-def test_legacy_session_entrypoints_do_not_execute_python() -> None:
+@pytest.mark.skipif(os.name == "nt", reason="POSIX executable-mode contract")
+def test_identical_stamp_repairs_launcher_without_republishing_metadata(tmp_path: Path) -> None:
+    import importlib.util
+    import stat
+
+    spec = importlib.util.spec_from_file_location("session_stamp", PLUGIN / "scripts/session-stamp.py")
+    assert spec and spec.loader
+    stamp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(stamp)
+    launcher = tmp_path / "agent-index"
+    data = b"#!/bin/sh\nprintf callable\n"
+    stamp.publish(launcher, data, executable=True)
+    launcher.chmod(0o644)
+    metadata = tmp_path / "stamped-version"
+    stamp.publish(metadata, b"9.9.9\n")
+    metadata.chmod(0o640)
+    before = metadata.stat()
+    stamp.publish(launcher, data, executable=True)
+    stamp.publish(metadata, b"9.9.9\n")
+    assert subprocess.run([str(launcher)], capture_output=True, check=True).stdout == b"callable"
+    assert stat.S_IMODE(launcher.stat().st_mode) == 0o755
+    after = metadata.stat()
+    assert (after.st_mode, after.st_ino, after.st_mtime_ns) == (
+        before.st_mode, before.st_ino, before.st_mtime_ns,
+    )
+    link = tmp_path / "linked-launcher"
+    link.symlink_to(launcher)
+    with pytest.raises(ValueError, match="linked stamp"):
+        stamp.publish(link, data, executable=True)
+
+
+def test_session_entrypoints_never_invoke_installers_or_service_ensure() -> None:
     bootstrap_sh = (PLUGIN / "scripts" / "bootstrap-check.sh").read_text(
         encoding="utf-8"
     )
@@ -25,9 +57,12 @@ def test_legacy_session_entrypoints_do_not_execute_python() -> None:
         encoding="utf-8"
     )
 
-    for source in (bootstrap_sh, bootstrap_ps, ensure_sh, ensure_ps):
+    for source in (ensure_sh, ensure_ps):
         assert source.rstrip().endswith("exit 0")
         assert "runtime-gate" not in source
+        assert "install." not in source
+    for source in (bootstrap_sh, bootstrap_ps):
+        assert "__session-stamp" in source
         assert "install." not in source
 
 
@@ -42,6 +77,7 @@ def test_bootstrap_check_emits_exact_empty_object(
             **os.environ,
             "HOME": str(tmp_path),
             "USERPROFILE": str(tmp_path),
+            "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(tmp_path / "bootstrap-killswitch.json"),
             "PYTHONUTF8": "1",
         },
         capture_output=True,
@@ -53,6 +89,74 @@ def test_bootstrap_check_emits_exact_empty_object(
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == "{}"
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("role", [None, "corpus", "client", "host"])
+def test_actual_session_hook_stamps_only_metadata(
+    tmp_path: Path, shell: str, role: str | None,
+) -> None:
+    import json
+    from test_runtime_gate import _fixture as gate_fixture
+
+    gate, environment = gate_fixture(tmp_path / "fixture", shell)
+    scripts = gate.parent
+    payload = scripts.parent
+    for name in ("session-stamp.py", "stamp_paths.py", "stamp_repair.py", "versioned_runtime.py",
+                 "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1"):
+        shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
+    (payload / "plugin.json").write_text('{"name":"agent-index","version":"9.9.9"}')
+    suffix = "sh" if shell == "bash" else "ps1"
+    shutil.copy2(PLUGIN / "scripts" / f"bootstrap-check.{suffix}", scripts)
+    repo = tmp_path / "fixture"
+    config = repo / ".agent-index/config.yaml"
+    if role is None:
+        config.unlink()
+    elif role != "corpus":
+        machine = "test-machine" if role == "host" else "remote-machine"
+        config.write_text(f"indexer:\n  machine: {machine}\n")
+    environment["AGENT_INDEX_MACHINE"] = "test-machine"
+    environment["AGENT_INDEX_REPO"] = str(repo)
+    environment["HOME"] = environment["USERPROFILE"] = str(tmp_path / "home")
+    environment["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(
+        tmp_path / "home/.copilot-extensions/bootstrap-killswitch.json"
+    )
+    Path(environment["HOME"]).mkdir()
+    environment.pop("TEST_PYTHON", None)
+    environment["COPILOT_PLUGIN_ROOT"] = str(payload)
+    environment["AGENT_INDEX_PAYLOAD_ROOT"] = str(payload)
+    forbidden = tmp_path / "forbidden-tools"
+    forbidden.mkdir()
+    marker = tmp_path / "forbidden-tool-called"
+    for name in ("uv", "pip", "pip3", "systemctl", "schtasks", "schtasks.exe"):
+        tool = forbidden / name
+        tool.write_text(f"#!/bin/sh\nprintf called > '{marker}'\nexit 99\n")
+        tool.chmod(0o755)
+    environment["PATH"] = str(forbidden) + os.pathsep + environment["PATH"]
+    # The real mode boundary executes a fixture-only read adapter. No production
+    # profile, service query, package tool or installer is available to it.
+    for name in ("install.sh", "install.ps1", "ensure-service.sh", "ensure-service.ps1"):
+        (scripts / name).write_text("FORBIDDEN INSTALLER/SERVICE INVOCATION")
+    hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["sessionStart"][1]
+    executable = _shell_command(shell, scripts / f"bootstrap-check.{suffix}")[0]
+    command = ([executable, "-c", hook["bash"]] if shell == "bash" else
+               [executable, "-NoProfile", "-Command", hook["powershell"]])
+    result = subprocess.run(command, cwd=repo, env=environment,
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "{}"
+    assert not marker.exists()
+    root = Path(environment["AGENT_INDEX_HOME"])
+    if role is None:
+        assert not root.exists()
+    else:
+        expected = {"payload-dir", "stamped-version", ".publication.lock"}
+        assert set(p.name for p in root.iterdir()) == expected
+        assert (root / "stamped-version").read_text().strip() == "9.9.9"
+        assert not list(root.rglob("pyvenv.cfg"))
+        assert not list(root.rglob("deploy-manifest.json"))
+    assert not (Path(environment["HOME"]) / ".config/systemd").exists()
+    assert not (Path(environment["HOME"]) / ".cache/huggingface").exists()
 
 
 def _shell_command(shell: str, script: Path) -> list[str]:

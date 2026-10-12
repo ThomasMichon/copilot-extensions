@@ -1,29 +1,33 @@
 {
   "name": "agent-index-solo",
-  "description": "Tier-P F1 solo scenario: install ONLY agent-index on a fresh box and assert its standalone setup-gated lifecycle. It validates no-runtime, stamped-only, partial-venv, complete-runtime/no-role, configured-client, and configured-host states; status must remain non-mutating before setup, partial slots must never dispatch, and explicit setup must repair/provision the role-specific runtime. It also validates the CLI, HTTP service shell, direct `agent-index mcp` toolset, and sessionStart scope-binding hook without requiring a durable embedding model build. Distinct from agent-index-cutover, which validates graceful version cutover. Name-free / public.",
+  "description": "Tier-P F1 installer witness: install ONLY agent-index from a pinned release or explicitly materialized candidate. Preserve inactive/dormant and metadata-only session checks, explicit repository opt-in, installation-policy/activation governance, configured client/host role reads, owned incomplete-slot repair through first-use provisioning, strict completed-profile/no-role rejection, actual venv/CLI version, installation-owned HTTP health/status and direct MCP tool registration. Never build or start the embedding engine or a model. Stop at the first real obstacle; no synthetic completion receipts or hand-install workaround.",
   "tier": "P",
   "family": "F1",
   "image": "base",
   "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
   "auth": { "copilot": "required", "gh": "optional", "ado": "none" },
-  "validates": "agent-index standalone setup gate, slot readiness, and read behavior",
+  "validates": "released agent-index explicit adoption, actual installer readiness and lightweight service reads",
   "config": {
     "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
     "CR_MARKETPLACE_NAME": "copilot-extensions",
-    "CR_UV_INDEX": "(opt-in uv-index fixture)"
+    "CR_RELEASE_REF": "main (or exact released commit SHA)",
+    "CR_EXPECT_VERSION": "(optional exact released or candidate plugin version)",
+    "CR_CANDIDATE_HEAD": "(required exact source HEAD; matched against the canonical builder's MATERIALIZED.json and whole-tree hashes before candidate installation)",
+    "CR_UV_INDEX": "(runner-provided opt-in uv-index fixture)"
   },
   "expected_artifacts": [
-    "~/.copilot/installed-plugins/<marketplace>/agent-index",
-    "~/.local/bin/agent-index (self-provisioning binstub)",
-    "~/.agent-index/versions/<ver>/bin/python or ~/.agent-index/.venv (service runtime)",
-    "~/.copilot/installed-plugins/<marketplace>/agent-index/scripts/emit-scope-binding.sh (+ .ps1) (sessionStart how-to-search hook)"
+    "~/released-marketplace/plugins/agent-index (released directory marketplace payload)",
+    "~/released-marketplace/plugins/agent-index/bin/agent-index (payload-local command)",
+    "~/.copilot-extensions/marketplaces/<source-id>/plugins/agent-index/versions/<ver>+host/bin/python",
+    "~/.copilot-extensions/marketplaces/<source-id>/plugins/agent-index/run/zdd/active.json",
+    "~/released-marketplace/plugins/agent-index/scripts/emit-scope-binding.sh (+ .ps1) (sessionStart how-to-search hook)"
   ],
   "stages": [
     { "n": 0, "title": "environment (fresh machine)" },
-    { "n": 1, "title": "install ONLY agent-index" },
-    { "n": 2, "title": "dormant, stamped, and partial runtimes stay non-runnable" },
-    { "n": 3, "title": "explicit setup repairs and provisions the host runtime" },
-    { "n": 4, "title": "complete/no-role plus configured client/host states are explicit" },
-    { "n": 5, "title": "standalone read/status/health verbs degrade cleanly with no built index" }
+    { "n": 1, "title": "install ONLY agent-index from a released marketplace" },
+    { "n": 2, "title": "inactive startup is dormant; opted-in startup stamps only metadata" },
+    { "n": 3, "title": "explicit installation-mode policy and activation" },
+    { "n": 4, "title": "owned incomplete slot and explicit setup/provision" },
+    { "n": 5, "title": "stock PATH payload command, service health and MCP read surfaces" }
   ]
 }

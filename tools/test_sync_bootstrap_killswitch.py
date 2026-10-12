@@ -44,9 +44,7 @@ def _mk_adopter(repo: Path, name: str, *, wired: bool = True) -> Path:
 
 
 def _mk_non_adopter(repo: Path, name: str) -> Path:
-    # A plugin with no bootstrap-check.sh at all (e.g. agent-index's no-op
-    # stub lives elsewhere, but the opt-in criterion itself is "has the
-    # hook"; a plugin missing it entirely must never be touched).
+    # A plugin missing the hook entirely must never be touched.
     plugin_dir = repo / "plugins" / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     return plugin_dir
@@ -126,14 +124,16 @@ def test_check_passes_when_call_site_wired(fake_repo, capsys):
     assert "All 1 wired adopters call their guard." in out.out
 
 
-def test_no_reconcile_stub_excluded_from_call_site_check(fake_repo, capsys):
+def test_index_metadata_stamp_requires_guard_call_site(fake_repo, capsys):
     _mk_adopter(fake_repo, "agent-index", wired=False)
     sync_bootstrap_killswitch.main([])
     capsys.readouterr()
     rc = sync_bootstrap_killswitch.main(["--check"])
     out = capsys.readouterr()
-    assert rc == 0
-    assert "All 0 wired adopters call their guard." in out.out
+    assert rc == 1
+    assert "agent-index/scripts/bootstrap-check.sh" in out.err
+    assert "agent-index/scripts/bootstrap-check.ps1" in out.err
+    assert "does not call its vendored guard" in out.err
 
 
 def test_write_mode_warns_but_does_not_fail_on_call_site_gap(fake_repo, capsys):

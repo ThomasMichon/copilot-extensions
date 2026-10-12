@@ -402,7 +402,14 @@ engine under this effort.
       green CI; released payload and runtime verified through the supported
       update flow. See the 2026-10-08 journal entry and issue #5802.
 - [ ] `agent-index` (separate engine venv — prove the config schema handles
-      this before completing the remaining adopters).
+      this before completing the remaining adopters). Implementation merged
+      as PR #5885; release and live deployment verification remain paused
+      at the operator's request.
+- [ ] Resolve the POSIX installer/stamp permission mismatch before the stricter
+      startup admission ships. New installer-created artifacts must not inherit
+      group/other write access from `umask 0002`. Include practical, bounded
+      session-start repair per the 2026-10-12 operator clarification below;
+      the exact migration protocol and its adversarial proof remain pending.
 - [x] `agent-dispatch` — PR #5832 merged, release #5866 promoted the
       adopter, and the normal update verified payload/runtime `0.14.0-dev1`
       with a healthy routed coordinator and running supervisor.
@@ -427,6 +434,15 @@ engine under this effort.
       "Done" for this effort means *that* set is fully adopted, not "every
       plugin in the repo, no exceptions."
 
+### Validation infrastructure — temporary Docker accountability (#6109)
+
+- [ ] Review the [temporary-container obligation proposal](temporary-container-obligations.md)
+      before implementing its new producer transaction and identity contract.
+- [ ] After that review, implement and validate automatic reservations, exact
+      Docker identity binding and verified close-out across both clean-room
+      wrappers and the devcontainer test runner. Existing Index live-proof
+      requirements remain open; this infrastructure slice does not satisfy them.
+
 ### Bug sweep — linked open bugs (2026-09-24)
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
@@ -440,6 +456,10 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 
 ## Validation Plan
 
+- [ ] Temporary Docker producers satisfy the reservation, identity, actual
+      finalize-gate and close-out checks in
+      [their scoped validation plan](temporary-container-obligations.md#validation-plan).
+      Mocked lifecycle evidence and native/live evidence are reported separately.
 - [ ] Phase 0's audit findings are recorded and reviewed (via the effort PR)
       before any engine code is written — wrong assumptions here would ripple
       into every later phase.
@@ -523,6 +543,227 @@ immutable-versioned-runtime slot contract. No scheduled task, no sibling
 installs, no service-specific config needed for this class of plugin.
 
 ## Journal
+
+### 2026-10-12 — Include practical session-start permission repair
+
+- Operator clarification, verbatim:
+  > session-start should also do repair if practical
+- The actual compatibility issue is distinct from the rejected claim that
+  `mkdir(..., 0755)` gains write bits from a umask. Legacy installer shell
+  redirections request `0666`, while `chmod +x` can preserve inherited shared
+  write bits. These artifacts can therefore fail the stricter stamp admission
+  under a common `0002` umask.
+- The scope now includes preventing unsafe new installer artifact modes and
+  practical repair during dependency-light session stamping. This does not
+  authorize session-start provisioning, service/engine startup or broad
+  filesystem permission normalization.
+- **Agent-recommended design constraints, not implemented:** bind repair to
+  verified creator ownership and exact no-follow identities; retain refusal
+  for foreign owners, links, multiple-link files and unsafe surrounding
+  namespaces. Do not infer trust in previously writable marker contents:
+  canonical stamp/launcher bytes and supersession decisions need explicit
+  treatment. Permissions changed after admission must still be rechecked.
+  State any installer-created ancestor that cannot be repaired safely rather
+  than silently broadening the repair boundary.
+- The migration protocol, its review and real installer-to-hook/adversarial
+  regressions remain pending. No live artifact permission was changed.
+
+#### Candidate protocol and execution evidence
+
+- The bounded candidate repairs only creator-owned, group-writable (not
+  world-writable or special-mode) runtime roots and exact legacy launcher
+  destination directories. It pins every ancestor and rechecks identities
+  before reducing permissions. Arbitrary ancestors remain strict.
+- Group-writable marker/launcher files are regenerated atomically only after
+  their contents match trusted payload/version or canonical launcher bytes;
+  a retained writer descriptor cannot modify the replacement. Unknown
+  contents, writable deployed-version state, links, multiple links and
+  foreign ownership still refuse. Explicit operator recovery is required
+  where migration cannot safely infer intent. Namespaced cells do not inherit
+  this legacy repair policy.
+- Installer stamp publication uses the same guarded file writer. Its
+  publication lock is prepared and validated before Bash adopts descriptor 9,
+  then checked against that descriptor's identity; neither side replaces or
+  truncates the lock inode. New lock creation is bounded by a private umask
+  that is restored before callbacks.
+- Actual-function installer-under-`0002`/`0077` to actual-hook tests cover Bash
+  and Linux PowerShell, known legacy migration and idempotence, retained
+  writable descriptors, ambiguous contents and supersession state, link
+  refusal before installer lock truncation, and directory replacement before
+  chmod. Relevant safety/publication/acquisition selection: 90 passed,
+  14 native-Windows skips. Full contained Index suite: 981 passed, 25 skipped
+  across three sub-suites (304/8, 321/2, 356/15). Coupled provenance and
+  customization scanner: 170 passed, 2 native-Windows skips. Review and native
+  validation remain pending. No production permission or service was changed.
+- Follow-up candidate regressions exercise the actual activation writer, not
+  only `do_stamp`: publication callbacks mask shared-write bits additively,
+  preserving stricter caller masks and restoring the caller's environment.
+  `current-version` and `last-known-good` remain strictly admitted after real
+  marker-only activation under `0002` and `0077` in both hook shells.
+- Candidate materialization now runs the archived commit's transformation
+  implementation and helpers in an isolated subprocess with site loading
+  disabled; host working-tree transformation edits cannot affect committed
+  candidate bytes. A destination that appears during preparation is refused,
+  not removed. Full contained Index suite after this follow-up: 985 passed,
+  25 skipped (304/8, 321/2, 360/15). Full materializer and provenance suites:
+  103 passed, 2 native-Windows junction skips. Native and review gates remain
+  pending. All child processes remain bounded and headless on Windows.
+
+### 2026-10-10 — Temporary Docker accountability proposal; implementation gated
+
+- Operator request:
+  > We clearly are missing "claims" for containers. For temporary containers, we need to make worktrees responsible for them before they may finalize.
+- Coordination #6109 owns this validation-infrastructure slice. Source tracing
+  confirmed that active container claims already block finalize, including its
+  final locked ownership check, but clean-room and devcontainer allocations do
+  not automatically create those claims. The existing `run` pending reservation
+  is useful precedent, not a Docker identity or close-out implementation.
+- Recorded the [scoped proposal](temporary-container-obligations.md) in this
+  existing effort rather than creating a parallel plan or ownership store.
+  The new generic producer transaction, temporary-resource settlement policy
+  and raw-Docker identity contract require plan review before implementation.
+  Proposed placements and design choices are explicitly agent-recommended,
+  not recorded as approved decisions.
+- No runtime, wrapper, provider, test runner, plugin version or pending
+  changefile changed. No Docker resource, production system or live claim
+  ledger was touched. Implementation and all lifecycle proofs remain pending.
+  Parent integration owns plan publication/review and subsequent implementation;
+  this effort remains Active and Index live proof remains unresolved.
+
+### 2026-10-10 — Explicit session-start policy; Index-only implementation slice
+
+- Operator decision (generic/public-safe verbatim):
+  > sessionStart hooks only ever do quick payload-and-binstub stamps; they never deploy via install scripts or start services. Instead, we defer to first attempted binstub invocation by an agent, or if the installer is directly run via `<repo> update`.
+- This refines the existing reviewed self-contained/lazy installer intent below
+  a newly explicit activation boundary; it does not replace the approved
+  byte-vendoring design or authorize a fleet-wide lifecycle rewrite. Index
+  hooks may publish metadata/binstubs, but never install/ensure/provision,
+  acquire uv/packages, create venvs, register autostart or start services/engines.
+  Runtime provisioning remains behind repository opt-in, installation governance
+  and explicit role/setup intent. No implicit host choice is allowed.
+- #6082 retains the corrected clean-room contract; #5873 retains the real release
+  and live-verification gates. This bounded candidate is not a shipped release.
+  The Active effort and adopter checkbox remain open. Parent integration owns
+  publication/review/merge/deployment; no next adopter starts here.
+- Candidate hook execution passed for Bash and PowerShell 7 on Linux with
+  temporary homes and inactive/corpus-only/client/host configurations.
+  Focused hook/runtime/scenario selection: 97 passed, 1 skipped. Hardened,
+  network-disconnected full Index suite: 760 passed, 107 skipped
+  (284/19, 269/48, 207/40). Final parser/materialization selection: 96 passed.
+  Shell/PowerShell parsers, F/E9 lint, install contract (13 plugins), and
+  installer-engine byte-sync (8 adopters) passed. Native Windows, PS5.1 and
+  macOS are not claimed.
+- Built a public standalone candidate using normal release materialization and
+  preview tools, with source payload version `0.1.0-dev210` (preview's
+  hypothetical pending-changefile version `0.1.1-dev1`). This is explicitly
+  **not** released Index `0.10.15-dev1` or a production update; version fields
+  were not hand-bumped. Installed installer/manifest bytes and both vendored
+  engine files matched candidate/canonical bytes in the fresh box.
+- Fresh candidate witness reached 17 passes / 1 failure, phase 5.
+  Inactive admission, metadata-only startup, explicit role refusal, policy/CAS
+  activation, host/client role reads and genuine incomplete-slot recovery
+  passed. First-use `setup --single --yes` reached the real runtime gate and
+  cell installer, produced a genuine completed importable host venv, and
+  reported its exact candidate CLI version directly from that venv.
+- **Genuine product STOP:** payload-local `--version` in the active namespaced
+  cell invokes `launch-validate --command --version`; argparse rejects it with
+  `argument --command: expected one argument`, then the gate exits 126.
+  No alternate launcher, hand-install, synthetic completion or temporary
+  product fix was used. Later scenario health/MCP/no-role assertions remain
+  unexecuted; the full clean-room gate is FAIL, not partial completion.
+  A separate read-only diagnostic observed `/health` `ok`, promoted/non-passive
+  at candidate `0.1.0-dev210+host`; this is not a scenario pass.
+- Fixture-only fresh attempts before that stop recorded 1/1 (missing
+  marketplace owner), 6/1 (status resolver telemetry), 13/1 (missing real
+  snapshot provenance), 13/1 (incomplete slot is correctly broken, not absent),
+  and 15/1 (setup logs contain both provisioning and final role JSON).
+  Corrected each witness assumption in source without dropping its stage.
+  Every failed box/report remains retained; borrowed OAuth cleanup requires
+  approval. No host runtime/socket/credential/private-code mount, privilege,
+  GPU/model, production service, scheduler or system-setting change occurred.
+- Final combined bounded hook/runtime/parser/materialization selection,
+  including executable tripwires forbidding uv/pip/service/task commands:
+  **183 passed, 1 skipped**. Full-suite result above predates only those
+  additional tripwires and final scenario-parser corrections, not product edits.
+  Candidate product bytes were unchanged through the final fresh run. A final
+  metadata-only hardening suppresses Python bytecode writes when importing the
+  stdlib-only version comparator; its actual hook selection passed 17 cases.
+  That final hardening was not rerun in a new clean room after the product STOP.
+
+### 2026-10-10 — Released Index clean-room witness corrected; live gate blocked
+
+- Coordination #6082 owns this bounded scenario correction; Index validation
+  #5873 remains open. No installer, runtime authorization, service architecture,
+  version or plugin payload changed. Clean-room tooling/tests/docs and this
+  journal do not require a plugin changefile.
+- Updated the existing `agent-index-solo` witness for canonical repository
+  opt-in, explicit installation-mode/activation governance, payload-local
+  commands, real owned incomplete venv recovery and strict role-profile
+  boundaries. Documented each obsolete expectation's replacement rather than
+  silently dropping it. Actual venv/import/version and installation-owned
+  HTTP health/status are required; synthetic completion is never deployment.
+- Both fresh attempts used released commit
+  `cb9d2c4d11c1ca947464ac522ccd1c4af24a205e` (promotion #6075),
+  Index `0.10.15-dev1`, not a mounted development payload. The first stopped
+  with 1 pass / 1 fail because directory marketplace installation is live,
+  not copied into `installed-plugins`. Corrected that scenario path assumption;
+  retained the failed box and used another fresh named container.
+- The corrected fresh run stopped at the first genuine contract obstacle:
+  5 passes / 1 failure, `index-config`, phase 2. Installed release and both
+  vendored engine files matched release/canonical bytes. Non-opted-in status
+  was `inactive` and non-mutating. After the sole minimal session hook witness,
+  opted-in status returned `setup_required` with runtime state `stamped`,
+  rather than the documented non-mutating `absent`.
+- Released `hooks.json` still invokes `install.sh ensure`. Its legacy binstub
+  publication path writes `payload-dir` and resolver copies under the legacy
+  root; the fresh box contained those files and a publication lock. This
+  contradicts the documented non-stamping session contract. No expectation was
+  weakened and no installer/runtime workaround or dependency hand-install
+  followed the failure.
+- No runtime venv or API service was installed; real CLI runtime version,
+  health, cell activation, partial recovery and later role/MCP assertions
+  remain unexecuted. Engine directory/listener, model cache and Index scheduler
+  artifacts were absent. No production/canary, GPU/model, warm engine or host
+  scheduler mutation occurred. Retained disposable boxes require explicit
+  cleanup authorization; borrowed credentials were not printed or committed.
+- Focused scenario/parser/runner-auth guards passed initially (12 cases);
+  the final selection passed 13 cases, including a regression rejecting
+  hook-created `stamped` readiness. Shell parsing, focused Python F/E9 lint and
+  staged whitespace checks passed. All pytest runs use bounded admission
+  120 / timeout 600 seconds.
+  The corrected witness is prepared locally, not reviewed or merged, and its
+  real installer/API proof is blocked. Publication, review, deployment and
+  disposition of the contract mismatch remain parent-owned; no next adopter
+  starts and neither the Index checkbox nor the Active effort is closed.
+
+### 2026-10-09 — Index installer PR merged; rollout paused
+
+- PR #5885 squash-merged to `dev` as
+  `3b1cbe29706cd8494157b06a5873d8dbb25895b9` after current-head review had
+  zero Medium/High findings and source CI plus required gates passed.
+  The retained Low metrics finding was addressed in the live description,
+  not bypassed as an unresolved implementation defect.
+- The final acquisition head passed native Windows installer selection
+  (74 passed, 42 skipped); final Index host/disconnected suites passed
+  (848/11 and 756/103). Actual SAC, PowerShell 5.1, native macOS and live
+  first-use provisioning remain disclosed limitations.
+- Source CI exposed an independent wrapped-I/O contention regression from
+  #5893. The narrow #5911 correction landed in this PR with its own
+  agent-worktrees changefile; the exact guard lane passed 333 cases with
+  10 skips, preserving the original real deadline lower-bound assertion.
+  Native classification passed 13 cases. The permanent shared-engine
+  exception is unchanged.
+- Publication recovery retained backup refs and used only explicitly
+  approved local operations: first a backed-up fast-forward recovery, then
+  one private-branch merge to reconcile newer trunk edits when legacy
+  branch-record replay proof refused. Final trunk integration was still
+  squash-only; no force push or tracking-file edit was used. The tooling
+  defect remains tracked as #5915.
+- The managed worktree reconciled onto the merge and keeps its effort binding
+  open. The operator requested pausing after this installer change, so no
+  subsequent adopter starts and no new live update, canary activation or
+  warm-engine restart is authorized. Release/deployment verification for
+  Index remains open under #5873; the parent effort is Active, not Done.
 
 ### 2026-10-09 — Index installation-wide uv acquisition serialized
 

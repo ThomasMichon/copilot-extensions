@@ -77,7 +77,7 @@ if (-not $GatePython -or -not (Test-Path -LiteralPath $EffectiveResolver -PathTy
         exit 0
     }
     Write-Inactive
-    exit $(if ($Command -eq 'status') { 0 } else { 2 })
+    exit $(if ($Command -in @('status', '__session-stamp')) { 0 } else { 2 })
 }
 try {
     $effectiveCwd = if ($env:AGENT_INDEX_REPO) {
@@ -102,7 +102,7 @@ if (-not $Effective -or -not $Effective.opted_in) {
         exit 0
     }
     Write-Inactive
-    exit $(if ($Command -eq 'status') { 0 } else { 2 })
+    exit $(if ($Command -in @('status', '__session-stamp')) { 0 } else { 2 })
 }
 if ($Effective.config) {
     $env:AGENT_INDEX_EFFECTIVE_CONFIG = [string]$Effective.config
@@ -400,6 +400,44 @@ function Get-ManagementPython {
     return $null
 }
 
+if ($Command -ceq '__session-stamp') {
+    if ($env:AGENT_INDEX_FORWARDED) { exit 0 }
+    if ($ActualMode -ceq 'namespaced' -and
+        ($ResolutionStatus -cne 'ready' -or $ResolutionReason -cne 'namespaced-active')) {
+        [Console]::Error.WriteLine('[agent-index] pending installation cannot stamp session metadata.')
+        exit 126
+    }
+    # Share the installer's publication mutex without waiting through deployment.
+    $identity = [IO.Path]::GetFullPath($Root).TrimEnd('/\')
+    if ($env:OS -eq 'Windows_NT') { $identity = $identity.ToLowerInvariant() }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = [BitConverter]::ToString(
+            $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($identity))
+        ).Replace('-', '').Substring(0, 24)
+    } finally { $sha.Dispose() }
+    $name = "CopilotExtensions.AgentIndex.Stamp.$hash.Publish"
+    if ($env:OS -eq 'Windows_NT') { $name = "Global\$name" }
+    try {
+        $mutex = New-Object Threading.Mutex($false, $name) -ErrorAction Stop
+    } catch [UnauthorizedAccessException] {
+        if ($env:OS -ne 'Windows_NT') { throw }
+        [Console]::Error.WriteLine('[agent-index] Global stamp mutex denied; using Local session serialization.')
+        $mutex = New-Object Threading.Mutex($false, $name.Replace('Global\', 'Local\')) -ErrorAction Stop
+    }
+    $held = $false
+    try {
+        try { $held = $mutex.WaitOne(0) }
+        catch [Threading.AbandonedMutexException] { $held = $true }
+        if (-not $held) { exit 0 }
+        & $GatePython.Source -I -X utf8 (Join-Path $PSScriptRoot 'session-stamp.py') $Root $PayloadRoot $ActualMode
+        exit $LASTEXITCODE
+    } finally {
+        if ($held) { [void]$mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
+
 if (
     $ActualMode -ceq 'namespaced' -and
     $Command -ceq 'engine' -and
@@ -531,7 +569,7 @@ function Resolve-ReadyRuntime {
                 --context $Context `
                 --expected-marketplace-id $MarketplaceId `
                 --durable-home $contextDurableHome `
-                --command $Command
+                "--command=$Command"
         )
         if ($LASTEXITCODE -ne 0) {
             [Console]::Error.WriteLine(

@@ -174,6 +174,7 @@ def _fixture(tmp_path: Path, shell: str) -> tuple[Path, dict[str, str]]:
     )
     env = os.environ.copy()
     env["AGENT_INDEX_HOME"] = str(tmp_path / f"home-{shell}")
+    env["USERPROFILE"] = str(tmp_path)
     env["PYTHONPATH"] = os.pathsep.join(
         (
             str(SOURCE_ROOT),
@@ -573,6 +574,9 @@ def test_bootstrap_does_not_import_any_runtime_or_repo_shadow(
     suffix = "sh" if shell == "bash" else "ps1"
     bootstrap = scripts / f"bootstrap-check.{suffix}"
     shutil.copy2(PLUGIN / "scripts" / bootstrap.name, bootstrap)
+    shutil.copy2(PLUGIN / "scripts" / f"bootstrap-killswitch-guard.{suffix}", scripts)
+    shutil.copy2(PLUGIN / "scripts" / f"runtime-gate.{suffix}", scripts)
+    shutil.copy2(PLUGIN / "scripts" / "resolve_effective_config.py", scripts)
     plugin_name = "agent-index-bootstrap-probe"
     (payload / "plugin.json").write_text(
         json.dumps({"name": plugin_name}),
@@ -660,6 +664,7 @@ def test_bootstrap_does_not_import_any_runtime_or_repo_shadow(
         "USERPROFILE": str(profile),
         "AGENT_INDEX_ROLE": "host",
         "PYTHONPATH": str(malicious_repo),
+        "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(profile / "bootstrap-killswitch.json"),
         "PYTHONUTF8": "1",
     }
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
@@ -1183,6 +1188,47 @@ def test_blocked_installation_states_never_fall_back_to_legacy(
     assert result.returncode == 126
     assert "blocks invocation" in result.stderr
     assert not marker.exists()
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+@pytest.mark.parametrize("command", ["--version", "--help", "capture"])
+def test_active_cell_option_command_is_one_validator_argument(
+    tmp_path: Path, shell: str, command: str,
+) -> None:
+    script, env = _fixture(tmp_path, shell)
+    cell_root = tmp_path / "cell" / "plugins" / "agent-index"
+    context = cell_root / "install.json"
+    context.parent.mkdir(parents=True)
+    context.write_text("{}\n", encoding="utf-8")
+    env["COPILOT_EXTENSIONS_CONTEXT"] = str(context)
+    env["AGENT_INDEX_ROLE"] = "host"
+    env["TEST_CELL_ROOT"] = str(cell_root)
+    env["TEST_INSTALLATION_STATUS"] = json.dumps(
+        {"status": "ready", "reason": "namespaced-active",
+         "actualMode": "namespaced", "desiredMode": "namespaced",
+         "context": str(context), "marketplaceId": "example--1234",
+         "policy": {"state": "valid", "enabled": True}}
+    )
+    captured = tmp_path / "dispatch-args.json"
+    env["TEST_PYTHON"] = str(_fake_runtime(
+        tmp_path,
+        f"import json, sys\nfrom pathlib import Path\nPath({str(captured)!r}).write_text(json.dumps(sys.argv[1:]))\n",
+        runtime_root=cell_root,
+    ))
+    (script.parent / "cell-runtime.py").write_text(
+        "import argparse, json, os\n"
+        "p=argparse.ArgumentParser()\np.add_argument('action')\n"
+        "p.add_argument('--context')\np.add_argument('--expected-marketplace-id')\n"
+        "p.add_argument('--durable-home')\np.add_argument('--command', required=True)\n"
+        "a=p.parse_args()\n"
+        f"assert a.command == {command!r}\n"
+        "print(json.dumps({'status':'ready','runtimeVersion':'9.9.9+host',"
+        "'interpreter':os.environ['TEST_PYTHON']}))\n",
+        encoding="utf-8",
+    )
+    result = _run(shell, script, env, command)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(captured.read_text()) == [command]
 
 
 def test_active_cell_dispatch_sets_cell_roots_and_context(tmp_path: Path) -> None:

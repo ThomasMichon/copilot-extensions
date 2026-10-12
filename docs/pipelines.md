@@ -448,6 +448,17 @@ it can take up to a day to appear.
   canonical, and the version it would get if its pending changefiles were
   consumed right now — entirely read-only against the real checkout. Good
   for "what would ship" without touching anything.
+- **`python tools/materialize_main.py --candidate --dest <new-directory>`**
+  builds the complete marketplace from committed HEAD using the promotion
+  materializers, with a durable `MATERIALIZED.json` whole-tree hash receipt.
+  Unlike `PREVIEW.json`'s informational `source_commit`, this receipt binds that
+  single source claim to the artifact's paths, bytes and executable/link identity.
+  Commit first; the builder intentionally does not claim uncommitted bytes as
+  HEAD. The standalone copy needs no Git checkout. Clean-room candidate consumers
+  verify the expected source commit and every path with their separately mounted
+  trusted library before accepting the product; the candidate's own tools do not
+  verify themselves. This is reproducible source provenance, not a signature from
+  an untrusted builder, and is not shipped-release or clean-room pass evidence.
 - **For actually running uncommitted/unmerged code against the real
   deployed CLI**, use the **mutable-dev-slot** pattern:
   `docs/patterns/mutable-dev-slot.md`. It gives each plugin a claimed,

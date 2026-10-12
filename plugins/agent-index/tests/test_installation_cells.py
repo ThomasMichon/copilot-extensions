@@ -4863,7 +4863,10 @@ def test_cell_installers_preserve_reserved_coordinator_exit(
     assert result.returncode == exit_code, result.stderr
     lines = capture.read_text(encoding="utf-8").splitlines()
     # Maintenance must leave the replaceable payload while using absolute inputs.
-    assert Path(lines[0]).resolve() == profile.resolve()
+    coordinator_cwd = Path(lines[0]).resolve()
+    assert coordinator_cwd == profile.resolve()
+    assert coordinator_cwd != PLUGIN.resolve()
+    assert coordinator_cwd != untrusted_cwd.resolve()
     assert lines[1:3] == ["unset", "unset"]
     assert str(SCRIPT) in lines[3]
     assert str(context) in lines[3]

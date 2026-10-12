@@ -28,7 +28,26 @@ runs through a durable engine daemon at `127.0.0.1:8421` unless an operator opts
 into another engine mode.
 - **Safe activation**: session-start contributes the command catalog and scope
 binding only when one effective repository configuration is active. The session
-hook never stamps a runtime, installs packages, or starts a service.
+hook cheaply stamps metadata and a callable binstub; it never installs packages,
+creates a venv, deploys, registers autostart, or starts a service/engine.
+The bootstrap hook emits exactly `{}` on both success and failure. PowerShell
+runtime-gate exceptions report a diagnostic on stderr and exit nonzero; normal
+child exit codes are forwarded across the hook process boundary.
+- **Bounded POSIX migration:** legacy startup and installer stamp writers can
+  remove group-write access from the creator-owned runtime root and the exact
+  `~/.local`/`~/.local/bin` destinations after pinning their no-follow identities.
+  Known group-writable markers and launchers are atomically regenerated only
+  when their bytes match the admitted payload/version or canonical launcher.
+  The publication lock keeps its inode and is never truncated during repair.
+  No arbitrary ancestor, foreign owner, world-writable path, link or multi-link
+  file is repaired. Writable deployed-version markers and unexpected marker or
+  launcher bytes fail explicitly: they require independently verified operator
+  recovery, not an automatic chmod that would make untrusted bytes look safe.
+  Namespaced cell stamps retain strict, non-repairing admission.
+  Installer publication callbacks also mask off group/other write bits while
+  activating runtime markers, without weakening a stricter inherited umask
+  or changing the caller's mask. Thus freshly activated `current-version`
+  and `last-known-good` markers remain readable by strict startup admission.
 - **Self-supervised host lifecycle**: the light host runtime is installed into
 its own versioned slot, and the plugin's installer/runtime commands supervise
 it directly. `install`/`update` rebuild only the light `[store,server]` service
@@ -56,8 +75,9 @@ for materialization and publication guarantees.
    `corpus.sources` entry. A malformed, unsafe, ambiguous, or empty config is
    inactive.
 3. Start a new Copilot session. The command catalog and scope guidance appear
-only for an active config. Session start remains non-mutating: it performs no
-runtime provisioning or service startup itself.
+only for an active config. Session start stamps only metadata/binstubs after
+configuration and installation-governance admission. It performs no runtime
+provisioning or service startup itself; a stamp is not runtime readiness.
 4. Pick a role explicitly:
    - single-machine/local indexer: `agent-index setup --single`
    - remote indexer: run `agent-index setup --indexer <machine> --ssh <alias>`
@@ -104,8 +124,15 @@ contexts fail closed without legacy fallback. Deactivation-pending cells retain
 their existing-runtime read and ownership-checked stop paths, but cannot
 provision or reactivate. Namespaced state/routing/log/cache roots remain
 installation-local; engine `start`/`run` remains blocked there. Session hook
-compatibility entry points are inert in both installation modes, including
-when invoked directly. Absent/default/explicit-false installation policy keeps
+compatibility `ensure-service` entry points are inert in both installation modes.
+`bootstrap-check` only invokes the dependency-light session stamp adapter.
+Before that adapter can mutate the default installation, the vendored machine
+bootstrap-killswitch guard must admit it. An active switch leaves payload pointers,
+binstubs and publication locks untouched and still emits exactly `{}`. Missing,
+malformed or failed guard scripts report an error without stamping; malformed
+switch state retains the canonical fail-open policy. Namespaced cells do not
+read the default installation's machine switch.
+Absent/default/explicit-false installation policy keeps
 the legacy client layout, not legacy host provisioning authority.
 
 ### Testing without an assigned indexer machine

@@ -248,3 +248,68 @@ credential changes, broad policy weakening or unreviewed releases.
   still follow the dev contribution/release boundary, never a source exception.
 - These changes reduce workflow invocations and held review-grace time.
   Required/job check counts and test coverage have not been pruned in this wave.
+
+### 2026-10-12 - New coverage-evidence release blocker
+
+- Run `38250657887` passed canonical source suites but failed promotion because
+  the enrolled agent-worktrees coverage artifact was missing. Its separate
+  coverage rerun exited 2; optional-step handling hid that failure until the
+  required promotion evidence check correctly refused publication.
+- #6319 owns the repair. The collector exception rendered stderr *or* stdout,
+  so a no-data coverage warning hid the pytest collection cause. First preserve
+  both diagnostic streams, then fix the real cause using the live Linux lane.
+- Local Docker has no reachable daemon; no shared service is repaired or
+  started as a side effect. A contained synthetic real-collector failure covers
+  diagnostic behavior locally; this is not the actual worktrees reproduction.
+- No partial baseline, enrollment removal, forced retry or evidence bypass is
+  an acceptable release recovery. The duplicate full/coverage execution remains
+  a consolidation seam after the failure is understood.
+
+### 2026-10-12 - Diagnostic overlap reconciled
+
+- Another driver landed the equivalent diagnostic implementation in #6321.
+  The operator authorized retaining only this campaign's unique regression
+  coverage and journal, adopting that implementation unchanged.
+- #6323 therefore contributes no production diagnostic change; its actual
+  collector failure regression and native-path test expectations remain useful.
+  The real missing-baseline repair stays open under #6319.
+
+### 2026-10-12 - Repair ownership and evidence refreshed
+
+- #6315 merged as `8fdb86fe39f6` after current-head approval and required
+  checks passed. Dependency routing is dev-landed, not yet claimed released.
+- Duplicate diagnostic tracker #6319 transferred to the already-owned #6320.
+  The later run `38289187893` produced all nine baseline artifacts, including
+  worktrees artifact `11766276761`; its publication instead failed the strict
+  no-overwrite materialization check at three migrated vendor destinations.
+- Existing fix #6335 under #6331/#6334 owns that layout repair. Later stale-tip
+  test failures have a merged owner repair #6353. No competing fix or gate
+  bypass is introduced. Observe a new green release before claiming live proof.
+
+### 2026-10-12 - First-wave live publication verified
+
+- Normal release run `38305079883` passed full source suites, all nine enrolled
+  baselines, final promotion, exact PR wait and actual post-merge tagging.
+  Generated #6358 merged at `21:01:09Z` as main `67661d853e8f`; recorded dev
+  input `1fe40334e3e0` includes #6308, #6313 and #6314 by Git ancestry.
+- Old standalone reviewer and identifier workflow files are absent from main.
+  Natural PR event `38308273017` has both guard and review jobs in one run.
+  Natural CI completions `38308478256` and `38308078379` have both scanner and
+  ancestry jobs in one run, with successful independent outcomes.
+- This proves workflow-invocation consolidation is live; it does not prove
+  overall Copilot throughput from a few samples or eliminate job/check records.
+  #6359 separately targets unnecessary executed ancestry jobs on PR completions.
+- #6319 is closed as duplicate, transferred to #6320. The production diagnostic
+  implementation remains #6321's, with only unique regression coverage here.
+  Main optional validation duplication and complete campaign measurement remain
+  unresolved gates; no completion declaration or policy bypass is implied.
+
+### 2026-10-12 - Verified peer repair and next runner reduction
+
+- #6337, not the still-open #6335, supplied the released vendor-layout repair;
+  merged source is `4b920e008227`. #6320 is closed after the real green release.
+  Keep historical owner pointers above as history, not the current blocker.
+- #6359 merged as `dbe9037692dc` after current-head Copilot approval and both
+  required checks passed. It prevents PR CI completions from allocating an
+  ancestry-filter runner, retaining success/ancestry checks for push/manual
+  events. Release and live skip evidence for that latest slice remain pending.

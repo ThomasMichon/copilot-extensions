@@ -10,7 +10,7 @@ import sys
 
 import pytest
 
-from test_install_engine_adoption import environment, function, run_ps
+from test_install_engine_adoption import PLUGIN, environment, function, run_ps
 from test_installer_publication_and_health import publication_fixture
 
 
@@ -30,6 +30,7 @@ def test_posix_runtime_and_engine_acquisition_have_one_complete_writer(tmp_path,
     script = definitions + f"""
 set -uo pipefail
 INSTALL_DIR='{root}'
+SCRIPT_DIR='{PLUGIN / "scripts"}'
 LINK_DIR='{tmp_path / "missing"}'
 _warn() {{ echo "$*" >&2; }}
 export COPILOT_EXT_NO_FLOCK={1 if fallback else 0}

@@ -1988,7 +1988,7 @@ function Install-LogonAutostart {
 # ── Scheduled-task registration: OPT-IN ADVANCED TIER ONLY (never the default) ─
 #    The DEFAULT lifecycle is user-mode: the daemon runs as a plain user process,
 #    started/kept-alive by `Ensure-Running` (install/update/start) and the
-#    sessionStart `ensure` safety net -- NO scheduled task, NO elevation. Scheduled
+#    explicit `ensure` action -- NO scheduled task, NO elevation. Scheduled
 #    tasks are reachable ONLY via the explicit `register-tasks` action, for boxes
 #    that want OS-level AtLogon persistence independent of a Copilot session.
 #    (see docs/install-contract.md § Hard rules).
@@ -2198,7 +2198,7 @@ function Install-Service {
 
 # ── DEFAULT lifecycle: user-mode auto-run (NO scheduled task, NO elevation) ────
 # The default way the daemon runs is a plain user-mode process, started/kept
-# alive by the user-mode CLI and the sessionStart `ensure` safety net. Scheduled
+# alive by the user-mode CLI and explicit `ensure` action. Scheduled
 # tasks are an OPT-IN advanced tier (`register-tasks`) -- never the default, and
 # never in the start/stop path. See docs/install-contract.md § Hard rules.
 function Get-ActiveServicePort {
@@ -2209,7 +2209,7 @@ function Get-ActiveServicePort {
 
 function Get-ActiveSlotPython {
     # The python of the ACTIVE (current-version marker) slot -- the single source
-    # of truth for "which version serves". The sessionStart `ensure` runs the
+    # of truth for "which version serves". Explicit `ensure` can run the
     # INSTALLED-snapshot's install.ps1, whose $LinkPython/$SrcVersion may be OLDER
     # than the active marker (a newer version was activated by a different
     # install.ps1 -- a local/worktree deploy, or a not-yet-reconciled marketplace
@@ -2274,7 +2274,7 @@ function Ensure-ServiceRunning {
         return
     }
     # Deploy the ACTIVE (current-version marker) slot -- NOT $LinkPython (this
-    # install.ps1's own build): a sessionStart `ensure` from an older installed
+    # install.ps1's own build): explicit `ensure` from an older installed
     # snapshot must keep the active version serving, never drag it back (#1504).
     $activePy = Get-ActiveSlotPython
     if (-not (Test-Path $activePy)) { Write-Skip 'Runtime not installed -- service not ensured'; return }
@@ -2298,7 +2298,7 @@ function Ensure-EngineRunning {
 
 function Ensure-Running {
     # The DEFAULT user-mode lifecycle. No task, no elevation. Called by
-    # install/update/start and the sessionStart `ensure`. A host runs the engine
+    # install/update/start and explicit `ensure`. A host runs the engine
     # then the local service; a client runs neither (Ensure-ServiceRunning
     # self-gates on role), so this is a no-op on a client.
     if ((Get-ActivationRole) -eq 'host') { Ensure-EngineRunning }
@@ -2638,9 +2638,7 @@ switch ($Action) {
         Write-Skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
     }
     'ensure' {
-        # User-mode safety net + default durable auto-start registration; also
-        # stamps the binstub on a never-provisioned machine (fits a sessionStart
-        # hook's grace window -- no venv build, no heavy runtime provisioning here).
+        # Explicit lifecycle action; never invoked by a sessionStart hook.
         $ps1Stub = Join-Path $LocalBin 'agent-index.ps1'
         if (-not (Test-Path -LiteralPath $ps1Stub -PathType Leaf)) {
             foreach ($dir in @($InstallDir, $LocalBin)) {

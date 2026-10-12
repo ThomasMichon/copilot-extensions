@@ -866,9 +866,20 @@ class TestMergeChunkResults:
 
 
 class TestBaselineCollectionErrorContract:
-    """Fast, mocked tests for the two non-clean collection outcomes --
-    neither spawns a real subprocess, so both run in the always-on
-    synthetic lane alongside `TestSelectTests`/`TestComputeFallbackSet`."""
+    """Fast mocked error contracts plus an explicitly opt-in subprocess case."""
+
+    @pytest.mark.parametrize("stdout,stderr", [
+        ("collection failed", ""),
+        ("", "process failed"),
+        ("ModuleNotFoundError: missing fixture dependency", "CoverageWarning: No data was collected"),
+    ])
+    def test_error_preserves_both_diagnostic_streams(self, stdout, stderr):
+        error = baseline_mod.BaselineCollectionError(2, stdout, stderr)
+        assert error.returncode == 2
+        assert error.stdout == stdout and error.stderr == stderr
+        for stream in (stdout, stderr):
+            if stream:
+                assert stream in str(error)
 
     def test_nonzero_exit_raises_baseline_collection_error(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -913,6 +924,28 @@ class TestBaselineCollectionErrorContract:
         # need to catch `BaselineCollectionError`; confirm the raw
         # `TimeoutExpired` never escapes as the exception type itself.
         assert not isinstance(exc_info.value, subprocess_module.TimeoutExpired)
+
+    def test_real_collection_error_is_not_hidden_by_coverage_warning(self, tmp_path):
+        if os.environ.get("CGS_RUN_INTEGRATION_TEST") != "1":
+            pytest.skip("opt-in only: real uv/coverage subprocess")
+        tests = tmp_path / "tests"
+        tests.mkdir()
+        (tests / "test_missing_dependency.py").write_text(
+            "import missing_baseline_fixture_dependency\n", encoding="utf-8",
+        )
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "example.py").write_text("VALUE = 1\n", encoding="utf-8")
+        with pytest.raises(baseline_mod.BaselineCollectionError) as caught:
+            baseline_mod.collect_baseline(
+                cwd=tmp_path, test_path="tests", cov_source="src", plugin="fixture",
+                timeout_s=60,
+            )
+        assert caught.value.returncode == 2
+        assert "missing_baseline_fixture_dependency" in caught.value.stdout
+        assert "missing_baseline_fixture_dependency" in str(caught.value)
+        assert "No data was collected" in caught.value.stderr
+        assert caught.value.stderr.rstrip() in str(caught.value)
 
     def test_measured_commit_round_trips_into_the_baseline_dict(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -2583,4 +2616,3 @@ class TestDecide:
         result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {})
 
         json.dumps(result.as_dict())  # must not raise
-

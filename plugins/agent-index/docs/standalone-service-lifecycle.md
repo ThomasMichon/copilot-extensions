@@ -33,14 +33,45 @@ supervision.
   such as pre-login start, missed-trigger recovery, or task-owned restart
   policy. Choosing that tier supersedes the matching HKCU Run entries rather
   than stacking both.
-- **Session start:** `hooks.json` publishes guidance and invokes the installer
-  `ensure` action as a bounded safety net. That action can health-check and
-  restore an already-installed configured host and its engine without
-  provisioning dependencies. The separate `ensure-service` compatibility
-  scripts are no-ops; they are not the active hook wiring.
+- **Session start:** `hooks.json` publishes guidance and invokes only the
+  dependency-light metadata/binstub stamp adapter. No install script,
+  provisioning, package acquisition, venv creation, service/engine startup,
+  restart or autostart registration is permitted at this seam. Stamping is not
+  readiness. First admitted binstub operational use provisions through the real
+  runtime gate after repo opt-in and explicit role/setup intent; it never
+  silently chooses a host. Direct installer invocation via `<repo> update`
+  remains an explicit deployment path. `ensure-service` compatibility scripts
+  remain no-ops.
+  The shared Python stamp transaction pins every root ancestor with no-follow
+  directory handles, validates file identity/type and creator ownership,
+  and keeps the installer's existing `.publication.lock` inode open without
+  truncation throughout metadata publication. POSIX uses nonblocking `fcntl`
+  locking even without the `flock` executable. Publication roots and metadata
+  must be owned by the effective user and reject group/other write permission;
+  pinned-root permissions are rechecked before each file operation. Ordinary
+  read-only group/other access remains permitted. Ancestors must be owned by the
+  effective user or root and disallow shared namespace mutation; trusted sticky
+  ancestors such as `/tmp` remain usable, but are never accepted as a publication
+  root. Ancestor ownership and permissions are rechecked before file operations;
+  existing deployment directories are never silently chmodded.
+  Windows rejects reparse points
+  using opened handles, denies delete sharing to pin ancestors, checks owner
+  SIDs and retains the installer's publication mutex. Windows accepts the token
+  user or an enabled `SE_GROUP_OWNER` group (never mere membership, a disabled
+  group or a deny-only group), including the default Administrators ownership
+  used by elevated creators. The opened root and files must have a non-null
+  DACL with no mutation grants outside those creator identities, SYSTEM,
+  Administrators and OWNER RIGHTS. Read-only and inherit-only grants do not
+  authorize mutation; unsupported ACE types fail closed. This does not elevate,
+  change ACLs or admit an ordinary shared writable directory. Only genuine contention
+  is a successful no-op; unsafe paths and I/O/lock errors fail explicitly.
 - **Installation cells:** namespaced installation cells build and reconcile the
   host runtime with the same local slot/cutover primitives as legacy mode. They
   remain self-contained and do not require `agent-dispatch`.
+  Cell/slot installer actions invoke the coordinator from the user profile,
+  outside both the payload and the invoking directory, with isolated Python
+  and no inherited `PYTHONPATH` or `PYTHONHOME`. Reserved coordinator exit
+  codes propagate unchanged.
 
 ## Consequences
 

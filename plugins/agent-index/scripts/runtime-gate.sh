@@ -43,7 +43,7 @@ if [ -z "$PY_GATE" ] || [ ! -f "$EFFECTIVE_RESOLVER" ]; then
         exit 0
     fi
     _emit_inactive
-    [ "$COMMAND" = status ] && exit 0
+    case "$COMMAND" in status|__session-stamp) exit 0 ;; esac
     exit 2
 fi
 EFFECTIVE_JSON="$("$PY_GATE" -E -X utf8 "$EFFECTIVE_RESOLVER" \
@@ -71,7 +71,7 @@ if [ "${EFFECTIVE_FIELDS[0]:-0}" != 1 ]; then
         exit 0
     fi
     _emit_inactive
-    [ "$COMMAND" = status ] && exit 0
+    case "$COMMAND" in status|__session-stamp) exit 0 ;; esac
     exit 2
 fi
 [ -n "${EFFECTIVE_FIELDS[1]:-}" ] &&
@@ -315,6 +315,18 @@ _find_management_python() {
     return 1
 }
 
+if [ "$COMMAND" = __session-stamp ]; then
+    [ -z "${AGENT_INDEX_FORWARDED:-}" ] || exit 0
+    if [ "$ACTUAL_MODE" = namespaced ] &&
+       { [ "$RESOLUTION_STATUS" != ready ] || [ "$RESOLUTION_REASON" != namespaced-active ]; }; then
+        printf '%s\n' '[agent-index] pending installation cannot stamp session metadata.' >&2
+        exit 126
+    fi
+    # Python owns the no-follow lock descriptor through every metadata write.
+    "$PY_GATE" -I -X utf8 "$SCRIPT_DIR/session-stamp.py" "$ROOT" "$PAYLOAD_ROOT" "$ACTUAL_MODE"
+    exit $?
+fi
+
 if [ "$ACTUAL_MODE" = namespaced ] &&
    [ "$COMMAND" = engine ] &&
    { [ "${2:-status}" = start ] || [ "${2:-status}" = run ]; }; then
@@ -397,7 +409,7 @@ _resolve_ready_runtime() {
             --context "$CONTEXT" \
             --expected-marketplace-id "$MARKETPLACE_ID" \
             --durable-home "$CONTEXT_DURABLE_HOME" \
-            --command "$COMMAND")" || {
+            "--command=$COMMAND")" || {
                 printf '%s\n' '[agent-index] selected installation runtime failed operative validation.' >&2
                 exit 126
             }

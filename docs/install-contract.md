@@ -1382,10 +1382,21 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
      started and kept alive by a user-mode *ensure* — health-gate the live routing
      endpoint; if unhealthy, start it via the user-mode CLI (agent-index:
      `agent-index deploy` on Windows; `systemctl --user` / nohup on POSIX). The
-     installer's `install` / `update` / `start`, **and a `sessionStart` `ensure`
-     hook**, all funnel through this same idempotent ensure. A Copilot session
-     therefore guarantees the daemon, so it survives reboots **without** an
-     AtLogon scheduled task.
+     installer's explicit `install` / `update` / `start` actions funnel through
+     this idempotent ensure. **Index sessionStart is metadata/binstub-only:**
+     it never invokes install/ensure/provision, acquires packages, creates
+     venvs, registers autostart or starts services/engines. A session stamp is
+     not a daemon guarantee. Index's first admitted operational binstub use
+     provisions through its runtime gate after repository opt-in and explicit
+     role/setup intent; direct `<repo> update` remains an explicit deploy path.
+     Legacy POSIX stamps also provide bounded migration of creator-owned
+     group-writable stamp destinations. They pin exact no-follow identities,
+     regenerate known marker/launcher bytes atomically, preserve the lock inode,
+     and never trust writable deployed-version state or arbitrary marker bytes.
+     Foreign owners, world-writable paths, links, multi-link files and unsafe
+     unrelated ancestors still fail explicitly. This is metadata repair, not
+     installer invocation or runtime provisioning. Namespaced cells retain
+     strict admission without this legacy permission migration.
    - **Windows:** the default path must NOT call `Install-Service` /
      `Register-ScheduledTask` / `Start-ScheduledTask`. Those live only behind the
      opt-in `register-tasks` action (rule 8). POSIX `systemd --user` units are
@@ -2185,7 +2196,7 @@ installation-mode resolver proves that actual mode. Transition cleanup
 removes only ownership-proven legacy wrappers, preserving unrelated user
 commands; a desired flag or environment hint alone is insufficient.
 
-So every Python runtime plugin **self-reconciles at session start**: it declares
+Most Python runtime plugins **self-reconcile at session start**: they declare
 a `sessionStart` hook that re-runs its own installer **only when the deployed
 version drifts** from the payload -- **unless the bootstrap-killswitch is
 active**, in which case that plugin's hook skips its own reconcile entirely for
@@ -2208,12 +2219,20 @@ vision).
 - `hooks.json` `hooks.sessionStart` runs the plugin's `scripts/bootstrap-check.{ps1,sh}`
   — either the copy the installer deploys to `~/.<plugin>/bin/`, or (the
   self-locating variant) the one shipped in the plugin payload's `scripts/` dir.
-- `scripts/bootstrap-check.{ps1,sh}` is a **version-gated reconcile**: it compares
+- For those self-reconciling plugins, `scripts/bootstrap-check.{ps1,sh}` is a **version-gated reconcile**: it compares
   the deployed version (`~/.<plugin>/deploy-manifest.json` → `source.version`) to
   the payload (`pyproject.toml`) and, on drift (or a missing venv), re-runs the
   plugin's canonical installer (`init.*`, or `install.* install`) **in the
   background** — the atomic versioned-venv swap keeps concurrent use safe, and
   backgrounding keeps session start non-blocking.
+- **Index is the explicit-first-use exception:** its session-start bootstrap
+  checks the default-installation killswitch, resolves repository and installation
+  admission, then publishes only metadata/binstubs. A validated namespaced-active
+  context stamps only cell-local metadata, never a global compatibility launcher;
+  the default-installation killswitch does not apply to that cell. The hook never
+  invokes an installer, provisions a venv or starts/registers a service or engine.
+  First admitted operational binstub use or explicit `<repo> update` owns
+  provisioning and reconciliation. A stamp is not runtime readiness.
 - A namespaced Agent Machines cell uses the schema-4 distinction defined above:
   bootstrap compares the loaded payload only with reconciled `source`
   provenance, validates `runtime` against the cell-local marker/interpreter, and
@@ -2228,7 +2247,8 @@ vision).
   operation while namespaced rollout is still opt-in.
 
 This reconciles the **tool**, never machine state or config. First install remains
-the one-time setup step; the hook only keeps an installed runtime current.
+the one-time setup step; a self-reconciling hook keeps an installed runtime
+current. Index instead defers that work to admitted first use or explicit update.
 
 ## Enforcement
 

@@ -1079,16 +1079,23 @@ _ensure_uv_index() {
 
 # Deploy a stable machine-global redirector to the payload-owned lifecycle gate.
 # The gate owns setup consent, runtime readiness, and provisioning.
+_write_index_stamp_file() {
+    local python
+    python="$(_bootstrap_python)" || python="$(_find_python)" || return 1
+    "$python" -I "$SCRIPT_DIR/session-stamp.py" publish "$1" "${2:-metadata}"
+}
+
 deploy_binstub() {
     _deploy_index_binstub() {
     _index_publication_fresh || { _skip 'Newer runtime or stamp superseded launcher publication'; return 0; }
-    mkdir -p "$LOCAL_BIN" "$INSTALL_DIR/bin"
+    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" |
+        _write_index_stamp_file "$INSTALL_DIR/payload-dir" || return 1
+    (umask 022; mkdir -p "$INSTALL_DIR/bin") || return 1
     # Co-deploy the canonical marker-only resolver (uniform-runtime-resolution, #765).
     for r in resolve-runtime.sh resolve-runtime.ps1; do
         [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
     done
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
-    cat > "$STUB" << 'STUBEOF'
+    _write_index_stamp_file "$STUB" executable << 'STUBEOF'
 #!/usr/bin/env bash
 _name="agent-index"
 _root="$HOME/.$_name"
@@ -1100,21 +1107,21 @@ if [ ! -f "$_gate" ]; then
 fi
 exec "$_gate" "$@"
 STUBEOF
-    chmod +x "$STUB"
+    [[ $? == 0 ]] || return 1
     _ok "Binstub: $STUB (setup-gated)"
     }
     _with_index_publication_lock _deploy_index_binstub
 }
 
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build until
-# explicit setup (fits a sessionStart hook's grace window). No venv, no uv.
+# explicit setup. This installer action is not a session hook. No venv, no uv.
 do_stamp() {
     _stamp_index_payload() {
     _index_publication_fresh || { _skip 'Newer runtime or stamp superseded stamp'; return 0; }
     echo ''; echo '=== agent-index stamp (defer runtime to explicit setup) ==='; echo ''
-    mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
-    deploy_binstub
-    printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/stamped-version"
+    deploy_binstub || return 1
+    printf '%s\n' "$SRC_VERSION" |
+        _write_index_stamp_file "$INSTALL_DIR/stamped-version" || return 1
     _ok "Stamped: binstub on PATH; runtime provisions after explicit setup."
     }
     _with_index_publication_lock _stamp_index_payload
@@ -1227,8 +1234,14 @@ _with_index_advisory_lock() (
         return 1
     fi
     timeout=$((10#$timeout))
-    local parent lock lock_python="" use_flock=0
+    local parent lock lock_python="" use_flock=0 previous_umask
+    previous_umask="$(umask)"
+    umask 077
     parent="$(dirname "$target")"
+    if [[ "$descriptor" == 9 ]]; then
+        lock_python="$(_bootstrap_python)" || lock_python="$(_find_python)" || return 1
+        "$lock_python" -I "$SCRIPT_DIR/session-stamp.py" prepare-lock "$parent" || return 1
+    fi
     mkdir -p "$parent" || return 1
     lock="$parent/.$(basename "$target").lock"
     if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
@@ -1278,11 +1291,13 @@ PY
     elif [[ "$descriptor" == 8 ]]; then
         exec 8>"$lock" || return 1
     elif [[ "$descriptor" == 9 ]]; then
-        exec 9>"$lock" || return 1
+        exec 9<>"$lock" || return 1
+        "$lock_python" -I "$SCRIPT_DIR/session-stamp.py" verify-lock "$parent" || return 1
     else
         _warn 'Invalid installer lock descriptor'
         return 1
     fi
+    umask "$previous_umask"
     _release_index_build_lock() {
         local rc=$?
         trap - EXIT
@@ -1322,6 +1337,10 @@ _with_index_publication_lock() {
     else
         _index_publication_callback() {
             local __index_publication_root="$INSTALL_DIR"
+            local callback_umask
+            callback_umask="$(umask)"
+            # Marker-only activation uses fresh temp files; never inherit shared write.
+            umask "$(printf '%04o' "$((8#$callback_umask | 8#022))")"
             "$@"
         }
         _with_index_advisory_lock "$INSTALL_DIR/publication" 9 20 _index_publication_callback "$@"
@@ -2144,9 +2163,7 @@ case "$ACTION" in
         _install_logon_autostart
         _skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
         ;;
-    ensure)  # user-mode safety net + default durable auto-start registration; also
-             # stamps the binstub on a never-provisioned machine (fits a sessionStart
-             # hook's grace window -- no venv, no uv, no heavy runtime build here)
+    ensure)  # Explicit lifecycle action; never invoked by a sessionStart hook.
         [ -x "$STUB" ] || {
             mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
             deploy_binstub
