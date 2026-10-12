@@ -184,7 +184,8 @@ repository creation, or private-environment capture was part of that proposal.
   changefile-bearing plugin slice. No campaign execution lead is implicitly
   appointed, and the overall Plan/Validation Plan and Active status remain open.
 - Canonical index validation also repaired two moved archive link targets
-  without changing those efforts' recorded status or claiming their work.
+  and aligned their index grouping with the existing canonical Done status,
+  without editing those archived efforts or claiming their work.
 
 ### 2026-10-12 — Documentation structure and prose claimed
 - Reused umbrella `#5799` and reviewed proposal `#5807`; no competing open

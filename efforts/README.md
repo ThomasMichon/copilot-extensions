@@ -64,7 +64,6 @@ that pattern to this repository.
 | [agent-bridge Contract Evolution](active/agent-bridge-contract-evolution/README.md) | Draft | #1460 |
 | [agent-bridge AHP Convergence](active/agent-bridge-ahp-convergence/README.md) | Draft | #1266, #1308 |
 | [agent-bridge Delegation Convergence](active/agent-bridge-delegation-convergence/README.md) | Active | #1448 |
-| [agent-bridge Attention Waits](2026/09/03%20agent-bridge-attention-waits/README.md) | Draft | #1450 |
 | [agent-bridge Session Discovery](active/agent-bridge-session-discovery/README.md) | Draft | #2530 |
 | [agent-bridge CLI-Mode Sessions](active/agent-bridge-cli-mode-sessions/README.md) | Active | See effort |
 | [Proposed Alignment/Convergence of Observable agent-bridge CLI Sessions](active/agent-bridge-cli-session-alignment/README.md) | Active | See effort |
@@ -75,7 +74,6 @@ that pattern to this repository.
 | [Review Automation Reliability](active/review-automation-reliability/README.md) | Draft | See effort |
 | [Marketplace-Scoped Installations](active/marketplace-scoped-installations/README.md) | Active | #1096 |
 | [Native-Construct Convergence](active/native-construct-convergence/README.md) | Active | #985 |
-| [Plugin Process Hygiene](2026/09/13%20plugin-process-hygiene/README.md) | Active | #736 |
 | [Tiered Payload Provisioning](active/tiered-payload-provisioning/README.md) | Draft | See effort |
 | [Governed Python Artifact Promotion](active/governed-python-artifact-promotion/README.md) | Draft | #4876 |
 | [Progressive Context Disclosure](active/progressive-context-disclosure/README.md) | Active | #1612 |
@@ -102,6 +100,8 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [agent-bridge Attention Waits](2026/09/03%20agent-bridge-attention-waits/README.md) | Done; archived | #1450 |
+| [Plugin Process Hygiene](2026/09/13%20plugin-process-hygiene/README.md) | Done; archived | #736 |
 | [agent-dispatch Workers Configuration Section](2026/10/12%20agent-dispatch-workers-config-section/README.md) | Done; local controls and native override proof landed | #6282; remote UI/validation transferred to #6283 |
 | [PR Recovery Break Glass](2026/10/12%20pr-recovery-break-glass/README.md) | Done; released recovery demonstrated | #5817 |
 | [Mux Child Window Suppression](2026/10/12%20mux-child-window-suppression/README.md) | Done; published repair, verified reachable rollout, remaining adopter verification transferred | #6040 |
