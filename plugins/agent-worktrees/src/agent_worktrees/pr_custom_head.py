@@ -7,7 +7,8 @@ from . import git_ops, pr_authority, pr_publish, providers
 from .providers.pr_source import same_repository
 
 
-def verify_attested(record, repo, pr, remote: str, expected: str, *, cwd: str) -> bool:
+def verify_attested(record, repo, pr, remote: str, expected: str, *, cwd: str,
+                    config=None, observed=None, remote_tip: str | None = None) -> bool:
     """Require exact saved publication ownership and live provider/remote agreement.
 
 This is not an adoption or recovery path: missing historical attestation
@@ -27,19 +28,22 @@ cannot be replaced by matching strings supplied through set-pr.
         if pr.repo.lower() != (git_ops.remote_slug(repo.remote, cwd=cwd) or "").lower():
             return False
         pr_authority.assert_exclusive(
-            cfg.load_config(project=record.repo), record, pr, identity=identity,
+            config or cfg.load_config(project=record.repo), record, pr, identity=identity,
         )
-        provider = providers.get_provider(pr.provider)
-        observed = provider.get_pull(
-            pr.repo, int(pr.number), api_base=repo.pr.api_base,
-            token=providers.account_token_for_slug(pr.repo, repo.pr),
-        )
+        if observed is None:
+            provider = providers.get_provider(pr.provider)
+            observed = provider.get_pull(
+                pr.repo, int(pr.number), api_base=repo.pr.api_base,
+                token=providers.account_token_for_slug(pr.repo, repo.pr),
+            )
+        if remote_tip is None:
+            remote_tip = pr_publish._tip(remote, pr.branch, cwd)
         return (
             observed.number == pr.number and observed.state.lower() == "open"
             and not observed.merged and observed.head_sha == expected
             and observed.head_ref == pr.branch and bool(observed.head_url)
             and same_repository(pr_publish._identity(observed.head_url, cwd), identity, pr.provider)
-            and pr_publish._tip(remote, pr.branch, cwd) == expected
+            and remote_tip == expected
         )
-    except (OSError, ValueError, RuntimeError, AttributeError, TypeError):
+    except (OSError, ValueError, RuntimeError):
         return False

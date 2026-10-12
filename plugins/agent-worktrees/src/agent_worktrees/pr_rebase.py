@@ -229,7 +229,7 @@ def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
         or dest in protected or source in protected
         or not dest.startswith(("pr/", "feature/", "user/"))
     ):
-        return refuse("The saved PR identity/head or private suffix-bound destination is invalid.")
+        return refuse("The saved PR identity/head or protected/private destination is invalid.")
     from . import pr_publish
     if remote != (pr.remote or repo.remote) and (
         pr.remote or remote != pr_publish.push_remote(repo, pr, cwd)

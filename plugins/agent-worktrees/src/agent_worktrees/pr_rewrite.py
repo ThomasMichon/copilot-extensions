@@ -122,13 +122,10 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
             slug = pr_publish.push_slug(target.remote, cwd=cwd)
             if not identity or not slug:
                 raise ValueError(pr_publish.REPOINTED)
-            if not recovery and not pr.branch.endswith("-" + git_ops.worktree_suffix(worktree_id)):
-                from .pr_custom_head import verify_attested
-                if not verify_attested(fresh, repo, pr, target.remote, pr.head_sha, cwd=cwd):
-                    raise ValueError("Custom PR head lacks exact saved and live publication ownership.")
             if ((not recovery or pr.rewrite_identity)
                     and identity != (pr.rewrite_identity or legacy_identity(pr, cwd))):
                 raise ValueError("PR publication destination changed; nothing was pushed.")
+            observed = None
             if pr.number:
                 observed = observe_pr(config, pr)
                 if observed.merged or observed.state.lower() != "open" or observed.head_sha != pr.head_sha:
@@ -142,8 +139,14 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
                     )
                 ):
                     raise ValueError("Provider did not confirm this exact PR head and destination; nothing was pushed.")
-            if pr_publish._tip(target.remote, pr.branch, cwd) != pr.head_sha:
+            remote_tip = pr_publish._tip(target.remote, pr.branch, cwd)
+            if remote_tip != pr.head_sha:
                 raise ValueError("PR remote head no longer matches the recorded lease; inspect and reconcile it.")
+            if not recovery and not pr.branch.endswith("-" + git_ops.worktree_suffix(worktree_id)):
+                from .pr_custom_head import verify_attested
+                if not verify_attested(fresh, repo, pr, target.remote, pr.head_sha, cwd=cwd,
+                                       config=config, observed=observed, remote_tip=remote_tip):
+                    raise ValueError("Custom PR head lacks exact saved and live publication ownership.")
             if not git_ops.is_clean(cwd=cwd):
                 raise ValueError("Working tree has uncommitted changes; commit them before --rewrite-pr.")
             head_sha = git_ops.git(

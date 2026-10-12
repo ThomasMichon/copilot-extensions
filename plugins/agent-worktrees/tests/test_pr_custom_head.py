@@ -124,3 +124,19 @@ def test_public_explicit_rewrite_round_trip_and_stale_live_head(pr_repo, monkeyp
     _git("commit", "-m", "later", cwd=path)
     assert not finalize.push_changes(record.worktree_id, config, rewrite_pr=True)
     assert _git("--git-dir", str(remote), "rev-parse", observed.head_ref, cwd=path) == published
+
+
+@pytest.mark.guard
+def test_fork_head_identity_is_distinct_from_base_pr_repository(pr_repo, monkeypatch):
+    config, record, path, remote, old, observed = _attested(pr_repo, monkeypatch)
+    record.pr.rewrite_identity = "example.com/contributor/project"
+    observed.head_url = "https://example.com/contributor/project"
+    monkeypatch.setattr(pr_publish, "push_identity", lambda *a, **k: record.pr.rewrite_identity)
+    monkeypatch.setattr(git_ops, "remote_slug",
+                        lambda remote, **k: "example/project" if remote == "origin" else "contributor/project")
+    monkeypatch.setattr(pr_publish, "_tip", lambda *a: old)
+    assert pr_custom_head.verify_attested(record, config.default_repo, record.pr, "fork", old, cwd=str(path),
+                                          config=config, observed=observed, remote_tip=old)
+    record.pr.repo = "contributor/project"
+    assert not pr_custom_head.verify_attested(record, config.default_repo, record.pr, "fork", old, cwd=str(path),
+                                              config=config, observed=observed, remote_tip=old)
