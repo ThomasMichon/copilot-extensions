@@ -69,6 +69,9 @@ bundle using GitHub OIDC, with `contents: read`, `id-token: write` and
 `attestations: write`. Neither signing authority nor release-write authority
 substitutes for the other. Manual promotion must run from the default branch;
 an otherwise-valid dev-ref dispatch cannot supply the trusted signing workflow.
+The attestation's source digest identifies the trusted default-branch workflow
+run, not the generated payload commit. The signed transfer index separately
+binds the validated dev SHA and composed payload tree.
 
 The privileged job downloads only the same run's named transfer artifact.
 Before consuming metadata, `gh attestation verify` requires this repository,

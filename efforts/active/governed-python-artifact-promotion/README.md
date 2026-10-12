@@ -459,6 +459,10 @@ win grows with build complexity.
   import/parsing/hash/export behavior on 3.10. The effort index now agrees
   with Active status; the plan distinguishes implemented pipeline/trust
   work from its still-open native-signing/release validation gate.
+- Fast hosted composition exposed a real two-phase tag collision:
+  preparation and validation can produce the same commit within one second.
+  Preparation now creates no tag/ref; only the subsequent ordinary promotion
+  creates its tag. The real subprocess regression checks this boundary.
   Dependency closure/admission, shared-installer consumption, the full
   consumer/platform matrix and durable retention remain open.
 

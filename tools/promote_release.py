@@ -779,7 +779,8 @@ def promote(
             # actual post-merge commit, not this pre-merge candidate.
             _git(["push", "origin", f"{commit}:refs/heads/{candidate_branch}"], cwd=scratch)
         else:
-            _git(["tag", "-a", tag_name, "-m", message, commit], cwd=scratch)
+            if build_python_artifacts_dir is None:
+                _git(["tag", "-a", tag_name, "-m", message, commit], cwd=scratch)
             if push:
                 _git(["push", "origin", f"{commit}:refs/heads/main"], cwd=scratch)
                 _git(["push", "origin", tag_name], cwd=scratch)

@@ -201,12 +201,14 @@ def test_real_export_subprocess_uses_bumped_candidate_without_polluting_it(repo,
     assert index["artifacts"][0]["version"] == "0.1.1-dev1"
     assert [entry["plugin"] for entry in index["artifacts"]] == ["demo-plugin", "other-plugin"]
     assert "backend-residue.txt" not in _git(["ls-tree", "-r", "--name-only", prepared["commit"]], repo)
+    assert _git(["tag", "--points-at", prepared["commit"]], repo) == ""
     assert len(_git(["worktree", "list"], repo).splitlines()) == 1
     promoted = promotion.promote(
         repo=repo, dev_ref="dev", main_ref="main", python_artifacts_dir=directory,
     )
     assert promoted["promoted"]
     assert prepared["bumps"] == promoted["bumps"]
+    assert promoted["tag"] in _git(["tag", "--points-at", promoted["commit"]], repo).splitlines()
 
 
 def test_missing_artifacts_fail_before_candidate_push(repo, tmp_path, monkeypatch):
