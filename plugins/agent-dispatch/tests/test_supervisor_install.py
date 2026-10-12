@@ -50,6 +50,7 @@ def _shell_function(name: str) -> str:
     return text[start : text.index("\n}\n", start)]
 
 
+@pytest.mark.guard
 @pytest.mark.parametrize("function", ["_install_service", "_install_supervisor_unit"])
 def test_systemd_restart_limits_in_unit_section(function: str) -> None:
     body = _shell_function(function)
@@ -61,6 +62,7 @@ def test_systemd_restart_limits_in_unit_section(function: str) -> None:
     assert body.count("StartLimitBurst=") == 1
 
 
+@pytest.mark.guard
 def test_coordinator_reset_precedes_restart_but_not_graceful_refresh() -> None:
     body = _shell_function("_install_service")
     no_restart = body.index('if [[ "${1:-}" == "--no-restart" ]]; then')
@@ -72,6 +74,7 @@ def test_coordinator_reset_precedes_restart_but_not_graceful_refresh() -> None:
     assert "systemctl --user restart" not in body[no_restart:end_gate]
 
 
+@pytest.mark.guard
 def test_supervisor_reset_is_audited_and_preserves_enablement_gates() -> None:
     body = _shell_function("_install_supervisor_unit")
     gate = body.index('[[ "$mode" == "serve" ]] || _supervisor_labels_configured')
