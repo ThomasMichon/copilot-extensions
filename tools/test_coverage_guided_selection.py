@@ -757,7 +757,7 @@ class TestPlanChunks:
         # order matches sorted discovery order (stable, reproducible
         # chunking across runs).
         flattened = [path for chunk in chunks for path in chunk]
-        assert flattened == sorted(f"tests/{name}" for name in names)
+        assert flattened == sorted(str(Path("tests") / name) for name in names)
 
     def test_large_suite_includes_both_default_pytest_filename_patterns(
         self, tmp_path: Path
@@ -776,7 +776,7 @@ class TestPlanChunks:
         chunks = baseline_mod._plan_chunks(tmp_path, "tests", max_files_per_chunk=3)
 
         flattened = {path for chunk in chunks for path in chunk}
-        assert flattened == {f"tests/{name}" for name in names}
+        assert flattened == {str(Path("tests") / name) for name in names}
 
     def test_large_suite_outside_cwd_keeps_absolute_paths(
         self, tmp_path: Path
@@ -2583,5 +2583,4 @@ class TestDecide:
         result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {})
 
         json.dumps(result.as_dict())  # must not raise
-
 
