@@ -1389,6 +1389,14 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
      not a daemon guarantee. Index's first admitted operational binstub use
      provisions through its runtime gate after repository opt-in and explicit
      role/setup intent; direct `<repo> update` remains an explicit deploy path.
+     Legacy POSIX stamps also provide bounded migration of creator-owned
+     group-writable stamp destinations. They pin exact no-follow identities,
+     regenerate known marker/launcher bytes atomically, preserve the lock inode,
+     and never trust writable deployed-version state or arbitrary marker bytes.
+     Foreign owners, world-writable paths, links, multi-link files and unsafe
+     unrelated ancestors still fail explicitly. This is metadata repair, not
+     installer invocation or runtime provisioning. Namespaced cells retain
+     strict admission without this legacy permission migration.
    - **Windows:** the default path must NOT call `Install-Service` /
      `Register-ScheduledTask` / `Start-ScheduledTask`. Those live only behind the
      opt-in `register-tasks` action (rule 8). POSIX `systemd --user` units are

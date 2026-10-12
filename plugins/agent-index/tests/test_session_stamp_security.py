@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -20,7 +21,7 @@ def _hook(tmp_path: Path, shell: str = "bash") -> tuple[list[str], dict[str, str
     repo = tmp_path / "repo"
     gate, environment = _fixture(repo, shell)
     scripts = gate.parent
-    for name in ("session-stamp.py", "stamp_paths.py", "versioned_runtime.py",
+    for name in ("session-stamp.py", "stamp_paths.py", "stamp_repair.py", "versioned_runtime.py",
                  "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1"):
         shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     suffix = "sh" if shell == "bash" else "ps1"
@@ -33,6 +34,8 @@ def _hook(tmp_path: Path, shell: str = "bash") -> tuple[list[str], dict[str, str
         tmp_path / "home/.copilot-extensions/bootstrap-killswitch.json"
     )
     Path(environment["HOME"]).mkdir()
+    for kind in ("CACHE", "DATA", "CONFIG"):
+        environment[f"XDG_{kind}_HOME"] = str(tmp_path / f"shell-{kind.lower()}")
     environment["COPILOT_PLUGIN_ROOT"] = str(scripts.parent)
     environment["AGENT_INDEX_PAYLOAD_ROOT"] = str(scripts.parent)
     hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["sessionStart"][1]
@@ -49,7 +52,7 @@ def _run(command: list[str], environment: dict[str, str], repo: Path):
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mutation permissions")
 @pytest.mark.parametrize("shell", ["bash", "powershell"])
-@pytest.mark.parametrize("mode", [0o770, 0o707, 0o777])
+@pytest.mark.parametrize("mode", [0o707, 0o777])
 def test_actual_hook_refuses_shared_writable_root_before_publication(
     tmp_path: Path, shell: str, mode: int,
 ) -> None:
@@ -197,6 +200,7 @@ def _stamp_module():
 
 
 def _paths_module():
+    sys.path.insert(0, str(PLUGIN / "scripts"))
     spec = importlib.util.spec_from_file_location("stamp_paths_test", PLUGIN / "scripts/stamp_paths.py")
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)

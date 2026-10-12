@@ -519,10 +519,14 @@ def test_posix_cli_build_uses_shared_venv_and_keeps_engine_lazy(tmp_path: Path):
         (directory / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
     (plugin / "src").mkdir()
     (plugin / "pyproject.toml").write_text('[project]\nversion = "1.0.0"\n', encoding="utf-8")
+    (plugin / "scripts").mkdir()
+    for name in ("session-stamp.py", "stamp_paths.py", "stamp_repair.py"):
+        shutil.copy2(PLUGIN / "scripts" / name, plugin / "scripts" / name)
     env = environment(tmp_path)
     env["PATH"] = str(tmp_path) + os.pathsep + env["PATH"]
     functions = "\n".join(function(name, "sh") for name in (
         "_ensure_uv", "_uv_pip_install", "_resolve_vendored_lib",
+        "_bootstrap_python",
         "_test_index_venv", "_new_index_venv", "_with_index_build_lock", "_with_index_advisory_lock",
         "_with_index_publication_lock", "_index_publication_fresh", "_version_lt", "_install_server_venv", "_ensure_runtime",
     ))
@@ -547,6 +551,7 @@ _versioned_gc() {{ :; }}
 deploy_binstub() {{ :; }}
 _write_manifest() {{ :; }}
 INSTALL_DIR='{tmp_path / "runtime"}'
+LINK_DIR='{tmp_path / "absent-link"}'
 LOCAL_BIN='{tmp_path / "bin"}'
 PLUGIN_DIR='{plugin}'
 PKG_SRC_DIR="$PLUGIN_DIR/src"

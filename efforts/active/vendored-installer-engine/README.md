@@ -568,6 +568,34 @@ installs, no service-specific config needed for this class of plugin.
 - The migration protocol, its review and real installer-to-hook/adversarial
   regressions remain pending. No live artifact permission was changed.
 
+#### Candidate protocol and execution evidence
+
+- The bounded candidate repairs only creator-owned, group-writable (not
+  world-writable or special-mode) runtime roots and exact legacy launcher
+  destination directories. It pins every ancestor and rechecks identities
+  before reducing permissions. Arbitrary ancestors remain strict.
+- Group-writable marker/launcher files are regenerated atomically only after
+  their contents match trusted payload/version or canonical launcher bytes;
+  a retained writer descriptor cannot modify the replacement. Unknown
+  contents, writable deployed-version state, links, multiple links and
+  foreign ownership still refuse. Explicit operator recovery is required
+  where migration cannot safely infer intent. Namespaced cells do not inherit
+  this legacy repair policy.
+- Installer stamp publication uses the same guarded file writer. Its
+  publication lock is prepared and validated before Bash adopts descriptor 9,
+  then checked against that descriptor's identity; neither side replaces or
+  truncates the lock inode. New lock creation is bounded by a private umask
+  that is restored before callbacks.
+- Actual-function installer-under-`0002`/`0077` to actual-hook tests cover Bash
+  and Linux PowerShell, known legacy migration and idempotence, retained
+  writable descriptors, ambiguous contents and supersession state, link
+  refusal before installer lock truncation, and directory replacement before
+  chmod. Relevant safety/publication/acquisition selection: 90 passed,
+  14 native-Windows skips. Full contained Index suite: 981 passed, 25 skipped
+  across three sub-suites (304/8, 321/2, 356/15). Coupled provenance and
+  customization scanner: 170 passed, 2 native-Windows skips. Review and native
+  validation remain pending. No production permission or service was changed.
+
 ### 2026-10-10 — Temporary Docker accountability proposal; implementation gated
 
 - Operator request:

@@ -7,6 +7,9 @@ import os
 from pathlib import Path
 import secrets
 import stat
+import sys
+
+from stamp_repair import repairable, tighten_directories
 
 
 def _windows_open(path: Path, *, directory: bool, create: bool = False) -> int:
@@ -203,13 +206,16 @@ def _posix_ancestor_private(info: os.stat_result) -> bool:
 class Directory:
     """Hold every ancestor open; POSIX mutations are relative to directory fds."""
 
-    def __init__(self, path: Path) -> None:
+    ancestor_private = staticmethod(_posix_ancestor_private)
+
+    def __init__(self, path: Path, *, repair_paths: frozenset[Path] = frozenset()) -> None:
         if ".." in path.parts:
             raise ValueError(f"refusing parent traversal in stamp destination: {path}")
         self.path = Path(os.path.abspath(path))
         self.stack = ExitStack()
         self.fd = -1
         self.bindings: list[tuple[int | None, Path, int]] = []
+        self.repair_paths = repair_paths
 
     def __enter__(self) -> Directory:
         try:
@@ -218,6 +224,8 @@ class Directory:
             for component in self.path.parts[1:]:
                 current = current / component
                 self.fd = self._directory(current, self.fd)
+            if os.name != "nt" and self.repair_paths:
+                tighten_directories(self)
             if not (_windows_owned(self.fd) if os.name == "nt" else
                     _posix_private(os.fstat(self.fd))):
                 raise ValueError(f"stamp directory is not privately owned by this user: {self.path}")
@@ -254,7 +262,8 @@ class Directory:
         info = os.fstat(fd)
         if not stat.S_ISDIR(info.st_mode):
             raise ValueError(f"stamp ancestor is not a directory: {path}")
-        if os.name != "nt" and path != self.path and not _posix_ancestor_private(info):
+        if (os.name != "nt" and path != self.path and not _posix_ancestor_private(info)
+                and not (path in self.repair_paths and repairable(info))):
             raise ValueError(f"stamp ancestor permits untrusted mutation: {path}")
         self.bindings.append((parent, path, fd))
         return fd
@@ -273,7 +282,8 @@ class Directory:
                     or (info.st_dev, info.st_ino) != (entry.st_dev, entry.st_ino)):
                 raise ValueError(f"stamp directory identity changed: {path}")
 
-    def open(self, name: str, *, create: bool = False, exclusive: bool = False) -> int:
+    def open(self, name: str, *, create: bool = False, exclusive: bool = False,
+             repair: bool = False) -> int:
         self.verify()
         if os.name == "nt":
             if exclusive:
@@ -297,7 +307,8 @@ class Directory:
             info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise ValueError(f"stamp file must be a single-link regular file: {name}")
-            if not (_windows_owned(fd) if os.name == "nt" else _posix_private(info)):
+            if not (_windows_owned(fd) if os.name == "nt" else
+                    _posix_private(info) or repair and repairable(info)):
                 raise ValueError(f"stamp file is not privately owned by this user: {name}")
             entry = os.stat(self.path / name, follow_symlinks=False) if os.name == "nt" else (
                 os.stat(name, dir_fd=self.fd, follow_symlinks=False)
@@ -317,14 +328,20 @@ class Directory:
         with os.fdopen(fd, "rb") as stream:
             return stream.read()
 
-    def publish(self, name: str, data: bytes, *, executable: bool = False) -> None:
+    def publish(self, name: str, data: bytes, *, executable: bool = False,
+                repair: bool = False) -> None:
+        shared = False
         try:
-            fd = self.open(name)
+            fd = self.open(name, repair=repair)
         except FileNotFoundError:
             fd = None
         if fd is not None:
             with os.fdopen(fd, "rb") as stream:
-                if stream.read() == data:
+                shared = os.name != "nt" and not _posix_private(os.fstat(stream.fileno()))
+                identical = stream.read() == data
+                if shared and not identical:
+                    raise ValueError(f"cannot repair untrusted stamp content: {name}")
+                if identical and not shared:
                     if executable:
                         os.fchmod(stream.fileno(), 0o755) if os.name != "nt" else (
                             os.chmod(self.path / name, 0o755)
@@ -343,6 +360,8 @@ class Directory:
             else:
                 self.verify()
                 os.replace(temporary, name, src_dir_fd=self.fd, dst_dir_fd=self.fd)
+            if shared:
+                print(f"[agent-index] regenerated stamp artifact: {name}", file=sys.stderr)
         finally:
             try:
                 if os.name == "nt":

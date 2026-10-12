@@ -33,6 +33,17 @@ creates a venv, deploys, registers autostart, or starts a service/engine.
 The bootstrap hook emits exactly `{}` on both success and failure. PowerShell
 runtime-gate exceptions report a diagnostic on stderr and exit nonzero; normal
 child exit codes are forwarded across the hook process boundary.
+- **Bounded POSIX migration:** legacy startup and installer stamp writers can
+  remove group-write access from the creator-owned runtime root and the exact
+  `~/.local`/`~/.local/bin` destinations after pinning their no-follow identities.
+  Known group-writable markers and launchers are atomically regenerated only
+  when their bytes match the admitted payload/version or canonical launcher.
+  The publication lock keeps its inode and is never truncated during repair.
+  No arbitrary ancestor, foreign owner, world-writable path, link or multi-link
+  file is repaired. Writable deployed-version markers and unexpected marker or
+  launcher bytes fail explicitly: they require independently verified operator
+  recovery, not an automatic chmod that would make untrusted bytes look safe.
+  Namespaced cell stamps retain strict, non-repairing admission.
 - **Self-supervised host lifecycle**: the light host runtime is installed into
 its own versioned slot, and the plugin's installer/runtime commands supervise
 it directly. `install`/`update` rebuild only the light `[store,server]` service

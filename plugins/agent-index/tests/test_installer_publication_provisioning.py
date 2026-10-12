@@ -24,6 +24,8 @@ def test_posix_stamp_and_new_activation_share_publication_not_build_descriptor(t
     (root / "current-version").write_text("0.9.0")
     scripts = tmp_path / "scripts"
     scripts.mkdir()
+    for name in ("session-stamp.py", "stamp_paths.py", "stamp_repair.py"):
+        shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     (scripts / "versioned_runtime.py").write_text(
         "import pathlib, sys\n"
         "a=sys.argv\n"
@@ -41,7 +43,7 @@ def test_posix_stamp_and_new_activation_share_publication_not_build_descriptor(t
     definitions = "\n".join(function(name, "sh") for name in (
         "_with_index_advisory_lock", "_with_index_build_lock", "_with_index_publication_lock",
         "_index_publication_fresh", "_version_lt", "_bootstrap_python", "_find_python",
-        "_versioned_activate", "deploy_binstub", "do_stamp", "_write_manifest",
+        "_versioned_activate", "_write_index_stamp_file", "deploy_binstub", "do_stamp", "_write_manifest",
         "_ensure_runtime", "_test_index_venv",
     ))
     prelude = f"""
