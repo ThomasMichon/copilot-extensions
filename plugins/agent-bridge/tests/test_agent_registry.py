@@ -2408,12 +2408,13 @@ class TestSenderRepoFallback:
         assert target.project == "SPO.Core"  # sender repo, not the dotfiles default
 
     @pytest.mark.asyncio
-    async def test_owning_harness_survives_knowledge_default_and_unavailable_cwd_probe(self, monkeypatch):
+    @pytest.mark.parametrize("qualifier", ["", "#session"])
+    async def test_owning_harness_survives_knowledge_default_and_unavailable_cwd_probe(self, monkeypatch, qualifier):
         from agent_bridge import __main__ as cli
 
         self.agents["dev6"].project = "knowledge-fixture"
         monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", None)
-        monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "host/harness-fixture/wt#session")
+        monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "host/harness-fixture/wt" + qualifier)
         monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "session")
         monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
         sender_repo = cli._sender_repo()

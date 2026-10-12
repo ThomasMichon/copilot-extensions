@@ -7,9 +7,10 @@ import re
 
 from .caller_session import caller_session_id_from_env
 
-# Canonical shape: execution-space/project/worktree#Copilot-session.
+# Durable owner: execution-space/project/worktree; an optional session qualifier
+# must agree with the current caller rather than silently rebinding it.
 _OWNER_REF = re.compile(
-    r"^[^/\s#]+/(?P<project>[^/\s#]+)/[^/\s#]+#(?P<session>[^/\s#]+)$"
+    r"^[^/\s#]+/(?P<project>[^/\s#]+)/[^/\s#]+(?:#(?P<session>[^/\s#]+))?$"
 )
 
 
@@ -18,7 +19,7 @@ class CallerProjectContextError(ValueError):
 
 
 def owning_project() -> str | None:
-    """Accept only an owner reference tied to this exact Copilot session."""
+    """Read a managed project, validating the caller and any session qualifier."""
     raw_reference = os.environ.get("AGENT_WORKTREES_OWNER_REF")
     if raw_reference is None:
         return None
@@ -34,7 +35,7 @@ def owning_project() -> str | None:
         raise CallerProjectContextError(
             "Managed caller owner reference is malformed; rebind the worktree before dispatch."
         )
-    if match.group("session") != session_id:
+    if match.group("session") is not None and match.group("session") != session_id:
         raise CallerProjectContextError(
             "Managed caller owner reference belongs to a different session; "
             "rebind the worktree before dispatch."

@@ -21,6 +21,14 @@ def test_owning_harness_preferred_over_knowledge_checkout_and_probe_failure(monk
         assert cli._sender_repo() == "harness"
 
 
+def test_published_durable_owner_without_session_qualifier_is_valid(monkeypatch):
+    monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "space/harness/worktree")
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "current-session")
+    monkeypatch.setattr(cli, "_worktrees_get", lambda key: "knowledge")
+    assert owning_project() == "harness"
+    assert cli._sender_repo() == "harness"
+
+
 def test_explicit_project_override_wins(monkeypatch):
     monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "host/harness/worktree#session")
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "session")
@@ -30,7 +38,7 @@ def test_explicit_project_override_wins(monkeypatch):
 
 @pytest.mark.parametrize("reference,session", [
     ("host/harness/worktree#old-session", "new-session"),
-    ("host/harness/worktree", "session"),
+    ("host/harness/worktree#", "session"),
     ("host/harness/worktree#session", ""),
     ("host/harness/extra/worktree#session", "session"),
     ("host/ /worktree#session", "session"),
