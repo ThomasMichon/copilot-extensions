@@ -193,6 +193,13 @@ def _posix_private(info: os.stat_result) -> bool:
     )
 
 
+def _posix_ancestor_private(info: os.stat_result) -> bool:
+    return info.st_uid in {0, os.geteuid()} and (
+        not info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+        or bool(info.st_mode & stat.S_ISVTX)
+    )
+
+
 class Directory:
     """Hold every ancestor open; POSIX mutations are relative to directory fds."""
 
@@ -244,8 +251,11 @@ class Directory:
                 raise ValueError(f"refusing linked stamp destination: {path}") from error
             raise
         self.stack.callback(os.close, fd)
-        if not stat.S_ISDIR(os.fstat(fd).st_mode):
+        info = os.fstat(fd)
+        if not stat.S_ISDIR(info.st_mode):
             raise ValueError(f"stamp ancestor is not a directory: {path}")
+        if os.name != "nt" and path != self.path and not _posix_ancestor_private(info):
+            raise ValueError(f"stamp ancestor permits untrusted mutation: {path}")
         self.bindings.append((parent, path, fd))
         return fd
 
@@ -254,6 +264,8 @@ class Directory:
             raise ValueError(f"stamp directory is not privately owned: {self.path}")
         for parent, path, fd in self.bindings:
             info = os.fstat(fd)
+            if os.name != "nt" and not _posix_ancestor_private(info):
+                raise ValueError(f"stamp ancestor permits untrusted mutation: {path}")
             entry = (os.stat(path, follow_symlinks=False)
                      if os.name == "nt" or parent is None else
                      os.stat(path.name, dir_fd=parent, follow_symlinks=False))

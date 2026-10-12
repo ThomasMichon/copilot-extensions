@@ -49,24 +49,35 @@ def content_manifest(root: Path) -> dict[str, dict]:
     if root.is_symlink() or not root.is_dir():
         raise ValueError("materialized root must be a real directory")
     entries = {}
-    for path in sorted(root.rglob("*")):
-        relative = path.relative_to(root).as_posix()
-        if relative == RECEIPT:
-            continue
-        mode = path.lstat().st_mode
-        if stat.S_ISLNK(mode):
-            if not path.resolve().is_relative_to(root.resolve()):
-                raise ValueError(f"materialized link escapes root: {relative}")
-            entries[relative] = {"kind": "symlink", "target": os.readlink(path)}
-        elif stat.S_ISDIR(mode):
-            entries[relative] = {"kind": "directory"}
-        elif stat.S_ISREG(mode):
-            entries[relative] = {
-                "kind": "file", "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                "executable": bool(mode & 0o111),
-            }
-        else:
-            raise ValueError(f"unsupported materialized path: {relative}")
+
+    def refuse_unreadable(error: OSError) -> None:
+        raise error
+
+    for directory, children, files in os.walk(
+        root, followlinks=False, onerror=refuse_unreadable,
+    ):
+        children.sort()
+        for name in sorted(children + files):
+            path = Path(directory) / name
+            relative = path.relative_to(root).as_posix()
+            if relative == RECEIPT:
+                continue
+            mode = path.lstat().st_mode
+            if stat.S_ISLNK(mode):
+                if not path.resolve().is_relative_to(root.resolve()):
+                    raise ValueError(f"materialized link escapes root: {relative}")
+                entries[relative] = {"kind": "symlink", "target": os.readlink(path)}
+                if name in children:
+                    children.remove(name)
+            elif stat.S_ISDIR(mode):
+                entries[relative] = {"kind": "directory"}
+            elif stat.S_ISREG(mode):
+                entries[relative] = {
+                    "kind": "file", "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "executable": bool(mode & 0o111),
+                }
+            else:
+                raise ValueError(f"unsupported materialized path: {relative}")
     return entries
 
 

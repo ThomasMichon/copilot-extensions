@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from stamp_fixture import no_shared_write_umask  # noqa: F401
 
 
 PLUGIN = Path(__file__).resolve().parents[1]

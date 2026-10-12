@@ -415,7 +415,7 @@ def run_plugin(
                 poll_seconds=limits.poll_seconds,
             )
             group_temp = basetemp / f"g{index}"
-            group_temp.parent.mkdir(parents=True, exist_ok=True)
+            group_temp.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             cmd = [
                 str(py),
                 "-m",

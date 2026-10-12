@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from test_session_stamp_security import _hook, _run
+from stamp_fixture import no_shared_write_umask  # noqa: F401
 
 
 @pytest.mark.parametrize("shell", ["bash", "powershell"])

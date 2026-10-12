@@ -49,7 +49,12 @@ supervision.
   locking even without the `flock` executable. Publication roots and metadata
   must be owned by the effective user and reject group/other write permission;
   pinned-root permissions are rechecked before each file operation. Ordinary
-  read-only group/other access remains permitted. Windows rejects reparse points
+  read-only group/other access remains permitted. Ancestors must be owned by the
+  effective user or root and disallow shared namespace mutation; trusted sticky
+  ancestors such as `/tmp` remain usable, but are never accepted as a publication
+  root. Ancestor ownership and permissions are rechecked before file operations;
+  existing deployment directories are never silently chmodded.
+  Windows rejects reparse points
   using opened handles, denies delete sharing to pin ancestors, checks owner
   SIDs and retains the installer's publication mutex. Windows accepts the token
   user or an enabled `SE_GROUP_OWNER` group (never mere membership, a disabled

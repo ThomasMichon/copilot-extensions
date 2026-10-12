@@ -1,6 +1,7 @@
 """Whole-marketplace candidate build/verification without containers or live state."""
 from __future__ import annotations
 
+from collections.abc import Iterator
 import importlib.util
 import io
 import json
@@ -30,6 +31,59 @@ def _git(root: Path, *args: str) -> str:
         ["git", "-C", str(root), *args], check=True, capture_output=True,
         text=True, timeout=10,
     ).stdout.strip()
+
+
+def test_manifest_prunes_directory_aliases_and_cycles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "tree"
+    (root / "real").mkdir(parents=True)
+    (root / "real/file").write_bytes(b"owned bytes")
+    try:
+        (root / "alias").symlink_to("real", target_is_directory=True)
+        (root / "cycle").symlink_to(".", target_is_directory=True)
+    except OSError as error:
+        if os.name == "nt" and getattr(error, "winerror", None) == 1314:
+            pytest.skip("native symlink creation unavailable")
+        raise
+    reads: list[Path] = []
+    original = Path.read_bytes
+
+    def read(path: Path) -> bytes:
+        reads.append(path)
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+    manifest = PROVENANCE.content_manifest(root)
+    assert set(manifest) == {"real", "real/file", "alias", "cycle"}
+    assert manifest["alias"] == {"kind": "symlink", "target": "real"}
+    assert manifest["cycle"] == {"kind": "symlink", "target": "."}
+    assert reads == [root / "real/file"]
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret").write_bytes(b"never read")
+    (root / "escaping").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="link escapes root"):
+        PROVENANCE.content_manifest(root)
+    assert outside / "secret" not in reads
+
+
+def test_manifest_refuses_unreadable_subtree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "tree"
+    unreadable = root / "unreadable"
+    unreadable.mkdir(parents=True)
+    original = os.scandir
+
+    def scan(path: str | os.PathLike[str] | int) -> Iterator[os.DirEntry[str]]:
+        if not isinstance(path, int) and Path(path) == unreadable:
+            raise PermissionError("fixture subtree is unreadable")
+        return original(path)
+
+    monkeypatch.setattr(PROVENANCE.os, "scandir", scan)
+    with pytest.raises(PermissionError, match="fixture subtree is unreadable"):
+        PROVENANCE.content_manifest(root)
 
 
 @pytest.fixture

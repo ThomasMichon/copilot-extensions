@@ -123,8 +123,10 @@ def _wait_for_smoke_receipt(
             if not isinstance(data, dict):
                 pytest.fail(f"staged receipt is not a JSON object: {data!r}")
             return data
-        if child_exit is not None or time.monotonic() >= deadline:
-            pytest.fail(f"no complete staged receipt: {last_error}")
+        if child_exit is not None:
+            pytest.fail(f"child exited with code {child_exit}; no complete staged receipt: {last_error}")
+        if time.monotonic() >= deadline:
+            pytest.fail(f"receipt wait timed out; no complete staged receipt: {last_error}")
         time.sleep(0.05)
 
 
@@ -146,7 +148,7 @@ def test_smoke_receipt_waits_for_complete_json(
 def test_smoke_receipt_rejects_incomplete_json_after_child_exit(tmp_path: Path) -> None:
     receipt = tmp_path / "smoke.json"
     receipt.write_text("", encoding="utf-8")
-    with pytest.raises(pytest.fail.Exception, match="no complete staged receipt"):
+    with pytest.raises(pytest.fail.Exception, match="child exited with code 0; no complete staged receipt"):
         _wait_for_smoke_receipt(receipt, lambda: 0)
 
 
@@ -177,12 +179,12 @@ def test_smoke_receipt_retries_partial_utf8(
 def test_smoke_receipt_rejects_partial_utf8_after_child_exit(tmp_path: Path) -> None:
     receipt = tmp_path / "smoke.json"
     receipt.write_bytes(b'{"working_dir":"\xc3')
-    with pytest.raises(pytest.fail.Exception, match="no complete staged receipt"):
+    with pytest.raises(pytest.fail.Exception, match="child exited with code 0; no complete staged receipt"):
         _wait_for_smoke_receipt(receipt, lambda: 0)
 
 
 def test_smoke_receipt_timeout_is_explicit(tmp_path: Path) -> None:
-    with pytest.raises(pytest.fail.Exception, match="no complete staged receipt"):
+    with pytest.raises(pytest.fail.Exception, match="receipt wait timed out; no complete staged receipt"):
         _wait_for_smoke_receipt(tmp_path / "smoke.json", lambda: None, timeout=0)
 
 

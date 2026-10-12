@@ -1,7 +1,6 @@
 """Actual hook refusal precedes any write through an unowned filesystem link."""
 from __future__ import annotations
 
-from collections.abc import Iterator
 import errno
 import importlib.util
 import json
@@ -14,15 +13,7 @@ import pytest
 
 from test_ensure_service_hooks import PLUGIN, _shell_command
 from test_runtime_gate import _fixture
-
-
-@pytest.fixture(autouse=True)
-def private_stamp_umask() -> Iterator[None]:
-    previous = os.umask(0o022)
-    try:
-        yield
-    finally:
-        os.umask(previous)
+from stamp_fixture import no_shared_write_umask  # noqa: F401
 
 
 def _hook(tmp_path: Path, shell: str = "bash") -> tuple[list[str], dict[str, str], Path]:
