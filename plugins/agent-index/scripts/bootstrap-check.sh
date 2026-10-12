@@ -2,7 +2,8 @@
 # Only the dependency-light metadata adapter is admitted at session start.
 set -uo pipefail
 script_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-trap "printf '{}'" EXIT
+emit_session_start_json() { printf '{}'; }
+trap 'emit_session_start_json' EXIT
 # The machine switch governs only the default installation, never another cell.
 if [ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then
   _bks_guard="$script_dir/bootstrap-killswitch-guard.sh"

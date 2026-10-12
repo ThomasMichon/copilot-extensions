@@ -1,4 +1,9 @@
 # Only the dependency-light metadata adapter is admitted at session start.
+function Exit-SessionStart {
+    param([int]$Code)
+    [Console]::Out.Write('{}')
+    exit $Code
+}
 if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
     $_bksGuard = Join-Path $PSScriptRoot 'bootstrap-killswitch-guard.ps1'
     try {
@@ -14,17 +19,15 @@ if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
         }
         $global:LASTEXITCODE = $null
         & $_bksGuard check | Out-Null
-        if ($global:LASTEXITCODE -eq 0) { [Console]::Out.Write('{}'); exit 0 }
+        if ($global:LASTEXITCODE -eq 0) { Exit-SessionStart 0 }
         if ($global:LASTEXITCODE -ne 1) {
             throw "bootstrap-killswitch guard failed (exit $global:LASTEXITCODE)"
         }
     } catch {
         [Console]::Error.WriteLine("agent-index bootstrap-killswitch guard failed: $_")
-        [Console]::Out.Write('{}')
-        exit 1
+        Exit-SessionStart 1
     }
 }
 & (Join-Path $PSScriptRoot 'runtime-gate.ps1') __session-stamp | Out-Null
 $rc = $LASTEXITCODE
-[Console]::Out.Write('{}')
-exit $rc
+Exit-SessionStart $rc
