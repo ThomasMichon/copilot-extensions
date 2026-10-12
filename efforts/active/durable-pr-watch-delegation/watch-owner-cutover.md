@@ -98,7 +98,11 @@ drain, extend and test that shared seam rather than bypassing it in the plugin.
 
 Use disposable installation homes, real subprocess boundaries, finite
 deadlines, and existing contained tooling. Never interrupt a shared live watch
-owner, coordinator, callback, or peer.
+owner, coordinator, callback, or peer. Shared live means any instance serving
+subscriptions or sessions outside this test, including ordinary development
+instances. Inject crashes or interruptions only into exact processes owned by
+the test in its disposable installation; isolation of state alone does not
+authorize interrupting a shared process.
 
 - Passive startup leaves subscriptions, callback counters, and active discovery
   unchanged. Promotion refuses foreign receipts, stale generations, wrong
