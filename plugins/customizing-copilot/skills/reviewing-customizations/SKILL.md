@@ -415,8 +415,8 @@ payload size remains unknown by default; prompt-hook payloads are reported
 separately and are not counted as `additionalContext`.
 JSON output includes a stable `context_budget` object.
 Its additive `instruction_delivery` inventory separates automatically
-discovered selectors, inline kernels and legacy locals from non-discovered
-current local bodies and reviewed fallbacks. These counts never assert model admission;
+discovered selectors, inline kernels and current local bodies from non-discovered
+compatibility bodies and reviewed fallbacks. These counts never assert model admission;
 selective reads and native/runtime admission remain unknown.
 
 Add `--capture-dynamic` to also measure the real session-scoped

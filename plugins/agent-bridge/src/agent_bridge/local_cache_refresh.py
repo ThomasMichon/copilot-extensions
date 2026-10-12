@@ -171,8 +171,8 @@ LOCAL_SPAWN_MAX_TIMEOUT_S = 5.0
 # _CLEANUP_GRACE_S`, never `timeout` alone -- asserted directly in
 # `test_descendant_of_a_timed_out_render_does_not_survive`.
 _CLEANUP_GRACE_S = 1.5
-# Resolution (identity-verified plugin lookup) gets a small, fixed share of
-# the overall budget; the remainder goes to the render call itself.
+# Identity resolution and rendering share one deadline; rendering uses
+# whatever budget remains after the identity-verified lookup.
 # The scope name resolve_active_plugins() uses for a plugin's machine-wide
 # (non-project-specific) activation -- see ActivePlugin.root_for_scope().
 _GLOBAL_SCOPE = "global"

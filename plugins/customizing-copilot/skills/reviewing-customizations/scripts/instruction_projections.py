@@ -929,8 +929,9 @@ def render_local_cache(
 
     * **Stale-sibling reconciliation.** A source that becomes disabled,
       removed, or unloadable between two calls has its previous
-      current ``.local.md`` removed too. Legacy auto-discovered files are
-      retired only after new publication and exact enabled canonical validation.
+      current ``.local.instructions.md`` removed too. Non-discovered
+      compatibility bodies are retired only after new publication and exact
+      enabled canonical validation.
       A file is only ever removed
       when its own provenance marker both parses *and* declares the
       checked-in destination whose local sibling is exactly this path --
@@ -968,7 +969,7 @@ def render_local_cache(
       after the lock is held, no call can ever act on a source set that a
       more recent call has already superseded.
     * **Never manages a destination git already tracks.** A
-      ``.local.md`` body is only ever written, refreshed,
+      ``.local.instructions.md`` body is only ever written, refreshed,
       or reconciled away when it is not currently tracked by git -- the
       `.gitignore` convention this mechanism depends on
       (``docs/patterns/worktree-scoped-dynamic-guidance.md``) is a
