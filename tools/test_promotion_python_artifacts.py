@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import hashlib
+import base64
+import csv
+import io
+import inspect
 import json
 import os
 import shutil
@@ -27,6 +31,30 @@ repo = _repo_fixture
 no_ambient_git_identity = _identity_fixture
 
 DEV, MAIN, TREE = "a" * 40, "b" * 40, "c" * 40
+
+
+def _wheel_bytes(name: str, version: str) -> bytes:
+    prefix = f"{name}-{version}.dist-info/"
+    files = {
+        f"{name}/__init__.py": b"VALUE = 'first-party fixture'\n",
+        prefix + "WHEEL": (
+            "Wheel-Version: 1.0\nGenerator: setuptools (80.9.0)\n"
+            "Root-Is-Purelib: true\nTag: py3-none-any\n"
+        ).encode(),
+        prefix + "METADATA": f"Metadata-Version: 2.4\nName: {name}\nVersion: {version}\n".encode(),
+    }
+    record = io.StringIO(newline="")
+    writer = csv.writer(record)
+    for path, payload in sorted(files.items()):
+        digest = base64.urlsafe_b64encode(hashlib.sha256(payload).digest()).rstrip(b"=").decode()
+        writer.writerow([path, "sha256=" + digest, str(len(payload))])
+    writer.writerow([prefix + "RECORD", "", ""])
+    files[prefix + "RECORD"] = record.getvalue().encode()
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as bundle:
+        for path, payload in sorted(files.items()):
+            bundle.writestr(zipfile.ZipInfo(path), payload)
+    return output.getvalue()
 
 
 def _complete_manifest(manifest: dict) -> dict:
@@ -66,7 +94,7 @@ def _manifest(
 ) -> dict:
     directory.mkdir(parents=True, exist_ok=True)
     wheel = directory / "demo-1.0-py3-none-any.whl"
-    wheel.write_bytes(b"first-party wheel")
+    wheel.write_bytes(_wheel_bytes("demo", "1.0"))
     manifest = {
         "schema": "copilot-extensions.python-artifact-manifest", "schema_version": 3,
         "plugin": "demo", "version": "1.0", "artifact_id": "sha256:" + "d" * 64,
@@ -111,14 +139,14 @@ def test_bundle_and_transfer_roundtrip(tmp_path):
     with zipfile.ZipFile(directory / entry["filename"]) as bundle:
         assert set(bundle.namelist()) == {"manifest.json", "demo-1.0-py3-none-any.whl"}
         assert json.loads(bundle.read("manifest.json"))["plugin"] == "demo"
-        assert bundle.read("demo-1.0-py3-none-any.whl") == b"first-party wheel"
+        assert bundle.read("demo-1.0-py3-none-any.whl") == _wheel_bytes("demo", "1.0")
 
 
 def test_identical_artifact_bundles_ignore_clock_mtimes_permissions_and_wheel_order(tmp_path, monkeypatch):
     wheel_dir = tmp_path / "wheels"
     manifest = _manifest(wheel_dir)
     library = wheel_dir / "library-1.0-py3-none-any.whl"
-    library.write_bytes(b"library")
+    library.write_bytes(_wheel_bytes("library", "1.0"))
     manifest["wheels"].append({
         "filename": library.name, "role": "vendored-lib",
         "sha256": "sha256:" + artifacts._digest(library),
@@ -275,13 +303,13 @@ def test_validator_accepts_declared_vendored_library_wheel(tmp_path):
         payload = bundle.read(name)
     manifest["wheels"].append({
         "filename": "library-1.0-py3-none-any.whl", "role": "vendored-lib",
-        "sha256": "sha256:" + hashlib.sha256(b"library").hexdigest(),
+        "sha256": "sha256:" + hashlib.sha256(_wheel_bytes("library", "1.0")).hexdigest(),
     })
     _complete_manifest(manifest)
     with zipfile.ZipFile(path, "w") as bundle:
         bundle.writestr("manifest.json", json.dumps(manifest))
         bundle.writestr(name, payload)
-        bundle.writestr("library-1.0-py3-none-any.whl", b"library")
+        bundle.writestr("library-1.0-py3-none-any.whl", _wheel_bytes("library", "1.0"))
     new_name = f"demo-1.0-{manifest['artifact_id'][7:]}.zip"
     new_path = path.with_name(new_name)
     path.rename(new_path)
@@ -368,6 +396,64 @@ def test_forged_content_address_fails_even_when_manifest_index_filename_and_dige
         _validate(directory)
 
 
+@pytest.mark.parametrize("mutation", [
+    "opaque", "generator", "duplicate-generator", "name", "version", "missing-metadata",
+    "missing-record", "wrong-tag", "traversal", "backslash", "symlink", "duplicate-member",
+    "extra-dist-info", "record-digest", "record-set", "compressed-bomb",
+])
+def test_trusted_wheel_validation_reads_real_metadata_and_members(tmp_path, monkeypatch, mutation):
+    manifest = _manifest(tmp_path / "wheels")
+    wheel = manifest["wheels"][0]
+    with zipfile.ZipFile(io.BytesIO(_wheel_bytes("demo", "1.0"))) as bundle:
+        members = [(info, bundle.read(info.filename)) for info in bundle.infolist()]
+    if mutation in ("missing-metadata", "missing-record"):
+        suffix = "/METADATA" if mutation == "missing-metadata" else "/RECORD"
+        members = [(info, payload) for info, payload in members if not info.filename.endswith(suffix)]
+    for position, (info, payload) in enumerate(members):
+        if info.filename.endswith("/WHEEL"):
+            if mutation == "generator":
+                payload = payload.replace(b"setuptools (80.9.0)", b"unknown")
+            elif mutation == "duplicate-generator":
+                payload += b"Generator: setuptools (80.9.0)\n"
+            elif mutation == "wrong-tag":
+                payload = payload.replace(b"py3-none-any", b"cp310-none-any")
+        elif info.filename.endswith("/METADATA"):
+            if mutation == "name":
+                payload = payload.replace(b"Name: demo", b"Name: other")
+            elif mutation == "version":
+                payload = payload.replace(b"Version: 1.0", b"Version: 2.0")
+        elif info.filename.endswith("/RECORD") and mutation == "record-set":
+            payload += b"undeclared.py,,\n"
+        elif info.filename.endswith("__init__.py"):
+            if mutation == "record-digest":
+                payload = b"altered package bytes"
+            elif mutation in ("traversal", "backslash"):
+                info = zipfile.ZipInfo("../escape.py" if mutation == "traversal" else "..\\escape.py")
+            elif mutation == "symlink":
+                info.create_system = 3
+                info.external_attr = (stat.S_IFLNK | 0o777) << 16
+            elif mutation == "compressed-bomb":
+                payload = b"x" * 20000
+                monkeypatch.setattr(artifacts, "_BUNDLE_LIMIT", 10000)
+        members[position] = info, payload
+    if mutation == "duplicate-member":
+        members.append(members[0])
+    elif mutation == "extra-dist-info":
+        members.append((zipfile.ZipInfo("other-1.0.dist-info/WHEEL"), b"wrong"))
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+        for info, payload in members:
+            info.compress_type = zipfile.ZIP_DEFLATED
+            if info.filename in bundle.namelist():
+                with pytest.warns(UserWarning, match="Duplicate name"):
+                    bundle.writestr(info, payload)
+            else:
+                bundle.writestr(info, payload)
+    archive = io.BytesIO(b"not a wheel" if mutation == "opaque" else output.getvalue())
+    with pytest.raises(artifacts.PromotionArtifactError):
+        artifacts.validate_wheel(archive, wheel)
+
+
 @pytest.mark.parametrize("payload", [b"", b"chunked digest" * 200000], ids=["empty", "multi-chunk"])
 def test_digest_matches_sha256_across_multiple_chunks(tmp_path, payload):
     path = tmp_path / "data.bin"
@@ -446,7 +532,8 @@ def _fake_builder(repo: Path) -> None:
     template = _manifest(repo / "fixture-wheels")
     shutil.rmtree(repo / "fixture-wheels")
     (repo / "tools" / "build_python_artifacts.py").write_text(
-        "TEMPLATE = " + repr(template) + "\n" + """import copy, hashlib, pathlib, re
+        "TEMPLATE = " + repr(template) + "\n" + inspect.getsource(_wheel_bytes) + "\n"
+        + """import base64, copy, csv, hashlib, io, pathlib, re, zipfile
 try:
     import tomllib
 except ModuleNotFoundError:
@@ -458,12 +545,12 @@ def build_plugin_artifacts(plugin, *, out_dir, toolchain):
     name = re.sub(r'[-_.]+', '_', project['name']).lower()
     out_dir.mkdir()
     wheel = out_dir / (name + '-' + version.replace('-', '.') + '-py3-none-any.whl')
-    wheel.write_bytes(b'wheel')
+    wheel.write_bytes(_wheel_bytes(name, version.replace('-', '.')))
     pathlib.Path('backend-residue.txt').write_text('must not enter promotion')
     manifest = copy.deepcopy(TEMPLATE)
     manifest.update(plugin=plugin, version=version)
     manifest['wheels'][0].update(name=name, filename=wheel.name, source='plugins/' + plugin,
-                               sha256='sha256:' + hashlib.sha256(b'wheel').hexdigest())
+                               sha256='sha256:' + hashlib.sha256(wheel.read_bytes()).hexdigest())
     def hash_fields(fields):
         digest = hashlib.sha256()
         for field in fields:
@@ -666,40 +753,137 @@ def _publish_fixture(tmp_path, monkeypatch):
     return directory, index["artifacts"][0]
 
 
-@pytest.mark.parametrize("status", ["absent", "exists", "same", "different", "unauthorized"])
+@pytest.mark.parametrize("status", ["absent", "exists", "same", "different", "unauthorized", "draft"])
 def test_release_publication_never_clobbers_and_only_treats_404_as_absence(tmp_path, monkeypatch, status):
     directory, entry = _publish_fixture(tmp_path, monkeypatch)
     calls = []
+    created = False
 
     def gh(argv, **kwargs):
+        nonlocal created
         calls.append(argv)
         if argv[0] != "api":
+            if argv[:2] == ["release", "create"]:
+                created = True
             return subprocess.CompletedProcess(argv, 0, "", "")
-        if status in ("absent", "unauthorized"):
+        if "/git/ref/tags/" in argv[1]:
+            if status == "absent" and not created:
+                return subprocess.CompletedProcess(argv, 1, "", "gh: Not Found (HTTP 404)")
+            return subprocess.CompletedProcess(
+                argv, 0, json.dumps({"object": {"type": "commit", "sha": TREE}}), "",
+            )
+        if (status == "absent" and not created) or status == "unauthorized":
             return subprocess.CompletedProcess(
                 argv, 1, "", "gh: Not Found (HTTP 404)" if status == "absent" else "HTTP 403",
             )
-        assets = [] if status == "exists" else [{
+        assets = [] if status in ("exists", "absent", "draft") else [{
             "name": entry["filename"],
             "digest": f"sha256:{entry['sha256']}" if status == "same" else "sha256:wrong",
         }]
-        return subprocess.CompletedProcess(argv, 0, json.dumps({"assets": assets}), "")
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            "assets": assets, "draft": status == "draft", "tag_name": "demo-v1.0",
+        }), "")
 
     monkeypatch.setattr(publisher, "_gh", gh)
     kwargs = dict(repository="example/plugins", merged_commit=TREE, dev_head=DEV, repo=tmp_path)
-    if status in ("different", "unauthorized"):
+    if status in ("different", "unauthorized", "draft"):
         with pytest.raises(artifacts.PromotionArtifactError):
             publisher.publish_artifacts(directory, **kwargs)
-        assert len(calls) == 1
+        assert not any(argv[0] == "release" for argv in calls)
     else:
         publisher.publish_artifacts(directory, **kwargs)
+        writes = [argv for argv in calls if argv[0] == "release"]
         if status == "same":
-            assert len(calls) == 1
+            assert not writes
         else:
-            assert calls[1][:2] == ["release", "create" if status == "absent" else "upload"]
-            assert "--clobber" not in calls[1]
+            assert writes[-1][:2] == ["release", "upload"]
+            assert all("--clobber" not in argv for argv in writes)
             if status == "absent":
-                assert calls[1][calls[1].index("--target") + 1] == TREE
+                assert writes[0][:2] == ["release", "create"]
+                assert writes[0][writes[0].index("--target") + 1] == TREE
+                assert str(directory / entry["filename"]) not in writes[0]
+
+
+@pytest.mark.parametrize("tag_state", ["current", "same-ancestor", "wrong-ancestor", "unshipped", "missing"])
+def test_release_tag_must_bind_the_actual_plugin_payload(tmp_path, monkeypatch, tag_state):
+    directory, entry = _publish_fixture(tmp_path, monkeypatch)
+    older = tmp_path / "older"
+    shutil.copytree(tmp_path / "plugins", older / "plugins")
+    if tag_state == "wrong-ancestor":
+        (older / "plugins" / "demo" / "injected.py").write_text("different old payload")
+    monkeypatch.setattr(publisher, "_tag_commit", lambda *_: (
+        None if tag_state == "missing" else TREE if tag_state == "current" else MAIN
+    ))
+    monkeypatch.setattr(promotion, "_is_ancestor", lambda *a, **kw: tag_state != "unshipped")
+    monkeypatch.setattr(promotion, "add_scratch_worktree", lambda commit, **kw: (
+        older if commit == MAIN else tmp_path
+    ))
+    calls = []
+    def gh(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            "draft": False, "tag_name": "demo-v1.0", "assets": [],
+        }), "")
+    monkeypatch.setattr(publisher, "_gh", gh)
+    if tag_state in ("wrong-ancestor", "unshipped", "missing"):
+        with pytest.raises(artifacts.PromotionArtifactError):
+            publisher.publish_artifacts(
+                directory, repository="example/plugins", merged_commit=TREE, dev_head=DEV, repo=tmp_path,
+            )
+        assert not any(argv[0] == "release" for argv in calls)
+    else:
+        publisher.publish_artifacts(
+            directory, repository="example/plugins", merged_commit=TREE, dev_head=DEV, repo=tmp_path,
+        )
+        assert calls[-1][:2] == ["release", "upload"]
+        assert calls[-1][-1] == str(directory / entry["filename"])
+
+
+@pytest.mark.parametrize("kind", [
+    "lightweight", "annotated", "absent", "cycle", "blob", "unauthorized", "missing-object",
+])
+def test_tag_resolution_is_bounded_and_only_initial_404_means_absence(monkeypatch, kind):
+    def gh(argv, **kwargs):
+        if kind in ("absent", "unauthorized"):
+            return subprocess.CompletedProcess(
+                argv, 1, "", "(HTTP 404)" if kind == "absent" else "(HTTP 403)",
+            )
+        if kind == "missing-object" and "/git/tags/" in argv[1]:
+            return subprocess.CompletedProcess(argv, 1, "", "(HTTP 404)")
+        object_type = (
+            "blob" if kind == "blob" else "tag" if kind == "cycle"
+            or (kind in ("annotated", "missing-object") and "/git/ref/" in argv[1]) else "commit"
+        )
+        sha = MAIN if object_type == "tag" else TREE
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            "object": {"type": object_type, "sha": sha},
+        }), "")
+    monkeypatch.setattr(publisher, "_gh", gh)
+    if kind in ("cycle", "blob", "unauthorized", "missing-object"):
+        with pytest.raises(artifacts.PromotionArtifactError):
+            publisher._tag_commit("example/plugins", "demo-v1.0")
+    else:
+        assert publisher._tag_commit("example/plugins", "demo-v1.0") == (
+            None if kind == "absent" else TREE
+        )
+
+
+def test_tag_created_between_absence_check_and_release_creation_blocks_upload(tmp_path, monkeypatch):
+    directory, _entry = _publish_fixture(tmp_path, monkeypatch)
+    tags = iter([None, MAIN])
+    monkeypatch.setattr(publisher, "_tag_commit", lambda *_: next(tags))
+    calls = []
+    def gh(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(
+            argv, 1 if argv[0] == "api" else 0, "", "(HTTP 404)" if argv[0] == "api" else "",
+        )
+    monkeypatch.setattr(publisher, "_gh", gh)
+    with pytest.raises(artifacts.PromotionArtifactError, match="tag changed during creation"):
+        publisher.publish_artifacts(
+            directory, repository="example/plugins", merged_commit=TREE, dev_head=DEV, repo=tmp_path,
+        )
+    assert [argv[:2] for argv in calls if argv[0] == "release"] == [["release", "create"]]
 
 
 def test_actual_merge_composition_mismatch_blocks_all_release_writes(tmp_path, monkeypatch):

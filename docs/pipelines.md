@@ -84,6 +84,11 @@ first-party labels alone never establish source provenance. The publisher
 repeats this source binding against the actual merged snapshot.
 It rejects duplicate, extra, missing, non-regular or unsafe members, with a
 1 MiB manifest limit and 512 MiB total uncompressed bundle limit.
+Each declared wheel must itself be a safe ZIP with one matching distribution's
+`WHEEL`, `METADATA` and `RECORD`. Trusted checks compare the real generator,
+distribution/version and tags with the validated manifest, reject unsafe wheel
+members, and verify complete RECORD hashes/sizes. An opaque byte string with a
+`.whl` filename and a matching outer digest is not a wheel.
 `actions/attest-build-provenance` then signs both this index and each
 bundle using GitHub OIDC, with `contents: read`, `id-token: write` and
 `attestations: write`. Neither signing authority nor release-write authority
@@ -114,7 +119,17 @@ already-compressed wheels are stored without recompression, so identical
 inputs cannot drift with filesystem metadata, wall-clock time or zlib versions.
 No upload uses `--clobber`; an already-present same-name asset is accepted only
 when GitHub's reported SHA-256
-digest matches. Its release PAT and verification token are scoped to the final
+digest matches. Draft or malformed releases are rejected, not treated as
+consumer-visible publication. The publisher resolves lightweight/annotated
+tags and validates their source binding before accepting or uploading assets.
+A new tag must resolve to the exact merged commit after release creation;
+asset upload is separate and happens only after that recheck. An existing
+version tag may point to an older shipped ancestor only when its exact
+plugin/vendored closure, distributions/versions and payload hash still match.
+Unrelated promotions must not move unchanged plugins' stable version tags,
+and a toolchain-only rebuild may add a new content-addressed asset to that
+same version. An unshipped or different-payload tag is rejected.
+Its release PAT and verification token are scoped to the final
 publisher step, not exposed to checkout, Python setup or artifact-download
 actions. Publication is its own job so a partial upload can be retried with
 **Re-run failed jobs**, reusing the successful signer and exact merge

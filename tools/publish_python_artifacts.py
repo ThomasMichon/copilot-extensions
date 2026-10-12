@@ -7,10 +7,12 @@ import os
 import re
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 from promotion_python_artifacts import (
     INDEX_NAME, PromotionArtifactError, candidate_projects, validate_artifacts,
+    validate_source_binding,
 )
 
 
@@ -61,6 +63,61 @@ def verify_attestations(
         ], verification=True))
 
 
+def _tag_commit(repository: str, tag: str) -> str | None:
+    result = _gh(["api", f"repos/{repository}/git/ref/tags/{tag}"])
+    if result.returncode:
+        if "(HTTP 404)" in result.stderr:
+            return None
+        _check(result)
+    seen = set()
+    for _ in range(8):
+        try:
+            obj = json.loads(_check(result))["object"]
+            kind, sha = obj["type"], obj["sha"]
+            if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha) or sha in seen:
+                raise ValueError("invalid or cyclic tag object")
+            seen.add(sha)
+            if kind == "commit":
+                return sha
+            if kind != "tag":
+                raise ValueError("tag does not resolve to a commit")
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+            raise PromotionArtifactError(f"{tag}: invalid tag response") from exc
+        result = _gh(["api", f"repos/{repository}/git/tags/{sha}"])
+    raise PromotionArtifactError(f"{tag}: annotated tag chain exceeds validation limit")
+
+
+def _validate_tag_binding(
+    directory: Path, entry: dict, *, tag_commit: str, merged_commit: str, repo: Path,
+) -> None:
+    """A stable version tag may precede unrelated promotions, but not its payload."""
+    import promote_release as promotion
+
+    if tag_commit == merged_commit:
+        return
+    if not promotion._is_ancestor(tag_commit, merged_commit, cwd=repo):
+        raise PromotionArtifactError("release tag is not a shipped ancestor of the merged candidate")
+    scratch = promotion.add_scratch_worktree(tag_commit, repo=repo)
+    try:
+        with zipfile.ZipFile(directory / entry["filename"]) as bundle:
+            manifest = json.loads(bundle.read("manifest.json"))
+        validate_source_binding(manifest, scratch)
+    finally:
+        promotion.remove_scratch_worktree(scratch, repo=repo)
+
+
+def _release(result: subprocess.CompletedProcess, tag: str) -> dict:
+    try:
+        release = json.loads(_check(result))
+        if release["draft"] is not False or release["tag_name"] != tag:
+            raise PromotionArtifactError(f"{tag}: draft or mismatched release is not published")
+        if not isinstance(release["assets"], list):
+            raise TypeError("invalid release assets")
+        return release
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise PromotionArtifactError(f"{tag}: invalid release response") from exc
+
+
 def publish_artifacts(
     directory: Path, *, repository: str, merged_commit: str, dev_head: str, repo: Path,
 ) -> None:
@@ -84,21 +141,35 @@ def publish_artifacts(
         tag = f"{entry['plugin']}-v{entry['version']}"
         asset = str(directory / entry["filename"])
         result = _gh(["api", f"repos/{repository}/releases/tags/{tag}"])
+        absent = False
         if result.returncode:
             if "(HTTP 404)" not in result.stderr:
                 _check(result)
+            absent = True
+        release = None if absent else _release(result, tag)
+        tag_commit = _tag_commit(repository, tag)
+        if tag_commit is not None:
+            _validate_tag_binding(
+                directory, entry, tag_commit=tag_commit, merged_commit=merged_commit, repo=repo,
+            )
+        elif not absent:
+            raise PromotionArtifactError(f"{tag}: published release has no tag")
+        if absent:
             _check(_gh([
                 "release", "create", tag, "--repo", repository, "--target", merged_commit,
                 "--title", tag, "--notes",
                 "Attested first-party Python wheels. Runtime dependency admission is "
                 "consumer-side; these assets contain no third-party runtime packages.",
-                asset,
             ]))
-            continue
+            created_commit = _tag_commit(repository, tag)
+            if created_commit != (tag_commit or merged_commit):
+                raise PromotionArtifactError(f"{tag}: release tag changed during creation")
+            release = _release(_gh(["api", f"repos/{repository}/releases/tags/{tag}"]), tag)
+        if release is None:
+            raise PromotionArtifactError(f"{tag}: release state was not validated")
         try:
-            release = json.loads(result.stdout)
             matches = [a for a in release["assets"] if a["name"] == entry["filename"]]
-        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        except (KeyError, TypeError) as exc:
             raise PromotionArtifactError(f"{tag}: invalid release response") from exc
         if matches:
             if len(matches) != 1 or matches[0].get("digest") != f"sha256:{entry['sha256']}":

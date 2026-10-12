@@ -510,6 +510,18 @@ win grows with build complexity.
   compressed wheels without recompression. Identical input bytes remain
   identical despite changed clocks, mtimes, permissions or wheel-record order,
   avoiding a spurious immutable-asset collision on an unchanged rebuild.
+- Wheel trust now inspects actual package bytes rather than only declared
+  filenames/digests: each nested ZIP requires matching WHEEL generator/tags,
+  METADATA distribution/version, safe members and a complete verified RECORD.
+  Fixtures are real minimal wheels; opaque bytes, forged metadata, unsafe
+  members and broken RECORDs fail before signing/publication.
+- Release visibility and tag binding are explicit: draft releases fail,
+  annotated/lightweight tags resolve through a bounded reader, and a new
+  release's tag is rechecked before a separate asset upload. Existing stable
+  plugin/version tags can remain at an older shipped ancestor only when
+  their exact first-party source closure and payload still match. Requiring
+  every unchanged version tag to point to each latest global promotion would
+  contradict the chosen stable-tag/content-addressed-rebuild contract.
 
 ### 2026-10-12 - Phase 2 slice 4: explicit public build-toolchain integration
 
