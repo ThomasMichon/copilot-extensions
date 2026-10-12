@@ -393,6 +393,9 @@ phase's first Plan item for the rationale.)_
 - Updated the manifest contract, worker-control docs and test-lane instructions;
   added changefiles for both changed components. Implementation review/merge
   and the effort's archive/release remain outstanding.
+- Addressed review diagnostics: keep the form type import type-only in the
+  contract layer, identify the failing dynamic-choice field and duplicated pool
+  names, and name the strict configuration-choice deadline independently.
 
 ### 2026-10-12 — Local toggle slice resumed; remote scope transferred
 

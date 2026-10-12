@@ -16,6 +16,7 @@ Legacy terminal toggles remain permissive.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import sys
 from typing import TYPE_CHECKING
 
@@ -77,9 +78,14 @@ def _unique_supervised_lanes() -> list["ProfileDeclaration"]:
     from .registrar import RegistrarError
 
     declarations = all_supervised_lanes()
-    names = [decl.name for decl in declarations]
-    if len(names) != len(set(names)):
-        raise RegistrarError("ambiguous worker pool declarations: names must be unique")
+    duplicates = sorted(
+        name for name, count in Counter(decl.name for decl in declarations).items()
+        if count > 1
+    )
+    if duplicates:
+        raise RegistrarError(
+            f"ambiguous worker pool declarations: duplicate names {', '.join(duplicates)}"
+        )
     return declarations
 
 

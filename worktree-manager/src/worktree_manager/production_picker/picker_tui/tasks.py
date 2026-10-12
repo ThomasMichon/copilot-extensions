@@ -48,6 +48,7 @@ ACTION_TIMEOUT = 30.0
 #: source should degrade to the field's "Other…" free-text fallback promptly,
 #: not stall opening the dialog.
 OPTIONS_COMMAND_TIMEOUT = 5.0
+STRICT_OPTIONS_COMMAND_TIMEOUT = 20.0
 
 #: Phase 0 (render-perf follow-up, #4762, 2026-10-01):
 #: a held ``subscribe`` stream's producer can exit (crash, or a plain EOF with
@@ -107,7 +108,7 @@ def resolve_dynamic_options(argv: Sequence[str], *, strict: bool = False) -> lis
     try:
         proc = subprocess.run(
             argv, capture_output=True, text=True,
-            timeout=LIST_TIMEOUT if strict else OPTIONS_COMMAND_TIMEOUT,
+            timeout=STRICT_OPTIONS_COMMAND_TIMEOUT if strict else OPTIONS_COMMAND_TIMEOUT,
             check=False, env=_child_process_env(), creationflags=no_window_flags(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
@@ -144,8 +145,13 @@ def resolve_form_fields(
         if command:
             from .pivot_actions import _as_argv
 
-            argv = _as_argv(command, where="form field options_command")
-            live = resolve_dynamic_options(argv, strict=strict)
+            try:
+                argv = _as_argv(command, where="form field options_command")
+                live = resolve_dynamic_options(argv, strict=strict)
+            except ValueError as exc:
+                raise ValueError(
+                    f"field {field['name']!r} options_command: {exc}"
+                ) from exc
             if live:
                 merged["options"] = live
         resolved.append(merged)

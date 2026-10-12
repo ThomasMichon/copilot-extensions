@@ -14,13 +14,15 @@ import shutil
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .harness_state import (
     build_projects,
     repo_plugin_enablement,
     user_enabled_plugins,
 )
-from .production_picker.picker_tui.pivot_create_action import CreateAction
+if TYPE_CHECKING:
+    from .production_picker.picker_tui.pivot_create_action import CreateAction
 
 CONTRACT_VERSION = 1
 PLUGINS_ROOT_ENV = "WORKTREE_MANAGER_PLUGINS_DIR"

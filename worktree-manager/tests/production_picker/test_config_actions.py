@@ -61,7 +61,7 @@ def _install_section(tmp_path, monkeypatch, section):
 
 
 async def _wait(pilot, predicate):
-    deadline = time.monotonic() + tasks.ACTION_TIMEOUT + tasks.LIST_TIMEOUT + 5
+    deadline = time.monotonic() + tasks.ACTION_TIMEOUT + tasks.STRICT_OPTIONS_COMMAND_TIMEOUT + 5
     while time.monotonic() < deadline:
         await pilot.pause()
         if predicate():
@@ -175,7 +175,15 @@ def test_config_choices_use_read_query_budget_without_changing_create_budget(mon
     monkeypatch.setattr(tasks.subprocess, "run", run)
     assert tasks.resolve_dynamic_options(["fixture"], strict=True) == ["pool"]
     assert tasks.resolve_dynamic_options(["fixture"]) == ["pool"]
-    assert timeouts == [tasks.LIST_TIMEOUT, tasks.OPTIONS_COMMAND_TIMEOUT]
+    assert timeouts == [tasks.STRICT_OPTIONS_COMMAND_TIMEOUT, tasks.OPTIONS_COMMAND_TIMEOUT]
+
+
+def test_config_options_error_identifies_the_field():
+    with pytest.raises(ValueError, match="field 'pool' options_command"):
+        tasks.resolve_form_fields([{
+            "name": "pool", "type": "choice",
+            "options_command": [sys.executable, "-c", "print('[]')"],
+        }], strict=True)
 
 
 def test_config_form_cancel_and_apply_native_controls(tmp_path, monkeypatch):

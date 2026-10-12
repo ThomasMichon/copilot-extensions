@@ -47,6 +47,18 @@ def test_pool_options_are_read_only(monkeypatch, capsys):
     assert not overrides_path().exists()
 
 
+def test_pool_options_identify_duplicate_names_without_writes(monkeypatch, capsys):
+    from agent_dispatch.config import overrides_path
+
+    _patch_discover(monkeypatch, [
+        _declare("duplicate"), _declare("duplicate", owner="other"),
+    ])
+    args = _args(["workers", "pool-options"])
+    assert args.func(args) == 2
+    assert "duplicate names duplicate" in capsys.readouterr().err
+    assert not overrides_path().exists()
+
+
 @pytest.mark.parametrize("toggle", ["disable", "enable"])
 @pytest.mark.parametrize("declarations", [[], [_declare("pool"), _declare("pool", owner="other")]])
 def test_strict_toggle_refuses_missing_or_ambiguous_before_writes(
