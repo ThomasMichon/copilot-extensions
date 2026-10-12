@@ -156,9 +156,11 @@ def _provider_head(repo, pr, *, expected_ref: str = "", expected_identity: str =
         return ""
     try:
         from . import providers
+        from .providers.pr_source import same_repository
 
         prcfg = repo.pr
-        provider = providers.get_provider(getattr(pr, "provider", "") or prcfg.provider)
+        provider_name = getattr(pr, "provider", "") or prcfg.provider
+        provider = providers.get_provider(provider_name)
         result = provider.get_pull(slug, int(number),
                                    api_base=getattr(prcfg, "api_base", "") or "",
                                    token=providers.account_token_for_slug(slug, prcfg))
@@ -166,7 +168,9 @@ def _provider_head(repo, pr, *, expected_ref: str = "", expected_identity: str =
             result.state not in ("open", "active") or result.merged
             or result.number != int(number) or result.head_ref != expected_ref
             or result.base_ref != repo.default_branch
-            or not result.head_url or _identity(result.head_url, "") != expected_identity
+            or not same_repository(
+                _identity(result.head_url, ""), expected_identity, provider_name,
+            )
         ):
             return ""
         return (getattr(result, "head_sha", "") or "").strip()

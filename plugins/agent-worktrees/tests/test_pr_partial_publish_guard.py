@@ -88,3 +88,30 @@ def test_partial_confirmation_requires_live_unchanged_provider_association(monke
         repo, pr, expected_ref="pr/topic-abcd", expected_identity="github.com/owner/repo",
     )
     assert result == ("b" * 40 if accepted else "")
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("url,accepted", [
+    ("https://dev.azure.com/org/project/_git/repo", True),
+    ("git@ssh.dev.azure.com:v3/org/project/repo", True),
+    ("https://dev.azure.com/other/project/_git/repo", False),
+    ("https://dev.azure.com/org/other/_git/repo", False),
+    ("https://other.example/org/project/_git/repo", False),
+    ("http://dev.azure.com/org/project/_git/repo", False),
+])
+def test_partial_confirmation_preserves_secure_azure_repository_aliases(monkeypatch, url, accepted):
+    pull = PullResult(
+        number=7, state="active", head_sha="b" * 40, head_ref="pr/topic-abcd",
+        base_ref="dev", head_url=url,
+    )
+    repo = SimpleNamespace(
+        default_branch="dev", pr=SimpleNamespace(provider="azure-devops", api_base=""),
+    )
+    pr = SimpleNamespace(number=7, repo="org/project/repo", provider="azure-devops")
+    monkeypatch.setattr(providers, "get_provider", lambda *_: SimpleNamespace(get_pull=lambda *_a, **_k: pull))
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: "")
+    result = pr_publish._provider_head(
+        repo, pr, expected_ref="pr/topic-abcd",
+        expected_identity="ssh.dev.azure.com/v3/org/project/repo",
+    )
+    assert result == ("b" * 40 if accepted else "")
