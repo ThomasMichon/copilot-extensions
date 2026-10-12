@@ -60,9 +60,12 @@ def cmd_attribution_prepare(args: argparse.Namespace) -> int:
         record = tracking.load_record_by_id(worktree_id, tracking_path=cfg.tracking_dir(config.repo_name))
         if record is None:
             raise ValueError("run attribution-prepare inside a managed source worktree")
+        if not record.worktree_path:
+            raise ValueError("managed source worktree has no recorded root")
+        root = Path(record.worktree_path).resolve()
         body = args.body_file.read_text(encoding="utf-8") if args.body_file else ""
         head = git_ops.git(
-            "rev-parse", "HEAD", cwd=str(cwd), check=True, isolated_repository=True, timeout=10,
+            "rev-parse", "HEAD", cwd=str(root), check=True, isolated_repository=True, timeout=10,
         ).stdout.strip()
         result = prepare(body, record, config, head=head, omit=args.omit_source, tag=args.tag)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:

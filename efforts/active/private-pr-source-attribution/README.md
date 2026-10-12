@@ -112,9 +112,9 @@ remote PR mutation. Adopter labels are optional public invocation configuration.
   rotation and old-token lookup before publishing the integration.
 
 ### Phase 4 — Provider fallback attribution
-- [ ] Add a configurable, provider-neutral fallback attribution path for PRs
+- [x] Add a configurable, provider-neutral fallback attribution path for PRs
   opened outside managed `create-pr`, including Azure DevOps.
-- [ ] Keep adopter-specific tags and repository names in adopter configuration,
+- [x] Keep adopter-specific tags and repository names in adopter configuration,
   never in the public plugin's defaults.
 
 ## Validation Plan
