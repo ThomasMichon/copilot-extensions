@@ -32,7 +32,8 @@ async def azure_json(args: list[str], *, timeout: float) -> object:
         if proc.returncode != 0:
             raise RoutingError("routing auth identity unavailable: Azure CLI command failed")
         return json.loads(stdout)
-    except (OSError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (OSError, TimeoutError, asyncio.TimeoutError,
+            json.JSONDecodeError, UnicodeDecodeError) as exc:
         await _terminate_tree(proc)
         raise RoutingError("routing auth identity unavailable: Azure CLI probe failed") from exc
     except BaseException:

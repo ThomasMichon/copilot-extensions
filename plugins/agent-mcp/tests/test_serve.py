@@ -158,6 +158,22 @@ async def test_warmpool_list():
         await pool.close_all()
 
 
+async def test_closed_pool_rejects_new_work_without_opening(monkeypatch):
+    import agent_mcp.serve as serve
+
+    async def unexpected_open(session):
+        pytest.fail("closed pool must not open an upstream")
+
+    monkeypatch.setattr(serve.OneShotSession, "__aenter__", unexpected_open)
+    pool = WarmPool()
+    await pool.close_all()
+    with pytest.raises(UpstreamError, match="warm pool is closing"):
+        await pool.list("new", _cfg())
+    with pytest.raises(UpstreamError, match="warm pool is closing"):
+        await pool.call("new", _cfg(), "echo", {})
+    assert pool.size == 0
+
+
 async def test_warmpool_enforces_fresh_tool_filter():
     pool = WarmPool()
     try:
@@ -632,6 +648,57 @@ async def test_pending_attach_reserves_host_before_upstream_start(tmp_path, monk
         if not task.done():
             await request_via_socket(sock, {"op": "shutdown"})
         await asyncio.wait_for(task, timeout=5)
+
+
+@pytest.mark.parametrize("operation", ["call", "list"])
+async def test_shutdown_drains_pending_warm_open_before_retirement(
+    tmp_path, monkeypatch, operation,
+):
+    import agent_mcp.serve as serve
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    original_open = serve.OneShotSession.__aenter__
+    closed = []
+    original_close = serve.OneShotSession.__aexit__
+
+    async def slow_open(session):
+        entered.set()
+        await release.wait()
+        return await original_open(session)
+
+    async def record_close(session, *args):
+        await original_close(session, *args)
+        closed.append(session)
+
+    monkeypatch.setattr(serve.OneShotSession, "__aenter__", slow_open)
+    monkeypatch.setattr(serve.OneShotSession, "__aexit__", record_close)
+    sock = tmp_path / "serve.sock"
+    bridge = _write_bridge_config(tmp_path)
+    server = Server(sock, idle_timeout=0, enable_lease=False)
+    retired = asyncio.Event()
+    monkeypatch.setattr(server, "_release_lease", retired.set)
+    host = asyncio.create_task(server.serve_forever())
+    request = None
+    try:
+        await _await_socket(sock)
+        request = asyncio.create_task(request_via_socket(sock, {
+            "op": operation, "bridge": str(bridge), "tool": "echo", "arguments": {},
+        }))
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        assert server.pool.size == 1
+        assert (await request_via_socket(sock, {"op": "shutdown"}))["ok"]
+        await asyncio.sleep(0)
+        assert not host.done() and not retired.is_set()
+        release.set()
+        assert (await asyncio.wait_for(request, timeout=5))["ok"]
+        await asyncio.wait_for(host, timeout=5)
+        assert retired.is_set() and len(closed) == 1 and server.pool.size == 0
+    finally:
+        release.set()
+        server.stop()
+        if request is not None:
+            await asyncio.gather(request, return_exceptions=True)
+        await asyncio.wait_for(host, timeout=5)
 
 
 async def test_failed_attach_releases_reservation_and_closes_session(tmp_path, monkeypatch):

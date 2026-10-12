@@ -157,7 +157,9 @@ When selected-target auth is configured, empty or failed injection is fatal
 remains an explicit unauthenticated choice.
 
 MCP `BridgeSession`, one-shot `call`, materialized stubs, and warm `serve`
-calls all use this enforcement core. Discovery starts only the trusted catalog
+calls all use this enforcement core. Warm-pool shutdown closes admission and
+drains pending opens as well as registered calls before host retirement.
+Discovery starts only the trusted catalog
 target. Materialized schemas retain the required selector; `defer` and
 `code-mode` expose the common contract and every real downstream call they
 synthesize must supply it in its own arguments (for example

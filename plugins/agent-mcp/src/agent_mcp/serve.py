@@ -141,6 +141,7 @@ class WarmPool:
         self._idle_timeout = idle_timeout
         self._guard = asyncio.Lock()  # guards the open/evict of the entry map
         self._opening = 0
+        self._closing = False
 
     async def _key_lock(self, key: str) -> asyncio.Lock:
         async with self._guard:
@@ -149,6 +150,8 @@ class WarmPool:
     async def _entry_for_locked(self, key: str, cfg: BridgeConfig) -> _WarmEntry:
         """Select/open a config-matched entry while the key lock is held."""
         async with self._guard:
+            if self._closing:
+                raise UpstreamError("warm pool is closing; no new work admitted")
             entry = self._entries.get(key)
         if entry is not None and entry.session.cfg != cfg:
             await self._evict_locked(key, entry)
@@ -254,7 +257,12 @@ class WarmPool:
             await self._evict(key)
 
     async def close_all(self) -> None:
-        for key in list(self._entries):
+        async with self._guard:
+            self._closing = True
+            # Keys precede upstream startup, so their locks also drain opens
+            # that have not yet registered an entry.
+            keys = list(self._key_locks)
+        for key in keys:
             await self._evict(key)
 
     @property

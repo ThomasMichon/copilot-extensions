@@ -196,14 +196,20 @@ def test_generic_principal_markers_are_not_verified_identities(user):
         _account_identity({"user": user, "tenantId": "tenant", "id": "subscription"})
 
 
-async def test_azure_probe_timeout_uses_owned_tree_teardown(monkeypatch):
+@pytest.mark.parametrize("legacy_asyncio", [False, True])
+async def test_azure_probe_timeout_uses_owned_tree_teardown(monkeypatch, legacy_asyncio):
     import agent_mcp.auth.identity as identity
     import agent_mcp.auth.injectors as injectors
     import credential_relay.sources.az_login as source
 
+    timeout_type = TimeoutError
+    if legacy_asyncio:
+        timeout_type = type("LegacyAsyncioTimeoutError", (Exception,), {})
+        monkeypatch.setattr(identity.asyncio, "TimeoutError", timeout_type)
+
     class Process:
         async def communicate(self):
-            raise TimeoutError()
+            raise timeout_type()
 
     proc = Process()
     closed = []
