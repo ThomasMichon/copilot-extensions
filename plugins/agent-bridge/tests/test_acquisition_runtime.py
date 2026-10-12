@@ -781,6 +781,91 @@ async def test_retirement_recovery_settles_admitted_turn_without_duplicate(rig, 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["cli", "acp"])
+@pytest.mark.parametrize("defect", ["none", "caller", "binding", "generation", "retired", "head", "authority", "fresh"])
+async def test_legacy_superseded_launch_requires_exact_positive_native_provenance(rig, mode, defect):
+    rig.source["task"]["generation"] = 1
+    rig.source["acquisition_reservation"].update(
+        worktree_ownership="reused", conversation_retired=True,
+    )
+    first = req(mode=mode, allocation="reused", conversation_retired=True, task_generation=1)
+    deliver = rig.runtime._deliver
+    rig.runtime._deliver = AsyncMock(side_effect=RuntimeError("before delivery"))
+    with pytest.raises(RuntimeError):
+        await rig.runtime.acquire(first)
+    rig.runtime._deliver = deliver
+    token, _, data = rig.runtime.store.recovery(first)
+    rig.runtime.store.stage(
+        first, "launching", acquired="created", session_id=None, native_session_id=None,
+        retired_native_ids=data.get("retired_native_ids", []),
+        creation_authorized=defect != "authority",
+    )
+    rig.runtime.store.journal.refuse(first, token, "superseded_before_delivery")
+    rig.runtime.store.release_gate(first)
+    if defect == "caller":
+        if mode == "acp":
+            rig.db.execute_write("UPDATE sessions SET caller_id='acquisition:another-delivery'")
+        else:
+            rig.db.execute_write("UPDATE live_sessions SET driven_by='another-driver'")
+    elif defect == "binding":
+        rig.db.execute_write("UPDATE acquisition_bindings SET task_id='another-task'")
+    elif defect == "generation":
+        rig.db.execute_write("UPDATE acquisition_bindings SET task_generation=0")
+    elif defect == "retired":
+        rig.db.execute_write("UPDATE acquisition_bindings SET retired=1")
+    elif defect == "head":
+        rig.head["id"] = "another-native"
+    rig.source["acquisition_reservation"]["key"] = "reservation-b"
+    second = first.model_copy(update={
+        "reservation_key": "reservation-b", "delivery_id": "delivery-b",
+        "intent": "fresh" if defect == "fresh" else "automatic",
+    })
+    if defect != "none":
+        with pytest.raises(AcquisitionRefused):
+            await rig.runtime.acquire(second)
+        table = "live_messages" if mode == "cli" else "turns"
+        assert not rig.db.execute_read(f"SELECT * FROM {table}")
+        return
+    result = await rig.runtime.acquire(second)
+    assert result.native_session_id == rig.head["id"]
+    assert await rig.runtime.acquire(second) == result
+    rig.source["acquisition_reservation"]["key"] = "reservation-c"
+    third = first.model_copy(update={"reservation_key": "reservation-c", "delivery_id": "delivery-c"})
+    assert not rig.runtime.store.retirement_recovery_proven(
+        third, result.session_id, result.native_session_id,
+    )
+    legacy = rig.db.execute_read(
+        "SELECT stage,data_json FROM acquisition_effects WHERE delivery_id='delivery-a'",
+    )[0]
+    assert legacy["stage"] == "launching"
+    assert "result" not in json.loads(legacy["data_json"])
+    table = "live_messages" if mode == "cli" else "turns"
+    assert rig.db.execute_read(f"SELECT COUNT(*) AS n FROM {table}")[0]["n"] == 1
+    for session in rig.manager.list_sessions():
+        if session._prompt_task:
+            await session._prompt_task
+
+
+def test_retirement_proof_uses_persistent_history_index(tmp_db, monkeypatch):
+    store = AcquisitionStore(tmp_db)
+    tmp_db.execute_write("DROP INDEX idx_acquisition_history")
+    store = AcquisitionStore(tmp_db)
+    original_read = tmp_db.execute_read
+    queries = []
+    def capture(sql, parameters=()):
+        queries.append((sql, parameters))
+        return original_read(sql, parameters)
+    monkeypatch.setattr(tmp_db, "execute_read", capture)
+    assert not store.retirement_recovery_proven(req(), "session-a", "native-a")
+    sql, parameters = queries[0]
+    plan = original_read("EXPLAIN QUERY PLAN " + sql, parameters)
+    assert any("SEARCH a USING INDEX idx_acquisition_history" in row["detail"] for row in plan)
+    assert not any("SCAN a" in row["detail"] for row in plan)
+    indexes = original_read("PRAGMA index_list(acquisition_attempts)")
+    assert any(row["name"] == "idx_acquisition_history" and not row["partial"] for row in indexes)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["cli", "acp"])
 async def test_completed_retirement_recovery_cannot_authorize_another_delivery(rig, mode):
     rig.source["task"]["generation"] = 1
     rig.source["acquisition_reservation"].update(

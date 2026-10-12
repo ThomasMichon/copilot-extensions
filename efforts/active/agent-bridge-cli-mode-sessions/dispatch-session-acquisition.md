@@ -220,3 +220,34 @@ bridge boundary, the validation matrix is resolved with honest evidence,
 authoritative docs match, and the runtime changes have merged. Record release
 and authorized rollout status without claiming uninstalled code is live.
 Completing Phase 6 does not close this effort's unrelated remaining phases.
+
+## Recovery incident and validation boundary (2026-10-12)
+
+The local consolidation in #6123 made worktree-owner invocation mandatory for
+dispatch acquisition. Its legacy resolver used ambient command discovery,
+which failed under a native service's minimal PATH despite an installed owner.
+It also marked dispatch acquisition before admitting the bridge journal.
+Consequently, an owner-lookup failure could leave a retained allocation without
+positive first-creation evidence. #6230 corrected attributable owner lookup;
+#6243 retained preflight receipts and first-conversation retry authority.
+
+Fresh-authorized recovery then exposed a second missing state combination:
+an interrupted creation left a real native holder, but the carried retirement
+marker demanded another creation and refused that holder. #6269 / #6270 address
+identity-bound recovery, consume recovery authority after actual admission,
+preserve exact delivery replay, and recognize older superseded launching stages
+only through positive native caller/driver and task-generation binding evidence.
+Historical stages remain unchanged; missing history never proves absence.
+
+The original connected tests mocked worktree commands, native connections,
+process spawning, and prompt execution. They covered interruption and retirement
+separately, not their important combined retry case. Those passing component
+contracts did not establish native-service execution readiness. New CLI/ACP
+regressions cover that combination, pre-completion admission, completed replay,
+legacy receipt gaps, and interrupted reuse with an unchanged process driver.
+
+The existing native integration gate remains open. Before crediting a rollout,
+exercise the real owner invocation under service-equivalent routing/PATH and
+prove actual native creation, turn admission, interruption, and same-context
+recovery without replacing those boundaries with mocks. Component checks,
+daemon health, an allocated directory, or an idle native holder are not substitutes.

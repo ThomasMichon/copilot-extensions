@@ -63,6 +63,10 @@ class AcquisitionJournal:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_acquisition_pending "
             "ON acquisition_attempts(target, worktree_id) WHERE state='pending'"
         )
+        db.execute_write(
+            "CREATE INDEX IF NOT EXISTS idx_acquisition_history "
+            "ON acquisition_attempts(worktree_id, state)"
+        )
 
     def claim(self, request: AcquisitionRequest) -> AcquisitionClaim:
         token = uuid.uuid4().hex

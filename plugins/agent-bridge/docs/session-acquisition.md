@@ -129,7 +129,12 @@ the old attempt `superseded_before_delivery`. Automatic retries may reuse that
 specific non-retired, same-task, same-generation conversation only when its
 target/mode and native head agree with that receipt. Foreign or unbound
 holders, older generations, a newly issued freshness intent, and retired
-native IDs still refuse. Durable turn admission consumes that recovery chain
+native IDs still refuse. Older superseded `launching` records without a result
+remain recoverable only when their positive creation authorization, exact
+native task/generation binding, and recorded launch caller (ACP) or driver (CLI)
+all agree. Missing records never establish that proof, and historical stages
+are not rewritten into fabricated result receipts.
+Durable turn admission consumes that recovery chain
 for other delivery IDs, even before completion is journaled. A completed receipt
 retains immutable proof only for replay of its own delivery ID; later
 reservations cannot use it to deliver the same fresh-generation task again.
