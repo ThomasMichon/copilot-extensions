@@ -272,7 +272,10 @@ promotion, not merely a green full-test job. The separate vault-timeout tracker
 
 Publisher prerequisite #5817 is complete. The effort and Phase 3 remain Active:
 the next reviewed shared slice is candidate/rollback retention, followed by
-construction coalescing and complete adopter integration. Immutable-slot
+construction coalescing and complete adopter integration. The existing
+shared-core worker's retention reservation under #5472 is preserved; the
+publisher worker posted the verified release/deployment handback and makes no
+competing retention edits. Immutable-slot
 refusal, explicit dev/release, distinct-generation repair, portfolio rollout
 and their full validation remain unchecked. The parked authoritative-daemon
 work is still separate; this delivery does not complete or transfer it.
