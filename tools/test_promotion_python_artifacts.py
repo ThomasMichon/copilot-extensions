@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import stat
 import subprocess
@@ -111,6 +112,40 @@ def test_bundle_and_transfer_roundtrip(tmp_path):
         assert set(bundle.namelist()) == {"manifest.json", "demo-1.0-py3-none-any.whl"}
         assert json.loads(bundle.read("manifest.json"))["plugin"] == "demo"
         assert bundle.read("demo-1.0-py3-none-any.whl") == b"first-party wheel"
+
+
+def test_identical_artifact_bundles_ignore_clock_mtimes_permissions_and_wheel_order(tmp_path, monkeypatch):
+    wheel_dir = tmp_path / "wheels"
+    manifest = _manifest(wheel_dir)
+    library = wheel_dir / "library-1.0-py3-none-any.whl"
+    library.write_bytes(b"library")
+    manifest["wheels"].append({
+        "filename": library.name, "role": "vendored-lib",
+        "sha256": "sha256:" + artifacts._digest(library),
+    })
+    _complete_manifest(manifest)
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    original = artifacts.bundle_wheels(manifest, wheel_dir, first)
+    for path in wheel_dir.iterdir():
+        os.utime(path, (1000000000, 1000000000))
+        path.chmod(0o444)
+    monkeypatch.setattr(zipfile.time, "localtime", lambda *_: (2050, 12, 31, 23, 59, 58, 0, 0, 0))
+    manifest["wheels"].reverse()
+    try:
+        rebuilt = artifacts.bundle_wheels(manifest, wheel_dir, second)
+    finally:
+        for path in wheel_dir.iterdir():
+            path.chmod(0o644)
+    assert original == rebuilt
+    assert (first / original["filename"]).read_bytes() == (second / rebuilt["filename"]).read_bytes()
+    with zipfile.ZipFile(first / original["filename"]) as bundle:
+        for info in bundle.infolist():
+            assert info.date_time == (1980, 1, 1, 0, 0, 0)
+            assert info.create_system == 3
+            assert info.external_attr == (stat.S_IFREG | 0o644) << 16
+            assert info.compress_type == zipfile.ZIP_STORED
 
 
 @pytest.mark.parametrize("mutation", [

@@ -504,6 +504,12 @@ win grows with build complexity.
   remote/config reads while preserving all four recovery-dispatch assertions;
   its isolated runner passes all 21 cases. No production publication logic
   was relaxed.
+- The same review's previously-missed Medium finding identified nondeterministic
+  ZIP headers under content-addressed filenames. Bundles now sort members and
+  manifest wheel records, use fixed timestamps/permissions, and store already-
+  compressed wheels without recompression. Identical input bytes remain
+  identical despite changed clocks, mtimes, permissions or wheel-record order,
+  avoiding a spurious immutable-asset collision on an unchanged rebuild.
 
 ### 2026-10-12 - Phase 2 slice 4: explicit public build-toolchain integration
 

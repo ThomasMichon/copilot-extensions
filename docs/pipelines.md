@@ -108,8 +108,12 @@ actual parent/content tree and project set and revalidates archive contents.
 Assets live under the deterministic
 `<plugin>-v<version>` GitHub Release tag. Each ZIP filename includes the
 manifest's content-addressed `artifact_id`, permitting independently attested
-rebuilds without replacing a prior asset. No upload uses `--clobber`; an
-already-present same-name asset is accepted only when GitHub's reported SHA-256
+rebuilds without replacing a prior asset. Outer ZIP members have fixed
+timestamps/permissions and canonical order;
+already-compressed wheels are stored without recompression, so identical
+inputs cannot drift with filesystem metadata, wall-clock time or zlib versions.
+No upload uses `--clobber`; an already-present same-name asset is accepted only
+when GitHub's reported SHA-256
 digest matches. Its release PAT and verification token are scoped to the final
 publisher step, not exposed to checkout, Python setup or artifact-download
 actions. Publication is its own job so a partial upload can be retried with

@@ -80,9 +80,19 @@ def bundle_wheels(manifest: dict, wheel_dir: Path, out_dir: Path) -> dict:
     filename = f"{plugin}-{version}-{artifact_id[7:]}.zip"
     destination = out_dir / filename
     names = {"manifest.json"}
-    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
-        bundle.writestr("manifest.json", json.dumps(manifest, sort_keys=True) + "\n")
-        for wheel in manifest["wheels"]:
+
+    def member(name: str) -> zipfile.ZipInfo:
+        info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+        info.create_system = 3
+        info.external_attr = (stat.S_IFREG | 0o644) << 16
+        return info
+
+    wheels = sorted(manifest["wheels"], key=lambda wheel: wheel["filename"])
+    canonical_manifest = {**manifest, "wheels": wheels}
+    # Wheels are already compressed; storing them avoids zlib-version drift too.
+    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_STORED) as bundle:
+        bundle.writestr(member("manifest.json"), json.dumps(canonical_manifest, sort_keys=True) + "\n")
+        for wheel in wheels:
             name = wheel["filename"]
             if (
                 wheel["role"] not in ("plugin", "vendored-lib")
@@ -95,7 +105,8 @@ def bundle_wheels(manifest: dict, wheel_dir: Path, out_dir: Path) -> dict:
             path = wheel_dir / name
             if path.is_symlink() or f"sha256:{_digest(path)}" != wheel["sha256"]:
                 raise PromotionArtifactError(f"{name}: wheel digest changed before bundling")
-            bundle.write(path, name)
+            with path.open("rb") as source, bundle.open(member(name), "w") as target:
+                shutil.copyfileobj(source, target, length=1 << 20)
     return {
         "plugin": plugin, "version": version, "artifact_id": artifact_id,
         "filename": filename, "sha256": _digest(destination),
