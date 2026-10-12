@@ -101,6 +101,11 @@ def test_kick_requires_verification_and_sets_scope_exclusivity(tmp_path, monkeyp
     assert captured[0].require_verification is True
     assert captured[0].exclusive_key == "worktree-audit:fixture-project"
     assert captured[0].spawn is False
+    ordinary = build_parser().parse_args(["create", captured[0].title])
+    assert vars(ordinary).keys() <= vars(captured[0]).keys()
+    assert captured[0].remote_create_envelope is None
+    assert captured[0].producer_capability is None
+    assert captured[0].supersede_exclusive_key is False
     bypass = build_parser().parse_args(
         [*_args("kick", _params(tmp_path)), "--no-require-verification"],
     )

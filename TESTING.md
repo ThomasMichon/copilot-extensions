@@ -116,6 +116,8 @@ The remaining checkout/obligation matrix runs in the existing full
 promotion/scheduled/manual suite, not as an unconditional new PR matrix.
 The report-only audit recipe's pure parameter/receipt/path checks and
 service-free CLI render smoke also run in the changed-dispatch guard lane.
+A non-dry-run CLI kick additionally traverses the real parser/create/client
+path against an isolated loopback coordinator without spawning a worker.
 Native symlink escape coverage runs where the test environment permits
 creating symlinks; a platform refusal is reported as a skip, not a pass.
 

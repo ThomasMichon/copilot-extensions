@@ -178,6 +178,34 @@ def test_http_existing_recipe_leaves_verification_unspecified(coord, monkeypatch
     assert "require_verification" not in captured[0]
 
 
+@pytest.mark.guard
+def test_actual_cli_audit_kick_enqueues_without_spawning(coord, tmp_path):
+    import json
+    import os
+    from pathlib import Path
+    import subprocess
+    import sys
+
+    source = Path(__file__).resolve().parents[1] / "src"
+    env = {**os.environ, "PYTHONPATH": str(source)}
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    response = subprocess.run(
+        [
+            sys.executable, "-m", "agent_dispatch", "--url", coord,
+            "recipes", "kick", "worktree-audit", "--repo", TEST_REPO,
+            "--param", "scope=fixture-project", "--param", "candidates=wt-a",
+            "--param", "budget_minutes=5", "--param", f"report_dir={tmp_path}",
+        ],
+        capture_output=True, text=True, env=env, timeout=20, check=True, **flags,
+    )
+    task = json.loads(response.stdout)
+    assert task["status"] == "queued"
+    assert task["require_verification"] is True
+    assert task["exclusive_key"] == "worktree-audit:fixture-project"
+    assert "mode:report-only" in task["labels"]
+    assert task["producer_fence"] is None
+
+
 def test_hosted_emitter_side_load_routes_to_registration_owner(tmp_path, monkeypatch):
     import asyncio
 

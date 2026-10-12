@@ -143,7 +143,11 @@ def _recipe_create_namespace(args: argparse.Namespace, rendered: Any) -> argpars
     reuse ``_cmd_create`` verbatim (dedup, spawn, lane resolution)."""
     from .recipes import exclusive_key_for
 
-    return argparse.Namespace(
+    create_args = _resolve_cli_module().build_parser().parse_args(["create", rendered.title])
+    for key, value in vars(args).items():
+        if key in vars(create_args) and key not in {"func", "command"}:
+            setattr(create_args, key, value)
+    options = dict(
         # recipe-derived
         title=rendered.title,
         prompt=rendered.prompt,
@@ -186,6 +190,8 @@ def _recipe_create_namespace(args: argparse.Namespace, rendered: Any) -> argpars
         machine=getattr(args, "machine", None),
         worktree=getattr(args, "worktree", None),
     )
+    vars(create_args).update(options)
+    return create_args
 
 
 def _cmd_recipes_kick(args: argparse.Namespace) -> int:
