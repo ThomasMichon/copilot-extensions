@@ -14,7 +14,7 @@ class OperationLedger:
     def __init__(self, path, *, authority, installation):
         identifier(authority, "ledger authority")
         identifier(installation, "ledger installation")
-        self.path = Path(path)
+        self.path = Path(path).resolve()
         self.authority, self.installation = authority, installation
         with self._transaction(verify=False) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
@@ -56,7 +56,10 @@ class OperationLedger:
 
     @contextmanager
     def _transaction(self, *, verify=True, write=True):
-        connection = sqlite3.connect(self.path, timeout=5, isolation_level=None)
+        connection = sqlite3.connect(
+            self.path.as_uri() + "?mode=rw" if verify else str(self.path),
+            timeout=5, isolation_level=None, uri=verify,
+        )
         try:
             connection.execute("PRAGMA foreign_keys=ON")
             connection.execute("PRAGMA synchronous=FULL")

@@ -39,6 +39,9 @@ it never probes a remote target.
 Schema and authority/installation identity are checked when opening and inside
 every operation transaction. Unsupported versions and unrecognized databases
 are refused; no migration or stale backup restoration is performed.
+Only explicit construction may create a database; subsequent verified
+transactions open the resolved path in existing-file mode and fail without
+recreating storage if it disappears.
 SQLite/storage exceptions propagate explicitly. Paths and underlying files
 must remain under a trusted deployment owner's control on supported local
 storage; this is not hostile-client or network-filesystem isolation.
