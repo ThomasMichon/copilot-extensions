@@ -47,6 +47,7 @@ from agent_procutil import no_window_flags, no_window_kwargs
 from . import (
     activity,
     env_scrub,
+    finalize_obligations,
     git_ops,
     hooks,
     obligations,
@@ -1261,8 +1262,7 @@ def _assert_obligations_settled(
     abandon: bool,
     handoff_to: str | None = None,
 ) -> bool:
-    from .finalize_obligations import assert_obligations_settled
-    return assert_obligations_settled(
+    return finalize_obligations.assert_obligations_settled(
         record, worktree_id, abandon=abandon, handoff_to=handoff_to,
         emit_error=output.err, emit_warning=output.warn,
         format_ref=tracking.format_claim_ref,
@@ -1654,11 +1654,7 @@ def validate_and_finalize(
                     c for c in record.resources
                     if c.is_unsettled and c.kind != "session"
                 ]
-                if any(c.has_producer and c.is_unsettled for c in record.resources):
-                    output.err(
-                        f"Worktree {worktree_id} acquired an unsettled disposable "
-                        "producer obligation before cleanup; finalize is refused."
-                    )
+                if not finalize_obligations.assert_producers_settled(record, worktree_id, emit_error=output.err):
                     return False
                 pending = [
                     c for c in unsettled if c.ref.startswith("pending-run:")
@@ -1721,8 +1717,7 @@ def validate_and_finalize(
             record = tracking.load_record(yaml_path)
             require_record_mutation(record, config)
             checkout_managed = record.checkout_managed
-            if any(c.has_producer and c.is_unsettled for c in record.resources):
-                output.err("Unsettled disposable producer obligation at locked cleanup gate.")
+            if not finalize_obligations.assert_producers_settled(record, worktree_id, emit_error=output.err):
                 _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
                 return False
         inside_worktree = git_ops.is_cwd_inside(worktree_path)

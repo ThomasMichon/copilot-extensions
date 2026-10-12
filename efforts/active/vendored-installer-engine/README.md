@@ -614,6 +614,13 @@ installs, no service-specific config needed for this class of plugin.
   orphaned records. Regression cases prove rejected acceptance changes neither
   owner record nor bundle registry and retains the source obligation.
   The post-fix contained producer/handoff selection passed 113 tests.
+- The next required CI run exposed a one-line module-ceiling overrun only in
+  the synthetic merge: concurrent upstream guidance-worker liveness protection
+  increased the finalizer relative to the local PR head. Consolidating the
+  repeated producer checks into the existing obligation helper reduced the
+  local finalizer to 2,033 lines without widening its 2,038-line ceiling or
+  changing those gates. The combined contained producer, handoff and actual
+  finalization selections passed 124 tests.
 - An exact committed snapshot of
   `02d8773bf39647bf92386e30a1e6dd02781dedb0` passed 126 targeted native Windows
   tests under Python 3.12 and Windows PowerShell 5.1, including the producer,

@@ -8,6 +8,23 @@ if TYPE_CHECKING:
     from .tracking import WorktreeRecord
 
 
+def assert_producers_settled(
+    record: WorktreeRecord | None,
+    worktree_id: str,
+    *,
+    emit_error: Callable[[str], None],
+) -> bool:
+    """Apply the same non-bypassable producer gate before and during cleanup."""
+    if record is not None and any(c.has_producer and c.is_unsettled for c in record.resources):
+        emit_error(
+            f"Worktree {worktree_id} owns unsettled disposable producer obligations; "
+            "verified close or explicitly accepted handoff is required. "
+            "Abandon and obligation-gate mode cannot bypass this ownership."
+        )
+        return False
+    return True
+
+
 def assert_obligations_settled(
     record: WorktreeRecord | None,
     worktree_id: str,
@@ -42,12 +59,7 @@ def assert_obligations_settled(
     """
     if record is None:
         return True
-    if any(c.has_producer and c.is_unsettled for c in record.resources):
-        emit_error(
-            f"Worktree {worktree_id} owns unsettled disposable producer obligations; "
-            "verified close or explicitly accepted handoff is required. "
-            "Abandon and obligation-gate mode cannot bypass this ownership."
-        )
+    if not assert_producers_settled(record, worktree_id, emit_error=emit_error):
         return False
     try:
         from . import claim_handoffs
