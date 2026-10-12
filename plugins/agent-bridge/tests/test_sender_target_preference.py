@@ -116,3 +116,52 @@ def test_degraded_target_resolution_survives_one_failed_roster_read(monkeypatch,
     assert len(roster_reads) == 1
     assert requests[0]["sender_repo"] is None
     assert "Agent roster unavailable (HTTP 503)" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("machine", [False, True])
+def test_known_session_restart_preflights_before_end(monkeypatch, machine):
+    events = []
+    agent = "machine" if machine else "worker"
+    monkeypatch.setattr(cli, "_get_caller_id", lambda: None)
+    monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
+    monkeypatch.setattr(cli, "_phased_timeouts", lambda: PhasedTimeouts())
+    monkeypatch.setattr(cli, "_wait_for_idle", lambda *args, **kwargs: None)
+    client = SimpleNamespace(
+        get_session=lambda target: {
+            "session_id": "busy", "agent_name": agent, "status": "running",
+        },
+        list_sessions=lambda: [],
+        list_agents=lambda: events.append("roster") or [
+            {"name": agent, "derived": machine, "host": "host"},
+        ],
+        end_session=lambda sid: events.append("end"),
+        start_session=lambda **kwargs: events.append(("start", kwargs["sender_repo"])) or {
+            "session_id": "new", "name": "test", "status": "idle",
+        },
+    )
+    if machine:
+        with pytest.raises(SystemExit):
+            _resolve_target(client, "busy", force=True)
+        assert events == ["roster"]
+    else:
+        assert _resolve_target(client, "busy", force=True) == "new"
+        assert events == ["roster", "end", ("start", None)]
+
+
+def test_force_takeover_keeps_existing_session_when_preflight_fails(monkeypatch):
+    events = []
+    monkeypatch.setattr(cli, "_get_caller_id", lambda: "caller")
+    client = SimpleNamespace(
+        list_sessions=lambda: [{
+            "session_id": "busy", "agent_name": "machine", "caller_id": "caller",
+            "status": "running",
+        }],
+        end_session=lambda sid: events.append("end"),
+        start_session=lambda **kwargs: events.append("start"),
+    )
+    with pytest.raises(SystemExit):
+        _start_agent_session(
+            client, "machine", force=True,
+            agent_inventory=[{"name": "machine", "derived": True, "host": "host"}],
+        )
+    assert events == []

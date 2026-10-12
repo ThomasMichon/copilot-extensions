@@ -50,6 +50,12 @@ second lookup. A failed roster read is reported as degraded and direct
 namespace/qualified resolution remains available; it is not reported as an
 empty authoritative catalog.
 
+Force takeover/restart prepares the applicable preference and target
+classification before ending the existing session. Invalid consuming-machine
+context leaves that session intact; a known non-machine restart skips irrelevant
+owner preference checks. The target-bound prepared result is reused during
+startup, with no roster lookup or sender revalidation after termination.
+
 ## Quick Setup
 
 ### Auto-adopt from a repo

@@ -534,13 +534,18 @@ def _resolve_known_session(client, session_id: str, session: dict, *, force: boo
             file=sys.stderr,
         )
         sys.exit(core._SEND_BUSY_EXIT)
+    from .session_start_cli import _prepare_sender_preference
+
+    sender_preference = _prepare_sender_preference(client, agent) if agent else None
     print(f"[>] --force: ending busy session {session_id} to take over...")
     try:
         client.end_session(session_id)
     except Exception:
         pass
     if agent:
-        return core._start_agent_session(client, agent, force=False)
+        return core._start_agent_session(
+            client, agent, force=False, sender_preference=sender_preference,
+        )
     print(
         f"[FAIL] Session {session_id} ended; no agent recorded -- re-send to the agent name to start a fresh session.",
         file=sys.stderr,
@@ -599,15 +604,9 @@ def _resolve_target(
         if session:
             return _resolve_known_session(client, worktree_session_id, session, force=force)
 
-    try:
-        agents = client.list_agents()
-    except BridgeClientError as exc:
-        print(
-            f"[WARN] Agent roster unavailable (HTTP {exc.status}); "
-            "trying direct resolution for the requested target.",
-            file=sys.stderr,
-        )
-        agents = []
+    from .session_start_cli import _read_agent_inventory
+
+    agents = _read_agent_inventory(client)
 
     matches = _match_agents(target, agents)
     if len(matches) > 1:

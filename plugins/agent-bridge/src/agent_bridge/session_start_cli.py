@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 
 
 def _core():
@@ -195,6 +196,43 @@ def _sender_repo_for_target(
     return _core()._sender_repo()
 
 
+def _read_agent_inventory(client) -> list[dict]:
+    from .client import BridgeClientError
+
+    list_agents = getattr(client, "list_agents", None)
+    if list_agents is None:
+        return []
+    try:
+        return list_agents()
+    except BridgeClientError as exc:
+        print(
+            f"[WARN] Agent roster unavailable (HTTP {exc.status}); "
+            "trying direct resolution for the requested target.",
+            file=sys.stderr,
+        )
+        return []
+
+
+@dataclass(frozen=True)
+class _SenderPreference:
+    agent_name: str
+    project: str | None
+
+
+def _prepare_sender_preference(
+    client, agent_name: str, *, agent_inventory: list[dict] | None = None,
+) -> _SenderPreference:
+    repo, separator, venue = agent_name.partition("@")
+    if separator and repo.strip() and venue.strip():
+        return _SenderPreference(agent_name, None)
+    inventory = (
+        _read_agent_inventory(client) if agent_inventory is None else agent_inventory
+    )
+    return _SenderPreference(
+        agent_name, _sender_repo_for_target(agent_name, agent_inventory=inventory),
+    )
+
+
 def _start_agent_session(
     client,
     agent_name: str,
@@ -208,11 +246,15 @@ def _start_agent_session(
     target_dir: str | None = None,
     worktree_id: str | None = None,
     agent_inventory: list[dict] | None = None,
+    sender_preference: _SenderPreference | None = None,
 ) -> str:
     core = _core()
     from .client import BridgeClientError
     from .session_targeting_cli import _AgentSessionConflict, _busy_session_message
 
+    if sender_preference is not None and sender_preference.agent_name != agent_name:
+        print("[FAIL] Prepared sender preference belongs to a different target.", file=sys.stderr)
+        raise SystemExit(2)
     caller_id = core._get_caller_id()
 
     if not force_new:
@@ -227,6 +269,10 @@ def _start_agent_session(
                 if not force:
                     print(_busy_session_message(client, sid, agent_name, caller_id), file=sys.stderr)
                     sys.exit(core._SEND_BUSY_EXIT)
+                if sender_preference is None:
+                    sender_preference = _prepare_sender_preference(
+                        client, agent_name, agent_inventory=agent_inventory,
+                    )
                 print(f"[>] --force: ending busy session {sid} to take over...")
                 try:
                     client.end_session(sid)
@@ -235,6 +281,10 @@ def _start_agent_session(
             else:
                 return _reuse_existing(client, existing, agent_name)
 
+    if sender_preference is None:
+        sender_preference = _prepare_sender_preference(
+            client, agent_name, agent_inventory=agent_inventory,
+        )
     print(f"[>] Starting session for agent '{agent_name}'...")
     try:
         resp = client.start_session(
@@ -243,7 +293,7 @@ def _start_agent_session(
             target_dir=target_dir,
             caller_id=caller_id,
             caller_session_id=core._get_caller_session_id(),
-            sender_repo=_sender_repo_for_target(agent_name, agent_inventory=agent_inventory),
+            sender_repo=sender_preference.project,
             force_new=force_new,
             caller_owner_ref=core._worktrees_get("owner-ref"),
             worktree_id=worktree_id,
@@ -281,6 +331,7 @@ def _start_agent_session(
                     target_dir=target_dir,
                     worktree_id=worktree_id,
                     agent_inventory=agent_inventory,
+                    sender_preference=sender_preference,
                 )
             if session.get("status", "") == "running":
                 if not force:
@@ -303,6 +354,7 @@ def _start_agent_session(
                     target_dir=target_dir,
                     worktree_id=worktree_id,
                     agent_inventory=agent_inventory,
+                    sender_preference=sender_preference,
                 )
             return _reuse_existing(client, session, agent_name)
         raise
