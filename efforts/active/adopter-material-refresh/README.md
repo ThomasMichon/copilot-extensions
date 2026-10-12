@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent, serial per-phase PRs to `dev`
 - **Created:** 2026-10-08
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/README.md` and the subject-specific visions, used as
   intent boundaries rather than evidence that a capability is shipped
 - **Umbrella issue:** `ThomasMichon/copilot-extensions#5799`
@@ -28,6 +28,7 @@ is not sufficient evidence for a present-tense capability claim.
 |-------------|---------------------|-------------|
 | Planning lead | Owns the bounded proposal and review gate; does not assume material-execution ownership | managed proposal worktree |
 | Execution lead (unassigned) | Claims the independent campaign before executing its reviewed phases | umbrella issue and a new managed worktree |
+| Documentation slice lead | Owns adopter structure/prose, documentation checks, and serial publication; excludes preview capture/assets | umbrella `#5799` documentation claim |
 
 ## Coordination
 
@@ -74,6 +75,24 @@ The phase structure and validation obligations below are **agent-recommended**,
 not additional operator-requested product features.
 
 ## Plan
+
+### Bounded documentation participant
+
+- [ ] Land documentation intent and page-role architecture before dependent
+      adopter-page rewrites.
+- [ ] Inventory and refresh the primary reading path: README, adopter index,
+      capability/adoption, configuration, architecture, and runbook waypoints.
+      Preserve component references and current command/configuration owners.
+- [ ] Ground installation and support claims in manifests and owning
+      implementation; label generic deployment examples as hypothetical.
+- [ ] Validate changed navigation and existing documentation guards; extend an
+      existing guard only for an objective invariant, with fixture tests.
+- [ ] Land the implementation slice, journal merged references, and release
+      this participant's responsibility without completing the whole campaign.
+
+Preview capture and asset regeneration remain **outstanding and unassigned**.
+The campaign execution lead and exhaustive plugin-reference inventory are not
+implicitly assigned by this bounded documentation claim.
 
 ### Phase 0 — Publish the independent reviewed plan
 - [x] Confirm sibling relationship and slug; verify target adoption and dedup.
@@ -135,12 +154,29 @@ not additional operator-requested product features.
 
 ## Proposal
 
-**Reviewed Draft; execution unassigned.** The operator confirmed relationship
+**Reviewed plan; bounded documentation execution claimed.** The operator confirmed relationship
 and name, and the agent-recommended execution/validation structure cleared the
 normal review gate in `#5807`. No runtime implementation, service repair,
 repository creation, or private-environment capture was part of that proposal.
 
 ## Journal
+
+### 2026-10-12 — Documentation structure and prose claimed
+- Reused umbrella `#5799` and reviewed proposal `#5807`; no competing open
+  documentation slice was found. The documentation participant owns serial
+  direction and implementation PRs, not runtime changes or preview assets.
+- Generic request capture: make the toolkit's adopter path current,
+  navigable, and honest about optional dependencies and supported behavior;
+  keep hypothetical deployments separate from capability claims.
+- Baseline: the README fronts unavailable Configurator bootstrap commands
+  before current install instructions, repeats runtime diagrams and references,
+  and makes a suite-wide platform assurance. The runbook's curated set carries
+  obsolete total counts. Existing catalog/skill/count and runbook-reference
+  guards remain the validation owners; no dedicated adopter docs index exists.
+- Added a documentation vision and current page-role map as the direction
+  gate. Dependent adopter rewrites wait for that PR's actual merge.
+- Screenshot phases remain outstanding/unassigned; this participant will not
+  declare the campaign Done or replace its existing completion gate.
 
 ### 2026-10-08 — Independent planning seed
 - Captured the original material concern and both literal follow-up selections.

@@ -22,6 +22,7 @@ repo via the Copilot CLI marketplace.
 |-------|-------|
 | Know **which plugins exist** (+ versions) | `.github/plugin/marketplace.json` (source of truth), rendered in `README.md` and `docs/architecture.md` |
 | Understand **how the suite works today** (as-is) | `docs/architecture.md` |
+| Maintain **adopter documentation and its reading flow** | `docs/documentation-architecture.md` + `visions/documentation/README.md`; documentation-impact review in `CONTRIBUTING.md` |
 | See **how we build plugins here** (reusable design) | `docs/patterns/README.md` |
 | Add an **`agent-*` runtime plugin** with commands/services | `docs/patterns/runtime-agent-plugin.md` |
 | See **what a subject should ultimately be** (intent) | `visions/README.md` |
