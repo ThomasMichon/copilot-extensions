@@ -256,6 +256,15 @@ failure still require the normal promotion lane; these checks do not prove a
 baseline was earned. No runtime-retention implementation or deployment gate is
 checked off by this diagnostic slice.
 
+Subsequent live evidence supersedes the collection blocker: normal run
+`38289187893` earned and uploaded the required agent-worktrees baseline
+(collection step succeeded; artifact `11766276761`). Promotion then correctly
+refused three existing vendor destinations after canonical-source migration:
+`plugin-resolve`, `dropin-registry`, and `plugin-activation`. The source-layout
+repair is already claimed under #6331/#6334 with #6335 open; this effort does
+not duplicate that owner's implementation or bypass the no-overwrite gate.
+Normal promotion and installed verification remain the publisher prerequisite.
+
 ### 2026-10-12 — Shared construction ownership merged
 
 The bounded, dependency-free Python `construction_lease()` API landed through
