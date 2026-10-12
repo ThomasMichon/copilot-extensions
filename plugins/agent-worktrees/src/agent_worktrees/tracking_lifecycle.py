@@ -440,12 +440,12 @@ def set_head_session(
     save: bool = True,
 ) -> None:
     tracking = _tracking()
-    _ensure_head_ledger(record)
     entry = record.session_entry(session_id)
     if entry is None or entry.state != "active":
         raise SessionLifecycleError(
             f"session {session_id} is not active; use explicit lifecycle recovery"
         )
+    _ensure_head_ledger(record)
     if record.resolved_head_session != session_id:
         _append_head_transition(record, session_id, reason="adopted")
     if save:

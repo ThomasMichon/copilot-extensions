@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from copy import deepcopy
 
 from agent_worktrees import session_catalog, tracking, tracking_lifecycle
 from test_session_catalog import _record, _wire
@@ -59,3 +60,20 @@ def test_observation_adoption_refuses_nonactive_session(tmp_path, monkeypatch, s
     with pytest.raises(tracking.SessionLifecycleError, match="not active"):
         tracking.set_head_session(rec, "old", save=False)
     assert rec.head_revision == before
+
+
+@pytest.mark.parametrize("state", ["yielded", "handed-off", "concluded"])
+def test_refused_legacy_adoption_does_not_seed_ledger(tmp_path, state):
+    rec = _record(
+        "wt-legacy", str(tmp_path / "wt-legacy"),
+        sessions_list=[
+            tracking.SessionEntry("current", "2026-06-01T10:00:00"),
+            tracking.SessionEntry("target", "2026-06-01T11:00:00", state=state),
+        ],
+        head="current",
+    )
+    before = deepcopy(rec)
+    with pytest.raises(tracking.SessionLifecycleError, match="not active"):
+        tracking.set_head_session(rec, "target", save=False)
+    assert rec == before
+    assert rec.head_transitions == []
