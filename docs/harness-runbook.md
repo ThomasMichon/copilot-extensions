@@ -83,7 +83,7 @@ These are the load-bearing conventions. Apply them. Each maps to a phase.
 
 1. **Repo structure** for the harness itself — [Phase 1](#phase-1--repo-structure).
 2. **Repo-scoped plugin registration** via `.github/copilot/settings.json` +
-   experimental mode — [Phase 2](#phase-2--register-repo-scoped-plugins).
+   explicit activation/trust scope — [Phase 2](#phase-2--register-repo-scoped-plugins).
 3. **Adopting the harness and its related target repos with agent-worktrees** —
    [Phase 3](#phase-3--adopt-the-harness-and-related-repos).
 4. **`AGENTS.md` + "connective-tissue" skills** that bind the generic plugin
@@ -199,7 +199,7 @@ below invoke them in order.
 | `efforts-setup` | scaffold · repo | Scaffold `efforts/` + this repo's efforts addendum (Phase 7) |
 | `visions-setup` | scaffold · repo | Scaffold `visions/` + this repo's visions addendum (Phase 7) |
 | `create-setup-script` | scaffold · repo | Generate an ACP-safe `tools/setup/setup.{ps1,sh}` (Phase 1) |
-| `context-handoff-setup` | verify · no install | Troubleshoot the context-handoff **extension** (it needs no install — just the plugin enabled + experimental mode on) |
+| `context-handoff-setup` | verify · no Python runtime | Troubleshoot extension loading; user-level enablement is separate from repo-scoped payload activation |
 
 > Payload-only plugins (`efforts`, `visions`, `context-handoff`,
 > `customizing-copilot`, `harness-*`, `wsl-setup`) have **no runtime to install** —
@@ -216,16 +216,15 @@ across every plugin or platform; see [installation requirements](installation.md
 - **Copilot CLI**; for the local worktree lane, **Python 3.10+** and **Git 2.15+**
   as documented by its [owner](../plugins/agent-worktrees/docs/getting-started.md#prerequisites).
 - **`uv`** — the selected runtime plugin's installer owns bootstrap/deployment.
-- **Experimental mode on, once per machine** — the CLI gates *all* extension
-  loading on it. In `~/.copilot/settings.json`:
-  ```json
-  { "experimental": true }
-  ```
+- **Activation and trust** — ordinary plugin loading does not require
+  experimental mode. Repository settings are trust-gated; session extensions
+  require user-level enablement because their loader does not merge repo
+  settings. Follow the [installation scope contract](installation.md#load-the-marketplace-payload).
 - Provider CLIs only for selected integrations (`gh` for GitHub access/token
   workflows; `docker` for container fleet operations).
 
-**Done when:** `copilot --version` works and `~/.copilot/settings.json` has
-`"experimental": true`.
+**Done when:** Copilot CLI runs and the selected payloads/extensions load from
+their intended scope; repository trust is persisted where ACP use needs it.
 
 ---
 
@@ -308,6 +307,11 @@ Write `.github/copilot/settings.json`, declaring the marketplace and the
 Trim or extend `enabledPlugins` to the operator's needs — add
 `agent-mcp`, `agent-logger`, `agent-codespaces`, `agent-containers`,
 `agent-dispatch` only where a later phase or the operator calls for them.
+
+This example selects repository payloads. For selected session extensions
+such as context-handoff, deliberately configure user-level enablement as
+documented by the [installation owner](../plugins/customizing-copilot/skills/installing-plugins/SKILL.md);
+the current extension loader does not merge this repository file.
 
 **Restart before you rely on the new skills.** Plugins are scanned at session
 **startup**, so a session that *wrote* `settings.json` does not yet have the

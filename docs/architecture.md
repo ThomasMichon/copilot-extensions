@@ -16,6 +16,12 @@ The [marketplace manifest](../.github/plugin/marketplace.json) owns the roster;
 the lifecycle tables below classify its components without duplicating a
 second prose inventory. For component internals, follow the owner links.
 
+Payload activation and session-extension activation have different scope:
+trusted repository settings govern repo payloads, but the current extension
+loader uses user-level enablement and persisted install state. Follow
+[installation](installation.md) and its owner reference rather than inferring
+extension readiness from a repository plugin setting.
+
 ## The plugins
 
 The independently packaged [fleet-manager](../fleet-manager/README.md) is a

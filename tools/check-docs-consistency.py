@@ -79,11 +79,27 @@ def local_links(text: str) -> list[str]:
     """Inline/reference Markdown links and HTML image/link destinations."""
     text = prose(text)
     text = re.sub(r"(`+).*?\1", "", text)
-    links = re.findall(r"!?\[[^\]\n]*\]\(\s*<?([^\s)>]+)>?(?:\s+[^)]*)?\)", text)
-    definitions = dict(re.findall(r"^\s*\[([^\]]+)\]:\s*<?([^\s>]+)>?", text, re.M))
-    definitions = {key.casefold(): value for key, value in definitions.items()}
-    for label, reference in re.findall(r"!?\[([^\]]+)\]\[([^\]]*)\]", text):
-        destination = definitions.get((reference or label).casefold())
+    inline = r"!?\[[^\]\n]*\]\(\s*<?([^\s)>]+)>?(?:\s+[^)]*)?\)"
+    links = re.findall(inline, text)
+    definitions = dict(re.findall(r"^\s*\[([^\]\n]+)\]:\s*<?([^\s>]+)>?", text, re.M))
+
+    def reference_key(label: str) -> str:
+        return " ".join(label.split()).casefold()
+
+    definitions = {reference_key(key): value for key, value in definitions.items()}
+    remaining = re.sub(r"^\s*\[[^\]\n]+\]:[^\n]*$", "", text, flags=re.M)
+    remaining = re.sub(inline, "", remaining)
+
+    def full_reference(match: re.Match) -> str:
+        label, reference = match.groups()
+        destination = definitions.get(reference_key(reference or label))
+        if destination:
+            links.append(destination)
+        return ""
+
+    remaining = re.sub(r"!?\[([^\]\n]+)\]\[([^\]\n]*)\]", full_reference, remaining)
+    for reference in re.findall(r"!?\[([^\]\n]+)\]", remaining):
+        destination = definitions.get(reference_key(reference))
         if destination:
             links.append(destination)
     links.extend(re.findall(r"<(?:a|img)\b[^>]*?\b(?:href|src)=[\"']([^\"']+)[\"']",

@@ -12,7 +12,8 @@ and installing the marketplace does not adopt your repositories.
 
 ## Quick Start
 
-Start with a capability you need. For example, to load the customization skills:
+Start with a capability you need. For a **deliberate user-global installation**
+of the customization skills:
 
 ```bash
 copilot plugin marketplace add ThomasMichon/copilot-extensions
@@ -21,7 +22,7 @@ copilot plugin install customizing-copilot@copilot-extensions
 
 Restart Copilot CLI and verify the plugin's skills are available. Follow
 [installation](docs/installation.md) for repository-scoped settings,
-experimental extension loading, runtime prerequisites, and first-use checks.
+activation/trust and extension scope, runtime prerequisites, and first-use checks.
 For isolated local git sessions, add
 [agent-worktrees](plugins/agent-worktrees/docs/getting-started.md); its
 standalone path does not require bridge, Codespaces, or container plugins.

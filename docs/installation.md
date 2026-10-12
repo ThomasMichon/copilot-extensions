@@ -6,14 +6,17 @@ install an operator's complete harness, identities, or repository policy.
 
 ## Load the marketplace payload
 
-With an installed and authorized Copilot CLI:
+With an installed and authorized Copilot CLI, this is the **user-global**
+installation path (it affects sessions beyond one repository):
 
 ```bash
 copilot plugin marketplace add ThomasMichon/copilot-extensions
 copilot plugin install customizing-copilot@copilot-extensions
 ```
 
-This example loads customization skills, not a runtime service. To select a
+This example loads customization skills, not a runtime service. For a
+repository-scoped choice, use the settings path below instead of a global
+install command. To select a
 different capability, replace the plugin name with one from the
 [marketplace](../.github/plugin/marketplace.json). Restart the session and
 verify the expected skills or extension are present.
@@ -39,11 +42,19 @@ The following is a **minimal example**, not a default full harness:
 ```
 
 The owner guide places this in `.github/copilot/settings.json`. Preserve
-existing settings rather than overwriting the file. The documented extension
-loading path uses `"experimental": true` in user-global
-`~/.copilot/settings.json`; verify the setting when selecting extension-backed
-plugins. Repository selection and machine-local settings have different
-[configuration owners](configuration.md).
+existing settings rather than overwriting the file. Plugin loading does not
+require experimental mode. Repository settings participate only when the
+repository is trusted; ACP sessions require persisted trust because they
+cannot present the interactive trust prompt.
+
+**Session extensions have a separate activation boundary.** The current
+extension loader reads user-level `enabledPlugins` and persisted install
+state without merging repository settings. For a selected extension-backed
+capability, use deliberate user-level enablement/global installation and
+verify that the extension loaded; a repo-only payload setting is not enough.
+Installed inventory alone is not activation. See the
+[installation owner's scoping caveats](../plugins/customizing-copilot/skills/installing-plugins/SKILL.md)
+and the [configuration ownership map](configuration.md).
 
 ## Payload, runtime, and adoption are different steps
 
@@ -66,6 +77,14 @@ is the task-time entry point; use the current
 [architecture](architecture.md) and [install contract](install-contract.md)
 for composition and command ownership. Other runtime plugins have their own
 setup owners in the [reference index](reference-index.md).
+
+The mesh setup skill retains legacy endpoint/install-order and
+experimental-setting examples; its payload refresh is tracked under
+[adopter-material-refresh](../efforts/active/adopter-material-refresh/README.md).
+For those boundaries, the current installation owner and architecture describe
+ordinary plugin activation, user-level extension enablement, discovered
+endpoints, and filesystem providers. Do not hardcode an endpoint or infer a
+mandatory sibling install order from those older examples.
 
 ## Requirements and platform scope
 

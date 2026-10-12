@@ -72,7 +72,7 @@ then re-run adoption when the machine-local projection needs refreshing.
 
 | File | Purpose | Written by |
 |------|---------|-----------|
-| `~/.copilot/settings.json` | Per-user CLI settings — **experimental mode**, personal plugin toggles | you (once per machine) |
+| `~/.copilot/settings.json` | Per-user CLI settings and user-global plugin activation, including session extensions | you |
 | `~/.copilot-extensions/installation-mode.json` | OS-profile-pinned desired installation mode: legacy by default, with namespaced opt-in and exact marketplace/plugin overrides | you, through explicit machine-local policy |
 | `~/.copilot-extensions/maintenance` + `maintenance.json` | Existence gate plus strict ownership sidecar that quiesces new plugin activity during user-wide surgical maintenance | maintenance command / you |
 | `~/.agent-worktrees/config.yaml` | Machine-wide defaults: `srcroot`, `machine`, `platform`, `copilot_profiles` | `install` |
@@ -90,6 +90,13 @@ Resolve actual runtime roots and command paths from the selected plugin's
 installation context; `~/.agent-*` entries are documented legacy locations,
 not safe hardcoded cross-plugin discovery paths. See
 [agent-facing invocation](architecture.md#agent-facing-invocation-and-command-glossaries).
+
+Plugin payloads can be activated through trusted repository settings, while
+the current session-extension loader uses user-level enablement and persisted
+install state without merging repository settings. Installed inventory,
+repository trust, and activation are separate authorities; ordinary plugin
+loading does not require experimental mode. Follow
+[the installation owner's scope contract](../plugins/customizing-copilot/skills/installing-plugins/SKILL.md).
 
 ### Marketplace installation cells
 

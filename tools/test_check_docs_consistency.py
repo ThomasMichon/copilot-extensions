@@ -74,3 +74,28 @@ def test_reference_links_html_and_encoded_paths(tmp_path):
 def test_outside_repo_is_rejected_before_read(tmp_path):
     (tmp_path / "README.md").write_text('[outside](../outside.md)\n', encoding="utf-8")
     assert mod.check_adopter_navigation(tmp_path, ("README.md",), {})
+
+
+def test_shortcut_reference_checks_its_actual_destination(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "[Guide]\n\n[Guide]: missing.md\n", encoding="utf-8")
+    problems = mod.check_adopter_navigation(tmp_path, ("README.md",), {})
+    assert len(problems) == 1
+    assert "missing.md" in problems[0]
+
+
+def test_unused_definitions_and_full_inline_labels_are_not_shortcuts(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "[Label][owner]\n[Inline](guide.md)\n"
+        "[Label]: missing.md\n[Inline]: missing.md\n"
+        "[unused]: missing.md\n[owner]: guide.md\n", encoding="utf-8")
+    (tmp_path / "guide.md").write_text("# Guide\n", encoding="utf-8")
+    assert not mod.check_adopter_navigation(tmp_path, ("README.md",), {})
+
+
+def test_collapsed_and_shortcut_reference_labels_share_normalization(tmp_path):
+    text = "[My  Guide][]\n[my guide]\n[My Guide]: guide.md#ready\n"
+    (tmp_path / "README.md").write_text(text, encoding="utf-8")
+    (tmp_path / "guide.md").write_text("# Ready\n", encoding="utf-8")
+    assert mod.local_links(text) == ["guide.md#ready", "guide.md#ready"]
+    assert not mod.check_adopter_navigation(tmp_path, ("README.md",), {})

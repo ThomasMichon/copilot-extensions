@@ -206,7 +206,7 @@ repository creation, or private-environment capture was part of that proposal.
   payload in a separately claimed changefile-bearing slice, not by inventing
   alternate mechanics in these root waypoints. No plugin payload is modified
   by the documentation participant.
-- Local validation: nine focused guard fixtures, F/E9 lint, real primary-path
+- Local validation: twelve focused guard fixtures, F/E9 lint, real primary-path
   navigation (including exact casing), runbook/plugin identifiers, canonical
   effort/vision structure, and staged size checks pass. Root references are
   retained through the primary family; existing preview files are untouched.
@@ -214,6 +214,11 @@ repository creation, or private-environment capture was part of that proposal.
   documentation/guard-only change; repository-selected CI remains a separate
   publication gate. Identifier lint has no configured private denylist, so
   public-neutrality also received manual review.
+- Plugin activation guidance follows the current installation owner: ordinary
+  plugin loading is not experimental; trusted repo payload activation differs
+  from user-level session-extension activation. The guard covers shortcut,
+  collapsed, and full reference links without treating unused definitions or
+  labels inside other link forms as navigation.
 
 ### 2026-10-08 — Independent planning seed
 - Captured the original material concern and both literal follow-up selections.
