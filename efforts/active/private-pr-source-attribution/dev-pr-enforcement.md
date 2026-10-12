@@ -66,7 +66,12 @@ the optional encrypted identity remains an owner's reverse-lookup mechanism.
 - [ ] Missing, malformed, duplicate/conflicting fields, private/raw fields and
   unsafe marker values fail with actionable, public-safe repair guidance.
 - [ ] Valid codename and workflow-origin forms pass; optional root/encrypted
-  fields follow the published grammar and never become mandatory key setup.
+  fields follow the existing marker contract in the worktree skill's
+  [PR attribution reference](../../../plugins/agent-worktrees/skills/worktree/references/pr-attribution.md),
+  backed by `providers/attribution.py` and `codename.is_valid_handle`.
+  The implementation must publish the validator's exact accepted grammar in
+  the contribution/repair guidance and test it. Encryption never becomes
+  mandatory key setup.
 - [ ] Current-body retrieval and edited events prove that adding/removing a
   marker reevaluates the same PR head; non-dev PRs remain unaffected.
 - [ ] The operator-only exception passes silently, its removal restores normal
