@@ -130,6 +130,13 @@ stated outcome, not separately operator-specified line items.)_
   (or drain-then-promote) ownership transfer at the safe drain boundary in
   `libs/zdd/src/zdd/cutover.py` / `status_monitor_cutover.py`,
   per #5453's own scope section.
+- [ ] Inventory the shared `zdd.cutover` consumers and preserve their existing
+  active/passive contract through an opt-in seam, or validate every changed
+  shared behavior across all affected consumers before publication. Synchronize
+  any real vendored copies, including agent-worktrees, and add every affected
+  consumer's required changefile using the shared-library release rules in
+  `docs/pipelines.md`; canonical editable references do not replace release
+  materialization or compatibility proof.
 - [ ] Update `status_monitor_cli.py`'s lease-guard side to match the new
   sequencing.
 - [ ] Add real (non-mocked where practical) activation-path regression
@@ -166,6 +173,10 @@ and replacement/cutover proofs belong to the later phase PRs.)_
   owner and from a validated serving resident. Cover stale metadata and the
   Phase 2 ownership-handoff window; no transition may fabricate absence,
   healthy service or an unbounded uncertain state.
+- [ ] Shared-cutover compatibility: exercise unchanged/default behavior for
+  existing `zdd.cutover` consumers and the selected singleton handoff behavior.
+  Verify development and release-materialized imports, synchronized vendored
+  copies and all affected consumer changefiles before the Phase 2 PR merges.
 - [ ] Platform accounting for both phases: complete the design and
   validation obligations below on Windows, Linux and macOS. Any unavailable
   proof requires an explicit justified exemption documenting the degraded

@@ -3,11 +3,16 @@
 - **Subject:** **agent-worktrees** as the durable authority for repository and
   worktree identity, worktree-lifetime agency state, relationships, claims,
   obligations, disposition, and source-control completion.
-- **Scope:** leaf (concrete component; child of agent-fabric)
+- **Scope:** branch (worktree-lifetime authority; child of agent-fabric)
 - **Status:** Active
 - **Last revised:** 2026-10-12
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
+
+## Child visions
+
+- [Pull requests](pull-requests/README.md) - provider-neutral publication and review capability.
+- [Status-monitor singleton](status-monitor-singleton/README.md) - lifecycle exclusivity and bounded serving coverage.
 
 ## Purpose & Intent
 
