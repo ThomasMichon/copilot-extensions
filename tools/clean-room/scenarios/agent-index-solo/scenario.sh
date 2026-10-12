@@ -62,7 +62,6 @@ if [ "$RELEASE_REF" != main ]; then
     _run release-checkout git -C "$RELEASE" checkout --quiet --detach FETCH_HEAD
 fi
 RELEASE_SHA="$(git -C "$RELEASE" rev-parse HEAD)" || _stop repo-config "release HEAD unavailable"
-cr_meta release_sha "$RELEASE_SHA"
 if [ "$RELEASE_REF" != main ] && [ "$RELEASE_SHA" != "$RELEASE_REF" ]; then
     _stop repo-config "release pin did not resolve to the requested commit"
 fi

@@ -147,6 +147,10 @@ def test_manifest_and_execution_keep_release_and_safety_contract() -> None:
     assert source.index('export AGENT_INDEX_REPO="$REPO"') < source.index("_state status-inactive")
     assert "::agent-provisioning::" in source
     assert "materialized-candidate-not-shipped" in source
+    assert source.count('cr_meta release_sha "$RELEASE_SHA"') == 1
+    assert source.index('cr_meta release_sha "$RELEASE_SHA"') > source.index(
+        'release pin did not resolve to the requested commit'
+    )
     assert source.index("_run candidate-source") < source.index("_run marketplace-add")
     assert 'printf \'{"version"' not in source
     assert "|| true" not in source
