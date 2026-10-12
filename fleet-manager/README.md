@@ -1,7 +1,7 @@
 # fleet-manager
 
-Standalone fleet system home and thin CLI. **Initial slice: offline configuration
-and capacity planning only.** No controller, provider invocation, credential
+Standalone fleet system home and thin CLI. **Current scope: offline configuration/
+capacity planning and explicit release-snapshot inspection.** No controller, provider invocation, credential
 lookup, install/uninstall, telemetry sink or resource mutation is delivered yet.
 Those remain the [canonical effort](../efforts/active/linux-role-fleet/README.md).
 
@@ -76,3 +76,73 @@ Output hashing, saved-plan verification and CLI serialization use these output
 bounds and output-specific diagnostics, not the individual input limits.
 The package uses only the standard library and has no server,
 Docker, Copilot, marketplace or private-provider dependency.
+
+## Release roles and snapshot inspection
+
+```text
+fleet-manager inspect --release release.json --observation observation.json --role client --authority example --installation local-example
+```
+
+This is an **offline contract**, not an installer or live health probe. It never
+downloads artifacts, queries a daemon/provider, finds ambient state, acquires
+credentials or starts a service. `installed` and `ready` describe assertions in
+the explicitly supplied observation; output always has
+`evidence: supplied-snapshot-only`, `live_readiness_verified: false`, and
+`mutations_performed: false`. Hash matching supplies integrity binding, not
+signature verification, authentication or authorization.
+Results preserve `inspected_at`, `observed_at` and `valid_until`. The latter two
+are explicitly null when no observation was supplied. Retained results are
+historical assertions: consumers must reject freshness at or after `valid_until`
+and must not infer readiness from null, expired, future or incomplete evidence.
+Preserved time bounds do not authenticate the supplied observation.
+
+The strict schema-v1 `fleet-manager.release` has:
+
+- `id`: bounded release display identity; inspection additionally binds the
+  SHA-256 of canonical manifest content.
+- `components`: nonempty object keyed by bounded IDs. Each component declares
+  `kind` (`client`, `control`, or `executor`), lowercase 64-character
+  `artifact_sha256`, `api: {min, max}` and nonempty unique `data_schemas`.
+  API/schema values are integers 1-65535, never booleans.
+- `roles`: exactly `client`, `gateway` and `node`, each with a nonempty unique
+  list of declared component IDs. All components must be referenced.
+  The client role cannot require a control/executor component. This is declared
+  role isolation, not analysis of executable dependencies.
+
+No actual released Gateway/node artifacts are claimed by these declarations.
+A manifest is explicit input, not a generated product release or proof of
+artifact availability. Role closures must be stated directly; there is no
+dependency resolver, artifact URL, executable path or apply operation.
+
+The strict schema-v1 `fleet-manager.installation-observation` declares
+`authority`, `installation`, canonical `release_digest`, finite epoch
+`observed_at`/`expires_at`, boolean `complete`, and `components`. Each component
+observation has `artifact_sha256`, selected integer `api`/`data_schema`, and
+`state` (`installed`, `ready`, `unknown`). Expected authority/installation are
+mandatory CLI inputs; a mismatch is an error, not a different state source.
+
+An omitted observation produces `unknown`; a supplied unreadable/malformed file
+is an error. A mismatched release digest takes precedence and produces
+`incompatible` even when the supplied observation is stale or incomplete; this
+states a manifest binding mismatch, not the live host's state.
+For a matching release, future, expired or incomplete observations produce `unknown`.
+Only fresh complete observations can assert `missing`. A release/artifact/
+API/data-schema mismatch produces `incompatible`. Required components alone
+determine the selected role's result; observed unrelated components do not add
+server dependencies to a client. Aggregate priority is incompatible, missing,
+unknown, installed, then ready. Expiry at the inspection time is stale.
+
+Exit 0 means compatible `installed`/`ready` snapshot assertions, **not live
+readiness**; 2 means missing/incompatible/unknown, and 1 invalid input/I/O.
+Input bounds, duplicate-key refusal and non-secret diagnostic rules are shared
+with the existing planner: at most 256 components per manifest/observation and
+256 entries in any role closure, 1 MiB input and depth 12. Exact-field diagnostics
+name static expected keys, never unknown supplied keys or values.
+A future trusted observer/installer must produce
+attributable live evidence and verify actual dependencies; this slice does not
+implement that authority or replace its acceptance gate.
+
+Vision reconciliation: closes the first contract portion of machine-fleet
+`unified-coordination-product` under [Fleet Control V2](../efforts/active/fleet-control-v2/README.md).
+Ordinary standalone client planning remains unchanged. Live lifecycle, signed
+release distribution and node/Gateway operation remain pending.

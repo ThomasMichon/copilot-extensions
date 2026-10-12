@@ -68,6 +68,14 @@ If you (or a stale worktree/bookmark) still have a PR open against `main`,
 retarget it — `gh pr edit <#> --base dev` — then rebase onto current `dev`
 and resolve conflicts for real; there's no need to open a fresh PR.
 
+Dependabot **version updates** explicitly target `dev` in
+`.github/dependabot.yml`, retaining ordinary review, validation and changefile
+requirements. GitHub's `target-branch` option does not redirect **security
+updates**: those still use its default branch, `main`. A security fix must be
+carried through a dev-based contribution and validated promotion; it is not a
+direct-main source exception. See the
+[Dependabot options reference](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#target-branch).
+
 ## PR gating: the four enforcement layers
 
 Every change lands through a pull request against `dev`. This is enforced

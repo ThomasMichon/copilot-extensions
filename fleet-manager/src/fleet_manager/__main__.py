@@ -1,4 +1,4 @@
-"""The thin standalone entry point; this initial slice performs offline planning."""
+"""Thin standalone offline planning and release-snapshot inspection."""
 
 import argparse
 import sys
@@ -7,6 +7,7 @@ from pathlib import Path
 
 from . import __version__
 from .planning import MAX_BYTES, PlanError, canonical, decode, plan
+from .release import ROLES, inspect_release
 
 
 def read(path, label):
@@ -27,19 +28,35 @@ def main(argv=None):
     planning.add_argument("--inventory", type=Path, required=True)
     planning.add_argument("--fleet-id", required=True)
     planning.add_argument("--machine-limit", type=int, required=True)
+    inspection = commands.add_parser("inspect", help="Inspect explicit release snapshots; never probe or install")
+    inspection.add_argument("--release", type=Path, required=True)
+    inspection.add_argument("--observation", type=Path, help="Explicit installation observation; absent means unknown")
+    inspection.add_argument("--role", choices=ROLES, required=True)
+    inspection.add_argument("--authority", required=True)
+    inspection.add_argument("--installation", required=True)
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return 0 if exc.code == 0 else 1
     try:
-        result = plan(read(args.template, "template"), read(args.config, "config") if args.config else None,
-                      read(args.inventory, "inventory"), fleet_id=args.fleet_id,
-                      machine_limit=args.machine_limit, now=time.time())
+        if args.command == "inspect":
+            result = inspect_release(
+                read(args.release, "release"),
+                read(args.observation, "observation") if args.observation else None,
+                role=args.role, authority=args.authority, installation=args.installation,
+                now=time.time(),
+            )
+        else:
+            result = plan(read(args.template, "template"), read(args.config, "config") if args.config else None,
+                          read(args.inventory, "inventory"), fleet_id=args.fleet_id,
+                          machine_limit=args.machine_limit, now=time.time())
         serialized = canonical(result, output=True).decode("utf-8")
     except PlanError as exc:
         print(f"fleet-manager: {exc}", file=sys.stderr)
         return 1
     print(serialized)
+    if args.command == "inspect":
+        return 0 if result["status"] in ("installed", "ready") else 2
     return 2 if result["blockers"] else 0
 
 

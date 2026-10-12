@@ -231,3 +231,20 @@ credential changes, broad policy weakening or unreviewed releases.
   five-minute suppression; latest-head and billing admission are unchanged.
 - This targets held runner time without adding a workflow or status check.
   Live queue/start timestamps and actual script logs must confirm the saving.
+
+### 2026-10-12 - Queue grace and CI-completion consolidation merged
+
+- #6313 merged as `ff5b1daebb9b` and #6314 as `17bab4665219`, serially after
+  current-head Copilot approval and explicit required-check passes.
+- CI completions now have one proposed trusted follow-up invocation instead of
+  two, with the original ancestry/filter and inert scanner jobs unchanged and
+  original permissions isolated per job. Real Git/Bash tests exercised exact
+  dev dispatch, unrelated feature rejection and fetch failure.
+- The earlier failed release snapshots still contained the handoff fixture
+  regression; its existing owner fixed it through #6309. New green promotion
+  and default-main live behavior are still required, not presumed.
+- Next metadata reduction routes all eleven dependency version-update groups
+  to dev. Security updates retain GitHub's default-branch behavior and must
+  still follow the dev contribution/release boundary, never a source exception.
+- These changes reduce workflow invocations and held review-grace time.
+  Required/job check counts and test coverage have not been pruned in this wave.
