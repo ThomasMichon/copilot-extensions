@@ -31,6 +31,7 @@ from .registry import (
     get_recipe,
     list_recipes,
     render_recipe,
+    verification_options,
 )
 
 __all__ = [
@@ -51,5 +52,6 @@ __all__ = [
     "get_recipe",
     "list_recipes",
     "render_recipe",
+    "verification_options",
     "resolution_outcome",
 ]

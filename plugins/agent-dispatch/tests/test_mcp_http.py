@@ -158,6 +158,26 @@ def test_http_audit_recipe_retains_verification_and_exclusivity(coord, tmp_path)
     assert "mode:report-only" in task["labels"]
 
 
+def test_http_existing_recipe_leaves_verification_unspecified(coord, monkeypatch):
+    import asyncio
+
+    captured = []
+    original_create = TaskQueue.create
+
+    def capture_create(queue, *args, **kwargs):
+        captured.append(kwargs)
+        return original_create(queue, *args, **kwargs)
+
+    monkeypatch.setattr(TaskQueue, "create", capture_create)
+    response = asyncio.run(_call(
+        coord, "dispatch_recipe_kick",
+        {"name": "goal-driven", "repo": TEST_REPO, "params": {"goal": "fixture"}},
+    ))
+    assert not response.is_error
+    assert len(captured) == 1
+    assert "require_verification" not in captured[0]
+
+
 def test_hosted_emitter_side_load_routes_to_registration_owner(tmp_path, monkeypatch):
     import asyncio
 

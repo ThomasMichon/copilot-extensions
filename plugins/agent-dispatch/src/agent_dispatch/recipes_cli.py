@@ -221,12 +221,14 @@ def _cmd_recipes_check_report(args: argparse.Namespace) -> int:
 
     try:
         rendered = render_recipe("worktree-audit", _parse_recipe_params(args.param))
-        root = Path(rendered.params["report_dir"]).resolve(strict=True)
+        root = Path(rendered.params["report_dir"]).resolve(strict=False)
         if not root.is_dir():
             raise ValueError("approved report_dir must be an existing directory")
         report_path = Path(args.report).resolve(strict=True)
         if report_path == root or not report_path.is_relative_to(root):
             raise ValueError("report must be inside the approved report_dir after resolving symlinks")
+        if not report_path.is_file():
+            raise ValueError("report must be a regular file inside the approved report_dir")
         with report_path.open("rb") as stream:
             data = stream.read(65537)
         if len(data) > 65536:

@@ -435,8 +435,14 @@ def render_recipe(name: str, params: dict[str, str]) -> RenderedRecipe:
 
 def exclusive_key_for(rendered: RenderedRecipe) -> str | None:
     if rendered.recipe == worktree_audit.NAME:
-        return f"worktree-audit:{rendered.params['scope']}"
+        return f"{worktree_audit.NAME}:{rendered.params['scope']}"
     return None
+
+
+def verification_options(rendered: RenderedRecipe) -> dict[str, bool]:
+    if rendered.require_verification is None:
+        return {}
+    return {"require_verification": rendered.require_verification}
 
 
 def dedup_key_for(rendered: RenderedRecipe) -> str:

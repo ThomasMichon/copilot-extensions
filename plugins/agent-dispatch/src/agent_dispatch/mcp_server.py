@@ -306,7 +306,7 @@ class DispatchTools:
         supervisor pool with ``["general"]``). This *enqueues* the task; embodying
         a worker to drive the loop is the supervisor/host's job (exactly as with
         ``create``)."""
-        from .recipes import dedup_key_for, exclusive_key_for, render_recipe
+        from .recipes import dedup_key_for, exclusive_key_for, render_recipe, verification_options
 
         rendered = render_recipe(name, params or {})
         lane = self._scope_repo(repo)
@@ -325,7 +325,7 @@ class DispatchTools:
                 labels=merged_labels,
                 dedup_key=dedup_key or dedup_key_for(rendered),
                 exclusive_key=exclusive_key_for(rendered),
-                require_verification=bool(rendered.require_verification),
+                **verification_options(rendered),
                 goal=rendered.goal,
                 done_criteria=rendered.done_criteria,
                 source="recipe",

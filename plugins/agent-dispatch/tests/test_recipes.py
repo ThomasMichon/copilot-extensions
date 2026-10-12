@@ -363,6 +363,23 @@ def test_mcp_audit_kick_preserves_verification_and_exclusivity(tmp_path):
     assert sink["exclusive_key"] == "worktree-audit:fixture-project"
 
 
+@pytest.mark.guard
+@pytest.mark.parametrize("verification", [None, False, True])
+def test_mcp_existing_recipe_preserves_unspecified_verification(monkeypatch, verification):
+    from dataclasses import replace
+
+    original = recipes.get_recipe("goal-driven")
+    monkeypatch.setitem(
+        recipes.REGISTRY, "goal-driven", replace(original, require_verification=verification),
+    )
+    sink = {}
+    _tools(sink).recipe_kick("goal-driven", params={"goal": "fixture"})
+    if verification is None:
+        assert "require_verification" not in sink
+    else:
+        assert sink["require_verification"] is verification
+
+
 def test_mcp_recipe_render_is_pure():
     out = _tools({}).recipe_render("reviewer", {"repo": "o/n", "pr": "5"})
     assert out["title"] == "review o/n#5 to resolution"

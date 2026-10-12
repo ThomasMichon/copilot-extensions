@@ -211,6 +211,30 @@ def test_checker_requires_existing_directory_not_a_file(tmp_path, capsys):
     assert "existing directory" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("mode", ["missing-root", "directory-report"])
+def test_checker_explains_missing_directory_and_non_file_report(tmp_path, mode, capsys):
+    values = _params(tmp_path)
+    report = tmp_path / "nested"
+    if mode == "missing-root":
+        values["report_dir"] = str(tmp_path / "missing")
+        expected = "existing directory"
+    else:
+        report.mkdir()
+        expected = "regular file"
+    args = build_parser().parse_args(
+        [*_args("check-report", values), "--report", str(report)],
+    )
+    assert args.func(args) == 2
+    assert expected in capsys.readouterr().err
+
+
+def test_audit_drive_remains_non_resolving_if_resolution_wording_changes():
+    from dataclasses import replace
+
+    recipe = replace(recipes.get_recipe("worktree-audit"), resolution="reworded")
+    assert recipes.decide(recipe, "abandoned").kind == "work"
+
+
 @pytest.mark.parametrize("fault", [
     "schema", "scope", "roster", "duplicate", "mutation", "partial-evidence",
     "remaining", "elapsed", "unsupported-evidence", "steering", "bool-budget",
