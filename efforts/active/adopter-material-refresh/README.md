@@ -233,12 +233,14 @@ repository creation, or private-environment capture was part of that proposal.
   behavior or introducing another documentation pipeline.
 - Reference definitions preserve the first normalized label, matching rendered
   Markdown even when later definitions change casing or whitespace.
-- The navigation guard uses a pinned, dev-only CommonMark parser rather than
-  maintaining a partial Markdown lexer. The existing CI Docs consistency step
-  installs the same tooling requirements used by manual audits; no plugin or
-  runtime dependency changes. It also enforces the sequential waypoints
+- The self-contained navigation guard also enforces the sequential waypoints
   advertised by the adopter index. Multiline code-span and graph-edge fixtures
-  prove the actual rendered navigation contract.
+  prove those primary-page contracts without new runtime/tool dependencies.
+- A mandatory external-parser proposal was withdrawn: the promotion workflow
+  loads from `main` and cannot bootstrap a new dependency solely from a `dev`
+  change before that change promotes. Retaining self-contained validation
+  avoids that release deadlock without skipping checks or taking an
+  unauthorized main-workflow bootstrap path.
 
 ### 2026-10-08 — Independent planning seed
 - Captured the original material concern and both literal follow-up selections.

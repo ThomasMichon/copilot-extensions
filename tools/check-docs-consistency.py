@@ -21,7 +21,6 @@ Three checks (truth is `.github/plugin/marketplace.json` + `plugins/`):
   D. **Adopter navigation** -- primary reading pages exist, link to their
      next waypoints, and resolve local paths/heading anchors with exact casing.
 
-Install the dev-only parser: python -m pip install -r tools/requirements-docs.txt
 Usage:  python tools/check-docs-consistency.py            # check
         python tools/check-docs-consistency.py --counts   # print derived counts
 Exit 0 = consistent, 1 = drift (suitable for a pre-push hook / CI).
@@ -29,12 +28,11 @@ Exit 0 = consistent, 1 = drift (suitable for a pre-push hook / CI).
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import os
 import re
 import sys
-from functools import lru_cache
-from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -64,84 +62,132 @@ READING_EDGES = {
 }
 
 
-@lru_cache(maxsize=1)
-def markdown_parser():
-    try:
-        from markdown_it import MarkdownIt
-    except ImportError as exc:
-        raise RuntimeError(
-            "Install documentation tooling: python -m pip install -r tools/requirements-docs.txt"
-        ) from exc
-    return MarkdownIt("commonmark")
-
-
-class HtmlTargets(HTMLParser):
-    def __init__(self, include_images: bool = True):
-        super().__init__(convert_charrefs=True)
-        self.include_images = include_images
-        self.links: list[str] = []
-        self.anchors: set[str] = set()
-
-    def handle_starttag(self, tag, attrs):
-        values = dict(attrs)
-        if tag == "a" and values.get("href"):
-            self.links.append(values["href"])
-        if tag == "img" and self.include_images and values.get("src"):
-            self.links.append(values["src"])
-        if values.get("id"):
-            self.anchors.add(values["id"])
-        if tag == "a" and values.get("name"):
-            self.anchors.add(values["name"])
-
-
-def html_targets(text: str, include_images: bool = True) -> HtmlTargets:
-    parser = HtmlTargets(include_images)
-    parser.feed(text)
-    parser.close()
-    return parser
+def prose(text: str, keep_inline: bool = False) -> str:
+    """Ignore code/comments without letting code literals open HTML comments."""
+    lines = text.splitlines()
+    result = []
+    fence = ""
+    span = ""
+    comment = False
+    for line_index, line in enumerate(lines):
+        if not line.strip():
+            span = ""
+        match = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+        if fence:
+            if match:
+                marker, info = match.groups()
+                if marker[0] == fence[0] and len(marker) >= len(fence) and not info.strip():
+                    fence = ""
+            continue
+        if match and not comment and not span:
+            marker, info = match.groups()
+            if marker[0] != "`" or "`" not in info:
+                fence = marker
+                continue
+        visible = []
+        cursor = 0
+        while cursor < len(line):
+            if span:
+                if line[cursor] == "`":
+                    marker = re.match(r"`+", line[cursor:]).group()
+                    if keep_inline:
+                        visible.append(marker)
+                    if marker == span:
+                        span = ""
+                    cursor += len(marker)
+                    continue
+                if keep_inline:
+                    visible.append(line[cursor])
+                cursor += 1
+                continue
+            if comment:
+                end = line.find("-->", cursor)
+                if end < 0:
+                    break
+                comment = False
+                cursor = end + 3
+                continue
+            if line.startswith("<!--", cursor):
+                comment = True
+                cursor += 4
+                continue
+            if line[cursor] == "`":
+                marker = re.match(r"`+", line[cursor:]).group()
+                start = cursor + len(marker)
+                rest = [line[start:]]
+                for following in lines[line_index + 1:]:
+                    if not following.strip():
+                        break
+                    rest.append(following)
+                if re.search(r"(?<!`)" + re.escape(marker) + r"(?!`)", "\n".join(rest)):
+                    span = marker
+                    visible.append(marker if keep_inline else " ")
+                else:
+                    visible.append(marker)
+                cursor = start
+                continue
+            visible.append(line[cursor])
+            cursor += 1
+        result.append("".join(visible))
+    return "\n".join(result)
 
 
 def local_links(text: str, include_images: bool = True) -> list[str]:
-    """Collect rendered CommonMark links/assets, not code or definition text."""
-    links: list[str] = []
-    for token in markdown_parser().parse(text):
-        if token.type == "html_block":
-            links.extend(html_targets(token.content, include_images).links)
-        for child in token.children or ():
-            if child.type == "link_open":
-                links.append(child.attrGet("href"))
-            elif child.type == "image" and include_images:
-                links.append(child.attrGet("src"))
-            elif child.type == "html_inline":
-                links.extend(html_targets(child.content, include_images).links)
+    """Inline/reference links and HTML targets in the primary-page syntax."""
+    text = prose(text)
+    if not include_images:
+        text = re.sub(r"!\[[^\]\n]*\]\([^)]+\)|!\[[^\]\n]*\]\[[^\]\n]*\]|!\[[^\]\n]*\]",
+                      "", text)
+        text = re.sub(r"<img\b[^>]*>", "", text, flags=re.I)
+    inline = r"!?\[[^\]\n]*\]\(\s*(?:<([^>\n]+)>|([^\s)>]+))(?:\s+[^)]*)?\)"
+    links = [angled or bare for angled, bare in re.findall(inline, text)]
+
+    def reference_key(label: str) -> str:
+        return " ".join(label.split()).casefold()
+
+    definitions = {}
+    for label, angled, bare in re.findall(
+        r"^ {0,3}\[([^\]\n]+)\]:\s*(?:<([^>\n]+)>|([^\s>]+))", text, re.M
+    ):
+        definitions.setdefault(reference_key(label), angled or bare)
+    remaining = re.sub(r"^ {0,3}\[[^\]\n]+\]:[^\n]*$", "", text, flags=re.M)
+    remaining = re.sub(inline, "", remaining)
+
+    def full_reference(match: re.Match) -> str:
+        label, reference = match.groups()
+        destination = definitions.get(reference_key(reference or label))
+        if destination:
+            links.append(destination)
+        return ""
+
+    remaining = re.sub(r"!?\[([^\]\n]+)\]\[([^\]\n]*)\]", full_reference, remaining)
+    for reference in re.findall(r"!?\[([^\]\n]+)\]", remaining):
+        destination = definitions.get(reference_key(reference))
+        if destination:
+            links.append(destination)
+    links.extend(re.findall(r"<(?:a|img)\b[^>]*?\b(?:href|src)=[\"']([^\"']+)[\"']",
+                            text, re.I))
     return [link for link in links if not urlsplit(link).scheme and not link.startswith("//")]
 
 
-def rendered_heading(children) -> str:
-    parts = []
-    for child in children or ():
-        if child.type in {"text", "code_inline"}:
-            parts.append(child.content)
-        elif child.type in {"softbreak", "hardbreak"}:
-            parts.append(" ")
-        elif child.type == "image":
-            parts.append(rendered_heading(child.children))
-    return "".join(parts)
-
-
 def heading_anchors(text: str) -> set[str]:
-    tokens = markdown_parser().parse(text)
-    anchors: set[str] = set()
+    anchors = set(re.findall(r"<a\b[^>]*?\b(?:id|name)=[\"']([^\"']+)[\"']",
+                             prose(text), re.I))
     seen: set[str] = set()
-    for index, token in enumerate(tokens):
-        if token.type == "html_block":
-            anchors.update(html_targets(token.content).anchors)
-        for child in token.children or ():
-            if child.type == "html_inline":
-                anchors.update(html_targets(child.content).anchors)
-        if token.type != "heading_open":
-            continue
-        heading = rendered_heading(tokens[index + 1].children)
+    for heading in re.findall(r"^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$", prose(text, keep_inline=True), re.M):
+        code = []
+
+        def protect(match: re.Match) -> str:
+            code.append(match.group(2))
+            return f"\x00{len(code) - 1}\x00"
+
+        heading = re.sub(r"(`+)(.*?)\1", protect, heading)
+        heading = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", heading)
+        heading = re.sub(r"</?(?:a|em|strong|code|span|img|br|sup|sub|b|i)\b[^>]*>",
+                         "", heading, flags=re.I)
+        heading = html.unescape(heading)
+        for index, content in enumerate(code):
+            heading = heading.replace(f"\x00{index}\x00", content)
         base = re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
         anchor = base
         suffix = 0
@@ -320,16 +366,10 @@ def main() -> int:
         print(f"payload plugins: {sorted(n for n in names if not is_runtime(n))}")
         return 0
 
-    try:
-        navigation = check_adopter_navigation()
-    except RuntimeError as exc:
-        print(f"[FAIL] {exc}")
-        return 1
-
     problems = (check_readme_completeness(names)
                 + check_plugin_skill_lists(names)
                 + check_counts(expected)
-                + navigation)
+                + check_adopter_navigation())
 
     if problems:
         print(f"[FAIL] {len(problems)} docs-consistency problem(s):")

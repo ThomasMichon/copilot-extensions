@@ -68,15 +68,15 @@ Existing publication safeguards provide distinct checks:
 - `tools/check-large-files.py`: publication-size limits.
 
 These are mechanical checks, not a claim that all documentation is current.
-The navigation check uses a pinned CommonMark parser for rendered links and
-headings, plus HTML link/image and explicit-anchor extraction on the designated
-primary pages. Code and comments are excluded. Images are checked as
+The navigation check covers the primary pages' inline/reference links, ATX
+headings, and HTML link/image and explicit-anchor syntax. Fenced/inline code
+and comments are excluded. Images are checked as
 assets but cannot satisfy reading-path hyperlinks. Resolved local targets,
 including a directory's README anchor target, must remain inside the repo.
-For manual audits, first install the dev-only requirements with
-`python -m pip install -r tools/requirements-docs.txt`; the existing CI guard
-step installs the same requirements. This is not a plugin/runtime dependency
-or a new documentation pipeline.
+The guard is self-contained Python tooling, so existing PR and promotion
+callers do not need new dependency bootstrap. It is a bounded conformance check,
+not a general Markdown renderer; review rendered navigation as well when
+introducing syntax outside the fixture-covered primary-page conventions.
 Authors must also verify changed navigation outside the guarded primary path, ground support claims
 in the owner implementation, and have semantic claims reviewed. Extend an
 existing guard for an objective navigation or ownership invariant rather than
