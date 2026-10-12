@@ -9,9 +9,14 @@ from pathlib import Path
 
 import pytest
 
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
+
 
 REPO = Path(__file__).resolve().parents[3]
-PLUGIN_LIBS = REPO / "plugins" / "agent-worktrees" / "libs"
+PLUGIN_ROOT = REPO / "plugins" / "agent-worktrees"
 pytestmark = pytest.mark.guard
 
 
@@ -33,9 +38,12 @@ def test_plugin_activation_import_survives_stage_cleanup_when_installed_from_rea
     stage_root = tmp_path / ".install-stage" / "agent-worktrees"
     site_packages = tmp_path / "venv" / "lib" / "python3.12" / "site-packages"
     site_packages.mkdir(parents=True)
+    project = tomllib.loads((PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    sources = project["tool"]["uv"]["sources"]
 
     for lib in ("plugin-activation", "dropin-registry", "plugin-resolve"):
-        shutil.copytree(PLUGIN_LIBS / lib, stage_root / lib)
+        source = (PLUGIN_ROOT / sources[f"agent-{lib}"]["path"]).resolve()
+        shutil.copytree(source, stage_root / lib)
         _copy_installed_package(stage_root, site_packages, lib)
 
     dist_info = site_packages / "agent_plugin_activation-0.1.0.dev0.dist-info"
