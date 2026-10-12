@@ -10,6 +10,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tarfile
 import tempfile
 
@@ -113,18 +114,18 @@ def verify(root: Path, expected_head: str) -> str:
 
 def build(dest: Path, *, source_root: Path) -> list[str]:
     """Materialize committed Git bytes, never claim HEAD for a dirty working copy."""
-    import materialize_main
-
     if dest.exists() or dest.is_symlink():
         raise ValueError("candidate destination must not already exist")
     git_env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     head = subprocess.run(
         ["git", "-C", str(source_root), "rev-parse", "--verify", "HEAD^{commit}"],
         check=True, capture_output=True, text=True, timeout=10, env=git_env,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     ).stdout.strip()
     archive = subprocess.run(
         ["git", "-C", str(source_root), "archive", "--format=tar", head],
         check=True, capture_output=True, timeout=120, env=git_env,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     ).stdout
     with tempfile.TemporaryDirectory(prefix="materialized-source-") as temporary:
         source = Path(temporary)
@@ -132,7 +133,26 @@ def build(dest: Path, *, source_root: Path) -> list[str]:
             extract_source(tree, source)
         if (source / RECEIPT).exists() or (source / RECEIPT).is_symlink():
             raise ValueError("source must not contain a generated materialized receipt")
-        log = materialize_main.build(dest, source_root=source)
+        program = (
+            "import json, sys\n"
+            "from pathlib import Path\n"
+            "sys.dont_write_bytecode = True\n"
+            "root = Path(sys.argv[1])\n"
+            "sys.path.insert(0, str(root / 'tools'))\n"
+            "import materialize_main\n"
+            "print(json.dumps(materialize_main.build("
+            "Path(sys.argv[2]), source_root=root, replace_existing=False)))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-I", "-S", "-c", program, str(source), str(dest.absolute())],
+            capture_output=True, text=True, timeout=120, env=git_env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if result.returncode:
+            raise ValueError(f"committed materializer failed: {result.stderr.strip()}")
+        log = json.loads(result.stdout)
+        if not isinstance(log, list) or any(not isinstance(line, str) for line in log):
+            raise ValueError("committed materializer returned an invalid log")
     if any(line.startswith("SKIP") for line in log):
         raise ValueError("candidate materialization refused an unresolved source")
     receipt = {"schema": SCHEMA, "version": 1, "source_commit": head,

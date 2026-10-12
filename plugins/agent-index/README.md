@@ -44,6 +44,10 @@ child exit codes are forwarded across the hook process boundary.
   launcher bytes fail explicitly: they require independently verified operator
   recovery, not an automatic chmod that would make untrusted bytes look safe.
   Namespaced cell stamps retain strict, non-repairing admission.
+  Installer publication callbacks also mask off group/other write bits while
+  activating runtime markers, without weakening a stricter inherited umask
+  or changing the caller's mask. Thus freshly activated `current-version`
+  and `last-known-good` markers remain readable by strict startup admission.
 - **Self-supervised host lifecycle**: the light host runtime is installed into
 its own versioned slot, and the plugin's installer/runtime commands supervise
 it directly. `install`/`update` rebuild only the light `[store,server]` service

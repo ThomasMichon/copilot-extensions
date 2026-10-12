@@ -16,7 +16,11 @@ python tools/materialize_main.py --candidate --dest <new-outside-repository-dire
 
 This archives committed HEAD (not uncommitted checkout bytes), applies the same
 file/lib/installer-engine/launch-wrapper expansions as promotion and plugin
-preview, and writes `MATERIALIZED.json`. The receipt uses the existing preview
+preview using the materializer and helper code from that same archive in an
+isolated subprocess, and writes `MATERIALIZED.json`. Dirty edits to host
+transformation modules cannot change those candidate bytes. The subprocess
+refuses a destination that appeared during preparation instead of deleting it.
+The receipt uses the existing preview
 `source_commit` vocabulary and inventories every materialized path, file SHA-256,
 executable bit and in-tree symlink target. No `.git` is needed in the resulting
 standalone marketplace; no hand-written receipt or preview overlay is required.

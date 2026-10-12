@@ -595,6 +595,19 @@ installs, no service-specific config needed for this class of plugin.
   across three sub-suites (304/8, 321/2, 356/15). Coupled provenance and
   customization scanner: 170 passed, 2 native-Windows skips. Review and native
   validation remain pending. No production permission or service was changed.
+- Follow-up candidate regressions exercise the actual activation writer, not
+  only `do_stamp`: publication callbacks mask shared-write bits additively,
+  preserving stricter caller masks and restoring the caller's environment.
+  `current-version` and `last-known-good` remain strictly admitted after real
+  marker-only activation under `0002` and `0077` in both hook shells.
+- Candidate materialization now runs the archived commit's transformation
+  implementation and helpers in an isolated subprocess with site loading
+  disabled; host working-tree transformation edits cannot affect committed
+  candidate bytes. A destination that appears during preparation is refused,
+  not removed. Full contained Index suite after this follow-up: 985 passed,
+  25 skipped (304/8, 321/2, 360/15). Full materializer and provenance suites:
+  103 passed, 2 native-Windows junction skips. Native and review gates remain
+  pending. All child processes remain bounded and headless on Windows.
 
 ### 2026-10-10 — Temporary Docker accountability proposal; implementation gated
 

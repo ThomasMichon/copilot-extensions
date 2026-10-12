@@ -145,6 +145,14 @@ def source(tmp_path: Path) -> tuple[Path, str]:
     (root / "docs/shared.md").write_text("# Materialized\n")
     (root / ".github/plugin").mkdir(parents=True)
     (root / ".github/plugin/marketplace.json").write_text('{"plugins":[]}\n')
+    (root / "tools").mkdir()
+    for name in (
+        "materialize_main.py", "materialize_installer_engine.py",
+        "materialize_launch_wrapper_assets.py", "nested_uv_editable_ref.py",
+        "uv_editable_ref.py", "launch_wrapper_assets_ref.py",
+        "installer_engine_ref.py", "standalone_consumers.py",
+    ):
+        shutil.copy2(TOOLS / name, root / "tools" / name)
     _git(root, "init", "--quiet")
     _git(root, "add", ".")
     _git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
@@ -189,6 +197,49 @@ def test_builder_does_not_inherit_repository_selection(source, tmp_path, monkeyp
     dest = tmp_path / "candidate"
     PROVENANCE.build(dest, source_root=root)
     assert PROVENANCE.verify(dest, head) == head
+
+
+@pytest.mark.parametrize("module", ["materialize_main.py", "uv_editable_ref.py"])
+def test_builder_uses_committed_materializer_code_not_working_tree(source, tmp_path, module, monkeypatch):
+    root, head = source
+    (root / "tools" / module).write_text(
+        "raise AssertionError('dirty transformation code must never execute')\n",
+    )
+    monkeypatch.setattr(mm, "build", lambda *_a, **_k: pytest.fail("ambient build was invoked"))
+    dest = tmp_path / "candidate"
+    PROVENANCE.build(dest, source_root=root)
+    assert PROVENANCE.verify(dest, head) == head
+    assert (dest / "plugins/example/docs/shared.md").read_text() == "# Materialized\n"
+    assert "dirty transformation" not in (dest / "tools" / module).read_text()
+
+
+def test_builder_refuses_destination_created_during_archive_preparation(source, tmp_path, monkeypatch):
+    root, _ = source
+    dest = tmp_path / "candidate"
+    original = PROVENANCE.extract_source
+
+    def extract(tree, snapshot):
+        original(tree, snapshot)
+        dest.mkdir()
+        (dest / "sentinel").write_bytes(b"not owned by the builder")
+
+    monkeypatch.setattr(PROVENANCE, "extract_source", extract)
+    with pytest.raises(ValueError, match="candidate destination must not already exist"):
+        PROVENANCE.build(dest, source_root=root)
+    assert (dest / "sentinel").read_bytes() == b"not owned by the builder"
+    assert not (dest / PROVENANCE.RECEIPT).exists()
+
+
+def test_missing_committed_helper_has_no_ambient_fallback(source, tmp_path):
+    root, _ = source
+    (root / "tools/uv_editable_ref.py").unlink()
+    _git(root, "add", "-u")
+    _git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+         "commit", "--quiet", "-m", "missing committed helper")
+    dest = tmp_path / "candidate"
+    with pytest.raises(ValueError, match="committed materializer failed"):
+        PROVENANCE.build(dest, source_root=root)
+    assert not (dest / PROVENANCE.RECEIPT).exists()
 
 
 @pytest.mark.parametrize("kind", ["fifo", "hardlink"])

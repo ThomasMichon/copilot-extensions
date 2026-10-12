@@ -207,3 +207,51 @@ def test_directory_repair_refuses_replacement_namespace_before_chmod(tmp_path, m
             raise AssertionError("replaced directory must never be admitted")
     assert stat.S_IMODE((tmp_path / "old-root").stat().st_mode) == 0o775
     assert stat.S_IMODE(root.stat().st_mode) == 0o755
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell"])
+@pytest.mark.parametrize("mask", [0o002, 0o077])
+def test_actual_runtime_activation_markers_remain_admitted_by_hook(tmp_path, shell, mask):
+    command, environment, repo = _hook(tmp_path, shell)
+    root = Path(environment["AGENT_INDEX_HOME"])
+    payload = Path(environment["AGENT_INDEX_PAYLOAD_ROOT"])
+    slot = root / "versions/9.9.9"
+    (slot / "bin").mkdir(parents=True)
+    python = slot / "bin/python"
+    python.write_text(f"#!/bin/sh\nexec '{sys.executable}' \"$@\"\n")
+    python.chmod(0o755)
+    helper = payload / "scripts/versioned_runtime.py"
+    subprocess.run(
+        [sys.executable, str(helper), "--root", str(root), "mark-complete", "9.9.9"],
+        check=True, capture_output=True, text=True, timeout=10,
+    )
+    definitions = "\n".join(function(name, "sh") for name in (
+        "_with_index_advisory_lock", "_with_index_publication_lock",
+        "_index_publication_fresh", "_version_lt", "_versioned_activate",
+    ))
+    result = subprocess.run(
+        ["bash", "-c", definitions + f"""
+set -euo pipefail
+INSTALL_DIR='{root}'; SCRIPT_DIR='{payload / "scripts"}'; VENV_DIR='{slot}'
+SRC_VERSION=9.9.9; FORCE=0; VERSIONED_RUNTIME=1
+_bootstrap_python() {{ printf '%s\\n' '{sys.executable}'; }}
+_runtime_origin_under() {{ return 0; }}
+_ok() {{ :; }}; _skip() {{ :; }}; _fail() {{ echo "$*" >&2; }}; _warn() {{ echo "$*" >&2; }}
+umask {mask:03o}
+_versioned_activate
+[[ "$(umask)" == {mask:04o} ]]
+"""], env=environment, cwd=repo, capture_output=True, text=True, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+    for name in ("current-version", "last-known-good"):
+        path = root / name
+        assert path.read_text() == "9.9.9\n"
+        assert stat.S_IMODE(path.stat().st_mode) == 0o666 & ~(mask | 0o022)
+    before = (root / "current-version").stat()
+    result = _run(command, environment, repo)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "{}"
+    after = (root / "current-version").stat()
+    assert (before.st_ino, before.st_mtime_ns, before.st_mode) == (
+        after.st_ino, after.st_mtime_ns, after.st_mode,
+    )

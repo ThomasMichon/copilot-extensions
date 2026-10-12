@@ -1337,6 +1337,10 @@ _with_index_publication_lock() {
     else
         _index_publication_callback() {
             local __index_publication_root="$INSTALL_DIR"
+            local callback_umask
+            callback_umask="$(umask)"
+            # Marker-only activation uses fresh temp files; never inherit shared write.
+            umask "$(printf '%04o' "$((8#$callback_umask | 8#022))")"
             "$@"
         }
         _with_index_advisory_lock "$INSTALL_DIR/publication" 9 20 _index_publication_callback "$@"

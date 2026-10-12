@@ -662,8 +662,10 @@ def _ignore(_dir: str, names: list[str]) -> set[str]:
     } or n.endswith((".pyc", ".pyo")) or n.endswith(".egg-info")}
 
 
-def build(dest: Path, *, source_root: Path = REPO) -> list[str]:
+def build(dest: Path, *, source_root: Path = REPO, replace_existing: bool = True) -> list[str]:
     if dest.exists():
+        if not replace_existing:
+            raise ValueError("candidate destination must not already exist")
         shutil.rmtree(dest)
     # symlinks=True: preserve any tracked symlink AS a symlink in the
     # snapshot rather than following it -- the default (False) would
