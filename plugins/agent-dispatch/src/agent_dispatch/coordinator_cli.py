@@ -522,18 +522,20 @@ def _cmd_cutover(
             _config.routing_dir(), make_client, health_check=liveness_check
         )
         if recovery.get("refused"):
+            reason = breadcrumb.refusal_reason(recovery)
             if getattr(args, "json", False):
-                _emit({"ok": False, "error": recovery["reason"], "recovery": recovery})
+                _emit({"ok": False, "error": reason, "recovery": recovery})
             else:
-                print(f"[FAIL] {recovery['reason']}", file=sys.stderr)
+                print(f"[FAIL] {reason}", file=sys.stderr)
             return 1
         _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(_config.routing_dir())
         passive_reap = reap_abandoned(_pre_recovery_breadcrumb)
         if passive_reap.get("refused"):
+            reason = breadcrumb.refusal_reason(passive_reap)
             if getattr(args, "json", False):
-                _emit({"ok": False, "error": passive_reap["reason"], "passive_reap": passive_reap})
+                _emit({"ok": False, "error": reason, "passive_reap": passive_reap})
             else:
-                print(f"[FAIL] {passive_reap['reason']}", file=sys.stderr)
+                print(f"[FAIL] {reason}", file=sys.stderr)
             return 1
         if getattr(args, "recover", False):
             recovery["passive_reap"] = passive_reap

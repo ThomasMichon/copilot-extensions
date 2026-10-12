@@ -12,10 +12,13 @@ def render_recovery(
     emit: Callable[[dict[str, Any]], Any],
 ) -> int | None:
     if recovery.get("refused"):
+        from zdd.breadcrumb import refusal_reason
+
+        reason = refusal_reason(recovery)
         if json_output:
-            emit({"ok": False, "error": recovery["reason"], "recovery": recovery})
+            emit({"ok": False, "error": reason, "recovery": recovery})
         else:
-            print(f"[FAIL] {recovery['reason']}", file=sys.stderr)
+            print(f"[FAIL] {reason}", file=sys.stderr)
         return 1
     if recover_only:
         if json_output:

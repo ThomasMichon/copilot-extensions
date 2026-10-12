@@ -93,8 +93,9 @@ def _capture_promoting_routing(monkeypatch, tmp_path, capsys, *, refused=False, 
     assert rc == 1
     output = capsys.readouterr().out
     if refused:
-        assert json.loads(output)["ok"] is False
-        assert "recovery refused" in json.loads(output)["error"]
+        payload = json.loads(output)
+        assert payload["ok"] is False
+        assert "recovery refused" in payload["error"]
     return captured, handle, route_root
 
 

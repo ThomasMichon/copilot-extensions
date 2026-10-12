@@ -216,6 +216,15 @@ def _routing_lock(
         _PROCESS_ROUTING_LOCK.release()
 
 
+@contextmanager
+def routing_lock(
+    config_dir: str | os.PathLike[str], *, deadline: float,
+):
+    """Hold native routing authority within an explicit acquisition deadline."""
+    with _routing_lock(config_dir, deadline=deadline):
+        yield
+
+
 def read_table(config_dir: str | os.PathLike[str], *, strict: bool = False) -> dict | None:
     """Read the table; strict ownership callers distinguish absence from damage."""
     path = routing_table_path(config_dir)

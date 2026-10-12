@@ -124,6 +124,9 @@ Legacy recovery and passive reaping acquire native transition authority
 non-blockingly before reading or mutating recovery state, closing the race
 where an earlier legacy observation could overwrite a newly-started conditional
 attempt. Contention is an explicit refusal, not a stale-state repair.
+Malformed refusal reasons are logged as outcome-contract failures and remain
+nonzero CLI outcomes. Invalid candidate PIDs cannot pass health or authorize
+disposal. Conditional cleanup uses the public deadline-bound `routing_lock`.
 
 The supported in-process adapter is `run_conditional_cutover(config_dir,
 version=..., request=...)`. Bridge deployment/service restart and Dispatch

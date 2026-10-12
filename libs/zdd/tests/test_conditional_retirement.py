@@ -210,3 +210,20 @@ def test_free_port_probe_uses_successor_bind_scope(case, monkeypatch, bind):
         root, version="2.0.0", request=replace(request, expected_active=replace(old, bind=bind))
     )
     assert observed == [(expected_host, 0)]
+
+
+@pytest.mark.parametrize("pid", [None, False, "202", -1])
+def test_invalid_candidate_pid_retains_unresolved_recovery(case, pid):
+    root, _, events, handle, _, request, orch = case
+    handle.pid = pid
+    result = orch.run(conditional=request, health_timeout=0)
+    assert not result.ok and not result.committed and not result.rolled_back
+    assert events == ["spawn"]
+    assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
+
+
+@pytest.mark.parametrize("reason", [None, "", 1])
+def test_malformed_refusal_reason_is_explicit_failure(reason, caplog):
+    message = breadcrumb.refusal_reason({"refused": True, "reason": reason})
+    assert "outcome contract invalid" in message
+    assert message in caplog.text

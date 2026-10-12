@@ -155,12 +155,14 @@ class PreparedCutover:
 
     def spawn(self, port: int) -> _Handle:
         handle = self.snapshot.spawn_passive(port)
+        raw_pid = getattr(handle, "pid", None)
+        pid = raw_pid if type(raw_pid) is int and raw_pid > 0 else None
         self.new = Endpoint(
             bind=self.orch.bind,
             port=port,
-            pid=handle.pid,
+            pid=pid,
             version=self.orch.version,
-            process_start_time=diagnostics.process_start_time(handle.pid),
+            process_start_time=diagnostics.process_start_time(pid) if pid is not None else None,
         )
         return handle
 
@@ -251,7 +253,9 @@ class PreparedCutover:
             log.error("Conditional cutover retains promoted successor and its admitted work")
             return
         try:
-            with routing._routing_lock(self.orch.config_dir, deadline=self.deadline()):
+            if self.new is None or self.new.pid is None:
+                raise CutoverError("candidate process identity unavailable; refusing disposal")
+            with routing.routing_lock(self.orch.config_dir, deadline=self.deadline()):
                 table = routing.read_table(self.orch.config_dir, strict=True) or {}
                 active_raw = table.get("active")
                 active = Endpoint.from_dict(active_raw) if isinstance(active_raw, dict) else None
@@ -260,14 +264,14 @@ class PreparedCutover:
                 for key in ("active", "previous"):
                     raw = table.get(key)
                     endpoint = Endpoint.from_dict(raw) if isinstance(raw, dict) else None
-                    if endpoint is not None and endpoint.pid == handle.pid:
+                    if endpoint is not None and endpoint.pid == self.new.pid:
                         raise CutoverError("candidate has been published; refusing disposal")
                 if handle.poll() is None:
                     if (
                         self.new is None
                         or not self.new.process_start_time
                         or (
-                            diagnostics.process_start_time(handle.pid)
+                            diagnostics.process_start_time(self.new.pid)
                             != self.new.process_start_time
                         )
                     ):

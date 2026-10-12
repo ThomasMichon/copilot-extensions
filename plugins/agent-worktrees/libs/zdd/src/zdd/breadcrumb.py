@@ -162,6 +162,16 @@ def requires_conditional_recovery(record: dict | None) -> bool:
     return bool(record and str(record.get("state", "")).startswith("conditional-"))
 
 
+def refusal_reason(outcome: dict) -> str:
+    """Report malformed refusal evidence explicitly rather than crashing a CLI."""
+    reason = outcome.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        return reason
+    message = "native recovery refused without a valid reason; outcome contract invalid"
+    log.error(message)
+    return message
+
+
 def recover_stale_cutover(
     config_dir: str | os.PathLike[str],
     make_client: Callable[[str], Any],
