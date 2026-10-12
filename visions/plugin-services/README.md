@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-10-11
+- **Last revised:** 2026-10-12
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -189,9 +189,15 @@ Consolidated fronts retain independently owned endpoints, routing, drain and
 rollback even when execution resources are shared.
 
 ### self-contained-runtime
-Every runtime plugin owns a complete, standalone runtime (venv + binstub +
-service) that its own installer deploys and updates. Nothing a service needs to
-run is borrowed from a sibling plugin or from a git checkout of this repo.
+Every runtime plugin's installer establishes a complete, standalone installation
+(runtime, invocation surface and any service), including all dependencies and
+their durable lifetime. A required helper may be a private runtime or an
+explicitly managed compatible helper reused over the process boundary described
+above; each consuming installer secures its own reference and can provision a
+compatible helper when none exists. A sibling's private venv, installation
+presence or continued operation is never a prerequisite. Updating or uninstalling
+one consumer cannot invalidate another's live dependency. Nothing depends on a
+git checkout of this repo or an unowned ambient helper.
 
 ### immutable-versioned-runtime
 A runtime install is **immutable**: once a version's venv is built it is never

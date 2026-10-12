@@ -5,9 +5,9 @@
 - **Branch(es):** independent sequential slice PRs against `dev`
 - **Created:** 2026-10-11
 - **Status:** Draft
-- **Vision:** [Plugin services](../../../../visions/plugin-services/README.md):
+- **Vision:** [Plugin services](../../../visions/plugin-services/README.md):
   `capability-sized-runtime-dependencies`, `compatible-helper-runtime-reuse`;
-  [agent-index](../../../../visions/plugins/agent-index/README.md):
+  [agent-index](../../../visions/plugins/agent-index/README.md):
   `lightweight-client-and-declared-host-service`
 - **Umbrella issue:** #6234
 - **Related issues:** #5768, #5873, #4876, #6143
@@ -163,3 +163,10 @@ shared mutable venv is presumed acceptable.
   #6143 as neighboring owners rather than creating duplicate implementations.
 - Created the proposal and validation gate. Private deployment-specific
   motivation and the full operator request are recorded only downstream.
+
+### 2026-10-12 - Proposal review clarification
+- Corrected vision navigation and reconciled helper reuse with standalone
+  runtime ownership: each consuming installer must secure a durable compatible
+  dependency and its reference lifetime, not borrow a sibling's private venv.
+- Reuse remains an unimplemented investigation; reality-pattern changes will
+  accompany a separately reviewed design before any runtime migration.
