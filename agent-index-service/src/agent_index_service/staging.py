@@ -640,7 +640,10 @@ def _copy(source: Path, target: Path, expected: str) -> None:
         != (after.st_ino, after.st_size, after.st_mtime_ns)
     ):
         raise CandidateError("release source changed while snapshotting")
-    _path(source, file=True)
+    try:
+        _path(source, file=True)
+    except (OSError, CandidateError) as exc:
+        raise CandidateError("release source changed while snapshotting") from exc
 
 
 def _receipt(slot: Path, primitive, root: Path, version: str) -> dict | None:

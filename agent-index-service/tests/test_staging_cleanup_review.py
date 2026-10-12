@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import stat
 from types import SimpleNamespace
 
@@ -79,6 +80,24 @@ def test_receipt_creation_is_exclusive_private_at_open(tmp_path, monkeypatch):
     assert calls[0][2] == 0o600  # Never manipulate process-wide umask.
     if os.name != "nt":
         assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+
+
+def test_copy_final_path_revalidation_retains_source_change_diagnostic(tmp_path, monkeypatch):
+    source, target = tmp_path / "source.whl", tmp_path / "snapshot.whl"
+    source.write_bytes(b"fixture")
+    actual_path = staging._path
+    checks = []
+
+    def changed(path, **kwargs):
+        checks.append(path)
+        if len(checks) == 2:
+            raise CandidateError("source path became a symlink")
+        return actual_path(path, **kwargs)
+
+    monkeypatch.setattr(staging, "_path", changed)
+    with pytest.raises(CandidateError, match="release source changed while snapshotting"):
+        staging._copy(source, target, hashlib.sha256(b"fixture").hexdigest())
+    assert checks == [source, source]
 
 
 @pytest.mark.parametrize("kind,label", [
