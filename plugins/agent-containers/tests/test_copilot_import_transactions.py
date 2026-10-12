@@ -1,0 +1,135 @@
+"""Hermetic transaction and failure-path coverage for Copilot config imports."""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import pytest
+from agent_procutil import no_window_flags
+
+from agent_containers import resolver
+from agent_containers.private_state import private_file_lock
+
+
+@pytest.mark.parametrize("failure", ["fsync", "replace"])
+def test_import_cleans_its_temp_after_publication_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    config = tmp_path / "config.json"
+    original = '{"firstLaunchAt": "fixture"}'
+    config.write_text(original, encoding="utf-8")
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise OSError("fixture publication failure")
+
+    if failure == "fsync":
+        monkeypatch.setattr(resolver.os, "fsync", fail)
+    else:
+        monkeypatch.setattr(Path, "replace", fail)
+    with pytest.raises(OSError, match="fixture publication failure"):
+        resolver.import_copilot_cli_token("fixture-user", "fixture-secret", config)
+
+    assert config.read_text(encoding="utf-8") == original
+    assert not list(tmp_path.glob("*.tmp"))
+    assert not list(tmp_path.glob(".*.tmp"))
+    with private_file_lock(tmp_path / ".config.json.copilot-login.lock", timeout=0):
+        pass
+
+
+def test_import_refuses_unreadable_existing_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = tmp_path / "config.json"
+    original = '{"firstLaunchAt": "fixture"}'
+    config.write_text(original, encoding="utf-8")
+    read_text = Path.read_text
+
+    def deny_read(path: Path, *args: object, **kwargs: object) -> str:
+        if path == config:
+            raise PermissionError("fixture unreadable config")
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", deny_read)
+    with pytest.raises(PermissionError):
+        resolver.import_copilot_cli_token("fixture-user", "fixture-secret", config)
+    assert read_text(config, encoding="utf-8") == original
+
+
+_IMPORT_WORKER = """
+import sys, time
+from pathlib import Path
+from agent_containers.resolver import import_copilot_cli_token
+
+config, markers, account = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+read_text = Path.read_text
+def observe_read(path, *args, **kwargs):
+    value = read_text(path, *args, **kwargs)
+    if path == config:
+        (markers / (account + "-read")).touch()
+        if account == "first":
+            deadline = time.monotonic() + 15
+            while not (markers / "release").exists():
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("fixture release timeout")
+                time.sleep(0.01)
+    return value
+Path.read_text = observe_read
+(markers / (account + "-entered")).touch()
+import_copilot_cli_token(account, "fixture-" + account, config)
+"""
+
+
+def _wait_for(path: Path) -> None:
+    deadline = time.monotonic() + 10
+    while not path.exists():
+        if time.monotonic() >= deadline:
+            pytest.fail("Concurrent import worker did not reach its fixture barrier")
+        time.sleep(0.01)
+
+
+def test_concurrent_imports_preserve_both_accounts(tmp_path: Path) -> None:
+    config = tmp_path / "config.json"
+    config.write_text('{"unrelated": "preserved"}', encoding="utf-8")
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+    workers: list[subprocess.Popen[str]] = []
+    try:
+        for account in ("first", "second"):
+            workers.append(subprocess.Popen(
+                [sys.executable, "-c", _IMPORT_WORKER, str(config), str(tmp_path), account],
+                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                creationflags=no_window_flags(),
+            ))
+            _wait_for(tmp_path / f"{account}-entered")
+            if account == "first":
+                _wait_for(tmp_path / "first-read")
+        # The first process holds its read/merge/write transaction open.
+        # The second must not read that stale snapshot while the lock is held.
+        time.sleep(0.3)
+        assert not (tmp_path / "second-read").exists()
+    finally:
+        (tmp_path / "release").touch()
+        for worker in workers:
+            stdout, stderr = worker.communicate(timeout=25)
+            assert worker.returncode == 0, stderr
+            assert stdout == ""
+
+    data = json.loads(config.read_text(encoding="utf-8"))
+    assert data["unrelated"] == "preserved"
+    assert set(data["authTokens"]) == {
+        "https://github.com:first", "https://github.com:second",
+    }
+
+
+def test_config_import_lock_has_bounded_contention(tmp_path: Path) -> None:
+    path = tmp_path / "import.lock"
+    with private_file_lock(path):
+        with pytest.raises(RuntimeError, match="Timed out acquiring"):
+            with private_file_lock(path, timeout=0):
+                pytest.fail("A competing lock was admitted")
+    with private_file_lock(path, timeout=0):
+        pass

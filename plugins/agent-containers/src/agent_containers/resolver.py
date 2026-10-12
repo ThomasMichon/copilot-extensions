@@ -42,8 +42,8 @@ from .config import (
     FleetConfig,
     load_config,
 )
-from .lease import deploy_hold_status, get_deploy_hold, get_lease
 from .inference import NativeInferenceConfig
+from .lease import deploy_hold_status, get_deploy_hold, get_lease
 from .lifecycle import (
     get_container,
     inspect_state,
@@ -51,6 +51,7 @@ from .lifecycle import (
     restricted_policy_errors,
     start_container,
 )
+from .private_state import private_file_lock
 from .ssh_transport import prepare_ssh_config
 
 if TYPE_CHECKING:
@@ -248,13 +249,21 @@ def import_copilot_cli_token(
     at mode 0600 FROM THE MOMENT OF CREATION (never written under the
     process umask and chmod'd restrictive only afterward, which would leave
     this plaintext OAuth-token store briefly world/group-readable), then
-    replaced over the real path.
+    replaced over the real path. Cooperating imports serialize the entire
+    read/merge/write transaction using a persistent sibling lock file.
+    This lock does not coordinate unrelated writers such as Copilot CLI.
     """
     path = Path(config_path) if config_path is not None else copilot_cli_config_path()
+    path = path.expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
+    with private_file_lock(path.with_name(f".{path.name}.copilot-login.lock")):
+        _import_copilot_cli_token_locked(account, token, path)
+
+
+def _import_copilot_cli_token_locked(account: str, token: str, path: Path) -> None:
     try:
-        raw = path.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
         raw = ""
     lines = raw.splitlines()
     header_lines: list[str] = []

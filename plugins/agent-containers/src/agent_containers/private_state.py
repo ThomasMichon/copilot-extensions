@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import stat
+import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 _ACL_MODE_FILESYSTEMS = {
@@ -15,6 +19,48 @@ _ACL_MODE_FILESYSTEMS = {
     "fuseblk",
     "smb3",
 }
+
+
+@contextmanager
+def private_file_lock(path: Path, *, timeout: float = 10.0) -> Iterator[None]:
+    """Serialize cooperating writers using a persistent, kernel-owned lock."""
+    fd = os.open(
+        path,
+        os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    try:
+        enforce_mode(path, 0o600)
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    os.lseek(fd, 1 << 30, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(f"Timed out acquiring config import lock: {path}") from exc
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                os.lseek(fd, 1 << 30, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        # Keep the inode: unlinking it lets later writers lock a different file.
+        os.close(fd)
 
 
 def _mount_path(value: str) -> str:

@@ -268,7 +268,7 @@ def test_import_copilot_cli_token_leaves_no_leftover_temp_file(tmp_path):
     import_copilot_cli_token("inference-user", "gho_fresh", config_path)
 
     entries = {p.name for p in tmp_path.iterdir()}
-    assert entries == {"config.json"}
+    assert entries == {"config.json", ".config.json.copilot-login.lock"}
 
 
 def test_import_copilot_cli_token_uses_a_unique_temp_name_per_call(tmp_path, monkeypatch):
@@ -282,7 +282,8 @@ def test_import_copilot_cli_token_uses_a_unique_temp_name_per_call(tmp_path, mon
     real_open = os.open
 
     def _spying_open(path, flags, mode=0o777):
-        seen_paths.append(str(path))
+        if flags & os.O_EXCL:
+            seen_paths.append(str(path))
         return real_open(path, flags, mode)
 
     monkeypatch.setattr(resolver_mod.os, "open", _spying_open)
