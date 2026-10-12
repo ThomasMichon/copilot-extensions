@@ -133,6 +133,28 @@ def test_empty_search_success_remains_success_but_unvalidated_hit_collection_is_
         replace(result, hits=[IndexHit.from_dict(hit())])
 
 
+def test_direct_search_construction_and_replace_enforce_aggregate_response_budget():
+    large = IndexHit.from_dict(hit(content="x" * 600000))
+    valid = IndexSearchResult("query", True, (large,))
+    assert len(payload(valid.to_dict())) < MAX_RESPONSE_BYTES
+    with pytest.raises(ContractError):
+        IndexSearchResult("query", True, (large, large))
+    with pytest.raises(ContractError):
+        replace(valid, hits=(large, large))
+
+
+def test_direct_search_aggregate_byte_boundary_is_exact():
+    empty_hit = IndexHit.from_dict(hit(content=""))
+    empty = IndexSearchResult("query", True, (empty_hit,))
+    overhead = len(payload(empty.to_dict()))
+    boundary_hit = replace(empty_hit, content="x" * (MAX_RESPONSE_BYTES - overhead))
+    boundary = IndexSearchResult("query", True, (boundary_hit,))
+    assert len(payload(boundary.to_dict())) == MAX_RESPONSE_BYTES
+    too_large = replace(boundary_hit, content=boundary_hit.content + "x")
+    with pytest.raises(ContractError):
+        IndexSearchResult("query", True, (too_large,))
+
+
 @pytest.mark.parametrize("control", ["\x7f", "\x85", "\x9f"])
 def test_health_rejects_control_characters_in_opaque_installation_identity(control):
     with pytest.raises(ContractError):

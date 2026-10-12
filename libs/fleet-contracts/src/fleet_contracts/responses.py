@@ -15,6 +15,7 @@ from .records import (
     _text,
     _tuple,
     decode_json,
+    encode_json,
 )
 
 
@@ -142,6 +143,7 @@ class IndexSearchResult:
         values = _tuple(self.hits, "hits", 100, empty=True)
         if any(not isinstance(hit, IndexHit) for hit in values):
             raise BackendResponseError("hits must contain validated index records")
+        encode_json(self.to_dict(), max_bytes=MAX_RESPONSE_BYTES)
 
     @classmethod
     def from_backend(
