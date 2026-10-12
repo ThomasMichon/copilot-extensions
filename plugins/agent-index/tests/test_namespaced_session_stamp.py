@@ -16,6 +16,9 @@ def _active_hook(
     tmp_path: Path, shell: str,
 ) -> tuple[list[str], dict[str, str], Path, Path]:
     command, environment, repo = _hook(tmp_path, shell)
+    shell_cache = tmp_path / "shell-cache"
+    shell_cache.mkdir()
+    environment["PSModuleAnalysisCachePath"] = str(shell_cache / "module-analysis.cache")
     payload = Path(environment["AGENT_INDEX_PAYLOAD_ROOT"])
     library = PLUGIN.parents[1] / "libs/installation-context"
     context_dir = payload / "scripts/installation-context"
