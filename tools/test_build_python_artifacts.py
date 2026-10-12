@@ -2244,6 +2244,11 @@ def test_governed_feed_configured_via_programdata_uv_toml(
     )
 
 
+def _posix_xdg_entry(path: Path) -> str:
+    """Omit the Windows drive colon; callers select the temporary drive."""
+    return str(path).removeprefix(path.drive)
+
+
 def test_effective_uv_toml_candidates_posix_includes_system_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
@@ -2261,7 +2266,7 @@ def test_effective_uv_toml_candidates_posix_includes_system_paths(
     (xdg_dir / "uv").mkdir(parents=True)
     (xdg_dir / "uv" / "uv.toml").write_text("", encoding="utf-8")
     candidates = btl._effective_uv_toml_candidates(
-        {"HOME": "/home/x", "XDG_CONFIG_DIRS": str(xdg_dir).removeprefix(xdg_dir.drive)}
+        {"HOME": "/home/x", "XDG_CONFIG_DIRS": _posix_xdg_entry(xdg_dir)}
     )
     expected = (xdg_dir / "uv" / "uv.toml").resolve()
     assert any(c.resolve() == expected for c in candidates)
@@ -2285,7 +2290,7 @@ def test_effective_uv_toml_candidates_posix_honors_xdg_config_dirs(
     (second_dir / "uv").mkdir(parents=True)
     (second_dir / "uv" / "uv.toml").write_text("", encoding="utf-8")
     candidates = btl._effective_uv_toml_candidates(
-        {"XDG_CONFIG_DIRS": f"{str(first_dir).removeprefix(first_dir.drive)}:{str(second_dir).removeprefix(second_dir.drive)}"}
+        {"XDG_CONFIG_DIRS": f"{_posix_xdg_entry(first_dir)}:{_posix_xdg_entry(second_dir)}"}
     )
     assert len(candidates) == 1
     assert candidates[0].resolve() == (second_dir / "uv" / "uv.toml").resolve()
@@ -2300,7 +2305,7 @@ def test_effective_uv_toml_candidates_posix_xdg_config_dirs_ignores_empty_entrie
     (only_dir / "uv").mkdir(parents=True)
     (only_dir / "uv" / "uv.toml").write_text("", encoding="utf-8")
     candidates = btl._effective_uv_toml_candidates(
-        {"XDG_CONFIG_DIRS": f":{str(only_dir).removeprefix(only_dir.drive)}::"}
+        {"XDG_CONFIG_DIRS": f":{_posix_xdg_entry(only_dir)}::"}
     )
     assert len(candidates) == 1
     assert candidates[0].resolve() == (only_dir / "uv" / "uv.toml").resolve()
@@ -2321,7 +2326,7 @@ def test_effective_default_index_url_honors_first_existing_xdg_config_dir(
     (second_dir / "uv" / "uv.toml").write_text(
         'index-url = "https://second.internal/simple/"\n', encoding="utf-8"
     )
-    env = {"XDG_CONFIG_DIRS": f"{str(first_dir).removeprefix(first_dir.drive)}:{str(second_dir).removeprefix(second_dir.drive)}"}
+    env = {"XDG_CONFIG_DIRS": f"{_posix_xdg_entry(first_dir)}:{_posix_xdg_entry(second_dir)}"}
     assert btl._effective_default_index_url(env) == (
         "https://second.internal/simple/", None,
     )

@@ -994,8 +994,8 @@ class TestRelayServingLiveness:
             "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.5",
         }
 
-        # Keep the non-listening port reserved so the live relay cannot
-        # inherit its number after a bind-and-close probe releases it.
+        # Reserve a distinct non-listening endpoint while the relay is live;
+        # keep both endpoints allocated throughout discovery.
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as closed_socket, _OneShotRelay("pong\n\n") as serving:
             closed_socket.bind(("127.0.0.1", 0))
             closed = closed_socket.getsockname()[1]

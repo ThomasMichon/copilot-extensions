@@ -185,6 +185,10 @@ def resolve_seasoned_public_version(
             f"{package}: PyPI JSON API returned HTTP {exc.code} for {url}"
         ) from exc
     except urllib.error.URLError as exc:
+        if isinstance(exc.reason, TimeoutError):
+            raise SeasonedVersionError(
+                f"{package}: PyPI JSON API request or response read timed out"
+            ) from exc
         raise SeasonedVersionError(
             f"{package}: could not reach PyPI JSON API at {url}: {exc.reason}"
         ) from exc
@@ -276,5 +280,5 @@ def resolve_seasoned_public_version(
             f"JSON API -- refusing to fall back to an unseasoned 'latest'"
         )
 
-    candidates.sort(key=lambda pair: pair[0])
+    candidates.sort()
     return candidates[-1][1]

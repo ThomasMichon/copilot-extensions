@@ -28,6 +28,22 @@ def _file(upload_time: str, *, yanked: bool = False) -> dict:
 
 
 class TestResolveSeasonedPublicVersion:
+    @pytest.mark.parametrize("versions", [("1.0", "1.0.0"), ("1.0.0", "1.0")])
+    def test_equivalent_version_spelling_selection_is_deterministic(self, versions):
+        payload = _releases_payload({v: [_file("2026-01-01T00:00:00Z")] for v in versions})
+        assert spf.resolve_seasoned_public_version("pkg", now=_NOW, fetch=lambda url: payload) == "1.0.0"
+
+    def test_url_error_wrapped_timeout_keeps_timeout_diagnostic(self, monkeypatch):
+        failure = spf.urllib.error.URLError(TimeoutError("connection stalled"))
+
+        def failing_urlopen(*args, **kwargs):
+            raise failure
+
+        monkeypatch.setattr(spf.urllib.request, "urlopen", failing_urlopen)
+        with pytest.raises(spf.SeasonedVersionError, match="timed out") as caught:
+            spf.resolve_seasoned_public_version("pkg", now=_NOW)
+        assert caught.value.__cause__ is failure
+
     @pytest.mark.parametrize("package", ["", "bad name", "../pkg", "a/b", "a?b", "a#b", "a%2Fb", "-pkg", "pkg-", None])
     def test_invalid_package_rejected_before_fetch(self, package):
         def unexpected_fetch(url):

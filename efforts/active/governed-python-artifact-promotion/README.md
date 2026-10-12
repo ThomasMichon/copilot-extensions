@@ -545,6 +545,14 @@ win grows with build complexity.
   The real Bash/Node discovery regression passes under the contained Windows
   runner; a mandatory Codespaces patch changefile accompanies the fixture fix.
   No production relay behavior, assertions, timeouts or retry budgets changed.
+- **2026-10-12 Lite-review refinements:** equivalent supported version
+  spellings now use their original string as a deterministic secondary sort
+  key, rather than depending on response order. `URLError`-wrapped timeouts
+  preserve the dedicated timeout diagnostic and original exception cause.
+  Clarified the relay fixture's actual allocation order and extracted the
+  repeated POSIX-XDG test-path conversion. All 265 combined artifact/resolver
+  cases pass locally; the latest resolver has 66 cases. No assertions or budgets
+  were weakened.
 - **Still open (this effort's own next slice):** actually wire this
   resolver into `resolve_toolchain_lock`/`build_python_artifacts.py`'s CLI
   (a caller-selectable "seasoned public" mode, distinct from and never
