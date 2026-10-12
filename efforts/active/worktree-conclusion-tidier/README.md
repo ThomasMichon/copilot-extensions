@@ -5,7 +5,7 @@
 - **Branch(es):** serial proposal and implementation PRs
 - **Created:** 2026-10-10
 - **Status:** Draft
-- **Status detail:** Report-only capability released through #6361 and its
+- **Status detail:** Report-only capability released through #6358 and its
   installed runtime/charter verified; live pilot parameters/execution and
   later authority graduation remain gated.
 - **Vision:** `visions/plugins/agent-dispatch/README.md` scheduled production
@@ -147,7 +147,7 @@ not standing authorization, pilot approval, or scheduling approval.
   private report-destination requirements for the audit pilot.
 - [x] Obtain explicit approval to implement the audit-only capability.
 - [x] Complete the capability's promotion to main and verify its installed
-  runtime/charter before the live pilot (#6361; installed dispatch
+  runtime/charter before the live pilot (#6358; installed dispatch
   `0.16.9-dev1` verified); a dev merge is not deployment.
 - [ ] Obtain explicit approval to run the bounded live audit pilot.
 
@@ -161,7 +161,7 @@ Mutation-fencing implementation is not an audit gate._
   charter and gradual, separately approved authority graduation.
 - [x] Land the manually invoked report-only recipe and its receipt checker
   on dev (#6303); independent semantic verification remains mandatory.
-- [x] Publish that capability through promotion to main (#6361).
+- [x] Publish that capability through promotion to main (#6358).
 - [ ] Implement deterministic discovery and one exclusive bounded worker using
   the existing registrar/supervisor if recurring production is later approved;
   the initial one-off recipe requires an explicit candidate roster.
@@ -312,8 +312,11 @@ registration, or apply-mode pilot has been started by this effort.
 ### 2026-10-12 - Release and installed capability verified
 
 - The normal validation/promotion pipeline completed successfully in run
-  `38307611449`; its generated release PR #6361 merged to main as
-  `1fbe70751ef74ffb66cbac9598768a36272110a4`. Existing upstream repair
+  `38305079883`; its generated release PR #6358 first published the
+  capability on main as `67661d853e8f5de7a11c078dbc6dcf50cbce06be`.
+  The later release #6361 retained it, and installed-code comparison used
+  that pinned main snapshot `1fbe70751ef74ffb66cbac9598768a36272110a4`.
+  Existing upstream repair
   owners cleared the publication blockers; this effort opened no competing
   pipeline fix and bypassed no gate.
 - The authorized canonical unified update refreshed marketplace payloads
