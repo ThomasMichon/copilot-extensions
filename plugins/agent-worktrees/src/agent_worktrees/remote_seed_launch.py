@@ -28,8 +28,12 @@ def shell_command(shell: str, argv: list[str]) -> str:
 
 
 def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
+    new = "--new" in args
+    existing = "--worktree-id" in args
+    if new == existing or (existing and args.index("--worktree-id") + 1 >= len(args)):
+        raise ValueError("Remote prompt requires exactly one New or existing worktree selector")
     request_id = uuid.uuid4().hex
-    kind = "new" if "--new" in args else "resume"
+    kind = "new" if new else "resume"
     wid = None if kind == "new" else args[args.index("--worktree-id") + 1]
     request = {
         "version": 1, "request_id": request_id, "kind": kind,

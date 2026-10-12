@@ -289,3 +289,21 @@ def test_structured_request_rejects_ordinary_selector_before_mutation(selector, 
     )
     assert resolve_cli.cmd_resolve(args) == 3
     assert "Structured launch requests require" in json.loads(capfd.readouterr().out)["error"]
+
+
+def test_malformed_base64_returns_structured_cli_error(capfd):
+    import argparse
+    from agent_worktrees import resolve_cli
+
+    parsers = argparse.ArgumentParser().add_subparsers()
+    resolve_cli.add_parsers(parsers)
+    args = parsers.choices["resolve"].parse_args(["--json", "--launch-request-b64", "!invalid!"])
+    assert resolve_cli.cmd_resolve(args) == 3
+    assert "Launch request <invalid> failed" in json.loads(capfd.readouterr().out)["error"]
+
+
+@pytest.mark.parametrize("selectors", [[], ["--codename", "one-two"], ["--worktree-id"],
+                                       ["--new", "--worktree-id", "wt-a"]])
+def test_remote_selector_refuses_before_admission(selectors):
+    with pytest.raises(ValueError, match="exactly one"):
+        remote_seed_launch.prepare(None, "target", "bash", selectors, "task")

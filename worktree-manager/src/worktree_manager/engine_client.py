@@ -44,6 +44,7 @@ ENGINE_ARGV_ENV = "WORKTREE_MANAGER_ENGINE_ARGV"
 #: A generous ceiling: a cold engine self-provisions on first use, and a classify
 #: pass can enumerate many worktrees. Kept bounded so the Manager never hangs.
 _DEFAULT_TIMEOUT = 120
+_REMOTE_ADMISSION_TIMEOUT = 240
 _PYTHON_PARENT_ENV = {
     "PYTHONHOME",
     "PYTHONPATH",
@@ -604,6 +605,8 @@ def resolve_launch_plan(
     must refuse the capability flag before mutation, rather than silently
     dropping preservation. Ordinary seedless launches retain version-skew
     compatibility.
+    Remote prompted requests have a minimum timeout of 240 seconds: the outer
+    engine must outlive its bounded 180-second SSH admission and startup.
 
     Version-skew tolerant: an older engine that does not know ``--bare-resume`` is
     retried as a plain resume (degrade the feature, don't fail) -- the same contract
@@ -643,7 +646,7 @@ def resolve_launch_plan(
     try:
         obj = run_json(
             project, args,
-            timeout=max(timeout, 240) if target_machine and seed else timeout,
+            timeout=max(timeout, _REMOTE_ADMISSION_TIMEOUT) if target_machine and seed else timeout,
             stream_progress=True,
         )
     except EngineError as e:
