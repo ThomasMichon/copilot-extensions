@@ -127,7 +127,10 @@ unknown, installed, then ready. Expiry at the inspection time is stale.
 Exit 0 means compatible `installed`/`ready` snapshot assertions, **not live
 readiness**; 2 means missing/incompatible/unknown, and 1 invalid input/I/O.
 Input bounds, duplicate-key refusal and non-secret diagnostic rules are shared
-with the existing planner. A future trusted observer/installer must produce
+with the existing planner: at most 256 components per manifest/observation and
+256 entries in any role closure, 1 MiB input and depth 12. Exact-field diagnostics
+name static expected keys, never unknown supplied keys or values.
+A future trusted observer/installer must produce
 attributable live evidence and verify actual dependencies; this slice does not
 implement that authority or replace its acceptance gate.
 

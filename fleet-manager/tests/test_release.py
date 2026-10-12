@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from fleet_manager.planning import PlanError, digest
+from fleet_manager.planning import MAX_ITEMS, PlanError, digest
 from fleet_manager.release import inspect_release, validate_release
 
 
@@ -111,6 +111,32 @@ def test_invalid_release_digest_has_correct_diagnostic():
     with pytest.raises(PlanError, match="release digest must be lowercase SHA-256") as error:
         inspect(release, observed)
     assert "invalid-private" not in str(error.value)
+
+
+def test_field_diagnostic_names_expected_keys_without_echoing_extra_input():
+    release = manifest()
+    release["components"]["cli"]["private-key-name"] = "private-value"
+    with pytest.raises(PlanError, match="expected: api, artifact_sha256, data_schemas, kind") as error:
+        validate_release(release)
+    assert "private-key-name" not in str(error.value) and "private-value" not in str(error.value)
+
+
+def test_release_and_observation_component_count_bounds():
+    release = manifest()
+    for i in range(MAX_ITEMS - 3):
+        name = f"c{i}"
+        release["components"][name] = copy.deepcopy(release["components"]["core"])
+        release["roles"]["gateway"].append(name)
+    assert len(release["components"]) == MAX_ITEMS
+    assert inspect(release, observation(release), role="client")["status"] == "ready"
+    too_many = copy.deepcopy(release)
+    too_many["components"]["extra"] = copy.deepcopy(release["components"]["core"])
+    with pytest.raises(PlanError, match="exceeds bounds"):
+        validate_release(too_many)
+    observed = observation(release)
+    observed["components"]["extra"] = copy.deepcopy(observed["components"]["core"])
+    with pytest.raises(PlanError, match="exceeds bounds"):
+        inspect(release, observed, role="client")
 
 
 @pytest.mark.parametrize("field", ["authority", "installation"])

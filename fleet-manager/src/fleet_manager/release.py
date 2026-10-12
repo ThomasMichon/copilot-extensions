@@ -3,7 +3,7 @@
 import math
 import re
 
-from .planning import PlanError, canonical, digest, identifier, integer, record
+from .planning import MAX_ITEMS, PlanError, canonical, digest, identifier, integer, record
 
 ROLES = ("client", "gateway", "node")
 SHA256 = re.compile(r"[a-f0-9]{64}\Z")
@@ -16,7 +16,7 @@ def _hash(value, label="artifact digest"):
 
 def _fields(value, expected, label):
     if not isinstance(value, dict) or set(value) != set(expected):
-        raise PlanError(f"invalid {label} fields")
+        raise PlanError(f"invalid {label} fields; expected: {', '.join(sorted(expected))}")
 
 
 def _range(value):
@@ -40,7 +40,7 @@ def validate_release(value):
     record(value, "fleet-manager.release", {"id", "components", "roles"})
     identifier(value["id"], "release id")
     components = value["components"]
-    if not isinstance(components, dict) or not components:
+    if not isinstance(components, dict) or not 1 <= len(components) <= MAX_ITEMS:
         raise PlanError("release components must be a nonempty bounded object")
     for name, component in components.items():
         identifier(name, "component id")
@@ -88,7 +88,7 @@ def _snapshot(value):
         raise PlanError("observation expiry must follow observation time")
     if type(value["complete"]) is not bool:
         raise PlanError("observation completeness must be boolean")
-    if not isinstance(value["components"], dict):
+    if not isinstance(value["components"], dict) or len(value["components"]) > MAX_ITEMS:
         raise PlanError("observed components must be a bounded object")
     for name, observed in value["components"].items():
         identifier(name, "observed component id")
