@@ -308,7 +308,9 @@ def decrypt_identity_payload(token_b64: str, key: bytes | None = None) -> dict:
         if not os.environ.get(KEY_ENV_VAR) and ARGV_ENV in os.environ:
             raise IdentityMarkerError(
                 "configured shared vault key unavailable -- explicitly populate or "
-                "refresh its protected cache with agent-vault cache-populate"
+                "refresh its protected cache with agent-vault cache-populate --entry "
+                "<the configured AGENT_WORKTREES_IDENTITY_VAULT_ENTRY, or "
+                "Identity/PR-attribution when unset>"
             )
         raise IdentityMarkerError(
             "no identity key configured -- set "

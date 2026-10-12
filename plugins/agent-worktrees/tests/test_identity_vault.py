@@ -66,7 +66,10 @@ def test_decode_reports_configured_vault_cache_miss(monkeypatch):
     monkeypatch.delenv(identity_marker.KEY_ENV_VAR, raising=False)
     monkeypatch.setenv(identity_vault.ARGV_ENV, json.dumps([sys.executable]))
     monkeypatch.setattr(identity_vault, "_read_key_output", lambda argv: b"")
-    with pytest.raises(identity_marker.IdentityMarkerError, match="refresh its protected cache"):
+    with pytest.raises(
+        identity_marker.IdentityMarkerError,
+        match="cache-populate --entry .*AGENT_WORKTREES_IDENTITY_VAULT_ENTRY",
+    ):
         identity_marker.decrypt_identity_payload("unused")
 
 
@@ -127,6 +130,40 @@ def test_timeout_reaps_adapter_and_stdout_holding_descendant(monkeypatch, tmp_pa
     while pid_alive(child_pid) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert not pid_alive(child_pid)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Job breakaway contract")
+def test_cache_adapter_cannot_launch_breakaway_descendant(tmp_path):
+    import subprocess
+
+    from agent_worktrees.locks import pid_alive
+
+    result_file = tmp_path / "breakaway-result"
+    script = (
+        "import subprocess,sys,pathlib\n"
+        "try:\n"
+        " child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],"
+        "creationflags=subprocess.CREATE_BREAKAWAY_FROM_JOB)\n"
+        " result=str(child.pid)\n"
+        "except PermissionError:\n"
+        " result='denied'\n"
+        f"pathlib.Path({str(result_file)!r}).write_text(result)\n"
+        "print('fixture-output')\n"
+    )
+    try:
+        identity_vault._read_key_output([sys.executable, "-c", script])
+    except ValueError:
+        pass
+    result = result_file.read_text()
+    if result != "denied":
+        pid = int(result)
+        deadline = time.monotonic() + 3
+        while pid_alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        alive = pid_alive(pid)
+        if alive:
+            subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, check=True)
+        assert not alive, "breakaway descendant survived reader cleanup"
 
 
 def test_failed_cache_does_not_publish_secret_diagnostics(monkeypatch, caplog):

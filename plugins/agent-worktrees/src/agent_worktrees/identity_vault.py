@@ -22,7 +22,8 @@ _READ_TIMEOUT = 15
 
 def _read_key_output(argv: list[str]) -> bytes:
     process, job = spawn_sync_in_kill_on_close_job(
-        argv, require_job=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        argv, require_job=True, allow_breakaway=False,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL, **no_window_kwargs(),
         **({"start_new_session": True} if os.name != "nt" else {}),
     )
