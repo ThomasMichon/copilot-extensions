@@ -893,17 +893,25 @@ jobs:
     name: agent-dispatch-service (out-of-plugin)
     # agent-dispatch-service is delivered OUTSIDE the plugin pipe (see
     # tools/standalone_consumers.py), so the per-plugin matrix below never
-    # runs its tests. This dedicated job gives it real CI, mirroring
-    # worktree-manager's own out-of-plugin job shape.
+    # runs its tests. Unlike worktree-manager (whose dependencies are all
+    # genuinely vendorable shared libs/<lib>), agent-dispatch-service
+    # depends on the agent-dispatch PLUGIN -- the same shape as
+    # agent-index-service's dependency on agent-index -- so a plain `uv
+    # run` can't resolve it from any index. Use the same
+    # run-standalone-tests.py harness agent-index-service's own job uses,
+    # which supplies the needed local path sources directly (see
+    # run-standalone-tests.py's prepare()).
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
-      - name: Test agent-dispatch-service
-        working-directory: agent-dispatch-service
-        run: uv run --extra dev pytest -q
+      - name: Test agent-dispatch-service with installed plugin and host containment
+        run: python tools/run-standalone-tests.py agent-dispatch-service --prepare --admission-wait 60 --timeout 180
 
   test-runner-linux:
     name: test runner (ubuntu-latest)

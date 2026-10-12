@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; Phase 1 + Phase 2 landed
+- **Status:** Active; Phase 1 + Phase 2 landed; release-promotion regression fixed
 - **Vision:** [machine-fleet](../../../visions/machine-fleet/README.md):
   `standalone-service-installation`, role deployments and container managers
   (role instances may run directly or in containers on explicitly admitted
@@ -336,3 +336,54 @@ _Pending._
   default, the package-index build-arg override) in
   `agent-dispatch-service/README.md`.
 
+### 2026-10-11 -- Release-promotion regression found and fixed
+- Another session (umbrella #6177 comment 6115340519, via agent-bridge)
+  reported that release promotion (`dev` -> `main`, run 38184375719) was
+  **hard-refusing every release** -- including an unrelated already-merged
+  PR -- because of `agent-dispatch-service`'s own `[tool.uv.sources]`
+  pointer. `tools/materialize_main.py`'s uv-editable materializer only ever
+  vendors an escaping reference that resolves to EXACTLY
+  `canonical_root/libs/<lib>` (a deliberate containment check -- see its
+  own module docstring); `agent-dispatch-service -> ../plugins/agent-dispatch`
+  pointed at a PLUGIN, not a lib, which that materializer was never
+  designed to handle, so it correctly `SKIP`-refused and
+  `promote_release.py` treats any `SKIP` as a hard promotion-blocking error.
+- Root-caused via the actual failing job log
+  (`agent-dispatch references ../plugins/agent-dispatch ... which is not
+  canonical_root/libs/agent-dispatch -- refusing`) rather than guessing.
+- **Chose not to touch `tools/materialize_main.py`'s containment logic at
+  all** -- it is a security-critical, heavily-reviewed shared promotion
+  gate used by every plugin and standalone package, and "retaining strict
+  path containment" was explicitly requested. Instead found that
+  `agent-index-service` already has the IDENTICAL situation (its own
+  dependency on the `agent-index` plugin, not a lib) and solves it a
+  different way: its `pyproject.toml` carries a plain versioned dependency
+  with **no** `[tool.uv.sources]` escape at all, and
+  `tools/run-standalone-tests.py`'s `prepare()` supplies the local plugin
+  path (plus its own transitive `libs/*`) as extra flat install sources,
+  with a `--override` forcing resolution from the exact local checkout
+  (working around `dev`'s frozen source-version floor).
+- Mirrored that exact precedent for `agent-dispatch-service`: removed its
+  `[tool.uv.sources]` entry, changed its dependency to a plain
+  `agent-dispatch>=0.1.2.dev205`, added an `elif component ==
+  "agent-dispatch-service"` branch to `run-standalone-tests.py`'s
+  `prepare()` (sources list + override), switched its CI job from the
+  simpler `uv run --extra dev pytest` shape (only valid for a package whose
+  dependencies are all genuinely vendorable libs, like `worktree-manager`)
+  to the same `run-standalone-tests.py --prepare` invocation
+  `agent-index-service`'s own job uses, and updated the Dockerfile's
+  install step to install `plugins/agent-dispatch` alongside
+  `agent-dispatch-service` in one flat `uv pip install` call instead of
+  relying on the now-removed `[tool.uv.sources]` pointer.
+- Validated for real before landing, specifically because normal PR CI
+  never ran `materialize_main.py` in the first place (that's exactly how
+  this slipped through both #6245 and #6259 clean) -- this time ran the
+  **actual promotion-time materializer** locally against a scratch
+  destination (`python tools/materialize_main.py --dest <scratch>`):
+  exit 0, 125 artifacts materialized, `agent-dispatch-service`'s own
+  materialized `pyproject.toml` confirmed carrying the plain versioned
+  dependency with no escaping pointer and no `SKIP` emitted for it. Also
+  reran the local test harness (`run-standalone-tests.py --prepare`, 11/11
+  pass), the existing `tools/test_run_standalone_tests.py` suite (28
+  passed, 1 unrelated skip), and a full Docker rebuild + smoke run with the
+  new flat-install Dockerfile step.
