@@ -54,6 +54,9 @@ not a logical name, path or endpoint. Native index cells use values such as
 `<marketplace-id>/agent-index`; preserve and compare them exactly. Empty values
 and control characters are rejected. Accepting this identity still grants no
 authority and never causes a filesystem or network lookup.
+The same opaque identity validation applies to offers, routed requests and
+their responses; a response preserves the request's exact installation value
+rather than narrowing it back to a logical identifier.
 
 `health-v1` permits only `health`; `index-v1` additionally permits `index.search`.
 Search parameters match the existing index query API (`q`, `limit`, `source`,

@@ -319,6 +319,30 @@ def test_route_response_for_request_echoes_originating_identity():
     assert health.operation == "health"
 
 
+@pytest.mark.parametrize("identity", [
+    "example-marketplace/agent-index", "\u7814\u7a76/\u7d22\u5f15", "i" * 256,
+], ids=["native-cell", "opaque-utf8", "byte-boundary"])
+@pytest.mark.parametrize("operation", ["health", "index.search"])
+def test_native_opaque_identity_is_preserved_through_routed_response(identity, operation):
+    req = replace(
+        request(), installation_id=identity, operation=operation,
+        parameters=None if operation == "health" else SearchParameters("query"),
+    )
+    result = (
+        RouteResponse.for_request(req, health=HealthResult(True))
+        if operation == "health" else RouteResponse.for_request(req, hits=(hit(),))
+    )
+    assert result.installation_id == identity
+    assert RouteResponse.from_dict(decode_json(encode_json(result.to_dict()))) == result
+
+
+@pytest.mark.parametrize("identity", ["", "\n", "\x80", "i" * 257, "\u00e9" * 129, None],
+                         ids=["empty", "c0", "c1", "long-ascii", "long-utf8", "wrong-type"])
+def test_routed_response_rejects_invalid_installation_identity(identity):
+    with pytest.raises(ContractError):
+        health_response(installation_id=identity)
+
+
 @pytest.mark.parametrize("change", [
     {"operation": "execute"},
     {"operation": "health", "hits": (hit(),), "health": None},

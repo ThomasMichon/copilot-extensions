@@ -599,8 +599,9 @@ class RouteResponse(_WireRecord):
     credential: CredentialResult | None = None
 
     def __post_init__(self) -> None:
-        for name in ("request_id", "service_id", "installation_id"):
+        for name in ("request_id", "service_id"):
             _identifier(getattr(self, name), name)
+        _installation_id(self.installation_id)
         if self.operation == "health":
             if not isinstance(self.health, HealthResult):
                 raise ContractError("health operation requires a health result")
