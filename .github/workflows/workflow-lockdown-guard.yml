@@ -92,7 +92,7 @@
 # untrusted head. This job never checks out or executes PR content -- it
 # only reads the PR's file list via the REST API -- so it carries none of
 # the classic `pull_request_target` secret-exfiltration risk (see this
-# repo's own `identifier-leak-guard.yml` for the citation on that risk
+# repo's own `promote-trigger.yml` for the citation on that risk
 # class).
 #
 # BOOTSTRAP ORDER MATTERS: because the trusted copy is loaded from `main`,

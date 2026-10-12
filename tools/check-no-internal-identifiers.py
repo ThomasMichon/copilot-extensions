@@ -13,7 +13,7 @@ A denylist that *named* those strings would itself leak them, so the list is
      ``token|reason`` entries for CI/trusted-workflow use -- backed in
      production by the ``FORBIDDEN_IDS_FACILITY`` / ``FORBIDDEN_IDS_WORK``
      repository secrets consumed by
-     ``.github/workflows/identifier-leak-guard.yml``, which documents the
+     ``.github/workflows/promote-trigger.yml``, whose scanner job documents the
      exact provisioning command), and
   4. a best-effort **live cross-repo sweep**, when a locally registered
      ``agent-worktrees`` installation is discoverable: ``agent-worktrees

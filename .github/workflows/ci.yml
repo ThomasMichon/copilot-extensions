@@ -487,7 +487,7 @@ jobs:
       - name: Promotion exact-PR merge wait regression tests
         run: python -m pytest -q tools/test_promotion_merge_wait.py
       - name: Trusted PR policy contract tests
-        run: python -m pytest -q tools/test_trusted_pr_policy.py
+        run: python -m pytest -q tools/test_trusted_pr_policy.py tools/test_post_ci_policy.py
       - name: Payload invocation generated files
         run: python libs/payload-invocation/generate.py --all --check
       - name: Payload invocation foundation tests
@@ -755,7 +755,7 @@ jobs:
       # Internal-identifier enforcement moved out of this untrusted PR lane.
       # Fork PRs receive no repository secrets on `pull_request`, and repo
       # `vars.*` would be plain-text/public, so this workflow can never hold the
-      # real denylist safely. `.github/workflows/identifier-leak-guard.yml`
+      # real denylist safely. The scanner job in `.github/workflows/promote-trigger.yml`
       # follows GitHub's documented `pull_request` -> `workflow_run` pattern:
       # CI stays unprivileged here, then the trusted follow-up workflow reads
       # the PR head as inert data only, runs the trusted scanner with secrets,

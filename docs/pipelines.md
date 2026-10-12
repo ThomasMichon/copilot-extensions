@@ -290,8 +290,7 @@ targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `identifier-leak-guard.yml` | `workflow_run: ["CI"]` | Scans a PR's changed-file contents (as inert `git show` data, never executed) for configured private identifiers; reports a Check Run. GitHub's documented fork-safe "run untrusted work under `pull_request`, react from a separate privileged `workflow_run`" pattern. |
-| `promote-trigger.yml` | `workflow_run: ["CI"]` | Cheap, unthrottled filter: decides whether a completed "CI" run was a genuine `dev`-branch advancement, and if so fires the `repository_dispatch` signal `validate-and-promote.yml` waits on. Kept separate from that workflow so this filter never queues behind the full validation suite's own concurrency group. |
+| `promote-trigger.yml` | `workflow_run: ["CI"]` | One trusted invocation hosts independent dev-ancestry dispatch and fork-safe identifier scanning jobs. Job-scoped permissions preserve the two original credential boundaries. No concurrency group or cross-job dependency can hold the filter behind scanning or full release validation. PR objects are read as inert data, never executed. |
 
 **The promotion pipeline (dev → main):**
 
