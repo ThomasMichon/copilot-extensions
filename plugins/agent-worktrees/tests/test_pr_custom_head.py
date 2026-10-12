@@ -94,3 +94,28 @@ def test_custom_head_rejects_unproven_or_stale_authority(pr_repo, monkeypatch):
                 patch.setattr(pr_custom_head.providers, "get_provider",
                               lambda *a: (_ for _ in ()).throw(RuntimeError("unavailable")))
             assert not pr_custom_head.verify_attested(record, config.default_repo, record.pr, "origin", old, cwd=str(path)), mutation
+
+
+@pytest.mark.guard
+def test_public_explicit_rewrite_round_trip_and_stale_live_head(pr_repo, monkeypatch):
+    from agent_worktrees import finalize, pr_ops, pr_rewrite
+
+    config, record, path, remote, old, observed = _attested(pr_repo, monkeypatch)
+    monkeypatch.setattr(pr_publish, "push_target", lambda *a, **k: pr_publish.PushTarget("origin"))
+    monkeypatch.setattr(pr_publish, "push_slug", lambda *a, **k: "example/project")
+    monkeypatch.setattr(pr_rewrite, "observe_pr", lambda *a: observed)
+    monkeypatch.setattr(pr_ops, "refresh_head_observation", lambda *a: "")
+    monkeypatch.setattr(pr_ops, "refresh_source_attribution", lambda *a: "")
+    (path / "feedback.txt").write_text("reviewed feedback\n")
+    _git("add", "feedback.txt", cwd=path)
+    _git("commit", "-m", "feedback", cwd=path)
+    assert finalize.push_changes(record.worktree_id, config, rewrite_pr=True)
+    published = _git("--git-dir", str(remote), "rev-parse", observed.head_ref, cwd=path)
+    assert published == _git("rev-parse", "HEAD", cwd=path)
+    assert _record(record.worktree_id).pr.head_sha == published
+    observed.head_sha = "a" * 40
+    (path / "later.txt").write_text("later source\n")
+    _git("add", "later.txt", cwd=path)
+    _git("commit", "-m", "later", cwd=path)
+    assert not finalize.push_changes(record.worktree_id, config, rewrite_pr=True)
+    assert _git("--git-dir", str(remote), "rev-parse", observed.head_ref, cwd=path) == published
