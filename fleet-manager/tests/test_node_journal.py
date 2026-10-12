@@ -217,7 +217,7 @@ def test_scope_identity_schema_and_lost_database_refusals(tmp_path):
         journal(foreign)
     gateway = tmp_path / "gateway.db"
     OperationLedger(gateway, authority="fleet-1", installation="node-install-1")
-    with pytest.raises(sqlite3.OperationalError):
+    with pytest.raises(PlanError, match="schema"):
         journal(gateway)
 
 

@@ -64,12 +64,15 @@ deferred query-only snapshots. Cursors are local to this journal installation,
 not transport acknowledgments or globally comparable connector generations.
 Reads never delete results or acknowledge delivery.
 
-A transport must durably couple its receiver-side cursor with reconciliation,
-or query `inspect` for an already-reconciled operation. Replaying old history
+The [Gateway ledger](operation-ledger.md)'s explicit `result_cursor` and
+`reconcile_results` APIs couple the receiver-side cursor with receipts, outbox
+and audit in one transaction. A transport must use that durable position on
+reconnect, or query `inspect` for an already-reconciled operation.
+Replaying old history
 after the Gateway already holds a later receipt encounters its intentional stale
 sequence refusal; do not weaken that rule or reinterpret stale acceptance as a
-new effect. Receiver cursor persistence, reconnect protocol, authenticated
-snapshot reconciliation and bounded spool retention remain future gates.
+new effect. Authenticated reconnect protocol, snapshot reconciliation,
+installation transfer and bounded spool retention remain future gates.
 Pagination bounds each read, not total disk use.
 
 The journal uses five-second SQLite contention bounds, foreign keys, FULL

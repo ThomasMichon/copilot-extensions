@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; local journal landed, node effect receipts next
+- **Status:** Active; node receipts landed, durable receiver replay next
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts. Existing dependencies #5789, #6030, #5861, #5862 retain ownership.
@@ -114,7 +114,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [ ] Implement identified command admission, content-bound idempotency,
   transactional intent/claims/audit/outbox and target-side receipt reconciliation.
   Intent/receipt contracts and local admission/outbox/audit persistence landed
-  in #6357/#6360. Allocation claims and durable node effect receipts remain open.
+  in #6357/#6360; explicit node acceptance/effect receipts landed in #6388.
+  Durable receiver cursors, allocation claims and authenticated runtime integration
+  remain open.
 - [ ] Prove objective -> workspace -> host -> prompt -> outcome -> settlement
   locally, then through one Gateway and two separate nodes.
 - [ ] Persist scope/generation fences at cooperative effect owners; define
@@ -248,3 +250,20 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   reconciliation, followed by allocation/authorization and actual effect-owner
   fencing. Installation, Gateway service, live fleet adoption and migration
   gates remain open. No deployment or enrollment was performed.
+
+### 2026-10-12 - Node acceptance and effect receipts landed
+- #6388 merged at `2026-10-12T23:27:09Z`, commit
+  `a7d327c6f2d1b332b2369f421ba003b48d42b30e`, after actual current-head Copilot
+  APPROVED with zero findings and green required and ordinary CI.
+  Installed contained suite: 177 passed.
+- Separate process evidence covers cooperative effect/receipt commit, pre-commit
+  crash rollback, post-commit lost reply with one effect after retry, concurrent
+  duplicate effects, and external-attempt crashes preserving UNKNOWN.
+  This does not establish arbitrary external exactly-once or remote fencing.
+- Re-read the parent Plan and advanced the clean worktree to the verified merge,
+  retaining a backup of the published commit. The full effort remains active.
+- Next is durable Gateway receiver cursor plus receipt/outbox/audit reconciliation
+  in one transaction, so reconnect after a lost receiver reply does not replay
+  stale acceptance over a later outcome. Allocation/authorization/effect-owner
+  fencing and real local/two-node runtime proof follow. Existing routing/auth
+  and deployment ownership remains intact; no fleet was enrolled or deployed.

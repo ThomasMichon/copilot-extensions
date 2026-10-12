@@ -162,6 +162,10 @@ persists admission/outbox/audit and correlated receipt updates transactionally.
 It is not automatically installed or activated and supplies no executor,
 authentication, allocation claims or resource fencing.
 The offline CLI remains non-mutating.
+Its explicit result-reconciliation API commits a node spool's receiver cursor
+with receipt/outbox/audit updates, avoiding stale history replay after a lost
+receiver acknowledgment. Node identity authentication and transport remain
+the caller's responsibility.
 
 An explicit [node journal](docs/node-journal.md) now persists local acceptance,
 cooperative SQLite effects and correlated receipts with an append-only result
