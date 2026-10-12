@@ -59,6 +59,7 @@ def _base(
         "freshness": "unknown",
         "availability": "unavailable",
         "quantity_kind": None,
+        "has_quota": None,
         "allowance": None,
         "consumption": None,
         "additional_usage": None,
@@ -111,6 +112,13 @@ def normalize_quota(
     snapshot = snapshots.get(category) if isinstance(snapshots, Mapping) else None
     if not isinstance(snapshot, Mapping):
         diagnostics.append("quota-category-unavailable")
+        return result
+    has_quota = snapshot.get("hasQuota")
+    if has_quota is not None and not isinstance(has_quota, bool):
+        raise ModelError("quota.hasQuota must be a boolean when provided")
+    result["has_quota"] = has_quota
+    if has_quota is False:
+        diagnostics.append("provider-reports-no-quota-counters-withheld")
         return result
     unlimited = snapshot.get("isUnlimitedEntitlement")
     if not isinstance(unlimited, bool):

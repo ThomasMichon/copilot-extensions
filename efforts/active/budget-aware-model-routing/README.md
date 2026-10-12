@@ -269,6 +269,11 @@ promotion authority, task queue, or dashboard.
   cached readings. Raw account reset reconciliation, independently attributable
   provider freshness, same-period rate evidence, and integration remain open.
   This is a partial Phase 6 slice, not effort completion.
+- Independent review identified that cached counters must not override an
+  explicit provider quota denial. Added boolean validation and withheld all
+  budget values on denial, including conflicting unlimited entitlements; the
+  new regressions fail against the original normalization before passing with
+  the correction.
 
 ### 2026-10-10 - Quota helper planning and publication reliability
 

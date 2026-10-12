@@ -163,6 +163,46 @@ def test_malformed_snapshot_container_is_not_a_missing_category() -> None:
         normalize({"snapshots": []})
 
 
+def test_provider_denial_with_optimistic_cached_counters_cannot_report_a_balance() -> None:
+    raw = projection()
+    raw["snapshots"]["premium_interactions"]["hasQuota"] = False
+    result = normalize(raw)
+    assert result["availability"] == "unavailable"
+    assert result["allowance"] is None
+    assert result["consumption"] is None
+    assert result["remaining"] is None
+    assert result["has_quota"] is False
+    assert "provider-reports-no-quota-counters-withheld" in result["diagnostics"]
+
+
+def test_provider_denial_cannot_be_overridden_by_unlimited_entitlement() -> None:
+    raw = projection()
+    raw["snapshots"]["premium_interactions"].update(
+        hasQuota=False, isUnlimitedEntitlement=True
+    )
+    result = normalize(raw)
+    assert result["availability"] == "unavailable"
+    assert result["remaining"] is None
+
+
+@pytest.mark.parametrize("flag", [0, 1, "false", {}, []])
+def test_provider_quota_flag_must_be_a_boolean(flag: object) -> None:
+    raw = projection()
+    raw["snapshots"]["premium_interactions"]["hasQuota"] = flag
+    with pytest.raises(ModelError, match="hasQuota"):
+        normalize(raw)
+
+
+def test_explicit_provider_quota_and_absent_optional_flag_preserve_cached_semantics() -> None:
+    assert normalize()["has_quota"] is None
+    raw = projection()
+    raw["snapshots"]["premium_interactions"]["hasQuota"] = True
+    result = normalize(raw)
+    assert result["has_quota"] is True
+    assert result["availability"] == "cached"
+    assert result["remaining"] == "750"
+
+
 def test_transport_failures_are_explicit_and_do_not_echo_provider_errors() -> None:
     class Quota:
         async def get(self, *, timeout: float | None = None) -> None:
@@ -255,6 +295,12 @@ def test_cli_capture_is_bounded_and_cannot_self_assert_session_rpc_authority(
     result = json.loads(capsys.readouterr().out)
     assert result["attribution"] == "caller-declared-capture"
     assert result["calculated"] is None
+    capture["projection"]["snapshots"]["premium_interactions"]["hasQuota"] = False
+    path.write_text(json.dumps(capture), encoding="utf-8")
+    assert main(args) == 1
+    denied = json.loads(capsys.readouterr().out)
+    assert denied["availability"] == "unavailable"
+    assert denied["remaining"] is None
     assert main([*args[:-3], "--session-id", "different", "--json"]) == 1
     assert json.loads(capsys.readouterr().out)["consumption"] is None
     path.write_bytes(b" " * 65537)

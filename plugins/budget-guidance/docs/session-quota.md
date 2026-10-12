@@ -80,6 +80,12 @@ finite allowance or arithmetic, including when the provider uses negative
 sentinels. Each call reads the supplied entitlement anew, without persisting
 one month's allocation as a recurring limit.
 
+The optional provider `hasQuota` flag is validated as a boolean. An explicit
+false produces unavailable with counters withheld, even if cached counters
+suggest a positive balance or the unlimited-entitlement flag is true. Absence
+of that optional flag remains unknown, not an invented true value. A true flag
+does not establish provider observation freshness.
+
 Additional usage (`overage`) is reported separately, not silently added to
 `usedRequests`: the reader does not guess whether a provider includes it in the
 consumed quantity.
