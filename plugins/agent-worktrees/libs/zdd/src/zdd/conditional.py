@@ -198,6 +198,21 @@ class PreparedCutover:
         if self.snapshot.confirm_retired(self.old, self.request.retirement_timeout) is not True:
             raise CutoverError("predecessor exit unconfirmed; owner-led recovery required")
 
+    def complete(self, result: CutoverResult) -> None:
+        """Publish success and clear recovery only for the verified routed owner."""
+        with routing.routing_lock(self.orch.config_dir, deadline=self.deadline()):
+            attested = self.new is not None and self.matches(self.new)
+            table = routing.read_table(self.orch.config_dir, strict=True) or {}
+            raw = table.get("active")
+            active = Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+            if self.new is None or active != self.new or not attested:
+                result.serving_endpoint = None
+                raise CutoverError("successor ownership changed before completion")
+            if not breadcrumb.clear_breadcrumb(self.orch.config_dir):
+                raise CutoverError("conditional completion could not clear recovery state")
+            result.ok = True
+            result.serving_endpoint = self.new
+
     def rollback(
         self,
         handle: _Handle,

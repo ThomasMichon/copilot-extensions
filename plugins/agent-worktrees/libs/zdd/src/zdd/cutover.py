@@ -650,9 +650,11 @@ class CutoverOrchestrator:
             # once the old one has released it.
             self._adopt_relay(new_port, result, make_client=make_client)
 
-            result.ok = True
-            # Clean cutover: retire the breadcrumb so no stale trace lingers.
-            breadcrumb.clear_breadcrumb(self.config_dir)
+            if conditional:
+                conditional.complete(result)
+            else:
+                result.ok = True
+                breadcrumb.clear_breadcrumb(self.config_dir)
             return result
 
         except Exception as exc:  # noqa: BLE001 -- convert to a rollback
@@ -665,7 +667,7 @@ class CutoverOrchestrator:
                 )
                 result.ok = conditional is None
                 log.error("Cutover post-commit error: %s", result.error)
-                if conditional and not result.retirement_confirmed:
+                if conditional:
                     write_breadcrumb(
                         state="draining", old=old_dict,
                         new_port=new_port, new_pid=new_pid, started_at=started_at,

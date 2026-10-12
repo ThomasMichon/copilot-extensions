@@ -311,3 +311,23 @@ def test_rollback_retains_address_only_published_candidate(case, published_pid):
     assert not result.ok and not result.rolled_back
     assert events == ["spawn"]
     assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
+
+
+def test_route_winner_during_exit_confirmation_cannot_report_success(case):
+    root, old, events, _, snapshot, request, orch = case
+    winner = replace(old, pid=303, generation=30, process_start_time="3030")
+
+    def confirm(endpoint, timeout):
+        routing._atomic_write(root / "active.json", {"active": winner.to_dict()})
+        return True
+
+    result = orch.run(
+        conditional=replace(
+            request, capture_runtime=lambda _: replace(snapshot, confirm_retired=confirm)
+        )
+    )
+    assert not result.ok and result.committed and result.retirement_confirmed
+    assert result.serving_endpoint is None
+    assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
+    assert routing.read_table(root)["active"] == winner.to_dict()
+    assert events == ["spawn", "drain", "shutdown"]
