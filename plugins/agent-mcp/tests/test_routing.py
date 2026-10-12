@@ -389,10 +389,9 @@ async def test_cli_target_env_and_auth_failure_never_falls_back(tmp_path, monkey
     cfg = parse_config({"routing": {"parameter": "organization", "catalog": "alpha",
                                     "targets": targets}})
     async with OneShotSession(cfg) as session:
-        result = await session.call_tool("read", {"organization": "beta", "q": "hello"})
-        assert result["isError"]
-        assert "authentication failed" in result_text(result)
-        assert "ambient-not-selected" not in result_text(result)
+        with pytest.raises(UpstreamError, match="authentication failed") as error:
+            await session.call_tool("read", {"organization": "beta", "q": "hello"})
+        assert "ambient-not-selected" not in str(error.value)
 
 
 async def test_failed_target_auth_does_not_spawn_stdio_child(tmp_path, monkeypatch):

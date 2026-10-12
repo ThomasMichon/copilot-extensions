@@ -75,6 +75,52 @@ async def test_routed_handle_preserves_structured_error(failure, monkeypatch):
     await core.aclose()
 
 
+@pytest.mark.parametrize("failure", [
+    RoutingError("selected identity unavailable", code=-32001, data={"retry": False}),
+    RoutingError("selected identity unavailable"),
+])
+async def test_cli_auth_preserves_structured_error_without_spawning(
+    failure, tmp_path, monkeypatch,
+):
+    import sys
+    import yaml
+    from agent_mcp.transports.cli import CliTransport
+
+    sidecar = tmp_path / "read.md"
+    sidecar.write_text("---\n" + yaml.safe_dump({"mcp": {
+        "name": "read", "inputSchema": {"type": "object", "properties": {}},
+        "invoke": {"command": sys.executable, "args": ["-c", "print('unexpected')"]},
+    }}) + "---\n", encoding="utf-8")
+    cfg = parse_config({"server": {"type": "cli", "tools_from": [str(sidecar)]}})
+    cfg.routed_target = True
+
+    class Injector:
+        async def child_env(self):
+            raise failure
+
+    async def unexpected_spawn(*args, **kwargs):
+        pytest.fail("authentication failure must prevent spawning")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", unexpected_spawn)
+    transport = CliTransport(cfg, Injector())
+    with pytest.raises(RoutingError) as error:
+        await transport._child_env()
+    assert error.value is failure
+
+    emitted = []
+
+    async def capture(response):
+        emitted.append(response)
+
+    monkeypatch.setattr(transport, "_emit_message", capture)
+    await transport.send({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                          "params": {"name": "read", "arguments": {}}})
+    expected = {"code": failure.code, "message": str(failure)}
+    if failure.data is not None:
+        expected["data"] = failure.data
+    assert emitted == [{"jsonrpc": "2.0", "id": 9, "error": expected}]
+
+
 @pytest.mark.parametrize("checked", [False, True])
 async def test_catalog_normalizes_typed_error_and_preserves_upstream_details(checked, monkeypatch):
     async with OneShotSession(parse_config(definition())) as session:

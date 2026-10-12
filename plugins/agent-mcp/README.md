@@ -173,7 +173,9 @@ target as proof that every execution target is healthy. Use a bounded audited
 read with an explicit selector to validate a particular target.
 Expected compatibility and identity-acquisition failures are returned as
 structured JSON-RPC errors and reported by `call`/`materialize` with a nonzero
-exit status, not an uncaught traceback. Cancellation and unrelated programming
+exit status, not an uncaught traceback. CLI-target authentication failures
+preserve their error code/data through the transport and never spawn a child.
+Cancellation and unrelated programming
 exceptions are not converted into successful fallbacks.
 
 Use an existing fleet first. Re-materialize when the expected stub is absent or
