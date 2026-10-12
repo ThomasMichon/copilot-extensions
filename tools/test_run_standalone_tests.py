@@ -76,6 +76,7 @@ def test_manager_preparation_retains_source_payload_layout(tmp_path, monkeypatch
     monkeypatch.setattr(runner.subprocess, "run", lambda argv, **kwargs: calls.append(argv))
     python = tmp_path / ".test-venvs" / "worktree-manager" / "bin" / "python"
     python.parent.mkdir(parents=True)
+    (python.parent.parent / "pyvenv.cfg").write_text("home = fixture-base\n")
     python.touch()
     runner.prepare("worktree-manager", python)
     assert calls[-1][-2:] == ["--editable", str(tmp_path / "worktree-manager") + "[dev]"]
@@ -186,12 +187,13 @@ def test_venv_interpreter_symlink_is_not_resolved_out_of_its_environment(tmp_pat
     base.touch()
     python = tmp_path / ".test-venvs" / "worktree-manager" / "bin" / "python"
     python.parent.mkdir(parents=True)
+    (python.parent.parent / "pyvenv.cfg").write_text("home = fixture-base\n")
     try:
         python.symlink_to(base)
     except OSError:
         pytest.skip("Symlink creation is unavailable")
     monkeypatch.setattr(runner, "REPO", tmp_path)
-    monkeypatch.setattr(runner, "acquire", lambda wait: type("Lease", (), {"release": lambda self: None})())
+    monkeypatch.setattr(runner, "acquire", lambda wait, root: type("Lease", (), {"release": lambda self: None})())
     commands = []
     monkeypatch.setattr(runner, "run_contained", lambda command, **kwargs: commands.append(command) or 0)
     assert runner.main(["worktree-manager", "--python", str(python)]) == 0

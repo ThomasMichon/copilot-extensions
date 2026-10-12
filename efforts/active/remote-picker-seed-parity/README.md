@@ -79,23 +79,23 @@ The operator confirmed the slug `remote-picker-seed-parity`.
   structured request, remote capability and idempotency mechanisms.
 - [x] Specify which target-owned boundary stages intent and returns its
   worktree/seed identity, and which later command launches that exact identity.
-- [ ] Resolve lost-response semantics before enabling the offering: New retry
+- [x] Resolve lost-response semantics before enabling the offering: New retry
   must identify the already-created worktree, not create another; Resume retry
   must not silently replace or duplicate an admitted intent.
 
 ### Phase 2 -- Equivalent local and SSH execution
 
-- [ ] Add safe transport of confirmed text to the attributed target engine,
+- [x] Add safe transport of confirmed text to the attributed target engine,
   preserving project, machine/environment, New/Resume provenance and identity.
-- [ ] Reuse target daemon seed stage/reservation/release/finish operations;
+- [x] Reuse target daemon seed stage/reservation/release/finish operations;
   retain local behavior and avoid a host-side copy of the target's seed store.
-- [ ] Carry the exact target worktree and intent through the real remote launch
+- [x] Carry the exact target worktree and intent through the real remote launch
   and setup boundary, including both resolve hops and No Mux.
-- [ ] Offer New and stopped Resume prompts for supported remote sources;
+- [x] Offer New and stopped Resume prompts for supported remote sources;
   capability/version-skew errors remain visible and seedless launches unchanged.
-- [ ] Enforce target-authoritative cold checks after UI confirmation and again
+- [x] Enforce target-authoritative cold checks after UI confirmation and again
   at backend handoff. Open never delivers a staged prompt.
-- [ ] Update engine-Picker contract, Manager documentation and changefiles for
+- [x] Update engine-Picker contract, Manager documentation and changefiles for
   touched packages; do not hand-edit versions.
 
 ### Phase 3 -- Validation, release and closure
@@ -113,9 +113,9 @@ The operator confirmed the slug `remote-picker-seed-parity`.
 These concrete fault cases are agent-recommended checks of the requested
 equivalent-flow contract, not additional product features.
 
-- [ ] Unit coverage: local/remote action eligibility, version skew, correct
+- [x] Unit coverage: local/remote action eligibility, version skew, correct
   machine/environment routing, no-Mux, both kinds and identity forwarding.
-- [ ] Actual process-boundary checks through Windows and POSIX remote shell
+- [x] Actual process-boundary checks through Windows and POSIX remote shell
   adapters: multiline and Unicode text, quotes, dollar signs, semicolons and
   shell metacharacters arrive unchanged and are never executed.
 - [ ] Failure matrix: disconnected/unavailable target before admission,
@@ -232,3 +232,42 @@ hiding the problem or silently dropping text.
   Full-suite observations still include setup-epoch and process-probe timeouts;
   isolated revalidation is in progress. Later CI has another failed plugin
   fan-out awaiting its completed logs; no merge bypass is used.
+- **2026-10-12** -- Resumed after an interrupted publication. The target branch
+  had not received the last fixture commit; published that commit and the
+  subsequent selector/budget regressions. Malformed Base64 already falls under
+  ValueError because binascii.Error subclasses it; a CLI regression proves JSON
+  refusal. Also normalize that decode error explicitly and normalize shell
+  casing, avoiding ambiguous diagnostics.
+  Full POSIX Manager validation passed 1797 cases (47 skips). Full Windows
+  validation still exposed native process-start/probe timeouts and a contributed
+  pivot refresh test; do not count it as passing. Reconciled with newer upstream
+  machine canonicalization, contributed-action confirmation, native census and
+  environment-scoped runner lease fixes. Preserved the stronger already-landed
+  callback-generation fix rather than adding a competing repair.
+  Remote request staging now enforces receiving-side project authority and
+  requires version-2 daemon verbs so an older resident cannot bypass it.
+  Rebased boundary tests pass 64 cases (one native POSIX skip); runner contracts
+  pass 36 (two skips). Corrected the POSIX symlink fixture to declare pyvenv.cfg
+  and use the current lease interface.
+  With operator-authorized temporary candidate wiring, drove actual New and
+  Resume composer screens with a controlled Picker source, then the real host
+  resolver using a captured authoritative machine roster, actual SSH target
+  admission and an identity-only native No-Mux launch. Both prompts appeared
+  once and received the expected answers in the same target conversation.
+  This is candidate process-boundary evidence, not a delivered-install claim;
+  the controlled UI source and isolated candidate launcher are explicitly
+  distinct from the normal installed source discovery path. State was discarded
+  at handoff. Removed temporary wiring and finalized both completed POSIX
+  conversation-validation worktrees; the isolated source candidate remains for
+  final release validation.
+  Current CI also encountered the four partial-publication fixture failures
+  owned by #6336. Posted evidence there and await its already-claimed repair;
+  no duplicate implementation or merge bypass.
+  One Windows SSH target briefly became reachable. The operator authorized an
+  isolated managed candidate there; candidate checkout succeeded, but test
+  preparation reported missing uv. The approved normal Manager bootstrap could
+  not run because the route then failed banner exchange and a bounded
+  reachability recheck. Keep that source worktree accounted for until the route
+  returns; no test result or completed Manager update is claimed for it.
+  Remaining gates are native Windows/lifecycle disposition, current-head green
+  CI and review, promotion/deployment, delivered Picker observation and closure.
