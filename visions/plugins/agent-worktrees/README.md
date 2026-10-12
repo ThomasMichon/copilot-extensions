@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** leaf (concrete component; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-08
+- **Last revised:** 2026-10-12
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -264,7 +264,11 @@ regardless of how many worktrees, sessions, or CLI invocations reach it — the
 suite-wide
 [*process-count-scales-with-services-not-sessions*](../../plugin-services/README.md#process-count-scales-with-services-not-sessions)
 guarantee, generalized here from session-lifecycle hooks to every ordinary
-reader.
+reader. This is the healthy steady-state guarantee. Across cold start,
+replacement, restart, and promotion/cutover, at most one resident actively
+serves, with intentional bounded zero-coverage windows — not a promise of
+exactly one at every instant. The lifecycle standard is its own subject:
+see [*status-monitor singleton correctness*](status-monitor-singleton/README.md).
 
 The reduction's inputs are a fixed, small set of independently named facts —
 whether the session has held activity since its last checkpoint, whether the
@@ -812,6 +816,13 @@ manager, or session-host implementation.
 
 ## Provenance
 
+- **2026-10-06 — Inception.** The
+  [*status-monitor singleton correctness*](status-monitor-singleton/README.md)
+  child specializes the healthy steady-state singleton into one standard
+  for cold start, muxless/superseded-runtime replacement, restart and
+  promotion/cutover. PR #5412 and issues #5453 / #5512 ground that distinction;
+  the [effort Journal](../../../efforts/active/status-monitor-singleton-correctness/README.md#journal)
+  preserves its creation and review history.
 - **2026-10-08** — Reconciled account-catalog versus repository-routing
   ownership, scoped operation credentials, and explicit identity failure
   distinct from ambient consent. Preserved independent Copilot inference
