@@ -16,12 +16,17 @@ def _candidates() -> list[diagnostics.DaemonCandidate]:
     if sys.platform == "win32":
         from . import windows_process_census
 
-        return [
-            diagnostics.DaemonCandidate(pid=item["pid"], start_time=item["start_time"])
-            for item in windows_process_census.snapshot()
-            if procs._is_under(item["cwd"], runtime_root)
-            and status_monitor_cutover._is_status_monitor_cmdline(item["command_line"])
-        ]
+        candidates = []
+        for item in windows_process_census.snapshot():
+            if not status_monitor_cutover._is_status_monitor_cmdline(item["command_line"]):
+                continue
+            if not item["cwd"]:
+                raise OSError(f"Cannot establish runtime scope for monitor PID {item['pid']}")
+            if procs._is_under(item["cwd"], runtime_root):
+                candidates.append(
+                    diagnostics.DaemonCandidate(pid=item["pid"], start_time=item["start_time"])
+                )
+        return candidates
     if sys.platform == "darwin":
         scoped_pids = {
             pid

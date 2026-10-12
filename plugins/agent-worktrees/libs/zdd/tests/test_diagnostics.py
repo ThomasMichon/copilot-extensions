@@ -86,6 +86,7 @@ def test_census_failure_is_blocked_and_releases_guard(tmp_path, apply, error):
     assert report["census_available"] is False
     assert report["candidate_count"] is None
     assert report["findings"][0]["repairable"] is False
+    assert report["findings"][0]["error"] == str(error)
     assert released == [True]
     assert state["terminated"] == []
 

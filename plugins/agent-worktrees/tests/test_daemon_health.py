@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import pytest
 
 from agent_worktrees import daemon_health
 
@@ -92,3 +93,16 @@ def test_windows_candidates_use_one_fresh_native_snapshot(tmp_path, monkeypatch)
     assert [c.pid for c in daemon_health._candidates()] == [101]
     assert [c.pid for c in daemon_health._candidates()] == [101]
     assert len(calls) == 2
+
+
+def test_windows_matching_monitor_without_cwd_blocks_census(tmp_path, monkeypatch):
+    from agent_worktrees import windows_process_census
+
+    monkeypatch.setattr(daemon_health.sys, "platform", "win32")
+    monkeypatch.setattr(daemon_health.status_monitor_runtime, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(windows_process_census, "snapshot", lambda: [
+        {"pid": 101, "cwd": "", "start_time": "monitor",
+         "command_line": "python -m agent_worktrees status-monitor"},
+    ])
+    with pytest.raises(OSError, match="runtime scope for monitor PID 101"):
+        daemon_health._candidates()

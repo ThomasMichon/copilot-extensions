@@ -650,6 +650,7 @@ def _audit_daemon_health(
                 "summary": "fresh daemon process census unavailable",
                 "repairable": False,
                 "blocked_reason": type(exc).__name__,
+                "error": str(exc),
             }
             return {
                 "service": ctx.service, "mode": "report",
@@ -927,6 +928,8 @@ def apply_daemon_health(
             attempted.add(item["pid"])
 
         after = _audit_daemon_health(ctx, now=now, cutover_state="held")
+        if after.get("census_available") is False:
+            return blocked_census(after)
         return {
             "service": ctx.service,
             "mode": "apply",
