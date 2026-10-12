@@ -1937,6 +1937,26 @@ if (-not $noMux) {
             ) 'WARN'
         }
     }
+    function Read-AwPaneArgsReceipt([string]$Path, [string]$Manifest) {
+        if (-not (Test-Path -LiteralPath $Path)) { return $null }
+        try {
+            $receipt = [IO.File]::ReadAllText($Path) | ConvertFrom-Json -ErrorAction Stop
+            if (
+                ($receipt.version -isnot [long] -and $receipt.version -isnot [int]) -or
+                $receipt.version -ne 1 -or
+                $receipt.manifest -ne [IO.Path]::GetFileName($Manifest) -or
+                $receipt.status -notin @('consumed', 'rejected') -or
+                $receipt.stage -notin @('manifest-open', 'manifest-json', 'manifest-schema', 'wrapper-path') -or
+                ($receipt.pid -isnot [long] -and $receipt.pid -isnot [int]) -or
+                $receipt.pid -le 0
+            ) {
+                throw 'Invalid pane argument receipt.'
+            }
+            return $receipt
+        } catch {
+            return [pscustomobject]@{ status = 'invalid'; stage = 'receipt-validation' }
+        }
+    }
     $maxCreateAttempts = 3
     $retryDelayMs = 1000
     $totalCreateAttempts = 0
@@ -1951,6 +1971,7 @@ if (-not $noMux) {
             $newSessionExit = 1
             $newSessionError = ''
             $paneArgsFile = $null
+            $paneReceiptFile = $null
             try {
                 if (Test-Path -LiteralPath $paneWrapper) {
                     # Each retry owns a fresh handoff; the pane consumes it once.
@@ -1964,6 +1985,7 @@ if (-not $noMux) {
                     $paneArgsFile = Join-Path $paneArgsRoot (
                         'aw-pane-' + [Guid]::NewGuid().ToString('N') + '.json'
                     )
+                    $paneReceiptFile = "$paneArgsFile.receipt.json"
                     $argsJson = ConvertTo-Json -InputObject @{
                         version = 1
                         wrapper = $paneWrapper
@@ -1973,6 +1995,7 @@ if (-not $noMux) {
                     $paneCmd = @(
                         'pwsh.exe', '-NoProfile', '-NoLogo', '-File',
                         ("'" + $paneLaunch.Replace("'", "''") + "'"),
+                        '-Receipt', ("'" + $paneReceiptFile.Replace("'", "''") + "'"),
                         '-Manifest', ("'" + $paneArgsFile.Replace("'", "''") + "'")
                     )
                 }
@@ -2024,6 +2047,7 @@ if (-not $noMux) {
             Stop-AwOwnedPsmuxSession $sessName
             if ($paneArgsFile) {
                 Remove-AwPaneArgsFile $paneArgsFile
+                Remove-AwPaneArgsFile $paneReceiptFile
             }
             $detail = if ($newSessionError) { ": $newSessionError" } else { '' }
             Write-SetupLog (
@@ -2074,21 +2098,42 @@ if (-not $noMux) {
         exit $newSessionExit
     } else {
         if ($paneArgsFile) {
-            $argsDeadline = [DateTime]::UtcNow.AddSeconds(5)
-            while (
-                (Test-Path -LiteralPath $paneArgsFile) -and
-                [DateTime]::UtcNow -lt $argsDeadline
-            ) {
+            # Cold nested PowerShell startup is not manifest consumption.
+            # Require the consumer's validated receipt, within one bounded budget.
+            $argsDeadline = [DateTime]::UtcNow.AddSeconds(30)
+            $paneReceipt = $null
+            while ([DateTime]::UtcNow -lt $argsDeadline) {
+                $paneReceipt = Read-AwPaneArgsReceipt $paneReceiptFile $paneArgsFile
+                if ($paneReceipt) { break }
                 Start-Sleep -Milliseconds 50
             }
-            if (Test-Path -LiteralPath $paneArgsFile) {
+            if (-not $paneReceipt -or $paneReceipt.status -ne 'consumed') {
+                $receiptStatus = if ($paneReceipt) { $paneReceipt.status } else { 'not-acknowledged' }
+                $receiptStage = if ($paneReceipt) { $paneReceipt.stage } else { 'consumer-startup' }
+                $recoveryProject = if ($script:LaunchProject) { $script:LaunchProject } else { 'agent-worktrees' }
+                $message = (
+                    "Pane argument handoff failed ($receiptStatus; $receiptStage). " +
+                    "The saved conversation and worktree are preserved. Retry " +
+                    "'$recoveryProject --worktree-id $($plan.worktree_id)', or add --no-mux."
+                )
+                Write-SetupLog $message 'ERROR'
+                Write-AwMuxFailure -Reason 'pane_args_handoff_failed' -ExitCode 3 -Fields @(
+                    "receipt_status=$receiptStatus", "receipt_stage=$receiptStage", 'recoverable=true'
+                )
                 Stop-AwOwnedPsmuxSession $sessName
                 Remove-AwPaneArgsFile $paneArgsFile
-                if ($ahpTokenFile) { [IO.File]::Delete($ahpTokenFile) }
-                Write-AwMuxFailure -Reason 'pane_args_handoff_failed' -ExitCode 3
-                Write-Error 'Pane did not consume its argument handoff.' -ErrorAction Continue
+                Remove-AwPaneArgsFile $paneReceiptFile
+                if ($ahpTokenFile) {
+                    try {
+                        [IO.File]::Delete($ahpTokenFile)
+                    } catch [IO.IOException], [UnauthorizedAccessException] {
+                        Write-SetupLog 'Protected token cleanup failed; preserving the pane startup failure.' 'WARN'
+                    }
+                }
+                Write-Error $message -ErrorAction Continue
                 exit 3
             }
+            Remove-AwPaneArgsFile $paneReceiptFile
         }
         if ($ahpTokenFile) {
             $tokenDeadline = [DateTime]::UtcNow.AddSeconds(5)

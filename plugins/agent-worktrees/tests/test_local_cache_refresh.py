@@ -77,7 +77,8 @@ def test_identity_lookup_shares_overall_budget_without_two_second_cutoff(
     lookup_timeouts: list[float] = []
     render_timeouts: list[float] = []
 
-    def resolve(_home, *, timeout, outcomes):
+    def resolve(_home, *, timeout, outcomes, repo_root):
+        assert repo_root == tmp_path
         lookup_timeouts.append(timeout)
         return tmp_path / "renderer.py"
 
@@ -91,6 +92,68 @@ def test_identity_lookup_shares_overall_budget_without_two_second_cutoff(
     assert lcr.refresh_local_cache(tmp_path, timeout=10).status == "ready"
     assert lookup_timeouts == [10]
     assert render_timeouts == [7]
+
+
+@pytest.mark.parametrize("trusted", [True, False])
+def test_current_directory_renderer_requires_repository_trust(tmp_path, trusted):
+    home = tmp_path / "home"
+    repo = tmp_path / "repo"
+    market = repo / ".ai"
+    plugin = market / "customizing-copilot"
+    plugin.mkdir(parents=True)
+    (plugin / "plugin.json").write_text('{"name":"customizing-copilot","version":"1.0.0"}')
+    manifest = market / ".claude-plugin" / "marketplace.json"
+    manifest.parent.mkdir()
+    manifest.write_text(json.dumps({
+        "name": "local", "plugins": [{"name": "customizing-copilot", "source": "./customizing-copilot"}],
+    }))
+    settings = repo / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "enabledPlugins": {"customizing-copilot@local": True},
+        "extraKnownMarketplaces": {"local": {"source": {"source": "directory", "path": "./.ai"}}},
+    }))
+    copilot = home / ".copilot"
+    copilot.mkdir(parents=True)
+    (copilot / "config.json").write_text(json.dumps({
+        "trustedFolders": [str(repo)] if trusted else [],
+    }))
+    assert lcr._select_global_root(home, repo) == (plugin.resolve() if trusted else None)
+
+
+def test_renderer_identity_ambiguity_is_checked_across_project_and_global_scopes(tmp_path, monkeypatch):
+    project = SimpleNamespace(
+        name="customizing-copilot",
+        root_for_scope=lambda scope: tmp_path / "project" if scope == "project:current" else None,
+    )
+    global_plugin = SimpleNamespace(
+        name="customizing-copilot",
+        root_for_scope=lambda scope: tmp_path / "global" if scope == "global" else None,
+    )
+    monkeypatch.setattr(
+        "plugin_activation.resolve_active_plugins",
+        lambda **_kwargs: SimpleNamespace(active={
+            "customizing-copilot@project-market": project,
+            "customizing-copilot@global-market": global_plugin,
+        }),
+    )
+    assert lcr._select_global_root(tmp_path / "home", tmp_path / "repo") is None
+
+
+def test_current_repository_disable_prevents_global_renderer_fallback(tmp_path):
+    home = tmp_path / "home"
+    repo = tmp_path / "repo"
+    plugin = home / ".copilot" / "installed-plugins" / "market" / "customizing-copilot"
+    plugin.mkdir(parents=True)
+    (plugin / "plugin.json").write_text('{"name":"customizing-copilot","version":"1.0.0"}')
+    (home / ".copilot" / "settings.json").write_text(json.dumps({
+        "enabledPlugins": {"customizing-copilot@market": True},
+    }))
+    settings = repo / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"enabledPlugins": {"customizing-copilot@market": False}}))
+    assert lcr._select_global_root(home) == plugin.resolve()
+    assert lcr._select_global_root(home, repo) is None
 
 
 @pytest.mark.parametrize(
@@ -163,8 +226,11 @@ def test_launch_refresh_repairs_nested_worktree_guidance(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("trusted", [True, False], ids=["trusted", "untrusted"])
 @pytest.mark.parametrize("delivery", ["launch", "backup"])
+@pytest.mark.parametrize("renderer_scope", ["global", "project"])
 @pytest.mark.timeout(2 * lcr.DEFAULT_TIMEOUT_S + 15)
-def test_real_global_discovery_and_renderer_fit_launch_budget(tmp_path, monkeypatch, trusted, delivery):
+def test_real_global_discovery_and_renderer_fit_launch_budget(
+    tmp_path, monkeypatch, trusted, delivery, renderer_scope,
+):
     """Exercise both production subprocesses and source discovery, not stubs."""
     scripts = (
         _REPO_ROOT / "plugins" / "customizing-copilot" / "skills"
@@ -180,7 +246,9 @@ def test_real_global_discovery_and_renderer_fit_launch_budget(tmp_path, monkeypa
         json.dumps({"name": "customizing-copilot", "version": "1.0.0"}), encoding="utf-8"
     )
     (home / ".copilot" / "settings.json").write_text(
-        json.dumps({"enabledPlugins": {"customizing-copilot@test-market": True}}),
+        json.dumps({"enabledPlugins": (
+            {"customizing-copilot@test-market": True} if renderer_scope == "global" else {}
+        )}),
         encoding="utf-8",
     )
     repo = tmp_path / "repo"
@@ -199,7 +267,10 @@ def test_real_global_discovery_and_renderer_fit_launch_budget(tmp_path, monkeypa
     settings.parent.mkdir(parents=True)
     names = [f"guidance-{index}" for index in range(8)]
     settings.write_text(
-        json.dumps({"enabledPlugins": {f"{name}@test-market": True for name in names}}),
+        json.dumps({"enabledPlugins": {
+            **{f"{name}@test-market": True for name in names},
+            **({"customizing-copilot@test-market": True} if renderer_scope == "project" else {}),
+        }}),
         encoding="utf-8",
     )
     templates = []

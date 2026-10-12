@@ -1,0 +1,9 @@
+{
+  "comment": "Acknowledge Windows pane argument handoffs and distinguish controller-owned sessionless workspaces in Picker",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

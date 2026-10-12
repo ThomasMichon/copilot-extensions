@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import types
+
+import pytest
+
 from worktree_manager.production_picker.picker_tui import derive
 from worktree_manager.production_picker.picker_tui.engine import PickerScreen
 
@@ -13,6 +17,96 @@ def _raw(**values):
     }
     row.update(values)
     return row
+
+
+@pytest.mark.parametrize("ownership", [
+    {"owner_ref": "host/example/controller"},
+    {"controllers": [{"kind": "session", "state": "active", "controller_session_id": "origin"}]},
+    {"owner_ref": "host/example/missing", "controller_findings": [{"status": "missing"}]},
+])
+def test_sessionless_owned_workspace_is_not_an_ordinary_resume_target(ownership) -> None:
+    row = derive.norm(_raw(session_count=0, **ownership), "host", "windows")
+    assert row["managed_child"]
+    assert PickerScreen._session_action_verbs(row) == ["Refresh"]
+    screen = types.SimpleNamespace(
+        src=types.SimpleNamespace(bucket=derive.bucket),
+        is_all=lambda: False,
+        _visible_scope_data=lambda: [row],
+    )
+    _cols, sections = PickerScreen.current_list(screen)
+    assert all(row not in rows for label, rows in sections if label in ("Active", "Recent", "Completed"))
+    assert next(rows for label, rows in sections if label.startswith("Owned")) == [row]
+
+
+@pytest.mark.parametrize("values", [
+    {"session_count": 1},
+    {"session_count": 0, "last_session_id": "own-session"},
+    {},
+])
+def test_controller_does_not_hide_an_own_or_unknown_conversation(values) -> None:
+    row = derive.norm(_raw(owner_ref="host/example/controller", **values), "host", "windows")
+    assert not row["managed_child"]
+    assert "Resume" in PickerScreen._session_action_verbs(row)
+
+
+def test_unowned_empty_workspace_and_released_controller_remain_openable() -> None:
+    for ownership in ({}, {"controllers": [{"state": "released"}]}):
+        row = derive.norm(_raw(session_count=0, **ownership), "host", "windows")
+        assert not row["managed_child"]
+        assert "Open" in PickerScreen._session_action_verbs(row)
+
+
+def test_explicit_controller_release_overrides_historical_owner_backlink():
+    row = derive.norm(_raw(
+        session_count=0,
+        owner_ref="host/example/former-controller",
+        reciprocal_relation={
+            "version": 1, "state": "unbound",
+            "binding": {"state": "unbound"},
+            "control": {"state": "released"}, "actions": [],
+        },
+    ), "host", "windows")
+    assert not row["managed_child"]
+    assert "Open" in PickerScreen._session_action_verbs(row)
+
+
+@pytest.mark.parametrize("residue,expected", [
+    ({"mux_attached": True}, ["Open", "Stop"]),
+    ({"session_lock_stale": True}, ["Reclaim"]),
+])
+def test_owned_workspace_retains_existing_mux_and_orphan_recovery(residue, expected) -> None:
+    row = derive.norm(
+        _raw(session_count=0, owner_ref="host/example/controller", **residue),
+        "host", "windows",
+    )
+    assert row["managed_child"]
+    actions = PickerScreen._session_action_verbs(row)
+    assert actions[:len(expected)] == expected
+    assert "Resume" not in actions
+
+
+@pytest.mark.parametrize("embodied", [False, True])
+def test_successful_embodiment_can_attach_despite_stale_sessionless_snapshot(embodied):
+    row = derive.norm(
+        _raw(session_count=0, owner_ref="host/example/controller"),
+        "host", "windows",
+    )
+    decisions = []
+    screen = types.SimpleNamespace(
+        _find_internal_worktree=lambda *_args: (row, ""),
+        _resume_decision=lambda value: {"action": "resume", "worktree_id": value["id"]},
+        _decide=decisions.append,
+    )
+    ok, message = PickerScreen._resume_embodied_worktree_cli(
+        screen, row["id"], embodied=embodied,
+    )
+    assert ok is embodied
+    if embodied:
+        assert decisions == [{"action": "resume", "worktree_id": row["id"]}]
+    else:
+        assert not decisions
+        assert "no session here" in message
+    assert "Resume" not in PickerScreen._session_action_verbs(row)
 
 
 def test_current_reciprocal_relation_is_preserved() -> None:

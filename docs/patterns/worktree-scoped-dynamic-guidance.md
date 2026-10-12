@@ -271,20 +271,25 @@ invoked CLI's whole process tree on a stall, not just its direct child) --
 never importing that plugin's Python package directly, per
 [`a-la-carte-independence.md`](a-la-carte-independence.md)'s "no
 cross-plugin reach-around" rule. The sibling's root is resolved through
-`plugin_activation.resolve_active_plugins(include_projects=False)` -- the same identity-verified
+`plugin_activation.resolve_active_plugins(include_projects=False, project_root=repo_root)` -- the same identity-verified
 active-plugin evidence `claim_providers.py` uses for its own sibling
 callbacks -- rather than trusting a directory merely because it
 self-declares the expected name in a `plugin.json`, per
 [`marketplace-installation-cells.md`](marketplace-installation-cells.md)'s
-"plugin name alone never selects a runtime" invariant; only the plugin's
-**global** activation scope is trusted (never a project-scoped override,
-which could otherwise let one repo's local dev override of
-customizing-copilot execute against an unrelated repo's worktree), and
+"plugin name alone never selects a runtime" invariant. The explicit
+**current-checkout** scope is preferred, falling back to **global** activation.
+Repository-only enablement works without promoting activation to user settings;
+another registered project's local override is never inspected or executed.
+An explicit directory renderer in the current checkout additionally requires
+Copilot's existing repository-trust proof; an exact installed payload does not
+require promoting repository activation to global settings.
+Only the renderer's plugin name is resolved, with all matching marketplace
+identities retained for ambiguity checks, and
 missing or ambiguous provenance (zero, or more than one, matching active
 plugin) fails closed. This resolution step itself runs in its own
 bounded subprocess (`python -m agent_worktrees.local_cache_refresh
-<home>`) rather than in-process or on a bare thread, since the resolver
-performs bounded global identity discovery without visiting unrelated registered
+<home> [repo_root]`) rather than in-process or on a bare thread, since the resolver
+performs bounded current-checkout/global identity discovery without visiting unrelated registered
 projects. Process-tree containment still protects its filesystem I/O.
 Discovery and rendering share the caller's overall refresh deadline (120 seconds
 by default for launch preparation and the asynchronous backup worker).
