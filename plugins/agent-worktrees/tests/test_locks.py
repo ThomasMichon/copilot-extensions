@@ -13,6 +13,8 @@ import json
 import os
 from unittest.mock import patch
 
+import pytest
+
 from agent_worktrees import locks
 
 # ── process_start_time / _pid_alive on the live test process ──
@@ -26,6 +28,41 @@ def test_start_time_of_self_is_stable_token():
 def test_start_time_of_dead_pid_is_none():
     # A pid that is essentially never live. Best-effort: None (can't read).
     assert locks.process_start_time(999_999_999) is None
+
+
+@pytest.mark.parametrize("outcome", ["ready", "short", "wrong-pid", "invalid-time", "denied"])
+def test_darwin_start_time_uses_native_microsecond_identity(monkeypatch, outcome):
+    import ctypes
+
+    class Query:
+        def __call__(self, pid, flavor, argument, buffer, size):
+            assert (pid, flavor, argument, size) == (4242, 3, 0, 136)
+            info = buffer._obj
+            assert type(info).start_seconds.offset == 120
+            assert type(info).start_microseconds.offset == 128
+            info.pid = 1 if outcome == "wrong-pid" else pid
+            info.start_seconds = 1234
+            info.start_microseconds = 1_000_000 if outcome == "invalid-time" else 567
+            return 0 if outcome == "denied" else size - 1 if outcome == "short" else size
+
+    def library(path, **kwargs):
+        assert path == "/usr/lib/libproc.dylib"
+        return type("LibProc", (), {"proc_pidinfo": Query()})()
+
+    monkeypatch.setattr(ctypes, "CDLL", library)
+    monkeypatch.setattr(locks.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(locks, "_start_time_posix", lambda pid: pytest.fail("macOS has no /proc"))
+    assert locks.process_start_time(4242) == ("1234:567" if outcome == "ready" else None)
+
+
+def test_darwin_identity_failure_never_raises(monkeypatch):
+    import ctypes
+
+    monkeypatch.setattr(locks.platform, "system", lambda: "Darwin")
+    def missing(*args, **kwargs):
+        raise OSError("libproc unavailable")
+    monkeypatch.setattr(ctypes, "CDLL", missing)
+    assert locks.process_start_time(4242) is None
 
 
 def test_pid_alive_self_and_dead():

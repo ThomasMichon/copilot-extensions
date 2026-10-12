@@ -339,6 +339,8 @@ in the Git administrative directory during rendering. The worker atomically
 publishes a latest-result log capped at 8 KiB and its completed receipt.
 Finalization and cleanup's normal liveness checks spare a live queued/running
 worker using its workspace-local receipt, without spawning Git per checkout.
+Owner birth identity uses native process APIs on Windows and macOS, and
+`/proc` start ticks on Linux; macOS admission does not depend on `/proc`.
 Creation and resume still perform synchronous primary publication before launch.
 The asynchronous backup can race instruction discovery and first-turn reads:
 neither a successful spawn nor a completed cache write proves model admission.

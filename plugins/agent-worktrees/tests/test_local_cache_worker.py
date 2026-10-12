@@ -30,6 +30,27 @@ def test_metadata_resolution_never_spawns_git(tmp_path, monkeypatch, kind):
     assert lcr._worker_directory(root) == git_dir / "agent-worktrees-local-guidance"
 
 
+def test_darwin_birth_identity_allows_queue_and_acknowledgement(tmp_path, monkeypatch):
+    import ctypes
+
+    class Query:
+        def __call__(self, pid, flavor, argument, buffer, size):
+            info = buffer._obj
+            info.pid, info.start_seconds, info.start_microseconds = pid, 1234, 567
+            return size
+
+    monkeypatch.setattr(ctypes, "CDLL", lambda *a, **k: SimpleNamespace(proc_pidinfo=Query()))
+    monkeypatch.setattr(worker.locks.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(worker.subprocess, "Popen", lambda *a, **k: SimpleNamespace(pid=os.getpid(), wait=lambda: 0))
+    monkeypatch.setattr(lcr, "refresh_local_cache", lambda root: lcr.RefreshResult("ready", changed=1))
+    directory = tmp_path / "worker"
+    assert worker.queue(tmp_path, directory).status == "queued"
+    state = json.loads((directory / "request.json").read_text())
+    assert state["owner"]["start_time"] == "1234:567"
+    assert worker.run(tmp_path, directory, state["request_id"]) == 0
+    assert json.loads((directory / "request.json").read_text())["phase"] == "done"
+
+
 def test_dispatch_reservation_survives_the_pre_acknowledgement_gap(tmp_path, monkeypatch):
     entered = threading.Event()
     release = threading.Event()
