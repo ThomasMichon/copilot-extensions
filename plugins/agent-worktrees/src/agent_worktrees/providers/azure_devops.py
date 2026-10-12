@@ -16,6 +16,7 @@ import shutil
 from typing import TYPE_CHECKING
 
 from .base import ProviderError, PRScope, PullResult, run_cli
+from .pr_source import azure_source, pull_payload, source_object, source_text
 
 if TYPE_CHECKING:
     from ..pr_contract import PRDiff, PRSnapshot, ThreadsResult
@@ -119,10 +120,12 @@ class AzureDevOpsProvider:
             )
         data = json.loads(proc.stdout)
         number = data.get("pullRequestId")
+        state = self._canonical_state(str(data.get("status", "active")).lower())
         return PullResult(
             url=self._web_url(scope.api_base, project, name, number),
             number=int(number) if number is not None else None,
-            state=str(data.get("status", "active")).lower(),
+            state=state,
+            merged=state == "merged",
         )
 
     @staticmethod
@@ -130,6 +133,13 @@ class AzureDevOpsProvider:
         if number is None:
             return ""
         return f"{org.rstrip('/')}/{project}/_git/{repo}/pullrequest/{number}"
+
+    @staticmethod
+    def _canonical_state(status: str) -> str:
+        states = {"active": "open", "completed": "merged", "abandoned": "closed"}
+        if status not in states:
+            raise ProviderError(f"Unknown Azure DevOps PR status: {status!r}")
+        return states[status]
 
     def get_pull(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
@@ -150,25 +160,22 @@ class AzureDevOpsProvider:
             raise ProviderError(
                 f"az repos pr show #{number} failed for {repo}: {proc.stderr.strip()}"
             )
-        data = json.loads(proc.stdout)
+        data = pull_payload(proc.stdout)
         # Azure DevOps PR status: active | completed | abandoned. "completed"
         # means merged; canonicalize to the open|merged|closed vocab the
         # tracking record uses and expose the authoritative merged signal.
         status = str(data.get("status", "active")).lower()
         merged = (status == "completed")
-        state = {"completed": "merged", "abandoned": "closed"}.get(status, "open")
-        merge_source = data.get("lastMergeSourceCommit")
-        head_sha = (
-            str(merge_source.get("commitId", "") or "")
-            if isinstance(merge_source, dict) else ""
-        )
+        state = self._canonical_state(status)
+        head_sha = source_text(source_object(data, "lastMergeSourceCommit"), "commitId")
         return PullResult(
             url=self._web_url(api_base, project, name, number),
             number=number,
             state=state,
             merged=merged,
             head_sha=head_sha,
-            base_ref=str(data.get("targetRefName", "") or "").removeprefix("refs/heads/"),
+            base_ref=source_text(data, "targetRefName").removeprefix("refs/heads/"),
+            **azure_source(data),
         )
 
     def observe_head(
@@ -557,7 +564,7 @@ class AzureDevOpsProvider:
         p = data[0]
         status = str(p.get("status", "active")).lower()
         merged = (status == "completed")
-        state = {"completed": "merged", "abandoned": "closed"}.get(status, "open")
+        state = self._canonical_state(status)
         return PullResult(
             url=self._web_url(api_base, project, name, int(p["pullRequestId"])),
             number=int(p["pullRequestId"]),

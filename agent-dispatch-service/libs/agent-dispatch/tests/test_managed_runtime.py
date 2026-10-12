@@ -1,0 +1,1014 @@
+"""Immutable managed companion runtime materialization."""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sys
+import threading
+import time
+from pathlib import Path
+
+import pytest
+
+from agent_dispatch.managed_runtime import (
+    _BUILD_DIRS,
+    _CELL_DIRS,
+    _LAYOUT_VERSION_COMPACT,
+    ManagedRuntimeError,
+    ManagedRuntimePolicy,
+    ManagedRuntimeMaterializer,
+    RECEIPT_NAME,
+    _cell_key,
+    _governed_uv_index_url,
+    _is_reparse,
+    _layout_version,
+    _python_path,
+    _runtime_dir,
+    _subprocess_environment,
+)
+
+
+def _project(root: Path, *, content: str = "VALUE = 1\n") -> Path:
+    project = root / "plugin"
+    package = project / "example_service"
+    package.mkdir(parents=True)
+    (project / "pyproject.toml").write_text(
+        "[project]\nname='example-service'\nversion='1.0.0'\n",
+        encoding="utf-8",
+    )
+    (package / "__init__.py").write_text(content, encoding="utf-8")
+    return project
+
+
+def _registration(plugin_root: Path) -> dict:
+    managed = {
+        "schema_version": 1,
+        "runtimes": [
+            {
+                "name": "service",
+                "version": "2.0.0",
+                "profile": "host",
+                "python_env": "EXAMPLE_MANAGED_PYTHON",
+                "projects": [{"path": ".", "extras": ["service"]}],
+                "imports": ["example_service"],
+            }
+        ],
+    }
+    source_path = str(plugin_root / "registrar" / "service.json")
+    return {
+        "id": "declared:plugin@example:service",
+        "logical_id": "service",
+        "kind": "plugin-companion",
+        "source": "declared",
+        "owner": "plugin@example",
+        "spec": {
+            "command": ["bin/serve"],
+            "managed_runtime": managed,
+        },
+        "plugin": {
+            "root": str(plugin_root),
+            "source_path": source_path,
+            "version": "2.0.0",
+            "activation_scopes": ["global"],
+        },
+        "runtime_revision": {
+            "plugin_root": str(plugin_root),
+            "plugin_owner": "plugin@example",
+            "plugin_source_path": source_path,
+            "plugin_version": "2.0.0",
+            "activation_scopes": ["global"],
+            "managed_runtime": managed,
+        },
+    }
+
+
+class FakeRunner:
+    def __init__(self, *, windows: bool = False):
+        self.windows = windows
+        self.calls: list[tuple[list[str], Path | None, dict[str, str]]] = []
+        self.install_count = 0
+        self.fail_install = False
+        self.install_started: threading.Event | None = None
+        self.install_release: threading.Event | None = None
+        self.after_install = None
+        self.mutate_install_source = False
+        self.mutate_validation = False
+        self.validation_count = 0
+        self.fail_validation_at: int | None = None
+
+    def __call__(self, argv, cwd, environment):
+        args = list(argv)
+        self.calls.append((args, cwd, dict(environment)))
+        if args[1:5] == ["-I", "-m", "venv", "--copies"]:
+            environment_root = Path(args[5])
+            python = _python_path(environment_root, windows=self.windows)
+            python.parent.mkdir(parents=True)
+            python.write_bytes(b"python")
+            return
+        if args[1:3] == ["pip", "install"]:
+            self.install_count += 1
+            if self.install_started is not None:
+                self.install_started.set()
+            if self.install_release is not None:
+                assert self.install_release.wait(timeout=5)
+            if self.fail_install:
+                raise ManagedRuntimeError("install failed")
+            if self.mutate_install_source:
+                source = Path(args[-1].split("[", 1)[0])
+                (source / "build").mkdir()
+                (source / "build" / "artifact.txt").write_text(
+                    "build output", encoding="utf-8"
+                )
+            if self.after_install is not None:
+                self.after_install(Path(args[args.index("--python") + 1]).parent)
+            return
+        if args[1:4] == ["-I", "-B", "-c"]:
+            self.validation_count += 1
+            if self.fail_validation_at == self.validation_count:
+                raise ManagedRuntimeError("validation failed")
+            if self.mutate_validation:
+                Path(args[0]).write_bytes(b"mutated by import")
+
+
+def _policy(tmp_path: Path, *, windows: bool = False) -> ManagedRuntimePolicy:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    python = tools / ("python.exe" if windows else "python")
+    uv = tools / ("uv.exe" if windows else "uv")
+    python.write_bytes(b"base-python")
+    uv.write_bytes(b"uv")
+    runtime_paths: tuple[Path, ...] = ()
+    if windows:
+        versioned_dll = (
+            tools / f"python{sys.version_info.major}{sys.version_info.minor}.dll"
+        )
+        versioned_dll.write_bytes(b"python-dll")
+        (tools / "python3.dll").write_bytes(b"python3")
+        (tools / "pythonw.exe").write_bytes(b"pythonw")
+        (tools / "vcruntime140.dll").write_bytes(b"vcruntime")
+        (tools / "msvcp140.dll").write_bytes(b"msvcp")
+        standard_library = tools / "Lib"
+        standard_library.mkdir()
+        (standard_library / "os.py").write_text("# stdlib\n", encoding="utf-8")
+        site_packages = standard_library / "site-packages" / "tool"
+        site_packages.mkdir(parents=True)
+        (site_packages / "launcher.exe").write_bytes(b"launcher")
+        dlls = tools / "DLLs"
+        dlls.mkdir()
+        (dlls / "_socket.pyd").write_bytes(b"socket")
+        (dlls / "libffi-8.dll").write_bytes(b"libffi")
+        tcl = tools / "tcl"
+        (tcl / "tix8.4.3").mkdir(parents=True)
+        (tcl / "tix8.4.3" / "ix84.dll").write_bytes(b"unsigned tcl")
+        (tcl / "nmake").mkdir(exist_ok=True)
+        (tcl / "nmake" / "x86_64-w64-mingw32-nmakehlp.exe").write_bytes(b"unsigned helper")
+    else:
+        standard_library = tools / "lib" / "python"
+        standard_library.mkdir(parents=True)
+        (standard_library / "os.py").write_text("# stdlib\n", encoding="utf-8")
+        runtime_paths = (standard_library,)
+    return ManagedRuntimePolicy(
+        root=tmp_path / "runtimes",
+        base_python=python,
+        package_manager=uv,
+        windows=windows,
+        environment={"PATH": str(tools), "PYTHONNOUSERSITE": "1"},
+        base_runtime_paths=runtime_paths,
+    )
+
+
+def _receipt(cell: Path) -> dict:
+    return json.loads((cell / RECEIPT_NAME).read_text(encoding="utf-8"))
+
+
+def _snapshot_projects_root(cell: Path) -> Path:
+    receipt = _receipt(cell)
+    project_dir = "p" if receipt.get("layout_version") == 2 else "projects"
+    snapshot_dir = "s" if receipt.get("layout_version") == 2 else "snapshot"
+    return cell / snapshot_dir / project_dir
+
+
+def _build_root(cell: Path) -> Path:
+    receipt = _receipt(cell)
+    return cell / _BUILD_DIRS[_layout_version(receipt)]
+
+
+def _cell_runtime_dir(cell: Path) -> Path:
+    receipt = _receipt(cell)
+    return _runtime_dir(cell, layout_version=_layout_version(receipt))
+
+
+def test_reparse_probe_fails_closed_when_metadata_is_unavailable(tmp_path, monkeypatch):
+    path = tmp_path / "python.exe"
+    path.write_bytes(b"python")
+
+    def unavailable(_path):
+        raise OSError("metadata unavailable")
+
+    monkeypatch.setattr(Path, "lstat", unavailable)
+
+    assert _is_reparse(path)
+
+
+def test_materializes_snapshot_and_reuses_valid_cell(tmp_path):
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
+
+    first = materializer.materialize(_registration(plugin))[0]
+    second = materializer.materialize(_registration(plugin))[0]
+
+    assert first == second
+    assert first.cell.is_dir()
+    assert first.receipt == first.cell / RECEIPT_NAME
+    assert first.python.is_file()
+    assert runner.install_count == 1
+    receipt = json.loads(first.receipt.read_text(encoding="utf-8"))
+    assert receipt["content_digest"] == first.content_digest
+    assert receipt["snapshot"]["projects"] == [
+        {"path": ".", "extras": ["service"]}
+    ]
+    project_prefix = "p" if receipt.get("layout_version") == 2 else "projects"
+    assert {
+        entry["path"]
+        for entry in receipt["snapshot"]["files"]
+        if entry["type"] == "file"
+    } == {
+        f"{project_prefix}/000/example_service/__init__.py",
+        f"{project_prefix}/000/pyproject.toml",
+    }
+    snapshot_dir = "s" if receipt.get("layout_version") == 2 else "snapshot"
+    assert (
+        first.cell / snapshot_dir / project_prefix / "000" / "example_service" / "__init__.py"
+    ).read_text(encoding="utf-8") == "VALUE = 1\n"
+
+
+def test_changed_content_publishes_a_new_digest_cell(tmp_path):
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
+    first = materializer.materialize(_registration(plugin))[0]
+
+    (plugin / "example_service" / "__init__.py").write_text(
+        "VALUE = 2\n", encoding="utf-8"
+    )
+    second = materializer.materialize(_registration(plugin))[0]
+
+    assert second.content_digest != first.content_digest
+    assert second.cell != first.cell
+    assert first.cell.is_dir()
+    assert second.cell.is_dir()
+    assert runner.install_count == 2
+
+
+def test_identity_paths_decouple_digest_from_unrelated_plugin_changes(tmp_path):
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
+    registration = _registration(plugin)
+    registration["spec"]["managed_runtime"]["runtimes"][0]["identity_paths"] = [
+        "example_service"
+    ]
+    registration["runtime_revision"]["managed_runtime"] = registration["spec"]["managed_runtime"]
+    first = materializer.materialize(registration)[0]
+
+    (plugin / "pyproject.toml").write_text(
+        "[project]\nname='example-service'\nversion='9.9.9'\n",
+        encoding="utf-8",
+    )
+    (plugin / "README.md").write_text("service-only change\n", encoding="utf-8")
+    second = materializer.materialize(registration)[0]
+
+    assert second == first
+    assert runner.install_count == 1
+
+
+def test_identity_paths_survive_a_plugin_version_bump(tmp_path):
+    """A routine plugin release must not force-rebuild an identity-scoped runtime.
+
+    Without this, an ML-dependency-heavy runtime (torch/transformers, tens of
+    minutes on first build) would be invalidated and rebuilt from scratch on
+    every ordinary release of its plugin, even one that never touches the
+    runtime's own declared paths -- exactly the "isolated from regular churn"
+    property this scoping exists to provide.
+    """
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
+    registration = _registration(plugin)
+    registration["spec"]["managed_runtime"]["runtimes"][0]["identity_paths"] = [
+        "example_service"
+    ]
+    registration["runtime_revision"]["managed_runtime"] = registration["spec"]["managed_runtime"]
+    first = materializer.materialize(registration)[0]
+
+    bumped = _registration(plugin)
+    bumped["spec"]["managed_runtime"]["runtimes"][0]["identity_paths"] = [
+        "example_service"
+    ]
+    bumped["runtime_revision"]["managed_runtime"] = bumped["spec"]["managed_runtime"]
+    bumped["plugin"]["version"] = "2.0.1"
+    bumped["runtime_revision"]["plugin_version"] = "2.0.1"
+    second = materializer.materialize(bumped)[0]
+
+    assert second == first
+    assert runner.install_count == 1
+    materializer.validate(bumped, (second,))
+
+
+def test_validate_accepts_a_legacy_full_authority_digest_for_identity_scoped_cell(tmp_path):
+    """``validate()`` must still accept a cell keyed before authority
+    narrowing shipped (its cell path/authority_digest built from the full,
+    unnarrowed authority), not just newly narrowed ones -- otherwise every
+    pre-existing identity-scoped cell fails "selected managed runtime
+    authority is inconsistent" the moment this narrowing ships.
+    """
+    from agent_dispatch.managed_runtime import _cache_authority
+
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
+    registration = _registration(plugin)
+    registration["spec"]["managed_runtime"]["runtimes"][0]["identity_paths"] = [
+        "example_service"
+    ]
+    registration["runtime_revision"]["managed_runtime"] = registration["spec"]["managed_runtime"]
+    runtime = materializer.materialize(registration)[0]
+
+    receipt = json.loads((runtime.cell / RECEIPT_NAME).read_text(encoding="utf-8"))
+    authority = receipt["ownership"]["authority"]
+    from agent_dispatch.managed_runtime import _canonical_digest
+
+    legacy_digest = _canonical_digest(_cache_authority(authority, identity_scoped=False))
+    assert legacy_digest != receipt["authority_digest"]
+    receipt["authority_digest"] = legacy_digest
+    legacy_key = _cell_key(receipt)
+    legacy_cell = runtime.cell.parent / legacy_key
+    shutil.copytree(runtime.cell, legacy_cell)
+    receipt["ownership"]["cell"] = str(legacy_cell)
+    (legacy_cell / RECEIPT_NAME).write_text(
+        json.dumps(receipt, sort_keys=True), encoding="utf-8"
+    )
+    layout_version = _layout_version(receipt)
+    legacy_runtime = runtime.__class__(
+        name=runtime.name,
+        version=runtime.version,
+        profile=runtime.profile,
+        content_digest=runtime.content_digest,
+        cell=legacy_cell,
+        python=_python_path(_runtime_dir(legacy_cell, layout_version=layout_version), windows=False),
+        receipt=legacy_cell / RECEIPT_NAME,
+    )
+
+    materializer.validate(registration, (legacy_runtime,))
+
+
+def test_validate_accepts_a_legacy_cell_after_a_plugin_version_bump(tmp_path):
+    """The legacy-digest fallback must be computed from the *receipt's own*
+    recorded authority, not the freshly resolved one: a legacy cell built at
+    an older plugin_version, revalidated after a subsequent version bump,
+    would otherwise never match either digest candidate (the narrowed one
+    differs by construction, and a legacy candidate built from the *current*
+    authority still embeds the *new* plugin_version, not the one the cell
+    was actually keyed with).
+    """
+    from agent_dispatch.managed_runtime import _cache_authority, _canonical_digest
+
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
+    registration = _registration(plugin)
+    registration["spec"]["managed_runtime"]["runtimes"][0]["identity_paths"] = [
+        "example_service"
+    ]
+    registration["runtime_revision"]["managed_runtime"] = registration["spec"]["managed_runtime"]
+    runtime = materializer.materialize(registration)[0]
+
+    receipt = json.loads((runtime.cell / RECEIPT_NAME).read_text(encoding="utf-8"))
+    authority = receipt["ownership"]["authority"]
+    legacy_digest = _canonical_digest(_cache_authority(authority, identity_scoped=False))
+    receipt["authority_digest"] = legacy_digest
+    legacy_key = _cell_key(receipt)
+    legacy_cell = runtime.cell.parent / legacy_key
+    shutil.copytree(runtime.cell, legacy_cell)
+    receipt["ownership"]["cell"] = str(legacy_cell)
+    (legacy_cell / RECEIPT_NAME).write_text(
+        json.dumps(receipt, sort_keys=True), encoding="utf-8"
+    )
+    layout_version = _layout_version(receipt)
+    legacy_runtime = runtime.__class__(
+        name=runtime.name,
+        version=runtime.version,
+        profile=runtime.profile,
+        content_digest=runtime.content_digest,
+        cell=legacy_cell,
+        python=_python_path(_runtime_dir(legacy_cell, layout_version=layout_version), windows=False),
+        receipt=legacy_cell / RECEIPT_NAME,
+    )
+
+    bumped = _registration(plugin)
+    bumped["spec"]["managed_runtime"]["runtimes"][0]["identity_paths"] = ["example_service"]
+    bumped["runtime_revision"]["managed_runtime"] = bumped["spec"]["managed_runtime"]
+    bumped["plugin"]["version"] = "2.0.1"
+    bumped["runtime_revision"]["plugin_version"] = "2.0.1"
+
+    materializer.validate(bumped, (legacy_runtime,))
+
+
+def test_empty_directory_changes_snapshot_digest(tmp_path):
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
+    first = materializer.materialize(_registration(plugin))[0]
+    (plugin / "empty_namespace").mkdir()
+
+    second = materializer.materialize(_registration(plugin))[0]
+
+    assert first.content_digest != second.content_digest
+
+
+def test_changed_authority_publishes_alongside_prior_cell(tmp_path):
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
+    first_registration = _registration(plugin)
+    first = materializer.materialize(first_registration)[0]
+    second_registration = _registration(plugin)
+    second_registration["plugin"]["version"] = "2.0.1"
+    second_registration["runtime_revision"]["plugin_version"] = "2.0.1"
+
+    second = materializer.materialize(second_registration)[0]
+
+    assert first.content_digest == second.content_digest
+    assert first.cell != second.cell
+    assert first.cell.is_dir()
+    assert second.cell.is_dir()
+    assert runner.install_count == 2
+
+
+def test_changed_toolchain_bytes_publish_alongside_prior_cell(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path)
+    runner = FakeRunner()
+    materializer = ManagedRuntimeMaterializer(policy, runner=runner)
+    first = materializer.materialize(_registration(plugin))[0]
+    original = policy.package_manager.stat()
+    policy.package_manager.write_bytes(b"UV")
+    os.utime(
+        policy.package_manager,
+        ns=(original.st_atime_ns, original.st_mtime_ns),
+    )
+    assert policy.package_manager.stat().st_size == original.st_size
+
+    second = materializer.materialize(_registration(plugin))[0]
+
+    assert first.content_digest == second.content_digest
+    assert first.cell != second.cell
+    assert first.cell.is_dir()
+    assert second.cell.is_dir()
+
+
+def test_posix_base_runtime_change_publishes_new_generation(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path)
+    runner = FakeRunner()
+    materializer = ManagedRuntimeMaterializer(policy, runner=runner)
+    first = materializer.materialize(_registration(plugin))[0]
+    (policy.base_runtime_paths[0] / "os.py").write_text(
+        "# changed stdlib\n", encoding="utf-8"
+    )
+
+    second = materializer.materialize(_registration(plugin))[0]
+
+    assert first.content_digest == second.content_digest
+    assert first.cell != second.cell
+
+
+def test_failed_install_preserves_published_cell_and_cleans_staging(tmp_path):
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    materializer = ManagedRuntimeMaterializer(_policy(tmp_path), runner=runner)
+    published = materializer.materialize(_registration(plugin))[0]
+    (plugin / "example_service" / "__init__.py").write_text(
+        "VALUE = 2\n", encoding="utf-8"
+    )
+    runner.fail_install = True
+
+    with pytest.raises(ManagedRuntimeError, match="install failed"):
+        materializer.materialize(_registration(plugin))
+
+    assert published.cell.is_dir()
+    assert list((tmp_path / "runtimes" / ".staging").iterdir()) == []
+
+
+def test_cleanup_failure_does_not_mask_install_failure(
+    tmp_path, monkeypatch, caplog
+):
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    runner.fail_install = True
+
+    def fail_cleanup(_path):
+        raise OSError("cleanup failed")
+
+    monkeypatch.setattr(shutil, "rmtree", fail_cleanup)
+
+    with pytest.raises(ManagedRuntimeError, match="install failed"):
+        ManagedRuntimeMaterializer(
+            _policy(tmp_path), runner=runner
+        ).materialize(_registration(plugin))
+
+    assert "failed to clean managed runtime staging directory" in caplog.text
+
+
+def test_installer_mutation_is_confined_to_disposable_working_copy(tmp_path):
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    runner.mutate_install_source = True
+    result = ManagedRuntimeMaterializer(
+        _policy(tmp_path), runner=runner
+    ).materialize(_registration(plugin))[0]
+
+    assert not (_snapshot_projects_root(result.cell) / "000" / "build").exists()
+    assert not _build_root(result.cell).exists()
+
+
+def test_import_validation_must_not_modify_staged_cell(tmp_path):
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    runner.mutate_validation = True
+
+    with pytest.raises(ManagedRuntimeError, match="validation modified"):
+        ManagedRuntimeMaterializer(
+            _policy(tmp_path), runner=runner
+        ).materialize(_registration(plugin))
+
+
+def test_import_validation_disables_bytecode_writes(tmp_path):
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+
+    ManagedRuntimeMaterializer(
+        _policy(tmp_path), runner=runner
+    ).materialize(_registration(plugin))
+
+    validation_calls = [
+        args for args, _cwd, _environment in runner.calls if "-c" in args
+    ]
+    assert validation_calls
+    assert all("-B" in args for args in validation_calls)
+
+
+def test_incomplete_existing_cell_is_preserved_without_rebuilding(tmp_path):
+    plugin = _project(tmp_path)
+    runner = FakeRunner()
+    policy = _policy(tmp_path)
+    materializer = ManagedRuntimeMaterializer(policy, runner=runner)
+    published = materializer.materialize(_registration(plugin))[0]
+    published.receipt.unlink()
+
+    with pytest.raises(ManagedRuntimeError, match="metadata"):
+        materializer.materialize(_registration(plugin))
+    assert published.cell.is_dir()
+    assert not published.receipt.exists()
+    assert runner.install_count == 1
+
+
+def test_failed_post_publish_validation_does_not_poison_cell_key(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path)
+    runner = FakeRunner()
+    runner.fail_validation_at = 2
+    materializer = ManagedRuntimeMaterializer(policy, runner=runner)
+
+    with pytest.raises(ManagedRuntimeError, match="validation failed"):
+        materializer.materialize(_registration(plugin))
+
+    assert len(list((policy.root / ".failed").iterdir())) == 1
+    runner.fail_validation_at = None
+    rebuilt = materializer.materialize(_registration(plugin))[0]
+    assert rebuilt.cell.is_dir()
+
+
+def test_rejects_unattributed_or_inconsistent_registration_before_writes(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path)
+    registration = _registration(plugin)
+    registration["source"] = "direct"
+
+    with pytest.raises(ManagedRuntimeError, match="attributed plugin declaration"):
+        ManagedRuntimeMaterializer(policy, runner=FakeRunner()).materialize(registration)
+
+    registration = _registration(plugin)
+    registration["runtime_revision"]["plugin_version"] = "other"
+    with pytest.raises(ManagedRuntimeError, match="provenance"):
+        ManagedRuntimeMaterializer(policy, runner=FakeRunner()).materialize(registration)
+
+    assert not policy.root.exists()
+
+
+def test_materializer_defensively_rejects_project_traversal(tmp_path):
+    plugin = _project(tmp_path)
+    registration = _registration(plugin)
+    registration["spec"]["managed_runtime"]["runtimes"][0]["projects"] = [
+        {"path": "../outside"}
+    ]
+
+    with pytest.raises(ManagedRuntimeError, match="contained plugin-relative"):
+        ManagedRuntimeMaterializer(
+            _policy(tmp_path), runner=FakeRunner()
+        ).materialize(registration)
+
+
+def test_rejects_linked_project_content(tmp_path):
+    plugin = _project(tmp_path)
+    target = tmp_path / "outside.py"
+    target.write_text("SECRET = True\n", encoding="utf-8")
+    link = plugin / "example_service" / "linked.py"
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are unavailable")
+
+    with pytest.raises(ManagedRuntimeError, match="link or reparse point"):
+        ManagedRuntimeMaterializer(
+            _policy(tmp_path), runner=FakeRunner()
+        ).materialize(_registration(plugin))
+
+
+def test_rejects_linked_publication_descendant(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path)
+    policy.root.mkdir()
+    external = tmp_path / "external"
+    external.mkdir()
+    try:
+        (policy.root / _CELL_DIRS[_LAYOUT_VERSION_COMPACT]).symlink_to(
+            external, target_is_directory=True
+        )
+    except (OSError, NotImplementedError):
+        pytest.skip("directory links are unavailable")
+
+    with pytest.raises(ManagedRuntimeError, match="link or reparse point"):
+        ManagedRuntimeMaterializer(policy, runner=FakeRunner()).materialize(
+            _registration(plugin)
+        )
+
+    assert list(external.iterdir()) == []
+
+
+def test_preserves_linked_python_inside_reused_cell(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path)
+    materializer = ManagedRuntimeMaterializer(policy, runner=FakeRunner())
+    published = materializer.materialize(_registration(plugin))[0]
+    external = tmp_path / "external-python"
+    external.write_bytes(b"python")
+    published.python.unlink()
+    try:
+        published.python.symlink_to(external)
+    except (OSError, NotImplementedError):
+        pytest.skip("file links are unavailable")
+
+    with pytest.raises(ManagedRuntimeError, match="link or reparse"):
+        materializer.materialize(_registration(plugin))
+    assert published.python.is_symlink()
+    assert external.read_bytes() == b"python"
+
+
+def test_preserves_modified_regular_file_inside_reused_cell(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path)
+    materializer = ManagedRuntimeMaterializer(policy, runner=FakeRunner())
+    published = materializer.materialize(_registration(plugin))[0]
+    published.python.write_bytes(b"modified")
+
+    with pytest.raises(ManagedRuntimeError, match="preserving"):
+        materializer.materialize(_registration(plugin))
+    assert published.python.read_bytes() == b"modified"
+
+
+def test_cell_layout_stays_shallow_for_windows_paths(tmp_path):
+    plugin = _project(tmp_path)
+    result = ManagedRuntimeMaterializer(
+        _policy(tmp_path, windows=True),
+        runner=FakeRunner(windows=True),
+        trust_verifier=lambda _path: True,
+    ).materialize(_registration(plugin))[0]
+
+    relative = result.cell.relative_to(tmp_path / "runtimes")
+    assert len(relative.parts) == 3
+    assert len(str(relative)) < 80
+
+
+def test_root_lock_serializes_concurrent_builders(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path)
+    runner = FakeRunner()
+    runner.install_started = threading.Event()
+    runner.install_release = threading.Event()
+    materializer_a = ManagedRuntimeMaterializer(policy, runner=runner)
+    materializer_b = ManagedRuntimeMaterializer(policy, runner=runner)
+    results = []
+    errors = []
+
+    def run(materializer):
+        try:
+            results.append(materializer.materialize(_registration(plugin))[0])
+        except Exception as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    first = threading.Thread(target=run, args=(materializer_a,))
+    second = threading.Thread(target=run, args=(materializer_b,))
+    first.start()
+    assert runner.install_started.wait(timeout=5)
+    second.start()
+    time.sleep(0.2)
+    assert runner.install_count == 1
+    runner.install_release.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert errors == []
+    assert len(results) == 2
+    assert results[0].cell == results[1].cell
+    assert runner.install_count == 1
+
+
+def test_stale_lock_file_does_not_block_materialization(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path)
+    policy.root.mkdir()
+    (policy.root / ".materialize.lock").write_text("999999", encoding="ascii")
+
+    result = ManagedRuntimeMaterializer(
+        policy, runner=FakeRunner()
+    ).materialize(_registration(plugin))[0]
+
+    assert result.cell.is_dir()
+
+
+def test_concurrent_root_creation_is_idempotent(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path)
+    runner = FakeRunner()
+    runner.install_started = threading.Event()
+    runner.install_release = threading.Event()
+    results = []
+
+    def materialize():
+        results.append(
+            ManagedRuntimeMaterializer(policy, runner=runner).materialize(
+                _registration(plugin)
+            )[0]
+        )
+
+    first = threading.Thread(target=materialize)
+    second = threading.Thread(target=materialize)
+    first.start()
+    second.start()
+    assert runner.install_started.wait(timeout=5)
+    runner.install_release.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert len(results) == 2
+    assert results[0].cell == results[1].cell
+
+
+def test_build_environment_drops_ambient_package_authority(tmp_path, monkeypatch):
+    monkeypatch.setenv("PIP_INDEX_URL", "https://secret.example")
+    monkeypatch.setenv("UV_INDEX_URL", "https://secret.example")
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "injected"))
+    monkeypatch.setenv("AGENT_DISPATCH_TOKEN", "secret")
+    # No governed uv-feed config at this (empty) config home -- deterministic
+    # across machines regardless of whether the real box has one.
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    python = tmp_path / "python"
+    uv = tmp_path / "uv"
+
+    environment = _subprocess_environment(base_python=python, package_manager=uv)
+
+    assert "PIP_INDEX_URL" not in environment
+    assert "UV_INDEX_URL" not in environment
+    assert "PYTHONPATH" not in environment
+    assert "AGENT_DISPATCH_TOKEN" not in environment
+    assert environment["PIP_CONFIG_FILE"]
+    assert environment["UV_NO_CONFIG"] == "1"
+    assert "UV_DEFAULT_INDEX" not in environment
+
+
+def test_governed_uv_index_url_absent_without_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
+    assert _governed_uv_index_url() is None
+
+
+def test_governed_uv_index_url_reads_managed_uv_toml(tmp_path, monkeypatch):
+    """Mirrors dotfiles' Restore-UvFeed.ps1 / restore-uv-feed.sh output shape."""
+    config_home = tmp_path / "config-home"
+    monkeypatch.setenv("APPDATA", str(config_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    uv_dir = config_home / "uv"
+    uv_dir.mkdir(parents=True)
+    (uv_dir / "uv.toml").write_text(
+        "# Managed by dotfiles agent-machines (governed-feeds / uv-feed).\n"
+        "[[index]]\n"
+        'url = "https://packagefeedproxy.microsoft.io/pypi/simple/"\n'
+        "default = true\n",
+        encoding="utf-8",
+    )
+
+    assert (
+        _governed_uv_index_url()
+        == "https://packagefeedproxy.microsoft.io/pypi/simple/"
+    )
+
+
+def test_build_environment_forwards_governed_uv_index(tmp_path, monkeypatch):
+    monkeypatch.delenv("PIP_INDEX_URL", raising=False)
+    monkeypatch.delenv("UV_INDEX_URL", raising=False)
+    config_home = tmp_path / "config-home"
+    monkeypatch.setenv("APPDATA", str(config_home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    uv_dir = config_home / "uv"
+    uv_dir.mkdir(parents=True)
+    (uv_dir / "uv.toml").write_text(
+        "[[index]]\n"
+        'url = "https://packagefeedproxy.microsoft.io/pypi/simple/"\n'
+        "default = true\n",
+        encoding="utf-8",
+    )
+    python = tmp_path / "python"
+    uv = tmp_path / "uv-bin"
+
+    environment = _subprocess_environment(base_python=python, package_manager=uv)
+
+    assert (
+        environment["UV_DEFAULT_INDEX"]
+        == "https://packagefeedproxy.microsoft.io/pypi/simple/"
+    )
+    # Still bounded: config-file discovery stays off, only the one resolved
+    # value is forwarded.
+    assert environment["UV_NO_CONFIG"] == "1"
+
+
+def test_windows_verifies_base_and_copied_python_before_install(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path, windows=True)
+    runner = FakeRunner(windows=True)
+    verified: list[Path] = []
+
+    def verify(path: Path) -> bool:
+        verified.append(path)
+        return True
+
+    result = ManagedRuntimeMaterializer(
+        policy, runner=runner, trust_verifier=verify
+    ).materialize(_registration(plugin))[0]
+
+    install_call = next(call for call in runner.calls if call[0][1:3] == ["pip", "install"])
+    assert verified[0] == policy.base_python
+    assert any(".staging" in str(path) for path in verified[1:])
+    assert result.python in verified
+    assert all("tcl" not in {part.casefold() for part in path.parts} for path in verified[1:])
+    assert runner.calls.index(install_call) == 0
+
+
+def test_windows_untrusted_base_prevents_environment_creation(tmp_path):
+    plugin = _project(tmp_path)
+    runner = FakeRunner(windows=True)
+
+    with pytest.raises(ManagedRuntimeError, match="untrusted Windows base Python"):
+        ManagedRuntimeMaterializer(
+            _policy(tmp_path, windows=True),
+            runner=runner,
+            trust_verifier=lambda _path: False,
+        ).materialize(_registration(plugin))
+
+    assert runner.calls == []
+
+
+def test_windows_does_not_require_signatures_for_installed_launchers(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path, windows=True)
+    runner = FakeRunner(windows=True)
+
+    def add_unsigned_launcher(runtime_root: Path) -> None:
+        scripts = runtime_root / "Scripts"
+        scripts.mkdir()
+        (scripts / "example.exe").write_bytes(b"unsigned launcher")
+
+    runner.after_install = add_unsigned_launcher
+
+    def verify(path: Path) -> bool:
+        return path.name != "example.exe"
+
+    result = ManagedRuntimeMaterializer(
+        policy,
+        runner=runner,
+        trust_verifier=verify,
+    ).materialize(_registration(plugin))[0]
+
+    assert (result.python.parent / "Scripts" / "example.exe").is_file()
+
+
+def test_windows_trust_manifest_excludes_uncopied_site_packages(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path, windows=True)
+
+    result = ManagedRuntimeMaterializer(
+        policy,
+        runner=FakeRunner(windows=True),
+        trust_verifier=lambda path: path.name != "launcher.exe",
+    ).materialize(_registration(plugin))[0]
+
+    assert not (
+        _cell_runtime_dir(result.cell) / "Lib" / "site-packages" / "tool" / "launcher.exe"
+    ).exists()
+
+
+def test_windows_trust_manifest_excludes_unsigned_tcl_binaries(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path, windows=True)
+    result = ManagedRuntimeMaterializer(
+        policy,
+        runner=FakeRunner(windows=True),
+        trust_verifier=lambda path: path.name
+        not in {"ix84.dll", "x86_64-w64-mingw32-nmakehlp.exe"},
+    ).materialize(_registration(plugin))[0]
+
+    receipt = _receipt(result.cell)
+    assert set(receipt["windows_trust_files"]) == {
+        "DLLs/_socket.pyd",
+        "DLLs/libffi-8.dll",
+        "msvcp140.dll",
+        "python.exe",
+        "python3.dll",
+        f"python{sys.version_info.major}{sys.version_info.minor}.dll",
+        "pythonw.exe",
+        "vcruntime140.dll",
+    }
+    assert (_cell_runtime_dir(result.cell) / "tcl" / "tix8.4.3" / "ix84.dll").is_file()
+
+
+def test_windows_trust_scope_change_rebuilds_alongside_prior_cells(tmp_path):
+    plugin = _project(tmp_path)
+    policy = _policy(tmp_path, windows=True)
+    runner = FakeRunner(windows=True)
+    materializer = ManagedRuntimeMaterializer(
+        policy,
+        runner=runner,
+        trust_verifier=lambda _path: True,
+    )
+    current = materializer.materialize(_registration(plugin))[0]
+    receipt = _receipt(current.cell)
+    legacy_receipt = dict(receipt)
+    legacy_receipt.pop("windows_trust_scope_version")
+    legacy_receipt["windows_trust_files"] = sorted(
+        {
+            *receipt["windows_trust_files"],
+            "tcl/nmake/x86_64-w64-mingw32-nmakehlp.exe",
+            "tcl/tix8.4.3/ix84.dll",
+        },
+        key=str.casefold,
+    )
+    legacy_key = _cell_key(
+        {
+            "schema_version": legacy_receipt["schema_version"],
+            "name": legacy_receipt["name"],
+            "version": legacy_receipt["version"],
+            "profile": legacy_receipt["profile"],
+            "content_digest": legacy_receipt["content_digest"],
+            "authority_digest": legacy_receipt["authority_digest"],
+            "toolchain_digest": legacy_receipt["toolchain_digest"],
+        }
+    )
+    legacy_cell = current.cell.parent / legacy_key
+    shutil.copytree(current.cell, legacy_cell)
+    (legacy_cell / RECEIPT_NAME).write_text(
+        json.dumps(legacy_receipt, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    shutil.rmtree(current.cell)
+
+    rebuilt = materializer.materialize(_registration(plugin))[0]
+
+    assert rebuilt.cell != legacy_cell
+    assert rebuilt.cell.is_dir()
+    assert legacy_cell.is_dir()
+    assert runner.install_count == 2
+
+
+def test_windows_untrusted_core_runtime_file_still_fails(tmp_path):
+    plugin = _project(tmp_path)
+
+    with pytest.raises(ManagedRuntimeError, match="trust verification"):
+        ManagedRuntimeMaterializer(
+            _policy(tmp_path, windows=True),
+            runner=FakeRunner(windows=True),
+            trust_verifier=lambda path: path.name != "python.exe" or ".staging" not in str(path),
+        ).materialize(_registration(plugin))

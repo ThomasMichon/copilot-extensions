@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import logging
+import subprocess
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, FiniteFloat
 
 from .events import EventBus
@@ -102,6 +104,16 @@ class RearmSpawnBody(BaseModel):
     min_failures: int = 3
 
 
+class AuthorizeFreshBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    reservation_key: str
+    worktree: str
+    expected_generation: int
+    permitted: bool = False
+    confirmed_no_live_holder: bool = False
+    reason: str
+
+
 def _reservation_dict(res: SpawnReservation) -> dict:
     return asdict(res)
 
@@ -110,7 +122,28 @@ def register_spawn_routes(
     app: FastAPI,
     queue: TaskQueue,
     bus: EventBus,
+    control_token: str | None = None,
 ) -> None:
+    from .coordinator_auth import _make_control_auth
+
+    def rejected(event: str, detail: dict[str, object]) -> None:
+        logging.getLogger("agent-dispatch").warning("%s: %s", event, detail)
+    control_auth = _make_control_auth(control_token, rejected)
+
+    @app.post(
+        "/spawn-reservations/tasks/{task_id}/authorize-fresh",
+        dependencies=[Depends(control_auth)],
+    )
+    def authorize_fresh(task_id: str, body: AuthorizeFreshBody) -> dict:
+        try:
+            from .acquisition_receipts import verify_recovery_bridge
+            verify_recovery_bridge()
+            return queue.authorize_fresh_acquisition(task_id, **body.model_dump())
+        except TaskError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise HTTPException(503, detail="recovery bridge readiness unavailable") from exc
+
     def _require_task(task_id: str) -> None:
         if queue.get(task_id) is None:
             raise HTTPException(status_code=404, detail="no such task")

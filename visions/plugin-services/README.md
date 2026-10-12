@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-10-09
+- **Last revised:** 2026-10-11
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -47,6 +47,21 @@ the one live daemon it needs, and exits — it is never itself the long-running
 thing, and it never spawns one just to be sure.
 
 ## Concepts & Components
+
+### Explicit integrated coordination profile
+
+Alongside independently installed addons, an adopter can select the integrated
+fleet-manager control product. It supplies one selected release/lifecycle system
+for client, Gateway and node roles; runtime-backed Copilot adapters depend on
+that explicitly adopted product instead of self-installing another runtime.
+Static guidance remains independently useful.
+
+Integrated control roles may share canonical coordination state after verified
+authority migration, while accepted execution, credentials and heavy workers
+retain appropriate failure boundaries. Every integrated role uses the same
+declared lifecycle contract, not an independently invented updater/keepalive.
+This does not weaken immutable-runtime, attributable invocation, safe cutover,
+resource fencing, or existing standalone-service defaults.
 
 - **Plugin runtime** — the self-contained versioned runtime and invocation
   surface a runtime plugin's own installer deploys inside its marketplace

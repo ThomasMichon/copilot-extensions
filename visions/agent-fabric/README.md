@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-10-08
+- **Last revised:** 2026-10-11
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -36,6 +36,20 @@ to the next. The fabric makes *who-is-doing-what* and *hand-this-onward*
 first-class.
 
 ## Concepts & Components
+
+### Explicit integrated-product adoption
+
+An adopter may select fleet-manager's integrated coordination product rather
+than independently manage each runtime-bearing layer. Its Gateway hosts one
+canonical coordination authority, usable locally or across enrolled machines;
+thin clients and adapters do not create competing owners. Logical ownership
+boundaries remain intact even where canonical modules share a transactional
+store and release/lifecycle system.
+
+This is an explicit profile, not a change to existing standalone defaults.
+Guidance remains independently useful. Replacing a standalone authority requires
+verified migration of its state, accepted execution and obligations; installing
+or enrolling the integrated product does not perform that migration implicitly.
 
 The fabric is a **layered stack of capabilities**; each layer is its own subject
 with a child vision at its scope-appropriate home: plugin-specific subjects under
@@ -109,7 +123,9 @@ per-plugin child vision refines it at
 ### Machine fleet — optional driver-based Gateway coordination
 Adds a central rendezvous and authenticated service/control routing over declared
 machine connectors without replacing local service, worktree, task, session, or
-credential authorities. Drivers supply the substrate; the default adopts static
+credential authorities merely by enrollment. Explicit integrated-product
+migration can replace canonical coordination owners, never credential issuance
+or session substrate ownership implicitly. Drivers supply the substrate; the default adopts static
 machines through agent-ssh. Shell-independent control and recoverable observation
 augment existing direct/SSH paths rather than making the Gateway mandatory.
 Each target has exactly one selected driver/provider authority for identity and

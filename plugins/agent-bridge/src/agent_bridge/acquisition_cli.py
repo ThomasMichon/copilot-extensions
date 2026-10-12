@@ -11,7 +11,9 @@ from typing import Any
 from .acquisition_contract import AcquisitionRequest, AcquisitionResult
 from .client import BridgeClientError
 
-ACQUISITION_PROTOCOL_VERSION = 30
+from .protocol import ACQUISITION_RETIREMENT_REVALIDATION_PROTOCOL_VERSION
+
+ACQUISITION_PROTOCOL_VERSION = ACQUISITION_RETIREMENT_REVALIDATION_PROTOCOL_VERSION
 
 
 def acquire(client: Any, request: AcquisitionRequest) -> AcquisitionResult:
@@ -46,6 +48,18 @@ def register(subparsers: Any) -> None:
     inspect = subparsers.add_parser("acquisition-inspect", help="Read durable bridge acquisition identity")
     inspect.add_argument("delivery_id")
     inspect.set_defaults(func=inspect_command)
+    readiness = subparsers.add_parser(
+        "acquisition-readiness", help="Prove daemon support for current acquisition safety",
+    )
+    readiness.set_defaults(func=readiness_command)
+
+
+def readiness_command(args: argparse.Namespace) -> None:
+    from . import __main__ as core
+    supported = core._get_client().daemon_supports(ACQUISITION_PROTOCOL_VERSION)
+    print(json.dumps({"supported": supported, "required_protocol": ACQUISITION_PROTOCOL_VERSION}))
+    if not supported:
+        raise SystemExit(1)
 
 
 def inspect_command(args: argparse.Namespace) -> None:

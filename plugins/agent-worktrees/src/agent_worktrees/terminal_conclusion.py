@@ -189,7 +189,7 @@ def _preservation_reason(
         return "outstanding-obligations"
     if record.is_paired and not pair_clear:
         return "outstanding-obligations"
-    if any(pr.state in {"creating", "open"} for pr in record.prs):
+    if record.has_live_pr():
         return "open-pull-request"
     return None
 
@@ -209,7 +209,7 @@ def _sibling_preservation_reason(sibling: tracking.WorktreeRecord) -> str | None
         return "pair-sibling-follow-up"
     if sibling.live_resources or sibling.owner_ref:
         return "pair-sibling-outstanding-obligations"
-    if any(pr.state in {"creating", "open"} for pr in sibling.prs):
+    if sibling.has_live_pr():
         return "pair-sibling-open-pull-request"
     if sibling.resolved_head_session is not None:
         # A tracked, still-resumable lifecycle head is independent of live

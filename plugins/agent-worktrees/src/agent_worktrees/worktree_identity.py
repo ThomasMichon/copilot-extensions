@@ -268,7 +268,7 @@ def _infer_worktree_id(
     return _infer_worktree_id_from_cwd(config)
 
 
-def _resolve_worktree_id(raw_id: str) -> str:
+def _resolve_worktree_id(raw_id: str, *, project: str | None = None) -> str:
     """Canonicalize a worktree ID, resolving short suffixes.
 
     If ``raw_id`` matches a tracking file directly, return as-is.
@@ -280,7 +280,7 @@ def _resolve_worktree_id(raw_id: str) -> str:
         output.err(f"Invalid worktree ID: {raw_id}")
         raise SystemExit(1)
 
-    tdir = cfg.tracking_dir()
+    tdir = cfg.tracking_dir(project) if project else cfg.tracking_dir()
 
     # Exact match -- fast path
     if (tdir / f"{raw_id}.yaml").exists():

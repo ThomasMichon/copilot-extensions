@@ -25,7 +25,12 @@ import os
 import platform
 import subprocess
 
-from agent_procutil import contained_test_mode, detached_kwargs
+from agent_procutil import (
+    contained_test_mode,
+    detached_kwargs,
+    no_window_kwargs,
+    spawn_sync_in_kill_on_close_job,
+)
 
 #: 180s covers the documented worst-case provisioning ETA (120s) plus buffer
 #: for a contended provisioning mutex.
@@ -61,6 +66,7 @@ def _kill_tree(proc: subprocess.Popen) -> None:
             subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                 capture_output=True, check=False,
+                **no_window_kwargs(),
             )
         else:
             import signal
@@ -81,27 +87,35 @@ def run_bounded(
     ENTIRE process tree (see module docstring) before re-raising
     :class:`subprocess.TimeoutExpired` with whatever output was captured.
 
-    ``detached_kwargs()`` (not a hand-rolled ``creationflags``/
-    ``start_new_session``) puts *cmd* in its own process group/session --
-    the headless-launch guard requires routing platform process-creation
-    flags through ``agent_procutil`` rather than reimplementing them here.
+    Windows captured children start headless and require a kill-on-close Job
+    before they can execute. POSIX retains its existing process-group cleanup.
     """
-    proc = subprocess.Popen(
+    windows = platform.system() == "Windows"
+    proc, job = spawn_sync_in_kill_on_close_job(
         cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, encoding="utf-8", errors="replace", env=env,
-        **detached_kwargs(),
+        require_job=windows,
+        allow_breakaway=False,
+        **(no_window_kwargs() if windows else detached_kwargs()),
     )
     try:
-        stdout, stderr = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired as exc:
-        _kill_tree(proc)
         try:
-            stdout, stderr = proc.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            stdout, stderr = exc.stdout or "", exc.stderr or ""
-        exc.stdout, exc.stderr = stdout, stderr
-        raise
-    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            if job is not None:
+                job.close()
+            else:
+                _kill_tree(proc)
+            try:
+                stdout, stderr = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                stdout, stderr = exc.stdout or "", exc.stderr or ""
+            exc.stdout, exc.stderr = stdout, stderr
+            raise
+        return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+    finally:
+        if job is not None:
+            job.close()
 
 
 def message(exc: subprocess.TimeoutExpired, timeout: float | None) -> str:

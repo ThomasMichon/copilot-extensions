@@ -121,6 +121,80 @@ def _run_uv_editable_scenario(tmp_path: Path, canonical_mod, *, name: str, build
     return _outcome(trusted_log), _outcome(canonical_log)
 
 
+@pytest.mark.parametrize("implementation", ["canonical", "trusted"])
+@pytest.mark.parametrize("consumer_name,dependency,path,allowed", [
+    ("agent-dispatch-service", "agent-dispatch", "../plugins/agent-dispatch", True),
+    ("unrelated-service", "agent-dispatch", "../plugins/agent-dispatch", False),
+    ("agent-dispatch-service", "alias", "../plugins/agent-dispatch", False),
+    ("agent-dispatch-service", "agent-dispatch", "../plugins/other-plugin", False),
+])
+def test_standalone_dispatch_package_reference_is_explicit(
+    tmp_path, canonical, implementation, consumer_name, dependency, path, allowed,
+):
+    module = canonical if implementation == "canonical" else trusted
+    root = tmp_path / "repo"
+    plugin = root / "plugins" / path.rsplit("/", 1)[-1]
+    (plugin / "src" / "agent_dispatch").mkdir(parents=True)
+    (plugin / "src" / "agent_dispatch" / "__init__.py").write_text("VALUE = 1\n")
+    (plugin / "pyproject.toml").write_text(
+        '[project]\nname = "agent-dispatch"\nversion = "0.1.0"\n'
+        '[tool.uv.sources]\nagent-zdd = { path = "../../libs/zdd", editable = true }\n'
+    )
+    _canonical_lib(root, "zdd", version="0.1.0", content="VALUE = 2\n")
+    consumer = root / consumer_name
+    consumer.mkdir()
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname = "standalone"\nversion = "0.1.0"\n'
+        f'[tool.uv.sources]\n{dependency} = {{ path = "{path}", editable = true }}\n'
+    )
+    dest = tmp_path / "slot"
+    shutil.copytree(consumer, dest)
+    log = module.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=dest,
+        canonical_root=root, dest_root=dest,
+    )
+    if not allowed:
+        assert any(line.startswith("SKIP") for line in log)
+        assert not (dest / "libs").exists()
+        assert (dest / "pyproject.toml").read_bytes() == (consumer / "pyproject.toml").read_bytes()
+        return
+    assert all(line.startswith("OK") for line in log), log
+    assert (dest / "libs/agent-dispatch/src/agent_dispatch/__init__.py").read_text() == "VALUE = 1\n"
+    assert (dest / "libs/zdd/src/zdd/__init__.py").read_text() == "VALUE = 2\n"
+    assert 'path = "libs/agent-dispatch"' in (dest / "pyproject.toml").read_text()
+    nested = dest / "libs/agent-dispatch"
+    assert 'path = "../../libs/zdd" }' in (nested / "pyproject.toml").read_text()
+    assert (nested / "../../libs/zdd").resolve() == (dest / "libs/zdd").resolve()
+
+
+@pytest.mark.parametrize("implementation", ["canonical", "trusted"])
+@pytest.mark.parametrize("linked", ["source", "plugins"])
+def test_standalone_dispatch_reference_refuses_symlinked_ancestors(tmp_path, canonical, implementation, linked):
+    module = canonical if implementation == "canonical" else trusted
+    root = tmp_path / "repo"
+    plugin = root / "plugins/agent-dispatch"
+    (plugin / "src/agent_dispatch").mkdir(parents=True)
+    (plugin / "src/agent_dispatch/__init__.py").write_text("VALUE = 1\n")
+    (plugin / "pyproject.toml").write_text('[project]\nname = "agent-dispatch"\nversion = "0.1.0"\n')
+    consumer = root / "agent-dispatch-service"
+    consumer.mkdir()
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname = "standalone"\nversion = "0.1.0"\n'
+        '[tool.uv.sources]\nagent-dispatch = { path = "../plugins/agent-dispatch", editable = true }\n'
+    )
+    dest = tmp_path / "slot"
+    shutil.copytree(consumer, dest)
+    source = consumer if linked == "source" else root / "plugins"
+    moved = tmp_path / "moved"
+    source.rename(moved)
+    _symlink_to_or_skip(source, moved, target_is_directory=True)
+    log = module.materialize_uv_editable_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=dest, canonical_root=root, dest_root=dest,
+    )
+    assert any("is a symlink" in line for line in log), log
+    assert not (dest / "libs").exists()
+
+
 def test_uv_editable_parity_expands_a_clean_reference_from_canonical(tmp_path: Path, canonical):
     def build(root: Path) -> None:
         _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")

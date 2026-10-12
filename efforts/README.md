@@ -10,8 +10,9 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Fleet Control V2](active/fleet-control-v2/README.md) | Active; plan reviewed, contract assignment pending | #6236, #6240, #6241; existing #5789/#6030 owners retained |
 | [Process Slot Ownership](active/process-slot-ownership/README.md) | Draft; reader-lifetime continuation | #3963; registry presentation separately #5559 |
-| [Process Spawn Reduction](active/process-spawn-reduction/README.md) | Draft | #6086 |
+| [Process Spawn Reduction](active/process-spawn-reduction/README.md) | Active | #6086 |
 | [Private PR Source Attribution](active/private-pr-source-attribution/README.md) | Active; originating identity slice | #6068 |
 | [Remote Picker Seed Parity](active/remote-picker-seed-parity/README.md) | Draft; operator-requested parity | #6057 |
 | [Worktree Conclusion Tidier](active/worktree-conclusion-tidier/README.md) | Draft; design/charter review before pilot or scheduling | #6060 |
@@ -19,13 +20,14 @@ that pattern to this repository.
 | [Native Context Handoff Compatibility](active/native-context-handoff-compatibility/README.md) | Active; capability-contract investigation | #6028 |
 | [Linux Role Fleet](active/linux-role-fleet/README.md) | Active; reviewed Komodo-first plan and isolated adoption proof | #6030, #5861 |
 | [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Active; proposal reviewed | #6007 |
-| [PR Recovery Break Glass](active/pr-recovery-break-glass/README.md) | Draft | #5817 |
+| [PR Recovery Break Glass](active/pr-recovery-break-glass/README.md) | Active | #5817 |
 | [Versioned Singleton Manager](active/versioned-singleton-manager/README.md) | Active | #5655 |
 | [Adopter Material Refresh](active/adopter-material-refresh/README.md) | Draft; independent planning proposal | #5799 |
 | [Machine Fleet Routing Foundation](active/machine-fleet-routing-foundation/README.md) | Active; contract implementation | #5789 |
 | [Mutable dev slot](active/mutable-dev-slot/README.md) | Active | #5472 |
 | [Machine Transport Convergence](active/machine-transport-convergence/README.md) | Active | #5737, #5738, #5740, #5741, #5972, #5973, #5974, #6039 |
 | [agent-index Standalone Service](active/agent-index-standalone-service/README.md) | Active; proposal reviewed | #5768, #5769 |
+| [agent-dispatch Standalone + Container](active/agent-dispatch-standalone-container/README.md) | Active; Phase 1 landed | #6177 |
 | [Dispatch Task Lifecycle and Conversations](active/agent-dispatch-monitor-and-confirmed-state/README.md) | Active; submission/output/delivery amendment proposed | #3681 |
 | [Dispatch Tasks-Pane UX](active/agent-dispatch-tasks-pane-ux-overhaul/README.md) | Active; review/history/follow-up amendment proposed | #3681 (backend dependency) |
 | [Lean Session Lifecycle](active/lean-session-lifecycle/README.md) | Draft | #5579, #5664, #2619 |

@@ -3,7 +3,8 @@
 Phase 6 of `efforts/active/agent-bridge-cli-mode-sessions` consolidates dispatch
 session acquisition beneath bridge. `agent-bridge acquire --request-file -`
 accepts version-1 JSON on stdin and calls `POST /api/v1/acquisitions`.
-HTTP protocol **30** gates this operation; older daemons refuse capability
+HTTP protocol **31** gates current clients, including post-preparation
+retirement/holder revalidation; older daemons refuse capability
 instead of falling back to create. Legacy unbound/explicit-fresh `create`
 semantics are unchanged. This slice supports **local** CLI and ACP; remote/
 fleet acquisition remains outstanding.
@@ -50,6 +51,60 @@ The bridge reads admission facts through the existing `dispatch:` namespace
 provider: current task generation/status/hold, latest active reservation,
 worktree ownership and retirement. Generation is the **current admission
 fence**, not immutable conversation lineage: claim/adoption increments it.
+
+Worktree-owner resolution does not require an interactive shell's `PATH`.
+A legacy bridge uses its installed canonical versioned-runtime resolver to
+select a completed worktree-owner interpreter. Its execution trampoline rechecks
+legacy ownership and resolves the completed slot immediately before launch,
+retaining the legacy command
+compatibility path when no runtime resolves. A native service rooted in an
+installation cell derives its own `install.json` context when the launcher
+did not supply one; explicit and derived contexts use the existing validated
+same-cell peer launcher and never fall back to a global command. Retired legacy
+ownership refuses rather than crossing installation cells.
+Owner availability is checked before marking dispatch acquisition. A missing
+owner reports the existing `worktrees_unavailable` refusal without certifying
+`effect: not_started`: neither owner absence nor an empty local journal proves
+that an earlier launch did not happen. Historical and unknown effects retain
+their existing reconciliation requirement. No acquisition wire capability or
+protocol change is introduced by installed-owner resolution.
+
+For an admitted new delivery, the bridge records the complete request in its
+`prepared` journal stage before the worktree-owner preflight. A preflight
+refusal therefore leaves a request-digest-bound `refused/prepared` receipt,
+including when owner capability is unavailable. Existing pending operations
+retain the normal reconciliation path; absence never settles an old attempt.
+
+An automatic reused allocation can create its first native conversation only
+when the dispatch provider supplies the complete consecutive same-task
+reservation history (bounded to 256 attempts), beginning with `created`
+allocation, and every predecessor has a matching positive
+`refused/prepared` bridge receipt. Worktree, task, mode, target, project,
+retirement and request digests must agree; a predecessor generation may be
+older than the current admitted generation, never newer. No predecessor may
+have a session handle, a spawned/unknown outcome, a launch-stage receipt,
+or a binding; current native head, holder, continuation intent and task
+attachments still block first-conversation creation. This preserves allocation
+provenance without retiring or discarding a transcript.
+
+Missing/truncated provider history, gaps, missing original receipts, database
+replacement and legacy attempts that failed before journaling do not authorize
+creation. `acquisition-inspect "<reservation-key>:acquire"` reads individual
+stages; `acquisition_not_found` is unknown history, not a no-launch receipt.
+No blanket fresh or rearm operation repairs missing proof.
+
+An explicitly authorized operator may instead choose a new conversation via
+dispatch's control-only `reservations authorize-fresh` operation. This is
+audited fresh-generation/retirement authority, not retroactive proof of
+historical absence. It preserves old records and transcripts and authorizes no
+takeover. Bridge independently refuses live/unknown holder and head evidence,
+then revalidates the exact task/reservation/generation/retirement fence after
+target preparation and before launch. Revocation or a changed holder prevents
+creation. See the dispatch acquisition guide for the exact permission,
+concluded-reservation, liveness-attestation and deployment requirements.
+Current acquisition clients require protocol 31, refusing a protocol-30 daemon
+before sending retirement authorization. A protocol-31 daemon continues serving
+protocol-30 acquisition requests with its stronger holder/retirement checks.
 A bridge binding from an older generation of the same task remains resumable
 when current owner facts authorize it. A future/stale admission generation
 refuses. Historical expired registrations that are not the current native head

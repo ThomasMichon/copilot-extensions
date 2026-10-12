@@ -1,0 +1,127 @@
+"""Captured-child launch and ownership contracts; no real process in guards."""
+
+from __future__ import annotations
+
+import subprocess
+import json
+import os
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from agent_worktrees import push_timeout
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("windows", [True, False])
+@pytest.mark.parametrize("outcome", ["success", "timeout", "error"])
+def test_captured_tree_launch_and_cleanup(monkeypatch, windows, outcome):
+    events = []
+    launch = {}
+    job = SimpleNamespace(close=lambda: events.append("job-close"))
+    proc = SimpleNamespace(returncode=7)
+
+    def communicate(*, timeout):
+        events.append(("communicate", timeout))
+        if outcome == "timeout" and timeout == 0.5:
+            raise subprocess.TimeoutExpired(["fixture"], timeout, "partial", "diagnostic")
+        if outcome == "error":
+            raise OSError("capture failed")
+        return "output", "error output"
+
+    proc.communicate = communicate
+
+    def spawn(argv, **kwargs):
+        launch.update(argv=argv, **kwargs)
+        return proc, job if windows else None
+
+    monkeypatch.setattr(push_timeout.platform, "system", lambda: "Windows" if windows else "Linux")
+    monkeypatch.setattr(push_timeout, "spawn_sync_in_kill_on_close_job", spawn)
+    monkeypatch.setattr(push_timeout, "no_window_kwargs", lambda: {"headless": True})
+    monkeypatch.setattr(push_timeout, "detached_kwargs", lambda: {"own_group": True})
+    monkeypatch.setattr(push_timeout, "_kill_tree", lambda child: events.append("group-kill"))
+    env = {"fixture": "value"}
+    if outcome == "success":
+        result = push_timeout.run_bounded(["fixture"], cwd="workspace", env=env, timeout=0.5)
+        assert (result.returncode, result.stdout, result.stderr) == (7, "output", "error output")
+    elif outcome == "timeout":
+        with pytest.raises(subprocess.TimeoutExpired) as raised:
+            push_timeout.run_bounded(["fixture"], cwd="workspace", env=env, timeout=0.5)
+        assert (raised.value.stdout, raised.value.stderr) == ("output", "error output")
+        assert events[1] == ("job-close" if windows else "group-kill")
+        assert events[2] == ("communicate", 5)
+    else:
+        with pytest.raises(OSError, match="capture failed"):
+            push_timeout.run_bounded(["fixture"], cwd="workspace", env=env, timeout=0.5)
+    assert launch["require_job"] is windows
+    assert launch["allow_breakaway"] is False
+    assert launch.get("headless", False) is windows
+    assert launch.get("own_group", False) is not windows
+    assert launch["env"] is env and launch["cwd"] == "workspace"
+    assert launch["stdout"] == subprocess.PIPE and launch["stderr"] == subprocess.PIPE
+    assert launch["encoding"] == "utf-8" and launch["text"] is True
+    if windows:
+        assert events[-1] == "job-close"
+        assert "group-kill" not in events
+    else:
+        assert "job-close" not in events
+
+
+@pytest.mark.guard
+def test_required_job_admission_failure_is_not_retried(monkeypatch):
+    calls = []
+
+    def refuse(argv, **kwargs):
+        calls.append(kwargs)
+        raise RuntimeError("Windows descendant Job assignment failed before child resume")
+
+    monkeypatch.setattr(push_timeout.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(push_timeout, "spawn_sync_in_kill_on_close_job", refuse)
+    with pytest.raises(RuntimeError, match="before child resume"):
+        push_timeout.run_bounded(["fixture"], cwd=None, env={}, timeout=0.5)
+    assert len(calls) == 1 and calls[0]["require_job"] is True
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(
+    sys.platform != "win32" or os.environ.get("AGENT_WORKTREES_BOUNDED_NATIVE") != "1",
+    reason="explicit Windows consoleless-parent integration",
+)
+def test_native_consoleless_capture_and_descendant_timeout(tmp_path):
+    from agent_procutil import (
+        no_window_kwargs,
+        spawn_sync_in_kill_on_close_job,
+        windowless_python,
+        windowless_python_env,
+    )
+
+    native = Path(__file__).with_name("native_bounded_process.py")
+    report_path = tmp_path / "report.json"
+    env = dict(os.environ)
+    env.update(windowless_python_env())
+    proc, job = spawn_sync_in_kill_on_close_job(
+        [
+            windowless_python(), str(native),
+            str(Path(__file__).resolve().parents[1] / "src"),
+            sys.executable, str(tmp_path), str(report_path),
+        ],
+        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        require_job=True, **no_window_kwargs(),
+    )
+    try:
+        assert proc.wait(timeout=25) == 0, (
+            report_path.read_text() if report_path.exists() else "native driver failed before reporting"
+        )
+        report = json.loads(report_path.read_text())
+        assert report == {
+            "cycles": 2, "timeout": True, "failure": "",
+            "breakaway_contained": True,
+            "new_visible_windows": 0, "foreground_transitions": 0, "observer_errors": [],
+        }
+    finally:
+        if job is not None:
+            job.close()

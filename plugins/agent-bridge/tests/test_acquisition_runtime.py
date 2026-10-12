@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agent_bridge import acquisition_authority, acquisition_runtime, session_manager as core
-from agent_bridge.acquisition_cli import acquire as client_acquire
+from agent_bridge.acquisition_cli import ACQUISITION_PROTOCOL_VERSION, acquire as client_acquire
 from agent_bridge.acquisition_contract import AcquisitionRefused, AcquisitionRequest
 from agent_bridge.acquisition_store import AcquisitionStore
 from agent_bridge.acquisition_executor import executor
@@ -47,6 +47,7 @@ def rig(tmp_db, session_manager, mock_acp_client, monkeypatch, tmp_path):
         "attachments": [],
         "acquisition_reservation": {
             "key": "reservation-a", "worktree": "worktree-a",
+            "task_id": "task-a", "attempt": 1,
             "worktree_ownership": "created", "conversation_retired": False,
             "state": "reserving",
         },
@@ -123,6 +124,203 @@ def rig(tmp_db, session_manager, mock_acp_client, monkeypatch, tmp_path):
         runtime=runtime, db=tmp_db, manager=session_manager, client=mock_acp_client,
         head=head, source=source, calls=calls, resolver=resolver,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("history", ["absent", "journal", "spawned"])
+async def test_missing_owner_preflight_precedes_mark_and_preserves_ambiguity(rig, monkeypatch, history):
+    if history == "journal":
+        await rig.runtime.acquire(req())
+    if history == "spawned":
+        rig.source["acquisition_reservation"]["state"] = "spawned"
+    marker = AsyncMock()
+    monkeypatch.setattr(acquisition_runtime, "mark_dispatch_acquisition", marker)
+    monkeypatch.setattr(
+        acquisition_runtime, "verify_worktree",
+        AsyncMock(side_effect=AcquisitionRefused("worktrees_unavailable", "owner missing")),
+    )
+    before = rig.db.execute_read("SELECT COUNT(*) AS n FROM acquisition_attempts")[0]["n"]
+    with pytest.raises(AcquisitionRefused) as error:
+        await rig.runtime.acquire(req(delivery_id="delivery-next"))
+    assert error.value.code == "worktrees_unavailable"
+    assert error.value.effect is None
+    marker.assert_not_awaited()
+    after = rig.db.execute_read("SELECT * FROM acquisition_attempts WHERE delivery_id='delivery-next'")
+    assert len(after) == 1
+    assert after[0]["state"] == "refused"
+    assert rig.db.execute_read("SELECT COUNT(*) AS n FROM acquisition_attempts")[0]["n"] == before + 1
+
+
+async def preflight_retry(rig, monkeypatch, mode="acp"):
+    first = req(mode=mode)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            acquisition_runtime, "verify_worktree",
+            AsyncMock(side_effect=AcquisitionRefused("worktrees_unavailable", "owner missing")),
+        )
+        with pytest.raises(AcquisitionRefused, match="owner missing"):
+            await rig.runtime.acquire(first)
+    original = {**rig.source["acquisition_reservation"], "state": "deferred"}
+    current = {
+        **original, "key": "reservation-b", "attempt": 2,
+        "state": "reserving", "worktree_ownership": "reused",
+    }
+    rig.source["acquisition_reservation"] = current
+    rig.source["acquisition_reservation_history"] = {
+        "version": 1, "reservations": [current, original],
+    }
+    return req(
+        mode=mode, allocation="reused", reservation_key="reservation-b", delivery_id="delivery-b",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["cli", "acp"])
+async def test_receipt_proven_preflight_retry_creates_first_conversation_once(rig, monkeypatch, mode):
+    retry = await preflight_retry(rig, monkeypatch, mode)
+    assert rig.db.execute_read(
+        "SELECT state,refusal_code FROM acquisition_attempts WHERE delivery_id='delivery-a'",
+    )[0]["refusal_code"] == "worktrees_unavailable"
+    created = await rig.runtime.acquire(retry)
+    assert created.acquired == "created"
+    assert created.native_session_id == rig.head["id"]
+    assert await rig.runtime.acquire(retry) == created
+    table = "live_messages" if mode == "cli" else "turns"
+    assert rig.db.execute_read(f"SELECT COUNT(*) AS n FROM {table}")[0]["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_every_preflight_retry_retains_a_bound_refusal_receipt(rig, monkeypatch):
+    second = await preflight_retry(rig, monkeypatch)
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            acquisition_runtime, "verify_worktree",
+            AsyncMock(side_effect=AcquisitionRefused("worktrees_unavailable", "owner missing")),
+        )
+        with pytest.raises(AcquisitionRefused):
+            await rig.runtime.acquire(second)
+    previous = {**rig.source["acquisition_reservation"], "state": "deferred"}
+    current = {**previous, "key": "reservation-c", "attempt": 3, "state": "reserving"}
+    root = rig.source["acquisition_reservation_history"]["reservations"][1]
+    rig.source["acquisition_reservation"] = current
+    rig.source["acquisition_reservation_history"] = {
+        "version": 1, "reservations": [current, previous, root],
+    }
+    result = await rig.runtime.acquire(req(
+        allocation="reused", reservation_key="reservation-c", delivery_id="delivery-c",
+    ))
+    assert result.acquired == "created"
+    assert len(rig.db.execute_read("SELECT * FROM acquisition_attempts WHERE state='refused'")) == 2
+    assert len(rig.db.execute_read("SELECT * FROM turns")) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("defect", [
+    "missing_receipt", "missing_history", "history_gap", "spawned", "wrong_task",
+    "digest", "launched", "native_handle", "not_created", "database_replaced",
+    "stale_current", "retired", "future_generation", "strict_continuation", "existing_head",
+    "active_predecessor",
+])
+async def test_initial_creation_refuses_unproven_or_historical_launch(rig, monkeypatch, defect):
+    retry = await preflight_retry(rig, monkeypatch)
+    history = rig.source["acquisition_reservation_history"]
+    previous = history["reservations"][1]
+    if defect in {"missing_receipt", "database_replaced"}:
+        rig.db.execute_write("DELETE FROM acquisition_attempts WHERE delivery_id='delivery-a'")
+    elif defect == "missing_history":
+        del rig.source["acquisition_reservation_history"]
+    elif defect == "history_gap":
+        history["reservations"].pop()
+    elif defect == "spawned":
+        previous["state"] = "spawned"
+    elif defect == "wrong_task":
+        previous["task_id"] = "other-task"
+    elif defect == "digest":
+        rig.db.execute_write(
+            "UPDATE acquisition_attempts SET request_digest='invalid' WHERE delivery_id='delivery-a'",
+        )
+    elif defect == "launched":
+        rig.db.execute_write(
+            "UPDATE acquisition_effects SET stage='launching' WHERE delivery_id='delivery-a'",
+        )
+    elif defect == "native_handle":
+        previous["session_handle"] = "native-old"
+    elif defect == "not_created":
+        previous["worktree_ownership"] = "targeted"
+    elif defect == "stale_current":
+        history["reservations"][0] = {**history["reservations"][0], "key": "other-key"}
+    elif defect == "retired":
+        previous["conversation_retired"] = True
+    elif defect == "future_generation":
+        rig.db.execute_write(
+            "UPDATE acquisition_effects SET data_json=json_set(data_json, '$._request.task_generation', 2) "
+            "WHERE delivery_id='delivery-a'",
+        )
+    elif defect == "strict_continuation":
+        retry = retry.model_copy(update={"intent": "continue"})
+    elif defect == "existing_head":
+        rig.head["id"] = "native-prior"
+    elif defect == "active_predecessor":
+        previous["state"] = "reserving"
+    with pytest.raises(AcquisitionRefused) as error:
+        await rig.runtime.acquire(retry)
+    assert error.value.code == ("authority_unknown" if defect == "existing_head" else "continuity_ambiguous")
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM turns")
+
+
+@pytest.mark.asyncio
+async def test_first_conversation_revalidates_authority_after_target_preparation(rig, monkeypatch):
+    retry = await preflight_retry(rig, monkeypatch)
+    prepare = rig.runtime._prepare_target
+    async def changed(*args):
+        target = await prepare(*args)
+        rig.source["acquisition_reservation_history"]["reservations"][1]["state"] = "spawned"
+        return target
+    monkeypatch.setattr(rig.runtime, "_prepare_target", changed)
+    with pytest.raises(AcquisitionRefused) as error:
+        await rig.runtime.acquire(retry)
+    assert error.value.code == "initial_creation_fence_changed"
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM acquisition_launch_gates")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocker", ["none", "unknown_head", "live_holder", "revoked"])
+async def test_explicit_retirement_recovery_still_checks_native_holder_and_owner(rig, monkeypatch, blocker):
+    rig.source["task"]["generation"] = 1
+    rig.source["acquisition_reservation"].update(
+        attempt=167, worktree_ownership="reused", conversation_retired=True,
+    )
+    request = req(allocation="reused", conversation_retired=True, task_generation=1)
+    if blocker == "unknown_head":
+        rig.head["id"] = "unknown-native"
+    elif blocker == "live_holder":
+        await rig.runtime.acquire(request)
+        return_request = request.model_copy(update={"delivery_id": "second-delivery"})
+        with pytest.raises(AcquisitionRefused) as error:
+            await rig.runtime.acquire(return_request)
+        assert error.value.code == "live_holder"
+        assert len(rig.db.execute_read("SELECT * FROM turns")) == 1
+        return
+    elif blocker == "revoked":
+        original = rig.runtime._prepare_target
+        async def revoke(*args):
+            result = await original(*args)
+            rig.source["acquisition_reservation"]["conversation_retired"] = False
+            return result
+        monkeypatch.setattr(rig.runtime, "_prepare_target", revoke)
+    if blocker == "none":
+        result = await rig.runtime.acquire(request)
+        assert result.acquired == "created"
+        assert len(rig.db.execute_read("SELECT * FROM turns")) == 1
+        return
+    with pytest.raises(AcquisitionRefused) as error:
+        await rig.runtime.acquire(request)
+    assert error.value.code == (
+        "authority_unknown" if blocker == "unknown_head" else "dispatch_fence_changed"
+    )
+    assert not rig.manager.list_sessions()
 
 
 @pytest.mark.asyncio
@@ -235,7 +433,7 @@ async def test_real_constructed_client_envelope_and_http_response(rig):
         assert refused.json()["detail"]["code"] == "cli_options_unsupported"
         assert refused.json()["detail"]["effect"] == "not_started"
     client = BridgeClient("http://unused", "unused", connect_grace=0)
-    client._daemon_proto = (30, 1)
+    client._daemon_proto = (ACQUISITION_PROTOCOL_VERSION, 1)
     sent = []
 
     def request(method, path, body, **kw):
@@ -246,9 +444,9 @@ async def test_real_constructed_client_envelope_and_http_response(rig):
     result = client_acquire(client, req(mode="cli"))
     assert result.native_session_id == response.json()["native_session_id"]
     assert sent[0][:2] == ("POST", "/api/v1/acquisitions")
-    assert sent[0][2]["protocol_version"] == 30
+    assert sent[0][2]["protocol_version"] == ACQUISITION_PROTOCOL_VERSION
     assert sent[0][2]["mode"] == "cli"
-    client._daemon_proto = (29, 1)
+    client._daemon_proto = (30, 1)
     with pytest.raises(BridgeClientError) as error:
         client_acquire(client, req(mode="cli"))
     assert error.value.status == 426

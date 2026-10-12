@@ -132,6 +132,9 @@ Implementation sequencing below is **agent-recommended**:
   amended core intent before provider/service changes.
 - [ ] Implement bounded template/adopter/live/quota planning and version-bound
   apply receipts with no implicit provisioning/cleanup.
+  The initial standalone offline JSON planner produces preservation-safe
+  config suggestions, aggregate capacity proposals and revision-bound digests;
+  apply receipts, YAML/default harness integration and placement remain open.
 - [ ] Prove empty, existing-custom, no-quota, one-host and stale/partial states.
 - [ ] Supply harness default-template and paired-config integration downstream;
   keep the portable runtime name-free and the private capacity adapter private.
@@ -299,3 +302,52 @@ not to the vision. This effort does not acquire or migrate live capacity.
 - Native response #6034 remains held on confirmed partial-publication recovery
   #6038. No lease was hand-edited and the final test-only follow-up stays local;
   this does not transfer publisher ownership from the existing #5835 campaign.
+
+### 2026-10-11 - Safe setup gate and first offline planner
+- #6119 merged after actual current-head approval and successful CI. Its
+  review-request workflow hit the shared account's API rate limit; waited for
+  reset and reran that failed workflow rather than bypassing it.
+- Established the standalone `fleet-manager` package and release/test registry
+  entry. The first CLI accepts explicit non-secret JSON inputs and preserves
+  adopter roles/extensions while proposing aggregate quota/budget-bound capacity.
+- The CLI performs no provider, server, credential or cleanup operations.
+  Review-required output is not fleet readiness; YAML/harness default integration,
+  detailed role placement, installer/uninstaller and apply receipts remain open.
+- Installed contained-package tests cover existing custom state, stale/unknown
+  quota, unadmitted resources, one-host budget, future unsupported roles,
+  duplicate/oversized inputs and plan identity/freshness. An actual installed CLI
+  process proves no input/config writes or implicit hosting.
+
+### 2026-10-11 - Planner review bounds and portability
+- Separated bounded plan output from individual input limits. Near-limit
+  preserved config, the union of custom/recommended roles and nested extensions
+  now fit the larger explicitly bounded output envelope. Hashing, saved-plan
+  verification and CLI serialization share its output-specific diagnostics.
+- The standalone preparation fixture uses the runner's native interpreter
+  layout; file errors retain input-kind diagnostics without an unreachable
+  generic I/O fallback.
+- Installed contained planner selection: 40 passed, including real CLI
+  subprocesses. Runner/CI-selector contracts: 40 passed, one platform skip.
+  These are offline contracts, not provider deployment, clean-room service
+  hosting or live capacity receipts. #6133 still requires current review and CI;
+  none of the fleet activation or lifecycle gates are completed by this fix.
+
+### 2026-10-11 - Recorded provenance revalidation refusal
+- The next review identified that explicit stale/different recorded template
+  provenance remained only a suggestion. Added a plan blocker so saved-plan
+  verification rejects that unresolved discrepancy while retaining the original
+  provenance and custom roles. Optional missing provenance remains supported
+  without inventing a previous template identity.
+- Installed contained planner selection: 43 passed, including stale revision,
+  different template and optional absent-provenance regressions. Current review
+  and CI still gate #6133; this correction is not fleet activation.
+
+### 2026-10-11 - CLI syntax outcome separation
+- A subsequent current-head review identified argparse's default exit 2 for
+  invalid invocation syntax, colliding with valid blocked-plan output. Parser
+  failures now return the documented invalid-input code 1; help/version retain
+  exit 0. Eight actual installed CLI subprocess regressions cover missing and
+  unknown arguments, invalid integers, help/version and subcommand help.
+- Installed contained planner selection: 51 passed. Shared review-request
+  workflow import failure is tracked in #6191; no current workflow failure or
+  review finding is bypassed to land the planner.

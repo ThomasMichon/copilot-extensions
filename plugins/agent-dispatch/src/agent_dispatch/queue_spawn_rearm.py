@@ -20,6 +20,85 @@ from .queue_records import SpawnState, Status, TaskError
 class SpawnRearmMixin:
     """``rearm_spawn`` for :class:`TaskQueue`."""
 
+    def authorize_fresh_acquisition(
+        self, task_id: str, *, reservation_key: str, worktree: str,
+        expected_generation: int, permitted: bool = False,
+        confirmed_no_live_holder: bool = False, reason: str,
+    ) -> dict[str, object]:
+        """Authorize a new conversation, never certify historical launch absence."""
+        if not permitted or not confirmed_no_live_holder or not reason.strip():
+            raise TaskError("fresh acquisition requires permission, verified no-live-holder attestation and reason")
+        if type(expected_generation) is not int or expected_generation < 0:
+            raise TaskError("fresh acquisition requires an exact non-negative task generation")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            rows = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE task_id=? ORDER BY attempt DESC",
+                (task_id,),
+            ).fetchall()
+            if (
+                task is None or task.status != Status.QUEUED or task.owner is not None
+                or task.hold_reason is not None or task.generation != expected_generation
+                or task.owner_session_id or not rows or task.exclusive_key is None
+            ):
+                raise TaskError("fresh acquisition task generation/ownership fence changed")
+            latest = rows[0]
+            latest_allocation = conn.execute(
+                "SELECT key FROM spawn_reservations WHERE exclusive_key=? AND worktree IS NOT NULL "
+                "ORDER BY reserved_at DESC LIMIT 1", (task.exclusive_key,),
+            ).fetchone()
+            if (
+                latest["key"] != reservation_key or latest["worktree"] != worktree
+                or latest_allocation is None or latest_allocation["key"] != reservation_key
+                or latest["state"] not in {SpawnState.DEFERRED, SpawnState.FAILED}
+                or latest["session_handle"] or latest["release_requested"]
+                or latest["conversation_retired"]
+                or latest["worktree_ownership"] not in {"created", "reused"}
+                or latest["conclusion_state"] == "pending"
+                or any(row["state"] in SpawnState.ACTIVE for row in rows)
+            ):
+                raise TaskError("fresh acquisition reservation fence changed or remains active")
+            foreign = conn.execute(
+                "SELECT key FROM spawn_reservations WHERE (worktree=? OR inherited_worktree=?) AND task_id!=? "
+                "AND state IN ('reserving','spawned','cold','releasing') LIMIT 1",
+                (worktree, worktree, task_id),
+            ).fetchone()
+            if foreign:
+                raise TaskError("another task has an active reservation on the worktree")
+            exclusive_owner = conn.execute(
+                "SELECT key FROM spawn_reservations WHERE exclusive_key=? "
+                "AND state IN ('reserving','spawned','cold','releasing') "
+                "AND (exclusive_released=0 OR task_id=?) LIMIT 1",
+                (task.exclusive_key, task_id),
+            ).fetchone()
+            if exclusive_owner:
+                raise TaskError("exclusive-key spawn authority is still active")
+            timestamp = self._now(None)
+            conn.execute(
+                "UPDATE tasks SET generation=generation+1, updated_at=? WHERE id=?",
+                (timestamp, task_id),
+            )
+            conn.execute(
+                "UPDATE spawn_reservations SET conversation_retired=1, updated_at=? WHERE key=?",
+                (timestamp, reservation_key),
+            )
+            self._audit(
+                conn, task_id, ts=timestamp, from_status=Status.QUEUED,
+                to_status=Status.QUEUED, worker="operator",
+                note=(
+                    f"fresh acquisition authorized: reservation={reservation_key}; "
+                    f"worktree={worktree}; generation={expected_generation}->{expected_generation + 1}; "
+                    f"no-live-holder attested; history preserved; reason={reason.strip()}"
+                ),
+            )
+            conn.commit()
+        return {
+            "task_id": task_id, "reservation_key": reservation_key, "worktree": worktree,
+            "generation": expected_generation + 1, "conversation_retired": True,
+            "authorization": "operator-fresh", "launched": False,
+        }
+
     def rearm_spawn(
         self,
         task_id: str,

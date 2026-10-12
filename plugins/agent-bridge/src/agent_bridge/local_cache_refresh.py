@@ -495,7 +495,9 @@ def _resolve_same_cell_agent_worktrees_path() -> str | None:
     try:
         from . import _peer_launch
 
-        explicit_context = os.environ.get(_peer_launch.CONTEXT_ENV, "")
+        from .session_lifecycle_cli import _agent_bridge_installation_context
+
+        explicit_context = _agent_bridge_installation_context()
         if not explicit_context:
             return None
         from .session_lifecycle_cli import _agent_bridge_owner_root
@@ -531,12 +533,11 @@ def _resolve_agent_worktrees_path() -> tuple[str | None, bool]:
 
     Returns ``(path, must_skip_render)``. ``session_lifecycle_cli.
     _agent_worktrees_launch_prefix()`` already does this same-cell
-    resolution for agent-bridge's own handoff-check CLI: with no
-    ``COPILOT_EXTENSIONS_CONTEXT`` receipt (a non-namespaced install) it
-    degrades to the exact same ambient ``shutil.which("agent-worktrees")``
-    lookup as a single-element list -- the one shape compatible with
-    ``--agent-worktrees-path``'s own single-string contract, returned
-    directly as ``(path, False)``. With a receipt present, it instead
+    resolution for agent-bridge's own handoff-check CLI. Its legacy command
+    compatibility path returns a single-element list compatible with
+    ``--agent-worktrees-path``. A legacy installed-runtime prefix cannot
+    be represented by that argument, so it retains optional renderer lookup.
+    With an explicit or service-derived cell receipt, it instead
     returns a multi-token, receipt-revalidating launch prefix that same
     CLI argument was never designed to carry; ``_resolve_same_cell_
     agent_worktrees_path()`` resolves the equivalent single path directly
@@ -551,14 +552,19 @@ def _resolve_agent_worktrees_path() -> tuple[str | None, bool]:
     evidence to discard in the first place."""
     try:
         from . import _peer_launch
-        from .session_lifecycle_cli import _agent_worktrees_launch_prefix
+        from .session_lifecycle_cli import (
+            _agent_bridge_installation_context,
+            _agent_worktrees_launch_prefix,
+        )
 
         prefix = _agent_worktrees_launch_prefix()
+    except _peer_launch.ContextRefused:
+        return None, True
     except Exception:
         return None, False
     if isinstance(prefix, list) and len(prefix) == 1 and prefix[0]:
         return prefix[0], False
-    if os.environ.get(_peer_launch.CONTEXT_ENV, ""):
+    if _agent_bridge_installation_context():
         same_cell = _resolve_same_cell_agent_worktrees_path()
         if same_cell:
             return same_cell, False

@@ -1,0 +1,338 @@
+# agent-dispatch: standalone (non-plugin) package + container image
+
+- **Slug:** `agent-dispatch-standalone-container`
+- **Repo:** copilot-extensions
+- **Branch(es):** independent per-slice PRs against `dev`
+- **Created:** 2026-10-11
+- **Status:** Active; Phase 1 + Phase 2 landed
+- **Vision:** [machine-fleet](../../../visions/machine-fleet/README.md):
+  `standalone-service-installation`, role deployments and container managers
+  (role instances may run directly or in containers on explicitly admitted
+  hosts); extends the `out-of-plugin-delivery` behavior the
+  [installer vision](../../../visions/installer/README.md) already names for
+  `worktree-manager`.
+- **Umbrella issue:** [#6177](https://github.com/ThomasMichon/copilot-extensions/issues/6177)
+- **Sub-issues:** None yet
+
+## Guiding Intent
+
+Give `agent-dispatch`'s coordinator daemon the same out-of-plugin distribution
+shape `worktree-manager` already proves for `agent-worktrees`: installable and
+runnable with **zero Copilot/marketplace involvement** (no `copilot plugin
+install`, no session hooks), plus a reusable container image so the
+coordinator can run headless on a fleet/CDE host as a first-class, reusable
+daemon service. This is the first of what should become a repeatable pattern
+for other agent-* daemon services; it deliberately starts with exactly one
+service (agent-dispatch) rather than generalizing a framework up front.
+
+This is explicitly **not** a rewrite of agent-dispatch's coordinator lifecycle.
+`plugins/agent-dispatch/scripts/install.{sh,ps1}` already implements a mature,
+well-tested versioned-venv + binstub + service-unit installer (systemd user
+unit on Linux, Scheduled Task on Windows, graceful zdd cutover, WSL
+coordinator-vs-client detection, embody-supervisor). This effort adds two
+things beside it, reusing its runtime mechanics rather than duplicating them:
+
+1. A **Copilot-independent fetch/bootstrap entrypoint** (`bootstrap.sh` /
+   `bootstrap.ps1`, mirroring `worktree-manager/bootstrap.{sh,ps1}` byte-for-
+   byte in shape) so a bare machine with no Copilot CLI and no marketplace
+   registration can still install and run the coordinator.
+2. A **container image** that runs the coordinator as PID 1
+   (`python -m agent_dispatch serve`), reading the exact same environment
+   variables the systemd `EnvironmentFile=` already documents
+   (`AGENT_DISPATCH_HOST`/`PORT`/`DB`/`TOKEN`/`CONTROL_TOKEN`/
+   `ENFORCE_REGISTERED_REPOS`) -- no systemd, no Scheduled Task, no supervisor
+   unit inside the container; Docker (or the fleet's chosen container manager)
+   owns restart/health instead.
+
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Campaign owner | Planning, package/container packaging, validation, PR stewardship | Managed upstream worktree |
+
+## Coordination
+
+- **Topology:** Independent per-slice PRs against `dev`.
+- **Host (owns PRs):** Campaign owner.
+- **Delegates:** None assigned; do not give two actors the same slice.
+- **Handoff:** Resume the first unresolved Plan item from this canonical README.
+- **Adjacent ownership:** [agent-index standalone service](../agent-index-standalone-service/README.md)
+  (#5768) owns the analogous standalone-package + version-slot-installer pattern
+  for agent-index, and its own Phase 3 has an **open, undecided** "generic
+  Dockerfile" item. This effort does not block on or preempt that decision --
+  it proves the pattern independently on agent-dispatch (a materially simpler
+  service: one coordinator process, no embedding engine, no durable corpus,
+  no model cache) and either package can later adopt whichever shared
+  convention proves out first, without either becoming a hard dependency of
+  the other.
+  [machine-fleet-routing-foundation](../machine-fleet-routing-foundation/README.md)
+  (#5789) separately owns the Gateway-routed controller/connector runtime and
+  typed service adapters (`vault-v1`, `index-v1`); this effort supplies a
+  deployable artifact (agent-dispatch's own container image) that a future
+  fleet role could place, but does not implement fleet routing, a connector,
+  or a credential adapter itself.
+- **Downstream boundary:** Actual fleet placement, CDE/container-host
+  admission, and any private deployment's specific credential/network wiring
+  are downstream, adopter-owned concerns (see `visions/machine-fleet`'s
+  "Role deployments and container managers" -- "Adopter-specific provisioning
+  remains outside the portable fleet core"). This effort ships a reusable
+  package and image; it does not deploy either anywhere.
+
+## Context
+
+`tools/standalone_consumers.py` currently names the only two packages that
+participate in standalone repository releases: `worktree-manager` and
+`agent-index-service`. No existing effort or package addresses agent-dispatch.
+
+`worktree-manager/bootstrap.sh` (and its `.ps1` twin) is the proven template:
+it auto-provisions `uv` (user-local, no admin), falls back to a GitHub tarball
+fetch when `git` is unavailable, version-installs the fetched payload via the
+package's own `self-install --apply`, and execs the freshly-installed CLI --
+all without any Copilot plugin or marketplace step. `worktree-manager`'s
+`pyproject.toml` also shows the established convention for a standalone
+package's sibling-lib dependencies (`[tool.uv.sources]` editable `path =
+"../libs/..."` entries on `dev`, materialized to real local copies only for a
+`main`-branch release build via `tools/materialize_main.py`).
+
+`plugins/agent-dispatch/scripts/install.sh` already fully implements the
+coordinator's installed lifecycle (versioned venv activation/gc, binstub,
+systemd user unit with graceful zdd cutover, WSL detection, label-gated embody
+supervisor). None of that needs to be reinvented; a standalone, non-plugin
+package should installer-wrap the *same* mechanics (or import and drive the
+coordinator module directly), not fork them. A container image needs even
+less: no systemd/Scheduled Task machinery at all, since the container runtime
+itself supplies process supervision -- the image installs the venv, then execs
+`python -m agent_dispatch serve` as PID 1, reading the same documented
+`AGENT_DISPATCH_*` environment variables the systemd `EnvironmentFile`
+otherwise supplies.
+
+Scope was deliberately narrowed to agent-dispatch only (not agent-worktrees)
+after investigation found agent-worktrees' own "daemon" pieces
+(`mux_daemon.py`, the resident status-monitor) are primarily about managing
+*local* terminal panes and worktree state on an operator's own dev box, not
+an obviously fleet-reusable headless service; its containerizable boundary
+needs separate design and is out of scope here.
+
+## Request
+
+Operator, paraphrased (2026-10-10 session): build dedicated, reusable
+containerizable installers for agent-* daemon services, starting with
+agent-dispatch and agent-worktrees. After investigation surfaced that
+agent-worktrees' containerizable boundary is unclear while agent-dispatch
+already has a clean, headless, systemd-unit-based coordinator service, the
+operator confirmed: start with agent-dispatch only, and write this effort doc
+for review before any implementation.
+
+## Plan
+
+### Phase 0 -- Drafting and review
+- [x] Capture the literal request, confirmed scope (agent-dispatch only, with
+  agent-worktrees deliberately deferred), and existing-pattern survey
+  (`worktree-manager`, `agent-index-standalone-service`, `tools/
+  standalone_consumers.py`).
+- [x] Open the umbrella issue (#6177).
+- [ ] Review this draft with the operator before implementation starts.
+
+### Phase 1 -- Standalone (non-plugin) package
+- [x] Decide the package name/location: new top-level `agent-dispatch-service/`
+  (mirroring `agent-index-service`'s `<name>-service` naming, since both are
+  headless daemon services, not TUI/manager tools like `worktree-manager`).
+  Registered in `tools/standalone_consumers.py`.
+- [x] Build `bootstrap.sh`/`bootstrap.ps1` mirroring `worktree-manager`'s fetch
+  shape (git-or-tarball fetch, no Copilot/marketplace dependency) -- simpler
+  than worktree-manager's own Python `self-install --apply` step, since
+  agent-dispatch's lifecycle is already a mature bash/PowerShell installer:
+  the bootstrap scripts fetch the repo, then `exec` straight into the
+  existing `plugins/agent-dispatch/scripts/install.{sh,ps1}`.
+- [x] Reuse (not fork) the existing coordinator lifecycle from
+  `plugins/agent-dispatch`: `agent-dispatch-service` depends on the
+  `agent-dispatch` package itself (`[tool.uv.sources]` editable path on
+  `dev`, same convention as every other standalone/plugin pointer) and the
+  bootstrap scripts exec its unmodified `install.{sh,ps1}` directly -- zero
+  lines of installer logic duplicated.
+- [x] Preserve exact runtime compatibility: since the standalone path calls
+  the identical `install.sh`/`install.ps1`, the `~/.agent-dispatch` DB/config
+  layout and `AGENT_DISPATCH_*` environment contract are unchanged by
+  construction -- there is no second implementation to drift.
+
+### Phase 2 -- Container image
+- [x] Add a `Dockerfile` (in `agent-dispatch-service/`, built from the
+  repository root so it can reach the handful of shared `libs/*` its
+  dependency chain needs in their real relative positions) that builds the
+  coordinator's venv from the same sources the standalone package installs,
+  with no systemd/Scheduled Task layer -- the container entrypoint execs
+  `python -m agent_dispatch serve` directly, with self-update disabled
+  (`AGENT_DISPATCH_SELF_UPDATE=0` -- an image rebuild+redeploy is how this
+  service updates in a container, not an in-place self-update).
+- [x] Document the exact environment-variable contract the image reads
+  (`AGENT_DISPATCH_HOST`/`PORT`/`DB`/`TOKEN`/`CONTROL_TOKEN`/
+  `ENFORCE_REGISTERED_REPOS`), a volume mount for the durable task DB, and
+  expected restart/health behavior left to the container runtime. The image
+  deliberately does **not** default `AGENT_DISPATCH_HOST=0.0.0.0` -- the
+  coordinator itself refuses an unauthenticated LAN bind, and reaching it
+  from another container requires explicitly pairing `AGENT_DISPATCH_HOST=
+  0.0.0.0` with `AGENT_DISPATCH_TOKEN`, documented in the package README.
+- [x] Prove a clean build + run + restart-persistence cycle on a throwaway
+  container host (mirroring the validation rigor the parallel
+  `harness-gateway-fleet` dotfiles-private effort already applied to its own
+  Gateway container: build, run, push/read persistence across `docker
+  restart`, teardown). Done for real locally: built the image, ran it with
+  an explicit bearer token, created a real task via the `agent-dispatch` CLI
+  (`docker exec`), `docker restart`ed the container, and confirmed the same
+  task was still present afterward -- the task database under the named
+  volume survives a container recreate. Also found and fixed a real safety
+  gap live: the coordinator's own guard correctly refused to start when the
+  image's first draft hardcoded `AGENT_DISPATCH_HOST=0.0.0.0` with no token
+  ("the task-control API must not be exposed on the LAN unauthenticated") --
+  removed that unsafe default rather than working around the guard.
+
+### Phase 3 -- Validation and documentation
+- [ ] Prove plugin-delivered and standalone installations are interoperable:
+  a coordinator installed one way is indistinguishable (DB format, wire
+  protocol, CLI) from one installed the other way.
+- [x] Document the reusable pattern (package layout, bootstrap shape,
+  container conventions) in `agent-dispatch-service/README.md` so a later
+  agent-worktrees or other agent-* containerization effort can follow it
+  without rediscovering these decisions (repo-root build context for
+  reaching shared `libs/*`, `--no-editable` to keep the final image
+  self-contained, the safe-default-bind + explicit-opt-in-with-token
+  pattern, and the public-PyPI-default-with-build-arg-override pattern for
+  managed-network package-index policy).
+- [ ] Mark Done only after every Plan and Validation Plan item is resolved or
+  explicitly transferred to a named follow-on objective.
+
+## Validation Plan
+
+- [ ] Standalone bootstrap: fresh-machine install (no Copilot, no marketplace,
+  no `git`/`uv` preinstalled) succeeds via `bootstrap.sh`/`bootstrap.ps1`;
+  re-running is idempotent/version-gated like `worktree-manager`'s.
+- [x] Container image: clean build, run, and a real `docker restart` with DB
+  persistence verified (not merely "the process starts") -- done locally
+  2026-10-11 (see Phase 2 above and the Journal entry below for the exact
+  commands and outcomes).
+- [ ] Plugin-delivered and standalone coordinators interoperate: same DB
+  schema/location contract, same CLI/API behavior, no silent divergence.
+- [ ] Existing plugin-delivered install/update/status/start/stop/uninstall
+  flows remain unaffected; this effort adds a parallel path, not a
+  replacement.
+- [ ] Touched-code lint, relevant suites, changefiles, documentation-impact
+  review, actual automated review and required CI before each merge.
+
+## Proposal
+
+_Pending._
+
+## Journal
+
+### 2026-10-11 -- Kickoff
+- Captured the operator's request and the investigation that narrowed scope
+  to agent-dispatch only (confirmed via `ask_user`), deferring agent-worktrees
+  pending clearer design of its own containerizable boundary.
+- Surveyed existing precedent: `worktree-manager` (standalone twin of
+  agent-worktrees, with `bootstrap.{sh,ps1}`), the actively in-flight
+  `agent-index-standalone-service` effort (#5768, same-day commits; its own
+  Phase 3 Dockerfile decision is open and not blocking this effort), and
+  `tools/standalone_consumers.py` (the authoritative registry this effort
+  will extend). Confirmed via GitHub issue/PR search that no existing effort
+  or issue covers agent-dispatch standalone/container packaging.
+- Opened umbrella issue #6177. No code changed in this slice; Phase 1
+  implementation has not started pending review of this draft.
+
+### 2026-10-11 -- Phase 1: standalone package landed
+- Operator reviewed and approved the draft (merged via #6180); proceeded with
+  implementation in the same session.
+- Also found a third sibling pattern landed since the draft: `fleet-manager`
+  (PR #6133, merged), confirming top-level-directory + `STANDALONE_CONSUMERS`
+  is the repo's settled convention for a non-plugin distribution, not just a
+  worktree-manager/agent-index-service pair.
+- Built `agent-dispatch-service/`: `bootstrap.sh`/`bootstrap.ps1` (fetch +
+  exec straight into the existing, unmodified `plugins/agent-dispatch`
+  installer -- no new install logic), a thin `pyproject.toml` depending on
+  `agent-dispatch` via the standard editable `[tool.uv.sources]` path
+  pointer, a marker package, and tests (bootstrap script shape/executable-bit
+  guards + a package import smoke test). Registered in
+  `tools/standalone_consumers.py` and wired a dedicated
+  `agent-dispatch-service (out-of-plugin)` CI job mirroring
+  `worktree-manager`'s, added to the required `PR gate` job's `needs:` list.
+- Validated locally end-to-end before opening a PR: `uv run --extra dev
+  pytest -q` (the exact CI invocation) passes 5/5; `python tools/run-
+  standalone-tests.py agent-dispatch-service --prepare` (the registered-
+  component test harness) also passes, confirming the nested
+  `[tool.uv.sources]` path resolution (agent-dispatch-service ->
+  `../plugins/agent-dispatch` -> its own further `../../libs/*` pointers)
+  works through both `uv pip install` and `uv run` invocation shapes; `ruff
+  check --select F,E9` (the exact CI selector) and
+  `check-version-consistency.py`/`check-changefile-presence.py` are clean.
+- Phase 2 (container image) and Phase 3 (validation/documentation) remain
+  open; not started in this slice.
+- Hit and fixed a real CI gap after opening the PR: `check-changefile-
+  presence.py` (which diffs the PR's actual base...head commits, not local
+  uncommitted state) correctly failed on a missing changefile for the new
+  `agent-dispatch-service` package; added one and pushed the fix. PR #6245
+  merged after all checks (including the new out-of-plugin job) passed.
+
+### 2026-10-11 -- Phase 2: container image landed
+- Operator said "proceed"; continued directly into Phase 2 per the reviewed
+  effort doc rather than re-confirming scope.
+- Built `agent-dispatch-service/Dockerfile` (+ a repo-root `.dockerignore`):
+  a two-stage build, repo-root context (to reach `plugins/agent-dispatch`
+  and its `libs/*` dependency chain in their real relative positions),
+  `uv pip install --no-editable` so the final stage is self-contained
+  without needing to carry `/src` along, non-root `dispatch` user, a
+  `VOLUME` for the durable task DB/rendezvous file, and
+  `ENTRYPOINT ["python", "-m", "agent_dispatch", "serve"]` directly --
+  no systemd/Scheduled Task layer, matching the effort's original intent.
+- Hit and fixed two real bugs live during local validation (this machine has
+  Docker Desktop with a real Linux engine):
+  1. **Editable-install trap**: `agent-dispatch`'s `[tool.uv.sources]` marks
+     it editable, so a plain `uv pip install <path>` left the final image's
+     venv pointing back at `/src/plugins/agent-dispatch/src` -- which only
+     exists in the discarded `builder` stage, so the shipped image failed
+     at startup with `No module named agent_dispatch`. Fixed with
+     `uv pip install --no-editable`, which bakes a real, self-contained
+     install into the final stage instead of carrying `/src` along.
+  2. **Unsafe default bind**: the first draft defaulted
+     `AGENT_DISPATCH_HOST=0.0.0.0` in the image. The coordinator's own
+     startup guard correctly refused to run ("the task-control API must not
+     be exposed on the LAN unauthenticated"), exiting with code 2. Removed
+     that default rather than working around the guard -- the image now
+     keeps the coordinator's own safe loopback default, and reaching it from
+     another container requires explicitly pairing
+     `AGENT_DISPATCH_HOST=0.0.0.0` with `AGENT_DISPATCH_TOKEN`, documented
+     in the README.
+- Also hit a real environment constraint, not a Dockerfile bug: this is a
+  Microsoft-managed developer machine with Central Feed Services PyPI
+  enforcement, so the container's own (unconfigured) network egress to
+  `files.pythonhosted.org` was network-blocked (`SSLV3_ALERT_HANDSHAKE_
+  FAILURE`) -- the exact symptom the `working-on-managed-machines` skill
+  documents for uv on an enforced box. Per that skill: never bake a
+  Microsoft-internal feed URL into this **public** repository's committed
+  default (external consumers couldn't reach it, and it doesn't belong in a
+  personal OSS repo); instead added a `PYTHON_INDEX_URL` build `ARG`
+  defaulting to public PyPI (the correct, portable committed default) and
+  overrode it only for local validation via `--build-arg`, never committed.
+- Full local validation performed for real (not simulated): clean image
+  build; ran the container with an explicit bearer token and
+  `AGENT_DISPATCH_HOST=0.0.0.0`/`AGENT_DISPATCH_PORT` pinned; confirmed
+  `agent-dispatch health` (via `docker exec`) reports a real running
+  coordinator (PID 1, correct bind/port, active slot); created a real task
+  via `agent-dispatch create` and captured its ID; `docker restart`ed the
+  container; confirmed via `agent-dispatch show <id>` that the identical
+  task was still present with its original `created_at`/`id` -- the task
+  database under the named volume survives a container recreate, the same
+  persistence guarantee this effort's parent `harness-gateway-fleet`
+  dotfiles-private effort already proved for its own Gateway container.
+  Test container, volume, and image removed after validation.
+- Added `tests/test_dockerfile_shape.py` (static content assertions -- no
+  Docker dependency in ordinary CI): entrypoint shape, no hardcoded
+  unauthenticated `0.0.0.0` default, self-update disabled, `--no-editable`
+  present, public-PyPI-default build arg. The real build+run+restart
+  validation above was performed locally, not wired into per-PR CI (Docker
+  is not otherwise used in this repo's CI; documented as a manually
+  validated gap, the same honest-gap convention the dotfiles-private
+  `agent-index-container` README already uses for its own untested tiers).
+- Documented the full container usage contract (build command, run
+  examples, the safe-bind/token-pairing requirement, the dynamic-port
+  default, the package-index build-arg override) in
+  `agent-dispatch-service/README.md`.
+

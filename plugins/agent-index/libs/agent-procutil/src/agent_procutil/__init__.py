@@ -222,7 +222,9 @@ def _log_job_failure(operation: str) -> None:
         log.debug("%s failed with Windows error %d; child job binding skipped", operation, error)
 
 
-def _assign_suspended_to_kill_on_close_job(pid: int) -> JobHandle | None:
+def _assign_suspended_to_kill_on_close_job(
+    pid: int, *, allow_breakaway: bool = True,
+) -> JobHandle | None:
     """Assign a newly-created suspended ``pid`` to this owner's kill-on-close Job.
 
     The returned :class:`JobHandle` owns the Job Object handle. Hold it for the
@@ -249,9 +251,9 @@ def _assign_suspended_to_kill_on_close_job(pid: int) -> JobHandle | None:
             return None
 
         limit_info = _build_job_extended_limit_info()()
-        limit_info.BasicLimitInformation.LimitFlags = (
-            _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | _JOB_OBJECT_LIMIT_BREAKAWAY_OK
-        )
+        limit_info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if allow_breakaway:
+            limit_info.BasicLimitInformation.LimitFlags |= _JOB_OBJECT_LIMIT_BREAKAWAY_OK
         if not kernel32.SetInformationJobObject(
             job,
             _JobObjectExtendedLimitInformation,
@@ -379,6 +381,7 @@ def spawn_sync_in_kill_on_close_job(
     argv: list[str],
     *,
     require_job: bool = False,
+    allow_breakaway: bool = True,
     **kwargs: Any,
 ) -> tuple[subprocess.Popen, JobHandle | None]:
     """Synchronous (``subprocess.Popen``) counterpart to
@@ -402,6 +405,9 @@ def spawn_sync_in_kill_on_close_job(
 
     With ``require_job=True``, failed Windows Job assignment kills the still
     suspended child before it can launch descendants and raises explicitly.
+    ``allow_breakaway=False`` additionally prevents descendants escaping this Job.
+    The default remains permissive for callers whose service children must
+    deliberately outlive the command.
     Otherwise, if job creation or assignment fails, the child still runs (resumed) and is
     returned with ``job_handle=None`` so existing cleanup paths remain in
     charge -- containment is a best-effort hardening layer, not a hard
@@ -419,7 +425,10 @@ def spawn_sync_in_kill_on_close_job(
     job_handle: JobHandle | None = None
     try:
         pid = process.pid
-        job_handle = _assign_suspended_to_kill_on_close_job(pid)
+        if allow_breakaway:
+            job_handle = _assign_suspended_to_kill_on_close_job(pid)
+        else:
+            job_handle = _assign_suspended_to_kill_on_close_job(pid, allow_breakaway=False)
         if job_handle is None and require_job:
             process.kill()
             process.wait(timeout=5)

@@ -699,22 +699,15 @@ _versioned_activate_inner() {
     if ! health_out="$(PYTHONPATH= "$VENV_PYTHON" -I -c 'import agent_worktrees.__main__ as m; m._load_full_command_surface()' 2>&1)"; then
         err "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         [[ -n "$health_out" ]] && err "  $health_out"
-        # This slot may already carry a completion marker from an OLDER,
-        # less-strict installer run (dotfiles #7561): _test_slot_already_complete
-        # trusts a valid marker + matching payload hash and skips reinstalling,
-        # so without this the same stale-but-broken slot would keep failing this
-        # gate forever on every future run. Remove just the marker file (never
-        # the slot's other files -- safe even if this happens to be the
-        # CURRENTLY ACTIVE slot, since a JSON marker is never held open by a
-        # running interpreter the way its own module files can be) so a future
-        # run stops trusting it and either rebuilds it fresh or falls back to
-        # last-known-good (resolve_python's tiered fallback in
-        # versioned_runtime.py already treats a markerless slot as unhealthy).
-        # Filename matches versioned_runtime.py's own COMPLETE_MARKER constant.
+        # Quarantine readiness but retain immutable completion evidence.
+        # Resolution rejects the markerless slot; admission refuses rebuilding.
         local stale_marker="$VENV_DIR/.install-complete.json"
         if [[ -f "$stale_marker" ]]; then
-            rm -f "$stale_marker"
-            ok "Invalidated stale completion marker (versions/$SRC_VERSION)"
+            if ! mv -f "$stale_marker" "$VENV_DIR/.install-complete.failed.json"; then
+                err "Could not quarantine completion marker -- refusing activation"
+                return 1
+            fi
+            ok "Quarantined completion marker (versions/$SRC_VERSION); repair requires a distinct generation"
         fi
         return 1
     fi
@@ -1809,6 +1802,12 @@ deploy_venv() {
     if _test_slot_already_complete; then
         return 2
     fi
+    if [[ "$VERSIONED_RUNTIME" == 1 && "$SRC_VERSION" != dev &&
+          ( -e "$VENV_DIR/.install-complete.json" ||
+            -e "$VENV_DIR/.install-complete.failed.json" ) ]]; then
+        err "Completed runtime slot $SRC_VERSION cannot be rebuilt in place. Publish a new version or use the owned dev-slot workflow; repair requires a distinct healthy generation."
+        return 1
+    fi
     local slot_clean=0
     _versioned_slot_clean && slot_clean=1
     if [[ "$slot_clean" -ne 1 ]]; then
@@ -1997,7 +1996,7 @@ deploy_wrappers() {
     deploy_runtime_resolvers || return 1
 
     # Deploy hook scripts, including the consolidated pre/post client and its fallback modules.
-    for script in session-conduct.ps1 session-conduct.sh session-machine.ps1 session-machine.sh bootstrap-check.ps1 bootstrap-check.sh bootstrap-killswitch-guard.ps1 bootstrap-killswitch-guard.sh project-hooks.ps1 project-hooks.sh register-nudge.ps1 register-nudge.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh provision-check.ps1 provision-check.sh statelessness_guard.py cross_repo_guard.py anchor_shell_parser.py anchor_write_guard.py pr_supersede_guard.py registry_root.py nudge_status.py bind_nudge.py hook_client.py terminal_probe.py bind-nudge.sh bind-nudge.ps1; do
+    for script in session-conduct.ps1 session-conduct.sh session-machine.ps1 session-machine.sh bootstrap-check.ps1 bootstrap-check.sh bootstrap-killswitch-guard.ps1 bootstrap-killswitch-guard.sh project-hooks.ps1 project-hooks.sh register-nudge.ps1 register-nudge.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh provision-check.ps1 provision-check.sh statelessness_guard.py cross_repo_guard.py anchor_shell_parser.py anchor_write_guard.py pr_supersede_guard.py registry_root.py nudge_status.py bind_nudge.py hook_client.py post-tool-hook.ps1 terminal_probe.py bind-nudge.sh bind-nudge.ps1; do
         local script_src="$SCRIPT_DIR/$script"
         if [[ -f "$script_src" ]]; then
             tmp="$(mktemp "$BIN_DIR/$script.XXXXXX")"

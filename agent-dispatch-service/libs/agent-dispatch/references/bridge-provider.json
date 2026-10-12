@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "plugin": "agent-dispatch@copilot-extensions",
+  "namespace": "dispatch",
+  "restricted": false,
+  "description": "Delegated agent-dispatch tasks (agent-dispatch)"
+}

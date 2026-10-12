@@ -15,6 +15,7 @@ from urllib.parse import quote
 
 from ..pr_contract import Comment, CommentThread, PRDiff, PRSnapshot, Review, ThreadsResult
 from .base import ProviderError, PRScope, PullResult, run_cli
+from .pr_source import gitea_source, pull_payload, source_object, source_text
 
 # HTTP statuses (plus the synthetic 0 = curl-level failure) worth retrying when
 # resolving/attaching labels.  A label apply is a small, idempotent call against
@@ -423,9 +424,8 @@ class GiteaProvider:
         )
         if status != 200:
             raise ProviderError(f"Gitea PR #{number} lookup failed (HTTP {status}).")
-        data = json.loads(body)
-        # Gitea reports a merged PR as state "closed" + ``merged: true``; surface
-        # the distinct "merged" state so reconciliation records it faithfully.
+        data = pull_payload(body)
+        # Gitea's closed + merged signal is canonicalized for reconciliation.
         merged = bool(data.get("merged"))
         state = str(data.get("state", "")) or "open"
         if merged:
@@ -435,8 +435,8 @@ class GiteaProvider:
             number=int(data.get("number", number)),
             state=state,
             merged=merged,
-            head_sha=str((data.get("head") or {}).get("sha", "")),
-            base_ref=str((data.get("base") or {}).get("ref", "")),
+            base_ref=source_text(source_object(data, "base"), "ref"),
+            **gitea_source(data),
         )
 
     def observe_head(

@@ -2,7 +2,7 @@
 
 One-shot `create --spawn`, local supervisor `make_headless_spawn`/
 `make_embody_spawn`, and interactive embodiment acquire and deliver through
-`agent-bridge acquire --request-file -`, HTTP protocol 30. Existing
+`agent-bridge acquire --request-file -`, current-client HTTP protocol 31. Existing
 `spawn_backend=bridge` selects ACP; explicit `embody` selects CLI. No missing-
 capability fallback changes mode or invokes worktree session launch directly.
 Standalone task/script dispatch still works without bridge.
@@ -13,6 +13,15 @@ current generation/reservation, recorded worktree provenance, explicit
 retirement (including unknown), carried identity, charter, project, driver and
 verification timeout. The `dispatch:` namespace exposes current owner facts
 and the latest acquisition reservation for bridge verification.
+For a reserving reused allocation with 2–256 attempts, the provider also supplies
+a versioned bounded reservation-history snapshot. Bridge requires the complete
+consecutive same-task chain and a request-bound `refused/prepared` receipt for
+every predecessor, starting with a created allocation, before creating a first
+conversation in the reused directory. A missing receipt, truncated/gapped
+history, prior native handle, spawned outcome or unknown launch never grants
+fresh authority. Bridge revalidates that proof after target preparation and
+before entering its native launch gate. Older providers omit the snapshot and
+retain strict refusal; no caller-supplied history grants permission.
 Only an active task (`queued`, `claimed`, `started`, or `suspended`) with a
 `reserving`/`spawned` reservation that has not requested release may use that
 reservation as its namespace worktree fallback. Historical reservations remain
@@ -76,3 +85,40 @@ start. Unsupported CLI overrides fail as proven `not_started` capability
 mismatches rather than being deferred and repeatedly retried.
 Post-launch task-fence refusal defers;
 it never authorizes created-worktree teardown as a pre-effect failure.
+
+## Explicit operator fresh-conversation recovery
+
+When historical initial-launch evidence is missing, no automated absence
+inference is permitted. After independently verifying that the exact worktree
+has no active or unknown native holder, an operator may authorize a new
+conversation instead of claiming the old launch never happened:
+
+```text
+agent-dispatch reservations authorize-fresh <task-id> \
+  --reservation-key <latest-concluded-reservation> --worktree <worktree-id> \
+  --expected-generation <generation> --permit --confirm-no-live-holder \
+  --reason "<operator authorization and verified liveness evidence>"
+```
+
+The client uses its configured control identity, not the worker credential.
+The coordinator atomically requires the exact generation, queued/unowned/
+unheld task, a handle-less latest deferred/failed created-or-reused allocation,
+and an exclusive-key carry chain whose latest allocation is that exact row,
+no pending cleanup, no active same-task reservation and no other task's active
+reservation on that worktree. It advances task generation and marks the exact
+latest allocation's conversation retirement authorization, retaining original
+reservation details, receipts and transcripts and writing a task audit event.
+Stale/replayed authorization refuses. This only grants fresh intent; it neither
+starts a worker nor proves historical absence.
+
+The next reservation carries this retirement authorization through the existing
+owner-verified acquisition boundary. Bridge still independently refuses live
+or unknown holders and native heads, revalidates task/reservation/retirement
+after preparation, and applies existing launch/executor fences. A holder racing
+the operator's check blocks launch; permission never authorizes stopping it.
+An active reservation must finish its normal defer/conclusion before this verb;
+never force-clear it or directly edit the database. Deploy the promoted
+bridge and dispatch fixes through normal immutable-runtime activation first.
+The promoted bridge payload/client must be deployed too: current acquisition
+clients require daemon protocol 31 and refuse a protocol-30 daemon before
+sending a request, rather than assume it implements recovery revalidation.

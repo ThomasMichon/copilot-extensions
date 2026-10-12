@@ -3,7 +3,7 @@
 - **Subject:** A driver-based fleet of machines and services coordinated through an optional central Gateway controller.
 - **Scope:** leaf (cross-cutting child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-10
+- **Last revised:** 2026-10-11
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md), [`docs/configuration.md`](../../docs/configuration.md)
 
 ## Purpose & Intent
@@ -12,7 +12,8 @@ Make a declared set of machines a coherent, reachable, observable control fabric
 An operator can discover offered services, inspect work, reconcile deployments
 and configuration, and control supported sessions without first obtaining a
 remote shell. A central Gateway provides rendezvous and authorized routing,
-while each existing service remains the authority for its own state.
+while each existing service remains the authority for its own state unless an
+explicit ownership migration replaces it with the integrated coordination core.
 
 Fleet adoption is optional and additive. Standalone local services, direct
 connections, and existing SSH-based workflows retain their value without a
@@ -71,6 +72,20 @@ report freshness and outcomes, and reconcile locally permitted desired state.
 A logical controller may have a recoverable deployment without making its
 current network connection the lifetime owner of remote work.
 
+### Integrated coordination product
+
+An explicitly adopted integrated profile uses fleet-manager's Gateway as the
+coordination core, not a broker above a second control system. The same core
+supports machine-local and multi-machine deployments through capability-honest
+transport boundaries. Worktree Manager and Copilot integrations are clients of
+that authority, not independent fleet writers.
+
+Canonical agency, task, claim and operation relationships can share a
+transactional owner after their previous authorities are explicitly migrated.
+External or unmigrated services retain their own state; enrollment alone never
+creates a replacement registry or queue. Nodes preserve effect receipts and
+accepted execution without becoming another global allocation authority.
+
 ### Existing service authorities
 
 `agent-worktrees` owns durable worktree agency and source-control obligations;
@@ -122,6 +137,24 @@ Authenticated, operator-enrolled external execution hosts can supplement a small
 fleet without becoming controller hosts implicitly.
 
 ## Features
+
+### unified-coordination-product
+
+The integrated profile has one selected product release and lifecycle contract,
+with thin client, Gateway and node roles and independently isolated execution
+where lifetime, cost or privilege requires it. Local use does not require remote
+fleet adoption; a fleet client does not silently become a local controller when
+its selected Gateway is unavailable.
+
+Copilot adapters provide guidance and typed invocation, not installation,
+updates or persistent supervision. Independently useful guidance and existing
+standalone service adoption remain available outside this profile.
+
+Accepted work survives controller/connection replacement. Authority is fenced at
+the resource/effect owner; stale observations, grant expiry or healthy replacement
+processes alone never establish safe reassignment. Rolling updates report
+individual compatibility/readiness outcomes rather than fictitious fleet-wide
+atomic convergence.
 
 ### driver-based-fleet-adoption
 
@@ -244,7 +277,9 @@ The controller owns enrollment/connection registration within its fleet scope,
 desired reconciliation intent, and
 delivery/observation receipts. It derives worktree/task/session/service state
 from its existing authority. A Gateway acknowledgement does not replace the
-owning service's acceptance or completion record.
+owning service's acceptance or completion record. An integrated canonical module
+may replace that owner only through an explicit state/obligation migration;
+the old and new owner never both authorize the same work.
 Enrollment does not transfer the selected driver's target identity, substrate
 reachability, capacity, or lease authority to the controller.
 
@@ -306,8 +341,9 @@ replacement.
   adopter-specific inventory in the portable controller.
 - No mandatory Gateway dependency for standalone services or existing direct/
   SSH workflows, and no automatic migration of unrelated fleets.
-- No second task queue, worktree registry, credential issuer, session host, or
-  package manager replacing existing authorities.
+- No competing task queue or worktree registry beside an existing authority;
+  integrated replacement requires explicit migration. No replacement credential
+  issuer, session host or package manager merely from fleet enrollment.
 - No arbitrary shell/script payloads hidden inside deployment broadcasts,
   automatic capacity expansion, or destructive provider actions on mere enrollment.
 - No claim of transparent exactly-once side effects from transport retries.

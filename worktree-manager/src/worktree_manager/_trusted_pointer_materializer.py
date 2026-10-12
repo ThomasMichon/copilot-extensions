@@ -631,7 +631,16 @@ def materialize_uv_editable_ref_into(
                 "name -- refusing"
             )
             continue
-        canonical_unresolved = canonical_root_r / "libs" / lib
+        canonical_relative = Path("libs") / lib
+        if (source_consumer_dir.absolute() == canonical_root_r / "agent-dispatch-service"
+                and name == lib == "agent-dispatch"
+                and raw_path == "../plugins/agent-dispatch"):
+            bad_source = _find_symlinked_ancestor(source_consumer_dir, canonical_root_r)
+            if bad_source is not None:
+                log.append(f"SKIP {dest_consumer_dir}: {bad_source} is a symlink -- refusing")
+                continue
+            canonical_relative = Path("plugins") / "agent-dispatch"
+        canonical_unresolved = canonical_root_r / canonical_relative
         bad_ancestor = _find_symlinked_ancestor(canonical_unresolved, canonical_root_r)
         if bad_ancestor is not None:
             log.append(f"SKIP {dest_consumer_dir}: {bad_ancestor} is a symlink -- refusing")
@@ -640,7 +649,7 @@ def materialize_uv_editable_ref_into(
         if canonical != canonical_unresolved.resolve():
             log.append(
                 f"SKIP {dest_consumer_dir}: {name} references {raw_path} "
-                f"(resolved {canonical}) which is not canonical_root/libs/{lib} "
+                f"(resolved {canonical}) which is not canonical_root/{canonical_relative.as_posix()} "
                 "-- refusing"
             )
             continue

@@ -41,6 +41,29 @@ def bridge_evidence(delivery_id: str) -> dict[str, Any]:
     return evidence
 
 
+def verify_recovery_bridge() -> None:
+    """Refuse authorization unless both bridge payload and daemon prove v31."""
+    from .procutil import agent_bridge_launch_prefix, no_window_kwargs
+    prefix = agent_bridge_launch_prefix()
+    if not prefix:
+        raise TaskError("recovery requires a configured bridge acquisition capability")
+    result = subprocess.run(
+        [*prefix, "acquisition-readiness"], check=False, capture_output=True,
+        text=True, timeout=30, **no_window_kwargs(),
+    )
+    try:
+        response = json.loads(result.stdout)
+    except ValueError as exc:
+        raise TaskError("recovery bridge readiness is unproven") from exc
+    if (
+        result.returncode or not isinstance(response, dict)
+        or response.get("supported") is not True
+        or type(response.get("required_protocol")) is not int
+        or response["required_protocol"] < 31
+    ):
+        raise TaskError("recovery requires bridge payload and daemon acquisition protocol 31")
+
+
 def bind(
     queue: Any, receipt: dict[str, Any], *, evidence: dict[str, Any],
 ) -> dict[str, Any]:

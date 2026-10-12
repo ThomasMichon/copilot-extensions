@@ -13,6 +13,15 @@ CodeSpace/container resolvers), but their absence only disables those features.
 
 ## How It Works
 
+Completed numbered runtime slots are immutable. An unchanged completed slot
+is reused; a same-version payload mismatch is refused before venv or package
+mutation, including forced updates. Publish a new version for ordinary changes.
+Failed activation quarantines readiness as `.install-complete.failed.json`
+without erasing completion evidence. The resolver no longer sees a ready
+marker, and subsequent installer admission still refuses rebuilding that slot.
+Repair of a broken completed slot requires a distinct, health-checked generation,
+not an in-place dependency reinstall into a running CLI/monitor's files.
+
 Agent Worktrees has three shipped pieces:
 
 - **Plugin payload** (skills, hooks, live-pulse extension) -- loaded by Copilot
@@ -56,6 +65,29 @@ sharing project registrations, settings or ownership ledgers. Physical-host
 grouping never makes distinct registered spaces local to one another. See
 [Execution-space identity](docs/config-reference.md#execution-space-identity)
 for explicit selection, compatibility and lifecycle fences.
+
+## Captured child ownership
+
+Bounded Git publication and local-guidance discovery/rendering use a headless
+captured child on Windows, assigned to a kill-on-close Job before execution.
+Job admission failure is explicit; there is no detached fallback. Timeout or
+caller exit reaps descendants while preserving captured diagnostics.
+Explicit descendant escape is prevented by this bounded Job; durable-service
+launchers retain the shared helper's permissive default outside this seam.
+POSIX retains its process-group timeout cleanup. This is not a durable-daemon
+launch or an interactive terminal.
+
+## PowerShell post-tool hook
+
+The legacy-context PowerShell `postToolUse` hook contacts an already-running
+resident monitor inside its existing shell, without launching Python or the
+CLI on success. It uses the monitor's authenticated loopback JSON-line
+transport, not HTTP. An unavailable resident falls back to the deployed
+Python advisory evaluator without resending the request. Explicit installation
+cells retain the existing validated Python client; Bash, pre-tool safety,
+session-start reconciliation and its single-flight owner are unchanged.
+
+This removes a child process, not the shell the hook host itself creates.
 
 ## Same-Machine AHP Sessions
 

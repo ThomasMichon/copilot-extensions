@@ -4,10 +4,10 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent serial slice PRs targeting `dev`
 - **Created:** 2026-10-10
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugin-services/README.md` - service-scaled process count, transient hooks, discovered local endpoints
 - **Umbrella issue:** #6086
-- **Sub-issues:** #6087
+- **Sub-issues:** #6087, #4644
 - **Related, independently owned:** #6040, #6077, #6079, #6088, #6092
 
 ## Guiding Intent
@@ -73,7 +73,7 @@ a scaling aspiration, not a fixed spawn-rate budget with an approved interval.
 ### Phase 1 - Reviewed scope and baseline
 
 - [x] Record measured root attribution and link existing issue/campaign owners.
-- [ ] Land this reviewed plan before implementation.
+- [x] Land this reviewed plan before implementation.
 - [ ] Establish isolated representative hook and daemon workloads; record
   spawn counts, elapsed time and scope without raw adopter identifiers.
 
@@ -87,6 +87,8 @@ a scaling aspiration, not a fixed spawn-rate budget with an approved interval.
 - [ ] Retain the existing attributed CLI/client fallback only for explicitly
   eligible unavailability. Preserve safety decisions and ambiguous-outcome
   behavior; no provisioning or new service on the hot path.
+- [ ] Keep session-start drift reconciliation and its single-flight provisioning
+  owner unchanged and separate from the ordinary hook fast path.
 - [ ] Evaluate Bash's available in-process primitives separately. Do not hide
   a curl/Python/jq child in a claimed zero-child path or sacrifice bounded
   transport/JSON validation to match the PowerShell implementation.
@@ -128,7 +130,8 @@ a scaling aspiration, not a fixed spawn-rate budget with an approved interval.
 - [ ] No fallback repeats a mutation after an ambiguous delivery/result.
 - [ ] A small explicit integration lane exercises the actual shell/daemon
   consumer contract, including daemon-down fallback and Windows stdio.
-- [ ] Default unit collection spawns zero external Bash/WSL processes.
+- [ ] Ordinary unit selection and collection spawn zero real external processes,
+  including Bash/WSL, Git, PowerShell, cmd and Python children.
 - [ ] Daemon comparisons report cumulative starts, peak live processes,
   workload/session/plugin context and honest missing observations.
 - [ ] Snapshot/cache tests prove invalidation, concurrency and cross-cell
@@ -155,9 +158,29 @@ small and explicit while unit policy tests remain in-process.
 
 ## Journal
 
+### 2026-10-11 - Captured child safety
+
+- Resumed the reviewed campaign, retaining the separate hook fast-path and
+  immutable-runtime admission obligations.
+- Traced local-guidance identity discovery to the same detached captured-child
+  seam as bounded Git publication. A console-subsystem re-exec could allocate
+  a terminal; PID-based timeout sweeps also carried the tracked #4644 race.
+- Reused the existing suspended-start Job primitive with required Windows
+  ownership and captured-child headlessness. POSIX process-group behavior is
+  unchanged; no daemon lifetime escape or installed-runtime mutation.
+- Focused contained policy, publication and guidance tests passed, including
+  two native consoleless-parent cycles with zero new visible windows and zero
+  foreground transitions, captured output/exit status, and grandchild timeout
+  cleanup. Promotion and authorized running-state rollout remain outstanding.
+
 ### 2026-10-10 - Canonical campaign claimed
 
 - Operator approved the slug and instructed execution by measured offenders.
 - Target adoption was verified; #6086 claimed through scoped identity.
 - Existing mux/provenance owners retained; no duplicate implementation created.
 - Plan drafted for review. No hook/daemon source changes made before review.
+- Plan landed as #6112. The first slice is the legacy-context PowerShell
+  post-tool advisory request; selected installation cells retain the existing
+  validated client. Session-start reconciliation is untouched. Review
+  clarification explicitly preserves its single-flight owner and broadens
+  unit collection's zero-child criterion beyond Bash/WSL.

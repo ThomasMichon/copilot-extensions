@@ -712,22 +712,13 @@ function Invoke-VersionedActivateInner {
     if (-not $slotOk) {
         Write-ServiceErr "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         if ($healthOut) { Write-ServiceErr "  $healthOut" }
-        # This slot may already carry a completion marker from an OLDER,
-        # less-strict installer run (dotfiles #7561): Test-SlotAlreadyComplete
-        # trusts a valid marker + matching payload hash and skips reinstalling,
-        # so without this the same stale-but-broken slot would keep failing
-        # this gate forever on every future run. Remove just the marker file
-        # (never the slot's other files -- safe even if this happens to be the
-        # CURRENTLY ACTIVE slot, since a JSON marker is never held open by a
-        # running interpreter the way its own module files can be) so a future
-        # run stops trusting it and either rebuilds it fresh or falls back to
-        # last-known-good (resolve_python's tiered fallback in
-        # versioned_runtime.py already treats a markerless slot as unhealthy).
-        # Filename matches versioned_runtime.py's own COMPLETE_MARKER constant.
+        # Quarantine health readiness without erasing immutable completion
+        # evidence. The resolver rejects the markerless slot; admission still
+        # refuses rebuilding this numbered generation on the next run.
         $staleMarker = Join-Path $VenvDir '.install-complete.json'
-        if (Test-Path $staleMarker) {
-            Remove-Item $staleMarker -Force -ErrorAction SilentlyContinue
-            Write-ServiceChanged "Invalidated stale completion marker (versions/$SrcVersion)"
+        if (Test-Path -LiteralPath $staleMarker) {
+            Move-Item -LiteralPath $staleMarker -Destination (Join-Path $VenvDir '.install-complete.failed.json') -Force -ErrorAction Stop
+            Write-ServiceChanged "Quarantined completion marker (versions/$SrcVersion); repair requires a distinct generation"
         }
         return $false
     }
@@ -2364,6 +2355,12 @@ function Deploy-Venv {
         $script:DeployVenvAlreadyComplete = $true
         return $true
     }
+    if ($VersionedRuntime -and $SrcVersion -ne 'dev' -and
+        ((Test-Path -LiteralPath (Join-Path $VenvDir '.install-complete.json')) -or
+         (Test-Path -LiteralPath (Join-Path $VenvDir '.install-complete.failed.json')))) {
+        Write-ServiceErr "Completed runtime slot $SrcVersion cannot be rebuilt in place. Publish a new version or use the owned dev-slot workflow; repair requires a distinct healthy generation."
+        return $false
+    }
 
     # Validate the slot's liveness/cleanliness immediately after acquiring
     # the lease, UNCONDITIONALLY -- regardless of whether $VenvPython
@@ -2506,7 +2503,7 @@ function Deploy-Wrappers {
     if (-not (Deploy-RuntimeResolvers)) { return $false }
 
     # Deploy hook scripts, including the consolidated pre/post client and its fallback modules.
-    foreach ($script in @('session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'bootstrap-killswitch-guard.ps1', 'bootstrap-killswitch-guard.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-nudge.ps1', 'register-nudge.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'cross_repo_guard.py', 'anchor_shell_parser.py', 'anchor_write_guard.py', 'pr_supersede_guard.py', 'registry_root.py', 'nudge_status.py', 'bind_nudge.py', 'hook_client.py', 'terminal_probe.py', 'bind-nudge.sh', 'bind-nudge.ps1')) {
+    foreach ($script in @('session-conduct.ps1', 'session-conduct.sh', 'session-machine.ps1', 'session-machine.sh', 'bootstrap-check.ps1', 'bootstrap-check.sh', 'bootstrap-killswitch-guard.ps1', 'bootstrap-killswitch-guard.sh', 'project-hooks.ps1', 'project-hooks.sh', 'register-nudge.ps1', 'register-nudge.sh', 'register-session.ps1', 'register-session.sh', 'deregister-session.ps1', 'deregister-session.sh', 'anchor-hygiene-check.ps1', 'anchor-hygiene-check.sh', 'provision-check.ps1', 'provision-check.sh', 'statelessness_guard.py', 'cross_repo_guard.py', 'anchor_shell_parser.py', 'anchor_write_guard.py', 'pr_supersede_guard.py', 'registry_root.py', 'nudge_status.py', 'bind_nudge.py', 'hook_client.py', 'post-tool-hook.ps1', 'terminal_probe.py', 'bind-nudge.sh', 'bind-nudge.ps1')) {
         $src = Join-Path $ScriptDir $script
         $dst = Join-Path $BinDir $script
         if (Test-Path $src) {

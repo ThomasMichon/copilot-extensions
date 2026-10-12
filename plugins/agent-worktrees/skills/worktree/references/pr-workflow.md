@@ -937,6 +937,141 @@ Either way HEAD stays on
 checked out on a legacy feature branch is accepted too and pushed as-is.) It
 does not create a PR; it updates the existing one.
 
+Ordinary `push-changes` accepts only incremental publication or the bounded
+source-owned replay proof described above; an arbitrary squash or rewrite
+does not inherit that permission. To publish an **intentional local rebase
+or squash** outside that proof, run
+`<agent-worktrees catalog argv[0]> push-changes --rewrite-pr`.
+This is not an automatic rebase: it publishes your current committed tip
+as-is, under either head scheme, using the **previously recorded full head
+SHA** as an exact remote lease. It never fetches a new lease to overwrite
+someone else's newer work. A moved/deleted remote head requires inspection
+and reconciliation, not blind retry.
+
+The opt-in requires the owning `worktree/{id}` checkout, persisted successful
+`create-pr` publication ownership, and an open, exclusively tracked private
+head ending in that worktree's canonical creation suffix. Ownership also binds
+the full destination attested by publication, for origin as well as a fork;
+another destination with the same slug and tip does not inherit permission.
+Legacy feature-branch checkouts, unowned `set-pr` associations, shared/default
+and release branches, missing leases, changed destinations and dirty trees
+are refused. Normal pre-push hooks, attribution and head tracking remain
+active. Rewrite authorization strictly scans every adopted project in the
+selected installation, matching the full destination and head ref rather than
+project names. Malformed or unreadable registry/record state and an ambiguous
+same-ref destination refuse the rewrite. Legacy destinations are resolved
+against each owning project's remote configuration, not the caller's remote
+name. A tracked provider/configuration mismatch is refused before credentials
+are resolved. An installation-scoped authority guard
+excludes reassignment and new ledger registration until the push finishes.
+First/incremental pushes and provider creation acquire that same authority
+before external mutation and retain it through the fresh tracking transaction.
+When finalization is also needed, its lock is acquired first and released last;
+authority contention therefore fails before a remote head or provider PR changes.
+Manual `set-pr` corrections wait for that guard; other association writers
+already holding a record lock fail immediately and must retry, never deadlock
+against publication. Ordinary Picker stamps with unchanged PR authority do not
+wait behind network I/O. The published source
+is pinned from the validated owning branch, never a later mutable `HEAD`.
+Review the rewritten diff and obtain current review before merging.
+
+Persisted provider-native `active` PR states remain live for selection and
+ownership refresh, as well as explicit rewrite admission; `completed` and
+`abandoned` remain terminal. Classification does not require rewriting a legacy
+ledger first. Explicit rewrites also retain the configured publication deadline
+and its matching lock budgets when integrating with newer deadline support.
+
+Authority admission revalidates the exact selected PR (including a checked-out
+legacy sibling), not merely the active entry. Every admitted publication lock
+uses the configured deadline-derived wait. Project registration and removal
+hold installation authority across registry read/mutate/write, so concurrent
+registration cannot hide another project's ledger. A legacy empty provider may
+be backfilled only to the configured provider during the same verified
+publication transaction; mismatches remain refused.
+
+For an attested legacy open PR without publication ownership,
+`push-changes --rewrite-pr` reconciles ownership in the same command, even
+after rebasing. Compatibility requires a pre-generation record, a numbered
+provider PR and URL, and its previously saved full destination identity
+or an HTTPS provider PR URL identifying that same repository and PR number.
+The provider and remote must both still hold the exact saved lease; the
+usual owning-worktree, private-ref and installation-wide exclusivity checks
+remain mandatory. Ownership is persisted only after those checks, without
+switching to or re-publishing the old tip. Partial ownership, a corrected
+generation or missing destination evidence requires explicit reconciliation.
+A manual PR identity or branch correction
+invalidates ownership; a matching-looking suffix is never proof by itself.
+
+#### Operator-confirmed break glass
+
+Prefer source-owning CWD when available. If the original context or historical
+ownership/replay proof cannot be recovered, use the selected recovery worktree
+and project configuration explicitly:
+
+```text
+<agent-worktrees catalog argv[0]> push-changes <recovery-worktree-id> --config <project-config> --break-glass-reason "<reason>" --json
+```
+
+The unconfirmed invocation refuses and previews the exact existing PR,
+destination fingerprint, immutable source commit and saved expected remote
+commit, without changing Git refs, tracking or the remote. **Stop for real
+per-PR operator sign-off** on that previewed operation. A reason, discovered
+flag, broad policy approval or previous refusal does not authorize the push.
+Only then repeat with the same inputs and
+`--confirm-break-glass <preview-fingerprint>`. Agents must not generate consent
+on their own. A changed source (including an amend), destination, reason or
+expected head requires a new preview and sign-off.
+
+The exception waives historical original-owner, suffix and replay proof, not
+provider authentication, exact source/destination validation, an unchanged
+full remote-head lease, protected/default/release refs, committed clean source,
+serialization, real hooks or the normal new-head review/merge gates. A known
+different PR sharing that destination ref still refuses. Unavailable historical
+ledgers and duplicate historical associations to the same PR are reported in
+the preview and private audit, never silently treated as ownership evidence.
+The approved commit object is pinned through transport even if its local branch
+moves later; no opportunistic lease refresh or implicit exception exists.
+
+Before pushing, the command retains the approved source and previous published
+tip at reported worktree-scoped `refs/agent-worktrees/recovery/...` refs. They
+survive reflog expiry and garbage collection while the refs and repository
+exist; do not remove them or clean up the worktree until the recovery is
+reviewed, merged and no rollback is needed. Inspect without mutation using
+`git show <reported-ref>` or `git diff <published-ref> <source-ref>`. To revisit
+a retained commit, first preserve current work and obtain approval for checkout
+changes, then use `git switch --detach <reported-ref>`. Restoring local content
+does **not** restore the provider head: any remote rollback needs its own new
+preview, current exact lease and per-operation approval. No plain force push.
+
+Private `agent-worktrees-pr-break-glass-<id>.json` audits live in the selected
+worktree's Git metadata, with confirmation basis, reason, retained refs and
+available observed invoker/session attribution. Unknown provenance is recorded
+honestly; the data is not proof of authenticated identity and is not
+automatically published. `succeeded` means transport succeeded, not that the
+PR merged. If tracking or audit persistence fails after transport, the command
+reports the published remote head and reconciliation need, not success or a
+safe retry. Read provider/remote evidence before repairing bookkeeping.
+
+Ownership and each changed publication lease are persisted through fresh,
+generation-bound metadata transactions so an older unrelated save cannot erase,
+resurrect, or regress them. Provider-open identity advances that generation too.
+Attribution-only first-touch stamps may proceed during I/O; successful publication
+merges those stamps into its fresh transaction after rechecking the unchanged
+authority, rather than losing the new lease to an unrelated revision increment.
+Full-record saves retain the authority snapshot captured on load, so a newer
+attribution-only stamp cannot discard a concurrent lifecycle transition.
+Legacy stable-ID backfill is not itself an authority change. A genuinely newer
+authority correction still wins over a stale save. Public `create-pr` contention
+returns the normal human or JSON error contract rather than an uncaught timeout.
+An unleased provisional first publication can retry only while its destination
+ref is absent, using an atomic absent-ref lease. If a failed transport may already
+have created the ref, inspect and reconcile that ambiguous outcome; never adopt
+its new tip as implicit rewrite authority. Short IDs, relocated
+worktree paths, and JSON responses use the selected project's ledger.
+Reusing a confirmed-terminal PR's legacy feature branch preserves that prior
+PR's saved lease only when its recorded destination is still attested; it does
+not refresh the lease from today's remote tip.
+
 ### Bounding review/fix rounds (`pr rounds`)
 
 An automated reviewer can keep finding one new edge case per round, so an

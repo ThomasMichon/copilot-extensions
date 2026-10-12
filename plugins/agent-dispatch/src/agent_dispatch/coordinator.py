@@ -908,7 +908,7 @@ def create_app(
         control_token=control_token,
         resolve_owner_session_id=lambda worker_id: _resolve_owner_session_id(worker_id),
     )
-    register_spawn_routes(app, queue, bus)
+    register_spawn_routes(app, queue, bus, control_token=control_token)
     register_registry_routes(app, queue, control_token=control_token)
     register_worktree_status_routes(app, relay)
 

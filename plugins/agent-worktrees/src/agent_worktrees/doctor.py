@@ -553,6 +553,15 @@ def _agent_rt_root_findings(fix: bool) -> list[Finding]:
 
 
 def reconcile(fix: bool = False, plat: str | None = None) -> list[Finding]:
+    """Serialize registry repairs while keeping diagnosis read-only and lock-free."""
+    if fix:
+        from . import pr_authority
+        with pr_authority.guard():
+            return _reconcile(fix=True, plat=plat)
+    return _reconcile(plat=plat)
+
+
+def _reconcile(fix: bool = False, plat: str | None = None) -> list[Finding]:
     """Diagnose drift and, when ``fix`` is set, reconcile the data-only cases.
 
     Returns the list of findings; each ``fixed`` flag reflects whether ``--fix``

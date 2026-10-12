@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-dispatch-service"
+version = "0.1.1-dev1"
+description = "Standalone, Copilot-independent distribution of the agent-dispatch coordinator daemon."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Thomas Michon" }]
+# The coordinator lifecycle (CLI, `serve` command, installer) already lives
+# entirely in the `agent-dispatch` package itself; this standalone
+# distribution does not reimplement any of it -- it is a thin wrapper that
+# depends on the same package the Copilot plugin ships, plus the
+# Copilot-independent bootstrap scripts beside this file.
+dependencies = [
+    "agent-dispatch",
+]
+
+[tool.uv.sources]
+# `path` escapes this package's own root and resolves live to
+# `plugins/agent-dispatch`, so this `dev`-branch checkout has nothing to keep
+# manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy, matching every
+# other standalone/plugin `[tool.uv.sources]` pointer in this repository.
+agent-dispatch = { path = "libs/agent-dispatch" }
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99

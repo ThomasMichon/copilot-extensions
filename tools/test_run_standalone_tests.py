@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -13,6 +14,27 @@ SPEC = importlib.util.spec_from_file_location("run_standalone_tests", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
 runner = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runner)
+
+
+def test_fleet_manager_preparation_has_no_service_or_plugin_dependencies(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    calls = []
+    python = runner.default_python("fleet-manager")
+    def prepare_command(command, **kwargs):
+        calls.append(command)
+        if command[:2] == ["uv", "venv"]:
+            assert Path(command[-1]) == python.parent.parent
+            python.parent.mkdir(parents=True, exist_ok=True)
+            python.touch()
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(runner.subprocess, "run", prepare_command)
+    python.parent.parent.mkdir(parents=True)
+    runner.prepare("fleet-manager", python)
+    assert calls[-1] == [
+        "uv", "pip", "install", "--python", str(python), str(tmp_path / "fleet-manager") + "[dev]",
+    ]
+    assert "fleet-manager" in runner.STANDALONE_CONSUMERS
 
 
 @pytest.mark.parametrize("smoke", [False, True])

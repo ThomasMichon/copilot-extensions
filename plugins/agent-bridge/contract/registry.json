@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 30,
+        "current": 31,
         "minimum": 1,
-        "previous_generation": 29,
+        "previous_generation": 30,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -36,7 +36,8 @@
           27,
           28,
           29,
-          30
+          30,
+          31
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -83,13 +84,14 @@
         "target_preferences": 27,
         "strict_resume": 28,
         "current_attention": 29,
-        "strict_acquisition": 30
+        "strict_acquisition": 30,
+        "acquisition_retirement_revalidation": 31
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "bb15034be397105b401684dd64cefb53fda746018ad7491f79144f69387d806f",
+          "sha256": "47abf6059c7faced70e7dd3b6e98649822e6bedc08b8a94a381da1447a873d53",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -139,9 +141,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/acquisition-protocol.json",
-          "sha256": "e73e6de23803c793529ef873921122bb81b877d3fa4c7a746c258bda93cf8d98",
+          "sha256": "e7f75c2f93e3ac9516c709df7eaf5f75ce3789851117b229202c0ae8f6559541",
           "role": "current additive acquisition capability constants and refusal contract",
-          "generation": 30
+          "generation": 31
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
@@ -304,6 +306,18 @@
           "sha256": "4b3e03acaa1cabea3ed45a1617aa0bb3adc8e864f33d2813aa34e936d4578c87",
           "role": "previous HTTP generation health evidence",
           "generation": 28
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-30/acquisition-protocol.json",
+          "sha256": "e73e6de23803c793529ef873921122bb81b877d3fa4c7a746c258bda93cf8d98",
+          "role": "previous acquisition generation retained across recovery rollout",
+          "generation": 30
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-31.json",
+          "sha256": "3f396c2b72725a881cadf7f96241f0779c9c7911566d72379b06f009dedad19e",
+          "role": "unchanged agent-roster response re-attested at current recovery HTTP generation",
+          "generation": 31
         }
       ],
       "provenance": [
@@ -1034,6 +1048,22 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
           "source_git_blob": "1d5a042eda11f4875c080b1229cdb8f40bcedb7d",
           "capture_method": "Re-attested for the generation-28 bump (strict_resume) -- this file's own content is unchanged."
+        },
+        {
+          "commit": "ef422008c8c5e03fd54c04705e1dbb2f3a5fba9b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 31,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "97c8fda73c4fe33d50353d8eb028202d461ee5d3",
+          "capture_method": "Source-bound protocol constants for retirement revalidation; connected client/daemon skew tests independently exercise refusal before request."
+        },
+        {
+          "commit": "ef422008c8c5e03fd54c04705e1dbb2f3a5fba9b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 31,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-attested unchanged agent roster: source blob remains identical to generation-30 capture."
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",
@@ -1131,7 +1161,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-authority-v1.json",
-          "sha256": "0829e6452f1abacde68069e5b9a0d6a73323b9775715faf5efb170c23296fca1",
+          "sha256": "090a2a94d06908d14c72c7cd858c7fe0bd73e77d12704d5eeb63517596dcc0ee",
           "role": "launch-bound wrapper v1 authority and receipt-v2 validity vectors",
           "generation": 1
         },
@@ -1143,13 +1173,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-exec.json",
-          "sha256": "e6ad68fa79c97b4a26908b48904edb9f8f7c684d0b848c40a1d9196e0b5e90cd",
+          "sha256": "5f0ad024c6bfebb04644179789a69048d362fa947c4febd11382c34b1893cc5d",
           "role": "terminal exec consent, private environment closure and PID preservation",
           "generation": 1
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-consent.json",
-          "sha256": "a9234d16bcd4f01357b5ed4aa327fb370032928321b06fe100e6c7252d3a031a",
+          "sha256": "8eae358b7bb9498e3da309b4983d17070256cd2899183c24b5b5b1e126f6bd6b",
           "role": "complete staged authority closure and consent-owner failure ordering",
           "generation": 1
         },

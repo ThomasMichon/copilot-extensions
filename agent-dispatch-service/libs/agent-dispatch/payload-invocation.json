@@ -1,0 +1,12 @@
+{
+  "schema": "copilot-extensions.payload-invocation",
+  "version": 1,
+  "command": "agent-dispatch",
+  "module": "agent_dispatch",
+  "runtimeRoot": ".agent-dispatch",
+  "noSelfProvisionEnv": "AGENT_DISPATCH_NO_SELFPROVISION",
+  "purpose": "Coordinate queued agent work and task lifecycles",
+  "installer": "install",
+  "windowsCatalogShim": "cmd",
+  "provisionMode": "direct"
+}

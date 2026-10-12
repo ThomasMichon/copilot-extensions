@@ -261,12 +261,13 @@ def test_assign_suspended_to_kill_on_close_job_noop_off_windows(monkeypatch):
     assert pu._assign_suspended_to_kill_on_close_job(12345) is None
 
 
-def test_assign_suspended_to_kill_on_close_job_assigns_pid_to_job(monkeypatch):
+@pytest.mark.parametrize("allow_breakaway", [True, False])
+def test_assign_suspended_to_kill_on_close_job_assigns_pid_to_job(monkeypatch, allow_breakaway):
     fake = _FakeKernel32()
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(pu, "_kernel32", lambda: fake)
 
-    job = pu._assign_suspended_to_kill_on_close_job(12345)
+    job = pu._assign_suspended_to_kill_on_close_job(12345, allow_breakaway=allow_breakaway)
 
     assert job is not None
     assert fake.calls[:4] == [
@@ -281,7 +282,8 @@ def test_assign_suspended_to_kill_on_close_job_assigns_pid_to_job(monkeypatch):
         ("AssignProcessToJobObject", 101, 202),
     ]
     assert fake.limit_flags == (
-        pu._JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | pu._JOB_OBJECT_LIMIT_BREAKAWAY_OK
+        pu._JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        | (pu._JOB_OBJECT_LIMIT_BREAKAWAY_OK if allow_breakaway else 0)
     )
     assert fake.calls[4:] == [("CloseHandle", 202)]
 
@@ -427,6 +429,20 @@ def test_spawn_sync_in_kill_on_close_job_assigns_before_resuming(monkeypatch):
     assert operations.index("AssignProcessToJobObject") < operations.index("NtResumeProcess")
     assert not process.killed
     job.close()
+
+def test_strict_sync_job_disallows_breakaway(monkeypatch):
+    process = _FakeProcess()
+    job = Mock()
+    assign = Mock(return_value=job)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(pu.subprocess, "Popen", Mock(return_value=process))
+    monkeypatch.setattr(pu, "_assign_suspended_to_kill_on_close_job", assign)
+    monkeypatch.setattr(pu, "_resume_suspended_process", lambda pid: True)
+    result, owned = pu.spawn_sync_in_kill_on_close_job(
+        ["fixture"], require_job=True, allow_breakaway=False,
+    )
+    assert result is process and owned is job
+    assign.assert_called_once_with(process.pid, allow_breakaway=False)
 
 
 def test_spawn_sync_in_kill_on_close_job_resumes_when_assignment_fails(monkeypatch):

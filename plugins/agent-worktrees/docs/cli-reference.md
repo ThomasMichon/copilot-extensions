@@ -233,6 +233,51 @@ and `pr-merge` refuses (naming the reason) on a repo where the effective flow
 does not authorize that action. Full narrative in
 [worktree-lifecycle.md § Landing the change](worktree-lifecycle.md).
 
+### Explicit operator recovery
+
+Prefer invoking publication from the source-owning worktree's CWD. When that
+historical context or its ownership/replay evidence is unavailable, select the
+recovery worktree explicitly with its project configuration and request a preview:
+
+```text
+agent-worktrees push-changes <recovery-worktree-id> --config <project-config> --break-glass-reason "<reason>" --json
+```
+
+This first call refuses with exit 2 and an exact PR/provider/repository/head-ref,
+destination fingerprint, full source commit and expected remote commit preview.
+It changes no Git refs, tracking data or remote head. The reason and preview
+fingerprint are not operator authentication or permission. Obtain real operator
+sign-off for this specific PR and operation before repeating the same call with
+`--confirm-break-glass <preview-fingerprint>`. Never add confirmation automatically
+after a guard refusal. Changed source, reason, destination or expected head
+requires a fresh preview and sign-off.
+
+The confirmed call publishes the pinned committed source as-is. Historical
+ownership, suffix and replay bookkeeping may be waived; provider-confirmed
+destination, exact remote lease, serialization, protected refs, clean source,
+real hooks and fresh PR review/merge gates are not. Title/squash options and
+new-PR use are inapplicable. Source and prior published commits are retained at
+the reported `refs/agent-worktrees/recovery/...` refs before transport.
+
+Azure recovery recognizes the standard secure SSH and HTTPS addresses of the
+same organization/project/repository. Other hosts, organizations, projects,
+repositories, non-default ports and plaintext destinations remain distinct;
+this source observation does not change the saved publication destination fence.
+
+The selected worktree's Git metadata contains private
+`agent-worktrees-pr-break-glass-<id>.json` audits with the reason, confirmed
+operation, retained refs and observed invoker/session context. Unknown attribution
+stays unknown; this is not authenticated identity. Private rationale and invoker
+details are not posted to the provider. Audit `succeeded` records successful
+transport, not completed review/merge: a subsequent persistence failure explicitly
+reports that the remote was published and needs reconciliation. Do not repeat a
+push to repair a tracking or audit error. A failed transport is followed by a
+bounded exact-ref observation: an approved commit on the remote is reconciled
+as succeeded, an unchanged leased head is failed, and an unreadable or different
+head is audited as `unknown` with an explicit reconciliation warning. Never
+repeat a push while its outcome is unknown. Inspect the provider and remote first.
+See the worktree skill's PR workflow reference for retention and restore guidance.
+
 Networked actor-specific commands resolve a shared **effective actor profile**:
 configured/base `PRConfig` + live provider permission + a matching GitHub
 `pr.roles` override. Thus a conservative base can become `pr-self-merge` for a

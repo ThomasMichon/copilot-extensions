@@ -861,6 +861,21 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
             )
         )
 
+    def authorize_fresh_acquisition(
+        self, task_id: str, *, reservation_key: str, worktree: str,
+        expected_generation: int, permitted: bool, confirmed_no_live_holder: bool,
+        reason: str,
+    ) -> dict:
+        return self._unwrap(self._http.post(
+            f"/spawn-reservations/tasks/{task_id}/authorize-fresh",
+            headers=self._control_headers(),
+            json={
+                "reservation_key": reservation_key, "worktree": worktree,
+                "expected_generation": expected_generation, "permitted": permitted,
+                "confirmed_no_live_holder": confirmed_no_live_holder, "reason": reason,
+            },
+        ))
+
     # -- external producer resource reservations ----------------------------
 
     def acquire_resource_reservation(

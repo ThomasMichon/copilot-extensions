@@ -92,6 +92,39 @@ def selected_pr(worktree_id: str, branch: str, record):
     return matches[0] if matches else None
 
 
+def _retain_refs(point: RecoveryPoint, *, cwd: str) -> None:
+    for ref, head in (
+        (point.local_ref, point.local_head),
+        (point.published_ref, point.published_head),
+        (point.lineage_ref, point.lineage_head),
+    ):
+        if ref:
+            git_ops.git(
+                "update-ref", ref, head, "0" * len(head),
+                cwd=cwd, isolated_repository=True,
+            )
+
+
+def retain_rewrite(
+    worktree_id: str, branch: str, source: str, pr, *, cwd: str,
+) -> RecoveryPoint:
+    """Retain an explicitly confirmed rewrite without inventing replay authority."""
+    local, published = _rev(source, cwd), _rev(pr.head_sha, cwd)
+    if local != source or published != pr.head_sha:
+        raise ValueError("Confirmed source and published commit objects must exist before recovery publication.")
+    namespace = hashlib.sha256(worktree_id.encode("utf-8")).hexdigest()[:24]
+    root = f"refs/agent-worktrees/recovery/{namespace}/{uuid.uuid4().hex}"
+    point = RecoveryPoint(
+        version=1, worktree_id=worktree_id, branch=branch,
+        local_head=local, local_ref=f"{root}/local", target_head=local,
+        published_head=published, published_ref=f"{root}/published",
+        pr_id=pr.pr_id, pr_branch=pr.branch, pr_repo=pr.repo,
+        pr_provider=pr.provider, association=_association(pr),
+    )
+    _retain_refs(point, cwd=cwd)
+    return point
+
+
 def prepare(worktree_id: str, branch: str, target: str, record, *, cwd: str) -> RecoveryPoint:
     """Retain committed local and recorded published tips before changing HEAD."""
     local = _rev("HEAD", cwd)
@@ -115,20 +148,7 @@ def prepare(worktree_id: str, branch: str, target: str, record, *, cwd: str) -> 
         association=_association(pr) if pr is not None else "",
         lineage_head=lineage, lineage_ref=f"{root}/lineage" if lineage else "",
     )
-    git_ops.git(
-        "update-ref", point.local_ref, local, "0" * len(local),
-        cwd=cwd, isolated_repository=True,
-    )
-    if published:
-        git_ops.git(
-            "update-ref", point.published_ref, published, "0" * len(published),
-            cwd=cwd, isolated_repository=True,
-        )
-    if lineage:
-        git_ops.git(
-            "update-ref", point.lineage_ref, lineage, "0" * len(lineage),
-            cwd=cwd, isolated_repository=True,
-        )
+    _retain_refs(point, cwd=cwd)
     tracking._atomic_write(_pending_path(cwd), json.dumps(asdict(point), sort_keys=True) + "\n")
     if published and not lineage:
         raise ValueError(
