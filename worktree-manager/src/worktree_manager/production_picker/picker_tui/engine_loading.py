@@ -121,7 +121,7 @@ class PickerScreenLoadingMixin:
             from . import data_local
 
             machine, env = data_local.LOCAL
-            label = f"{machine} {env}"
+            label = f"Local {env}"
         except Exception:
             machine, env, label = None, None, "local"
         self.source_tabs = [
@@ -141,6 +141,7 @@ class PickerScreenLoadingMixin:
                 "ready": True,
                 "source_kind": "machine-ssh",
                 "source_id": None,
+                "machine_label": "Local",
                 "capabilities": {},
             },
         ]

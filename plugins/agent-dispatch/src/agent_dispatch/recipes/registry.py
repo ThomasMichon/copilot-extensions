@@ -7,7 +7,7 @@ recipe with concrete parameters yields a :class:`RenderedRecipe` -- the fields o
 an ordinary ``create`` call -- so a recipe is kickable ad-hoc as readily as it is
 driven by a standing domain service.
 
-The three first-class archetypes:
+The first-class archetypes:
 
 * **reviewer** -- review a pull request under an explicit landing model: either
   own the merge (``land=self``) or hand feedback back to the author
@@ -18,6 +18,8 @@ The three first-class archetypes:
   state, suspend/resume until it lands.
 * **goal-driven** -- drive an arbitrary goal against one or more repos through one
   or more pull requests until met or abandoned.
+* **worktree-audit** -- produce a bounded, independently verified private report
+  for explicit candidates without changing their work or lifecycle.
 
 Everything here is pure: no coordinator, no network, no worktree state. The CLI
 (``agent-dispatch recipes ...``) turns a rendered recipe into a task.
@@ -30,6 +32,7 @@ import string
 from dataclasses import dataclass, field
 
 from ..identity import canonical_reviewer_target
+from . import worktree_audit
 
 
 class RecipeError(RuntimeError):
@@ -313,6 +316,34 @@ _register(
         labels=("kind:goal",),
     )
 )
+_register(
+    Recipe(
+        name=worktree_audit.NAME,
+        summary="Audit explicit local worktree conclusions; report only, never clean up.",
+        params=(
+            RecipeParam("scope", "exact registered local project name"),
+            RecipeParam("candidates", "comma-list or JSON array of 1-5 approved exact worktree IDs"),
+            RecipeParam("report_dir", "approved absolute private report directory"),
+            RecipeParam("budget_minutes", "approved time budget, 1-30 minutes"),
+        ),
+        title_template="audit worktree conclusions in {scope}",
+        goal_template="Produce a bounded report for {scope}, candidates {candidates}; no candidate mutations.",
+        done_criteria=(
+            "Every requested candidate has an evidence-backed receipt or an explicit "
+            "hold/not-reviewed reason; the private report passes check-report and "
+            "is submitted for independent verification. No candidate is mutated."
+        ),
+        charter_template=(
+            "Scope: {scope}\nCandidates: {candidates}\n"
+            "Private report directory: {report_dir}\nBudget minutes: {budget_minutes}\n\n"
+            + worktree_audit.CHARTER
+        ),
+        suspend_on=(),
+        resolution="report-submitted-for-independent-verification",
+        labels=("kind:worktree-audit", "mode:report-only"),
+        require_verification=True,
+    ),
+)
 
 
 _PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
@@ -368,6 +399,11 @@ def render_recipe(name: str, params: dict[str, str]) -> RenderedRecipe:
         raise RecipeError(
             "recipe 'reviewer' parameter 'land' must be 'self' or 'author'"
         )
+    if recipe.name == worktree_audit.NAME:
+        try:
+            worktree_audit.validate_params(values)
+        except (ValueError, TypeError) as exc:
+            raise RecipeError(f"recipe {worktree_audit.NAME!r}: {exc}") from exc
 
     extra_labels: tuple[str, ...] = ()
     resolution = recipe.resolution
@@ -397,6 +433,18 @@ def render_recipe(name: str, params: dict[str, str]) -> RenderedRecipe:
     )
 
 
+def exclusive_key_for(rendered: RenderedRecipe) -> str | None:
+    if rendered.recipe == worktree_audit.NAME:
+        return f"{worktree_audit.NAME}:{rendered.params['scope']}"
+    return None
+
+
+def verification_options(rendered: RenderedRecipe) -> dict[str, bool]:
+    if rendered.require_verification is None:
+        return {}
+    return {"require_verification": rendered.require_verification}
+
+
 def dedup_key_for(rendered: RenderedRecipe) -> str:
     """Return the stable live-work identity for a rendered recipe.
 
@@ -405,6 +453,8 @@ def dedup_key_for(rendered: RenderedRecipe) -> str:
     review. The queue permits the same key again only after the prior generation
     becomes terminal.
     """
+    if rendered.recipe == worktree_audit.NAME:
+        return f"recipe:{worktree_audit.NAME}:{worktree_audit.identity(rendered.params)}"
     if rendered.recipe == "reviewer":
         return (
             "recipe:reviewer:target="

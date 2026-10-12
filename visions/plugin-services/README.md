@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-10-11
+- **Last revised:** 2026-10-12
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -166,10 +166,38 @@ resource fencing, or existing standalone-service defaults.
 
 ## Features
 
+### capability-sized-runtime-dependencies
+
+Each runtime carries the dependency closure needed for its selected capability,
+not the union of every client, UI, host, model and optional transport role.
+Lightweight callers remain light; expensive optional stacks have explicit
+installation ownership. Dependency cost is measured across fresh installation,
+downloads, resident processes and retained immutable generations, rather than
+judged by package names or direct wheel size alone.
+
+### compatible-helper-runtime-reuse
+
+Independently shippable payloads may supply shared helpers that installers reuse
+over efficient, attributable process boundaries when compatibility and trust
+permit. A lone consumer's installer supplies the required capability; later
+eligible consumers can avoid reconstructing an equivalent helper runtime.
+Sharing preserves installation-cell isolation, caller state and independent
+service lifecycle, and supports compatible generations without mutating live
+runtimes. It never assumes a pre-existing sibling, imports another service's
+private venv or turns an optimization into a mandatory global coordinator.
+Consolidated fronts retain independently owned endpoints, routing, drain and
+rollback even when execution resources are shared.
+
 ### self-contained-runtime
-Every runtime plugin owns a complete, standalone runtime (venv + binstub +
-service) that its own installer deploys and updates. Nothing a service needs to
-run is borrowed from a sibling plugin or from a git checkout of this repo.
+Every runtime plugin's installer establishes a complete, standalone installation
+(runtime, invocation surface and any service), including all dependencies and
+their durable lifetime. A required helper may be a private runtime or an
+explicitly managed compatible helper reused over the process boundary described
+above; each consuming installer secures its own reference and can provision a
+compatible helper when none exists. A sibling's private venv, installation
+presence or continued operation is never a prerequisite. Updating or uninstalling
+one consumer cannot invalidate another's live dependency. Nothing depends on a
+git checkout of this repo or an unowned ambient helper.
 
 ### immutable-versioned-runtime
 A runtime install is **immutable**: once a version's venv is built it is never

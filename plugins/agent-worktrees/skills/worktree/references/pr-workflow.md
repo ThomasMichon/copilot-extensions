@@ -630,7 +630,8 @@ publish with `push-changes` (or repeat `create-pr`). Inspect and validate the
 resolution before publishing.
 
 A non-ancestral update is authorized only for a unique, live, tracked private
-`pr/`, legacy `feature/`, or contributor `user/` head carrying this worktree's suffix or codename.
+`pr/`, legacy `feature/`, or contributor `user/` head carrying this worktree's
+suffix/codename or freshly proving its previously attested custom-head ownership.
 The current checkout must be its recorded `worktree/<id>` branch (or that
 same tracked private head in the legacy checked-out-feature flow). An exact
 legacy bare-id record resolves to its canonical `worktree/<id>` branch.
@@ -690,6 +691,18 @@ re-verifies the current source, pins its exact object, runs real pre-push hooks,
 and retains the exact **last-observed remote head** lease. Fetching a reviewer
 update never silently advances that lease. After a successful rewrite, tracking
 refreshes the base, head and patch together.
+If an earlier source push reached the remote but its acknowledgement was lost,
+a later rebase can leave the saved lease behind. Recovery never adopts today's
+tip blindly: the Git remote and provider must independently agree, and that tip
+must descend from the saved head and be contained in the verified pre-rebase
+source. The provider must still report the same live PR number, source ref,
+full source repository identity and expected base; closed/merged or retargeted
+PRs cannot be reconciled from their SHA alone.
+The complete source replay is checked again and the recovered exact tip
+fences the one bounded retry. The audit retains both the saved head and transport
+lease; tracking advances only after successful publication. Unconfirmed tips,
+concurrent commits outside that original source, changed associations or
+destinations remain explicit refusals.
 The destination is recorded only as a SHA-256 fingerprint; raw Git push URLs
 can carry credentials and are never copied into the checkpoint.
 Proof queries disable Git replacement objects, including ancestry, patch and
@@ -953,6 +966,20 @@ The opt-in requires the owning `worktree/{id}` checkout, persisted successful
 head ending in that worktree's canonical creation suffix. Ownership also binds
 the full destination attested by publication, for origin as well as a fork;
 another destination with the same slug and tip does not inherit permission.
+An explicitly named head from `create-pr --branch pr/custom-name` also qualifies
+without the generated suffix when the successful publication already attested
+the exact worktree/branch and destination. The existing worktree PR ledger owns
+that branch-to-provider/repository/PR mapping; there is no parallel mapping
+store. Follow-up `push-changes`, watch, rebase and completion reuse the recorded
+branch. `set-pr --branch` records an association but does not manufacture
+publication ownership. For a custom head, rebase/rewrite publication freshly
+checks the same numbered open PR, head ref, expected full head SHA, destination
+identity, remote tip and exclusive ledger ownership. Missing, foreign or stale
+evidence fails closed; suffixes remain the default naming convenience, not the
+only proof of ownership.
+Suffix-free `feature/*` remains the coordinated shared-branch namespace and
+never qualifies for this exception, even when its host opened an attested PR.
+
 Legacy feature-branch checkouts, unowned `set-pr` associations, shared/default
 and release branches, missing leases, changed destinations and dirty trees
 are refused. Normal pre-push hooks, attribution and head tracking remain
@@ -991,16 +1018,21 @@ publication transaction; mismatches remain refused.
 
 For an attested legacy open PR without publication ownership,
 `push-changes --rewrite-pr` reconciles ownership in the same command, even
-after rebasing. Compatibility requires a pre-generation record, a numbered
+after rebasing or squashing its own commits. The flag is the host's explicit
+confirmation of intentional rewriting; automatic replay proof is not required.
+Compatibility requires a numbered
 provider PR and URL, and its previously saved full destination identity
 or an HTTPS provider PR URL identifying that same repository and PR number.
 The provider and remote must both still hold the exact saved lease; the
 usual owning-worktree, private-ref and installation-wide exclusivity checks
 remain mandatory. Ownership is persisted only after those checks, without
-switching to or re-publishing the old tip. Partial ownership, a corrected
-generation or missing destination evidence requires explicit reconciliation.
-A manual PR identity or branch correction
-invalidates ownership; a matching-looking suffix is never proof by itself.
+switching to or re-publishing the old tip. A nonzero metadata generation alone
+does not disqualify the owning host. Such a legacy record must additionally match
+the provider's current numbered PR, source branch, source repository and saved
+head exactly before ownership is reconciled. Partial ownership or missing
+destination evidence still requires explicit reconciliation. An inconsistent
+PR identity or branch correction remains refused; a matching-looking suffix is
+never proof by itself.
 
 #### Operator-confirmed break glass
 

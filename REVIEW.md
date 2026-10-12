@@ -1,7 +1,8 @@
 # Review guidance — copilot-extensions
 
 This file is read by GitHub Copilot code review specifically (this repo's
-`.github/workflows/copilot-review-gate.yml` requests it, non-blocking, on
+The review job in `.github/workflows/workflow-lockdown-guard.yml` requests it,
+non-blocking, on
 every PR targeting `dev` authored by a Maintainer (see CONTRIBUTING.md's
 "Contribution flow" for why the automatic request is Maintainer-only, not
 "any invited collaborator") — see CONTRIBUTING.md's "Contribution flow" for

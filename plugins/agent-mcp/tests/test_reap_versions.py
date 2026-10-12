@@ -109,7 +109,10 @@ def test_reap_noops_without_current_marker(tmp_path, monkeypatch):
 # --- real terminate -------------------------------------------------------
 
 def test_terminate_tree_kills_real_process():
-    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(120)"],
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}),
+    )
     try:
         assert rv._pid_alive(proc.pid)
         assert rv._terminate_tree(proc.pid) is True

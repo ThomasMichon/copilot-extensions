@@ -22,13 +22,27 @@ def test_help_flag(capsys):
     assert "worktree-manager" in capsys.readouterr().out.lower()
 
 
-def test_bare_run_prints_intro_and_roadmap(capsys):
+def test_bare_run_prints_observed_status(monkeypatch, capsys):
+    from types import SimpleNamespace
+    from worktree_manager import startup_status
+
+    monkeypatch.setattr(startup_status, "self_status", lambda: SimpleNamespace(
+        installed=True, installed_version=__version__,
+    ))
+    monkeypatch.setattr(startup_status, "core_status", lambda: SimpleNamespace(
+        installed=True, state="installed",
+    ))
+    monkeypatch.setattr(startup_status, "detect_baseline", lambda: [])
+    monkeypatch.setattr(startup_status, "engine_available", lambda: True)
+    monkeypatch.setattr(startup_status, "build_projects", lambda: [object()])
     assert main([]) == 0
     out = capsys.readouterr().out
     assert "Worktree Manager" in out
-    # The roadmap is shown so a first run is self-explanatory.
-    assert "one-line bootstrap" in out
-    assert "you are here" in out
+    assert "Registered projects reported: 1" in out
+    assert "picker <project>" in out
+    assert "you are here" not in out
+    assert "Build-out roadmap" not in out
+    assert "setup" not in out
 
 
 def test_project_only_invocation_launches_picker(monkeypatch):

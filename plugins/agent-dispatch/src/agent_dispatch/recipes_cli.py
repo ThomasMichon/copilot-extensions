@@ -26,7 +26,9 @@ agent_dispatch`` loads it as ``sys.modules["__main__"]``, never as
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+from pathlib import Path
 from typing import Any
 
 from .loop_commands import _resolve_cli_module
@@ -139,7 +141,13 @@ def _recipe_dedup_key(rendered: Any) -> str:
 def _recipe_create_namespace(args: argparse.Namespace, rendered: Any) -> argparse.Namespace:
     """Build a ``create``-shaped namespace from a rendered recipe so ``kick`` can
     reuse ``_cmd_create`` verbatim (dedup, spawn, lane resolution)."""
-    return argparse.Namespace(
+    from .recipes import exclusive_key_for
+
+    create_args = _resolve_cli_module().build_parser().parse_args(["create", rendered.title])
+    for key, value in vars(args).items():
+        if key in vars(create_args) and key not in {"func", "command"}:
+            setattr(create_args, key, value)
+    options = dict(
         # recipe-derived
         title=rendered.title,
         prompt=rendered.prompt,
@@ -148,6 +156,7 @@ def _recipe_create_namespace(args: argparse.Namespace, rendered: Any) -> argpars
         require=list(rendered.requires) or None,
         label=list(dict.fromkeys([*rendered.labels, *(getattr(args, "label", None) or [])])),
         dedup_key=getattr(args, "dedup_key", None) or _recipe_dedup_key(rendered),
+        exclusive_key=exclusive_key_for(rendered),
         source="recipe",
         origin_ref=rendered.recipe,
         evaluator_ref=None,
@@ -181,6 +190,8 @@ def _recipe_create_namespace(args: argparse.Namespace, rendered: Any) -> argpars
         machine=getattr(args, "machine", None),
         worktree=getattr(args, "worktree", None),
     )
+    vars(create_args).update(options)
+    return create_args
 
 
 def _cmd_recipes_kick(args: argparse.Namespace) -> int:
@@ -188,6 +199,8 @@ def _cmd_recipes_kick(args: argparse.Namespace) -> int:
 
     try:
         rendered = render_recipe(args.name, _parse_recipe_params(args.param))
+        if rendered.recipe == "worktree-audit" and getattr(args, "require_verification", None) is False:
+            raise RecipeError("worktree-audit requires independent verification")
     except (RecipeError, ValueError) as exc:
         print(f"agent-dispatch: {exc}", file=sys.stderr)
         return 2
@@ -199,12 +212,47 @@ def _cmd_recipes_kick(args: argparse.Namespace) -> int:
             {
                 "dry_run": True,
                 "dedup_key": create_ns.dedup_key,
+                "exclusive_key": create_ns.exclusive_key,
                 "spawn": create_ns.spawn,
                 "spawn_backend": create_ns.spawn_backend,
             }
         )
         return _emit(preview)
     return _cmd_create(create_ns)
+
+
+def _resolve_report_path(path: Path, *, strict: bool) -> Path:
+    try:
+        return path.resolve(strict=strict)
+    except RuntimeError as exc:
+        raise ValueError(f"could not resolve audit report path (symlink loop?): {exc}") from exc
+
+
+def _cmd_recipes_check_report(args: argparse.Namespace) -> int:
+    from .recipes import RecipeError, render_recipe
+    from .recipes.worktree_audit import validate_report
+
+    try:
+        rendered = render_recipe("worktree-audit", _parse_recipe_params(args.param))
+        root = _resolve_report_path(Path(rendered.params["report_dir"]), strict=False)
+        if not root.is_dir():
+            raise ValueError("approved report_dir must be an existing directory")
+        report_path = _resolve_report_path(Path(args.report), strict=True)
+        if report_path == root or not report_path.is_relative_to(root):
+            raise ValueError("report must be inside the approved report_dir after resolving symlinks")
+        if not report_path.is_file():
+            raise ValueError("report must be a regular file inside the approved report_dir")
+        with report_path.open("rb") as stream:
+            data = stream.read(65537)
+        if len(data) > 65536:
+            raise ValueError("report exceeds the 64 KiB result limit")
+        validate_report(json.loads(data.decode("utf-8-sig")), rendered.params)
+    except (RecipeError, ValueError, OSError) as exc:
+        print(f"agent-dispatch: {exc}", file=sys.stderr)
+        return 2
+    return _emit({
+        "valid": True, "semantic_verification": False, "report": str(report_path),
+    })
 
 
 def _cmd_recipes_drive(args: argparse.Namespace) -> int:
@@ -283,7 +331,7 @@ def _cmd_recipes_drive(args: argparse.Namespace) -> int:
 def register_recipes_commands(sub) -> None:
     rp = sub.add_parser(
         "recipes",
-        help="loop recipes -- the packaged shapes of long-running agentic work (reviewer / conflict-resolution / goal-driven), kickable ad-hoc",
+        help="loop recipes -- packaged reviewer / conflict-resolution / goal-driven / worktree-audit work, kickable ad-hoc",
     )
     rsub = rp.add_subparsers(dest="recipes_command", required=True)
 
@@ -306,6 +354,13 @@ def register_recipes_commands(sub) -> None:
         help="a recipe parameter (repeatable), e.g. --param repo=owner/name --param pr=42",
     )
     rr.set_defaults(func=_resolve_cli_module()._cmd_recipes_render)
+
+    checker = rsub.add_parser(
+        "check-report", help="validate an audit report's shape and roster, not its semantic truth",
+    )
+    checker.add_argument("--report", required=True)
+    checker.add_argument("--param", action="append", metavar="KEY=VALUE")
+    checker.set_defaults(func=_cmd_recipes_check_report)
 
     kp = rsub.add_parser(
         "kick",

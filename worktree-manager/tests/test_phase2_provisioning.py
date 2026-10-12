@@ -160,7 +160,13 @@ def test_install_core_dry_run_plans_but_does_not_run(tmp_path: Path):
 
 # ── command surface ─────────────────────────────────────────────────────────
 
-def test_doctor_command_runs(capsys):
+def test_doctor_command_runs(capsys, monkeypatch, tmp_path):
+    from worktree_manager import daemon_health
+
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        daemon_health.mux_daemon_cutover, "_iter_mux_daemon_pids", lambda: set(),
+    )
     rc = main(["doctor"])
     out = capsys.readouterr().out
     assert "doctor" in out.lower()

@@ -79,20 +79,24 @@ a scaling aspiration, not a fixed spawn-rate budget with an approved interval.
 
 ### Phase 2 - Hook daemon fast path
 
-- [ ] Trace current request, installation selection, auth, output and fallback
+- [x] Trace current request, installation selection, auth, output and fallback
   contract in the existing hook client and daemon before changing transport.
-- [ ] Implement the first supported PowerShell hook fast path inside the
+- [x] Implement the first supported PowerShell hook fast path inside the
   already-created shell, reading the attributable rendezvous and directly
   requesting the existing daemon with no Python/CLI child on success.
-- [ ] Retain the existing attributed CLI/client fallback only for explicitly
+- [x] Retain the existing attributed CLI/client fallback only for explicitly
   eligible unavailability. Preserve safety decisions and ambiguous-outcome
   behavior; no provisioning or new service on the hot path.
-- [ ] Keep session-start drift reconciliation and its single-flight provisioning
+- [x] Keep session-start drift reconciliation and its single-flight provisioning
   owner unchanged and separate from the ordinary hook fast path.
 - [ ] Evaluate Bash's available in-process primitives separately. Do not hide
   a curl/Python/jq child in a claimed zero-child path or sacrifice bounded
   transport/JSON validation to match the PowerShell implementation.
-- [ ] Land code, focused tests, docs and required changefiles.
+- [x] Land code, focused tests, docs and required changefiles for the first
+  legacy-context PowerShell post-hook slice (#6122). Selected installation-cell
+  fast paths and Bash evaluation remain open.
+- [ ] Extend or explicitly transfer selected installation-cell fast paths
+  after proving the cell-owned request/fallback contract.
 
 ### Phase 3 - Recurring daemon churn
 
@@ -104,6 +108,9 @@ a scaling aspiration, not a fixed spawn-rate budget with an approved interval.
 - [ ] Preserve real Git correctness, installation separation, startup recovery
   and lifecycle ownership; do not call a cache authoritative by convenience.
 - [ ] Land bounded slices independently, each with before/after counts.
+- [x] _(Agent-recommended bounded first slice)_ Batch per-pass fallback object
+  comparisons before adding cross-cycle immutable-fact reuse; preserve fresh
+  mutable Git observations and prove the one-/many-path process budgets.
 
 ### Phase 4 - Unit boundaries and release proof
 
@@ -157,6 +164,39 @@ after equivalence and error semantics are established. Keep native integration
 small and explicit while unit policy tests remain in-process.
 
 ## Journal
+
+### 2026-10-12 - Per-pass tree comparison slice
+
+- Transitioned the canonical driver from Phase 2 to Phase 3 recurring work;
+  selected-cell/Bash and release/deployment obligations remain open.
+- The three prior slices landed serially: captured-child ownership #6231,
+  legacy PowerShell hook fast path #6122, and immutable numbered runtime
+  admission/readiness quarantine #6160. Release #6267 promoted a pinned
+  source containing all three merge commits; the relevant runtime, hook,
+  installer and process-helper sources match that release tree. No runtime
+  update is authorized by this continuation; release is not running-state
+  proof.
+- Isolated real Git measurements before batching: one changed path used
+  9 starts per cycle (0.881s, 0.923s); twenty paths, with the last still
+  unmerged, used 47 (4.248s, 4.510s). After batching the same workloads used
+  8 per cycle: one path 0.860s/0.676s, twenty 0.694s/0.664s. All four
+  classifications retained WIP with one commit ahead and behind; setup is
+  excluded. This is a direct classifier launch count, not a live daemon or
+  host-wide descendant/window census.
+- Replaced per-path blob children with raw, NUL-delimited object comparisons.
+  No longer-TTL or immutable cross-cycle cache is introduced; that subsequent
+  contract still needs ref/config/replacement/concurrency invalidation proof.
+  Existing catalog, lifecycle, write-admission, provenance and test-portfolio
+  owners retain their separately coordinated work.
+- Review identified that the initial second raw diff could enumerate
+  unrelated upstream files before filtering. Replaced it with exact,
+  nonrecursive `ls-tree` lookups, conservative argv-size batching and separate
+  ancestor/descendant requests. The final same-shape measurements retain
+  8 starts per cycle: one path 0.939s/0.867s, twenty 0.892s/0.776s. An
+  additional native fixture has 500 unrelated upstream paths and proves
+  those paths are absent from the lookup output. Large path sets may need
+  additional bounded batches; eight is the specified fixture budget, not
+  an unconditional promise for every repository.
 
 ### 2026-10-11 - Captured child safety
 

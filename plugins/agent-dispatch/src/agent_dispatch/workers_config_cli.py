@@ -1,5 +1,5 @@
 """Thin CLI glue for a Worktree Manager Picker "Workers" ``config_sections``
-entry (``agent-dispatch-workers-config-section``, Phases 1 + 3).
+entry (``agent-dispatch-workers-config-section``, Phases 1, 3 and 4).
 
 Bridges two already-shipped primitives -- ``registrar discover``'s declared
 ``supervised-lane`` pools and ``supervise override``'s local enable/disable
@@ -8,12 +8,15 @@ invocation needs: print a short, human-legible status line (one named pool,
 or a summary across every declared pool when no name is given), and, when
 invoked with a toggle flag against one named pool, apply the local override
 first. No new mutation primitive is introduced here -- this is glue, not a
-new engine; see ``efforts/active/agent-dispatch-workers-config-section``.
+new engine. The read-only ``pool-options`` command supplies the local form,
+whose ``--require-declared`` mutation refuses stale or ambiguous targets.
+Legacy terminal toggles remain permissive.
 """
 
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import sys
 from typing import TYPE_CHECKING
 
@@ -69,6 +72,33 @@ def all_supervised_lanes() -> list["ProfileDeclaration"]:
     return [
         decl for decl in rd.discover() if decl.kind == RegistrationKind.SUPERVISED_LANE
     ]
+
+
+def _unique_supervised_lanes() -> list["ProfileDeclaration"]:
+    from .registrar import RegistrarError
+
+    declarations = all_supervised_lanes()
+    duplicates = sorted(
+        name for name, count in Counter(decl.name for decl in declarations).items()
+        if count > 1
+    )
+    if duplicates:
+        raise RegistrarError(
+            f"ambiguous worker pool declarations: duplicate names {', '.join(duplicates)}"
+        )
+    return declarations
+
+
+def _cmd_workers_pool_options(args: argparse.Namespace) -> int:
+    """Read-only dynamic choices for the local Workers configuration form."""
+    from .registrar import RegistrarError
+
+    try:
+        declarations = _unique_supervised_lanes()
+    except RegistrarError as exc:
+        print(f"agent-dispatch workers pool-options: {exc}", file=sys.stderr)
+        return 2
+    return _core()._emit([decl.name for decl in declarations])
 
 
 def pool_status_line(
@@ -208,7 +238,28 @@ def _cmd_workers_config_section(args: argparse.Namespace) -> int:
         print(all_pools_status_line(declarations, overrides=overrides))
         return 0
 
-    declaration = find_supervised_lane(name, owner=getattr(args, "owner", None))
+    if getattr(args, "require_declared", False):
+        from .registrar import RegistrarError
+
+        try:
+            declarations = _unique_supervised_lanes()
+        except RegistrarError as exc:
+            print(f"agent-dispatch workers config-section: {exc}", file=sys.stderr)
+            return 2
+        matches = [
+            decl for decl in declarations
+            if decl.name == name and (args.owner is None or decl.owner == args.owner)
+        ]
+        if len(matches) != 1:
+            print(
+                f"agent-dispatch workers config-section: {name!r}: "
+                "no unique declared worker pool; no override changed",
+                file=sys.stderr,
+            )
+            return 2
+        declaration = matches[0]
+    else:
+        declaration = find_supervised_lane(name, owner=getattr(args, "owner", None))
     owner = declaration.owner if declaration is not None else (args.owner or "local")
     token = logical_override_id(owner or "local", name)
 
@@ -258,6 +309,10 @@ def register_workers_commands(sub) -> None:
         ),
     )
     workers_sub = p.add_subparsers(dest="workers_command", required=True)
+    options = workers_sub.add_parser(
+        "pool-options", help="print the JSON choices for declared local worker pools"
+    )
+    options.set_defaults(func=_cmd_workers_pool_options)
     cs = workers_sub.add_parser(
         "config-section",
         help=(
@@ -291,6 +346,10 @@ def register_workers_commands(sub) -> None:
         help="apply a local override before reporting status (requires name)",
     )
     cs.add_argument("--reason", help="optional reason recorded with --toggle disable")
+    cs.add_argument(
+        "--require-declared", action="store_true",
+        help="refuse absent or ambiguous declarations before changing a local override",
+    )
     cs.add_argument(
         "--json", action="store_true", help="emit full JSON instead of the compact status line"
     )

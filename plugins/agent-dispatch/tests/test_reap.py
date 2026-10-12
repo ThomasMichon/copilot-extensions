@@ -443,6 +443,9 @@ def test_is_live_coordinator_pid_fail_soft_on_enumeration_error():
 
 
 def test_reap_abandoned_passive_backstop_reaps_stranded_pid(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "agent_dispatch.cutover_process.verified_pair", lambda pid, _token: {pid: "1"},
+    )
     from zdd import breadcrumb
 
     breadcrumb.write_breadcrumb(

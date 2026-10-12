@@ -6,7 +6,7 @@ import json
 import hashlib
 import re
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from agent_procutil import no_window_kwargs
@@ -30,6 +30,7 @@ class RebaseProof:
     source_head: str
     patches: tuple[str, ...]
     conflict_replays: tuple[tuple[str, str], ...]
+    transport_expected_head: str = ""
 
 
 def _git(*args: str, cwd: str) -> str:
@@ -220,21 +221,25 @@ def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
         return refuse("The destination must match exactly one live PR in the owning record.")
     pr = live[0]
     suffixes = [git_ops.worktree_suffix(record.worktree_id), record.codename]
+    suffix_bound = any(suffix and (
+        dest.endswith("-" + suffix) or dest in (f"pr/{suffix}", f"feature/{suffix}")
+    ) for suffix in suffixes)
     protected = {"main", "master", "dev", repo.default_branch, *hooks._protected_branches(cwd)}
     if (
         not pr.pr_id or pr.head_sha != expected
         or dest in protected or source in protected
         or not dest.startswith(("pr/", "feature/", "user/"))
-        or not any(suffix and (
-            dest.endswith("-" + suffix) or dest in (f"pr/{suffix}", f"feature/{suffix}")
-        ) for suffix in suffixes)
     ):
-        return refuse("The saved PR identity/head or private suffix-bound destination is invalid.")
+        return refuse("The saved PR identity/head or protected/private destination is invalid.")
     from . import pr_publish
     if remote != (pr.remote or repo.remote) and (
         pr.remote or remote != pr_publish.push_remote(repo, pr, cwd)
     ):
         return refuse("The destination is not the verified remote holding this PR's head.")
+    if not suffix_bound:
+        from .pr_custom_head import verify_attested
+        if not verify_attested(record, repo, pr, remote, expected, cwd=cwd):
+            return refuse("The custom PR head lacks matching saved and live publication ownership.")
     owner_branch = (
         f"worktree/{record.worktree_id}" if record.branch == record.worktree_id else record.branch
     )
@@ -286,7 +291,9 @@ def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
     )
     if conflicts is None:
         return refuse("The manual replay did not preserve source trees and commit identity.")
-    url = _git("remote", "get-url", "--push", remote, cwd=cwd)
+    from .git_push_transport import captured_urls
+    captured = captured_urls(remote)
+    url = captured[0] if captured else _git("remote", "get-url", "--push", remote, cwd=cwd)
     if not url:
         return refuse("The verified destination has no readable push URL.")
     return RebaseProof(
@@ -327,7 +334,8 @@ def record_synced(worktree_id: str, config, cwd: str) -> None:
 
 
 def push(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
-         timeout: float = push_timeout.DEFAULT_PUSH_TIMEOUT) -> git_ops.PushResult:
+         timeout: float = push_timeout.DEFAULT_PUSH_TIMEOUT,
+         reconcile_head: str = "") -> git_ops.PushResult:
     """The only non-ancestral publish path: a freshly verified owned-PR replay."""
     try:
         reasons: list[str] = []
@@ -336,13 +344,40 @@ def push(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
             return git_ops.PushResult(
                 ok=False, stderr="Refusing unproved PR rewrite: " + reasons[0],
             )
+        lease = expected
+        if reconcile_head:
+            from . import pr_publish
+            pr = pr_publish._pr_for(record, proof.branch)
+            if not (
+                re.fullmatch(r"[0-9a-f]{40,64}", reconcile_head)
+                and _ancestor(expected, reconcile_head, cwd)
+                and _ancestor(reconcile_head, proof.old_source, cwd)
+                and pr_publish._tip(remote, proof.branch, cwd) == reconcile_head
+                and pr_publish._provider_head(
+                    repo, pr, expected_ref=proof.branch,
+                    expected_identity=pr_publish.push_identity(remote, cwd=cwd),
+                ) == reconcile_head
+            ):
+                return git_ops.PushResult(
+                    ok=False, stderr="Refusing partial publication recovery: remote head is not independently confirmed source lineage.",
+                )
+            lease = reconcile_head
+            proof = replace(proof, transport_expected_head=lease)
         _save(proof, cwd)
         # Pin the verified source object; never race a moving local branch.
         from .git_push_transport import push as transport
         result = transport(
             remote, f"{proof.source_head}:refs/heads/{proof.branch}", cwd=cwd,
-            force_with_lease_expect=expected, timeout=timeout,
+            force_with_lease_expect=lease, timeout=timeout,
         )
+        if not result and not reconcile_head and "stale info" in result.stderr:
+            from . import pr_publish
+            observed = pr_publish._tip(remote, proof.branch, cwd)
+            if observed:
+                return push(
+                    record, repo, remote, refspec, expected,
+                    cwd=cwd, timeout=timeout, reconcile_head=observed,
+                )
         if result:
             result.rebase_base_sha = proof.new_base
             result.published_head_sha = proof.source_head

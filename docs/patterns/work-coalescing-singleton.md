@@ -75,6 +75,21 @@ is built as a shared helper instead of re-invented per plugin.
    restart; rendezvous (a published endpoint file, liveness-checked) is how a
    client finds it — never by spawning one "to make sure."
 
+## Holder lifetime versus publication
+
+Agent Bridge's namespace roster cache retains the exact task and provider
+reference while a same-provider scan is running, including after bounded
+cancellation fails. The watchdog or warm-up force-fail path fences late
+publication by generation without releasing that holder's admission slot.
+New callers keep their bounded joins and receive incomplete/stale data when
+the scan cannot finish; they do not start an overlapping same-provider scan.
+
+A provider replacement invalidates the old provider's publication and creates
+a distinct admission identity. Superseded tasks remain in the cache's owned
+scan set until completion so bounded shutdown still cancels and observes them.
+Task completion is not proof that an underlying native process tree exited;
+process-backed cancellation and identity-safe cleanup require separate evidence.
+
 ## The wire protocol (generalizing `hook_ipc.py`)
 
 `agent-worktrees`' `HookIpcServer`/`_Handler` already implements the core

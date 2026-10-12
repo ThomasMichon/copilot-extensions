@@ -19,6 +19,10 @@ def test_stale_lease_retries_only_fast_forward(monkeypatch, ancestor, refspec):
 
     monkeypatch.setattr(pr_publish, "_tip", tip)
     def ancestry(*args, **kwargs):
+        if args[:2] == ("remote", "get-url"):
+            return SimpleNamespace(returncode=0, stdout="https://github.com/owner/repo.git\n", stderr="")
+        if args[0] == "config":
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
         assert args == (
             "--no-replace-objects", "merge-base", "--is-ancestor", "remote-tip",
             refspec.partition(":")[0],

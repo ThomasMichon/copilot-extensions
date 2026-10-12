@@ -37,16 +37,24 @@ Callers needing only machine-global scope can pass
 identity verification but skips registered-project discovery and Git checks.
 The default still aggregates all scopes.
 
+Callers locating one sibling may also pass `plugin_names=("customizing-copilot",)`.
+Only requested names incur source resolution, but all matching marketplace
+identities remain visible so ambiguity is never resolved by choosing the first.
+Report authority applies within the requested names; reconciliation preserves
+excluded prior entries while still removing authoritatively absent sources for
+selected names. Excluded `enabledPlugins` entries do not affect filtered
+authority. Selected entry types, whole-document reads and shape, and shared
+marketplace definitions retain their existing validation. Omitting the filter
+retains full-roster behavior.
+
 **In dev**, most consumers' `pyproject.toml` reference this library through a
 `uv`-editable canonical pointer (`vendor-pointer-generalization` effort,
-Phase 1), so there is no per-plugin dev copy to keep in sync. The two
-deliberate exceptions keep this full local copy instead:
-
-- `agent-worktrees`, so a staged non-editable install never depends on a
-  throwaway passthrough source tree; and
-- `customizing-copilot`, whose standalone `installing-plugins` skill script
-  resolves `state.py` directly by file path and has no consuming
-  `pyproject.toml` surface the `uv`-editable form could target.
+Phase 1), so there is no per-plugin dev copy to keep in sync.
+`customizing-copilot` keeps a full local copy instead: its standalone
+`installing-plugins` skill script resolves `state.py` directly by file path
+and has no consuming `pyproject.toml` surface the `uv`-editable form could target.
+`agent-worktrees` uses canonical editable references on dev; its standalone
+release receives real local copies during materialization.
 
 **At release**, `tools/materialize_main.py` rewrites any `uv`-editable
 consumers into the same real, promoted copy shape present here -- non-editable,

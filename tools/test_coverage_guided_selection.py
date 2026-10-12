@@ -46,6 +46,17 @@ from tools.coverage_guided_selection import diff as diff_mod  # noqa: E402
 from tools.coverage_guided_selection import cli as cli_mod  # noqa: E402
 
 
+def test_baseline_error_preserves_collection_output_despite_coverage_warning():
+    error = baseline_mod.BaselineCollectionError(
+        2, "ERROR collecting test_module.py\nImportError: missing dependency\n",
+        "CoverageWarning: No data was collected.\n",
+    )
+    assert error.returncode == 2
+    assert "stdout:\nERROR collecting test_module.py" in str(error)
+    assert "ImportError: missing dependency" in str(error)
+    assert "stderr:\nCoverageWarning: No data was collected." in str(error)
+
+
 def _synthetic_baseline() -> dict:
     """A hand-built baseline: 3 tests covering 5 lines across 2 files.
 
@@ -746,7 +757,7 @@ class TestPlanChunks:
         # order matches sorted discovery order (stable, reproducible
         # chunking across runs).
         flattened = [path for chunk in chunks for path in chunk]
-        assert flattened == sorted(f"tests/{name}" for name in names)
+        assert flattened == sorted(str(Path("tests") / name) for name in names)
 
     def test_large_suite_includes_both_default_pytest_filename_patterns(
         self, tmp_path: Path
@@ -765,7 +776,7 @@ class TestPlanChunks:
         chunks = baseline_mod._plan_chunks(tmp_path, "tests", max_files_per_chunk=3)
 
         flattened = {path for chunk in chunks for path in chunk}
-        assert flattened == {f"tests/{name}" for name in names}
+        assert flattened == {str(Path("tests") / name) for name in names}
 
     def test_large_suite_outside_cwd_keeps_absolute_paths(
         self, tmp_path: Path
@@ -2572,7 +2583,4 @@ class TestDecide:
         result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {})
 
         json.dumps(result.as_dict())  # must not raise
-
-
-
 

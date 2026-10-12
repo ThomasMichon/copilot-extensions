@@ -128,6 +128,14 @@ each adopter is already safe.
       write; after contention, wait within the caller's bounded budget and
       revalidate/reuse the winner. Different content must refuse after the
       winner publishes rather than becoming a second writer.
+      The shared Python `construction_lease()` context manager landed in #6290
+      and supplies bounded kernel ownership and normal/error/process-death
+      release. Native contender tests recheck admission under ownership after
+      the winner publishes.
+      Installer integration remains unchecked: both entrypoints must retain the
+      owning descriptor through real construction, and every contender on a
+      deployment path must use the same protocol. Ready/rollback candidate
+      retention below is a prerequisite to releasing construction before cutover.
 - [ ] Release construction ownership on success, failure, cancellation, and
       process death. Keep its lifetime scoped to construction, isolated health
       gating, and immutable publication, not unrelated binstub/service work.

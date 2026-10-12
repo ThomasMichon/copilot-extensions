@@ -32,12 +32,24 @@ def test_real_wheels_verify_and_reject_frozen_pre_seam_core(tmp_path):
         build.mkdir()
         for filename in ("pyproject.toml", "README.md"):
             shutil.copy2(source / filename, build / filename)
+        if source.name == "agent-index-service":
+            for filename in ("setup.py", "_build_runtime_resource.py", "MANIFEST.in"):
+                shutil.copy2(source / filename, build / filename)
+            primitive = tmp_path / "libs" / "versioned-runtime" / "versioned_runtime.py"
+            primitive.parent.mkdir(parents=True)
+            shutil.copy2(repo / "libs" / "versioned-runtime" / "versioned_runtime.py", primitive)
         shutil.copytree(
             source / "src", build / "src",
             ignore=shutil.ignore_patterns("__pycache__"),
         )
         if source.name == "agent-index":
             core_build = build
+        if source.name == "agent-procutil":
+            metadata = build / "pyproject.toml"
+            metadata.write_text(re.sub(
+                r'^version\s*=\s*"[^"]+"', 'version = "0.1.0-dev8"',
+                metadata.read_text(encoding="utf-8"), count=1, flags=re.MULTILINE,
+            ), encoding="utf-8")
         result = subprocess.run(
             [sys.executable, "-c",
              f"from setuptools.build_meta import build_wheel; build_wheel({str(bundle)!r})"],

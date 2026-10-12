@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import platform
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -639,15 +640,31 @@ def _audit_daemon_health(
             "counts": {"total": 0},
         }
 
-    candidates = _candidate_map(ctx.list_candidates())
-    table = routing.read_table(ctx.config_dir)
-    owner, owner_reason = _validated_owner(ctx, candidates, table)
-    record = breadcrumb.read_breadcrumb(ctx.config_dir)
-    active_raw = table.get("active") if isinstance(table, dict) else None
-    active_pid = active_raw.get("pid") if isinstance(active_raw, dict) else None
-
     findings: list[dict[str, object]] = []
     try:
+        try:
+            candidates = _candidate_map(ctx.list_candidates())
+        except (OSError, subprocess.SubprocessError) as exc:
+            finding = {
+                "kind": "census_unavailable",
+                "summary": "fresh daemon process census unavailable",
+                "repairable": False,
+                "blocked_reason": type(exc).__name__,
+                "error": str(exc),
+            }
+            return {
+                "service": ctx.service, "mode": "report",
+                "validated_owner": None,
+                "owner_validation_reason": "fresh daemon process census unavailable",
+                "cutover_in_progress": False, "cutover_guard_error": None,
+                "census_available": False, "candidate_count": None, "candidates": [],
+                "findings": [finding], "counts": _counts([finding]),
+            }
+        table = routing.read_table(ctx.config_dir)
+        owner, owner_reason = _validated_owner(ctx, candidates, table)
+        record = breadcrumb.read_breadcrumb(ctx.config_dir)
+        active_raw = table.get("active") if isinstance(table, dict) else None
+        active_pid = active_raw.get("pid") if isinstance(active_raw, dict) else None
         stranded = _inspect_stranded_survivor(ctx, record)
         if stranded is not None:
             findings.append(stranded)
@@ -746,6 +763,19 @@ def apply_daemon_health(
     try:
         before = _audit_daemon_health(ctx, now=now, cutover_state="held")
         actions: list[dict[str, object]] = []
+        def blocked_census(report):
+            return {
+                "service": ctx.service, "mode": "apply", "before": before,
+                "after": report, "findings": before["findings"],
+                "remaining_findings": report["findings"], "counts": report["counts"],
+                "actions": actions + [{
+                    "kind": "census_unavailable", "blocked": True,
+                    "reason": "fresh daemon process census unavailable",
+                }],
+            }
+
+        if before.get("census_available") is False:
+            return blocked_census(before)
 
         for finding in before.get("findings", []):
             if finding.get("kind") != "stranded_survivor":
@@ -778,6 +808,8 @@ def apply_daemon_health(
             break
 
         current = _audit_daemon_health(ctx, now=now, cutover_state="held")
+        if current.get("census_available") is False:
+            return blocked_census(current)
         attempted: set[int] = set()
         for finding in before.get("findings", []):
             if finding.get("kind") != "abandoned_passive":
@@ -838,6 +870,8 @@ def apply_daemon_health(
         max_iterations = max(1, before.get("candidate_count", 0) * 3)
         for _ in range(max_iterations):
             current = _audit_daemon_health(ctx, now=now, cutover_state="held")
+            if current.get("census_available") is False:
+                return blocked_census(current)
             next_target = None
             for kind, item in _target_pid_sequence(current):
                 if item["pid"] not in attempted:
@@ -894,6 +928,8 @@ def apply_daemon_health(
             attempted.add(item["pid"])
 
         after = _audit_daemon_health(ctx, now=now, cutover_state="held")
+        if after.get("census_available") is False:
+            return blocked_census(after)
         return {
             "service": ctx.service,
             "mode": "apply",

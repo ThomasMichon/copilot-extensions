@@ -62,15 +62,15 @@ reviewed body as the source of truth would leave two gaps:
 ## Standard approach
 
 A third delivery tier, **worktree-scoped** rather than session-scoped or
-purely checked-in: a gitignored, locally re-rendered cache that lives outside
-the instruction tree for as long as the worktree exists, refreshed at
-worktree lifecycle boundaries rather than every session start.
+purely checked-in: a gitignored, locally re-rendered cache of auto-discovered
+instruction siblings that lives for as long as the worktree exists, refreshed
+at worktree lifecycle boundaries and session start.
 
-### 1. The gitignored non-discovered local body
+### 1. The gitignored auto-discovered local body
 
 Every projection destination
 `.github/instructions/<plugin>/<sourceId>.instructions.md` gains a gitignored
-body at `.github/copilot/context-locals/<plugin>/<sourceId>.local.md`,
+body at `.github/instructions/<plugin>/<sourceId>.local.instructions.md`,
 **except** a source that opts out via its own declaration's
 `skipLocalCache: true` (the repo-wide catch-all in step 3 is the one shipped
 example: its own body would join its recovery inventory and get read back,
@@ -82,10 +82,11 @@ repeating the identical directive for no benefit). The consumer repo's root
 .github/instructions/**/*.local.instructions.md
 ```
 
-Nested destination subdirectories are preserved. Both local bodies and reviewed
-fallbacks are ordinary Markdown outside instruction roots, referenced using
-code spans rather than automatic imports. The historical API name
-`local_sibling_destination()` now returns this derived local-body path.
+Nested destination subdirectories are preserved. Local bodies are gitignored
+instruction siblings that creation and resume populate before discovery.
+Reviewed fallbacks are ordinary Markdown outside instruction roots, referenced
+using code spans rather than automatic imports. `local_sibling_destination()`
+returns the local instruction sibling path.
 The body holds a fresh re-render of the **currently installed** payload --
 never a network fetch, never a marketplace check, purely a local, offline
 render from whatever plugin payload already sits on disk. Keeping installed
@@ -246,7 +247,7 @@ changes, resume or reconstruction; persist no loaded-state. No global coverage
 file is required.
 
 The scanner separates automatically discovered selectors, inline kernels and
-legacy locals from non-discovered current local bodies and reviewed fallbacks.
+auto-discovered local bodies from non-discovered compatibility bodies and reviewed fallbacks.
 Actual admission and selective
 reads remain unknown without runtime evidence; character/4 estimates are only
 heuristics. Sandbox fake prompt/CLI tests establish ordering and envelope

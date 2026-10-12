@@ -173,6 +173,7 @@ class AgentRosterCache(_DiscoveryMixin):
         self._entries: dict[str, _NamespaceEntry] = {}
         self._inflight: dict[str, asyncio.Task[None]] = {}
         self._inflight_token: dict[str, object | None] = {}
+        self._owned_scans: set[asyncio.Task[None]] = set()
         self._task: asyncio.Task[None] | None = None
         self._watchdog_task: asyncio.Task[None] | None = None
         #: Single-flight task for the in-flight discovery scan (run via
@@ -327,8 +328,9 @@ class AgentRosterCache(_DiscoveryMixin):
     ) -> bool:
         """Cancel ``task`` and wait up to ``timeout`` for it to actually
         finish. Returns ``True`` if it finished (cancelled or otherwise),
-        ``False`` if it is being abandoned (still running) once the bound
-        elapsed.
+        ``False`` if it is still running once the bound
+        elapsed. Ownership must remain tracked until the task actually finishes,
+        even when its publication generation is invalidated.
 
         A plain ``task.cancel()`` followed by an unbounded ``await task``
         assumes the task's own code promptly re-raises
@@ -338,11 +340,9 @@ class AgentRosterCache(_DiscoveryMixin):
         or never actually awaits anything cancellable) can keep running
         indefinitely regardless, which would otherwise hang the watchdog,
         daemon shutdown, or the warm-up timeout's own force-fail escape
-        hatch. A caller that gets ``False`` back MUST ensure nothing else
-        keeps rejoining the abandoned task (e.g. drop it from whatever
-        single-flight tracking led here) -- its eventual, late result (if
-        any) is discarded via the normal generation guard regardless, the
-        same as an abandoned discovery scan's.
+        hatch. A caller that gets ``False`` back must invalidate publication without
+        losing ownership of the still-running task. Namespace waiters retain
+        their own bounded joins while the existing holder keeps its slot.
 
         The ``CancelledError`` branch below only treats it as the *child*
         ``task`` finishing via cancellation if ``task`` is actually done
@@ -366,8 +366,8 @@ class AgentRosterCache(_DiscoveryMixin):
         except (TimeoutError, asyncio.TimeoutError):
             log.warning(
                 "Agent roster cache: %s did not honor cancellation within "
-                "%.1fs -- abandoning it (cancellation-resistant code may "
-                "keep running orphaned in the background)",
+                "%.1fs -- ending the wait while retaining ownership "
+                "of the still-running task",
                 label, timeout,
             )
             return False
@@ -378,30 +378,15 @@ class AgentRosterCache(_DiscoveryMixin):
             return True
 
     def _drop_unfinished_inflight(self, snapshot: dict[str, "asyncio.Task[None]"]) -> None:
-        """Drop exactly the namespace scans captured in ``snapshot`` --
-        taken *before* the caller's own bounded cancellation wait, never
-        read fresh from ``self._inflight`` afterward -- and only if
-        ``self._inflight`` still points at that *same* task object. While
-        this caller was awaiting cancellation, a concurrent reconcile or
-        opportunistic join could have already untracked the old
-        (abandoned) task and installed a brand-new, legitimately in-flight
-        scan under the same key; popping unconditionally would orphan
-        that newer scan's own tracking instead of merely abandoning the
-        one this caller actually gave up on. A dropped scan's own
-        eventual, late publication is discarded by its entry's generation
-        guard -- bumped right here, not left to whenever a *replacement*
-        scan happens to start: a cancellation-resistant resolver can
-        still return between this cleanup and that later
-        ``_refresh_namespace()`` call, and until the generation actually
-        moves, the abandoned task's own captured generation still matches
-        the live entry's, so its late result would otherwise pass the
-        guard and briefly publish stale rows under a fresh timestamp --
-        exactly the bug this method's own docstring claims cannot
-        happen."""
+        """Fence exactly the captured scans without releasing live holders.
+
+        Only invalidate the entry if it still names the captured task. The
+        task's completion releases its slot; a cancellation timeout does not.
+        Bumping publication now prevents a late result appearing fresh before
+        a later caller starts a replacement.
+        """
         for ns, task in snapshot.items():
             if not task.done() and self._inflight.get(ns) is task:
-                self._inflight.pop(ns, None)
-                self._inflight_token.pop(ns, None)
                 entry = self._entries.get(ns)
                 if entry is not None:
                     entry.generation += 1
@@ -432,10 +417,8 @@ class AgentRosterCache(_DiscoveryMixin):
                     label="background refresh loop",
                 )
                 if not finished:
-                    # The abandoned loop's own in-flight namespace scans
-                    # (gathered inside its stuck cycle) must not keep
-                    # blocking the replacement loop's own joins for the
-                    # same namespaces.
+                    # Fence stale publication, but retain each outstanding
+                    # holder rather than multiply cancellation-resistant work.
                     self._drop_unfinished_inflight(inflight_snapshot)
             self._cycle_started_at = None
             if not self._stopping:
@@ -458,7 +441,9 @@ class AgentRosterCache(_DiscoveryMixin):
                 label="background refresh loop",
             )
         self._task = None
-        pending = [t for t in self._inflight.values() if not t.done()]
+        pending = list({
+            t for t in (*self._owned_scans, *self._inflight.values()) if not t.done()
+        })
         for task in pending:
             task.cancel()
         results = await asyncio.gather(
@@ -475,7 +460,7 @@ class AgentRosterCache(_DiscoveryMixin):
                 log.warning(
                     "Agent roster cache: an in-flight namespace scan did "
                     "not honor cancellation within %.1fs at shutdown -- "
-                    "abandoning it",
+                    "ending the wait while retaining ownership",
                     self._CANCELLATION_GRACE,
                 )
             elif isinstance(result, BaseException):
@@ -590,22 +575,12 @@ class AgentRosterCache(_DiscoveryMixin):
                     log.warning(
                         "Agent roster cache: namespace '%s:' scan did not "
                         "honor cancellation within %.1fs while force-"
-                        "failing an uninitialized namespace -- abandoning it",
+                        "failing an uninitialized namespace -- retaining its holder",
                         ns, self._CANCELLATION_GRACE,
                     )
-                    # Only drop if still the same task we cancelled -- a
-                    # concurrent caller may have already untracked it and
-                    # installed a brand-new, legitimately in-flight scan
-                    # under the same key while this wait was in progress;
-                    # popping unconditionally would orphan that newer
-                    # scan's own tracking. Bump the entry's own generation
-                    # here too (same as `_drop_unfinished_inflight`) --
-                    # about to be force-set to FAILED below, it must never
-                    # be silently overwritten back to OK by this abandoned
-                    # task's own late, generation-matching publish.
+                    # Fence only this holder: a provider replacement may have
+                    # installed another while cancellation was awaited.
                     if self._inflight.get(ns) is task:
-                        self._inflight.pop(ns, None)
-                        self._inflight_token.pop(ns, None)
                         live_entry = self._entries.get(ns)
                         if live_entry is not None:
                             live_entry.generation += 1
@@ -685,9 +660,8 @@ class AgentRosterCache(_DiscoveryMixin):
         rows must never keep serving as authoritative across the swap, even
         for the brief window before anything re-triggers a scan. Any
         in-flight scan for a namespace this reconcile drops or invalidates
-        is cancelled here rather than merely untracked -- an untracked but
-        still-running scan would survive :meth:`stop` entirely (shutdown
-        only cancels/awaits tasks still present in ``_inflight``)."""
+        is cancelled here and remains owned until completion, even when it
+        no longer holds the current provider's admission slot."""
         current = self._resolver.namespace_resolvers
         for ns in list(self._entries):
             if ns not in current:
@@ -701,13 +675,12 @@ class AgentRosterCache(_DiscoveryMixin):
 
     def _cancel_inflight_nowait(self, ns: str) -> None:
         """Cancel (without awaiting) and untrack any in-flight scan for
-        ``ns``. Fire-and-forget is safe here: the cancelled task's own
-        ``finally`` clause only pops itself from ``_inflight`` if it is
+        ``ns``. The task remains in ``_owned_scans`` until actual completion,
+        so stop() can still cancel and await a superseded provider's holder.
+        Its ``finally`` clause only pops itself from ``_inflight`` if it is
         still the CURRENT entry for ``ns`` (it won't be, since this method
-        already popped it), and :meth:`stop` separately awaits every
-        task still reachable from any live reference at shutdown -- this
-        only needs to ensure a dropped task doesn't keep running
-        *untracked* past this reconcile."""
+        already popped it). Publication is separately fenced by provider
+        identity and generation."""
         task = self._inflight.pop(ns, None)
         self._inflight_token.pop(ns, None)
         if task is not None and not task.done():
@@ -754,6 +727,8 @@ class AgentRosterCache(_DiscoveryMixin):
         my_generation = entry.generation
 
         task = asyncio.create_task(self._do_scan_namespace(ns, current_ref, my_generation))
+        self._owned_scans.add(task)
+        task.add_done_callback(self._owned_scans.discard)
         self._inflight[ns] = task
         self._inflight_token[ns] = current_ref
         return task
@@ -765,6 +740,9 @@ class AgentRosterCache(_DiscoveryMixin):
         try:
             if resolver is None:
                 raise LookupError(f"namespace '{ns}:' no longer registered")
+            if resolver is not provider_ref:
+                log.debug("Namespace '%s:' provider replaced before scan started", ns)
+                return
             # This cache owns the advertised refresh cadence -- a resolver's
             # own separate, shorter result TTL (e.g. `CliNamespaceResolver`'s
             # internal `_list_cache`) must never let a scan this cache
@@ -804,7 +782,8 @@ class AgentRosterCache(_DiscoveryMixin):
         # them as fresh.
         live_ref = self._namespace_resolver_ref(ns)
         if (
-            entry is None
+            self._stopping
+            or entry is None
             or entry.provider_ref is not provider_ref
             or entry.generation != generation
             or live_ref is not provider_ref

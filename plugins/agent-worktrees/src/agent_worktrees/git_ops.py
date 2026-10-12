@@ -22,7 +22,7 @@ from pathlib import Path
 
 from agent_procutil import no_window_kwargs
 
-from . import env_scrub, push_timeout
+from . import env_scrub, git_tree_diff, push_timeout
 
 log = logging.getLogger("agent-worktrees")
 
@@ -604,29 +604,31 @@ def _classify_git_state(
             current_branch=actual_branch, branch_drift=drift,
             fetch_requested=fetch, fetch_failed=fetch_failed,
         )
-    diff_r = _g("diff", "--name-only", merge_base, effective_branch)
-    changed_files = [f for f in diff_r.stdout.splitlines() if f.strip()]
-
-    if not changed_files:
+    try:
+        branch_changes = git_tree_diff.read(_g, merge_base, effective_branch)
+        if not branch_changes:
+            return WorktreeStateInfo(
+                state=WorktreeState.UNUSED,
+                ahead=ahead, behind=behind, title=title,
+                **_drift_fields,
+            )
+        upstream_objects = git_tree_diff.read_objects(_g, upstream, branch_changes)
+    except git_tree_diff.TreeDiffError as exc:
+        log.warning("classify_worktree: tree comparison failed for %s: %s", path, exc)
         return WorktreeStateInfo(
-            state=WorktreeState.UNUSED,
+            state=WorktreeState.UNKNOWN,
             ahead=ahead, behind=behind, title=title,
             **_drift_fields,
         )
 
-    # Compare file blobs between branch and master
-    for file in changed_files:
-        b_blob = _g("rev-parse", f"{effective_branch}:{file}")
-        m_blob = _g("rev-parse", f"{upstream}:{file}")
-        if b_blob.stdout.strip() != m_blob.stdout.strip():
-            return WorktreeStateInfo(
-                state=WorktreeState.WIP,
-                ahead=ahead, behind=behind, title=title,
-                **_drift_fields,
-            )
-
+    # Upstream-only changes do not make this branch WIP. Compare object IDs
+    # only on paths changed by the branch, without two Git children per path.
+    unmerged = any(
+        upstream_objects.get(file, "0" * len(after)) != after
+        for file, (_before, after) in branch_changes.items()
+    )
     return WorktreeStateInfo(
-        state=WorktreeState.COMPLETED,
+        state=WorktreeState.WIP if unmerged else WorktreeState.COMPLETED,
         ahead=ahead, behind=behind, title=title,
         **_drift_fields,
     )

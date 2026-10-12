@@ -47,9 +47,11 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import logging
+import math
 import os
 import subprocess
 import sys
+import time
 from typing import Any
 
 # Win32 process-creation flags. Read from ``subprocess`` when present (Windows)
@@ -128,6 +130,46 @@ class JobHandle:
         except Exception:
             log.debug("CloseHandle(job) failed", exc_info=True)
 
+    def terminate_and_wait(self, timeout_seconds: float) -> None:
+        """Terminate this owned Job, confirm zero active processes, then close.
+
+        Native failures and timeout retain the handle so the caller can retry.
+        An already-closed handle cannot attest that the Job is empty.
+        """
+        if (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+            or not math.isfinite(timeout_seconds) or timeout_seconds <= 0
+        ):
+            raise ValueError("timeout_seconds must be finite and positive")
+        handle = self._handle
+        if not handle:
+            raise RuntimeError("Job handle is closed; cannot confirm empty Job")
+        kernel32 = _kernel32()
+        _configure_job_teardown_api(kernel32)
+        deadline = time.monotonic() + timeout_seconds
+        if not kernel32.TerminateJobObject(handle, 1):
+            raise ctypes.WinError(ctypes.get_last_error())
+        while True:
+            accounting = _JobBasicAccountingInformation()
+            returned = ctypes.c_uint32()
+            if not kernel32.QueryInformationJobObject(
+                handle, 1, ctypes.byref(accounting), ctypes.sizeof(accounting),
+                ctypes.byref(returned),
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if returned.value != ctypes.sizeof(accounting):
+                raise RuntimeError("Job accounting returned an unexpected structure size")
+            if accounting.ActiveProcesses == 0:
+                if not kernel32.CloseHandle(handle):
+                    raise ctypes.WinError(ctypes.get_last_error())
+                self._handle = None
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Job still has active processes after termination timeout")
+            time.sleep(min(0.05, remaining))
+
     def __enter__(self) -> "JobHandle":
         return self
 
@@ -140,6 +182,33 @@ class JobHandle:
 
 def _kernel32() -> Any:
     return ctypes.WinDLL("kernel32", use_last_error=True)
+
+
+class _JobBasicAccountingInformation(ctypes.Structure):
+    _fields_ = [
+        ("TotalUserTime", ctypes.c_int64),
+        ("TotalKernelTime", ctypes.c_int64),
+        ("ThisPeriodTotalUserTime", ctypes.c_int64),
+        ("ThisPeriodTotalKernelTime", ctypes.c_int64),
+        ("TotalPageFaultCount", ctypes.c_uint32),
+        ("TotalProcesses", ctypes.c_uint32),
+        ("ActiveProcesses", ctypes.c_uint32),
+        ("TotalTerminatedProcesses", ctypes.c_uint32),
+    ]
+
+
+def _configure_job_teardown_api(kernel32: Any) -> None:
+    from ctypes import wintypes
+
+    kernel32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel32.TerminateJobObject.restype = wintypes.BOOL
+    kernel32.QueryInformationJobObject.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
+        ctypes.POINTER(ctypes.c_uint32),
+    ]
+    kernel32.QueryInformationJobObject.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
 
 
 def _ntdll() -> Any:
@@ -405,15 +474,22 @@ def spawn_sync_in_kill_on_close_job(
 
     With ``require_job=True``, failed Windows Job assignment kills the still
     suspended child before it can launch descendants and raises explicitly.
-    ``allow_breakaway=False`` additionally prevents descendants escaping this Job.
-    The default remains permissive for callers whose service children must
-    deliberately outlive the command.
+    ``allow_breakaway=False`` prohibits descendants from escaping this Job and
+    rejects an explicit CREATE_BREAKAWAY_FROM_JOB flag on the initial child.
+    The default permits explicit breakaway, preserving legacy daemon semantics.
     Otherwise, if job creation or assignment fails, the child still runs (resumed) and is
     returned with ``job_handle=None`` so existing cleanup paths remain in
     charge -- containment is a best-effort hardening layer, not a hard
     dependency for the child to execute at all. Off Windows this is a plain
     ``subprocess.Popen`` call returning ``(process, None)``.
     """
+    if type(allow_breakaway) is not bool:
+        raise ValueError("allow_breakaway must be a boolean")
+    if (
+        not allow_breakaway
+        and int(kwargs.get("creationflags", 0)) & _CREATE_BREAKAWAY_FROM_JOB
+    ):
+        raise ValueError("CREATE_BREAKAWAY_FROM_JOB conflicts with allow_breakaway=False")
     if not _is_windows():
         return subprocess.Popen(argv, **kwargs), None  # noqa: S603 - argv list, no shell
 
@@ -429,11 +505,15 @@ def spawn_sync_in_kill_on_close_job(
             job_handle = _assign_suspended_to_kill_on_close_job(pid)
         else:
             job_handle = _assign_suspended_to_kill_on_close_job(pid, allow_breakaway=False)
-        if job_handle is None and require_job:
+        if job_handle is None and (require_job or not allow_breakaway):
             process.kill()
             process.wait(timeout=5)
             raise RuntimeError("Windows descendant Job assignment failed before child resume")
         if not _resume_suspended_process(pid):
+            if require_job or not allow_breakaway:
+                process.kill()
+                process.wait(timeout=5)
+                raise RuntimeError(f"failed to resume suspended process {pid}")
             log.debug("killing pid %s because suspended-start resume failed", pid)
             try:
                 process.kill()

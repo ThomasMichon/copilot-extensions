@@ -25,6 +25,7 @@ import logging
 import os
 import shlex
 import subprocess
+import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -41,8 +42,8 @@ from .config import (
     FleetConfig,
     load_config,
 )
-from .lease import deploy_hold_status, get_deploy_hold, get_lease
 from .inference import NativeInferenceConfig
+from .lease import deploy_hold_status, get_deploy_hold, get_lease
 from .lifecycle import (
     get_container,
     inspect_state,
@@ -50,6 +51,7 @@ from .lifecycle import (
     restricted_policy_errors,
     start_container,
 )
+from .private_state import enforce_mode, fsync_directory, private_file_lock, strict_posix_modes
 from .ssh_transport import prepare_ssh_config
 
 if TYPE_CHECKING:
@@ -240,15 +242,29 @@ def import_copilot_cli_token(
     safe in practice). A genuinely missing/empty file initializes a new
     document; an EXISTING file whose body fails to parse (or isn't a JSON
     object) raises instead of silently discarding it -- never clobber a
-    real, if malformed, document with an empty one. Writes atomically (a
-    0600-permissioned temp file + replace, preserving owner-only access to
-    this plaintext OAuth-token store regardless of the process umask).
+    real, if malformed, document with an empty one. Writes atomically through
+    a per-call uniquely named temp file (``os.getpid()`` + a random hex
+    suffix -- never a fixed, predictable name two concurrent invocations or
+    a symlink-planting adversary could race) created with ``O_CREAT|O_EXCL``
+    with requested mode 0600: the umask may remove owner bits but never
+    grant group/world access. Exact owner access is restored before any
+    credential bytes are written (ACL-backed platforms retain their
+    existing permission model), then the temp file is atomically
+    replaced over the real path. Cooperating imports serialize the entire
+    read/merge/write transaction using a persistent sibling lock file.
+    This lock does not coordinate unrelated writers such as Copilot CLI.
     """
     path = Path(config_path) if config_path is not None else copilot_cli_config_path()
+    path = path.expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
+    with private_file_lock(path.with_name(f".{path.name}.copilot-login.lock")):
+        _import_copilot_cli_token_locked(account, token, path)
+
+
+def _import_copilot_cli_token_locked(account: str, token: str, path: Path) -> None:
     try:
-        raw = path.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
         raw = ""
     lines = raw.splitlines()
     header_lines: list[str] = []
@@ -296,13 +312,33 @@ def import_copilot_cli_token(
     data["loggedInUsers"] = logged_in
 
     rendered = "\n".join(header_lines + [json.dumps(data, indent=2)]) + "\n"
-    tmp_path = path.with_suffix(path.suffix + ".tmp-copilot-login")
-    tmp_path.write_text(rendered, encoding="utf-8")
-    # Preserve owner-only permissions: write_text creates the temp file under
-    # the process umask (e.g. 0644 under a normal 022 umask), which would
-    # silently widen this plaintext OAuth-token store's access on replace.
-    os.chmod(tmp_path, 0o600)
-    tmp_path.replace(path)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    fd = -1
+    created = False
+    try:
+        fd = os.open(str(tmp_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        created = True
+        if os.name != "nt" and strict_posix_modes(tmp_path):
+            os.fchmod(fd, 0o600)
+        else:
+            enforce_mode(tmp_path, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            fd = -1
+            stream.write(rendered)
+            stream.flush()
+            os.fsync(stream.fileno())
+        tmp_path.replace(path)
+        created = False  # replaced onto `path` -- nothing left at tmp_path to clean up
+        fsync_directory(path.parent)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        # Only remove a temp path THIS call actually created (and didn't
+        # already consume via replace()) -- never unlink on an O_EXCL
+        # creation failure, which would mean some other, unrelated file
+        # already occupied this (vanishingly unlikely, pid+uuid4-named) path.
+        if created:
+            tmp_path.unlink(missing_ok=True)
 
 
 def build_spawn_command(

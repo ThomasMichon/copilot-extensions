@@ -127,6 +127,10 @@ After the merge-only pause, the operator authorized resumption:
 - [ ] Implement the version-slot installer and durable configuration/state
   contract, including health-gated activation and rollback.
 - [ ] Preserve existing CLI, configuration and non-container host compatibility.
+  Existing legacy macOS installs remain supported; the new candidate staging
+  adapter initially admits Windows/Linux only. Equivalent owned-descendant
+  supervision and first-touch staging must be proved on Darwin before claiming
+  standalone macOS parity. _(agent-recommended staged platform admission)_
 - [ ] Keep the live native canary healthy across reviewed upgrades; retain a
   validated previous slot, verify worker adoption and protect the warm engine.
 - [ ] Define and test schema/queue rollback limits explicitly rather than assuming
@@ -337,3 +341,89 @@ boundaries from implementation decisions and deployment-specific policy.
   for all five agent-worktrees projections. Its test expectation is corrected
   without changing runtime behavior, so service promotion is not left blocked
   behind a known regression.
+- #6053 merged after zero-finding approval and required CI; the promotion fixture
+  repair is now on `dev`. Native candidate staging is the next reviewed lifecycle
+  slice. Canonical slot logic will be delivered by standard wheel/sdist build
+  resource copying, preserving one maintained stdlib primitive and unchanged
+  self-contained plugin bootstrap scripts. No over-cap source mirror, renamed
+  code or baseline exemption is introduced. Actual wheel/sdist byte equality,
+  standalone sdist-to-wheel construction and missing/conflicting-source failures
+  passed five packaging integration tests.
+- First-touch immutable native candidate staging now builds a verified bundle
+  in its final venv path under an exclusive lifecycle lease, snapshots the
+  selected artifacts/policy, validates native dependency closure and publishes
+  canonical completion last. It does not select, serve, migrate, activate,
+  roll back or supervise a host. Existing incomplete/conflicting slots remain
+  preserved; failed owned builds clean only their proven-owned incomplete slot.
+- Real governed-package/offline uv proof succeeded: first stage, idempotent
+  replay, native import/seam probe and candidate inspection, with no active
+  markers or host-state creation. The installed-wheel opt-in regression passed
+  separately. The full contained suite passed 321 tests with the two Linux-only
+  process cases and opt-in fixture initially skipped; actual Linux process
+  cleanup validation is being executed in a fresh network-disabled container.
+- Fresh Windows clean-room execution is unavailable because local Docker is in
+  Linux mode with no cached Windows image. No Docker mode change, image pull,
+  production indexer install or migration is inferred from validation.
+- Fresh network-disabled Linux clean-room evidence: real subreaper failure and
+  timeout descendant cleanup passed two cases, preserving the outer group;
+  241 pure release/staging contracts also passed. Approved binary test wheels
+  were downloaded on the governed host, then installed offline in the fresh
+  box. Its exact owned container and preparation artifacts were cleaned.
+- Complete installed Windows suite including real uv first-touch/replay passed
+  322 tests, with only the two Linux-specific process cases skipped (covered
+  above). Windows temporary-tree cleanup encountered uv cache paths beyond
+  ordinary Win32 limits; the standalone runner now uses owned extended-length
+  cleanup with bounded transient-lock retries and explicit permanent failure.
+  Deep-path cleanup and runner regressions passed 15 tests.
+- Staging review repaired process-identity fencing, success-path build scratch
+  removal, post-build executable hash revalidation and extended-length owned
+  failed-slot cleanup. Updated contained Windows suite passed 337 tests with
+  two Linux-specific cases skipped for their separate fresh-container proof.
+- Development monitoring later found the existing native API nonresponsive
+  despite a listening process and idle event-loop stack. A supported same-version
+  non-forced cutover completed with clean drain and restored process health
+  after the management command exited; the existing warm engine was not
+  restarted. Detailed corpus status remains slow, so no rollout-readiness claim
+  or standalone-service migration follows from the restored liveness probe.
+- Final Windows cleanup review requires strict Job empty confirmation rather
+  than best-effort handle closure. The shared process library now exposes
+  explicit terminate/wait/close errors and retains uncertain handles; staging
+  preserves candidates on any teardown uncertainty. Shared helper tests passed
+  51 cases including real owned child/grandchild termination. Updated complete
+  installed staging suite passed 343 tests with two separately covered Linux
+  process cases skipped. Existing best-effort close semantics remain unchanged.
+- Shared Job-helper integration changes the bridge's frozen authority component
+  digest, because that closure intentionally includes `agent_procutil`.
+  Authority fixture digest fields and registry hashes are recaptured from the
+  final integrated source without changing validity vectors. The contained
+  authority corpus/attestation selection passed 42 tests with platform skips.
+  A Windows nested-runner failure could not be reproduced in two targeted runs;
+  its assertion now includes captured fixture diagnostics instead of hiding the
+  inner cause behind exit 18. No passing expectation or visibility check is
+  relaxed.
+- Current-head staging review tightened build isolation to a minimal bound
+  platform environment, admitted only the exact POSIX `lib64 -> lib` scaffold
+  for owned failed-slot deletion, made teardown uncertainty exhaustive
+  (including unexpected failures/interrupts), and based candidate reporting on
+  canonical completion markers rather than receipt presence. The updated full
+  installed Windows suite and real offline uv fixture passed 359 tests with
+  two Linux-specific process cases delegated to fresh-container validation.
+- Windows staging ownership must be acquired while the child is suspended,
+  with required Job assignment and no permitted descendant breakaway. An empty
+  permissive Job alone is not an ownership proof. The shared helper adds an
+  explicit strict mode while preserving legacy defaults; the service declares
+  its required released helper floor. The invalid shared-library-named
+  changefile is removed; the already-declared consuming-program fanout remains
+  the release authority.
+- Strict spawn tests passed 63 cases, including actual denied Windows breakaway
+  creation and failed assignment before child code executes. The complete
+  installed native staging suite and real offline uv fixture passed 371 tests
+  with two Linux-specific process skips. Authority fixtures/registry are
+  recaptured for the new helper bytes; targeted bridge authority validation
+  passed 41 tests with platform skips. No service activation is introduced.
+- Fallback-review refinements ensure removable output cleanup is attempted
+  even after teardown uncertainty, atomically created receipts use restrictive
+  permissions, malformed UTF-8 identifies the lock/policy input, and preserved
+  completed-slot conflicts identify their version/path and receipt category.
+  The complete installed Windows suite and real offline uv fixture passed
+  381 tests with two Linux-specific process cases separately validated.

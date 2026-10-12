@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from .acquisition_contract import (
@@ -27,6 +27,7 @@ class ConversationEvidence:
     charter: str | None = None
     model: str | None = None
     effort: str | None = None
+    generation_bound: bool = False
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,7 @@ class AcquisitionDecision:
     acquired: Acquired
     conversation: ConversationEvidence | None = None
     creation_authorized: bool = False
+    retirement_recovered: bool = False
 
 
 def select_acquisition(
@@ -68,6 +70,22 @@ def select_acquisition(
 
     fresh = request.intent == "fresh" or request.conversation_retired is True
     if fresh:
+        if request.intent == "automatic" and request.conversation_retired is True:
+            current = [
+                item for item in conversations
+                if item.task_id == request.task_id
+                and item.task_generation == request.task_generation
+                and item.mode == request.mode
+                and item.retired is False
+                and item.generation_bound
+                and item.native_session_id == evidence.head_native_session_id
+            ]
+            if len(current) == 1:
+                continuation = request.model_copy(update={"conversation_retired": False})
+                return replace(
+                    select_acquisition(continuation, evidence),
+                    retirement_recovered=True,
+                )
         if live:
             raise AcquisitionRefused("live_holder", "fresh intent does not authorize takeover")
         return AcquisitionDecision("created", creation_authorized=True)

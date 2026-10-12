@@ -5,8 +5,9 @@
 - **Branch(es):** serial proposal and implementation PRs
 - **Created:** 2026-10-10
 - **Status:** Draft
-- **Status detail:** Design-only authority baseline and clarifications agreed;
-  pilot scope, execution, and recurring activation remain separately gated.
+- **Status detail:** Report-only dev slice landed in #6303; publication,
+  installed capability verification, and live pilot
+  parameters/execution and later authority graduation remain gated.
 - **Vision:** `visions/plugins/agent-dispatch/README.md` scheduled production
   and durable goals; `visions/plugins/agent-worktrees/README.md` accountable
   worktree-lifetime state.
@@ -38,7 +39,8 @@ does not add a daemon or give a model a force-delete escape hatch.
 
 - **Topology:** one proposal, followed by serial approved slices.
 - **Host (owns PRs):** design coordinator.
-- **Delegates:** none for implementation until the charter is approved.
+- **Delegates:** no live pilot worker until its explicit scope and parameters
+  are approved; audit capability implementation is now authorized.
 - **Handoff:** this README names the current gate; a successor must not infer
   implementation permission from the existence or merge of the proposal.
 - Existing allocator reclamation remains owned by
@@ -143,15 +145,25 @@ not standing authorization, pilot approval, or scheduling approval.
 - [ ] Select explicit project scope, budgets, and pilot candidates.
 - [ ] Select transcript completeness, trusted completion-verification, and
   private report-destination requirements for the audit pilot.
-- [ ] Obtain explicit approval to implement and run the audit-only pilot.
+- [x] Obtain explicit approval to implement the audit-only capability.
+- [ ] Complete the capability's promotion to main and verify its installed
+  runtime/charter before the live pilot; a dev merge is not deployment.
+- [ ] Obtain explicit approval to run the bounded live audit pilot.
 
 ### Phase 2 - Implement an audit-only pilot
 
-_Agent-recommended; blocked on the remaining Phase 1 decisions and explicit
-audit-pilot approval. Mutation-fencing implementation is not an audit gate._
+_Audit-first capability implementation approved. Live execution remains
+blocked on the remaining Phase 1 parameters and explicit pilot approval.
+Mutation-fencing implementation is not an audit gate._
 
+- [x] Operator approves starting with a report/steering-oriented dispatch
+  charter and gradual, separately approved authority graduation.
+- [x] Land the manually invoked report-only recipe and its receipt checker
+  on dev (#6303); independent semantic verification remains mandatory.
+- [ ] Publish that capability through promotion to main.
 - [ ] Implement deterministic discovery and one exclusive bounded worker using
-  the existing registrar/supervisor; no new daemon.
+  the existing registrar/supervisor if recurring production is later approved;
+  the initial one-off recipe requires an explicit candidate roster.
 - [ ] Produce evidence-backed per-candidate decisions without lifecycle,
   issue, effort, session, source, or posted steering mutations for candidates;
   use only the approved worker-run/report state for audit output.
@@ -211,12 +223,17 @@ _Agent-recommended acceptance cases for the future implementation._
   in-flight responsibility and receipts.
 - [ ] A candidate-specific steering request does not block unrelated
   candidates or silently transfer the original objective.
+- [x] Real temporary Git repositories prove FINAL stamp persistence,
+  checkout-change invalidation, and the production display/removal split.
+- [x] CLI and both MCP recipe surfaces retain report verification and
+  project-scoped exclusivity; report-only drive never resolves/unwinds work.
 
 ## Proposal
 
-[charter.md](charter.md) is the reviewable draft. No worker, emitter, schedule,
-supervisor registration, or apply-mode pilot has been installed or started by
-this effort.
+[charter.md](charter.md) is the governing draft. The initial capability is
+`agent-dispatch recipes render|kick worktree-audit`, with explicit candidates
+and private report parameters. No live worker, emitter, schedule, supervisor
+registration, or apply-mode pilot has been started by this effort.
 
 ## Journal
 
@@ -246,3 +263,47 @@ this effort.
   but its conclusions are snapshots, not future mutation permissions.
 - Project scope, budgets, candidates, evidence/evaluator requirements,
   report destination, and explicit audit-pilot approval remain open.
+
+### 2026-10-12 - Audit-first implementation approval
+
+- Operator endorsed audit-only first, with an initial dispatch charter
+  producing reports or steering cards and gradual authority graduation.
+- Selected the report-only variant for the first capability: proposed
+  steering questions stay in the report, preserving nonblocking sweeps.
+- Reused dispatch's ordinary recipe/goal/dedup/verification machinery rather
+  than adding a daemon or automatically installing a daily producer.
+- Added explicit bounded roster/report parameters and a structural receipt
+  checker; neither the checker nor a FINAL stamp attests objective completion.
+- Strengthened FINAL coverage at real Git and production descriptor/Picker
+  boundaries after the prior release exposed stale test assumptions.
+- Live candidate selection, run approval, posted candidate cards, apply-mode,
+  mutation fencing, and recurring/default activation remain separate gates.
+
+### 2026-10-12 - Report-only dev slice landed
+
+- #6303 merged to dev as `0ca3d894124663652b46fe7f9731512aff3b48a5`
+  after a genuine current-head approving review with zero findings and
+  successful CI, including both live required checks. No gate was bypassed.
+- The one-off recipe, report-only charter, trigger skill, structural receipt
+  checker, CLI/local-MCP/HTTP-MCP controls, and focused FINAL coverage are
+  merged to dev. Promotion to main and installed capability verification
+  remain pending; this is not a release/deployment completion claim.
+  Installing them does not activate a worker or producer.
+- Review fixes preserved unspecified verification defaults, enforced
+  report-file containment before reads, handled older-Python resolution
+  loops, and derived recipe creation defaults from the ordinary parser.
+- Validation included real non-dry-run CLI task creation against an isolated
+  coordinator, real HTTP transport, and real Git stamp/descriptor cases.
+  The latest audit/actual-kick guard selection passed 50 tests; native
+  Windows symlink creation was explicitly skipped when unavailable.
+- Structural report validation and local test receipts are not evidence of
+  a successful live agentic audit or of candidate mutation absence. The
+  live pilot's remaining safety cases stay open.
+- Next gates: finish publication/installed capability verification, then
+  approve exact local project/candidate roster, budget, private
+  writable report destination, evidence completeness standard, and independent
+  reviewer before any live audit. Establish fetch-free evidence reads;
+  observer commands that may refresh Git or lifecycle state are not assumed
+  read-only merely because their names describe status.
+- Apply operations, posted candidate cards, mutation-fencing implementation,
+  recurring production, and default activation remain separately unapproved.

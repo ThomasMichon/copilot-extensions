@@ -7,7 +7,7 @@
     "source_git_blob": "ef684ca179f87826028d1cbe25791ce8fdf9ceab",
     "source_sha256": "d72b281b0bbbe63108bd1bac5fbe932e90419516a96d5280d159a436cdfb1f8d"
   },
-  "component_digest": "564d77a1b0be00ceef893c86689b58965097d765b25971266d88107a2fb4f26a",
+  "component_digest": "b99534ce21278bf40168782662582c0cbd38482bed2d65cde7b53c86aa389084",
   "release_metadata_normalized": "agent_bridge.__version__",
   "authority_modules": [
     "agent_bridge",

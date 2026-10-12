@@ -60,7 +60,61 @@ def test_legacy_rewrite_single_public_command_after_rebase(pr_repo, scheme, monk
     assert git("rev-parse", "HEAD", cwd=wt) == source
 
 
-@pytest.mark.parametrize("defect", ["unattested", "corrected", "partial", "provider-moved", "shared"])
+@pytest.mark.parametrize("revision", [1, 17])
+def test_revised_legacy_record_can_intentionally_rewrite_its_own_head(pr_repo, revision, monkeypatch):
+    config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
+    path = legacy_record(wid, defect="corrected")
+    data = yaml.safe_load(path.read_text())
+    data["prs"][-1]["pr_revision"] = revision
+    path.write_text(yaml.safe_dump(data))
+    rec = record_for(wid)
+    source = git("rev-parse", "HEAD", cwd=wt)
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(pr_rewrite, "observe_pr", lambda *a: PullResult(
+        number=42, head_sha=old, head_ref=rec.pr.branch, head_url=str(remote),
+    ))
+    monkeypatch.setattr(pr_ops, "refresh_head_observation", lambda *a: "")
+    monkeypatch.setattr(pr_ops, "refresh_source_attribution", lambda *a: "")
+    monkeypatch.chdir(wt)
+    args = cli.build_parser().parse_args(["push-changes", wid, "--rewrite-pr"])
+    assert finalize_cli.cmd_push_changes(args) == 0
+    updated = record_for(wid)
+    assert updated.pr.head_sha == source
+    assert updated.pr.rewrite_owner == f"{wid}:{updated.pr.branch}"
+    assert updated.pr.rewrite_identity == rec.pr.head_identity
+    assert updated.pr.pr_revision > revision
+    assert git("rev-parse", f"refs/heads/{rec.pr.branch}", cwd=remote) == source
+
+
+@pytest.mark.parametrize("defect", ["number", "branch", "destination", "moved", "shared"])
+def test_revised_legacy_rewrite_requires_exact_live_authority(pr_repo, defect, monkeypatch):
+    config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
+    path = legacy_record(wid, defect="corrected")
+    rec = record_for(wid)
+    observed = PullResult(number=42, head_sha=old, head_ref=rec.pr.branch, head_url=str(remote))
+    if defect == "number":
+        observed.number = 43
+    elif defect == "branch":
+        observed.head_ref = "pr/another-owner"
+    elif defect == "destination":
+        observed.head_url = str(remote.parent / "another.git")
+    elif defect == "moved":
+        observed.head_sha = "a" * 40
+    elif defect == "shared":
+        other = tracking.create_new_record(
+            "other", "worktree/other", str(wt.parent / "other"),
+            rec.repo, "test", "linux", cfg.tracking_dir(),
+        )
+        other.prs = [replace(rec.pr)]
+        tracking.save_record(other)
+    before = path.read_bytes()
+    monkeypatch.setattr(pr_rewrite, "observe_pr", lambda *a: observed)
+    assert not pr_rewrite.push_changes(wid, config, rec)
+    assert path.read_bytes() == before
+    assert git("rev-parse", f"refs/heads/{rec.pr.branch}", cwd=remote) == old
+
+
+@pytest.mark.parametrize("defect", ["unattested", "partial", "provider-moved", "shared"])
 def test_legacy_rewrite_refuses_incompatible_evidence(pr_repo, defect, monkeypatch):
     config, wid, wt, remote, old = publish_and_rebase(pr_repo, "refspec")
     path = legacy_record(wid, defect=defect)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 import socket
 import stat
 import os
@@ -773,13 +775,11 @@ def _write_mapping(
     )
 
 
-def _unused_closed_port() -> int:
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
+@contextmanager
+def _reserved_closed_port() -> Iterator[int]:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-    finally:
-        sock.close()
+        yield sock.getsockname()[1]
 
 
 class TestRelayServingLiveness:
@@ -814,8 +814,8 @@ class TestRelayServingLiveness:
         ports_dir.mkdir()
         env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.5"}
 
-        closed = _unused_closed_port()
-        with _OneShotRelay("pong\n\n") as serving, _OneShotRelay("not-pong\n\n") as old_relay:
+        with _reserved_closed_port() as closed, _OneShotRelay("pong\n\n") as serving, _OneShotRelay("not-pong\n\n") as old_relay:
+            assert closed not in (serving.port, old_relay.port)
             serving_file = ports_dir / "serving.json"
             old_file = ports_dir / "old.json"
             closed_file = ports_dir / "closed.json"
@@ -956,14 +956,15 @@ class TestRelayServingLiveness:
             )
         assert live.stdout.strip() == "pong"
 
-        dead = subprocess.run(
-            [node, str(probe), str(_unused_closed_port())],
-            env=env,
-            text=True,
-            capture_output=True,
-            timeout=5,
-            check=False,
-        )
+        with _reserved_closed_port() as closed:
+            dead = subprocess.run(
+                [node, str(probe), str(closed)],
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
         assert dead.stdout.strip() == "dead"
 
     def test_wrapper_discovery_adopts_serving_and_prunes_dead(
@@ -994,8 +995,9 @@ class TestRelayServingLiveness:
             "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.5",
         }
 
-        closed = _unused_closed_port()
-        with _OneShotRelay("pong\n\n") as serving:
+        # Keep the non-listening endpoint reserved throughout discovery.
+        with _reserved_closed_port() as closed, _OneShotRelay("pong\n\n") as serving:
+            assert closed != serving.port
             serving_file = ports_dir / "serving.json"
             closed_file = ports_dir / "closed.json"
             _write_mapping(serving_file, serving.port, token="tok", ado_host="host")

@@ -21,6 +21,13 @@ plugins. It is the one piece that must work *before* the plugins do.
 
 ## Set up the harness
 
+A bare `worktree-manager` invocation reports its running and installed versions,
+observed core/engine availability, baseline prerequisite gaps, and registered
+project count. Next steps are derived from that snapshot: an installed setup
+is not repeatedly presented as a first-time Phase 2 install. The summary is
+read-only and does not claim a complete health or authentication verdict;
+use `doctor` for deeper inspection.
+
 ```bash
 uv run python -m worktree_manager doctor        # report prerequisites + the core install
 uv run python -m worktree_manager setup         # plan provisioning + core install (dry-run)
@@ -60,6 +67,10 @@ reported separately under `repo_registration.unknown` — visible, but never
 treated as confirmed drift.
 
 ## Resume prompt
+
+The initial loading tab is labelled `Local` with its environment until the
+machine roster resolves its canonical name. It does not present the OS hostname
+as a configured machine or add roster/configuration I/O to first paint.
 
 The Picker's fast worktree listing joins cached rows with one mux-session
 enumeration on the target machine. Mux presence and attached-client counts

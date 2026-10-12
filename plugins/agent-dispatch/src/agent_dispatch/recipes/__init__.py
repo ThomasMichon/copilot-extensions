@@ -27,9 +27,11 @@ from .registry import (
     RenderedRecipe,
     UnknownRecipe,
     dedup_key_for,
+    exclusive_key_for,
     get_recipe,
     list_recipes,
     render_recipe,
+    verification_options,
 )
 
 __all__ = [
@@ -46,8 +48,10 @@ __all__ = [
     "UnknownRecipe",
     "decide",
     "dedup_key_for",
+    "exclusive_key_for",
     "get_recipe",
     "list_recipes",
     "render_recipe",
+    "verification_options",
     "resolution_outcome",
 ]

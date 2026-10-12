@@ -1,0 +1,309 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import zipfile
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import artifact_builder_cli as cli
+import build_toolchain_lock as btl
+import public_toolchain_source as public
+from seasoned_public_feed import SeasonedPublicRelease
+
+PINS = {"setuptools": "84.0.0", "wheel": "0.46.0", "packaging": "25.0"}
+HASHES = {name: ("a" * 64,) for name in PINS}
+
+
+@pytest.fixture
+def isolated(monkeypatch):
+    monkeypatch.setattr(
+        public, "_opaque_index_identity",
+        lambda value: hashlib.sha256(value.encode()).hexdigest(),
+    )
+    monkeypatch.setattr(btl, "_restrict_file_to_owner", lambda path: None)
+    monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python, env: "/python/3.12")
+    monkeypatch.setattr(
+        btl, "_validated_trusted_index_url",
+        lambda env: pytest.fail("public mode must not label an ambient index governed"),
+    )
+    monkeypatch.setattr(
+        public, "resolve_seasoned_public_release",
+        lambda name, **kwargs: SeasonedPublicRelease(PINS[name], HASHES[name]),
+    )
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        if cmd[:2] == ["uv", "venv"]:
+            python = btl._venv_python_path(Path(cmd[3]))
+            python.parent.mkdir(parents=True)
+            python.write_text("", encoding="utf-8")
+        elif cmd[:3] == ["uv", "pip", "install"]:
+            config = Path(kwargs["env"]["UV_CONFIG_FILE"]).read_text(encoding="utf-8")
+            assert 'url = "https://pypi.org/simple"' in config
+            assert cmd[3:5] == ["--only-binary", ":all:"]
+            assert cmd[7:9] == ["--require-hashes", "--requirements"]
+            lines = Path(cmd[9]).read_text().splitlines()
+            assert set(lines) == {
+                f"{name}=={version} --hash=sha256:{'a' * 64}" for name, version in PINS.items()
+            }
+            assert "UV_INDEX" not in kwargs["env"]
+            assert "UV_DEFAULT_INDEX" not in kwargs["env"]
+        else:
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(PINS), "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(btl.subprocess, "run", run)
+    return calls
+
+
+def test_public_toolchain_pins_and_reuses(tmp_path, monkeypatch, isolated):
+    monkeypatch.setenv("UV_INDEX", "https://untrusted.example/simple")
+    monkeypatch.setenv("UV_DEFAULT_INDEX", "https://ambient.example/simple")
+    venv = tmp_path / "toolchain"
+    first = btl.resolve_toolchain_lock(venv, source_policy="seasoned-public")
+    second = btl.resolve_toolchain_lock(venv, source_policy="seasoned-public")
+    assert first.lock_id == second.lock_id
+    assert first.venv_python == second.venv_python
+    assert sum(cmd[:3] == ["uv", "pip", "install"] for cmd, _ in isolated) == 1
+    marker = json.loads((venv / btl._PROVENANCE_MARKER_NAME).read_text())
+    assert marker == {
+        **public.PublicToolchainSource(7, PINS, HASHES).provenance, "python": "/python/3.12",
+    }
+    assert "validated_index_identity" not in marker
+    assert first.record["provenance"] == marker
+
+
+@pytest.mark.parametrize("change", ["age", "pins", "python", "policy", "hashes"])
+def test_distinct_source_identity_preserves_occupied_slot(tmp_path, monkeypatch, isolated, change):
+    venv = tmp_path / "shared"
+    first = btl.resolve_toolchain_lock(venv, source_policy="seasoned-public")
+    original = (venv / btl._PROVENANCE_MARKER_NAME).read_bytes()
+    age = 7
+    policy = "seasoned-public"
+    if change == "age":
+        age = 8
+    elif change == "pins":
+        monkeypatch.setitem(PINS, "wheel", "0.45.0")
+    elif change == "python":
+        monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python, env: "/python/3.13")
+    elif change == "hashes":
+        monkeypatch.setitem(HASHES, "wheel", ("b" * 64,))
+        monkeypatch.setattr(btl, "_query_toolchain_versions", lambda python: dict(PINS))
+        original_run = btl.subprocess.run
+        def run(cmd, **kwargs):
+            if cmd[:3] == ["uv", "pip", "install"]:
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            return original_run(cmd, **kwargs)
+        monkeypatch.setattr(btl.subprocess, "run", run)
+    else:
+        policy = "governed"
+        monkeypatch.setattr(btl, "_validated_trusted_index_url", lambda env: ("https://feed.example/simple", None))
+        # The governed path installs bare package names from its own feed.
+        monkeypatch.setattr(btl, "_query_toolchain_versions", lambda python: dict(PINS))
+        original_run = btl.subprocess.run
+
+        def run(cmd, **kwargs):
+            if cmd[:3] == ["uv", "pip", "install"]:
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            return original_run(cmd, **kwargs)
+        monkeypatch.setattr(btl.subprocess, "run", run)
+    second = btl.resolve_toolchain_lock(
+        venv, source_policy=policy, min_age_days=age if policy == "seasoned-public" else None,
+    )
+    assert second.venv_python != first.venv_python
+    assert second.lock_id != first.lock_id
+    assert (venv / btl._PROVENANCE_MARKER_NAME).read_bytes() == original
+
+
+def test_wrong_installed_pin_never_published(tmp_path, monkeypatch, isolated):
+    monkeypatch.setattr(btl, "_query_toolchain_versions", lambda python: {**PINS, "wheel": "0.1"})
+    with pytest.raises(btl.ArtifactBuildError, match="do not match seasoned pins"):
+        btl.resolve_toolchain_lock(tmp_path / "venv", source_policy="seasoned-public")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_reused_pin_tampering_fails_closed(tmp_path, monkeypatch, isolated):
+    venv = tmp_path / "venv"
+    btl.resolve_toolchain_lock(venv, source_policy="seasoned-public")
+    monkeypatch.setattr(btl, "_query_toolchain_versions", lambda python: {**PINS, "wheel": "0.1"})
+    with pytest.raises(btl.ArtifactBuildError, match="do not match seasoned pins"):
+        btl.resolve_toolchain_lock(venv, source_policy="seasoned-public")
+    assert len(list(tmp_path.iterdir())) == 1
+
+
+def test_metadata_error_never_creates_venv(tmp_path, monkeypatch, isolated):
+    def fail(*args, **kwargs):
+        raise public.SeasonedVersionError("metadata unavailable")
+    monkeypatch.setattr(public, "resolve_seasoned_public_release", fail)
+    with pytest.raises(btl.ArtifactBuildError, match="metadata unavailable") as error:
+        btl.resolve_toolchain_lock(tmp_path / "venv", source_policy="seasoned-public")
+    assert isinstance(error.value.__cause__, public.SeasonedVersionError)
+    assert not isolated
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_default_never_uses_public_metadata(tmp_path, monkeypatch):
+    monkeypatch.setattr(btl, "_validated_trusted_index_url", lambda env: None)
+    monkeypatch.setattr(btl, "resolve_public_source", lambda *args: pytest.fail("implicit public fallback"))
+    with pytest.raises(btl.ArtifactBuildError, match="no affirmatively trusted"):
+        btl.resolve_toolchain_lock(tmp_path / "venv")
+
+
+def test_unknown_policy_rejected_before_io(tmp_path, monkeypatch):
+    monkeypatch.setattr(btl, "resolve_public_source", lambda *args: pytest.fail("unexpected network"))
+    with pytest.raises(btl.ArtifactBuildError, match="unknown toolchain source"):
+        btl.resolve_toolchain_lock(tmp_path / "venv", source_policy="typo")
+
+
+@pytest.mark.parametrize("age", [0, 7, 10, False])
+def test_governed_api_rejects_unused_seasoning(tmp_path, age):
+    with pytest.raises(btl.ArtifactBuildError, match="only to seasoned-public"):
+        btl.resolve_toolchain_lock(tmp_path / "venv", min_age_days=age)
+
+
+def test_incompatible_pin_solver_failure_is_not_relaxed(tmp_path, monkeypatch, isolated):
+    original_run = btl.subprocess.run
+    def run(cmd, **kwargs):
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 1, "", "incompatible exact pins")
+        return original_run(cmd, **kwargs)
+    monkeypatch.setattr(btl.subprocess, "run", run)
+    with pytest.raises(btl.ArtifactBuildError, match="incompatible exact pins"):
+        btl.resolve_toolchain_lock(tmp_path / "venv", source_policy="seasoned-public")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_metadata_queries_share_one_clock(monkeypatch):
+    clocks = []
+    def resolve(name, **kwargs):
+        clocks.append(kwargs["now"])
+        assert kwargs["min_age_days"] == 10
+        return SeasonedPublicRelease(PINS[name], HASHES[name])
+    monkeypatch.setattr(public, "resolve_seasoned_public_release", resolve)
+    assert public.resolve_public_source(tuple(PINS), 10).packages == PINS
+    assert len(set(clocks)) == 1
+
+
+@pytest.mark.parametrize("age", [-1, True, 1.5, "7", None])
+def test_invalid_age_rejected_before_network(monkeypatch, age):
+    from seasoned_public_feed import resolve_seasoned_public_release
+    monkeypatch.setattr(public, "resolve_seasoned_public_release", resolve_seasoned_public_release)
+    with pytest.raises(btl.ArtifactBuildError, match="non-negative integer"):
+        public.resolve_public_source(tuple(PINS), age)
+
+
+@pytest.mark.parametrize("shared", [True, False])
+def test_cli_public_lifetime(tmp_path, monkeypatch, capsys, shared):
+    argv = ["builder", "demo", "--out-dir", str(tmp_path / "out"),
+            "--toolchain-source", "seasoned-public", "--toolchain-min-age-days", "10"]
+    venv = tmp_path / "shared"
+    if shared:
+        argv.extend(["--toolchain-venv", str(venv)])
+    monkeypatch.setattr(sys, "argv", argv)
+    seen = []
+    def resolve(path, **kwargs):
+        assert not path.exists()
+        assert kwargs == {"python": None, "source_policy": "seasoned-public", "min_age_days": 10}
+        path.mkdir()
+        seen.append(path)
+        return btl.ToolchainLock(path / "python", dict(PINS))
+    monkeypatch.setattr(cli, "resolve_toolchain_lock", resolve)
+    def build(plugin, **kwargs):
+        assert plugin == "demo"
+        assert seen[0].exists()
+        assert kwargs["toolchain"].packages == PINS
+        return {"ok": True}
+    assert cli.main(build, "demo") == 0
+    assert json.loads(capsys.readouterr().out) == {"ok": True}
+    assert seen[0].exists() == shared
+
+
+def test_cli_seasoning_cannot_change_governed_default(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["builder", "demo", "--out-dir", "out",
+                                    "--toolchain-min-age-days", "10"])
+    with pytest.raises(SystemExit) as error:
+        cli.main(lambda *args: pytest.fail("build must not run"), "demo")
+    assert error.value.code == 2
+
+
+def test_cli_default_preserves_builder_validation_order(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["builder", "demo", "--out-dir", "out"])
+    monkeypatch.setattr(cli, "resolve_toolchain_lock", lambda *args, **kwargs: pytest.fail("early provisioning"))
+    def build(plugin, **kwargs):
+        assert kwargs["toolchain"] is None
+        raise btl.ArtifactBuildError("invalid plugin before provisioning")
+    assert cli.main(build, "demo") == 1
+    assert "invalid plugin before provisioning" in capsys.readouterr().err
+
+
+def test_cli_shared_governed_default_does_not_supply_seasoning(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["builder", "demo", "--out-dir", "out",
+                                    "--toolchain-venv", str(tmp_path / "shared")])
+    def resolve(path, **kwargs):
+        assert kwargs == {"python": None, "source_policy": "governed", "min_age_days": None}
+        return btl.ToolchainLock(path / "python", dict(PINS))
+    monkeypatch.setattr(cli, "resolve_toolchain_lock", resolve)
+    assert cli.main(lambda *args, **kwargs: {"ok": True}, "demo") == 0
+
+
+@pytest.mark.parametrize("provenance", [
+    {"python": "/python"},
+    {"python": "/python", "source_policy": "unknown"},
+    {"python": "/python", "source_policy": "governed"},
+    {"python": "/python", "source_policy": "governed", "validated_index_identity": "opaque", "extra": True},
+    {"python": "/python", "source_policy": "governed", "validated_index_identity": "opaque", "extra": object()},
+    {"python": "/python", "source_policy": "seasoned-public", "packages": PINS},
+    {**public.PublicToolchainSource(7, PINS, HASHES).provenance, "python": "/python", "min_age_days": -1},
+    {**public.PublicToolchainSource(7, PINS, HASHES).provenance, "python": "/python", "packages": {}},
+    {**public.PublicToolchainSource(7, PINS, HASHES).provenance, "python": "/python",
+     "file_hashes": {**{name: list(values) for name, values in HASHES.items()},
+                    "wheel": ["a" * 64, "a" * 64]}},
+    {**public.PublicToolchainSource(7, PINS, HASHES).provenance, "python": "/python",
+     "file_hashes": {**{name: list(values) for name, values in HASHES.items()},
+                    "wheel": ["b" * 64, "a" * 64]}},
+])
+def test_schema_three_record_rejects_incomplete_or_mismatched_provenance(provenance):
+    lock = btl.ToolchainLock(Path("/python"), dict(PINS), provenance=provenance)
+    with pytest.raises(btl.ArtifactBuildError, match="provenance"):
+        _ = lock.record
+
+
+def test_real_uv_refuses_late_file_not_in_seasoned_snapshot(tmp_path):
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("real uv contract requires uv on PATH")
+    env = btl.sanitize_subprocess_env()
+    btl.strip_package_source_env_vars(env, strip_credentials=True)
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    venv = tmp_path / "venv"
+    created = subprocess.run(
+        [uv, "venv", "--offline", "--no-config", "--python", sys.executable, str(venv)],
+        capture_output=True, text=True, env=env, timeout=30, **flags,
+    )
+    assert created.returncode == 0, created.stderr
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    wheel = wheels / "demo_toolchain-1.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("demo_toolchain-1.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: demo-toolchain\nVersion: 1.0\n")
+        archive.writestr("demo_toolchain-1.0.dist-info/WHEEL", "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
+        archive.writestr("demo_toolchain-1.0.dist-info/RECORD", "")
+    source = public.PublicToolchainSource(7, {"demo-toolchain": "1.0"}, {"demo-toolchain": ("a" * 64,)})
+    installed = subprocess.run(
+        [uv, "pip", "install", "--no-config", "--no-index", "--no-cache",
+         "--find-links", str(wheels), "--python", str(btl._venv_python_path(venv)),
+         *source.install_args(tmp_path)],
+        capture_output=True, text=True, env=env, timeout=30, **flags,
+    )
+    assert installed.returncode != 0
+    assert "hash mismatch" in installed.stderr.lower()
+    actual = hashlib.sha256(wheel.read_bytes()).hexdigest()
+    assert actual in installed.stderr

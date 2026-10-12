@@ -33,7 +33,9 @@ class CreateAction:
     confirm: bool = False
 
 
-def _parse_create_fields(raw: object, *, where: str) -> tuple[Mapping[str, object], ...]:
+def _parse_create_fields(
+    raw: object, *, where: str, dynamic_other: bool = True
+) -> tuple[Mapping[str, object], ...]:
     """Strictly validate a :class:`CreateAction`'s static field spec.
 
     Raises :class:`ManifestError` on a malformed entry (this spec is
@@ -83,12 +85,9 @@ def _parse_create_fields(raw: object, *, where: str) -> tuple[Mapping[str, objec
                         "of strings"
                     )
                 field["options_command"] = tuple(opts_cmd)
-                # The live command's result is never guaranteed (the target may
-                # be absent, slow, or return nothing this run) -- allow_other is
-                # therefore mandatory whenever options are dynamically sourced,
-                # so the field always degrades to free text rather than ever
-                # rendering genuinely unanswerable.
-                allow_other = True
+                # Create forms retain their free-text fallback. Configuration
+                # forms instead fail closed when the live choices are unusable.
+                allow_other = allow_other or dynamic_other
             if opts is not None or opts_cmd is None:
                 if (
                     not isinstance(opts, Sequence)
@@ -160,7 +159,9 @@ def _parse_create_fields(raw: object, *, where: str) -> tuple[Mapping[str, objec
     return tuple(out)
 
 
-def parse_create_action(raw: object, *, where: str) -> CreateAction | None:
+def parse_create_action(
+    raw: object, *, where: str, dynamic_other: bool = True
+) -> CreateAction | None:
     """Validate the optional pivot-level ``create_action`` manifest key.
 
     ``None``/absent => ``None`` (no create affordance for this pivot).
@@ -175,7 +176,9 @@ def parse_create_action(raw: object, *, where: str) -> CreateAction | None:
     key = raw.get("key", "create")
     if not isinstance(key, str) or not key.strip():
         raise ManifestError(f"{where}.key must be a non-empty string when present")
-    fields = _parse_create_fields(raw.get("fields", []), where=f"{where}.fields")
+    fields = _parse_create_fields(
+        raw.get("fields", []), where=f"{where}.fields", dynamic_other=dynamic_other
+    )
     run = _as_argv(raw.get("run"), where=f"{where}.run")
     confirm = raw.get("confirm", False)
     if not isinstance(confirm, bool):

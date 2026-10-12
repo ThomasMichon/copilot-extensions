@@ -27,6 +27,35 @@ an explicit `agents_config` file:
 | `machines.yaml` | Machine inventory (SSH environments, readiness, roles, descriptions, and capabilities) **plus** `control_plane.project`. agent-bridge derives one control-plane agent per (machine, SSH environment), and `<repo>@<machine>` agents from each repo's `.agent-worktrees/related.yaml`. |
 | `acp-agents.json` | **Deprecated.** Hand-authored agent list. Still honored if a profile sets `agents_config` (explicit entries win over derived ones), but no longer required — the roster is derived from topology. |
 
+For a bare machine target, a managed caller's published worktree owner reference
+supplies the preferred project before a CWD lookup. Durable owner references
+do not need a session suffix; when a qualifier is present it must match the
+validated current caller session.
+Thus a parent harness can dispatch into its own worktrees even when its
+knowledge companion owns the topology or a helper runs from the knowledge
+checkout. A declared owner reference that is stale, malformed, empty, or lacks
+a valid session identity refuses implicit project selection with an actionable rebind diagnostic;
+it never silently falls back to the knowledge checkout. With no declared owner,
+ordinary unmanaged CWD/default resolution remains available.
+Explicit `--project` and `<repo>@<venue>` targets retain precedence; unmanaged
+callers keep CWD/default resolution. This selects a project, not allocation
+authority: knowledge-only restrictions and cross-space claim gates still apply.
+
+Session startup derives that preference only for bare derived machine targets.
+Repository-qualified targets, namespaced providers, and named non-machine agents
+do not consume it and therefore do not evaluate managed-owner preference metadata.
+This preserves explicit-target precedence without weakening allocation checks.
+The start path reuses the existing roster snapshot rather than performing a
+second lookup. A failed roster read is reported as degraded and direct
+namespace/qualified resolution remains available; it is not reported as an
+empty authoritative catalog.
+
+Force takeover/restart prepares the applicable preference and target
+classification before ending the existing session. Invalid consuming-machine
+context leaves that session intact; a known non-machine restart skips irrelevant
+owner preference checks. The target-bound prepared result is reused during
+startup, with no roster lookup or sender revalidation after termination.
+
 ## Quick Setup
 
 ### Auto-adopt from a repo

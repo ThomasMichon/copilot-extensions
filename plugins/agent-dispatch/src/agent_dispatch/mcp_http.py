@@ -466,7 +466,7 @@ def build_coordinator_mcp(
         recipe's own (e.g. route the task onto a supervisor pool with
         ``["general"]``). Enqueues only; embodying a worker to drive the loop is
         the supervisor/host's job (as with ``create``)."""
-        from .recipes import RecipeError, dedup_key_for, render_recipe
+        from .recipes import RecipeError, dedup_key_for, exclusive_key_for, render_recipe, verification_options
 
         try:
             rendered = render_recipe(name, params or {})
@@ -484,6 +484,8 @@ def build_coordinator_mcp(
             requires=list(rendered.requires),
             labels=merged_labels,
             dedup_key=dedup_key or dedup_key_for(rendered),
+            exclusive_key=exclusive_key_for(rendered),
+            **verification_options(rendered),
             goal=rendered.goal,
             done_criteria=rendered.done_criteria,
             source="recipe",

@@ -19,6 +19,12 @@ a public package index for third-party dependencies, and no release bundles
 a complete virtual environment or a single packaged binary as its primary
 distribution unit.
 
+Public promotion runners may explicitly source the build toolchain
+(`setuptools`, `wheel`, `packaging`) from seasoned public releases. This
+approved exception does not apply to managed-device runtime dependency
+resolution, does not certify availability on any consumer's governed feed,
+and does not permit third-party dependency bytes in published artifact sets.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
@@ -72,6 +78,12 @@ distribution unit.
 > what the governed feed currently carries (governed feeds can lag public
 > releases by about a week). A single packaged binary is not an acceptable
 > distribution strategy.
+
+**2026-10-10 clarification:** the original request's governed-feed-only
+rule remains binding for managed-device dependencies. Public promotion
+build tooling has the explicit exception described in Guiding Intent above;
+the earlier wording must not be read as requiring public runners to reach a
+private consumer feed. Consumer-side admission still checks the actual feed.
 
 ## Plan
 
@@ -234,8 +246,9 @@ answer against the actual repository/CI configuration:
   build environment (which silently resolves "whatever satisfies the floor
   today," unrecorded and unreproducible run-to-run). Instead, promotion
   resolves one shared **build-toolchain lock** per promotion run (exact
-  `setuptools`/`wheel` versions, resolved from the governed feed like every
-  other third-party dependency in this effort -- never a public index),
+  `setuptools`/`wheel` versions, resolved from a governed feed on managed
+  machines, or seasoned public releases in the explicitly opted-in public
+  promotion-runner mode),
   installs it into a controlled build venv, and builds every plugin/lib
   wheel in that run with `--no-build-isolation` against that one locked
   venv. The resolved toolchain lock's hash becomes a component of each
@@ -283,6 +296,22 @@ answer against the actual repository/CI configuration:
   build a platform-specific artifact -- not solved speculatively here, per
   this effort's own established pattern of naming real gaps rather than
   pre-solving unneeded generality.
+- **Public-runner toolchain resolution -- resolved (2026-10-10):**
+  `validate-and-promote.yml` runs on public GitHub-hosted runners, which
+  cannot reach the corporate governed feed `resolve_toolchain_lock`
+  otherwise requires (it fails closed without one, by design, correct for
+  every OTHER caller of this tool on a managed machine). Raised to the
+  operator rather than silently decided. Resolution: the public runner
+  resolves the build toolchain (`setuptools`/`wheel`/`packaging` -- build
+  tooling, not a plugin's own distributed runtime dependency closure)
+  through public PyPI directly, but pinned to a **seasoned** (minimum-age)
+  version rather than unqualified "latest" -- approximating what a real
+  governed feed would likely already carry by the time a managed device
+  consumes a release built this way, not an exact substitute for querying
+  one directly. See `tools/seasoned_public_feed.py` and this Journal's
+  2026-10-10 entry. The API/CLI now expose an explicit `seasoned-public`
+  build-tooling mode with policy/pins/interpreter-bound reuse and manifest
+  provenance. Still open: invoking the builder in the actual promotion job.
 
 ## Validation Plan
 
@@ -379,6 +408,207 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-12 - Phase 2 slice 4: explicit public build-toolchain integration
+
+- The default API/CLI path remains governed-only and fails without an
+  affirmatively trusted feed. Public promotion runners can explicitly select
+  `seasoned-public`; no failure ever switches between policies.
+- Public exact pins share one metadata clock and install as binaries from one
+  sanitized explicit index. The resolver and existing build-requirement gate
+  reject incompatible or insufficient pins without relaxing seasoning.
+- Both policies use the existing staging/atomic publication and concurrent
+  reuse machinery. Public markers and schema-3 manifests name the real source
+  policy; policy, seasoning, pins, and resolved interpreter participate in
+  reuse and artifact identity. Reused public pins are rechecked.
+- Extracted the CLI/source-policy concerns instead of crossing the module-size
+  cap. `docs/pipelines.md` describes the standalone contract. Promotion
+  invocation, signing/publication, dependency-closure admission, and verified
+  installer consumption remain open.
+- Validation: existing builder/resolver contracts plus focused public-policy
+  regressions; path-scoped hosted smoke exercises a fresh public toolchain and
+  real wheel builds sharing one lock. Public-mode package installation is not
+  run on a managed device. Full installer clean-room and external consumption
+  matrices remain owned by later phases, which change those paths.
+- Review follow-through: schema-3 records reject caller-supplied locks lacking
+  valid source/interpreter provenance before wheel building, not merely after
+  resolution. Both fixture locks and negative regressions exercise this rule.
+  Governed records also reject noncanonical extra fields before serialization,
+  including non-JSON values, with an explicit artifact-build error.
+  Public hash arrays must be sorted and unique, preserving a single canonical
+  identity for each eligible digest set.
+  The API uses an omitted-seasoning sentinel, so even an explicit seven-day
+  argument is rejected in governed mode rather than silently ignored.
+- Age-floor race follow-through: snapshot-qualified file SHA-256 hashes travel
+  with exact pins into `uv pip install --require-hashes`. A later upload to the
+  same version cannot supply unseasoned bytes; unknown hashes and unpinned
+  transitive dependencies fail before publication. File hashes also bind reuse
+  and artifact provenance. A real offline uv regression proves rejection of a
+  same-version wheel absent from the eligible hash snapshot.
+
+### 2026-10-10 - Phase 2 slice 3: seasoned public-PyPI version resolution for public CI runners
+
+- Identified and resolved a real infrastructure conflict before wiring
+  `build_python_artifacts.py` into the actual promotion pipeline (the next
+  item in Phase 2's checklist): `resolve_toolchain_lock` requires an
+  affirmatively trusted GOVERNED feed and fails closed without one -- by
+  design, and correct for every other caller of this tool (a managed
+  machine, always governed-feed-reachable) -- but `validate-and-promote.yml`
+  runs on **public GitHub-hosted runners**, which have no network path to
+  a consumer's private governed feed.
+  Raised this to the operator rather than silently picking a resolution
+  myself. Decision: the public runner resolves the build toolchain
+  (`setuptools`/`wheel`/`packaging` -- build tooling, not a plugin's own
+  distributed runtime dependency closure) through **public PyPI directly**,
+  but pinned to a **seasoned** version (at least a configurable minimum age
+  old, never unqualified "latest") specifically to approximate what a real
+  governed feed would likely already carry by the time a managed device
+  actually consumes a release built this way -- never an exact substitute
+  for querying a real governed feed directly (that stays Phase 3's
+  consumer-side install-time design, which has its own real feed to query).
+- Implemented `tools/seasoned_public_feed.py`:
+  `resolve_seasoned_public_version(package, *, min_age_days=7, now=None,
+  fetch=...)` queries PyPI's JSON API (`https://pypi.org/pypi/<package>/json`)
+  and returns the newest release whose NEWEST uploaded file is at least
+  `min_age_days` old, excluding any release PyPI reports as yanked or that
+  parses as a pre/dev release. `min_age_days=7` is a deliberately modest
+  default floor for the toolchain specifically -- not derived from Phase 1's
+  own measured per-package lag (0 to 65+ days across just 3 dependencies of
+  one plugin), which Phase 1 itself found too package-specific to
+  generalize into one constant; this is a cheaper, narrower approximation
+  for foundational packaging tooling only.
+- Deliberately stdlib-only (`urllib.request`, no third-party `packaging`
+  import): `build_toolchain_lock.py` already applies this exact constraint
+  to itself (`_assert_toolchain_satisfies_build_requires`'s own
+  `packaging`-dependent logic runs as an inline script executed THROUGH the
+  locked toolchain venv's own interpreter, never imported into the host
+  process, so this tool keeps working on a genuinely clean machine with no
+  `packaging` installed anywhere yet) -- this module honors the same rule,
+  via a narrow, self-contained `_parse_release_version` (recognizes only a
+  clean numeric release segment with an optional PEP 440 epoch and/or
+  stable `.postN` suffix; anything else, including every genuine pre/dev
+  release, is excluded rather than guessed at).
+- Age is measured from a release's NEWEST uploaded file, not its earliest
+  -- this resolver returns a bare version, not a pinned exact file hash,
+  so a later install could select whichever file ends up published for
+  that version, including one added after the fact; every file must clear
+  the age floor for the seasoning guarantee to actually hold. The real
+  network fetch is isolated behind an injectable
+  `fetch` parameter so tests exercise the actual selection logic against
+  fixed, synthetic responses rather than real (slow, flaky, not
+  reproducible) calls to pypi.org.
+- Resolver regression coverage (`tools/test_seasoned_public_feed.py`): newest-seasoned
+  selection (including a stable `.postN` release), yanked/pre-release
+  exclusion (including when they'd otherwise be the newest-and-old-enough
+  candidate), newest-file age measurement, the exact min-age-days
+  boundary, empty/no-qualifying-release and malformed-JSON/wrong-root-
+  shape/missing-`releases`-key/offset-less-timestamp/negative-min-age-days
+  fail-closed paths, HTTP/URL error wrapping, a naive (non-timezone-aware)
+  `now` rejection, the real `_default_fetch`'s request/timeout
+  construction (stubbed at `urllib.request.urlopen`, never touching the
+  real network), and `_parse_release_version`'s own parametrized
+  accept/reject cases. `ruff check` and `tools/check-module-size.py` both
+  pass; no changefile required (this diff touches no `plugins/<name>/`
+  tree).
+- **Review round found 5 real issues, all fixed before merge:** (1) the
+  version parser rejected stable `.postN` releases along with genuine
+  pre/dev ones, even though the resolver's own contract only excludes
+  pre/dev -- extended the parser to accept an optional `.postN` suffix,
+  ordered so a bare release sorts before its own post release. (2) a
+  negative `min_age_days` silently disabled the seasoning control entirely
+  (and could admit a future-dated upload) -- now rejected up front. (3) a
+  non-object JSON root (e.g. a bare list) raised `AttributeError` instead
+  of the documented `SeasonedVersionError` -- fixed by checking the root's
+  type before calling `.get()` on it. (4) an offset-less upload timestamp
+  parsed successfully via `datetime.fromisoformat` but then raised an
+  uncaught `TypeError` when compared against the timezone-aware `now` --
+  now treated as a malformed timestamp (any file with one disqualifies the
+  whole version, never computed from only the files that happened to
+  parse). (5) **the most significant catch:** age was being measured from
+  a version's EARLIEST file, but this resolver returns a bare version
+  string, not a pinned file hash -- a version could look seasoned while
+  quietly carrying a brand-new file added after the fact, which a later
+  install could select. Switched to measuring from the NEWEST file (every
+  file for a version must clear the age floor), updated the docstrings,
+  and inverted the test that had codified the old (incorrect) behavior.
+- **Second review round found 1 more real issue:** release-segment
+  comparison was done on RAW tuples without PEP 440's trailing-zero
+  normalization ("1.0" == "1.0.0" == "1" -- a trailing `.0` is never
+  significant), so e.g. seasoned `1.0.0` and `1.0.post1` would wrongly
+  rank the base release above the post release (`(1, 0, 0) > (1, 0)` as
+  plain tuples, even though a post release is newer than its own base
+  release under PEP 440). Fixed by stripping trailing zero elements from
+  `release_segments` inside `_parse_release_version` itself, so every
+  caller gets canonical, directly-comparable tuples; added both a direct
+  equivalence-class test and the exact mixed-spelling integration
+  regression case the review named.
+- **2026-10-12 review follow-through:** validate distribution names before
+  any request and normalize them using PEP 503 name normalization, preventing
+  path/query/fragment characters from changing the request target. Corrected
+  the candidate-key type to include the post-release component. Response-read
+  timeouts and malformed Unicode now raise `SeasonedVersionError` with their
+  original cause. The existing trailing-zero normalization already addresses
+  the carried-over sorting finding. All 49 collected resolver cases pass,
+  including real response-read failure handling through the fetch helper;
+  touched Python lint passes. Test-count descriptions now refer to coverage
+  rather than a count that becomes stale with each review round.
+- **2026-10-12 required-CI follow-through:** the artifact-builder path
+  gate now includes both resolver files and runs their suite alongside the
+  existing builder suite. Age settings must be non-negative integers;
+  NaN, infinity, floats, strings and booleans are rejected before fetching.
+  The combined lane exposed four Windows fixture failures: drive colons
+  were being split as POSIX XDG separators, and root-relative paths then
+  resolved on the checkout's drive rather than the temporary drive. The
+  fixtures now select the temporary drive and omit drive prefixes from
+  their simulated POSIX paths, without changing production feed discovery.
+  All 255 combined cases pass locally (56 resolver cases); touched Python
+  lint passes. Guiding Intent, the original Request's clarification,
+  build-hermeticity policy and umbrella issue #4876 now consistently scope
+  the approved public-feed exception to promotion build tooling only.
+- **2026-10-12 response-contract follow-through:** truncated HTTP responses
+  and connection-reset failures are wrapped with their original cause, alongside
+  the existing timeout handling. A file is admitted only when its `yanked`
+  field is exactly boolean `False`; missing and wrong-type metadata disqualify
+  the whole version. Regression cases exercise response-read failures through
+  the real fetch helper and mixed valid/malformed file lists. The earlier
+  required-CI finding is already addressed by commit `7364f5232`: both resolver
+  paths are in the artifact-builder gate and its test invocation includes the
+  resolver suite.
+- **2026-10-12 hosted-CI detour:** run `38225329693` exposed a
+  Codespaces relay-discovery fixture race: the dead-port probe closed its socket
+  before the live relay started, so that relay could inherit the same port.
+  Discovery then correctly preferred the newer mapping, but the test mistook it
+  for adopting a dead endpoint. The test now holds a bound, non-listening socket
+  throughout discovery and asserts its port differs from the live relay.
+  The real Bash/Node discovery regression passes under the contained Windows
+  runner; a mandatory Codespaces patch changefile accompanies the fixture fix.
+  No production relay behavior, assertions, timeouts or retry budgets changed.
+- **2026-10-12 Lite-review refinements:** equivalent supported version
+  spellings now use their original string as a deterministic secondary sort
+  key, rather than depending on response order. `URLError`-wrapped timeouts
+  preserve the dedicated timeout diagnostic and original exception cause.
+  Clarified the relay fixture's actual allocation order and extracted the
+  repeated POSIX-XDG test-path conversion. All 265 combined artifact/resolver
+  cases pass locally; the latest resolver has 66 cases. No assertions or budgets
+  were weakened.
+- **2026-10-12 sibling-fixture follow-through:** moved non-listening-port
+  reservation into one context-managed helper used by both Python and wrapper
+  discovery, plus the direct dead-endpoint probe. All fixtures retain the
+  reservation through probing; the Python discovery case asserts neither live
+  relay owns the reserved port. All eight real relay-liveness cases pass under
+  the contained Windows runner, with assertions and timeout bounds preserved.
+- **Still open (this effort's own next slice):** actually wire this
+  resolver into `resolve_toolchain_lock`/`build_python_artifacts.py`'s CLI
+  (a caller-selectable "seasoned public" mode, distinct from and never
+  silently substituting the existing governed-feed-only default), then wire
+  THAT into a new `validate-and-promote.yml` job that builds, attests
+  (`actions/attest-build-provenance`, in a job scoped with only
+  `id-token: write`/`attestations: write`/`contents: read` -- never
+  `APERTURE_RELEASE_TOKEN`, per the Trust root/Credential separation Open
+  Design Questions below), and hands the result to `promote` for
+  publication as a GitHub Release asset -- mirroring the existing
+  coverage-baseline download/gate/publish pattern already in that
+  workflow's `promote` job.
 
 ### 2026-10-02 - Phase 2 slice 2: shared build-toolchain lock
 

@@ -446,12 +446,13 @@ async def test_real_constructed_client_envelope_and_http_response(rig):
     assert sent[0][:2] == ("POST", "/api/v1/acquisitions")
     assert sent[0][2]["protocol_version"] == ACQUISITION_PROTOCOL_VERSION
     assert sent[0][2]["mode"] == "cli"
-    client._daemon_proto = (30, 1)
-    with pytest.raises(BridgeClientError) as error:
-        client_acquire(client, req(mode="cli"))
-    assert error.value.status == 426
-    assert error.value.detail["code"] == "unsupported_acquisition_protocol"
-    assert error.value.detail["effect"] == "not_started"
+    for old_protocol in (30, 31):
+        client._daemon_proto = (old_protocol, 1)
+        with pytest.raises(BridgeClientError) as error:
+            client_acquire(client, req(mode="cli"))
+        assert error.value.status == 426
+        assert error.value.detail["code"] == "unsupported_acquisition_protocol"
+        assert error.value.detail["effect"] == "not_started"
     assert len(sent) == 1
 
 
@@ -654,19 +655,33 @@ async def test_new_attempt_refreshes_native_head_after_prior_reconciliation(rig,
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["cli", "acp"])
-async def test_interrupted_launch_reconciles_before_new_attempt_without_second_process(rig, mode):
+@pytest.mark.parametrize("retired", [False, True])
+async def test_interrupted_launch_reconciles_before_new_attempt_without_second_process(rig, mode, retired):
+    if retired:
+        rig.source["task"]["generation"] = 1
+        rig.source["acquisition_reservation"].update(
+            worktree_ownership="reused", conversation_retired=True,
+        )
+    original_request = req(
+        mode=mode, task_generation=1 if retired else 0,
+        allocation="reused" if retired else "created",
+        conversation_retired=retired,
+    )
     original = rig.runtime._deliver
     rig.runtime._deliver = AsyncMock(side_effect=RuntimeError("delivery not begun"))
     with pytest.raises(RuntimeError, match="delivery not begun"):
-        await rig.runtime.acquire(req(mode=mode))
+        await rig.runtime.acquire(original_request)
     rig.runtime._deliver = original
     rig.source["task"]["generation"] = 1
     rig.source["acquisition_reservation"].update(key="reservation-b", worktree_ownership="reused")
-    recovered = await rig.runtime.acquire(req(
+    retry_request = req(
         mode=mode, task_generation=1, allocation="reused",
         reservation_key="reservation-b", delivery_id="delivery-b",
-    ))
+        conversation_retired=retired,
+    )
+    recovered = await rig.runtime.acquire(retry_request)
     assert recovered.acquired == "reused"
+    assert await rig.runtime.acquire(retry_request) == recovered
     assert rig.db.execute_read(
         "SELECT state FROM acquisition_attempts WHERE delivery_id='delivery-a'",
     )[0]["state"] == "refused"
@@ -680,6 +695,274 @@ async def test_interrupted_launch_reconciles_before_new_attempt_without_second_p
         session = rig.manager.get_session(recovered.session_id)
         if session._prompt_task:
             await session._prompt_task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("defect", ["new_generation", "retired_binding", "foreign_binding", "no_binding", "explicit_fresh"])
+async def test_fresh_retry_never_adopts_unproven_or_reauthorized_holder(rig, defect):
+    rig.source["task"]["generation"] = 1
+    rig.source["acquisition_reservation"].update(
+        worktree_ownership="reused", conversation_retired=True,
+    )
+    original = rig.runtime._deliver
+    rig.runtime._deliver = AsyncMock(side_effect=RuntimeError("delivery not begun"))
+    sample = req(allocation="reused", conversation_retired=True, task_generation=1)
+    with pytest.raises(RuntimeError, match="delivery not begun"):
+        await rig.runtime.acquire(sample)
+    rig.runtime._deliver = original
+    # Reconcile the original launch before changing its authoritative binding.
+    rig.source["acquisition_reservation"]["key"] = "reservation-b"
+    await rig.runtime._reconcile_prior(
+        sample.model_copy(update={"reservation_key": "reservation-b", "delivery_id": "delivery-b"}),
+        {"path": "unused"}, rig.head["id"],
+    )
+    changes = {}
+    if defect == "new_generation":
+        rig.source["task"]["generation"] = 2
+        changes["task_generation"] = 2
+    elif defect == "retired_binding":
+        rig.db.execute_write("UPDATE acquisition_bindings SET retired=1")
+    elif defect == "foreign_binding":
+        rig.db.execute_write("UPDATE acquisition_bindings SET task_id='task-other'")
+    elif defect == "no_binding":
+        rig.db.execute_write("DELETE FROM acquisition_bindings")
+    else:
+        changes["intent"] = "fresh"
+    with pytest.raises(AcquisitionRefused):
+        await rig.runtime.acquire(sample.model_copy(update={
+            "reservation_key": "reservation-b", "delivery_id": "delivery-b", **changes,
+        }))
+    assert len(rig.manager.list_sessions()) == 1
+    assert not rig.db.execute_read("SELECT * FROM turns")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["cli", "acp"])
+@pytest.mark.parametrize("new_attempt", [False, True])
+async def test_retirement_recovery_settles_admitted_turn_without_duplicate(rig, mode, new_attempt):
+    rig.source["task"]["generation"] = 1
+    rig.source["acquisition_reservation"].update(
+        worktree_ownership="reused", conversation_retired=True,
+    )
+    sample = req(mode=mode, allocation="reused", conversation_retired=True, task_generation=1)
+    original_deliver = rig.runtime._deliver
+    rig.runtime._deliver = AsyncMock(side_effect=RuntimeError("before delivery"))
+    with pytest.raises(RuntimeError):
+        await rig.runtime.acquire(sample)
+    rig.runtime._deliver = original_deliver
+    rig.source["acquisition_reservation"]["key"] = "reservation-b"
+    retry = sample.model_copy(update={"reservation_key": "reservation-b", "delivery_id": "delivery-b"})
+    original_complete = rig.runtime.store.journal.complete
+    def interrupted_complete(request, *args, **kwargs):
+        if request.delivery_id == "delivery-b":
+            raise RuntimeError("after admission")
+        return original_complete(request, *args, **kwargs)
+    rig.runtime.store.journal.complete = interrupted_complete
+    with pytest.raises(RuntimeError, match="after admission"):
+        await rig.runtime.acquire(retry)
+    rig.runtime.store.journal.complete = original_complete
+    if new_attempt:
+        # Settling a superseded receipt is distinct from admitting another turn.
+        rig.source["acquisition_reservation"]["key"] = "reservation-c"
+        current = retry.model_copy(update={"reservation_key": "reservation-c", "delivery_id": "delivery-c"})
+        with pytest.raises(AcquisitionRefused):
+            await rig.runtime.acquire(current)
+    else:
+        await rig.runtime.acquire(retry)
+    table = "live_messages" if mode == "cli" else "turns"
+    assert rig.db.execute_read(f"SELECT COUNT(*) AS n FROM {table}")[0]["n"] == 1
+    assert rig.db.execute_read(
+        "SELECT state FROM acquisition_attempts WHERE delivery_id='delivery-b'",
+    )[0]["state"] == "completed"
+    for session in rig.manager.list_sessions():
+        if session._prompt_task:
+            await session._prompt_task
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["cli", "acp"])
+@pytest.mark.parametrize("defect", ["none", "caller", "binding", "generation", "retired", "head", "authority", "fresh"])
+async def test_legacy_superseded_launch_requires_exact_positive_native_provenance(rig, mode, defect):
+    rig.source["task"]["generation"] = 1
+    rig.source["acquisition_reservation"].update(
+        worktree_ownership="reused", conversation_retired=True,
+    )
+    first = req(mode=mode, allocation="reused", conversation_retired=True, task_generation=1)
+    deliver = rig.runtime._deliver
+    rig.runtime._deliver = AsyncMock(side_effect=RuntimeError("before delivery"))
+    with pytest.raises(RuntimeError):
+        await rig.runtime.acquire(first)
+    rig.runtime._deliver = deliver
+    token, _, data = rig.runtime.store.recovery(first)
+    rig.runtime.store.stage(
+        first, "launching", acquired="created", session_id=None, native_session_id=None,
+        retired_native_ids=data.get("retired_native_ids", []),
+        creation_authorized=defect != "authority",
+    )
+    rig.runtime.store.journal.refuse(first, token, "superseded_before_delivery")
+    rig.runtime.store.release_gate(first)
+    if defect == "caller":
+        if mode == "acp":
+            rig.db.execute_write("UPDATE sessions SET caller_id='acquisition:another-delivery'")
+        else:
+            rig.db.execute_write("UPDATE live_sessions SET driven_by='another-driver'")
+    elif defect == "binding":
+        rig.db.execute_write("UPDATE acquisition_bindings SET task_id='another-task'")
+    elif defect == "generation":
+        rig.db.execute_write("UPDATE acquisition_bindings SET task_generation=0")
+    elif defect == "retired":
+        rig.db.execute_write("UPDATE acquisition_bindings SET retired=1")
+    elif defect == "head":
+        rig.head["id"] = "another-native"
+    rig.source["acquisition_reservation"]["key"] = "reservation-b"
+    second = first.model_copy(update={
+        "reservation_key": "reservation-b", "delivery_id": "delivery-b",
+        "intent": "fresh" if defect == "fresh" else "automatic",
+    })
+    if defect != "none":
+        with pytest.raises(AcquisitionRefused):
+            await rig.runtime.acquire(second)
+        table = "live_messages" if mode == "cli" else "turns"
+        assert not rig.db.execute_read(f"SELECT * FROM {table}")
+        return
+    result = await rig.runtime.acquire(second)
+    assert result.native_session_id == rig.head["id"]
+    assert await rig.runtime.acquire(second) == result
+    rig.source["acquisition_reservation"]["key"] = "reservation-c"
+    third = first.model_copy(update={"reservation_key": "reservation-c", "delivery_id": "delivery-c"})
+    assert not rig.runtime.store.retirement_recovery_proven(
+        third, result.session_id, result.native_session_id,
+    )
+    legacy = rig.db.execute_read(
+        "SELECT stage,data_json FROM acquisition_effects WHERE delivery_id='delivery-a'",
+    )[0]
+    assert legacy["stage"] == "launching"
+    assert "result" not in json.loads(legacy["data_json"])
+    table = "live_messages" if mode == "cli" else "turns"
+    assert rig.db.execute_read(f"SELECT COUNT(*) AS n FROM {table}")[0]["n"] == 1
+    for session in rig.manager.list_sessions():
+        if session._prompt_task:
+            await session._prompt_task
+
+
+def test_retirement_proof_uses_persistent_history_index(tmp_db, monkeypatch):
+    store = AcquisitionStore(tmp_db)
+    tmp_db.execute_write("DROP INDEX idx_acquisition_history")
+    store = AcquisitionStore(tmp_db)
+    original_read = tmp_db.execute_read
+    queries = []
+    def capture(sql, parameters=()):
+        queries.append((sql, parameters))
+        return original_read(sql, parameters)
+    monkeypatch.setattr(tmp_db, "execute_read", capture)
+    assert not store.retirement_recovery_proven(req(), "session-a", "native-a")
+    sql, parameters = queries[0]
+    plan = original_read("EXPLAIN QUERY PLAN " + sql, parameters)
+    assert any("SEARCH a USING INDEX idx_acquisition_history" in row["detail"] for row in plan)
+    assert not any("SCAN a" in row["detail"] for row in plan)
+    indexes = original_read("PRAGMA index_list(acquisition_attempts)")
+    assert any(row["name"] == "idx_acquisition_history" and not row["partial"] for row in indexes)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["cli", "acp"])
+async def test_completed_retirement_recovery_cannot_authorize_another_delivery(rig, mode):
+    rig.source["task"]["generation"] = 1
+    rig.source["acquisition_reservation"].update(
+        worktree_ownership="reused", conversation_retired=True,
+    )
+    first = req(mode=mode, allocation="reused", conversation_retired=True, task_generation=1)
+    deliver = rig.runtime._deliver
+    rig.runtime._deliver = AsyncMock(side_effect=RuntimeError("before delivery"))
+    with pytest.raises(RuntimeError):
+        await rig.runtime.acquire(first)
+    rig.runtime._deliver = deliver
+    rig.source["acquisition_reservation"]["key"] = "reservation-b"
+    second = first.model_copy(update={"reservation_key": "reservation-b", "delivery_id": "delivery-b"})
+    result = await rig.runtime.acquire(second)
+    for session in rig.manager.list_sessions():
+        if session._prompt_task:
+            await session._prompt_task
+    rig.db.execute_write("UPDATE live_messages SET delivered_at=?, outcome='applied'", (time.time(),))
+    rig.source["acquisition_reservation"]["key"] = "reservation-c"
+    third = first.model_copy(update={"reservation_key": "reservation-c", "delivery_id": "delivery-c"})
+    assert not rig.runtime.store.retirement_recovery_proven(
+        third, result.session_id, result.native_session_id,
+    )
+    with pytest.raises(AcquisitionRefused):
+        await rig.runtime.acquire(third)
+    assert await rig.runtime.acquire(second) == result
+    table = "live_messages" if mode == "cli" else "turns"
+    assert rig.db.execute_read(f"SELECT COUNT(*) AS n FROM {table}")[0]["n"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("new_attempt", [False, True])
+async def test_cli_retirement_recovery_survives_launching_with_previous_driver(rig, monkeypatch, new_attempt):
+    rig.source["task"]["generation"] = 1
+    rig.source["acquisition_reservation"].update(
+        worktree_ownership="reused", conversation_retired=True,
+    )
+    first = req(mode="cli", allocation="reused", conversation_retired=True, task_generation=1)
+    deliver = rig.runtime._deliver
+    rig.runtime._deliver = AsyncMock(side_effect=RuntimeError("before delivery"))
+    with pytest.raises(RuntimeError):
+        await rig.runtime.acquire(first)
+    rig.runtime._deliver = deliver
+    stage = rig.runtime.store.stage
+    def interrupted(request, name, **data):
+        if request.delivery_id == "delivery-b" and name == "launched":
+            raise RuntimeError("after reuse before receipt")
+        stage(request, name, **data)
+    monkeypatch.setattr(rig.runtime.store, "stage", interrupted)
+    rig.source["acquisition_reservation"]["key"] = "reservation-b"
+    second = first.model_copy(update={"reservation_key": "reservation-b", "delivery_id": "delivery-b"})
+    with pytest.raises(RuntimeError, match="after reuse before receipt"):
+        await rig.runtime.acquire(second)
+    monkeypatch.setattr(rig.runtime.store, "stage", stage)
+    current = second
+    if new_attempt:
+        rig.source["acquisition_reservation"]["key"] = "reservation-c"
+        current = first.model_copy(update={"reservation_key": "reservation-c", "delivery_id": "delivery-c"})
+    result = await rig.runtime.acquire(current)
+    assert result.native_session_id == rig.head["id"]
+    assert await rig.runtime.acquire(current) == result
+    assert rig.db.execute_read("SELECT COUNT(*) AS n FROM live_messages")[0]["n"] == 1
+    assert len([args for args, _ in rig.calls if args[0] == "embody" and "--dry-run" not in args]) == 1
+    assert not rig.db.execute_read("SELECT * FROM acquisition_launch_gates")
+
+
+@pytest.mark.asyncio
+async def test_new_reservation_recovers_interrupted_retirement_registration(rig, monkeypatch):
+    rig.source["task"]["generation"] = 1
+    rig.source["acquisition_reservation"].update(
+        worktree_ownership="reused", conversation_retired=True,
+    )
+    sample = req(allocation="reused", conversation_retired=True, task_generation=1)
+    deliver = rig.runtime._deliver
+    rig.runtime._deliver = AsyncMock(side_effect=RuntimeError("before delivery"))
+    with pytest.raises(RuntimeError):
+        await rig.runtime.acquire(sample)
+    rig.runtime._deliver = deliver
+    register = acquisition_runtime.worktree_command
+    async def interrupted(args, project):
+        if args[0] == "register-session":
+            raise RuntimeError("registration interrupted")
+        return await register(args, project)
+    monkeypatch.setattr(acquisition_runtime, "worktree_command", interrupted)
+    rig.source["acquisition_reservation"]["key"] = "reservation-b"
+    second = sample.model_copy(update={"reservation_key": "reservation-b", "delivery_id": "delivery-b"})
+    with pytest.raises(RuntimeError, match="registration interrupted"):
+        await rig.runtime.acquire(second)
+    monkeypatch.setattr(acquisition_runtime, "worktree_command", register)
+    rig.source["acquisition_reservation"]["key"] = "reservation-c"
+    third = sample.model_copy(update={"reservation_key": "reservation-c", "delivery_id": "delivery-c"})
+    result = await rig.runtime.acquire(third)
+    assert len(rig.manager.list_sessions()) == 1
+    assert rig.db.execute_read("SELECT COUNT(*) AS n FROM turns")[0]["n"] == 1
+    session = rig.manager.get_session(result.session_id)
+    if session._prompt_task:
+        await session._prompt_task
 
 
 @pytest.mark.asyncio

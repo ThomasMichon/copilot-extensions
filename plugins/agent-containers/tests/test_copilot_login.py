@@ -229,3 +229,73 @@ def test_cleanup_runs_even_when_login_fails(monkeypatch):
             cmd_copilot_login(_args())
 
     assert run_mock.call_count == 3  # snapshot, login, restore -- cleanup still ran
+
+
+def test_restore_warns_when_restore_write_back_exits_nonzero(monkeypatch, capsys):
+    """A nonzero exit from the in-container restore write-back means the
+    pre-login config was NOT actually restored -- this must surface as a
+    warning, not be silently treated as a successful cleanup."""
+    monkeypatch.setattr(
+        "agent_containers.resolver.resolve_live_exec_target",
+        lambda name, config: _target(),
+    )
+    monkeypatch.setattr("agent_containers.config.load_config", lambda: object())
+    monkeypatch.setattr(
+        "agent_containers.resolver.copilot_cli_token_from_json_text",
+        lambda account, raw: "gho_extracted",
+    )
+    monkeypatch.setattr(
+        "agent_containers.resolver.import_copilot_cli_token",
+        lambda account, token: None,
+    )
+
+    prior_config = '{"authTokens": {"https://github.com:git-user": {"token": "gho_old"}}}'
+    snapshot_result = types.SimpleNamespace(returncode=0, stdout=prior_config)
+    login_ok = types.SimpleNamespace(returncode=0)
+    read_ok = types.SimpleNamespace(returncode=0, stdout='{"authTokens": {}}')
+    restore_failed = types.SimpleNamespace(returncode=1)
+    with patch(
+        "agent_containers.copilot_login.subprocess.run",
+        side_effect=[snapshot_result, login_ok, read_ok, restore_failed],
+    ):
+        rc = cmd_copilot_login(_args())
+
+    assert rc == 0  # the login itself still succeeded
+    stderr = capsys.readouterr().err
+    assert "WARNING" in stderr
+    assert "could not restore" in stderr
+
+
+def test_restore_warns_when_cleanup_rm_exits_nonzero(monkeypatch, capsys):
+    """Same check on the no-prior-snapshot (``rm -f``) cleanup path."""
+    monkeypatch.setattr(
+        "agent_containers.resolver.resolve_live_exec_target",
+        lambda name, config: _target(),
+    )
+    monkeypatch.setattr("agent_containers.config.load_config", lambda: object())
+    monkeypatch.setattr(
+        "agent_containers.resolver.copilot_cli_token_from_json_text",
+        lambda account, raw: "gho_extracted",
+    )
+    monkeypatch.setattr(
+        "agent_containers.resolver.import_copilot_cli_token",
+        lambda account, token: None,
+    )
+
+    snapshot_result = types.SimpleNamespace(returncode=0, stdout="")
+    login_ok = types.SimpleNamespace(returncode=0)
+    read_ok = types.SimpleNamespace(
+        returncode=0,
+        stdout='{"authTokens": {"https://github.com:inference-user": {"token": "gho_extracted"}}}',
+    )
+    rm_failed = types.SimpleNamespace(returncode=1)
+    with patch(
+        "agent_containers.copilot_login.subprocess.run",
+        side_effect=[snapshot_result, login_ok, read_ok, rm_failed],
+    ):
+        rc = cmd_copilot_login(_args())
+
+    assert rc == 0
+    stderr = capsys.readouterr().err
+    assert "WARNING" in stderr
+    assert "could not restore" in stderr

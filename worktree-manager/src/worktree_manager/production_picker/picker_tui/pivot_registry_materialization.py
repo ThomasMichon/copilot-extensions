@@ -163,6 +163,26 @@ def _rewrite_manifest_commands(
             if require_targets:
                 raise TargetUnusableError(str(exc)) from exc
 
+    def rewrite_form(form: object, *, where: str) -> None:
+        if not isinstance(form, dict):
+            return
+        if "run" in form:
+            form["run"] = list(_as_argv(form.get("run"), where=f"`{where}.run`"))
+            rewrite(form, "run")
+        fields = form.get("fields")
+        if not isinstance(fields, list):
+            return
+        for field_spec in fields:
+            if not isinstance(field_spec, dict) or "options_command" not in field_spec:
+                continue
+            field_spec["options_command"] = list(
+                _as_argv(
+                    field_spec.get("options_command"),
+                    where=f"`{where}.fields[].options_command`",
+                )
+            )
+            rewrite(field_spec, "options_command")
+
     if isinstance(data.get("list"), Sequence) and not isinstance(
         data.get("list"), (str, bytes)
     ):
@@ -177,33 +197,12 @@ def _rewrite_manifest_commands(
             if collection == "actions" and item.get("kind") in {"internal", "card"}:
                 continue
             rewrite(item, "run")
-    create_action = data.get("create_action")
-    if isinstance(create_action, dict) and "run" in create_action:
-        # Validate the argv shape BEFORE resolving an executable: classification
-        # rewrites commands ahead of `parse_manifest`'s own strict validation, so
-        # an unvalidated `run: 42` or `run: {"command": "x"}` would otherwise
-        # raise an uncaught TypeError/KeyError inside `_resolve_command` --
-        # aborting the whole registry scan instead of sinking only this one
-        # malformed manifest (the `ManifestError` this raises IS caught by
-        # `pivot_registry_scan`'s per-entry handling, same as every other
-        # manifest-shape error).
-        create_action["run"] = list(
-            _as_argv(create_action.get("run"), where="`create_action.run`")
-        )
-        rewrite(create_action, "run")
-    if isinstance(create_action, dict):
-        for field_spec in create_action.get("fields") or []:
-            if not isinstance(field_spec, dict) or "options_command" not in field_spec:
-                continue
-            # Same validate-before-resolve ordering as `create_action.run` above
-            # -- an unvalidated `options_command` shape must not crash the scan.
-            field_spec["options_command"] = list(
-                _as_argv(
-                    field_spec.get("options_command"),
-                    where="`create_action.fields[].options_command`",
+            if collection == "config_sections":
+                rewrite_form(
+                    item.get("configure_action"),
+                    where="config_sections[].configure_action",
                 )
-            )
-            rewrite(field_spec, "options_command")
+    rewrite_form(data.get("create_action"), where="create_action")
     return data
 
 
@@ -469,5 +468,4 @@ def _materialize_active_pivots(
         except OSError:
             continue
     return changed
-
 

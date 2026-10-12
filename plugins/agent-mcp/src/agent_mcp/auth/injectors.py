@@ -21,6 +21,7 @@ from agent_procutil import windowless_daemon_kwargs
 
 from .._exec import no_window_creationflags, resolve_argv
 from ..config import AuthSpec, BridgeConfig
+from ..routing_errors import RoutingError
 from .base import AuthInjector, CompositeInjector, NoneInjector, TokenInjector
 
 log = logging.getLogger("agent-mcp.auth")
@@ -148,6 +149,22 @@ class EntraInjector(TokenInjector):
         await super().invalidate()
         self._source = self._new_source()  # drop the source's internal token cache
 
+    async def _assert_identity(self) -> None:
+        from .identity import resolve_entra_identity
+
+        context = await resolve_entra_identity(self.spec, timeout=self._timeout)
+        if context != self.spec.identity_context:
+            await self.invalidate()
+            raise RoutingError("routing auth identity changed; retry as a new routed request")
+
+    async def _get(self) -> str | None:
+        if self.spec.identity_context is None:
+            return await super()._get()
+        await self._assert_identity()
+        token = await super()._get()
+        await self._assert_identity()
+        return token
+
     def _scope(self) -> str:
         """The AAD scope to request, canonicalized the same way ``az_login`` does."""
         from credential_relay.sources.az_login import _to_scope
@@ -203,6 +220,20 @@ class EntraInjector(TokenInjector):
         return token or None
 
     async def _acquire(self) -> str | None:
+        if self.spec.identity_context is not None:
+            from .identity import azure_json
+
+            # Subscription resolves the chosen local account without mutating
+            # the machine-global default. Bypass unqualified source/relay caches.
+            args = ["account", "get-access-token", "--subscription",
+                    self.spec.identity_context["subscription"], "--scope", self._scope()]
+            if self.spec.tenant:
+                args += ["--tenant", self.spec.tenant]
+            result = await azure_json(args, timeout=self._timeout)
+            if not isinstance(result, dict) or not isinstance(result.get("accessToken"), str):
+                raise RoutingError("routing target authentication failed: missing Azure token")
+            await self._assert_identity()
+            return result["accessToken"]
         helper = None if self.spec.tenant else shutil.which(self._RELAY_HELPER)
         if helper:
             token = await self._acquire_via_helper(helper)
@@ -474,6 +505,28 @@ def _build_one(spec: AuthSpec, cfg: BridgeConfig) -> AuthInjector:
     raise ValueError(f"unknown auth kind: {spec.kind}")
 
 
+class RequiredAuthInjector(AuthInjector):
+    """A routed target must never execute after its configured auth failed."""
+
+    def __init__(self, inner: AuthInjector) -> None:
+        self.inner = inner
+
+    async def headers(self) -> dict[str, str]:
+        values = await self.inner.headers()
+        if not values or not all(values.values()):
+            raise RoutingError("routing target authentication failed")
+        return values
+
+    async def child_env(self) -> dict[str, str]:
+        values = await self.inner.child_env()
+        if not values or not all(values.values()):
+            raise RoutingError("routing target authentication failed")
+        return values
+
+    async def invalidate(self) -> None:
+        await self.inner.invalidate()
+
+
 def build_injector(cfg: BridgeConfig) -> AuthInjector:
     """Construct the auth injector for a bridge config.
 
@@ -482,6 +535,9 @@ def build_injector(cfg: BridgeConfig) -> AuthInjector:
     injector's headers / child env (later entries win on key collisions).
     """
     injectors = [_build_one(spec, cfg) for spec in cfg.auths]
+    if cfg.routed_target:
+        injectors = [RequiredAuthInjector(inj) if spec.normalized_kind != "none" else inj
+                     for spec, inj in zip(cfg.auths, injectors)]
     if len(injectors) == 1:
         return injectors[0]
     return CompositeInjector(injectors)

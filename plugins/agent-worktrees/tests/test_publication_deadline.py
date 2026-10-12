@@ -1,6 +1,7 @@
 """Repository-configured deadlines reach real PR pushes and their locks."""
 
 from dataclasses import replace
+import os
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,7 @@ def test_invalid_deadline_fails_explicitly_before_publication(value, monkeypatch
 
 @pytest.mark.parametrize("scheme", ["snapshot", "refspec"])
 @pytest.mark.parametrize("timeout", [180.0, 300.0])
+@pytest.mark.timeout(90 if os.name == "nt" else 30)
 def test_real_publication_forwards_deadline_and_lock_budgets(pr_repo, monkeypatch, scheme, timeout):
     config, wid, wt_path, _ = pr_repo
     repo = config.default_repo
@@ -50,7 +52,9 @@ def test_real_publication_forwards_deadline_and_lock_budgets(pr_repo, monkeypatc
     def run_bounded(argv, **kwargs):
         if "push" in argv:
             attempts.append(kwargs["timeout"])
-            assert "-c" not in argv or "core.hooksPath=" not in " ".join(argv)
+            # A scoped proxy preserves logical remote identity and invokes the
+            # actual hook; marker assertions below prove it was not bypassed.
+            assert "core.hooksPath=" not in argv
         return bounded(argv, **kwargs)
 
     def acquire_file(fh, *, timeout):
@@ -81,7 +85,8 @@ def test_real_publication_forwards_deadline_and_lock_budgets(pr_repo, monkeypatc
     assert finalize.push_changes(wid, config)
 
     assert attempts == [timeout] * 3
-    assert waits and set(waits) == {4 * timeout + 30}
+    assert waits and set(waits) == {4 * timeout + 30, 1.0}
+    assert waits.count(1.0) == 3
     budget = 8 * timeout + 180
     assert lifecycle == [{"timeout": budget, "stale_after": budget}]
     assert marker.read_text().splitlines() == ["1"] * 3
@@ -112,6 +117,8 @@ def test_verified_rebase_retains_configured_bound(monkeypatch):
     attempts = []
     proof = SimpleNamespace(source_head="source", branch="change", new_base="base")
     monkeypatch.setattr(pr_publish, "publish_lock", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(git_ops, "git", lambda *a, **k:
+                        __import__("subprocess").CompletedProcess(a, 0, "https://example.test/repo.git\n", ""))
     monkeypatch.setattr(pr_rebase, "verify", lambda *a, **k: proof)
     monkeypatch.setattr(pr_rebase, "_save", lambda *a, **k: None)
 

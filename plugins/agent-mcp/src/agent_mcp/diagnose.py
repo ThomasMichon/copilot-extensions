@@ -123,6 +123,19 @@ async def diagnose(
         report.stages.append(StageResult("config", False, str(exc)))
         return report
     where = str(cfg.source_path) if cfg.source_path else name_or_path
+    if cfg.routing is not None:
+        detail = (
+            f"routed configuration; selector={cfg.routing.parameter}; "
+            f"catalog={cfg.routing.catalog} (discovery only); "
+            f"targets={','.join(cfg.routing.targets)}; no execution target selected"
+        )
+        report.stages.append(StageResult("config", True, where))
+        report.stages.append(StageResult("routing-context", False, detail))
+        printer(f"{step(1, 'config')}: OK -- {detail}")
+        printer("routing-context: NOT CHECKED -- diagnose cannot attest target auth/"
+                "connectivity without a selected execution context; use a bounded "
+                "audited read call with the required routing selector")
+        return report
     printer(f"{step(1, 'config')}: OK -- {where} -> {cfg.server.type} {cfg.server.launch_desc}")
     report.stages.append(StageResult("config", True, where))
 

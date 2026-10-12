@@ -267,6 +267,10 @@ def _reap_superseded_coordinators(result: Any) -> None:
             and active.get("pid")
         ):
             keep.add(int(active["pid"]))
+            from .cutover_process import is_windows, verified_pair
+
+            if is_windows():
+                keep.update(verified_pair(int(active["pid"]), active.get("process_start_time")))
         else:
             result.steps.append(
                 "reap skipped: could not confirm the promoted coordinator "
@@ -355,6 +359,7 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     if cfg.host in ("::", "[::]"):
         host = "::1"
     routing_bind = "::" if cfg.host == "[::]" else cfg.host
+    spawned = {}
 
     def pick_free_port() -> int:
         family = _socket.AF_INET6 if ":" in host else _socket.AF_INET
@@ -422,7 +427,12 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
         # CREATE_NO_WINDOW so this process's own console stays hidden while
         # still being inheritable by its children.
         kwargs.update(windowless_daemon_kwargs(breakaway=True))
-        return _subprocess.Popen(cmd, **kwargs)  # noqa: S603
+        launcher = _subprocess.Popen(cmd, **kwargs)  # noqa: S603
+        from .cutover_process import CoordinatorProcess, is_windows
+
+        handle = CoordinatorProcess(launcher) if is_windows() else launcher
+        spawned[port] = handle
+        return handle
 
     def health_check(check_host: str, port: int) -> bool:
         try:
@@ -433,7 +443,11 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
                 if resp.status != 200:
                     return False
                 payload = _json.loads(resp.read().decode("utf-8"))
-                return payload.get("status") != "draining"
+                if payload.get("status") == "draining":
+                    return False
+                handle = spawned.get(port)
+                accept = getattr(handle, "accept_health", None)
+                return bool(accept(payload)) if accept is not None else True
         except Exception:
             return False
 

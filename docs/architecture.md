@@ -1,36 +1,40 @@
 # Architecture Overview
 
-How the 24 copilot-extensions plugins fit together — install topology,
-runtimes, ports, and the credential relay. **Thirteen ship a runtime** (currently
-a `uv`-built venv under a plugin-owned root such as `~/.agent-*` or
-`~/.budget-guidance`, deployed by the plugin's own installer) plus generated
-payload-local agent commands and session command glossaries; compatibility
-management wrappers remain in `~/.local/bin` during the installation-cell
-migration. **Eleven are payload-only** — `efforts` (skills), `visions`
-(skills), `context-handoff` (hook + session extension + skill), `customizing-copilot`
-(skills), `copilot-extensions-harness` (skills + static instruction projections),
-`wsl-setup` (skills), and
-`harness-knowledge` (skills), `ai-attribution` (hook + skill),
-`delegation-guidance` (hook + skill), `agent-conduct-guidance`
-(instruction projection + skill), and `agent-remote-driver` (SDK extension)
-deploy entirely from the marketplace
-payload with no installer. For per-plugin internals, follow the links in each
-section.
+This is the current composition/reference page, not a supplied operator
+harness or a future-feature catalog. New adopters can start with
+[installation](installation.md), [capability selection](capabilities.md), and
+[adoption](adoption.md); the [documentation index](README.md) maps the reading
+path. Exact commands and schemas remain owned by the linked components.
+
+How the plugins fit together: installation topology, runtimes, endpoints, and
+credential relay. Runtime-backed plugins deploy a plugin-owned Python package
+with `uv`, generated payload-local commands, and session command glossaries.
+Compatibility management wrappers remain in `~/.local/bin` during the
+installation-cell migration. Payload-only plugins load their skills, hooks,
+and extensions without a separate Python runtime package.
+The [marketplace manifest](../.github/plugin/marketplace.json) owns the roster;
+the lifecycle tables below classify its components without duplicating a
+second prose inventory. For component internals, follow the owner links.
+
+Payload activation and session-extension activation have different scope:
+trusted repository settings govern repo payloads, but the current extension
+loader uses user-level enablement and persisted install state. Follow
+[installation](installation.md) and its owner reference rather than inferring
+extension readiness from a repository plugin setting.
 
 ## The plugins
 
-The independently packaged [fleet-manager](../fleet-manager/README.md) is the
-fleet system's standalone entry point. Its initial stdlib-only CLI performs
-offline preservation-safe config/capacity planning; controller, connector,
-install/uninstall and authenticated deployment surfaces remain implementation
-work. Installing the client does not host a controller or container manager.
+The independently packaged [fleet-manager](../fleet-manager/README.md) is a
+standalone product, not a marketplace plugin. Its owner page defines current
+planning, release, and deployment scope. Installing a client does not itself
+establish a hosted controller or container manager.
 
 ### Runtime plugins (installer-deployed runtime + payload-local commands)
 
 | Plugin | Kind | Legacy runtime home | Global command surface (legacy wrapper / project binstubs) | Lifecycle |
 |--------|------|--------------|---------|-----------|
 | [agent-worktrees](../plugins/agent-worktrees/) | Session plugin (skills + `sessionStart` hook) | `~/.agent-worktrees/` | `~/.local/bin/agent-worktrees` + per-project binstubs | Per session (launched by binstub); runtime auto-updates on session start |
-| [agent-pull-requests](../plugins/agent-pull-requests/) | Cross-repo PR CLI | `~/.agent-pull-requests/` | `~/.local/bin/agent-pull-requests` | On-demand CLI; current runtime-backed slice shells through `agent-worktrees repos gh <owner/repo> -- ...` for GitHub account/token resolution and does not require a local checkout |
+| [agent-pull-requests](../plugins/agent-pull-requests/) | Cross-repo PR CLI | `~/.agent-pull-requests/` | `~/.local/bin/agent-pull-requests` | On-demand status/create/merge/wait without a local checkout; current GitHub account/token resolution uses `agent-worktrees repos gh <owner/repo> -- ...` |
 | [agent-bridge](../plugins/agent-bridge/) | Persistent HTTP service | `~/.agent-bridge/` | `~/.local/bin/agent-bridge` | Always-on daemon (Windows scheduled task / Linux systemd user unit) |
 | [agent-codespaces](../plugins/agent-codespaces/) | CLI + credential relay | `~/.agent-codespaces/` | `~/.local/bin/agent-codespaces` | On-demand CLI; self-registers a `codespace:` namespace **provider** (+ credential relay) with the agent-bridge daemon via a `~/.agent-bridge/providers.d/` manifest — the daemon drives its binstub over a process boundary |
 | [agent-containers](../plugins/agent-containers/) | CLI + `container:` provider | `~/.agent-containers/` | `~/.local/bin/agent-containers` | On-demand CLI; self-registers a `container:` namespace **provider** with the agent-bridge daemon via a `~/.agent-bridge/providers.d/` manifest (process-boundary binstub invocation) |
@@ -346,16 +350,16 @@ agent-logger is the reference cold-store provider (see its own plugin docs);
 
 ## Ports
 
-Steady-state, **a service adds zero fixed listening ports**: it binds an
-OS-assigned ephemeral port and advertises it through discovery, so the table
-below is a shrinking list of *legacy fixed* endpoints, not a contract to
-maintain (dotfiles #694).
+Endpoint owners publish live discovery state rather than assigning a universal
+port map. Explicit port pinning and documented compatibility routes are
+component-specific; the table below distinguishes live discovery from
+explicit pinning and compatibility fallbacks.
 
 | Port | Owner | Purpose |
 |------|-------|---------|
 | **dynamic** (ephemeral) | agent-bridge daemon | HTTP API the CLI talks to. Binds an OS-assigned port and publishes it to the routing table (`active.json`); clients resolve it there — `agent-bridge status` reads the live port. The former fixed **9280/9281** (Windows/WSL) is retired as a default; a positive `port:` in `config.yaml` (or `--port`) still pins one, and `9280` remains only a last-resort client fallback. |
-| **9281** | agent-bridge elevated sub-daemon | Fixed loopback port for the Windows admin sub-daemon (`elevated.py` `ELEVATED_PORT`), reached via `acp-connect ws://127.0.0.1:9281/...`. Not yet migrated to discovery. |
-| **9857** | agent-codespaces credential relay | TCP server the CodeSpace reaches over an SSH reverse tunnel (`-R 9857`) to fetch git/GitHub/Azure credentials. Starts with the bridge service. Not yet migrated to discovery (the CodeSpace-side path already uses live-port discovery; the host bind still targets 9857). |
+| **dynamic** (ephemeral) | agent-bridge elevated sub-daemon | Windows admin sub-daemon publishes its live endpoint in its own elevated routing table. Clients discover that port; `9281` is the legacy compatibility fallback when no active table is published. See the [endpoint owner](../plugins/agent-bridge/src/agent_bridge/elevated.py). |
+| **dynamic** by default | credential relay hosted by agent-bridge | `credentials.relay_port: 0` selects an OS-assigned port published by the daemon; agent-codespaces follows it for the SSH reverse-forward. A positive value pins a port; `9857` is only a last-resort compatibility fallback. See the [relay owner workflow](../plugins/agent-codespaces/skills/codespaces-lifecycle/SKILL.md#credential-relay). |
 
 ## Agent plugins vs harness plugins — and two senses of "harness"
 
@@ -382,8 +386,10 @@ customizing-copilot) are **payload-only**. The full taxonomy is
 
 ## The control-harness repo
 
-A teammate's own repo (a dotfiles-style hub, `my-control-harness` in examples)
-is the single source of truth the mesh plugins read from. Where each config file
+A control repo can supply shared policy and topology to selected mesh plugins;
+it is one composition choice, not a prerequisite for every plugin.
+`my-control-harness` below is a **hypothetical example**, not a shipped harness
+or fixed identity. Where each config file
 belongs — in the repo (committed) vs machine-local (`~/`) — is laid out in
 [Configuration — In the Repo vs On the Machine](configuration.md).
 
@@ -422,8 +428,8 @@ flowchart LR
   filesystem-visible `$AGENT_CONTAINERS_STATE_DIR` so admission records remain
   atomic across both environments.
 
-> agent-mcp is **not** wired to the control repo — its bridge configs are
-> per-agent files: preferably **in-repo** (`--config .github/agents/<name>.mcp.yaml`)
+> agent-mcp's transport configuration is **per-agent**, not dependent on the
+> mesh topology — preferably **in-repo** (`--config .github/agents/<name>.mcp.yaml`)
 > for repo-scoped agents, or **user-global** under `~/.agent-mcp/bridges/<name>`
 > for personal/cross-repo MCPs.
 
@@ -433,18 +439,18 @@ for `.agent-codespaces/config.yaml`.
 
 ## Credential relay
 
-The relay lets a CodeSpace authenticate to GitHub and Azure DevOps using **your
-host's** credentials — no PATs stored in the CodeSpace. All requests pass a
+The relay forwards selected host credentials to a CodeSpace on request rather
+than requiring baked-in PATs. All requests pass a
 policy gate (action allowlist + per-source host/resource allowlists).
 
 ```mermaid
 sequenceDiagram
     participant Space as CodeSpace (git / gh)
-    participant Tunnel as SSH reverse tunnel :9857
+    participant Tunnel as SSH reverse tunnel (live port)
     participant Relay as Credential relay (host)
     participant Src as Source (GCM / gh auth / az)
     Space->>Tunnel: git-credential request
-    Tunnel->>Relay: forward to 127.0.0.1:9857
+    Tunnel->>Relay: forward to discovered loopback endpoint
     Relay->>Relay: policy gate (action + host/resource allowlist)
     Relay->>Src: fetch credential
     Src-->>Relay: token

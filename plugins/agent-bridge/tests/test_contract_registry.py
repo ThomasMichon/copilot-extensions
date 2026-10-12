@@ -63,6 +63,18 @@ def test_http_declared_generation_matches_current_fixture() -> None:
     )
 
 
+def test_retirement_recovery_capability_matches_current_fixture() -> None:
+    fixture = _fixture("fixtures/http/current/acquisition-protocol.json")
+    assert fixture["capability"]["required_protocol_version"] == (
+        bridge_protocol.ACQUISITION_RETIREMENT_RECOVERY_PROTOCOL_VERSION
+    )
+    registry = _fixture("registry.json")
+    contract = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
+    assert contract["capability_versions"]["acquisition_retirement_recovery"] == (
+        bridge_protocol.ACQUISITION_RETIREMENT_RECOVERY_PROTOCOL_VERSION
+    )
+
+
 def test_http_protocol_constant_fixture_matches_production() -> None:
     fixture = _fixture("fixtures/http/current/protocol-constants.json")
     assert fixture["declared_range"] == {

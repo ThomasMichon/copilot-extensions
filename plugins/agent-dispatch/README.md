@@ -258,6 +258,18 @@ cutover. Set `AGENT_DISPATCH_PORT` only when you deliberately need a fixed
 legacy port; clients resolve `AGENT_DISPATCH_URL` first, then the routing table /
 rendezvous file, then the legacy `127.0.0.1:9847` fallback.
 
+On Windows a venv `python.exe` can be a launcher whose child actually serves
+requests. Cutover verifies the `/health` server PID against that launcher's
+creation identity and direct ancestry before publishing the **server** PID,
+so active-route ownership and wake/self-retire checks agree. Post-cutover
+cleanup preserves only the verified matching launcher/server pair, not an
+arbitrary process family. Missing, changed, or ambiguous identities refuse
+promotion or explicitly skip cleanup; unrelated old coordinator generations
+remain eligible for retirement. The abandoned-passive backstop uses the same
+proof when a pre-health breadcrumb still records the promoted launcher PID.
+The existing health deadline still bounds
+readiness, and contained tests still suppress Job breakaway.
+
 ## Why
 
 A queue needs an **atomic leased claim** to be a correct coordinator: two agents
@@ -727,15 +739,25 @@ the existing `supervise override` local kill-switch) that one pool only;
 `--json` emits full structured detail instead of the compact line, for either
 shape. See `workers_config_cli.py` for the full contract.
 
-**Status-only from the Picker today.** The Configuration menu entry reports
-status only -- enabling/disabling a pool from the Picker itself is not yet
-wired up, blocked on
-[`ThomasMichon/copilot-extensions#6044`](https://github.com/ThomasMichon/copilot-extensions/issues/6044)
-(the Picker's `confirm` manifest field is parsed but not yet enforced before
-a destructive action/config-section dispatch runs -- a pre-existing,
-cross-cutting gap, not specific to this entry). The terminal `--toggle
-enable|disable` flag above remains the supported way to toggle a pool until
-that closes.
+**Local controls from the Picker.** After loading that status, Workers opens a
+pool/action form with an optional disable reason. **Apply** shows the selected
+pool and action in a confirmation that initially selects Cancel. Neither
+opening nor cancelling changes state. The controls always affect the invoking
+machine, even when another machine is selected in the Picker; remote controls
+are not part of this entry.
+
+`workers pool-options` is a read-only JSON list of declared local pool names.
+The form uses `workers config-section <name> --toggle enable|disable
+--require-declared`, which rechecks discovery and rejects absent or ambiguous
+declarations before changing the override store. Empty/error choices stop the
+form rather than permitting an arbitrary target. Existing terminal invocations
+without `--require-declared` remain deliberately permissive, including
+pre-disabling an undeclared logical pool.
+
+Disable writes the existing logical user-local override; Enable removes that
+override and restores the declaration's authority. Removing an override does
+**not** guarantee the declaration is enabled or the pool is running. No
+declaration, repository, or template is edited, and no daemon is started.
 
 `agent-dispatch emitter tick|serve SPEC --holder HOST` is the diagnostic/direct
 surface used by the supervised child. Normal deployments declare the emitter
@@ -1526,14 +1548,16 @@ posted verdict is progress followed by **SUSPEND**, never a progress **SUBMIT**.
 ## Recipes (loop archetypes)
 
 A **recipe** is a packaged *shape* of long-running agentic work -- a charter
-template plus the suspend/resume rhythm and the resolution it drives toward. Three
+template plus the suspend/resume rhythm and the resolution it drives toward. Four
 archetypes ship in-box: **reviewer** (review under an explicit `land=self|author`
 model),
 **conflict-resolution** (take the last mile of a stalled change), and
-**goal-driven** (drive an arbitrary goal through PRs). A recipe is a *first-class,
+**goal-driven** (drive an arbitrary goal through PRs), and **worktree-audit**
+(produce a bounded private report without candidate mutations). A recipe is a *first-class,
 directly-invokable* capability: you can kick a one-off from the CLI with only a
 coordinator + a worker body -- no standing service, emitter, or evaluator is
-required (the "recipes run ad-hoc" path).
+required (the "recipes run ad-hoc" path). The audit recipe always requires
+independent report verification; its driver never executes resolve/unwind.
 
 ```bash
 agent-dispatch recipes list                       # the available recipes + their params
@@ -1554,11 +1578,43 @@ in a fresh worktree with a full checkout -- the right body for a recipe). A
 the identity is the repository + pull-request reference only, so landing-policy,
 base-branch, or guidance drift cannot fork a live review. Once that generation
 is terminal, the queue releases the key and permits a later review generation
-(override with `--dedup-key`). The rendered charter reaffirms the two safety
+(override with `--dedup-key`). The source-work recipes' rendered charters reaffirm the two safety
 invariants -- *drive the worktree to a clean resolved state on abandon* and *report
 what you did* -- so a worker carries them even on the ad-hoc, no-service path. See
 [`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
 (§Concepts/*The recipe*, §Features/*loop-recipes* + *recipes-run-ad-hoc*).
+
+### Report-only worktree conclusion audit
+
+Use the `auditing-worktree-conclusions` skill for the approval and private
+workspace flow. `worktree-audit` requires four explicit parameters: `scope`
+(registered local project), `candidates` (1-5 exact IDs, comma-list or JSON),
+`report_dir` (approved absolute private directory), and `budget_minutes`
+(1-30). `render` and `kick --dry-run` perform no queue or lifecycle writes.
+Installing this capability never creates a worker or schedule.
+
+After explicit pilot approval, `kick` creates a goal task with report-only
+policy, coordinator-local project spawn exclusivity, stable normalized-roster
+dedup and `require_verification=true`. CLI, local MCP and HTTP MCP preserve
+those execution controls. The CLI rejects `--no-require-verification` for
+this recipe. The charter also lives at `charter show worktree-audit`.
+
+The worker may write only its own task progress/result and approved private
+report artifacts. Questions are proposed steering in the report, not posted
+candidate cards; unknown/incomplete evidence and unreviewed budget remainders
+remain explicit holds. No candidate edits, source work, claim releases,
+finalization, removal or recurring producer is authorized.
+
+`recipes check-report --report <path>` with the original four parameters
+checks the `worktree-conclusion-audit/v1` report's exact roster, empty
+`actions_taken`, bounds, evidence references and retained-work reasons.
+Before reading, it resolves the approved directory and report path, rejects
+reports outside that directory (including traversal/symlink escapes), and
+requires an existing approved directory.
+It does not prove evidence truth or that no mutations occurred. A human or
+separately authorized trusted evaluator corroborates those before confirming
+the submitted report. This is an advisory charter, not an OS-level read-only
+sandbox or a removal safety primitive.
 
 The reviewer defaults to backward-compatible `land=self`: the reviewer owns
 landing and is not done at a verdict. With `land=author`, the reviewer posts and

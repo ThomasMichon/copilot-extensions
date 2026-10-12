@@ -9,6 +9,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .pivot_create_action import CreateAction
 
 
 class ManifestError(ValueError):
@@ -62,6 +66,8 @@ class ConfigSection:
     an argv template substituted from picker context (``{machine}`` / ``{repo}``)
     -- so a contributed config tool opens on its own terms on ``PATH``. Config
     sections are global (not per-worktree), so there is no ``when`` gate.
+    With ``configure_action``, ``run`` instead queries read-only status before
+    opening a field form; only its submitted action changes local state.
     """
 
     key: str
@@ -70,6 +76,7 @@ class ConfigSection:
     source: str
     confirm: bool = False
     description: str = ""
+    configure_action: CreateAction | None = None
 
 
 def parse_worktree_actions(
@@ -142,6 +149,8 @@ def parse_config_sections(
     Each entry declares a ``label`` and a ``run`` argv template opened on Enter.
     A malformed entry raises :class:`ManifestError` so the caller can skip the
     whole manifest's config sections without aborting discovery."""
+    from .pivot_create_action import parse_create_action
+
     raw = data.get("config_sections", [])
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
         raise ManifestError("`config_sections` must be an array when present")
@@ -162,6 +171,11 @@ def parse_config_sections(
                 source=name,
                 confirm=bool(a.get("confirm", False)),
                 description=str(a.get("description", "")),
+                configure_action=parse_create_action(
+                    a.get("configure_action"),
+                    where=f"`config_sections[{i}].configure_action`",
+                    dynamic_other=False,
+                ),
             )
         )
     return tuple(out)

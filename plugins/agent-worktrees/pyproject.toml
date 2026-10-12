@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-worktrees"
-version = "1.24.51-dev1"
+version = "1.24.52-dev1"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
@@ -14,7 +14,7 @@ authors = [
 ]
 dependencies = [
     "pyyaml>=6.0.3",
-    "textual>=8.2.8",
+    "packaging>=23",
     "cryptography>=50.0.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'",
     "agent-config-migrate",
     "agent-plugin-resolve",
@@ -104,8 +104,8 @@ agent-worktrees = "agent_worktrees.__main__:console_entry"
 dev = [
     "pytest>=9.1.1",
     # tomllib is stdlib on 3.11+; tomli backports it for 3.10 (this plugin's
-    # requires-python floor). Only needed by
-    # tests/test_shutdown_exit.py's packaging-level console-script assertion.
+    # requires-python floor). Used by packaging-level assertions in
+    # tests/test_shutdown_exit.py and tests/test_runtime_dependencies.py.
     "tomli>=2 ; python_version < '3.11'",
 ]
 

@@ -275,6 +275,20 @@ launch of this (or any other) fleet configured with that same
 login. This command is manual/on-demand only; it is never triggered
 automatically by any launch path.
 
+Imports use owner-only temporary files, file fsync, atomic replacement, and
+best-effort containing-directory fsync where supported.
+Owner permissions are restored before writing even when the process umask
+masks owner bits; Windows and ACL-backed filesystems retain their existing
+best-effort mode enforcement. Concurrent
+`copilot-login` imports to the same config serialize their read/merge/write
+transactions through `.config.json.copilot-login.lock` beside the config.
+The OS releases the lock when its holder exits; keep the lock file in place.
+Contention waits at most ten seconds before failing explicitly. This is a
+cooperative import lock, not synchronization with unrelated Copilot CLI writes.
+Unreadable existing configs are not treated as missing or overwritten.
+If restoring or removing the container's temporary login config fails, the
+command warns that credentials may remain and names the affected container.
+
 ### Security profiles
 
 Fleets default to `security_profile: trusted`, preserving the existing

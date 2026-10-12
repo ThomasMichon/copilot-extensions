@@ -165,6 +165,11 @@ def _isolated_provenance_key_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 _FAKE_TOOLCHAIN = bpa.ToolchainLock(
     Path("/fake/toolchain-venv/bin/python"),
     {"setuptools": "84.1.0", "wheel": "0.44.0"},
+    provenance={
+        "source_policy": "governed",
+        "python": "/fake/interpreter",
+        "validated_index_identity": "test-index-identity",
+    },
 )
 
 
@@ -964,6 +969,17 @@ def test_build_wheel_ambiguous_output_raises(tmp_path: Path, monkeypatch: pytest
 
 # --- build_plugin_artifacts (end-to-end, mocked build_wheel) ---------------
 
+@pytest.mark.parametrize("provenance", [None, {}, {"source_policy": "governed"}])
+def test_build_plugin_artifacts_rejects_missing_provenance_before_build(
+    fake_repo: Path, monkeypatch: pytest.MonkeyPatch, provenance
+):
+    _write_pyproject(fake_repo / "plugins" / "demo", sources={})
+    lock = bpa.ToolchainLock(Path("/fake/python"), {"setuptools": "84.1.0"}, provenance=provenance)
+    monkeypatch.setattr(bpa, "build_wheel", lambda *args, **kwargs: pytest.fail("unprovenanced build"))
+    with pytest.raises(bpa.ArtifactBuildError, match="provenance"):
+        bpa.build_plugin_artifacts("demo", out_dir=fake_repo / "dist", toolchain=lock)
+    assert list((fake_repo / "dist").iterdir()) == []
+
 
 def test_build_plugin_artifacts_end_to_end(
     fake_repo: Path, monkeypatch: pytest.MonkeyPatch
@@ -990,6 +1006,7 @@ def test_build_plugin_artifacts_end_to_end(
     assert manifest["build_toolchain"] == {
         "packages": {"setuptools": "84.1.0", "wheel": "0.44.0"},
         "lock_id": _FAKE_TOOLCHAIN.lock_id,
+        "provenance": _FAKE_TOOLCHAIN.provenance,
     }
     assert manifest["python_tag"] == "py3"
     assert {e["role"] for e in manifest["wheels"]} == {"plugin", "vendored-lib"}
@@ -2244,6 +2261,11 @@ def test_governed_feed_configured_via_programdata_uv_toml(
     )
 
 
+def _posix_xdg_entry(path: Path) -> str:
+    """Omit the Windows drive colon; callers select the temporary drive."""
+    return str(path).removeprefix(path.drive)
+
+
 def test_effective_uv_toml_candidates_posix_includes_system_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
@@ -2253,23 +2275,15 @@ def test_effective_uv_toml_candidates_posix_includes_system_paths(
     # AT MOST ONE file (its own first-EXISTING XDG entry, else
     # `/etc/uv/uv.toml`), never every theoretical candidate.
     #
-    # Compared via `.resolve()` below (not plain `==`/`in`): on THIS
-    # (Windows) test machine, `XDG_CONFIG_DIRS` is built by joining real
-    # `tmp_path`-derived absolute paths with `:` -- the POSIX separator
-    # this env var uses -- but a Windows path's own drive letter (`C:`)
-    # ALSO contains a literal `:`, so splitting on it drops the drive
-    # prefix from the reconstructed candidate (still resolving to the
-    # SAME file via the current drive, just not `==`-comparable to the
-    # fully-qualified original). This collision cannot happen in this
-    # function's own real POSIX runtime use -- a genuine POSIX path never
-    # contains a colon -- so `.resolve()` here works around a test-
-    # environment-only artifact, not a production concern.
+    # Use the temporary directory's drive for root-relative Windows paths,
+    # without putting its drive colon into the simulated POSIX XDG list.
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(btl.sys, "platform", "linux")
     xdg_dir = tmp_path / "xdg"
     (xdg_dir / "uv").mkdir(parents=True)
     (xdg_dir / "uv" / "uv.toml").write_text("", encoding="utf-8")
     candidates = btl._effective_uv_toml_candidates(
-        {"HOME": "/home/x", "XDG_CONFIG_DIRS": str(xdg_dir)}
+        {"HOME": "/home/x", "XDG_CONFIG_DIRS": _posix_xdg_entry(xdg_dir)}
     )
     expected = (xdg_dir / "uv" / "uv.toml").resolve()
     assert any(c.resolve() == expected for c in candidates)
@@ -2285,16 +2299,15 @@ def test_effective_uv_toml_candidates_posix_honors_xdg_config_dirs(
     # (`crates/uv-dirs/src/lib.rs`), which previously went unconsulted
     # entirely here. Only the FIRST EXISTING entry is ever returned --
     # uv's own system-config resolution picks at most one file, never a
-    # list of further fallbacks to try. See the `.resolve()` note on
-    # `test_effective_uv_toml_candidates_posix_includes_system_paths`
-    # above for why comparison goes through it here too.
+    # list of further fallbacks to try.
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(btl.sys, "platform", "linux")
     first_dir = tmp_path / "first"  # left non-existent
     second_dir = tmp_path / "second"
     (second_dir / "uv").mkdir(parents=True)
     (second_dir / "uv" / "uv.toml").write_text("", encoding="utf-8")
     candidates = btl._effective_uv_toml_candidates(
-        {"XDG_CONFIG_DIRS": f"{first_dir}:{second_dir}"}
+        {"XDG_CONFIG_DIRS": f"{_posix_xdg_entry(first_dir)}:{_posix_xdg_entry(second_dir)}"}
     )
     assert len(candidates) == 1
     assert candidates[0].resolve() == (second_dir / "uv" / "uv.toml").resolve()
@@ -2303,12 +2316,13 @@ def test_effective_uv_toml_candidates_posix_honors_xdg_config_dirs(
 def test_effective_uv_toml_candidates_posix_xdg_config_dirs_ignores_empty_entries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(btl.sys, "platform", "linux")
     only_dir = tmp_path / "only"
     (only_dir / "uv").mkdir(parents=True)
     (only_dir / "uv" / "uv.toml").write_text("", encoding="utf-8")
     candidates = btl._effective_uv_toml_candidates(
-        {"XDG_CONFIG_DIRS": f":{only_dir}::"}
+        {"XDG_CONFIG_DIRS": f":{_posix_xdg_entry(only_dir)}::"}
     )
     assert len(candidates) == 1
     assert candidates[0].resolve() == (only_dir / "uv" / "uv.toml").resolve()
@@ -2321,6 +2335,7 @@ def test_effective_default_index_url_honors_first_existing_xdg_config_dir(
     # FIRST one that actually exists is used -- a later entry (or
     # `/etc/uv/uv.toml`) must never be consulted once an earlier one is
     # found.
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(btl.sys, "platform", "linux")
     first_dir = tmp_path / "first"  # deliberately does not exist
     second_dir = tmp_path / "second"
@@ -2328,7 +2343,7 @@ def test_effective_default_index_url_honors_first_existing_xdg_config_dir(
     (second_dir / "uv" / "uv.toml").write_text(
         'index-url = "https://second.internal/simple/"\n', encoding="utf-8"
     )
-    env = {"XDG_CONFIG_DIRS": f"{first_dir}:{second_dir}"}
+    env = {"XDG_CONFIG_DIRS": f"{_posix_xdg_entry(first_dir)}:{_posix_xdg_entry(second_dir)}"}
     assert btl._effective_default_index_url(env) == (
         "https://second.internal/simple/", None,
     )

@@ -154,7 +154,7 @@ def _win_kernel32():
     return k32
 
 
-def _win_enum_pids():
+def _win_enum_pids(*, strict: bool = False):
     import ctypes
     from ctypes import wintypes
 
@@ -170,6 +170,8 @@ def _win_enum_pids():
         arr = (wintypes.DWORD * count)()
         needed = wintypes.DWORD()
         if not psapi.EnumProcesses(arr, ctypes.sizeof(arr), ctypes.byref(needed)):
+            if strict:
+                raise ctypes.WinError(ctypes.get_last_error())
             return []
         got = needed.value // ctypes.sizeof(wintypes.DWORD)
         if got < count:

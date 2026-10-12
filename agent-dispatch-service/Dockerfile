@@ -5,12 +5,14 @@
 #
 # Build from the REPOSITORY ROOT (not this directory): the image needs
 # plugins/agent-dispatch plus the handful of shared libs/* it depends on,
-# preserving the exact relative directory layout their own
-# [tool.uv.sources] editable pointers already expect (the same dev-branch
-# convenience every plugin/standalone package in this repo uses; a real
-# released build instead vendors real copies via tools/materialize_main.py,
-# which already treats agent-dispatch-service as a registered standalone
-# consumer -- see tools/standalone_consumers.py).
+# in their real relative positions. agent-dispatch-service's own
+# pyproject.toml deliberately does NOT carry a [tool.uv.sources] pointer at
+# plugins/agent-dispatch (that escaping-path shape broke release promotion
+# -- tools/materialize_main.py's uv-editable materializer only ever vendors
+# an escaping libs/<lib> reference, by design), so this build installs
+# plugins/agent-dispatch explicitly alongside agent-dispatch-service in one
+# flat `uv pip install` invocation instead, the same pattern
+# tools/run-standalone-tests.py's prepare() uses for local/CI testing.
 #
 #   docker build -f agent-dispatch-service/Dockerfile -t agent-dispatch-service .
 #   docker run --rm -p 8787:8787 -e AGENT_DISPATCH_PORT=8787 \
@@ -52,7 +54,8 @@ COPY plugins/agent-dispatch plugins/agent-dispatch
 COPY agent-dispatch-service agent-dispatch-service
 
 RUN uv venv /opt/venv \
-    && uv pip install --no-editable --python /opt/venv/bin/python /src/agent-dispatch-service
+    && uv pip install --no-editable --python /opt/venv/bin/python \
+         /src/plugins/agent-dispatch /src/agent-dispatch-service
 
 FROM python:3.12-slim
 

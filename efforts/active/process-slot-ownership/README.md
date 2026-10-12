@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-slice PRs targeting `dev`
 - **Created:** 2026-10-10
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/agent-fabric/README.md` - claimed-resource-not-reclaimed
   and reclaim-idle-process; `visions/plugin-services/README.md` -
   work-coalescing-singleton
@@ -71,6 +71,28 @@ Characterize this with an event-gated reader before changing it. A provider
 replacement is a separate identity boundary, not permission to lose the old
 holder from shutdown accounting.
 
+### Remaining reader inventory
+
+This is a bounded source inventory, not proof that every reader has passed
+native lifetime or budget acceptance. Paths below are relative to `plugins/`.
+Existing cost limits are not substitutes for measured process-tree CPU budgets.
+
+| Reader seam | Existing admission/ownership evidence | Remaining evidence |
+|-------------|---------------------------------------|--------------------|
+| `agent-worktrees/src/agent_worktrees/list_cli.py:417-505`, `list_cache.py:77-130` | Project/status/args-keyed result cache; cache-only path avoids enrichment; ordinary cache miss preserves inline computation | Cross-process cache-miss single-flight and CPU/wall admission are not established by result caching |
+| `agent-worktrees/src/agent_worktrees/list_cli.py:386-413`, `status_monitor_cli.py:746-765` | Resident monitor refreshes demanded list shapes rather than every possible project | Bound per-shape work and measure aggregate role cost |
+| `agent-worktrees/src/agent_worktrees/worktree_status_cache.py:34-96` | 180s status TTL and four refreshes per sweep cap costly recomputation | Time/CPU overruns and exact-owner release need independent proof |
+| `agent-bridge/src/agent_bridge/routes/worktrees.py:158-242`, `routes/worktree_probe.py:188-286` | Crawl lock; shielded per-ID probe holders; per-agent fanout; list/classify timeouts | Prove native worker/tree completion, not just cancellation of probe tasks |
+| `agent-bridge/src/agent_bridge/agent_registry_namespace.py:110-190` | CLI namespace result TTL; thread-offloaded subprocess with a 90s default timeout; incomplete results are distinct from empty | Cancellation of the awaiter does not prove thread/subprocess completion; retain actual worker ownership |
+| `agent-bridge/src/agent_bridge/agent_registry_discovery.py:47-129` | Provider report generation fencing and transactional reconciliation | Bound synchronous scan admission and preserve real worker lifetime independently of publication |
+| `agent-dispatch/src/agent_dispatch/client.py:44-66`, `client_worktree_status.py:8-37` | 10s HTTP timeout and batched status relay reads | Remote reader-holder accounting and fanout/CPU circuits remain unverified |
+| `agent-dispatch/src/agent_dispatch/registrar_discovery.py:450-548,614-703` | Deterministic declaration discovery; indeterminate reads and duplicate identities are explicit | Concurrent-crawl coalescing and resource budgets remain unverified |
+
+Prioritize the CLI namespace worker boundary next: a cancelled coroutine can
+finish while its `to_thread` subprocess continues. Any correction must retain
+that actual holder and preserve bounded caller waits. Do not introduce a second
+registry or convert unknown remote ownership into permission to reclaim.
+
 ## Request
 
 The operator selected process ownership as the continuing work and confirmed
@@ -105,7 +127,7 @@ verified by this effort's Validation Plan.
 - [x] Identify existing leases, crawl/probe coalescing, and namespace readers.
 - [x] Separate operational registry presentation (#5559) and lean launch
       lifecycle (#5579/#5664) from reader admission; do not duplicate them.
-- [ ] Land this plan through review before implementation.
+- [x] Land this plan through review before implementation (#6091).
 - [ ] Inventory remaining status/list/discovery caller seams and record
       already-satisfied versus unverified requirements.
 
@@ -178,3 +200,44 @@ Confirmed the slug and mapped current prior art before implementation.
 Existing coalescing and registry/lifecycle efforts prevent a greenfield
 rewrite. Continuation B's first slice is deliberately a deterministic reader-lifetime
 regression, not a live reaper, service restart, or fleet-wide rollout.
+
+### 2026-10-10 - Reader holder correction prepared
+
+The reviewed plan landed in #6091. The first implementation retains
+same-provider task/token admission after watchdog or warm-up cancellation
+timeouts, fences late publication independently, and tracks superseded
+providers until completion for shutdown accounting.
+
+Event-gated regressions cover exact-holder reuse, actual late-result rejection,
+watchdog recovery only after holder completion, and superseded-holder shutdown.
+The discovery report fixture now targets discovery directly rather than
+counting unrelated synchronous list-agent reconciliation; the hung-discovery
+fixture awaits the replacement task before claiming its worker executed.
+The roster-cache contract passed (49 passed, one skipped), touched F/E9 lint
+passed, and the install-contract guard reported zero violations.
+This is not native process-tree cleanup, budget/circuit implementation, or
+release/adoption proof; those remain open acceptance gates.
+
+### 2026-10-10 - Scheduled provider identity verified
+
+Review identified a swap-before-task-start race: a task captured under provider
+A could read replacement B when first scheduled, admitting two B reads.
+The scan now verifies its captured provider identity before invalidation or
+calling the resolver. There is no await between that check and the resolver's
+own provider capture. A deterministic replacement-before-yield regression
+proves A performs no read, B performs exactly one, and only B's rows publish.
+The full roster-cache contract passes (50 passed, one skipped); touched lint
+and the install contract remain clean.
+
+### 2026-10-12 - Reconciliation and shutdown publication fence
+
+Reconciled the effort index with newer upstream entries without reverting
+their status. Review then identified that a cancellation-resistant holder
+could finish after bounded shutdown and publish into the stopped cache.
+Publication now rejects results while stopping; retained ownership remains
+observable until task completion. An event-gated shutdown regression proves
+the late result cannot change rows or state. Provider replacement before
+scan start is logged as normal discarded work, not a failed scan warning,
+and the replacement shutdown fixture uses an explicit start handshake.
+The targeted roster contract passes (51 passed, one skipped); native worker
+exit and budget/circuit gates remain unresolved.

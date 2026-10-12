@@ -195,6 +195,132 @@ def test_global_local_plugin_is_active(tmp_path):
     )
 
 
+def test_global_only_resolution_does_not_visit_project_registry(tmp_path, monkeypatch):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@local": True}},
+    )
+    installed = _installed(tmp_path, "local", "demo")
+
+    def unrelated_projects(_home):
+        raise AssertionError("global-only lookup must not verify unrelated projects")
+
+    monkeypatch.setattr(resolver, "_verified_project_roots", unrelated_projects)
+    report = resolve_active_plugins(home=tmp_path, include_projects=False)
+    assert report.authority is ScanAuthority.COMPLETE
+    assert report.active["demo@local"].root_for_scope("global") == installed
+    assert report.active["demo@local"].scopes == ("global",)
+
+
+def test_global_only_resolution_cannot_select_a_project_override(tmp_path):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@local": True}},
+    )
+    installed = _installed(tmp_path, "local", "demo")
+    repo = tmp_path / "project"
+    _register_project(tmp_path, "project", repo, "https://github.com/example/project.git")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+
+    report = resolve_active_plugins(home=tmp_path, include_projects=False)
+    assert report.active["demo@local"].root_for_scope("global") == installed
+    assert report.active["demo@local"].root_for_scope("project:project") is None
+
+
+@pytest.mark.parametrize("mode", ["active", "disabled", "absent", "indeterminate"])
+def test_filtered_reconciliation_preserves_excluded_plugins(tmp_path, mode):
+    if mode != "absent":
+        settings = (
+            {"enabledPlugins": {"demo@local": mode == "active"}}
+            if mode != "indeterminate"
+            else {"enabledPlugins": "invalid"}
+        )
+        _write_json(tmp_path / ".copilot" / "settings.json", settings)
+    installed = _installed(tmp_path, "local", "demo")
+    previous = {
+        source: _prior(source)
+        for source in ("demo@local", "demo@other", "unrelated@local")
+    }
+
+    report = resolve_active_plugins(
+        home=tmp_path, include_projects=False, plugin_names=("demo",)
+    )
+    reconciled = report.reconcile(previous)
+
+    assert reconciled["unrelated@local"] is previous["unrelated@local"]
+    assert "unrelated@local" not in report.active
+    if mode == "active":
+        assert reconciled["demo@local"].root == installed
+        assert "demo@other" not in reconciled
+    elif mode == "indeterminate":
+        assert reconciled == previous
+    else:
+        assert reconciled == {"unrelated@local": previous["unrelated@local"]}
+
+
+def test_empty_plugin_filter_preserves_entire_previous_roster(tmp_path):
+    previous = {"demo@local": _prior()}
+    report = resolve_active_plugins(
+        home=tmp_path, include_projects=False, plugin_names=()
+    )
+    assert report.active == {}
+    assert report.reconcile(previous) == previous
+
+
+@pytest.mark.parametrize("override", [False, True])
+@pytest.mark.parametrize("malformed_source", ["unrelated@local", "demo@local"])
+def test_filtered_settings_authority_checks_only_selected_plugin_entries(
+    tmp_path, override, malformed_source
+):
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {"enabledPlugins": {"demo@local": False}},
+    )
+    settings_name = "settings.local.json" if override else "settings.json"
+    _write_json(
+        tmp_path / ".copilot" / settings_name,
+        {"enabledPlugins": {"demo@local": False, malformed_source: "invalid"}},
+    )
+    previous = {
+        source: _prior(source) for source in ("demo@local", "unrelated@local")
+    }
+    report = resolve_active_plugins(
+        home=tmp_path, include_projects=False, plugin_names=("demo",)
+    )
+
+    if malformed_source == "demo@local":
+        assert report.authority is ScanAuthority.INDETERMINATE
+        assert report.reconcile(previous) == previous
+        assert any(f.reason == "invalid-entry" for f in report.findings)
+    else:
+        assert report.authority is ScanAuthority.COMPLETE
+        assert report.reconcile(previous) == {
+            "unrelated@local": previous["unrelated@local"]
+        }
+        assert not report.findings
+    unfiltered = resolve_active_plugins(home=tmp_path, include_projects=False)
+    assert unfiltered.authority is ScanAuthority.INDETERMINATE
+
+
+def test_filtered_project_settings_preserve_scoped_authority(tmp_path):
+    repo = tmp_path / "project"
+    _register_project(tmp_path, "project", repo, "https://github.com/example/project.git")
+    _write_json(
+        repo / ".github" / "copilot" / "settings.json",
+        {"enabledPlugins": {"demo@local": False, "unrelated@local": "invalid"}},
+    )
+    previous = {
+        source: _prior(source) for source in ("demo@local", "unrelated@local")
+    }
+    report = resolve_active_plugins(home=tmp_path, plugin_names=("demo",))
+    assert report.authority is ScanAuthority.COMPLETE
+    assert report.reconcile(previous) == {
+        "unrelated@local": previous["unrelated@local"]
+    }
+    assert not report.findings
+
+
 def test_local_override_disables_base_setting(tmp_path):
     _write_json(
         tmp_path / ".copilot" / "settings.json",

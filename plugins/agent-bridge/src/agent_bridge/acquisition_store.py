@@ -94,13 +94,101 @@ class AcquisitionStore:
             (request.worktree_id, request.delivery_id),
         )
 
+    def retirement_recovery_proven(
+        self, request: AcquisitionRequest, session: str, native: str,
+    ) -> bool:
+        rows = self.db.execute_read(
+            "SELECT a.delivery_id,a.state,a.refusal_code,e.stage,e.data_json "
+            "FROM acquisition_attempts a "
+            "JOIN acquisition_effects e USING(delivery_id) "
+            "WHERE a.worktree_id=? AND (a.state='completed' "
+            "OR e.stage IN ('delivering','delivered') "
+            "OR (a.state='refused' AND a.refusal_code='superseded_before_delivery' "
+            "AND e.stage IN ('launching','launched')))",
+            (request.worktree_id,),
+        )
+        proven = False
+        for row in rows:
+            data = json.loads(row["data_json"])
+            previous = data["_request"]
+            result = data.get("result") or {}
+            legacy_created = (
+                not result and row["stage"] == "launching"
+                and row["state"] == "refused"
+                and row["refusal_code"] == "superseded_before_delivery"
+                and data.get("acquired") == "created"
+                and data.get("creation_authorized") is True
+                and data.get("session_id") in {None, session}
+                and data.get("native_session_id") in {None, native}
+                and self._legacy_created_identity(previous, session, native)
+            )
+            if (
+                previous.get("conversation_retired") is True
+                and previous.get("task_generation") == request.task_generation
+                and previous.get("task_id") == request.task_id
+                and previous.get("target") == request.target
+                and previous.get("mode") == request.mode
+                and (legacy_created or (
+                    result.get("session_id") == session
+                    and result.get("native_session_id") == native
+                ))
+                and native not in data.get("retired_native_ids", [])
+            ):
+                if row["delivery_id"] != request.delivery_id:
+                    admission = self.db.execute_read(
+                        "SELECT 1 FROM turns WHERE acquisition_delivery_id=? AND session_id=? "
+                        "UNION ALL SELECT 1 FROM live_messages "
+                        "WHERE idempotency_key=? AND session_id=?",
+                        (row["delivery_id"], session, f"acquisition:{row['delivery_id']}", session),
+                    )
+                    if row["state"] == "completed" or admission:
+                        return False
+                if (
+                    row["state"] == "refused"
+                    and row["refusal_code"] == "superseded_before_delivery"
+                    and (legacy_created or (
+                        row["stage"] == "launched" and result.get("acquired") == "created"
+                    ))
+                ):
+                    proven = True
+        return proven
+
+    def _legacy_created_identity(
+        self, previous: dict[str, Any], session: str, native: str,
+    ) -> bool:
+        request = AcquisitionRequest.model_validate(previous)
+        binding = self.db.execute_read(
+            "SELECT 1 FROM acquisition_bindings WHERE session_id=? AND native_session_id=? "
+            "AND task_id=? AND task_generation=? AND worktree_id=? "
+            "AND mode=? AND target=? AND retired=0",
+            (session, native, request.task_id, request.task_generation,
+             request.worktree_id, request.mode, request.target),
+        )
+        if not binding:
+            return False
+        if request.mode == "acp":
+            identity = self.db.execute_read(
+                "SELECT 1 FROM sessions WHERE id=? AND acp_session_id=? AND caller_id=? "
+                "AND json_extract(target_json,'$.worktree_id')=?",
+                (session, native, f"acquisition:{request.delivery_id}", request.worktree_id),
+            )
+        else:
+            identity = self.db.execute_read(
+                "SELECT 1 FROM live_sessions WHERE session_id=? AND worktree_id=? AND driven_by=?",
+                (native, request.worktree_id, cli_driver(request)),
+            ) if session == native else []
+        return len(identity) == 1
+
     def stage(self, request: AcquisitionRequest, stage: str, **data: Any) -> None:
         previous = self.db.execute_read(
             "SELECT data_json FROM acquisition_effects WHERE delivery_id=?", (request.delivery_id,),
         )
         if previous:
-            authority = json.loads(previous[0]["data_json"]).get("creation_authorized", False)
+            previous_data = json.loads(previous[0]["data_json"])
+            authority = previous_data.get("creation_authorized", False)
             data.setdefault("creation_authorized", authority)
+            data.setdefault("retirement_recovered", previous_data.get("retirement_recovered", False))
+            data.setdefault("retirement_conversation", previous_data.get("retirement_conversation"))
         self.db.execute_write(
             "INSERT INTO acquisition_effects VALUES (?, ?, ?) "
             "ON CONFLICT(delivery_id) DO UPDATE SET stage=excluded.stage, data_json=excluded.data_json",

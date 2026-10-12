@@ -61,6 +61,76 @@ def _publish(command, config, wid):
     return result.get("success", False)
 
 
+def _partial_success_then_rebase(pr_repo, monkeypatch):
+    config, wid, path, remote, branch, old = _prepare(pr_repo, "refspec")
+    (path / "accepted.txt").write_text("already accepted source feedback\n")
+    _git("add", "accepted.txt", cwd=path)
+    _git("commit", "-m", "source feedback", cwd=path)
+    accepted = _git("rev-parse", "HEAD", cwd=path)
+    original_push = git_ops.push
+
+    def lost_acknowledgement(*args, **kwargs):
+        result = original_push(*args, **kwargs)
+        assert result
+        return git_ops.PushResult(ok=False, stderr="transport acknowledgement lost after acceptance")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(git_ops, "push", lost_acknowledgement)
+        assert not finalize.push_changes(wid, config)
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == accepted
+    assert _record(wid).pr.head_sha == old
+    (path / "unpublished.txt").write_text("preserve final local feedback\n")
+    _git("add", "unpublished.txt", cwd=path)
+    _git("commit", "-m", "unpublished source feedback", cwd=path)
+    _advance(config, path)
+    _git("rebase", "origin/master", cwd=path)
+    return config, wid, path, remote, branch, old, accepted
+
+
+def test_partial_success_before_rebase_recovers_only_verified_source_lineage(pr_repo, monkeypatch):
+    config, wid, path, remote, branch, old, accepted = _partial_success_then_rebase(pr_repo, monkeypatch)
+    monkeypatch.setattr(pr_publish, "_provider_head", lambda repo, pr, **kwargs: accepted)
+    tip = _git("rev-parse", "HEAD", cwd=path)
+    assert not git_ops.is_commit_ancestor(accepted, tip, cwd=path)
+    assert finalize.push_changes(wid, config)
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == tip
+    assert _record(wid).pr.head_sha == tip
+    assert (path / "accepted.txt").read_text() == "already accepted source feedback\n"
+    assert (path / "unpublished.txt").read_text() == "preserve final local feedback\n"
+    metadata = Path(_git("rev-parse", "--absolute-git-dir", cwd=path))
+    proof = json.loads((metadata / "agent-worktrees-pr-rebase.json").read_text())
+    assert proof["expected_head"] == old
+    assert proof["transport_expected_head"] == accepted
+
+
+@pytest.mark.parametrize("provider", ["unavailable", "different", "foreign", "racing"])
+def test_partial_success_recovery_rejects_unconfirmed_or_unrelated_remote_heads(pr_repo, monkeypatch, provider):
+    config, wid, path, remote, branch, old, accepted = _partial_success_then_rebase(pr_repo, monkeypatch)
+    remote_head = accepted
+    if provider in ("foreign", "racing"):
+        other = remote.parent / "concurrent"
+        _git("clone", str(remote), str(other), cwd=remote.parent)
+        _git("config", "user.email", "reviewer@example.com", cwd=other)
+        _git("config", "user.name", "Reviewer", cwd=other)
+        _git("checkout", "-B", branch, f"origin/{branch}", cwd=other)
+        (other / "foreign.txt").write_text("do not overwrite\n")
+        _git("add", "foreign.txt", cwd=other)
+        _git("commit", "-m", "concurrent feedback", cwd=other)
+        remote_head = _git("rev-parse", "HEAD", cwd=other)
+        if provider == "foreign":
+            _git("push", "origin", branch, cwd=other)
+    observed = "" if provider == "unavailable" else "0" * 40 if provider == "different" else remote_head
+    def provider_head(repo, pr, **kwargs):
+        if provider == "racing":
+            _git("push", "origin", branch, cwd=other)
+            return accepted
+        return observed
+    monkeypatch.setattr(pr_publish, "_provider_head", provider_head)
+    assert not finalize.push_changes(wid, config)
+    assert _git("--git-dir", str(remote), "rev-parse", branch, cwd=path) == remote_head
+    assert _record(wid).pr.head_sha == old
+
+
 @pytest.mark.parametrize("scheme,command,flow", [
     pytest.param("snapshot", "push-changes", "sync", marks=exhaustive),
     pytest.param("snapshot", "create-pr", "manual", marks=exhaustive),

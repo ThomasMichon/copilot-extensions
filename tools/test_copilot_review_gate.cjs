@@ -5,12 +5,17 @@ const test = require("node:test");
 const { spawnSync } = require("node:child_process");
 
 const workflow = fs.readFileSync(
-  path.join(__dirname, "../.github/workflows/copilot-review-gate.yml"), "utf8",
-);
-const script = workflow.split(
+  path.join(__dirname, "../.github/workflows/workflow-lockdown-guard.yml"), "utf8",
+).replace(/\r\n/g, "\n");
+const scriptLines = workflow.split(
   "      - name: Request Copilot review as a licensed Maintainer account\n",
 )[1].split("          script: |\n")[1]
-  .split("\n").filter(line => line.trim()).map(line => {
+  .split("\n");
+const scriptEnd = scriptLines.findIndex(
+  line => line.trim() && !line.startsWith("            "),
+);
+const script = scriptLines.slice(0, scriptEnd === -1 ? undefined : scriptEnd)
+  .filter(line => line.trim()).map(line => {
     assert.ok(line.startsWith("            "));
     return line.slice(12);
   }).join("\n");
@@ -23,7 +28,7 @@ const BOT = "copilot-pull-request-reviewer[bot]";
 
 async function run(options = {}) {
   const writes = [], reads = [], waits = [], failures = [], warnings = [], infos = [];
-  let clock = NOW;
+  let clock = NOW + (options.queueMs ?? 0);
   const reader = {
     rest: {
       issues: { listEventsForTimeline: "events" },
@@ -66,7 +71,10 @@ async function run(options = {}) {
     name => { throw new Error(`Bundled action does not expose module: ${name}`); },
     { env: { REVIEW_READ_TOKEN: "repository-token" } },
     { repo: { owner: "owner", repo: "repo" },
-      payload: { pull_request: { number: 7, head: { sha: "event-head" } } } },
+      payload: { pull_request: {
+        number: 7, head: { sha: "event-head" },
+        updated_at: options.updatedAt ?? new Date(NOW).toISOString(),
+      } } },
     writer,
     { info: msg => infos.push(msg), setFailed: msg => failures.push(msg),
       warning: msg => warnings.push(msg) },
@@ -95,6 +103,40 @@ test("one five-minute sleep, one snapshot and one nudge, no post-write polling",
 test("pending review needs only PR and pending reads and no nudge", async () => {
   const result = await run({ pending: true });
   assert.deepEqual(result.reads, ["pr", "pending"]);
+  assert.equal(result.writes.length, 0);
+});
+
+test("queue time satisfies the event grace without holding a runner", async () => {
+  const result = await run({ queueMs: 900_000 });
+  assert.deepEqual(result.waits, []);
+  assert.equal(result.writes.length, 1);
+});
+
+test("only the unelapsed event grace holds the runner", async () => {
+  const result = await run({ queueMs: 120_000 });
+  assert.deepEqual(result.waits, [180_000]);
+  assert.equal(result.writes.length, 1);
+});
+
+test("the exact grace boundary needs no additional delay", async () => {
+  assert.deepEqual((await run({ queueMs: 300_000 })).waits, []);
+});
+
+test("invalid or future PR event time fails before any write", async () => {
+  for (const updatedAt of ["invalid", new Date(NOW + 1).toISOString()]) {
+    await assert.rejects(run({ updatedAt }));
+  }
+});
+
+test("a recent request still suppresses nudging after a long queue", async () => {
+  const result = await run({
+    queueMs: 900_000,
+    events: [{
+      event: "review_requested", requested_reviewer: { login: BOT, type: "Bot" },
+      created_at: new Date(NOW + 840_000).toISOString(),
+    }],
+  });
+  assert.deepEqual(result.waits, []);
   assert.equal(result.writes.length, 0);
 });
 
@@ -240,7 +282,10 @@ test("pinned github-script bundle constructs independently authenticated clients
     };
     const Client = github.constructor.defaults({ request: { fetch: fakeFetch } });
     const writer = new Client({ auth: "licensed-token", retry: { enabled: false } });
-    context.payload = { pull_request: { number: 7, head: { sha: "event-head" } } };
+    context.payload = { pull_request: {
+      number: 7, head: { sha: "event-head" },
+      updated_at: new Date(${NOW + 300_000}).toISOString(),
+    } };
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     const run = new AsyncFunction("require", "github", "context", "core", "process",
       "Date", "setTimeout", ${JSON.stringify(script)});

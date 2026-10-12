@@ -374,6 +374,19 @@ def cmd_get(args: argparse.Namespace) -> int:
         return 1
 
     repo = config.default_repo
+    project_values = {
+        "repo-dir": lambda: repo.anchor,
+        "worktrees-root": lambda: repo.worktree_root,
+        "src-dir": lambda: config.srcroot,
+        "config-dir": lambda: str(cfg.project_dir()),
+        "machine": lambda: config.machine,
+        "platform": lambda: config.platform,
+        "project": lambda: config.repo_name,
+    }
+    if key in project_values:
+        print(project_values[key]())
+        return 0
+
     wt_id = _core()._infer_worktree_id_from_cwd(config)
     if not wt_id and session_id:
         if not session_wt_id:
@@ -437,17 +450,10 @@ def cmd_get(args: argparse.Namespace) -> int:
         else ""
     )
     values = {
-        "repo-dir": lambda: repo.anchor,
         "worktree-dir": lambda: current_worktree,
         "worktree-id": lambda: wt_id or "",
         "session-scope-id": lambda: session_scope_id,
         "worktree-state-dir": lambda: (str(state_dir) if state_dir is not None else ""),
-        "worktrees-root": lambda: repo.worktree_root,
-        "src-dir": lambda: config.srcroot,
-        "config-dir": lambda: str(cfg.project_dir()),
-        "machine": lambda: config.machine,
-        "platform": lambda: config.platform,
-        "project": lambda: config.repo_name,
         "owner-ref": lambda: (
             tracking.format_claim_ref(config.machine, config.repo_name, wt_id, session_id)
             if wt_id

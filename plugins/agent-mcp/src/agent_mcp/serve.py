@@ -116,21 +116,23 @@ __all__ = [
 class _WarmEntry:
     """One warm upstream session plus its serialization lock + idle clock."""
 
-    __slots__ = ("last_used", "lock", "session")
+    __slots__ = ("last_used", "lock", "session", "active", "idle")
 
     def __init__(self, session: OneShotSession) -> None:
         self.session = session
         self.lock = asyncio.Lock()
         self.last_used = time.monotonic()
+        self.active = 0
+        self.idle = asyncio.Event()
+        self.idle.set()
 
 
 class WarmPool:
     """A pool of warm :class:`OneShotSession`s keyed by bridge config path.
 
-    Calls to a given bridge are **serialized** by a per-entry lock (an MCP stdio
-    session is a single JSON-RPC pipe; serializing is correct without request
-    multiplexing). Distinct bridges run concurrently. A session that errors at
-    the transport level is evicted so the next call transparently reopens it.
+    Single-server calls are serialized. Routed calls lease a live entry while
+    the routing core isolates per-target execution; distinct targets can overlap.
+    Config replacement and eviction wait for active leases to drain.
     """
 
     def __init__(self, *, idle_timeout: float = _DEFAULT_IDLE_TIMEOUT) -> None:
@@ -138,6 +140,8 @@ class WarmPool:
         self._key_locks: dict[str, asyncio.Lock] = {}
         self._idle_timeout = idle_timeout
         self._guard = asyncio.Lock()  # guards the open/evict of the entry map
+        self._opening = 0
+        self._closing = False
 
     async def _key_lock(self, key: str) -> asyncio.Lock:
         async with self._guard:
@@ -146,19 +150,23 @@ class WarmPool:
     async def _entry_for_locked(self, key: str, cfg: BridgeConfig) -> _WarmEntry:
         """Select/open a config-matched entry while the key lock is held."""
         async with self._guard:
+            if self._closing:
+                raise UpstreamError("warm pool is closing; no new work admitted")
             entry = self._entries.get(key)
-            if entry is not None and entry.session.cfg != cfg:
-                self._entries.pop(key, None)
         if entry is not None and entry.session.cfg != cfg:
-            await entry.session.__aexit__(None, None, None)
+            await self._evict_locked(key, entry)
             log.info("warm session replaced after config change: %s", key)
             entry = None
         if entry is None:
             session = OneShotSession(cfg)
-            await session.__aenter__()
-            entry = _WarmEntry(session)
-            async with self._guard:
-                self._entries[key] = entry
+            self._opening += 1
+            try:
+                await session.__aenter__()
+                entry = _WarmEntry(session)
+                async with self._guard:
+                    self._entries[key] = entry
+            finally:
+                self._opening -= 1
             log.info("warm session opened: %s", key)
         return entry
 
@@ -169,6 +177,28 @@ class WarmPool:
                 code=-32601,
             )
         key_lock = await self._key_lock(key)
+        if cfg.routing is not None:
+            async with key_lock:
+                entry = await self._entry_for_locked(key, cfg)
+                entry.active += 1
+                entry.idle.clear()
+                entry.last_used = time.monotonic()
+            failed = False
+            try:
+                return await entry.session.call_tool(tool, arguments)
+            except UpstreamError:
+                raise
+            except Exception:
+                failed = True
+                raise
+            finally:
+                entry.active -= 1
+                entry.last_used = time.monotonic()
+                if not entry.active:
+                    entry.idle.set()
+                if failed:
+                    async with key_lock:
+                        await self._evict_locked(key, entry)
         async with key_lock:
             entry = await self._entry_for_locked(key, cfg)
             entry.last_used = time.monotonic()
@@ -203,10 +233,13 @@ class WarmPool:
             entry = self._entries.get(key)
             if expected is not None and entry is not expected:
                 return
-            entry = self._entries.pop(key, None)
         if entry is not None:
+            await entry.idle.wait()
             with contextlib.suppress(Exception):
                 await entry.session.__aexit__(None, None, None)
+            async with self._guard:
+                if self._entries.get(key) is entry:
+                    self._entries.pop(key)
             log.info("warm session closed: %s", key)
 
     async def _evict(self, key: str) -> None:
@@ -218,18 +251,23 @@ class WarmPool:
         now = time.monotonic()
         stale = [
             key for key, e in list(self._entries.items())
-            if now - e.last_used > self._idle_timeout
+            if not e.active and now - e.last_used > self._idle_timeout
         ]
         for key in stale:
             await self._evict(key)
 
     async def close_all(self) -> None:
-        for key in list(self._entries):
+        async with self._guard:
+            self._closing = True
+            # Keys precede upstream startup, so their locks also drain opens
+            # that have not yet registered an entry.
+            keys = list(self._key_locks)
+        for key in keys:
             await self._evict(key)
 
     @property
     def size(self) -> int:
-        return len(self._entries)
+        return len(self._entries) + self._opening
 
 
 class Server:
@@ -449,18 +487,20 @@ class Server:
                     pass  # a closed/broken client just drops the push
 
         session = BridgeSession(cfg, sink)
-        try:
-            await session.start()
-        except Exception as exc:
-            await self._send(writer, {"ok": False, "error": f"session start: {exc}"})
-            return
-        # Ack; from here the stream is raw MCP JSON-RPC in both directions.
-        await self._send(writer, {"ok": True, "attached": True})
+        # Opening an upstream is live work too: reserve before the first await,
+        # or a slow connect can let the idle sweeper evict this host mid-attach.
         self._attached += 1
         self._touch()
-        log.info("session attached: %s (%d decorators; %d live)", bridge,
-                 session.decorator_count, self._attached)
         try:
+            try:
+                await session.start()
+            except Exception as exc:
+                await self._send(writer, {"ok": False, "error": f"session start: {exc}"})
+                return
+            # Ack; from here the stream is raw MCP JSON-RPC in both directions.
+            await self._send(writer, {"ok": True, "attached": True})
+            log.info("session attached: %s (%d decorators; %d live)", bridge,
+                     session.decorator_count, self._attached)
             while not reader.at_eof():
                 line = await reader.readline()
                 if not line:
@@ -478,16 +518,21 @@ class Server:
         except (ConnectionResetError, BrokenPipeError):
             pass
         finally:
-            # The refcount MUST drop on detach even if teardown fails, or the host
-            # would believe a session is still attached and never idle-evict. Drop
-            # it first, then tear the session down fail-soft.
-            self._attached -= 1
-            self._touch()  # last detach starts the host's idle-eviction clock
+            # The reservation covers request drain and teardown, including
+            # caller cancellation, but must still release if cleanup fails.
             try:
-                await session.aclose()
-            except Exception as exc:  # teardown must not wedge the handler/refcount
-                log.warning("session aclose error for %s: %s", bridge, exc)
-            log.info("session detached: %s (%d live)", bridge, self._attached)
+                cleanup = asyncio.create_task(session.aclose())
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    await asyncio.gather(cleanup, return_exceptions=True)
+                    raise
+                except Exception as exc:
+                    log.warning("session aclose error for %s: %s", bridge, exc)
+            finally:
+                self._attached -= 1
+                self._touch()
+                log.info("session detached: %s (%d live)", bridge, self._attached)
 
     def _acquire_lease(self) -> bool:
         """Take the single-instance lease; return ``False`` to stand down.

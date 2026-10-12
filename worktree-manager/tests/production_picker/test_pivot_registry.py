@@ -776,6 +776,39 @@ def test_unattributed_create_action_options_command_missing_target_is_validated(
     assert report.findings[0].reason == "missing-target"
 
 
+@pytest.mark.parametrize("missing", [None, "run", "options_command"])
+def test_configuration_form_commands_are_resolved_and_validated(tmp_path, missing):
+    registry = tmp_path / "pivots"
+    registry.mkdir()
+    command = _command(tmp_path / "commands")
+    form = {
+        "label": "Controls", "run": [str(command), "{field.pool}"],
+        "fields": [{"name": "pool", "type": "choice",
+                    "options_command": [str(command), "options"]}],
+    }
+    if missing == "run":
+        form["run"] = ["definitely-missing-config-apply"]
+    elif missing == "options_command":
+        form["fields"][0]["options_command"] = ["definitely-missing-config-options"]
+    (registry / "local.json").write_text(json.dumps({
+        "config_sections": [{"label": "Controls", "run": [str(command)],
+                             "configure_action": form}],
+    }), encoding="utf-8")
+    report = pivots.scan_pivot_registry(
+        registry, materialize=False,
+        activation_report=ActivationReport(ScanAuthority.COMPLETE, {}),
+    )
+    if missing:
+        assert report.active_entries == {}
+        assert report.findings[0].reason == "missing-target"
+    else:
+        [section] = report.config_sections
+        assert section.configure_action.run == (str(command.resolve()), "{field.pool}")
+        assert section.configure_action.fields[0]["options_command"] == (
+            str(command.resolve()), "options",
+        )
+
+
 def test_unattributed_create_action_missing_target_is_validated(tmp_path):
     registry = tmp_path / "pivots"
     registry.mkdir()

@@ -27,6 +27,7 @@ from .._exec import no_window_creationflags, resolve_spawn
 from ..auth.base import AuthInjector
 from ..cli_tools import CliTool, CliToolError, build_argv, load_cli_tools, tool_in_scope
 from ..config import BridgeConfig
+from ..routing_errors import RoutingError
 from .base import Transport
 
 log = logging.getLogger("agent-mcp.transport.cli")
@@ -108,7 +109,11 @@ class CliTransport(Transport):
         env = dict(self._base_env)
         try:
             env.update(await self.injector.child_env())
+        except RoutingError:
+            raise
         except Exception as exc:
+            if self.cfg.routed_target:
+                raise RoutingError("routing target authentication failed") from exc
             log.warning("cli transport: auth injection failed (%s); "
                         "spawning with ambient environment", exc)
         return env
@@ -120,6 +125,10 @@ class CliTransport(Transport):
             return
         try:
             resp = await self._respond(method, msg)
+        except RoutingError as exc:
+            resp = _error(msg, str(exc), exc.code)
+            if exc.data is not None:
+                resp["error"]["data"] = exc.data
         except Exception as exc:  # never let one call wedge the pipe
             log.error("cli transport error on %s: %s", method, exc)
             resp = _error(msg, f"cli transport error: {exc}", _INTERNAL_ERROR)
@@ -210,6 +219,8 @@ class CliTransport(Transport):
         except FileNotFoundError:
             return _result(msg, _error_content(
                 f"command not found: {argv[0]!r}"))
+        except RoutingError:
+            raise
         except Exception as exc:
             return _result(msg, _error_content(f"spawn failed: {exc}"))
 

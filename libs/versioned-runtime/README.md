@@ -30,6 +30,16 @@ cannot be a shared runtime import — it must physically exist in each plugin. S
 this canonical copy is **vendored (synced) byte-identically** into every Python
 runtime plugin's `scripts/` dir.
 
+The standalone `agent-index-service` distribution also consumes this exact
+primitive for its explicit installer, without introducing a plugin or a second
+maintained source mirror. Its standard setuptools build copies the canonical
+file into wheel build output; its sdist carries the same bytes so a subsequent
+wheel build needs no repository checkout. Wheel/sdist byte-equality tests and
+wheel RECORD bind that generated resource to the package artifact. Existing
+plugin bootstrap scripts remain self-contained and unchanged. The standalone
+installer uses only its own installed resource, never a repository/plugin/PATH
+fallback; editable/source-only installation is not an installer runtime.
+
 Slot resolution is completion-marker strict: `current-version`,
 `last-known-good`, and newest-slot fallback candidates must carry a valid
 `.install-complete.json` and an interpreter. The marker schema is exact: string
@@ -45,6 +55,39 @@ without `/proc`), current-slot cleanup fails conservatively unless an explicit
 fallback uses the same numeric-token ordering in Python, POSIX shell, and
 PowerShell, so development versions such as `dev10` sort after `dev9` without
 `packaging` or GNU `sort -V`.
+
+## Construction ownership (Python API)
+
+`construction_lease(root, version, *, timeout=60.0, poll_interval=0.05)` is a
+stdlib-only context manager for installer-owned construction. It uses a
+nonblocking kernel lease (`flock` on POSIX; a CRT byte lock on Windows) under
+`<root>/.construction-leases/`, outside immutable slot content. Contenders wait
+within a monotonic budget; `ConstructionTimeout` distinguishes exhausted
+contention from filesystem or lock-backend failures, which propagate unchanged.
+The persistent lock file is never deleted, and is not evidence of a live owner.
+Version case aliases always share a lease, including on case-insensitive macOS
+volumes; distinct case-only names on a case-sensitive volume conservatively
+serialize too.
+Normal return, exceptions, cancellation, and process death close the descriptor
+and release ownership.
+
+After acquisition, call `check_admission` again before writing: another builder
+may have published while the caller waited. Matching input then reuses the winner;
+different input refuses construction. A completed-slot fast path does not need
+this exclusive construction lease. Hold it through construction, isolated health
+gating, and publication only; release before unrelated reconciliation or
+activation/cutover coordination. A repair's outer cutover guard remains required.
+
+This API is not yet wired into shell installers. A separate `acquire` command
+that exits could not retain kernel ownership for a subsequent shell build.
+Installer adoption must also implement candidate/rollback GC retention before
+construction release; this primitive alone does not protect a ready candidate
+or authorize rewriting a published slot. Existing installer lock schemes are
+not interchangeable with this protocol until all contenders on that path adopt
+the same lock.
+
+Focused native-process tests:
+`python tools/run-plugin-tests.py agent-bridge -k construction_lease`.
 
 ## Editing — one source of truth
 

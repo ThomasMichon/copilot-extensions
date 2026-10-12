@@ -528,9 +528,12 @@ def test_setup_sync_for_tests_prewarm_call_does_not_block_the_calling_thread(
     assert elapsed < 1.0
 
 
-def test_skeleton_does_not_touch_src_local():
+def test_skeleton_does_not_touch_src_local(monkeypatch):
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import engine as eng
+    from worktree_manager.production_picker.picker_tui import data_local
+
+    monkeypatch.setattr(data_local, "LOCAL", ("raw-hostname", "Win"))
 
     class Src:
         @property
@@ -542,6 +545,10 @@ def test_skeleton_does_not_touch_src_local():
     assert screen.data == []
     assert screen.loader is None
     assert screen.machines
+    assert screen.machines[1][:3] == ("Local Win", "raw-hostname", "Win")
+    rendered = screen.tab_bar(100, True).plain
+    assert "Local Win" in rendered
+    assert "raw-hostname" not in rendered
     screen.local_index()
     assert screen.machine_state(0) == "ready"
     assert screen.machine_state(1) == "loading"

@@ -100,17 +100,18 @@ def local_destination(destination: str) -> str:
         or len(path.parts) < 4 or not path.name.endswith(".instructions.md")
     ):
         raise ValueError("invalid selector destination")
+    return destination.removesuffix(".instructions.md") + ".local.instructions.md"
+
+
+def legacy_local_destination(destination: str) -> str:
+    local_destination(destination)
+    path = PurePosixPath(destination)
     return str(
         PurePosixPath(".github/copilot/context-locals")
         / PurePosixPath(*path.parts[2:]).with_name(
             path.name.removesuffix(".instructions.md") + ".local.md"
         )
     )
-
-
-def legacy_local_destination(destination: str) -> str:
-    local_destination(destination)
-    return destination.removesuffix(".instructions.md") + ".local.instructions.md"
 
 
 def _unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:

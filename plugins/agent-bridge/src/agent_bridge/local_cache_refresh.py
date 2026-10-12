@@ -8,7 +8,7 @@ This is the ``agent-bridge`` counterpart to
 ``agent_worktrees.local_cache_refresh`` (see
 ``docs/patterns/worktree-scoped-dynamic-guidance.md`` and
 ``efforts/2026/10/03 local-cache-delivery-primacy`` Phase 2): the same
-"render the worktree's gitignored non-discovered ``context-locals/**/*.local.md`` bodies
+"render the worktree's gitignored auto-discovered ``*.local.instructions.md`` bodies
 before the agent reads anything" mechanism, pre-rendering a spawn-path
 ``agent-worktrees``/``agent-bridge`` itself drive, that `create`/`resume`/
 ``sessionStart`` already cover for an interactively-launched session.
@@ -171,9 +171,8 @@ LOCAL_SPAWN_MAX_TIMEOUT_S = 5.0
 # _CLEANUP_GRACE_S`, never `timeout` alone -- asserted directly in
 # `test_descendant_of_a_timed_out_render_does_not_survive`.
 _CLEANUP_GRACE_S = 1.5
-# Resolution (identity-verified plugin lookup) gets a small, fixed share of
-# the overall budget; the remainder goes to the render call itself.
-_RESOLUTION_TIMEOUT_S = 2.0
+# Identity resolution and rendering share one deadline; rendering uses
+# whatever budget remains after the identity-verified lookup.
 # The scope name resolve_active_plugins() uses for a plugin's machine-wide
 # (non-project-specific) activation -- see ActivePlugin.root_for_scope().
 _GLOBAL_SCOPE = "global"
@@ -191,7 +190,9 @@ def _select_global_root(home: Path) -> Path | None:
     try:
         from plugin_activation import resolve_active_plugins
 
-        report = resolve_active_plugins(home=home, include_projects=False)
+        report = resolve_active_plugins(
+            home=home, include_projects=False, plugin_names=(_SIBLING_PLUGIN_NAME,),
+        )
     except Exception as exc:
         log.warning("Global projection renderer discovery failed: %s", exc)
         return None
@@ -579,7 +580,7 @@ async def refresh_local_cache(
     timeout: float = LOCAL_SPAWN_MAX_TIMEOUT_S,
 ) -> RefreshResult:
     """Best-effort refresh of every enabled source's gitignored
-    non-discovered local body under ``repo_root``, before a local
+    auto-discovered local instruction body under ``repo_root``, before a local
     spawn's Copilot CLI process is launched.
 
     Call this only for a ``target.type == "local"`` spawn whose ``target.
@@ -587,8 +588,7 @@ async def refresh_local_cache(
     never for ``"command"``/``"ssh"`` targets (Codespaces, containers,
     elevated relays, and other non-local providers; see ``session_start.
     py``). ``timeout`` bounds the subprocess ``wait_for`` budget, split
-    between resolving the sibling's CLI script (capped at
-    ``_RESOLUTION_TIMEOUT_S``) and invoking it with the actual elapsed-time
+    between resolving the sibling's CLI script and invoking it with the actual elapsed-time
     remainder. The genuine hard ceiling on this call's own **total** wall
     time is ``timeout + _CLEANUP_GRACE_S`` -- not ``timeout`` alone --
     since a timed-out subprocess's tree-kill cleanup (see ``_kill_tree``)
@@ -605,10 +605,9 @@ async def refresh_local_cache(
         if timeout <= 0:
             return _report(RefreshResult("timeout", detail="no refresh budget remains"))
         repo_root = _checkout_root(repo_root)
-        resolution_timeout = min(timeout, _RESOLUTION_TIMEOUT_S)
         outcomes: list[RefreshResult] = []
         script = await _resolve_cli_script(
-            home, timeout=resolution_timeout, outcomes=outcomes
+            home, timeout=timeout, outcomes=outcomes
         )
         if script is None:
             return _report(outcomes[-1] if outcomes else RefreshResult(

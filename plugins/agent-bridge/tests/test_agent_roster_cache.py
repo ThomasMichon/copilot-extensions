@@ -202,15 +202,17 @@ async def test_drop_unfinished_inflight_bumps_generation_so_late_result_is_disca
     cache._drop_unfinished_inflight({"ns": task})
 
     assert entry.generation == generation_before + 1
-    assert cache._inflight.get("ns") is None
-    assert cache._inflight_token.get("ns") is None
+    assert cache._inflight.get("ns") is task
+    assert cache._inflight_token.get("ns") is ns
+    assert cache._refresh_namespace("ns") is task
 
-    # Let the orphaned task finally complete -- its result must be
+    # Let the retained task finally complete -- its result must be
     # discarded by the (now-bumped) generation guard, never published.
     release.set()
     await asyncio.wait_for(task, timeout=2.0)
     assert entry.state.value == "uninitialized"
     assert entry.rows == []
+    assert ns.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -233,14 +235,13 @@ async def test_force_fail_bumps_generation_so_an_abandoned_scans_late_result_is_
     cache._CANCELLATION_GRACE = 0.05
     release = asyncio.Event()
 
-    async def _resists_cancellation():
-        while True:
+    async def _resists_cancellation() -> list[NamespaceAgentInfo]:
+        while not release.is_set():
             try:
-                await asyncio.sleep(3600)
+                await release.wait()
             except asyncio.CancelledError:
-                if release.is_set():
-                    raise
                 continue  # swallow and keep running -- cancellation-resistant
+        return [_agent("late")]
 
     ns.outcomes = [_resists_cancellation]
     cache._refresh_namespace("ns")
@@ -250,21 +251,117 @@ async def test_force_fail_bumps_generation_so_an_abandoned_scans_late_result_is_
 
     await cache.force_fail_uninitialized_namespaces()
     assert entry.state.value == "failed"
+    task = cache._inflight["ns"]
+    assert not task.done()
+    assert cache._refresh_namespace("ns") is task
     # The abandoned scan's own captured generation is now stale -- proving
     # the fix: without it, a belated publish under `stale_generation` would
     # still pass the guard and overwrite the just-forced FAILED state.
     assert entry.generation != stale_generation
 
-    # Directly exercise the same guard the orphaned task's own belated
-    # publish would hit, under its original (now-stale) generation --
-    # confirms it is discarded rather than flipping FAILED back to OK.
-    ns.outcomes = [[_agent("late")]]
-    await cache._do_scan_namespace("ns", ns, stale_generation)
+    release.set()
+    await asyncio.wait_for(task, timeout=2)
     assert entry.state.value == "failed"
     assert entry.rows == []
-
-    release.set()
+    assert ns.call_count == 1
+    assert "ns" not in cache._inflight
     await cache.stop()
+
+
+@pytest.mark.asyncio
+async def test_provider_swap_before_task_start_does_not_scan_replacement_twice() -> None:
+    resolver, original = _make_resolver_with_namespace()
+    cache = AgentRosterCache(resolver, refresh_interval=60.0)
+    old_task = cache._refresh_namespace("ns")
+    replacement = _ControllableResolver("ns")
+    replacement.outcomes = [[_agent("current")]]
+    resolver.unregister_namespace_resolver("ns")
+    resolver.register_namespace_resolver(replacement)
+    new_task = cache._refresh_namespace("ns")
+
+    await asyncio.wait_for(asyncio.gather(old_task, new_task), timeout=2)
+
+    assert original.call_count == 0
+    assert replacement.call_count == 1
+    assert cache._entries["ns"].provider_ref is replacement
+    assert [row["name"] for row in cache._entries["ns"].rows] == ["ns:current"]
+    assert not cache._inflight
+    assert not cache._owned_scans
+    await cache.stop()
+
+
+@pytest.mark.asyncio
+async def test_provider_replacement_keeps_cancel_resistant_scan_owned_until_shutdown() -> None:
+    resolver, original = _make_resolver_with_namespace()
+    cache = AgentRosterCache(resolver, refresh_interval=60.0)
+    release = asyncio.Event()
+    cancelled = asyncio.Event()
+    started = asyncio.Event()
+
+    async def scan() -> list[NamespaceAgentInfo]:
+        started.set()
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+        return [_agent("obsolete")]
+
+    original.outcomes = [scan]
+    old_task = cache._refresh_namespace("ns")
+    await asyncio.wait_for(started.wait(), timeout=2)
+    replacement = _ControllableResolver("ns")
+    resolver.unregister_namespace_resolver("ns")
+    resolver.register_namespace_resolver(replacement)
+    cache._reconcile_namespace_set()
+    await asyncio.wait_for(cancelled.wait(), timeout=2)
+    assert old_task in cache._owned_scans
+    assert not old_task.done()
+    await cache._refresh_namespace("ns")
+    assert cache._entries["ns"].rows == []
+
+    cancelled.clear()
+    stop_task = asyncio.create_task(cache.stop())
+    await asyncio.wait_for(cancelled.wait(), timeout=2)
+    release.set()
+    await asyncio.wait_for(stop_task, timeout=2)
+    assert old_task.done()
+    assert old_task not in cache._owned_scans
+    assert cache._entries["ns"].rows == []
+
+
+@pytest.mark.asyncio
+async def test_stop_fences_result_of_retained_cancellation_resistant_holder() -> None:
+    resolver, provider = _make_resolver_with_namespace()
+    cache = AgentRosterCache(resolver, refresh_interval=60)
+    cache._CANCELLATION_GRACE = 0.01
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def scan() -> list[NamespaceAgentInfo]:
+        started.set()
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                continue
+        return [_agent("late")]
+
+    provider.outcomes = [scan]
+    holder = cache._refresh_namespace("ns")
+    await asyncio.wait_for(started.wait(), timeout=2)
+    try:
+        await asyncio.wait_for(cache.stop(), timeout=2)
+        assert not holder.done()
+        assert holder in cache._owned_scans
+        release.set()
+        await asyncio.wait_for(holder, timeout=2)
+        assert cache._entries["ns"].rows == []
+        assert cache._entries["ns"].state.value == "uninitialized"
+        assert holder not in cache._owned_scans
+    finally:
+        release.set()
+        await asyncio.wait_for(holder, timeout=2)
 
 
 
@@ -1210,6 +1307,8 @@ async def test_hung_discovery_scan_is_abandoned_and_its_stale_result_discarded()
         await asyncio.sleep(0.05)
     else:
         pytest.fail("discovery never recovered from the hung first attempt")
+    assert cache._discovery_task is not None
+    await asyncio.wait_for(asyncio.shield(cache._discovery_task), timeout=2.0)
     assert cache._discovery_generation == 2
     assert call_count == 2  # the hung first attempt, plus its one replacement
 
@@ -1284,18 +1383,17 @@ async def test_abandoned_scans_report_is_never_applied_to_the_registry():
     resolver._apply_provider_report = _apply
     cache = AgentRosterCache(resolver, refresh_interval=60.0, watchdog_timeout=0.3)
 
-    # This caller joins the very first (soon-to-be-hung) attempt -- its own
-    # bounded wait (get_snapshot()'s discovery-join bound) may give up
-    # before the replacement (gen2) attempt has actually finished, since
-    # that bound is deliberately finite. Poll with plain (non-forced) calls
-    # after the initial kick -- force_refresh=True would keep re-triggering
-    # brand-new scans once gen2 is already applied, inflating
-    # applied_reports past 1 rather than just recognizing it as fresh.
-    await asyncio.wait_for(cache.get_snapshot(force_refresh=True), timeout=2.0)
+    # Exercise discovery itself: get_snapshot also calls list_agents, whose
+    # synchronous discovery path would invoke these stubs outside this guard.
+    await asyncio.wait_for(
+        cache._maybe_refresh_discovery(force=True, max_wait=0.6), timeout=2.0,
+    )
     for _ in range(100):
         if applied_reports:
             break
-        await asyncio.wait_for(cache.get_snapshot(), timeout=2.0)
+        await asyncio.wait_for(
+            cache._maybe_refresh_discovery(force=False, max_wait=0.6), timeout=2.0,
+        )
         await asyncio.sleep(0.05)
     else:
         pytest.fail("the replacement (gen2) discovery attempt never applied")
@@ -1344,24 +1442,20 @@ async def test_stop_does_not_hang_on_a_stuck_discovery_scan():
 
 @pytest.mark.asyncio
 async def test_watchdog_recovers_even_when_namespace_scan_resists_cancellation():
-    """A namespace resolver whose `list()` swallows `CancelledError` and
-    keeps running must never be able to hang the watchdog itself --
-    `_cancel_and_wait_bounded` bounds the wait, and the watchdog abandons
-    the stuck cycle (dropping its in-flight tracking so the replacement
-    loop doesn't rejoin it) rather than waiting on it forever."""
+    """Restarting supervision retains the live scan until it finishes."""
     resolver, ns = _make_resolver_with_namespace()
     started = asyncio.Event()
     release = asyncio.Event()
+    cancelled = asyncio.Event()
 
-    async def _resists_cancellation():
+    async def _resists_cancellation() -> list[NamespaceAgentInfo]:
         started.set()
-        while True:
+        while not release.is_set():
             try:
-                await asyncio.sleep(3600)
+                await release.wait()
             except asyncio.CancelledError:
-                if release.is_set():
-                    raise
-                continue  # swallow and keep running -- cancellation-resistant
+                cancelled.set()
+        return [_agent("obsolete")]
 
     ns.outcomes = [_resists_cancellation]
     cache = AgentRosterCache(resolver, refresh_interval=0.05, watchdog_timeout=0.1)
@@ -1375,7 +1469,20 @@ async def test_watchdog_recovers_even_when_namespace_scan_resists_cancellation()
         # the task; nothing yields to it until the next `await`), silently
         # skipping the hang scenario this test exists to exercise.
         await asyncio.wait_for(started.wait(), timeout=2.0)
-        ns.outcomes = []  # the restarted cycle's scan -- empty list, succeeds
+        holder = cache._inflight["ns"]
+        loop = cache._task
+        await asyncio.wait_for(cancelled.wait(), timeout=2.0)
+        for _ in range(40):
+            if cache._task is not None and cache._task is not loop:
+                break
+            await asyncio.sleep(0.01)
+        assert cache._task is not None and cache._task is not loop
+        assert cache._inflight["ns"] is holder
+        assert cache._refresh_namespace("ns") is holder
+        assert ns.call_count == 1
+        assert cache._entries["ns"].state.value != "ok"
+        release.set()
+        await asyncio.wait_for(holder, timeout=2)
         for _ in range(100):
             await asyncio.sleep(0.05)
             entry = cache._entries.get("ns")
@@ -1383,8 +1490,9 @@ async def test_watchdog_recovers_even_when_namespace_scan_resists_cancellation()
                 break
         else:
             pytest.fail(
-                "watchdog never recovered despite a cancellation-resistant scan"
+                "watchdog never recovered after the retained holder finished"
             )
+        assert cache._entries["ns"].rows == []
     finally:
         release.set()
         await cache.stop()
@@ -1607,4 +1715,3 @@ async def test_force_refresh_does_not_rescan_an_already_fresh_namespace():
 
     await cache.get_snapshot(force_refresh=True)
     assert ns.call_count == 1  # still fresh -- not rescanned
-

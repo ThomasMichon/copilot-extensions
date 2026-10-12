@@ -37,6 +37,94 @@ def _patch_discover(monkeypatch, decls):
     monkeypatch.setattr("agent_dispatch.registrar_discovery.discover", lambda: decls)
 
 
+def test_pool_options_are_read_only(monkeypatch, capsys):
+    from agent_dispatch.config import overrides_path
+
+    _patch_discover(monkeypatch, [_declare("first"), _declare("second")])
+    args = _args(["workers", "pool-options"])
+    assert args.func(args) == 0
+    assert json.loads(capsys.readouterr().out) == ["first", "second"]
+    assert not overrides_path().exists()
+
+
+def test_pool_options_identify_duplicate_names_without_writes(monkeypatch, capsys):
+    from agent_dispatch.config import overrides_path
+
+    _patch_discover(monkeypatch, [
+        _declare("duplicate"), _declare("duplicate", owner="other"),
+    ])
+    args = _args(["workers", "pool-options"])
+    assert args.func(args) == 2
+    assert "duplicate names duplicate" in capsys.readouterr().err
+    assert not overrides_path().exists()
+
+
+@pytest.mark.parametrize("toggle", ["disable", "enable"])
+@pytest.mark.parametrize("declarations", [[], [_declare("pool"), _declare("pool", owner="other")]])
+def test_strict_toggle_refuses_missing_or_ambiguous_before_writes(
+    monkeypatch, capsys, toggle, declarations,
+):
+    from agent_dispatch.config import overrides_path
+
+    path = overrides_path()
+    original = b'{"untouched":{"disabled":true,"reason":"keep"}}'
+    path.write_bytes(original)
+    _patch_discover(monkeypatch, declarations)
+    args = _args(["workers", "config-section", "pool", "--toggle", toggle, "--require-declared"])
+    assert args.func(args) == 2
+    assert capsys.readouterr().err
+    assert path.read_bytes() == original
+
+
+def test_strict_toggle_round_trip(monkeypatch, capsys):
+    from agent_dispatch.config import overrides_path
+    from agent_dispatch.overrides import load_overrides, overridden_off_ids
+
+    _patch_discover(monkeypatch, [_declare("pool")])
+    for toggle, expected in (("disable", {"logical:repo:example:pool"}), ("enable", set())):
+        args = _args([
+            "workers", "config-section", "pool", "--toggle", toggle,
+            "--require-declared", "--reason=-a literal {reason}",
+        ])
+        assert args.func(args) == 0
+        assert overridden_off_ids(load_overrides(overrides_path())) == expected
+    capsys.readouterr()
+
+
+@pytest.mark.parametrize("name", ["-pool", "--toggle"])
+def test_strict_toggle_addresses_option_like_declared_names(monkeypatch, capsys, name):
+    from agent_dispatch.config import overrides_path
+    from agent_dispatch.overrides import load_overrides, overridden_off_ids
+
+    _patch_discover(monkeypatch, [_declare(name)])
+    args = _args([
+        "workers", "config-section", "--toggle", "disable", "--require-declared", "--", name,
+    ])
+    assert args.func(args) == 0
+    assert overridden_off_ids(load_overrides(overrides_path())) == {
+        f"logical:repo:example:{name}"
+    }
+    assert name in capsys.readouterr().out
+
+
+def test_ui_commands_report_discovery_failure(monkeypatch, capsys):
+    from agent_dispatch.config import overrides_path
+    from agent_dispatch.registrar import RegistrarError
+
+    def fail():
+        raise RegistrarError("duplicate profile name 'pool'")
+
+    monkeypatch.setattr("agent_dispatch.registrar_discovery.discover", fail)
+    for argv in (
+        ["workers", "pool-options"],
+        ["workers", "config-section", "pool", "--toggle", "disable", "--require-declared"],
+    ):
+        args = _args(argv)
+        assert args.func(args) == 2
+        assert "duplicate profile name" in capsys.readouterr().err
+        assert not overrides_path().exists()
+
+
 # -- parser shape -------------------------------------------------------------
 
 

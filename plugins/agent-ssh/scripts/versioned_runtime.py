@@ -71,6 +71,7 @@ from __future__ import annotations
 import argparse
 import errno
 import json
+import math
 import os
 import platform
 import re
@@ -79,6 +80,7 @@ import stat
 import sys
 import time
 from pathlib import Path
+from contextlib import contextmanager
 
 CURRENT_LINK = "current"
 VERSIONS_DIR = "versions"
@@ -1252,11 +1254,108 @@ def toss_incomplete(root: Path, link_name: str = CURRENT_LINK) -> list[str]:
 # or can it reuse an already-completed, matching-content slot" -- stateless,
 # no construction lease taken, so a caller can make this check cheaply and
 # often (e.g. as an ordinary installer's own fast-path probe before it ever
-# considers contending for a build). This is the 3a "exact completed reuse"
-# half of the shared admission seam; the construction-lease half (bounded
-# join for genuine concurrent first builds) is tracked as this effort's next
-# slice -- see efforts/active/mutable-dev-slot/phase-3-runtime-admission.md.
+# considers contending for a build). The construction lease below supplies
+# bounded ownership for genuine concurrent first builds. Installer adoption
+# and GC retention remain separate prerequisites -- see
+# efforts/active/mutable-dev-slot/phase-3-runtime-admission.md.
 # --------------------------------------------------------------------------
+
+
+class ConstructionTimeout(TimeoutError):
+    """The construction owner did not release its kernel lease in budget."""
+
+
+@contextmanager
+def construction_lease(root: Path, version: str, *, timeout: float = 60.0,
+                       poll_interval: float = 0.05):
+    """Hold exclusive construction ownership for one installation/version.
+
+    This is an installer-facing Python primitive, not a shell acquire/release
+    command: the descriptor must remain in the process doing construction.
+    Recheck ``check_admission`` inside the context before any slot writes.
+    Release before unrelated reconciliation or activation/cutover locking.
+
+    POSIX uses flock; Windows uses a nonblocking one-byte CRT lock. Closing
+    the descriptor (including process death) releases ownership. The persistent
+    lock file is never unlinked: replacing it could create a second lock inode.
+    No PID file, stale timestamp, or mkdir fallback grants ownership.
+
+    This does not pin a completed candidate against GC or replace a repair's
+    outer cutover guard. Those protocols remain separate adoption prerequisites.
+    """
+    import hashlib
+
+    if not isinstance(version, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", version):
+        raise ValueError("construction version must be a single ordinary slot name")
+    if version.endswith("."):
+        raise ValueError("construction version must not end in a dot")
+    if not math.isfinite(timeout) or timeout < 0:
+        raise ValueError("construction timeout must be finite and non-negative")
+    if not math.isfinite(poll_interval) or poll_interval <= 0:
+        raise ValueError("construction poll interval must be finite and positive")
+
+    # Case aliases share ownership, including on case-insensitive POSIX volumes.
+    key = hashlib.sha256(version.lower().encode("utf-8")).hexdigest()
+    lock_dir = root / ".construction-leases"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / (key + ".lock")
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(lock_path, flags, 0o600)
+    try:
+        opened = os.fstat(fd)
+        named = os.lstat(lock_path)
+        if (not stat.S_ISREG(named.st_mode) or
+                (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
+            raise OSError("construction lease path is not the opened ordinary file")
+        if os.name == "nt":
+            import msvcrt
+
+            def try_lock():
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+
+            def unlock():
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+
+            # CRT _locking reports a competing byte lock as EACCES/EDEADLK.
+            # Filesystem access failures from open/stat are not retried.
+            busy_errors = {errno.EACCES, errno.EDEADLK}
+        else:
+            import fcntl
+
+            def try_lock():
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+            def unlock():
+                fcntl.flock(fd, fcntl.LOCK_UN)
+
+            busy_errors = {errno.EAGAIN, errno.EWOULDBLOCK}
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                try_lock()
+                break
+            except OSError as exc:
+                if exc.errno not in busy_errors:
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ConstructionTimeout(
+                        f"Timed out waiting for construction of versions/{version}; "
+                        "the lease owner is not identified by the surviving lock file"
+                    ) from exc
+                time.sleep(min(poll_interval, remaining))
+        try:
+            named = os.lstat(lock_path)
+            if (not stat.S_ISREG(named.st_mode) or
+                    (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
+                raise OSError("construction lease path changed while waiting")
+            yield
+        finally:
+            unlock()
+    finally:
+        os.close(fd)
 
 #: Admission decision states. A caller branches on these, never guesses from
 #: `is_complete` alone, because "incomplete" is itself two different cases

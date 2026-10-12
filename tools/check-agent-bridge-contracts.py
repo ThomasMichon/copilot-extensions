@@ -76,6 +76,7 @@ _DEFERRED_KEYS = {
     "reference_sha256",
 }
 _HTTP_CAPABILITY_CONSTANTS = {
+    "acquisition_retirement_recovery": "ACQUISITION_RETIREMENT_RECOVERY_PROTOCOL_VERSION",
     "acquisition_retirement_revalidation": "ACQUISITION_RETIREMENT_REVALIDATION_PROTOCOL_VERSION",
     "relay_interrupt": "RELAY_INTERRUPT_PROTOCOL_VERSION",
     "failed_acp_handshake": "FAILED_ACP_HANDSHAKE_PROTOCOL_VERSION",

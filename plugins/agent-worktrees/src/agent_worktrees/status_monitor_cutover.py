@@ -338,28 +338,12 @@ def _is_status_monitor_cmdline(cmdline: str) -> bool:
 
 def _iter_status_monitor_pids() -> set[int]:
     if os.name == "nt":
-        argv = [
-            "powershell",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }",
-        ]
-        out = subprocess.run(  # noqa: S603
-            argv, capture_output=True, text=True, timeout=10, check=False
-        )
-        hits: set[int] = set()
-        for line in (out.stdout or "").splitlines():
-            if "\t" not in line:
-                continue
-            pid_s, cmdline = line.split("\t", 1)
-            try:
-                pid = int(pid_s.strip())
-            except ValueError:
-                continue
-            if _is_status_monitor_cmdline(cmdline):
-                hits.add(pid)
-        return hits
+        from . import windows_process_census
+
+        return {
+            item["pid"] for item in windows_process_census.snapshot()
+            if _is_status_monitor_cmdline(item["command_line"])
+        }
     argv = ["ps", "-eo", "pid=,args="]
     out = subprocess.run(argv, capture_output=True, text=True, timeout=5, check=False)  # noqa: S603
     hits: set[int] = set()

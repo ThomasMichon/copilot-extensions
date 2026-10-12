@@ -85,6 +85,22 @@ The tracking state (seen in `list` / the picker) and its status-bar block:
 may hold planning or conversation. See
 [cli-reference.md § status-segment](cli-reference.md) for the bar detail.
 
+Git classification observes the current branch, dirtiness and local refs on
+each pass. After patch-equivalence checks, its content fallback reads a raw
+branch diff and batches exact upstream tree-entry lookups instead of launching
+two blob lookups per changed path. It considers only paths changed by the branch since its merge
+base; unrelated upstream changes do not make the branch WIP. Full blob/gitlink
+object IDs, not file modes, determine content equality. Rename detection and
+submodule hiding are disabled for this fallback so an outstanding old-path
+deletion or gitlink change cannot disappear from the evidence. Literal
+NUL-delimited paths support whitespace and Unicode without Git's display
+quoting. Literal, nonrecursive `ls-tree` requests are split under a conservative
+24-K argument budget, with ancestors and descendants in separate batches:
+they never enumerate unrelated upstream files. Oversized individual path
+arguments, failed commands and malformed tree evidence report `UNKNOWN`, never a clean
+or completed state. This is per-pass batching, not a persistent fact cache or
+a change to daemon authority, fetch freshness, or session/tracking refinements.
+
 #### `FINAL` vs `MERGED` -- the closure descriptor split
 
 A `completed` worktree (its content is fully on the default branch) does not

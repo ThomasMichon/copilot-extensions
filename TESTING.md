@@ -12,7 +12,7 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 The review-request workflow's fast contract uses
 `node --test tools/test_copilot_review_gate.cjs`. To exercise its exact script
 against the bundled `actions/github-script` runtime as well, download
-`dist/index.js` from the commit pinned in `copilot-review-gate.yml` into a
+`dist/index.js` from the commit pinned in `workflow-lockdown-guard.yml` into a
 task-specific scratch folder and pass its absolute path as
 `COPILOT_REVIEW_ACTION_BUNDLE` to that same command. The opt-in test uses
 synthetic read/write tokens and an in-memory HTTP adapter; it makes no live API
@@ -108,6 +108,19 @@ The stalled descendant/captured-pipe case lives separately in
 `test_first_install_bootstrap_watchdog.py` and runs only in the full suite,
 not the required guard lane.
 
+FINAL stamp regressions use one immutable real-Git template and isolated
+per-test copies. The changed-plugin guard lane runs four smoke cases:
+serialized stamp/poll persistence, a tracked edit invalidating the stamp,
+the production cached-display/removal split, and a retained at-rest claim.
+The remaining checkout/obligation matrix runs in the existing full
+promotion/scheduled/manual suite, not as an unconditional new PR matrix.
+The report-only audit recipe's pure parameter/receipt/path checks and
+service-free CLI render smoke also run in the changed-dispatch guard lane.
+A non-dry-run CLI kick additionally traverses the real parser/create/client
+path against an isolated loopback coordinator without spawning a worker.
+Native symlink escape coverage runs where the test environment permits
+creating symlinks; a platform refusal is reported as a skip, not a pass.
+
 There is no host-wide test singleton. Each target takes a lease keyed by its
 **concrete environment directory's filesystem identity** (`st_dev`, `st_ino`),
 held across venv preparation,
@@ -171,6 +184,17 @@ pytest's headless spawn adapter.
 The ambient desktop observations intentionally fail rather than excuse an
 unattributable window or focus change; run this lane separately from normal
 interactive desktop activity.
+
+Agent-worktrees' tree-comparison policy tests also run in-process. The opt-in
+`AGENT_WORKTREES_TREE_DIFF_NATIVE=1` lane in `test_git_tree_diff.py` requires
+`--allow-explicit-tiers` and constructs isolated fresh Git repositories. It
+measures two unchanged divergent-WIP cycles with one and twenty changed
+paths, requiring eight direct classifier Git starts per cycle, excluding
+fixture setup, with 500 unrelated upstream paths excluded from the actual
+lookup output. It also checks dirty/ref changes, Unicode names, replacement
+objects, exact ancestor/descendant lookups and differently shaped landed content.
+These are direct Git-launch
+budgets, not a host-wide spawn/window census or a deployed-daemon measurement.
 
 Large test modules should be split by behavioral contract, not by arbitrary
 line count. Within each contract family, prefer one parameterized or
@@ -584,6 +608,18 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   **Picker** UX, golden, cache, pivot, streaming, steering, profile, SSH-source,
   selection, capture, mock, and PNG-validation corpus under
   `worktree-manager/tests/production_picker/`.
+  The configuration-action contracts exercise native forms, Cancel-default
+  confirmation, safe argv substitution and visible command failures. For the
+  real Workers-to-override acceptance lane, prepare agent-dispatch's test venv
+  with `python tools/run-plugin-tests.py agent-dispatch --prepare-only`, set
+  `WORKERS_CONFIG_TEST_PYTHON` to that venv's interpreter, then run
+  `python tools/run-standalone-tests.py worktree-manager` with
+  `PYTEST_ADDOPTS='-k workers_picker_real_override_round_trip'` (add `--prepare`
+  only when the Manager test environment needs provisioning). It uses the
+  current source and shipped Workers form with an isolated registrar declaration
+  and override store: Cancel writes nothing, Disable sets the logical override,
+  Enable removes it, and declaration bytes stay unchanged. Ordinary Manager
+  runs skip this cross-distribution lane when no interpreter is supplied.
 - **ai-attribution:** payload-only hook tests covering authoritative
   `sessionStart` payload cwd, malformed/missing payloads, git-repo gating, safe
   defaults, bounded operator/repository config discovery, symlink/reparse

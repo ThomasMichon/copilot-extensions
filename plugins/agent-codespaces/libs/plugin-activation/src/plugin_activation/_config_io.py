@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 from dropin_registry import Finding, ScanAuthority
-from plugin_resolve import RepoPluginSettings
+from plugin_resolve import RepoPluginSettings, split_source
 
 from ._findings import _combine_authority, _finding
 from .state import PluginStateError, read_json_object
@@ -48,13 +48,19 @@ def _load_json_object(path: Path) -> tuple[ScanAuthority, dict, list[Finding]]:
     return ScanAuthority.COMPLETE, data, []
 
 
-def _read_settings(base: Path, rels: tuple[tuple[str, ...], ...]) -> _SettingsLoad:
+def _read_settings(
+    base: Path,
+    rels: tuple[tuple[str, ...], ...],
+    *,
+    plugin_names: tuple[str, ...] | None = None,
+) -> _SettingsLoad:
     enabled: dict[str, bool] = {}
     marketplaces: dict[str, dict] = {}
     enabled_origins: dict[str, Path] = {}
     marketplace_origins: dict[str, Path] = {}
     findings: list[Finding] = []
     authorities: list[ScanAuthority] = []
+    selected_names = frozenset(plugin_names) if plugin_names is not None else None
 
     for rel in rels:
         path = base.joinpath(*rel)
@@ -77,6 +83,12 @@ def _read_settings(base: Path, rels: tuple[tuple[str, ...], ...]) -> _SettingsLo
             )
         elif isinstance(raw_enabled, dict):
             for source, value in raw_enabled.items():
+                if (
+                    selected_names is not None
+                    and isinstance(source, str)
+                    and split_source(source)[0] not in selected_names
+                ):
+                    continue
                 if not isinstance(source, str) or not isinstance(value, bool):
                     authorities.append(ScanAuthority.INDETERMINATE)
                     findings.append(
@@ -134,10 +146,13 @@ def _read_settings(base: Path, rels: tuple[tuple[str, ...], ...]) -> _SettingsLo
     )
 
 
-def _user_settings(copilot_home: Path) -> _SettingsLoad:
+def _user_settings(
+    copilot_home: Path, *, plugin_names: tuple[str, ...] | None = None
+) -> _SettingsLoad:
     return _read_settings(
         copilot_home,
         (("settings.json",), ("settings.local.json",)),
+        plugin_names=plugin_names,
     )
 
 

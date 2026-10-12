@@ -48,6 +48,7 @@ ACTION_TIMEOUT = 30.0
 #: source should degrade to the field's "Other…" free-text fallback promptly,
 #: not stall opening the dialog.
 OPTIONS_COMMAND_TIMEOUT = 5.0
+STRICT_OPTIONS_COMMAND_TIMEOUT = 20.0
 
 #: Phase 0 (render-perf follow-up, #4762, 2026-10-01):
 #: a held ``subscribe`` stream's producer can exit (crash, or a plain EOF with
@@ -86,37 +87,75 @@ def _child_process_env() -> dict[str, str]:
     return env
 
 
-def resolve_dynamic_options(argv: Sequence[str]) -> list[str]:
+def resolve_dynamic_options(argv: Sequence[str], *, strict: bool = False) -> list[str]:
     """Run a ``create_action`` field's ``options_command`` and return its
-    JSON array of strings, or ``[]`` on ANY failure (not found, non-zero exit,
+    JSON array of strings, or (by default) ``[]`` on failure (not found, non-zero exit,
     timeout, malformed/non-array output) -- this is a soft, best-effort
     enrichment: a field that declares ``options_command`` always has
     ``allow_other`` auto-forced true by
     :func:`pivot_create_action.parse_create_action`, so an empty result still
     leaves the field answerable via its "Other…" free-text fallback rather
-    than ever blocking the create dialog from opening. Never raises."""
+    than ever blocking the create dialog from opening. Strict configuration
+    choices use the ordinary read-query budget and raise on failure instead."""
     argv = list(argv)
     if not argv:
+        if strict:
+            raise ValueError("empty options command")
         return []
     resolved = shutil.which(argv[0])
     if resolved:
         argv = [resolved, *argv[1:]]
     try:
         proc = subprocess.run(
-            argv, capture_output=True, text=True, timeout=OPTIONS_COMMAND_TIMEOUT,
-            check=False, env=_child_process_env(),
+            argv, capture_output=True, text=True,
+            timeout=STRICT_OPTIONS_COMMAND_TIMEOUT if strict else OPTIONS_COMMAND_TIMEOUT,
+            check=False, env=_child_process_env(), creationflags=no_window_flags(),
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
+        if strict:
+            raise ValueError(f"options command failed: {exc}") from exc
         return []
     if proc.returncode != 0:
+        if strict:
+            detail = (proc.stderr or "").strip() or f"exit {proc.returncode}"
+            raise ValueError(f"options command failed: {detail}")
         return []
     try:
         data = json.loads(proc.stdout or "[]")
-    except ValueError:
+    except ValueError as exc:
+        if strict:
+            raise ValueError("options command returned invalid JSON") from exc
         return []
     if not isinstance(data, list) or any(not isinstance(item, str) for item in data):
+        if strict:
+            raise ValueError("options command must return a JSON array of strings")
         return []
+    if strict and (not data or any(not item.strip() for item in data)):
+        raise ValueError("options command returned no usable choices")
     return data
+
+
+def resolve_form_fields(
+    fields: Sequence[Mapping[str, object]], *, strict: bool = False
+) -> list[dict[str, object]]:
+    resolved = []
+    for field in fields:
+        merged = dict(field)
+        command = field.get("options_command")
+        if command:
+            from .pivot_actions import _as_argv
+
+            try:
+                argv = _as_argv(command, where="form field options_command")
+                live = resolve_dynamic_options(argv, strict=strict)
+            except ValueError as exc:
+                raise ValueError(
+                    f"field {field['name']!r} options_command: {exc}"
+                ) from exc
+            if live:
+                merged["options"] = live
+        resolved.append(merged)
+    return resolved
 
 
 #: Overall watchdog for a one-shot (non-``subscribe``) streaming ``list``: a
@@ -878,20 +917,30 @@ class RegisteredPivotRuntime:
         return (False, (detail[-1] if detail else f"exit {rc}")[:200])
 
 
-def run_config_section(action, ctx: Mapping[str, object]) -> tuple[bool, str]:
+def run_config_section(
+    action, ctx: Mapping[str, object], *, fields: Mapping[str, object] | None = None
+) -> tuple[bool, str]:
     """Run a contributed :class:`~picker_tui.pivots.ConfigSection` against
     ``ctx`` as a subprocess (argv[0] resolved on ``PATH``). Returns
     ``(ok, message)`` and never raises, so the picker can surface the outcome in
     its status line. Mirrors :func:`run_worktree_action` -- a config section is
     the same run-on-Enter shape, but rides the ⚙ Configuration menu rather than
     a worktree row, and is global (not per-worktree) in scope."""
-    argv = _resolve_argv(action.run, ctx)
+    if fields is None:
+        argv = _resolve_argv(action.run, ctx)
+    else:
+        from .pivot_actions import format_form_template
+
+        # Field values are inserted once and never reinterpreted as tokens.
+        argv = format_form_template(action.run, ctx, fields)
+        if argv and (resolved := shutil.which(argv[0])):
+            argv[0] = resolved
     if not argv:
         return (False, "empty config command")
     try:
         proc = subprocess.run(
             argv, capture_output=True, text=True, timeout=ACTION_TIMEOUT,
-            check=False, env=_child_process_env(),
+            check=False, env=_child_process_env(), creationflags=no_window_flags(),
         )
     except FileNotFoundError:
         return (False, f"{argv[0]} not found on PATH")

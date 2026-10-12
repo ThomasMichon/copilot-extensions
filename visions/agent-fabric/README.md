@@ -67,6 +67,13 @@ Supporting capabilities may **consume** the fabric without becoming another
 coordination authority. They retain ownership of their own evidence or domain
 state while reusing the existing layers for scheduling, claims, and execution.
 
+### Agentic factory — intent-to-outcome composition
+The [agentic-factory](agentic-factory/README.md) child branch composes portable
+agents, durable tasks, specialized orchestration, and ephemeral planning into
+operator-steerable work. Its children refine consent-based worktree stewardship,
+independent harness/knowledge/product topology, and evidence-grounded operational
+feedback, over the fabric's existing authorities rather than another queue.
+
 ### agent-worktrees — the worktree-lifetime agency ground layer
 Owns repository and worktree identity, isolation, source-control lifecycle,
 claims, obligations, asserted disposition, execution relationships, and the
@@ -742,6 +749,8 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
 ## See Also
 
 - Parent vision: [visions index](../README.md)
+- Child branch: [agentic-factory](agentic-factory/README.md) — four-layer
+  intent-to-outcome composition and its focused capability leaves.
 - Sibling vision: [plugin-services](../plugin-services/README.md) — the per-host
   service model the fabric's layers deploy as (it defers cross-host agent reach
   to this fabric).

@@ -38,6 +38,73 @@ reports this before starting a cutover.
 Explicit-source mode keeps successors in the current complete native interpreter
 and bypasses legacy sibling server-venv discovery/foreground redispatch.
 
+## Stage an immutable native candidate
+
+This initial standalone **staging adapter supports Windows and Linux**. macOS
+staging fails before subprocess launch because the implementation cannot yet
+provide an equivalent owned-descendant cleanup authority there. Existing legacy
+macOS host/client installation remains unchanged; it is not redirected through
+this new adapter. Darwin parity is an explicit deferred lifecycle item, not a
+claim that native compatibility is complete.
+
+`stage` provisions a candidate but never selects it, starts a service or changes
+the host configuration/data/routing. The install root must be an explicit
+absolute dedicated directory, disjoint from the host home/data/routing, bundle,
+tools and policy inputs. No default `~/.agent-index` installation is inferred.
+
+```console
+agent-index-service stage --config /absolute/host.yaml --install-root /absolute/service-runtime --descriptor /absolute/bundle/release.json --expected-source-commit <commit> --python /absolute/python --uv /absolute/uv --third-party-lock /absolute/native-lock.txt --uv-config /absolute/uv.toml
+agent-index-service candidates --config /absolute/host.yaml --install-root /absolute/service-runtime
+```
+
+The platform-resolved third-party lock requires one exact `==` pin and one or
+more SHA-256 hashes per requirement; no includes, VCS/editable/direct URLs,
+environment markers, duplicate pins or replacements of bundled distributions.
+Feed policy comes from the explicitly supplied operator-owned uv TOML, not a
+hardcoded public registry. An offline wheelhouse is supported through that
+policy.
+Policy validation requires an explicit default index (`default-index`,
+`index-url` or a `[[index]]` with `default = true`), or explicit
+`offline = true` / `no-index = true`. An unrelated nonempty TOML table is not
+admitted, because it would leave uv's built-in registry fallback active.
+Build/probe environments use a minimal platform allowlist and only the
+explicit Python/uv/runtime directories on PATH. Ambient tokens, proxies, CA
+overrides, compiler flags and loader injections are not inherited. Additional
+proxy/CA environment injection is not supported by this adapter; required
+transport settings must be expressible in the supplied policy or staging fails.
+The allowed platform environment is bound into the candidate identity.
+The isolated probe checks dependency/extras closure, native imports,
+package versions and the explicit-source core seam without contacting an engine.
+
+Builds reserve the permanent `versions/<service-version>` path so POSIX venv
+shebangs remain valid. Verified wheels are snapshotted and reverified, build
+processes are bounded/owned, and canonical completion is published last. A
+completed same-version identical request is idempotent; conflicting completed
+or preexisting incomplete slots fail and remain inspectable. Failure cleanup
+removes only the current transaction's proven-owned incomplete slot; unconfirmed
+descendant cleanup preserves it.
+Removable build output is cleaned even when teardown fails, with explicit
+uncertainty if removal cannot complete. Receipt temporary files are created
+exclusively with restrictive permissions before atomic publication. Invalid
+lock/policy UTF-8 and preserved completed-slot receipt conflicts report their
+specific cause without printing feed contents.
+
+Windows staging requires strict owned Job termination and an empty-Job
+confirmation before candidate deletion. Best-effort handle closure alone is
+not accepted as proof that every descendant has exited; any teardown uncertainty
+preserves the incomplete candidate and fails explicitly.
+The child must also acquire its non-breakaway Job while still suspended.
+Assignment failure never resumes it. Legacy process-helper callers retain their
+existing breakaway behavior; staging explicitly selects the stricter mode.
+
+`candidates` is read-only, including when the root does not exist. Completion
+marker absence is reported as incomplete, including a crash after receipt
+publication; a present marker with missing/invalid receipt is invalid. Completion
+means **built and import-validated**, not passive service readiness or migration
+safety. There is no active marker, stable launcher, autostart registration,
+activation, rollback or pruning in this slice. Those operations require their
+own reviewed readiness, queue/data-schema and retained-rollback gates.
+
 ## Explicit host configuration (schema 1)
 
 ```yaml
@@ -156,8 +223,8 @@ assignment/progress/cancellation and query embedding/storage composition.
 Future authenticated remote adapters need identity/role/job/source authorization
 tests; a shared SQLite mount is not such an adapter.
 
-Version-slot installation, authenticated release acquisition/build provenance,
-candidate validation, durable supervision and rollback/schema policy belong to
+Health-gated slot activation, authenticated release acquisition/build provenance,
+durable supervision and rollback/schema policy belong to
 the coordinator's next lifecycle/release slice. `deploy` is not an installer
 or continuous restart authority. Never infer rollback safety from executable
 version slots alone.
@@ -177,8 +244,26 @@ Released installs require `agent-index>=0.10.12.dev1`; earlier released cores
 lack the explicit-source seam. The test runner alone overrides the core's frozen
 `dev` source version while installing that same checkout's core. This does not
 relax wheel metadata or the runtime compatibility check for ordinary installs.
+Staging also requires `agent-procutil>=0.1.0.dev8` for strict assignment and
+non-breakaway ownership. Local test preparation selects the same-checkout helper
+explicitly despite its frozen `dev` version; real wheel bundles must satisfy
+the released dependency floor.
 Smoke preparation installs only the base core and test extra; native storage
 and hosting extras are reserved for full/manual/promotion execution.
+
+The wheel carries the unchanged canonical stdlib versioned-runtime primitive as
+a build-generated package resource. A source build requires the full released
+checkout, or the complete sdist containing that resource. Sdist-to-wheel builds
+work outside the repository; missing or conflicting copies fail explicitly.
+No extra maintained source mirror or plugin dependency is introduced.
+Editable/source-only imports remain suitable for read-only development, but
+are not an installer runtime: staging requires a built, installed wheel.
+
+The optional real staging integration test consumes an explicitly prepared
+`STANDALONE_STAGING_TEST_FIXTURE` JSON containing descriptor, source commit,
+Python/uv paths, hash-lock and uv-config paths. Its wheels must come from the
+approved package source for that host. Run it with the installed package's
+isolated interpreter; a source-only import intentionally lacks the built resource.
 
 In an already provisioned test environment:
 

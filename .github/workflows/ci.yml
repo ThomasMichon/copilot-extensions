@@ -486,6 +486,8 @@ jobs:
         run: python -m pytest -q tools/test_hook_interpreter.py
       - name: Promotion exact-PR merge wait regression tests
         run: python -m pytest -q tools/test_promotion_merge_wait.py
+      - name: Trusted PR policy contract tests
+        run: python -m pytest -q tools/test_trusted_pr_policy.py tools/test_post_ci_policy.py
       - name: Payload invocation generated files
         run: python libs/payload-invocation/generate.py --all --check
       - name: Payload invocation foundation tests
@@ -682,7 +684,9 @@ jobs:
           --base ${{ github.event.pull_request.base.sha }}
           --head ${{ github.event.pull_request.head.sha }}
       - name: Docs consistency
-        run: python tools/check-docs-consistency.py
+        run: |
+          python -m pytest -q tools/test_check_docs_consistency.py
+          python tools/check-docs-consistency.py
       - name: Runbook references
         run: python tools/check-runbook-references.py
       - name: Trusted self-hosted CI contract
@@ -720,7 +724,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$base"...HEAD | grep -Eq \
-            '^tools/(build_python_artifacts\.py|build_toolchain_lock\.py|governed_feed_trust\.py|uv_editable_ref\.py|test_build_python_artifacts\.py)$'; then
+            '^tools/(build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|smoke_public_toolchain\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_seasoned_public_feed\.py|test_build_python_artifacts\.py)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -733,7 +737,13 @@ jobs:
         # paths (TESTING.md's "Gate specialized suites by changed paths"
         # invariant) since this is a large, subprocess-adjacent suite most
         # PRs never touch.
-        run: python -m pytest -q tools/test_build_python_artifacts.py
+        run: python -m pytest -q tools/test_build_python_artifacts.py tools/test_seasoned_public_feed.py tools/test_public_toolchain_source.py
+      - uses: astral-sh/setup-uv@v9.0.0
+        if: steps.python-artifact-builder.outputs.run == 'true'
+      - name: Fresh seasoned-public toolchain and shared real wheel builds
+        if: steps.python-artifact-builder.outputs.run == 'true'
+        timeout-minutes: 3
+        run: python tools/smoke_public_toolchain.py
       - name: Asyncio timeout handlers (Python 3.10 daemon)
         # The agent-bridge daemon venv is pinned to Python 3.10 (uv venv
         # --python 3.10), where asyncio.wait_for raises asyncio.TimeoutError --
@@ -753,7 +763,7 @@ jobs:
       # Internal-identifier enforcement moved out of this untrusted PR lane.
       # Fork PRs receive no repository secrets on `pull_request`, and repo
       # `vars.*` would be plain-text/public, so this workflow can never hold the
-      # real denylist safely. `.github/workflows/identifier-leak-guard.yml`
+      # real denylist safely. The scanner job in `.github/workflows/promote-trigger.yml`
       # follows GitHub's documented `pull_request` -> `workflow_run` pattern:
       # CI stays unprivileged here, then the trusted follow-up workflow reads
       # the PR head as inert data only, runs the trusted scanner with secrets,
@@ -826,7 +836,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$base"...HEAD | grep -Eq \
-            '^tools/(build_python_artifacts\.py|build_toolchain_lock\.py|governed_feed_trust\.py|uv_editable_ref\.py|test_build_python_artifacts\.py)$'; then
+            '^tools/(build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_build_python_artifacts\.py)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -837,6 +847,9 @@ jobs:
           uv run --with pytest python -m pytest -q -m windows_only
           -W ignore::pytest.PytestUnknownMarkWarning
           tools/test_build_python_artifacts.py
+      - name: Explicit public toolchain policy tests (Windows)
+        if: steps.python-artifact-builder.outputs.run == 'true'
+        run: uv run --with pytest python -m pytest -q tools/test_public_toolchain_source.py
 
   windows-hooks:
     name: Git hooks (Windows)
@@ -893,17 +906,25 @@ jobs:
     name: agent-dispatch-service (out-of-plugin)
     # agent-dispatch-service is delivered OUTSIDE the plugin pipe (see
     # tools/standalone_consumers.py), so the per-plugin matrix below never
-    # runs its tests. This dedicated job gives it real CI, mirroring
-    # worktree-manager's own out-of-plugin job shape.
+    # runs its tests. Unlike worktree-manager (whose dependencies are all
+    # genuinely vendorable shared libs/<lib>), agent-dispatch-service
+    # depends on the agent-dispatch PLUGIN -- the same shape as
+    # agent-index-service's dependency on agent-index -- so a plain `uv
+    # run` can't resolve it from any index. Use the same
+    # run-standalone-tests.py harness agent-index-service's own job uses,
+    # which supplies the needed local path sources directly (see
+    # run-standalone-tests.py's prepare()).
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
-      - name: Test agent-dispatch-service
-        working-directory: agent-dispatch-service
-        run: uv run --extra dev pytest -q
+      - name: Test agent-dispatch-service with installed plugin and host containment
+        run: python tools/run-standalone-tests.py agent-dispatch-service --prepare --admission-wait 60 --timeout 180
 
   test-runner-linux:
     name: test runner (ubuntu-latest)

@@ -13,6 +13,27 @@ from . import locks, procs, self_retire, status_monitor_cutover, status_monitor_
 
 def _candidates() -> list[diagnostics.DaemonCandidate]:
     runtime_root = str(status_monitor_runtime._aw_runtime_home())
+    if sys.platform == "win32":
+        from . import windows_process_census
+
+        candidates = []
+        for item in windows_process_census.snapshot():
+            if not status_monitor_cutover._is_status_monitor_cmdline(item["command_line"]):
+                continue
+            if not item["cwd"]:
+                raise OSError(f"Cannot establish runtime scope for monitor PID {item['pid']}")
+            if procs._is_under(item["cwd"], runtime_root):
+                candidates.append(
+                    diagnostics.DaemonCandidate(pid=item["pid"], start_time=item["start_time"])
+                )
+        candidate_pids = {candidate.pid for candidate in candidates}
+        for candidate in candidates:
+            if procs.parent_pid(candidate.pid) in candidate_pids:
+                raise OSError(
+                    "Monitor census contains a parent/child interpreter pair; "
+                    "cannot safely classify it as duplicate daemons"
+                )
+        return candidates
     if sys.platform == "darwin":
         scoped_pids = {
             pid

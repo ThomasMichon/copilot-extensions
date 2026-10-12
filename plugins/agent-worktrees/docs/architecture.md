@@ -1,5 +1,53 @@
 # Agent Worktrees -- Architecture
 
+## Concurrent PR publication
+
+The clone-wide `agent-worktrees-publish.lock` protects shared remote
+configuration and destination verification, not the duration of a push.
+Publication captures the expanded, verified push URL under that lock, then
+releases it before authentication, pre-push hooks, and network transfer.
+Transport uses a unique process-local remote with captured push-URL overrides;
+authentication uses that destination rather than resolving the mutable remote
+name again. Per-command URL rules prevent a later rewrite
+rule from redirecting the captured URL. A temporary pre-push forwarding hook
+executes the resolved original hook with unchanged stdin, URL and environment,
+and its original logical remote as `$1`, preserving remote-scoped validation and
+failure propagation. Both its fetch and push URL lookups are pinned to the
+configuration snapshot. No remote is persisted or repointed. The temporary remote
+has no fetch mapping, so Git cannot race the guarded tracking refresh.
+Remote-scoped receive/upload-pack, proxy/auth method, remote-helper, mirror and push
+options are captured with the destinations and reproduced for transport.
+A changed fork identity before capture
+is still refused.
+
+Ordinary incremental publications on unrelated branches can overlap at transport.
+Explicit `--rewrite-pr` retains its outer publication/installation authority
+locks through transport because destructive ownership changes remain serialized;
+the ordinary transport concurrency guarantee does not apply to that path.
+Same-branch updates retain explicit
+Git expected-object leases and owned-rebase proof, so competing writers are
+accepted or rejected atomically by the remote rather than serialized across the
+whole clone. All pre-push hooks and bounded process-tree timeouts still apply.
+After a successful push, a short locked refresh preserves remote-tracking refs
+only if the named remote still matches the captured destination; a remote
+repoint never credits the old push to the new repository.
+Captured nonblank URLs and local-path identities retain their exact whitespace.
+Quoted temporary configuration preserves logical remote names containing `=`
+for forwarded hook lookups. The post-push probe
+has a 30-second deadline, and its best-effort refresh waits at most one second
+for the configuration lock, independently of the push timeout.
+Published-ref probes use the same injected-credential then plain-helper fallback
+as pushes, with a 30-second bound per attempt. Tracking is refreshed only while
+both the named fetch and push destinations still match their snapshot.
+Tracking refresh uses compare-and-swap and never rolls back a newer published
+tip. A refresh failure is reported as a post-push warning, not a false claim
+that the already-successful remote update failed.
+Stale-lease fast-forward recovery probes the same captured destination, retaining
+the upstream exact-lease rewrite guards. Probe timeout warnings name the
+operation and deadline without exposing credential-bearing command arguments.
+Positive exact/wildcard fetch mappings are applied only after negative fetch
+exclusions, preserving deliberately untracked namespaces.
+
 ## Two-Layer Design
 
 ```
@@ -511,6 +559,14 @@ case the agent-bridge creation guard prevents upstream; the ground layer only
 records it. A `bind-session --handoff-token <token>` call claims one exact
 pending handoff and performs the predecessor conclusion, two-way link, handoff
 state change, and head transition atomically.
+
+Resident session discovery preserves the head read from the authoritative
+record under its lock, not a head cached earlier in the catalog cycle. Observing
+an old process cannot adopt any non-active session as head. Cancelling
+an unclaimed handoff restores only its latest rightful predecessor; rebinding
+that same session must not displace a newer yielded lineage. Historical damage
+to that lineage is repaired through explicit `link-succession` with both known
+session identities, never by editing state files or treating discovery as consent.
 
 When a launch carries an opt-in profile-assignment token, the same registration
 also binds the pending assignment to the actual session id. Ordinary resume

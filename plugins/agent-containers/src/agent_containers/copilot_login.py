@@ -72,11 +72,15 @@ def _restore_container_config(
     access could later recover. Restores the pre-login snapshot verbatim,
     or removes the file entirely if none existed. Best-effort and never
     raises -- a cleanup failure must not mask the real outcome (success or
-    the original error) that triggered it.
+    the original error) that triggered it -- but it DOES check the
+    in-container command's own exit status: a nonzero return (e.g. the
+    container exited/became unreachable mid-write) means the restore did
+    NOT actually happen, and silently treating that the same as success
+    would hide a freshly-minted OAuth token left behind in the container.
     """
     try:
         if pre_login_snapshot is not None:
-            subprocess.run(
+            proc = subprocess.run(
                 [
                     "docker", "exec", "-i", "-u", user, container_id,
                     "bash", "-lc", f"cat > {_CONFIG_PATH}",
@@ -87,7 +91,7 @@ def _restore_container_config(
                 creationflags=no_window_flags(),
             )
         else:
-            subprocess.run(
+            proc = subprocess.run(
                 [
                     "docker", "exec", "-u", user, container_id,
                     "bash", "-lc", f"rm -f {_CONFIG_PATH}",
@@ -95,12 +99,21 @@ def _restore_container_config(
                 timeout=30,
                 creationflags=no_window_flags(),
             )
+        if proc.returncode != 0:
+            print(
+                f"agent-containers: WARNING: could not restore {container_id}'s "
+                f"own {_CONFIG_PATH} after extracting its token (in-container "
+                f"command exited {proc.returncode}) -- the freshly logged-in "
+                "OAuth token may still be present in the container's "
+                f"filesystem; consider recreating container '{container_id}'",
+                file=sys.stderr,
+            )
     except (OSError, subprocess.SubprocessError) as exc:
         print(
             f"agent-containers: WARNING: could not restore {container_id}'s "
             f"own {_CONFIG_PATH} after extracting its token ({exc}) -- the "
             "freshly logged-in OAuth token may still be present in the "
-            "container's filesystem; consider recreating it",
+            f"container's filesystem; consider recreating container '{container_id}'",
             file=sys.stderr,
         )
 

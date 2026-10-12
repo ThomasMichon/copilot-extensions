@@ -200,3 +200,40 @@ def test_malformed_state_fails_closed(tmp_path, name, content, message):
     (home / name).write_text(content, encoding="utf-8")
     with pytest.raises(PluginStateError, match=message):
         inspect_plugin_state(IDENTITY, home)
+
+
+def test_a_built_in_plugin_entry_is_left_alone(tmp_path):
+    """Copilot CLI's first-party plugins write an unqualified key (no
+    ``@marketplace``) into enabledPlugins. It is not this library's: reads and
+    removals work around it and never drop or rewrite it."""
+    home = _write_state(tmp_path, True, inventory_enabled=True)
+    settings_path = home / "settings.json"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    settings["enabledPlugins"]["computer-use"] = True
+    settings_path.write_text(json.dumps(settings), encoding="utf-8")
+
+    assert inspect_plugin_state(IDENTITY, home)["userActivation"] == "true"
+    snapshot = capture(IDENTITY, home)
+    assert remove_user_activation(IDENTITY, home, apply=True)["changed"] is True
+    after = json.loads(settings_path.read_text(encoding="utf-8"))["enabledPlugins"]
+    assert after == {"other@m": True, "computer-use": True}
+    restore(snapshot, home)
+    after = json.loads(settings_path.read_text(encoding="utf-8"))["enabledPlugins"]
+    assert after == {IDENTITY: True, "other@m": True, "computer-use": True}
+
+
+@pytest.mark.parametrize("key", ["@m", "a@", "a@b@c"])
+def test_a_malformed_marketplace_key_still_fails_closed(tmp_path, key):
+    home = _write_state(tmp_path)
+    (home / "settings.json").write_text(json.dumps({"enabledPlugins": {key: True}}),
+                                        encoding="utf-8")
+    with pytest.raises(PluginStateError, match="<name>@<marketplace>"):
+        inspect_plugin_state(IDENTITY, home)
+
+
+def test_a_marketplace_key_still_needs_a_boolean(tmp_path):
+    home = _write_state(tmp_path)
+    (home / "settings.json").write_text(json.dumps({"enabledPlugins": {"a@m": "yes"}}),
+                                        encoding="utf-8")
+    with pytest.raises(PluginStateError, match="must be boolean"):
+        inspect_plugin_state(IDENTITY, home)

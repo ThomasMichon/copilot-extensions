@@ -53,21 +53,30 @@ class CreateActionScreen(FieldQuestionsMixin, ModalScreen[dict | None]):
         Binding("ctrl+left", "prev_tab", show=False),
     ]
 
-    def __init__(self, label: str, fields: list, *, confirm: bool = False) -> None:
+    def __init__(
+        self, label: str, fields: list, *, confirm: bool = False,
+        submit_label: str = "Create", summary: str = "", confirm_values: bool = False,
+    ) -> None:
         super().__init__()
         self._label = label
         self._fields = list(fields or [])
         self._needs_confirm = bool(confirm)
+        self._submit_label = submit_label
+        self._summary = summary
+        self._confirm_values = confirm_values
         self._q: list[dict] = []
         self._confirming = False
 
     # ---- compose --------------------------------------------------------
     def compose(self) -> ComposeResult:
         with Vertical(id="create-frame"):
+            if self._summary:
+                yield Static(self._summary, markup=False, id="create-summary")
             yield from self._compose_questions()
             yield Static(self._foot(), id="create-foot")
             yield FocusGroup(
-                [("confirm", "Create"), ("cancel", "Cancel")], id="create-buttons")
+                [("confirm", self._submit_label), ("cancel", "Cancel")],
+                id="create-buttons")
 
     def _compose_questions(self):
         if not self._fields:
@@ -147,9 +156,16 @@ class CreateActionScreen(FieldQuestionsMixin, ModalScreen[dict | None]):
         # label (often already a full, punctuated phrase like "New task…"),
         # not necessarily a bare noun -- "Create this <label>?" reads wrong
         # for most real labels ("Create this New task…?").
-        prompt = Static(f"Proceed with {self._label!r}?", id="create-confirm-prompt")
+        text = f"Proceed with {self._label!r}?"
+        if self._confirm_values:
+            text += "\n" + "\n".join(
+                f"{name}: {value}" for name, value in self._collect().items()
+            )
+            if self._summary:
+                text += f"\n\n{self._summary}"
+        prompt = Static(text, markup=False, id="create-confirm-prompt")
         buttons = FocusGroup(
-            [("yes", "Create"), ("no", "Cancel")], initial=1,
+            [("yes", self._submit_label), ("no", "Cancel")], initial=1,
             id="create-confirm-prompt-buttons")
         frame.mount(prompt)
         frame.mount(buttons)

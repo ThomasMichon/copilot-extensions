@@ -13,6 +13,13 @@ For the *concepts* behind a control-harness repo (what it is, why one repo),
 read the [README § Concepts](../README.md#concepts-the-control-harness-repo)
 first. This runbook is the *procedure*; the README is the *why*.
 
+**This is an optional assembly recipe, not the toolkit's universal install
+contract.** For one standalone capability, begin with
+[installation](installation.md) and its owner guide. For choosing components
+or a deployment shape, read [capabilities](capabilities.md) and
+[adoption](adoption.md). Product, account, provider, venue, and private-state
+choices remain the adopter's; examples here are generic, not a shipped bundle.
+
 ---
 
 ## How to use this runbook
@@ -37,14 +44,27 @@ the very plugins whose skills the later phases lean on.
 > runbook (it routes here and frames the run), and **`reviewing-customizations`**
 > operationalizes [Phase 8](#phase-8--validate-skills-and-agents).
 
-**All three modes run the same phases.** The difference is only whether each
-phase *creates*, *extends*, or *verifies*:
+**All three modes assess the same phases**, but execute only those selected
+for the deployment. A skipped optional phase is not a failed standalone
+installation. Record why it does not apply:
 
 - **Greenfield** — create everything from scratch.
 - **Brownfield** — add what is missing; leave the operator's existing product
   code untouched.
-- **Audit** — treat every phase's **"Done when"** as a checklist; report drift
-  and fix it in place. See [Audit mode](#audit-mode) for the condensed pass.
+- **Audit** — treat applicable **"Done when"** conditions as a read-only
+  checklist; report drift and apply only authorized corrections.
+  See [Audit mode](#audit-mode) for the condensed pass.
+
+| Selected scope | Applicable phases |
+|----------------|-------------------|
+| Local recipe | 0–4, then a local lifecycle validation in Phase 6 |
+| Remote/live communication | Add Phase 5 and the selected venue owner's setup |
+| Planning and intent | Add Phase 7 |
+| Customization review | Phase 8, using available review tools |
+| Authenticated MCP tools | Add Phase 9 |
+
+The Picker lane in Phase 6 applies when its separately installed host is
+selected; it is not required for a payload-only plugin or standalone CLI use.
 
 **Drive it, don't dictate it.** Where a phase names an *unopinionated seam*,
 ask the operator (use a structured question) rather than guessing. Where a
@@ -63,13 +83,13 @@ These are the load-bearing conventions. Apply them. Each maps to a phase.
 
 1. **Repo structure** for the harness itself — [Phase 1](#phase-1--repo-structure).
 2. **Repo-scoped plugin registration** via `.github/copilot/settings.json` +
-   experimental mode — [Phase 2](#phase-2--register-repo-scoped-plugins).
+   explicit activation/trust scope — [Phase 2](#phase-2--register-repo-scoped-plugins).
 3. **Adopting the harness and its related target repos with agent-worktrees** —
    [Phase 3](#phase-3--adopt-the-harness-and-related-repos).
 4. **`AGENTS.md` + "connective-tissue" skills** that bind the generic plugin
    skills to *this* repo — [Phase 4](#phase-4--agentsmd-and-connective-tissue-skills).
 5. **SSH mesh + agent-bridge topology** — [Phase 5](#phase-5--ssh-and-agent-bridge).
-6. **End-to-end validation through the Picker** —
+6. **End-to-end validation through the selected local CLI or Picker lane** —
    [Phase 6](#phase-6--validate-end-to-end-with-the-picker).
 7. **efforts + visions to guide change** — [Phase 7](#phase-7--enable-efforts-and-visions).
 8. **rubber-duck + customizing-copilot to validate skills and agents** —
@@ -91,9 +111,9 @@ Never impose a default on these. Detect the operator's existing choice, or ask.
    that also holds its own product* (`services/`, `tools/`, generators) — being
    both harness and product in one repo is fine. The rule is about **not imposing
    layout across repo boundaries**, not about keeping the harness empty.
-3. **Git provider / hosting.** GitHub, Gitea, GitLab, self-hosted — all fine.
-   Commands here use forge-neutral git; only fetch/push remotes are
-   provider-specific.
+3. **Git provider / hosting.** The operator chooses. Ordinary git operations
+   are provider-neutral; API-backed PR, issue, credential, and venue workflows
+   support only the providers their component owners document.
 4. **Issue-tracking provider.** GitHub Issues, Gitea, Jira, none — the harness
    does not require any particular tracker.
 5. **PR / review policy.** Whether changes go direct-to-default-branch or
@@ -115,18 +135,16 @@ Never impose a default on these. Detect the operator's existing choice, or ask.
 
 ## Recommended plugin set
 
-The suite is **fourteen plugins** — more than any single harness needs at once.
-Treat this section as the **curated recommendation**, not the full catalog:
-enable the tier the harness actually needs, not all fourteen by reflex. The
-table below covers the twelve a general harness draws from; the remaining two
-(`copilot-extensions-harness`, `wsl-setup`) are special-purpose — see the note
-after the table. You will encode the choice in
+Treat this section as a **curated recipe**, not the full catalog or a
+mandatory default bundle. The [marketplace](../.github/plugin/marketplace.json)
+owns the roster; [capabilities](capabilities.md) covers the broader selection
+map. Enable what the chosen workflow actually needs. Encode the choice in
 `.github/copilot/settings.json` in [Phase 2](#phase-2--register-repo-scoped-plugins).
 
 | Plugin | Tier | Enable when |
 |--------|------|-------------|
-| `agent-worktrees` | **Core** | Always. Session isolation + repo adoption + the Picker. Install first. |
-| `customizing-copilot` | **Core** | Always. Teaches authoring skills, sub-agents, MCP servers, plugin installs. Payload-only. |
+| `agent-worktrees` | **Recipe core** | Local worktree sessions and repo adoption; standalone CLI use does not require mesh siblings. |
+| `customizing-copilot` | **Recipe core** | Authoring skills, sub-agents, MCP servers, and plugin selection. Payload-only. |
 | `efforts` | **Recommended** | The harness plans stretches of work. Payload-only. |
 | `visions` | **Recommended** | The harness keeps a north-star and derives efforts from the delta. Payload-only. |
 | `agent-bridge` | **Recommended** | More than one machine/agent, or you want inter-agent sends. |
@@ -138,16 +156,18 @@ after the table. You will encode the choice in
 | `agent-dispatch` | **Optional** | Multiple agents must coordinate through an atomic task queue. |
 | `agent-vault` | **Optional** | The harness fetches secrets (API keys, SSH keys, credentials) from a local KeePassXC-backed store instead of hardcoding, committing, or env-exporting them. |
 
-**Minimum viable harness:** `agent-worktrees` + `customizing-copilot`.
-**Recommended default:** add `efforts`, `visions`, `agent-bridge`,
-`context-handoff`. Everything else is opt-in by substrate/need.
+**This recipe's local starting point:** `agent-worktrees` +
+`customizing-copilot`. Add planning, communication, and continuity only where
+their phases apply. This is not the minimum for every use of the toolkit.
 
-> **The two not tiered above are special-purpose, not general-harness picks.**
+> **Additional plugins are not implicitly excluded or required.**
 > `copilot-extensions-harness` is the operator harness for working *on* this
 > suite itself — enable it in a control repo that contributes to
 > copilot-extensions (it is the reference implementation of the `<repo>-harness`
 > standard). `wsl-setup` ships WSL2 provisioning/troubleshooting skills — enable
 > it when a harness must stand up or debug a WSL host. Both are payload-only.
+> See [capabilities](capabilities.md) for SSH, indexing, machine requirements,
+> knowledge binding, conduct, attribution, budget, and opt-in remote drivability.
 
 > **On consolidation.** Managing many plugins is awkward; this runbook is the
 > single place to curate the set. Keep the tiers above as the recommendation and
@@ -179,7 +199,7 @@ below invoke them in order.
 | `efforts-setup` | scaffold · repo | Scaffold `efforts/` + this repo's efforts addendum (Phase 7) |
 | `visions-setup` | scaffold · repo | Scaffold `visions/` + this repo's visions addendum (Phase 7) |
 | `create-setup-script` | scaffold · repo | Generate an ACP-safe `tools/setup/setup.{ps1,sh}` (Phase 1) |
-| `context-handoff-setup` | verify · no install | Troubleshoot the context-handoff **extension** (it needs no install — just the plugin enabled + experimental mode on) |
+| `context-handoff-setup` | verify · no Python runtime | Troubleshoot extension loading; user-level enablement is separate from repo-scoped payload activation |
 
 > Payload-only plugins (`efforts`, `visions`, `context-handoff`,
 > `customizing-copilot`, `harness-*`, `wsl-setup`) have **no runtime to install** —
@@ -190,20 +210,24 @@ below invoke them in order.
 
 ## Phase 0 — Prerequisites
 
-**Opinionated.** Every harness assumes these.
+**For this recipe's selected workflows.** Requirements are not universal
+across every plugin or platform; see [installation requirements](installation.md#requirements-and-platform-scope).
 
-- **Copilot CLI** (`copilot` on PATH), **Python 3.10+**, **Git 2.15+**.
-- **`uv`** — bootstrapped automatically by the plugin installers if missing.
-- **Experimental mode on, once per machine** — the CLI gates *all* extension
-  loading on it. In `~/.copilot/settings.json`:
-  ```json
-  { "experimental": true }
-  ```
-- Provider CLIs only as needed by chosen optional plugins (`gh` for
-  Codespaces/Containers; `docker` for Containers).
+- **Copilot CLI**; for the local worktree lane, **Python 3.10+** and **Git 2.15+**
+  as documented by its [owner](../plugins/agent-worktrees/docs/getting-started.md#prerequisites).
+- **`uv`** — the selected runtime plugin's installer owns bootstrap/deployment.
+- **Activation and trust** — ordinary plugin loading does not require
+  experimental mode. Repository settings are trust-gated; session extensions
+  require user-level enablement because their loader does not merge repo
+  settings. Follow the [installation scope contract](installation.md#load-the-marketplace-payload).
+- **For selected session extensions**, additionally enable user-global
+  `"experimental": true` per the [install contract](install-contract.md).
+  This does not make ordinary plugin loading experimental.
+- Provider CLIs only for selected integrations (`gh` for GitHub access/token
+  workflows; `docker` for container fleet operations).
 
-**Done when:** `copilot --version` works and `~/.copilot/settings.json` has
-`"experimental": true`.
+**Done when:** Copilot CLI runs and the selected payloads/extensions load from
+their intended scope; repository trust is persisted where ACP use needs it.
 
 ---
 
@@ -287,6 +311,11 @@ Trim or extend `enabledPlugins` to the operator's needs — add
 `agent-mcp`, `agent-logger`, `agent-codespaces`, `agent-containers`,
 `agent-dispatch` only where a later phase or the operator calls for them.
 
+This example selects repository payloads. For selected session extensions
+such as context-handoff, deliberately configure user-level enablement as
+documented by the [installation owner](../plugins/customizing-copilot/skills/installing-plugins/SKILL.md);
+the current extension loader does not merge this repository file.
+
 **Restart before you rely on the new skills.** Plugins are scanned at session
 **startup**, so a session that *wrote* `settings.json` does not yet have the
 newly enabled skills. In greenfield/brownfield, the order is: write
@@ -294,19 +323,16 @@ newly enabled skills. In greenfield/brownfield, the order is: write
 plugin skills loaded → then continue. (agent-worktrees especially only takes
 effect after a restart.)
 
-**Deploy the runtimes.** Payload registration only vendors skills/hooks; runtime
-plugins also need a venv + binstub deployed once. Split by installer:
-
-- **agent-worktrees, agent-bridge, agent-codespaces, agent-containers,
-  agent-mcp** — run the **`agent-worktrees:copilot-extensions-setup`** skill ("set up copilot
-  extensions"); it installs each under `~/.agent-*` with binstubs in
-  `~/.local/bin`.
-- **agent-logger** — deploy via its own installer / the **`session-sync-setup`**
-  skill (not covered by `copilot-extensions-setup`).
-- **agent-dispatch** — deploy via its own `scripts/init.*` / the
-  **`agent-dispatch:agent-dispatch`** skill.
-- **Payload-only** (`customizing-copilot`, `efforts`, `visions`,
-  `context-handoff`) — nothing to deploy beyond being enabled.
+**Verify the selected runtimes.** Use the
+[installation waypoint](installation.md#payload-runtime-and-adoption-are-different-steps)
+and each selected plugin's owner. Runtime readiness, first-use provisioning,
+service registration, and adoption are distinct contracts. The
+`agent-worktrees:copilot-extensions-setup` skill covers selected mesh/MCP setup;
+logger and dispatch retain their own setup procedures.
+Agent-facing checks use the plugin's attributable session command glossary;
+legacy `~/.local/bin` management wrappers are not generic cross-plugin
+discovery paths. Payload-only plugins have no separate Python package to
+deploy, but may still need hook/extension prerequisites.
 
 **Done when:** `.github/copilot/settings.json` lists the chosen set, the session
 has been restarted so the skills are live, `agent-worktrees --version` works,
@@ -329,9 +355,11 @@ From inside the harness repo (skill: **`agent-worktrees:copilot-extensions-setup
 agent-worktrees register <harness-repo-name>
 ```
 
-This writes `~/.<harness>/config.yaml`, picks a worktree root
-(`<parent>/.worktrees/<harness>/`), and drops a project binstub
-`~/.local/bin/<harness>` — the command that launches the Picker (Phase 6).
+Registration establishes the project configuration, worktree root, and project
+binstub according to the selected installation/adoption context. It does not
+prove a Picker host is installed. A selected Picker deployment needs the
+separate Manager setup in Phase 6; standalone local management uses the
+[worktrees CLI owner](../plugins/agent-worktrees/docs/cli-reference.md).
 
 ### Adopt related target repos
 
@@ -379,7 +407,9 @@ reaching across machines, and never hardcode a checkout path (resolve with
 > locus; a narrative with **no registry entry on any machine** is the actual gap
 > to reconcile (register it, or drop the stale narrative).
 
-**Done when:** `<harness>` launches the Picker; each product repo either resolves
+**Done when:** the harness registration and local CLI project resolution are
+verified (and, **if the Picker lane is selected**, its installed host launches);
+each product repo either resolves
 via `agent-worktrees related resolve <name>` with a concrete plan **or** is
 explicitly reference-class / owned by another machine, and every narrative has a
 matching registry entry somewhere.
@@ -498,16 +528,25 @@ listing `agent-bridge agents` shows the remote agent and
 
 ## Phase 6 — Validate end-to-end with the Picker
 
-**Opinionated:** the harness is not "done" until a real session runs through the
-**Picker** — the interactive worktree launcher the project binstub opens.
+**For a selected Picker deployment:** run a real session through the
+**Picker** after following the separate
+[Worktree Manager setup](../worktree-manager/README.md).
+For standalone local CLI use, validate the lifecycle through the
+[worktrees owner guide](../plugins/agent-worktrees/docs/getting-started.md)
+instead; do not make the optional Picker host a universal installation gate.
 
-Launch it:
+For the selected Picker lane, launch it:
 
 ```bash
 <harness>            # the project binstub from Phase 3 → opens the Picker
 ```
 
 Walk one full lifecycle:
+
+For standalone local management, use the owning CLI's create/status and
+configured finalization procedure instead of the Picker-specific navigation
+steps below. Do not treat an optional Manager bootstrap prompt as a failed
+repository registration.
 
 1. **Create/pick a worktree** from the Picker; confirm the session starts in an
    isolated worktree (not the anchor).
@@ -526,11 +565,12 @@ Walk one full lifecycle:
 > when *building* a harness, but wrong during a read-only audit. To audit Phase 6
 > without touching anything, verify the finalization path is **configured**
 > instead of exercised: the session is in an isolated worktree (not the anchor),
-> plugins/skills loaded, a setup script is present and ACP-safe, and the PR/branch
+> plugins/skills loaded, a chosen setup script is ACP-safe when present, and the PR/branch
 > policy is wired (`agent-worktrees get pr-required`, the `pr:`/hooks config) —
 > no trivial commit required.
 
-**Done when:** a worktree session launches from the Picker, plugins/skills load,
+**Done when:** a worktree session launches through the selected local CLI or
+Picker lane, plugins/skills load,
 and — when building — a trivial change completes the harness's finalization path
 cleanly (or, when auditing, that path is verified configured without a commit).
 
@@ -679,9 +719,9 @@ read-mostly, or a small low-risk host-auth surface).
 
 ## Audit mode
 
-For a repo already wired as a harness (including by an older incarnation of this
-system), run every phase's **"Done when"** as a checklist and fix drift in
-place. Highest-value checks, in order:
+For a repo already wired as a harness, assess each applicable phase's
+**"Done when"** as a read-only checklist. Report drift; change files or start
+resources only when correction is authorized. Highest-value checks, in order:
 
 1. **Plugin registration is repo-scoped and current** (Phase 2). Old harnesses
    often relied on global installs or a stale plugin set — migrate to
@@ -700,15 +740,17 @@ place. Highest-value checks, in order:
    primary agent.
 7. **rubber-duck + customizing-copilot pass** (Phase 8).
 
-Report findings as a prioritized list; fix the small ones in place (with atomic
-commits) and surface the structural ones to the operator before acting.
+Report findings as a prioritized list with the relevant owner procedure.
+When corrections are authorized, use the repository's normal worktree and
+publication flow; surface structural choices before acting.
 
 ---
 
 ## Where to go next
 
-- [README](../README.md) — concepts, quick start, the full plugin catalog.
+- [Documentation index](README.md) — installation, selection, adoption, and references.
+- [README](../README.md) — concepts, quick start, plugin discovery.
 - [Architecture overview](architecture.md) — how the plugins fit together.
-- Each plugin's `skills/` — the authoritative, always-current procedure for that
+- Each plugin's `skills/` — the owning task-time procedure for that
   capability. This runbook references those skills by name precisely so it stays
   thin and they stay the source of truth.

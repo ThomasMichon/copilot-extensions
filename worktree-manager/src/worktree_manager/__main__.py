@@ -50,33 +50,10 @@ _TAGLINE = "the standalone, out-of-plugin harness control plane"
 # their own installers, then Python libraries, then skills-only knowledge plugins.
 KIND_ORDER = {"core": 0, "service": 1, "library": 2, "knowledge": 3}
 
-# The build-out roadmap, shown so a first run is self-explanatory. Kept in step
-# with the vision's Features and the umbrella's phase issues (#353-#358).
-_ROADMAP = [
-    ("0", "out-of-plugin app + one-line bootstrap", "done"),
-    ("1", "know each plugin's prerequisites & config (dependency-free)", "done"),
-    ("2", "install prerequisites (restart-aware) + the agent-worktrees core", "you are here"),
-    ("3", "adopt a first harness repo + discover/register others", ""),
-    ("4", "a non-agentic visual worktree-manager (doctor / config / validate)", ""),
-    ("5", "Git-referenced presets", ""),
-]
-
-
 def _print_intro() -> None:
-    print()
-    print(f"  {_BANNER}")
-    print(f"  {_TAGLINE}")
-    print(f"  version {__version__}  ·  Phase 2 — prerequisites & core install")
-    print()
-    print("  Build-out roadmap (issue #352):")
-    for num, desc, here in _ROADMAP:
-        marker = f"  <- {here}" if here else ""
-        print(f"    {num}. {desc}{marker}")
-    print()
-    print("  Run `worktree-manager doctor` to check prerequisites + the core install,")
-    print("  `worktree-manager setup` to plan it (add --apply to execute), and")
-    print("  `worktree-manager plugins` to see what the installer knows.")
-    print()
+    from .startup_status import print_startup_status
+
+    print_startup_status()
 
 
 def _fmt_prereq(pr) -> str:
@@ -1587,7 +1564,7 @@ def main(argv: list[str] | None = None) -> int:
         print("The standalone copilot-extensions harness control plane (installer, configurator & worktree launcher).")
         print()
         print("commands:")
-        print("  (no args)              show the app banner + build-out roadmap")
+        print("  (no args)              inspect installation state and show relevant next steps")
         print("  --project NAME         launch NAME's interactive Picker (binstub seam)")
         print("  doctor [--json] [--apply-daemon-health]")
         print("                         report prerequisites + the agent-worktrees core")
@@ -1624,9 +1601,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  companion              Mux Companion: read-only status + session lineage for the current worktree (visions/mux-companion)")
         print("  mux-daemon <run|ensure|register|remove|show|status [--json]>  (daemons status|mappings; #5001)")
         print()
-        print("Phase 2 provisions prerequisites + drives the core install; Phase 3")
-        print("adds the Manager state views (projects/repos/plugin enablement); later")
-        print("phases add the visual worktree-manager and presets (issue #352).")
+        print("A bare invocation reads current installation state without changing it.")
         return 0
     if args and args[0] == "plugins":
         return _cmd_plugins(args[1:])

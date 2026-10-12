@@ -124,6 +124,7 @@ class OneShotSession:
         self._protocol_version: str = proto.LEGACY
         self._on_stage = on_stage
         self.stage: str = "init"
+        self._router = None
 
     def _set_stage(self, name: str) -> None:
         self.stage = name
@@ -131,6 +132,18 @@ class OneShotSession:
             self._on_stage(name)
 
     async def __aenter__(self) -> OneShotSession:
+        if self.cfg.routing is not None:
+            from .routing import RoutedCore
+
+            if self._transport is not None:
+                raise ValueError("routed sessions cannot use one unqualified transport")
+            self._router = RoutedCore(self.cfg)
+            self._ctx = BridgeContext(
+                new_id=self._router.new_id, emit_to_client=lambda _m: None)
+            self._pipeline = Pipeline(
+                build_decorators(self.cfg, self._ctx), self._router.handle)
+            self._set_stage("ready")
+            return self
         self._set_stage("auth")
         injector = build_injector(self.cfg)
         self._set_stage("transport-connect")
@@ -193,6 +206,8 @@ class OneShotSession:
         pipeline, client, transport = self._pipeline, self._client, self._transport
         if pipeline is not None:
             await pipeline.aclose()
+        if self._router is not None:
+            await self._router.aclose()
         if client is not None:
             client.fail_pending("one-shot session closing")
         if transport is not None:
@@ -387,6 +402,8 @@ class OneShotSession:
 
     async def list_tools(self) -> list[dict]:
         """Fetch the full (paginated) upstream catalog, honoring the tool filter."""
+        if self._router is not None:
+            return await self._routed_tools()
         self._need_client()
         if self._ctx is None:
             raise RuntimeError("OneShotSession used outside its async context")
@@ -410,6 +427,8 @@ class OneShotSession:
         same bounded pagination loop, treating every one of those shapes as a
         hard failure rather than an early, silent stop.
         """
+        if self._router is not None:
+            return await self._routed_tools()
         client = self._need_client()
         if self._ctx is None:
             raise RuntimeError("OneShotSession used outside its async context")
@@ -444,7 +463,17 @@ class OneShotSession:
             cursor = result.get("nextCursor")
             if not cursor:
                 break
+        if cursor and self.cfg.routed_target:
+            raise UpstreamError("routing compatibility error: catalog pagination exceeds bound")
         return filter_tools(tools, self.cfg.tools)
+
+    async def _routed_tools(self) -> list[dict]:
+        from .routing_errors import RoutingError
+
+        try:
+            return filter_tools(await self._router.catalog(), self.cfg.tools)
+        except RoutingError as exc:
+            raise UpstreamError(str(exc), code=exc.code, data=exc.data) from exc
 
     async def call_tool(self, name: str, arguments: dict) -> dict:
         """Invoke one tool; return the ``tools/call`` result mapping.
@@ -453,7 +482,7 @@ class OneShotSession:
         semantic failure via ``isError`` is returned normally (the caller decides
         the exit code) -- only a protocol-level error raises.
         """
-        client = self._need_client()
+        new_id = self._router.new_id if self._router is not None else self._need_client().new_id
         pipeline = self._need_pipeline()
         if not tool_visible(name, self.cfg.tools):
             raise UpstreamError(
@@ -462,7 +491,7 @@ class OneShotSession:
             )
         req = {
             "jsonrpc": "2.0",
-            "id": client.new_id(),
+            "id": new_id(),
             "method": "tools/call",
             "params": {"name": name, "arguments": arguments or {}},
         }

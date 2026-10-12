@@ -6,9 +6,11 @@ from __future__ import annotations
 import argparse
 import math
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from _admission_protocol import AlreadyRunningError, acquire
@@ -16,6 +18,32 @@ from plugin_test_containment import ContainmentError, Limits, isolated_environme
 from standalone_consumers import STANDALONE_CONSUMERS
 
 REPO = Path(__file__).resolve().parent.parent
+
+
+def extended_windows_path(path: str) -> str:
+    if path.startswith("\\\\?\\"):
+        return path
+    if path.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + path[2:]
+    return "\\\\?\\" + path
+
+
+def cleanup_sandbox(temporary: tempfile.TemporaryDirectory) -> None:
+    deadline = time.monotonic() + 15
+    while True:
+        try:
+            if os.name == "nt" and isinstance(temporary, tempfile.TemporaryDirectory):
+                root = Path(temporary.name).resolve()
+                if root.exists():
+                    shutil.rmtree(extended_windows_path(str(root)))
+            temporary.cleanup()
+            return
+        except OSError as exc:
+            if os.name != "nt" or getattr(exc, "winerror", None) not in {5, 32, 145}:
+                raise
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.25)
 
 
 def default_python(component: str) -> Path:
@@ -70,6 +98,28 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
             str(REPO / "plugins" / "agent-index" / "libs" / "dropin-registry"),
             str(REPO / "plugins" / "agent-index") + ("" if smoke else "[store,server]"),
         ]
+    elif component == "agent-dispatch-service":
+        # agent-dispatch-service depends on the agent-dispatch PLUGIN, not a
+        # shared libs/<lib> -- the same shape as agent-index-service's
+        # dependency on agent-index above. tools/materialize_main.py's
+        # uv-editable materializer only ever vendors an escaping
+        # libs/<lib> reference, by deliberate design (its own containment
+        # check requires the resolved path be EXACTLY canonical_root/
+        # libs/<lib>; a plugin tree is a different trust shape and is not
+        # safely vendorable the same way). So agent-dispatch-service's own
+        # pyproject.toml declares a plain versioned `agent-dispatch`
+        # dependency with NO [tool.uv.sources] escape, and this harness
+        # supplies the local path sources a real install needs, exactly
+        # like agent-index-service's own entry above.
+        sources = [
+            str(REPO / "libs" / "zdd"),
+            str(REPO / "libs" / "agent-procutil"),
+            str(REPO / "libs" / "dropin-registry"),
+            str(REPO / "libs" / "plugin-activation"),
+            str(REPO / "libs" / "plugin-resolve"),
+            str(REPO / "libs" / "single-instance-lease"),
+            str(REPO / "plugins" / "agent-dispatch"),
+        ]
     extra = ("test" if smoke else "native,test") if component == "agent-index-service" else "dev"
     sources.append(str(REPO / component) + f"[{extra}]")
     with tempfile.TemporaryDirectory(prefix="standalone-dependencies-") as temporary:
@@ -80,7 +130,21 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
             override = Path(temporary) / "overrides.txt"
             core = (REPO / "plugins" / "agent-index").resolve().as_uri()
             core_extra = "" if smoke else "[store,server]"
-            override.write_text(f"agent-index{core_extra} @ {core}\n", encoding="utf-8")
+            procutil = (REPO / "libs" / "agent-procutil").resolve().as_uri()
+            override.write_text(
+                f"agent-index{core_extra} @ {core}\nagent-procutil @ {procutil}\n",
+                encoding="utf-8",
+            )
+            overrides = ["--override", str(override)]
+        elif component == "agent-dispatch-service":
+            # Same "dev freezes source versions" concern as agent-index-
+            # service above: force the agent-dispatch requirement to
+            # resolve from this exact local checkout regardless of its
+            # declared version, rather than a version-floor match that can
+            # go stale.
+            override = Path(temporary) / "overrides.txt"
+            core = (REPO / "plugins" / "agent-dispatch").resolve().as_uri()
+            override.write_text(f"agent-dispatch @ {core}\n", encoding="utf-8")
             overrides = ["--override", str(override)]
         subprocess.run(
             ["uv", "pip", "install", "--python", str(python), *overrides, *sources],
@@ -174,13 +238,17 @@ def main(argv: list[str] | None = None) -> int:
             prepare(args.component, python, smoke=args.smoke)
         elif not python.is_file():
             parser.error("a prepared interpreter is required; use --prepare")
-        with tempfile.TemporaryDirectory(prefix=f"{args.component}-tests-") as temporary:
-            sandbox = Path(temporary)
+        temporary = tempfile.TemporaryDirectory(prefix=f"{args.component}-tests-")
+        try:
+            sandbox = Path(temporary.name)
             env = isolated_environment(os.environ, sandbox)
             tests = (
                 [
                     root / "tests" / "test_cli.py", root / "tests" / "test_config.py",
                     root / "tests" / "test_release.py", root / "tests" / "test_release_cli.py",
+                    root / "tests" / "test_staging.py", root / "tests" / "test_staging_cli.py",
+                    root / "tests" / "test_staging_cleanup_review.py",
+                    root / "tests" / "test_staging_processes.py",
                 ]
                 if args.smoke else [root / "tests"]
             )
@@ -192,6 +260,8 @@ def main(argv: list[str] | None = None) -> int:
                 sandbox=sandbox,
                 limits=limits,
             )
+        finally:
+            cleanup_sandbox(temporary)
     except (ContainmentError, OSError, ValueError, subprocess.CalledProcessError) as exc:
         print(f"standalone tests: {exc}", file=sys.stderr)
         if isinstance(exc, subprocess.CalledProcessError):

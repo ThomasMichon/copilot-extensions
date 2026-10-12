@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import subprocess
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from zdd import breadcrumb, diagnostics, routing
+import pytest
 
 
 def _ctx(
@@ -58,6 +61,54 @@ def _set_breadcrumb_age(tmp_path: Path, record: dict, *, seconds: float) -> None
         datetime.now(timezone.utc) - timedelta(seconds=seconds)
     ).isoformat()
     (tmp_path / "cutover.json").write_text(json.dumps(record), encoding="utf-8")
+
+
+@pytest.mark.parametrize("apply", [False, True])
+@pytest.mark.parametrize("error", [OSError("unavailable"), subprocess.TimeoutExpired("census", 10)])
+def test_census_failure_is_blocked_and_releases_guard(tmp_path, apply, error):
+    released = []
+
+    class Guard:
+        def release(self):
+            released.append(True)
+
+    state = {"lock": {}, "live": {}, "terminated": []}
+
+    def fail():
+        raise error
+
+    ctx = replace(
+        _ctx(tmp_path, state=state, acquire_cutover_guard=lambda timeout: Guard()),
+        list_candidates=fail,
+    )
+    result = diagnostics.apply_daemon_health(ctx) if apply else diagnostics.audit_daemon_health(ctx)
+    report = result["after"] if apply else result
+    assert report["census_available"] is False
+    assert report["candidate_count"] is None
+    assert report["findings"][0]["repairable"] is False
+    assert report["findings"][0]["error"] == str(error)
+    assert released == [True]
+    assert state["terminated"] == []
+
+
+def test_repair_stops_when_fresh_reaudit_becomes_unavailable(tmp_path):
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=101, version="1.0.0")
+    state = {"lock": {"pid": 101, "start_time": "owner"},
+             "live": {101: "owner", 202: "duplicate"}, "terminated": []}
+    ctx = _ctx(tmp_path, state=state)
+    calls = []
+    original = ctx.list_candidates
+
+    def census():
+        calls.append(True)
+        if len(calls) > 1:
+            raise OSError("unavailable")
+        return original()
+
+    result = diagnostics.apply_daemon_health(replace(ctx, list_candidates=census))
+    assert result["after"]["census_available"] is False
+    assert result["actions"][-1]["blocked"] is True
+    assert state["terminated"] == []
 
 
 def test_audit_reports_duplicate_resident_without_side_effects(tmp_path: Path):

@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .registry import Recipe
+from .worktree_audit import NAME as WORKTREE_AUDIT_NAME
 from ..resolution import ABANDONED, LANDED
 
 # Action kinds.
@@ -100,6 +101,14 @@ def decide(recipe: Recipe, signal: str) -> DriverAction:
       (be conservative -- don't busy-loop), yields **suspend** until a
       ``suspend_on`` event fires.
     """
+    if recipe.name == WORKTREE_AUDIT_NAME:
+        return DriverAction(
+            kind=WORK,
+            directive=(
+                "Produce or submit the bounded private report for independent verification; "
+                "never resolve, unwind, or mutate any candidate workspace."
+            ),
+        )
     outcome = resolution_outcome(signal)
     if outcome is not None:
         verb = "Land it" if outcome == LANDED else "Unwind it"

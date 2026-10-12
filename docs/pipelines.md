@@ -9,6 +9,45 @@ and reactive automation this repo runs. `CONTRIBUTING.md` owns contributor
 requirements); this doc owns the *infrastructure* those steps run on top
 of — link here rather than restating any of it.
 
+## Python artifact-builder toolchain policy
+
+`tools/build_python_artifacts.py` remains a standalone builder, not yet part
+of promotion. Its default `--toolchain-source governed` requires an
+affirmatively trusted governed feed. There is no automatic public fallback.
+Public promotion runners may explicitly choose
+`--toolchain-source seasoned-public --toolchain-min-age-days 7` (seven days
+is the default). This exception applies only to the build toolchain:
+`setuptools`, `wheel`, and `packaging`, never managed-device runtime
+dependency resolution or published third-party wheels.
+
+Public mode selects exact non-yanked stable pins from PyPI metadata, measures
+age from the newest file, and installs binary distributions only from one
+explicit public index. An incompatible pin set fails resolution; it never
+relaxes a pin or the seasoning floor. Every source's build requirements are
+also checked against the locked interpreter before building. Seasoning is an
+age floor, not proof that any consumer's governed feed has mirrored a version.
+The metadata snapshot's eligible SHA-256 file hashes are carried into a
+`--require-hashes` install. A wheel uploaded to the same version after that
+snapshot cannot silently win live-index selection: its bytes fail verification
+before the toolchain is published. Hash mode also refuses any unpinned
+transitive build-tool dependency.
+
+Manifest schema 3 records toolchain source policy and resolved interpreter in
+`build_toolchain.provenance`; public provenance additionally records the
+index, seasoning floor, exact pins, and eligible file hashes. These fields participate in
+`lock_id`, hence `artifact_id`. Caller-supplied toolchain locks with missing
+or inconsistent provenance are rejected before any wheel is built.
+Shared `--toolchain-venv` reuse checks the
+same policy/pins/interpreter identity and rechecks installed public pins;
+a different identity uses an alternate slot without disturbing an active
+build. The existing `.governed-feed-provenance.json` filename is retained
+for compatibility, but public markers explicitly say `seasoned-public` and
+contain no `validated_index_identity` claim.
+
+Path-scoped CI runs a fresh public toolchain plus real first-party wheel
+builds on a public hosted runner. Managed machines should retain governed
+mode when exercising the builder locally.
+
 ## Branch model at a glance
 
 - **`dev`** is this repo's contribution branch and the only one an ordinary PR
@@ -59,7 +98,8 @@ below).
 
 ### 3. Review automation
 
-`.github/workflows/copilot-review-gate.yml` requests a Copilot review
+The `request-review-if-maintainer` job in
+`.github/workflows/workflow-lockdown-guard.yml` requests a Copilot review
 automatically, but **only** for a PR authored by a **Maintainer** (the
 CODEOWNERS root roster, owner included) — not merely any invited
 collaborator. A Contributor's PR gets no automatic request (a Maintainer
@@ -78,14 +118,17 @@ Maintainers already hold ruleset self-merge bypass (this extends no new
 trust), and a Contributor's PR still needs a Maintainer's own approving
 review regardless of Copilot's verdict. (The ruleset-native
 `copilot_code_review` auto-review rule has no such condition — it would
-fire for literally anyone — so this repo has removed that rule.) Like
-`workflow-lockdown-guard.yml` below, this workflow runs on
+fire for literally anyone — so this repo has removed that rule.)
+Both the required guard and the review fallback run on
 `pull_request_target`, so it can't fire until its own file has reached
 `main` via a promotion — request a review manually for any PR opened
 before that first promotion completes.
 
-The automatic fallback waits **five minutes after its run starts**, without API
-polling, then checks the live PR once. It skips closed/draft/retargeted PRs,
+The automatic fallback gives native/manual review **five minutes from the
+triggering PR event's `updated_at` timestamp**, without API polling. Queue time
+counts toward that grace: a run queued for five minutes does not occupy a runner
+for another five. Invalid/future event timestamps fail before requesting review.
+After any remaining grace, it checks the live PR once. It skips closed/draft/retargeted PRs,
 pending Copilot reviews, completed reviews of the current diff, and requests
 still inside their five-minute grace period. Completed reviews must be newer
 than the latest base-retarget/reopen event. Identity checks accept the observed
@@ -256,7 +299,7 @@ support**, only the strictest built-in fork-PR-approval gate (Settings →
 Actions → General → "Fork pull request workflows" → **"Require approval
 for all outside collaborators"**), which already blocks every Actions run
 (including CI) from starting until a Maintainer manually approves it, plus
-`copilot-review-gate.yml`'s own collaborator check (above) for review. A
+the trusted review job's own collaborator check (above) for review. A
 Maintainer can still manually approve a run or request a review for an
 outside PR at their discretion — this only removes the automatic path for
 someone the repo owner never invited.
@@ -281,8 +324,7 @@ targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `ci.yml` | `pull_request`, `push` (`main`/`dev`), `workflow_dispatch` | The fast smoke-CI suite (guards, lint, per-plugin tests) that gates every PR. Contains `main-gate` (rejects a non-promotion PR against `main`) and the `PR gate` fixed-name required-check aggregate, including native Windows archive-source/chronicler smoke when `agent-logger` is selected. |
-| `copilot-review-gate.yml` | `pull_request_target` → `dev` | Requests an automatic Copilot review, Maintainer-authored PRs only (see [Review automation](#3-review-automation)). |
-| `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` | Required check: fails if a protected path (`.github/workflows/`, `.github/actions/`, `.github/CODEOWNERS`) is touched by anyone but the repo owner (see [Workflow/CODEOWNERS lockdown](#4-workflowcodeowners-lockdown)). |
+| `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` | One trusted run hosts the unchanged required `workflow-lockdown-guard` check and the Maintainer-only review fallback, with independent jobs and job-scoped review permissions/concurrency. Workflow and check names stay unchanged; no PR code executes. |
 | `base-branch-reminder.yml` | `pull_request_target` → `main` | Posts a one-time comment asking a non-owner author to retarget a PR against `main` to `dev` (see [If you opened a PR against `main` by mistake](#if-you-opened-a-pr-against-main-by-mistake)). Never checks out or executes PR code. |
 | `trusted-ci.yml` | `pull_request_target`, paths-scoped to `.github/workflows/trusted-ci.yml`/`libs/**`/`agent-bridge`/`tools/**` | Opt-in (`vars.TRUSTED_SELF_HOSTED_CI`), collaborator-gated self-hosted CI lane for paths too sensitive/expensive for the standard runner pool; includes its own file so a change to the gate itself also re-runs it. |
 
@@ -290,8 +332,7 @@ targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `identifier-leak-guard.yml` | `workflow_run: ["CI"]` | Scans a PR's changed-file contents (as inert `git show` data, never executed) for configured private identifiers; reports a Check Run. GitHub's documented fork-safe "run untrusted work under `pull_request`, react from a separate privileged `workflow_run`" pattern. |
-| `promote-trigger.yml` | `workflow_run: ["CI"]` | Cheap, unthrottled filter: decides whether a completed "CI" run was a genuine `dev`-branch advancement, and if so fires the `repository_dispatch` signal `validate-and-promote.yml` waits on. Kept separate from that workflow so this filter never queues behind the full validation suite's own concurrency group. |
+| `promote-trigger.yml` | `workflow_run: ["CI"]` | One trusted invocation hosts independent dev-ancestry dispatch and fork-safe identifier scanning jobs. Job-scoped permissions preserve the two original credential boundaries. No concurrency group or cross-job dependency can hold the filter behind scanning or full release validation. PR objects are read as inert data, never executed. |
 
 **The promotion pipeline (dev → main):**
 

@@ -8,7 +8,7 @@
 - **Scope:** leaf (per-plugin, under the [visions index](../../README.md); honors
   the [plugin-services](../../plugin-services/README.md) service model)
 - **Status:** Draft
-- **Last revised:** 2026-10-08
+- **Last revised:** 2026-10-11
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's future `plugins/agent-index/docs/`
 
@@ -257,7 +257,12 @@ Formerly `self-contained-service`.
 
 agent-index stays lightweight on every machine unless repository-scoped
 configuration explicitly opts into search and designates a host role. Client
-routing and configuration resolution carry no host store or model dependencies.
+routing and configuration resolution carry no host store, server framework or
+model dependencies. Hosted API/controller and worker execution use their own
+declared runtimes rather than installing duplicate host stacks into client
+environments. Optional tool transports and syntax capabilities are independently
+selectable without changing the stable retrieval contract. Accelerator packages
+are acquired only by the explicitly selected compatible execution profile.
 Without effective configuration the plugin is inert; without a reachable or
 locally supervised host runtime the search capability is honestly unavailable.
 

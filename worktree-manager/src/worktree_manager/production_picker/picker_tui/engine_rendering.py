@@ -311,7 +311,8 @@ class PickerScreenRenderingMixin:
         all_disabled = all(self.machine_state(i) == "disabled" for i in group)
         name_base = (C_DISABLED if all_disabled
                      else "bold white" if group_sel else C_TABOFF)
-        t.append(m0, style=self._hl(name_base, group_sel, focused))
+        t.append(tab0.get("machine_label") or m0,
+                 style=self._hl(name_base, group_sel, focused))
         for n, i in enumerate(group):
             e = self.machines[i][2]
             state = self.machine_state(i)

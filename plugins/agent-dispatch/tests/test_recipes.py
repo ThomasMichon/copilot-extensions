@@ -23,9 +23,9 @@ def _args(argv):
 # -- registry ----------------------------------------------------------------
 
 
-def test_registry_has_the_three_archetypes():
+def test_registry_has_the_supported_archetypes():
     names = {r.name for r in recipes.list_recipes()}
-    assert names == {"reviewer", "conflict-resolution", "goal-driven"}
+    assert names == {"reviewer", "conflict-resolution", "goal-driven", "worktree-audit"}
 
 
 def test_get_recipe_unknown_raises():
@@ -148,7 +148,9 @@ def test_cmd_list_emits_all_recipes(capsys):
     rc = _cmd_recipes_list(_args(["recipes", "list"]))
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
-    assert {r["name"] for r in out} == {"reviewer", "conflict-resolution", "goal-driven"}
+    assert {r["name"] for r in out} == {
+        "reviewer", "conflict-resolution", "goal-driven", "worktree-audit",
+    }
     reviewer = next(r for r in out if r["name"] == "reviewer")
     assert reviewer["resolution"] == "review-delivered-or-pull-request-resolved"
     assert any(p["name"] == "pr" and p["required"] for p in reviewer["params"])
@@ -343,7 +345,39 @@ def _tools(sink):
 
 def test_mcp_recipe_list_returns_archetypes():
     out = _tools({}).recipe_list()
-    assert {r["name"] for r in out} == {"reviewer", "conflict-resolution", "goal-driven"}
+    assert {r["name"] for r in out} == {
+        "reviewer", "conflict-resolution", "goal-driven", "worktree-audit",
+    }
+
+
+def test_mcp_audit_kick_preserves_verification_and_exclusivity(tmp_path):
+    sink = {}
+    _tools(sink).recipe_kick(
+        "worktree-audit",
+        params={
+            "scope": "fixture-project", "candidates": '["wt-a"]',
+            "budget_minutes": "5", "report_dir": str(tmp_path),
+        },
+    )
+    assert sink["require_verification"] is True
+    assert sink["exclusive_key"] == "worktree-audit:fixture-project"
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("verification", [None, False, True])
+def test_mcp_existing_recipe_preserves_unspecified_verification(monkeypatch, verification):
+    from dataclasses import replace
+
+    original = recipes.get_recipe("goal-driven")
+    monkeypatch.setitem(
+        recipes.REGISTRY, "goal-driven", replace(original, require_verification=verification),
+    )
+    sink = {}
+    _tools(sink).recipe_kick("goal-driven", params={"goal": "fixture"})
+    if verification is None:
+        assert "require_verification" not in sink
+    else:
+        assert sink["require_verification"] is verification
 
 
 def test_mcp_recipe_render_is_pure():

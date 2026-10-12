@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 31,
+        "current": 32,
         "minimum": 1,
-        "previous_generation": 30,
+        "previous_generation": 31,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -37,7 +37,8 @@
           28,
           29,
           30,
-          31
+          31,
+          32
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -85,13 +86,14 @@
         "strict_resume": 28,
         "current_attention": 29,
         "strict_acquisition": 30,
-        "acquisition_retirement_revalidation": 31
+        "acquisition_retirement_revalidation": 31,
+        "acquisition_retirement_recovery": 32
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "47abf6059c7faced70e7dd3b6e98649822e6bedc08b8a94a381da1447a873d53",
+          "sha256": "f71dbf17041074c9e906cd8d195f2294b3a18a6d544a8b5f552b2d6d5c3a0374",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -134,6 +136,12 @@
       ],
       "fixtures": [
         {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-32.json",
+          "sha256": "82459757b85aafdf6085c184e02d57923e18fa4759781c611dd34f48d403a52d",
+          "role": "unchanged agent-roster response re-attested at current retirement-recovery HTTP generation",
+          "generation": 32
+        },
+        {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-30.json",
           "sha256": "b36fae14696bc3bac0416b8c861a5bf0eba9b197a5c2a487bd7835e6fc9be91d",
           "role": "unchanged agent-roster response at current HTTP generation",
@@ -141,9 +149,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/acquisition-protocol.json",
-          "sha256": "e7f75c2f93e3ac9516c709df7eaf5f75ce3789851117b229202c0ae8f6559541",
+          "sha256": "18026e314eb8961eef4cd443f28277518b13d81b3d1a5dd718539f7771f0ece3",
           "role": "current additive acquisition capability constants and refusal contract",
-          "generation": 31
+          "generation": 32
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
@@ -314,6 +322,12 @@
           "generation": 30
         },
         {
+          "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-31/acquisition-protocol.json",
+          "sha256": "e7f75c2f93e3ac9516c709df7eaf5f75ce3789851117b229202c0ae8f6559541",
+          "role": "previous acquisition generation retained across retirement-recovery rollout",
+          "generation": 31
+        },
+        {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-31.json",
           "sha256": "3f396c2b72725a881cadf7f96241f0779c9c7911566d72379b06f009dedad19e",
           "role": "unchanged agent-roster response re-attested at current recovery HTTP generation",
@@ -321,6 +335,22 @@
         }
       ],
       "provenance": [
+        {
+          "commit": "eab727b8afc4de461934a3e801f75d61ddfb516e",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 32,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-attest byte-identical agent-roster source and representative response alongside additive retirement-recovery generation 32."
+        },
+        {
+          "commit": "eab727b8afc4de461934a3e801f75d61ddfb516e",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 32,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "905f9e5179a7902649d7e8cd41906105bc8885ff",
+          "capture_method": "Capture protocol-32 retirement-recovery constants from the published feedback commit; preserve the exact protocol-31 fixture as previous-generation evidence."
+        },
         {
           "commit": "db122b5771d2189df12d5f0d518c651cd143bd32",
           "plugin_version": "0.4.1-dev3",
@@ -1161,7 +1191,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-authority-v1.json",
-          "sha256": "090a2a94d06908d14c72c7cd858c7fe0bd73e77d12704d5eeb63517596dcc0ee",
+          "sha256": "22fa4fb7d8c068dc70c2de8572191249f3425ff903c6e6d3b180c3585fb7232a",
           "role": "launch-bound wrapper v1 authority and receipt-v2 validity vectors",
           "generation": 1
         },
@@ -1173,13 +1203,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-exec.json",
-          "sha256": "5f0ad024c6bfebb04644179789a69048d362fa947c4febd11382c34b1893cc5d",
+          "sha256": "03e3622eae4b9697bdca9c6edc9219d13875ede133812fe7757eea47af03e687",
           "role": "terminal exec consent, private environment closure and PID preservation",
           "generation": 1
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-consent.json",
-          "sha256": "8eae358b7bb9498e3da309b4983d17070256cd2899183c24b5b5b1e126f6bd6b",
+          "sha256": "3ca56f9e71efd2eb87edcf3f20df14b3586db27f1a5e5c9596bd6c07269347de",
           "role": "complete staged authority closure and consent-owner failure ordering",
           "generation": 1
         },

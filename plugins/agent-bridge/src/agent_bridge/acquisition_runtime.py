@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from dataclasses import replace
+from dataclasses import asdict, replace
 from typing import Any
 from types import SimpleNamespace
 
@@ -181,10 +181,13 @@ class AcquisitionRuntime:
             frozenset(
                 item.native_session_id for item in evidence.conversations if item.native_session_id
             )
-            if selected_req.conversation_retired is True or selected_req.intent == "fresh"
+            if not decision.retirement_recovered
+            and (selected_req.conversation_retired is True or selected_req.intent == "fresh")
             else frozenset()
         )
-        if selected_req.conversation_retired is True or selected_req.intent == "fresh":
+        if not decision.retirement_recovered and (
+            selected_req.conversation_retired is True or selected_req.intent == "fresh"
+        ):
             retired = (
                 retired
                 | frozenset(
@@ -210,6 +213,9 @@ class AcquisitionRuntime:
             else None,
             retired_native_ids=sorted(retired),
             creation_authorized=decision.creation_authorized,
+            retirement_recovered=decision.retirement_recovered,
+            retirement_conversation=asdict(decision.conversation)
+            if decision.retirement_recovered and decision.conversation else None,
         )
         try:
             session_id, native = await self._launch(req, decision, row, target, request_env)
@@ -277,6 +283,10 @@ class AcquisitionRuntime:
                     charter=self._charter(session.target.copilot_args),
                     model=getattr(session, "model_override", None),
                     effort=getattr(session, "effort_override", None),
+                    generation_bound=bool(
+                        binding and ours and native
+                        and self.store.retirement_recovery_proven(req, session.session_id, native)
+                    ),
                 )
             )
         for live in self.db.list_live_sessions(req.worktree_id, include_dead=True):
@@ -312,6 +322,10 @@ class AcquisitionRuntime:
                     charter=req.charter if ours else None,
                     model=req.model if ours else None,
                     effort=req.effort if ours else None,
+                    generation_bound=bool(
+                        binding and ours
+                        and self.store.retirement_recovery_proven(req, native, native)
+                    ),
                 )
             )
         # A native head with no authoritative bridge record is unknown, never
@@ -445,7 +459,9 @@ class AcquisitionRuntime:
             rows = [
                 row
                 for row in self.db.list_fresh_live_sessions(req.worktree_id, now=time.time())
-                if row.get("driven_by") == driver
+                if (row.get("driven_by") == driver or (
+                    decision and decision.retirement_recovered and decision.acquired == "reused"
+                ))
                 and (expected is None or row["session_id"] == expected)
             ]
             if len(rows) == 1:
@@ -562,9 +578,22 @@ class AcquisitionRuntime:
         row: dict[str, Any],
         head: str | None,
     ) -> AcquisitionResult:
+        recovery_decision = None
+        if data.get("retirement_recovered"):
+            conversation = ConversationEvidence(**data["retirement_conversation"])
+            if not conversation.native_session_id or not self.store.retirement_recovery_proven(
+                req, conversation.session_id, conversation.native_session_id,
+            ):
+                raise AcquisitionRefused(
+                    "retirement_recovery_changed", "current retirement recovery is no longer proven"
+                )
+            recovery_decision = AcquisitionDecision(
+                data["result"]["acquired"] if data.get("result") else data["acquired"],
+                conversation=conversation, retirement_recovered=True,
+            )
         if stage in {"delivered", "delivering", "launched"}:
             output = AcquisitionResult.model_validate(data["result"])
-            decision = AcquisitionDecision(
+            decision = recovery_decision or AcquisitionDecision(
                 output.acquired,
                 creation_authorized=data.get("creation_authorized", False),
             )
@@ -622,7 +651,7 @@ class AcquisitionRuntime:
                     )
                 session_id, native = session.session_id, session.acp_session_id
             else:
-                session_id, native = await self._cli_native(req, cli_driver(req))
+                session_id, native = await self._cli_native(req, cli_driver(req), recovery_decision)
             if data.get("native_session_id") and data["native_session_id"] != native:
                 raise AcquisitionRefused(
                     "native_identity_changed", "recovered launch changed native identity"
@@ -638,7 +667,7 @@ class AcquisitionRuntime:
             validate_result(
                 req,
                 output,
-                decision=AcquisitionDecision(
+                decision=recovery_decision or AcquisitionDecision(
                     data["acquired"],
                     creation_authorized=data.get("creation_authorized", False),
                 ),
@@ -651,7 +680,7 @@ class AcquisitionRuntime:
                 req,
                 token,
                 output,
-                decision=AcquisitionDecision(
+                decision=recovery_decision or AcquisitionDecision(
                     output.acquired,
                     creation_authorized=data.get("creation_authorized", False),
                 ),
@@ -759,6 +788,9 @@ class AcquisitionRuntime:
                     decision=AcquisitionDecision(
                         output.acquired,
                         creation_authorized=data.get("creation_authorized", False),
+                        retirement_recovered=data.get("retirement_recovered", False),
+                        conversation=ConversationEvidence(**data["retirement_conversation"])
+                        if data.get("retirement_recovered") else None,
                     ),
                 )
                 self.store.release_gate(previous)
@@ -777,7 +809,12 @@ class AcquisitionRuntime:
                         )
                     session, native = found[0].session_id, found[0].acp_session_id
                 else:
-                    session, native = await self._cli_native(previous, cli_driver(previous))
+                    recovery_decision = AcquisitionDecision(
+                        data["acquired"], retirement_recovered=data.get("retirement_recovered", False),
+                        conversation=ConversationEvidence(**data["retirement_conversation"])
+                        if data.get("retirement_recovered") else None,
+                    )
+                    session, native = await self._cli_native(previous, cli_driver(previous), recovery_decision)
                 if previous.mode == "acp":
                     await self._restore_recovered_head(req, session, native)
                     _, head = await verify_worktree(req)
@@ -788,16 +825,26 @@ class AcquisitionRuntime:
                         "prior_native_mismatch", "interrupted native launch changed identity"
                     )
                 output = self._result(previous, data["acquired"], session, native)
+                if data.get("retirement_recovered") and not self.store.retirement_recovery_proven(
+                    previous, session, native,
+                ):
+                    raise AcquisitionRefused(
+                        "retirement_recovery_changed", "prior recovery receipt is no longer proven"
+                    )
                 validate_result(
                     previous,
                     output,
                     decision=AcquisitionDecision(
                         data["acquired"],
                         creation_authorized=data.get("creation_authorized", False),
+                        retirement_recovered=data.get("retirement_recovered", False),
+                        conversation=ConversationEvidence(**data["retirement_conversation"])
+                        if data.get("retirement_recovered") else None,
                     ),
                     retired_native_ids=frozenset(data["retired_native_ids"]),
                 )
                 self.store.bind(previous, session, native)
+                self.store.stage(previous, "launched", result=output.model_dump())
             elif stage == "launched":
                 output = AcquisitionResult.model_validate(data["result"])
                 if output.native_session_id != head:

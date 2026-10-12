@@ -1,4 +1,4 @@
-"""Non-discovered bodies and ownership-validated legacy cache migration."""
+"""Auto-discovered local instructions and non-discovered reviewed fallbacks."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from context_budget import _repo_instruction_files
 pytestmark = pytest.mark.guard
 
 
-def test_both_body_classes_excluded_from_repository_discovery(tmp_path: Path) -> None:
+def test_only_reviewed_fallback_is_excluded_from_repository_discovery(tmp_path: Path) -> None:
     repo, source, spec = fixture(tmp_path)
     assert not projections.sync_repository(repo, [source]).blocking
     assert not projections.render_local_cache(repo, lambda: [source]).blocking
@@ -29,7 +29,7 @@ def test_both_body_classes_excluded_from_repository_discovery(tmp_path: Path) ->
     }
     automatic, conditional = _repo_instruction_files(repo)
     assert automatic == explicit
-    assert local not in automatic | conditional
+    assert local in automatic
     assert fallback not in automatic | conditional
     text = selector.read_text()
     assert delivery.local_destination(spec.destination) in text
@@ -44,23 +44,24 @@ def test_both_body_classes_excluded_from_repository_discovery(tmp_path: Path) ->
     assert not delivery.complete_body(selector.read_bytes(), delivery.parse_marker(selector.read_bytes()))
     inventory = projections.instruction_delivery_inventory(repo, automatic)["categories"]
     assert inventory["local_bodies"]["count"] == 1
-    assert not inventory["local_bodies"]["automatically_discovered"]
+    assert inventory["local_bodies"]["automatically_discovered"]
     assert inventory["reviewed_fallbacks"]["count"] == 1
     assert not inventory["reviewed_fallbacks"]["automatically_discovered"]
     legacy = repo / delivery.legacy_local_destination(spec.destination)
+    legacy.parent.mkdir(parents=True, exist_ok=True)
     legacy.write_bytes(local.read_bytes())
     automatic, _ = _repo_instruction_files(repo)
-    assert legacy in automatic
+    assert legacy not in automatic | conditional
     inventory = projections.instruction_delivery_inventory(repo, automatic)["categories"]
     assert inventory["legacy_local_bodies"]["count"] == 1
-    assert inventory["legacy_local_bodies"]["automatically_discovered"]
-    assert not inventory["local_bodies"]["automatically_discovered"]
+    assert not inventory["legacy_local_bodies"]["automatically_discovered"]
+    assert inventory["local_bodies"]["automatically_discovered"]
 
 
 def test_nested_local_body_paths_preserve_subdirectories() -> None:
     assert delivery.local_destination(
         ".github/instructions/policy/nested/rules.instructions.md"
-    ) == ".github/copilot/context-locals/policy/nested/rules.local.md"
+    ) == ".github/instructions/policy/nested/rules.local.instructions.md"
     assert delivery.fallback_destination(
         ".github/instructions/policy/nested/rules.instructions.md"
     ) == ".github/copilot/context-fallbacks/policy/nested/rules.md"
@@ -70,7 +71,7 @@ def test_nested_local_body_paths_preserve_subdirectories() -> None:
 def test_fallbacks_cannot_use_automatically_loaded_instruction_names(name: str) -> None:
     assert delivery.local_destination(
         f".github/instructions/policy/{name}.instructions.md"
-    ).endswith(f"/{name}.local.md")
+    ).endswith(f"/{name}.local.instructions.md")
     with pytest.raises(ValueError, match="automatic instruction discovery"):
         delivery.fallback_destination(f".github/instructions/policy/{name}.instructions.md")
 
@@ -129,6 +130,7 @@ def test_legacy_local_compatibility_reads_are_authenticated(tmp_path: Path) -> N
     repo, source, spec = fixture(tmp_path)
     assert not projections.sync_repository(repo, [source]).blocking
     old = repo / delivery.legacy_local_destination(spec.destination)
+    old.parent.mkdir(parents=True, exist_ok=True)
     old.write_bytes(projections.render_projection(spec, include_prefer_local=False).content)
     selected = projections.resolve_instruction_source(repo, spec.destination, [source])
     assert selected["selectedPath"] == delivery.legacy_local_destination(spec.destination)
@@ -164,7 +166,7 @@ def test_git_adopter_requires_new_ignore_rule_before_publication(tmp_path: Path)
     assert old.read_bytes() == raw
     assert not (repo / delivery.local_destination(spec.destination)).exists()
     assert any(f.check == "projection-local-cache-ignore" for f in result.findings)
-    (repo / ".gitignore").write_text(".github/copilot/context-locals/**/*.local.md\n")
+    (repo / ".gitignore").write_text(".github/instructions/**/*.local.instructions.md\n")
     result = projections.render_local_cache(repo, lambda: [source])
     assert not result.blocking
     assert not old.exists()

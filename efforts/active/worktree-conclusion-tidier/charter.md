@@ -3,8 +3,9 @@
 This remains a **design-only draft**, not an executable declaration or
 standing authorization. The operator agreed the authority baseline and the
 four clarifications recorded in [README.md](README.md); pilot parameters,
-implementation/execution, apply authority, and scheduling require their
-separate approvals.
+live pilot execution, apply authority, and scheduling require their separate
+approvals. Audit-first capability implementation is now approved; its initial
+report-only recipe keeps proposed steering questions in the private report.
 
 ## Purpose and non-goals
 

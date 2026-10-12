@@ -62,6 +62,11 @@ the healthy new one rather than stranding clients).
 
 ### `zdd.diagnostics` -- daemon-health audit + repair
 
+An unavailable native/process census is reported as `census_unavailable`,
+with `census_available: false` and `candidate_count: null`, rather than a
+healthy empty census. Repair stops at any failed fresh census, and the
+cutover guard is released even when candidate enumeration fails.
+
 `audit_daemon_health()` and `apply_daemon_health()` let a consumer surface the
 field-proven abnormal cutover states uniformly through its own doctor/health
 command: duplicate resident daemons, stranded old survivors from an aborted

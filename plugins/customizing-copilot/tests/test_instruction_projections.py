@@ -190,7 +190,7 @@ def test_render_projection_includes_prefer_local_preamble(tmp_path: Path) -> Non
     expected_name = Path(
         projections.local_sibling_destination(specs[0].destination)
     ).name
-    assert expected_name == "fallback.local.md"
+    assert expected_name == "fallback.local.instructions.md"
     preamble_marker = f"If `{projections.local_sibling_destination(specs[0].destination)}` is available"
     assert preamble_marker in text
     assert text.index(preamble_marker) < text.index(
@@ -258,7 +258,7 @@ def test_local_sibling_destination_naming() -> None:
         projections.local_sibling_destination(
             ".github/instructions/policy/fallback.instructions.md"
         )
-        == ".github/copilot/context-locals/policy/fallback.local.md"
+        == ".github/instructions/policy/fallback.local.instructions.md"
     )
     with pytest.raises(ValueError, match="already a local cache path"):
         projections.local_sibling_destination(
@@ -279,15 +279,14 @@ def test_render_local_cache_writes_sibling_without_touching_checked_in_or_lock(
 
     assert result.blocking == 0
     assert result.changed == [
-        ".github/copilot/context-locals/policy/fallback.local.md"
+        ".github/instructions/policy/fallback.local.instructions.md"
     ]
     local_path = (
         repo
         / ".github"
-        / "copilot"
-        / "context-locals"
+        / "instructions"
         / "policy"
-        / "fallback.local.md"
+        / "fallback.local.instructions.md"
     )
     assert local_path.exists()
     # The checked-in destination and the lock file are untouched by this
@@ -327,10 +326,9 @@ def test_render_local_cache_never_touches_git_and_is_idempotent(
     local_path = (
         repo
         / ".github"
-        / "copilot"
-        / "context-locals"
+        / "instructions"
         / "policy"
-        / "fallback.local.md"
+        / "fallback.local.instructions.md"
     )
     assert local_path.exists()
 
@@ -421,10 +419,9 @@ def test_render_local_cache_reconciles_stale_siblings_when_source_disabled(
     local_path = (
         repo
         / ".github"
-        / "copilot"
-        / "context-locals"
+        / "instructions"
         / "policy"
-        / "fallback.local.md"
+        / "fallback.local.instructions.md"
     )
 
     first = projections.render_local_cache(repo, lambda: [source])
@@ -439,7 +436,7 @@ def test_render_local_cache_reconciles_stale_siblings_when_source_disabled(
     second = projections.render_local_cache(repo, lambda: [])
     assert second.blocking == 0
     assert not local_path.exists()
-    assert local_path.as_posix().endswith("fallback.local.md")
+    assert local_path.as_posix().endswith("fallback.local.instructions.md")
 
 
 def test_render_local_cache_never_removes_a_file_without_its_own_marker(
@@ -502,10 +499,9 @@ def test_render_local_cache_rejects_ambiguous_destination_collisions(
     local_path = (
         repo
         / ".github"
-        / "copilot"
-        / "context-locals"
+        / "instructions"
         / "policy"
-        / "fallback.local.md"
+        / "fallback.local.instructions.md"
     )
     assert not local_path.exists()
 
@@ -519,22 +515,21 @@ def test_render_local_cache_is_idempotent_and_reports_unchanged(
     local_path = (
         repo
         / ".github"
-        / "copilot"
-        / "context-locals"
+        / "instructions"
         / "policy"
-        / "fallback.local.md"
+        / "fallback.local.instructions.md"
     )
 
     first = projections.render_local_cache(repo, lambda: [source])
     assert first.changed == [
-        ".github/copilot/context-locals/policy/fallback.local.md"
+        ".github/instructions/policy/fallback.local.instructions.md"
     ]
     mtime_after_first = local_path.stat().st_mtime_ns
 
     second = projections.render_local_cache(repo, lambda: [source])
     assert second.changed == []
     assert second.unchanged == [
-        ".github/copilot/context-locals/policy/fallback.local.md"
+        ".github/instructions/policy/fallback.local.instructions.md"
     ]
     assert local_path.stat().st_mtime_ns == mtime_after_first
 
@@ -610,10 +605,9 @@ def test_render_local_cache_refreshes_when_budget_config_is_malformed(
     local_path = (
         repo
         / ".github"
-        / "copilot"
-        / "context-locals"
+        / "instructions"
         / "policy"
-        / "fallback.local.md"
+        / "fallback.local.instructions.md"
     )
     assert local_path.exists()
 
@@ -727,7 +721,7 @@ def test_render_local_cache_safety_source_bound_keeps_other_safe_guidance(
         for f in result.findings
     )
     assert result.changed == [
-        ".github/copilot/context-locals/safe/fallback.local.md"
+        ".github/instructions/safe/fallback.local.instructions.md"
     ]
 
 
@@ -761,10 +755,9 @@ def test_render_local_cache_reconciles_stale_siblings_even_when_budget_config_fa
     local_path = (
         repo
         / ".github"
-        / "copilot"
-        / "context-locals"
+        / "instructions"
         / "policy"
-        / "fallback.local.md"
+        / "fallback.local.instructions.md"
     )
 
     first = projections.render_local_cache(repo, lambda: [source])
@@ -792,10 +785,9 @@ def test_render_local_cache_never_writes_the_wrong_destination_or_loads_it_unbou
     local_path = (
         repo
         / ".github"
-        / "copilot"
-        / "context-locals"
+        / "instructions"
         / "policy"
-        / "fallback.local.md"
+        / "fallback.local.instructions.md"
     )
     local_path.parent.mkdir(parents=True)
     oversized = b"x" * (projections.MAX_LOCAL_CACHE_BYTES + 1)
@@ -855,7 +847,7 @@ def test_render_local_cache_reports_handoff_when_a_source_is_renamed(
     )
     assert local_path.exists()
     assert result.changed == [
-        ".github/copilot/context-locals/policy/shared.local.md"
+        ".github/instructions/policy/shared.local.instructions.md"
     ]
 
 
@@ -883,7 +875,7 @@ def test_render_local_cache_write_failure_on_one_source_never_blocks_another(
     real_atomic_write = projections.transaction.create_exclusive
 
     def fail_for_first(path: Path, content: bytes) -> None:
-        if path.name == "first.local.md":
+        if path.name == "first.local.instructions.md":
             raise OSError("simulated write failure")
         real_atomic_write(path, content)
 
@@ -893,7 +885,7 @@ def test_render_local_cache_write_failure_on_one_source_never_blocks_another(
 
     assert any(
         finding.check == "projection-local-cache"
-        and "first.local.md" in finding.path
+        and "first.local.instructions.md" in finding.path
         for finding in result.findings
     )
     first_path = (
@@ -905,7 +897,7 @@ def test_render_local_cache_write_failure_on_one_source_never_blocks_another(
     assert not first_path.exists()
     assert second_path.exists()
     assert result.changed == [
-        ".github/copilot/context-locals/policy/second.local.md"
+        ".github/instructions/policy/second.local.instructions.md"
     ]
     # No checked-in destination or lock exists at all -- this render-only
     # path never touches either, failure or not.
@@ -922,10 +914,9 @@ def test_render_local_cache_removes_stale_content_when_a_refresh_fails(
     local_path = (
         repo
         / ".github"
-        / "copilot"
-        / "context-locals"
+        / "instructions"
         / "policy"
-        / "fallback.local.md"
+        / "fallback.local.instructions.md"
     )
 
     first = projections.render_local_cache(repo, lambda: [source])
@@ -1030,10 +1021,9 @@ def test_render_local_cache_refuses_to_overwrite_a_foreign_file(
     local_path = (
         repo
         / ".github"
-        / "copilot"
-        / "context-locals"
+        / "instructions"
         / "policy"
-        / "fallback.local.md"
+        / "fallback.local.instructions.md"
     )
     local_path.parent.mkdir(parents=True)
     foreign = "A human wrote this, not the renderer.\n" * 200
@@ -1049,7 +1039,7 @@ def test_render_local_cache_refuses_to_overwrite_a_foreign_file(
 
 
 def test_render_local_cache_stale_cleanup_ignores_a_marker_at_the_wrong_path(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -1060,10 +1050,9 @@ def test_render_local_cache_stale_cleanup_ignores_a_marker_at_the_wrong_path(
     genuine_path = (
         repo
         / ".github"
-        / "copilot"
-        / "context-locals"
+        / "instructions"
         / "policy"
-        / "fallback.local.md"
+        / "fallback.local.instructions.md"
     )
     # Copy the genuine, marker-bearing render to an unrelated local-cache
     # path -- same bytes, same marker, wrong location. It must never be
@@ -1072,17 +1061,28 @@ def test_render_local_cache_stale_cleanup_ignores_a_marker_at_the_wrong_path(
     misplaced_path = (
         repo
         / ".github"
-        / "copilot"
-        / "context-locals"
+        / "instructions"
         / "policy"
-        / "misplaced.local.md"
+        / "misplaced.local.instructions.md"
     )
-    misplaced_path.write_bytes(genuine_path.read_bytes())
+    original = genuine_path.read_bytes()
+    misplaced_path.write_bytes(original)
+    checked: list[str] = []
+    parse_marker = projections._parse_owned_local_cache_marker
 
+    def record_marker_check(raw: bytes, relative: str):
+        checked.append(relative)
+        return parse_marker(raw, relative)
+
+    monkeypatch.setattr(
+        projections, "_parse_owned_local_cache_marker", record_marker_check
+    )
     projections.render_local_cache(repo, lambda: [])
 
     assert not genuine_path.exists()
     assert misplaced_path.exists()
+    assert misplaced_path.relative_to(repo).as_posix() in checked
+    assert misplaced_path.read_bytes() == original
 
 
 def test_render_local_cache_reports_conflict_when_lock_already_held(
@@ -1115,10 +1115,9 @@ def test_render_local_cache_reports_conflict_when_lock_already_held(
     local_path = (
         repo
         / ".github"
-        / "copilot"
-        / "context-locals"
+        / "instructions"
         / "policy"
-        / "fallback.local.md"
+        / "fallback.local.instructions.md"
     )
     assert not local_path.exists()
 
@@ -1179,10 +1178,9 @@ def test_render_local_cache_refuses_to_write_a_git_tracked_destination(
     local_path = (
         repo
         / ".github"
-        / "copilot"
-        / "context-locals"
+        / "instructions"
         / "policy"
-        / "fallback.local.md"
+        / "fallback.local.instructions.md"
     )
     # Simulate the exact hazard: the *.local.instructions.md ignore rule
     # was never adopted, so this file got committed like any other.
@@ -1210,10 +1208,9 @@ def test_render_local_cache_never_deletes_a_git_tracked_stale_sibling(
     local_path = (
         repo
         / ".github"
-        / "copilot"
-        / "context-locals"
+        / "instructions"
         / "policy"
-        / "fallback.local.md"
+        / "fallback.local.instructions.md"
     )
     local_path.parent.mkdir(parents=True)
     # A real local-cache render's own bytes (owned marker, no
@@ -1266,10 +1263,9 @@ def test_render_local_cache_treats_inconclusive_git_check_as_tracked(
     local_path = (
         repo
         / ".github"
-        / "copilot"
-        / "context-locals"
+        / "instructions"
         / "policy"
-        / "fallback.local.md"
+        / "fallback.local.instructions.md"
     )
     assert not local_path.exists()
 
@@ -2967,7 +2963,7 @@ def test_customizing_copilot_ships_the_repo_wide_local_cache_catchall() -> None:
         "equal version/different hash favors reviewed content"
     ) in normalized
     assert spec.delivery_mode == "inline"
-    assert "a hook may have written bodies after automatic instruction discovery" in normalized.lower()
+    assert "creation preloads them; sessionstart may write later" in normalized.lower()
     assert "omitted middle text" in normalized
     assert "Persist no loaded-state" in normalized
 

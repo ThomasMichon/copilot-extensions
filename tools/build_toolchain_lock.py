@@ -16,7 +16,7 @@ Owns the Phase 2 Build hermeticity direction of the
 (`efforts/active/governed-python-artifact-promotion/README.md`): resolving
 ONE pinned `setuptools`/`wheel` venv (`resolve_toolchain_lock`), reusable
 unchanged across every wheel built in a run, verifying it only ever
-installs from an affirmatively trusted, governed, non-public package feed
+installs by default from an affirmatively trusted, governed, non-public package feed
 (`_governed_feed_configured`), and verifying a source's own `[build-
 system].requires` floor is satisfied by the locked versions before a
 `--no-build-isolation` build runs (`_assert_toolchain_satisfies_build_
@@ -52,7 +52,7 @@ from governed_feed_trust import (  # noqa: E402
     _governed_feed_configured,  # noqa: F401 -- re-exported for test/caller use
     _is_public_pypi_url,  # noqa: F401 -- re-exported for test/caller use
     _normalize_hostname,  # noqa: F401 -- re-exported for test/caller use
-    _opaque_index_identity,
+    _opaque_index_identity,  # noqa: F401 -- re-exported for test/caller use
     _project_uv_toml_candidates,  # noqa: F401 -- re-exported for test/caller use
     _restrict_file_to_owner,
     _trusted_index_hosts,  # noqa: F401 -- re-exported for test/caller use
@@ -60,6 +60,13 @@ from governed_feed_trust import (  # noqa: E402
     _validated_trusted_index_url,
     strip_package_source_env_vars,
 )
+from public_toolchain_source import (  # noqa: E402
+    PublicToolchainSource,
+    resolve_public_source,
+    source_provenance,
+    validate_lock_provenance,
+)
+from seasoned_public_feed import DEFAULT_MIN_AGE_DAYS  # noqa: E402
 
 #: The exact packages a locked build-toolchain venv pins -- every
 #: `pyproject.toml` under `plugins/` and `libs/` uses the same
@@ -124,28 +131,25 @@ def sanitize_subprocess_env(env: dict | None = None) -> dict:
 _PROVENANCE_MARKER_NAME = ".governed-feed-provenance.json"
 
 
-def _toolchain_identity_hash(validated_index_url: str, python: str | None) -> str:
-    """A stable identity for one (validated index, requested interpreter)
-    pairing -- the exact two inputs that determine what a locked
-    toolchain venv actually contains. Used to key a deterministic
-    alternate venv location (`_alternate_toolchain_dir`); via
-    `_opaque_index_identity`, never folds in a redacted (query/fragment-
-    stripped) form that could conflate two distinct indexes."""
-    return _hash_fields(_opaque_index_identity(validated_index_url), python or "")
+def _toolchain_identity_hash(validated_index_url: str | PublicToolchainSource, python: str | None) -> str:
+    """Key an alternate slot by source policy and interpreter. Governed
+    URLs use their full, opaque identity, never a conflating redaction;
+    public sources include the explicit index, age floor, and exact pins."""
+    return _hash_fields(
+        json.dumps(source_provenance(validated_index_url), sort_keys=True), python or ""
+    )
 
 
 def _write_provenance_marker(
-    venv_dir: Path, validated_index_url: str, python: str | None = None
+    venv_dir: Path, validated_index_url: str | PublicToolchainSource, python: str | None = None
 ) -> None:
-    """Records ``validated_index_url``'s opaque (one-way-hashed) identity,
-    and the requested ``python`` interpreter, into ``venv_dir``'s own
-    provenance marker -- called on the staging directory BEFORE the
-    atomic rename that publishes it, so the marker and the venv it
-    describes always arrive together, never as two separate, racy
-    writes. Never persists the raw URL (or any redacted-but-reversible
-    form of it) to disk -- see `_opaque_index_identity`."""
+    """Record source and interpreter BEFORE atomic publication, so the
+    marker and venv arrive together. Governed URLs persist only an opaque
+    keyed identity, never credentials or a reversible URL. Public sources
+    explicitly record the credential-free public index, policy, age, and
+    pins instead; that format never claims a validated governed identity."""
     marker = {
-        "validated_index_identity": _opaque_index_identity(validated_index_url),
+        **source_provenance(validated_index_url),
         "python": python or "",
     }
     (venv_dir / _PROVENANCE_MARKER_NAME).write_text(
@@ -154,14 +158,12 @@ def _write_provenance_marker(
 
 
 def _provenance_matches(
-    venv_dir: Path, validated_index_url: str, python: str | None = None
+    venv_dir: Path, validated_index_url: str | PublicToolchainSource, python: str | None = None
 ) -> bool:
-    """Whether ``venv_dir``'s own provenance marker records EXACTLY
-    ``validated_index_url``'s opaque identity AND the requested ``python``
-    interpreter -- a missing, unreadable, or mismatched marker returns
-    ``False``, never "probably fine". Omitting the interpreter identity
-    would let a venv built for one Python version be silently reused for
-    a call that explicitly asked for a different one."""
+    """Match the complete source marker and interpreter: opaque index
+    identity for governed mode, or public policy/index/age/pins. Missing,
+    unreadable, or mismatched markers never license reuse. Interpreter
+    identity prevents reusing a slot built for a different Python."""
     marker_path = venv_dir / _PROVENANCE_MARKER_NAME
     try:
         data = json.loads(marker_path.read_text(encoding="utf-8"))
@@ -169,13 +171,13 @@ def _provenance_matches(
         return False
     return (
         isinstance(data, dict)
-        and data.get("validated_index_identity") == _opaque_index_identity(validated_index_url)
+        and {k: v for k, v in data.items() if k != "python"} == source_provenance(validated_index_url)
         and data.get("python", "") == (python or "")
     )
 
 
 def _alternate_toolchain_dir(
-    venv_dir: Path, validated_index_url: str, python: str | None
+    venv_dir: Path, validated_index_url: str | PublicToolchainSource, python: str | None
 ) -> Path:
     """A deterministic, content-addressed SIBLING of ``venv_dir`` for a
     toolchain identity (validated index + requested interpreter) that does
@@ -192,7 +194,7 @@ def _alternate_toolchain_dir(
 
 
 def _occupied_by_other_identity(
-    target_dir: Path, validated_index_url: str, python: str | None
+    target_dir: Path, validated_index_url: str | PublicToolchainSource, python: str | None
 ) -> bool:
     """Whether ``target_dir`` exists but is NOT a complete, provenance-
     matching venv for this EXACT (index, python) identity -- covers a
@@ -213,7 +215,7 @@ def _occupied_by_other_identity(
 
 
 def _target_dir_for_identity(
-    venv_dir: Path, validated_index_url: str, python: str | None
+    venv_dir: Path, validated_index_url: str | PublicToolchainSource, python: str | None
 ) -> Path:
     """The directory `resolve_toolchain_lock` should actually build into
     or reuse for this (index, python) identity: ``venv_dir`` itself if it
@@ -347,9 +349,10 @@ class ToolchainLock:
     version actually produced them (the `governed-python-artifact-promotion`
     effort's own resolved Build hermeticity direction)."""
 
-    def __init__(self, venv_python: Path, packages: dict[str, str]):
+    def __init__(self, venv_python: Path, packages: dict[str, str], *, provenance: dict | None = None):
         self.venv_python = venv_python
         self.packages = packages
+        self.provenance = provenance
         self._marker_environment: dict | None = None
 
     @property
@@ -382,7 +385,16 @@ class ToolchainLock:
         wheel versions are naturally different, auditable artifact
         identities rather than a silent same-identity mismatch."""
         pairs = [f"{name}=={version}" for name, version in sorted(self.packages.items())]
+        if self.provenance is not None:
+            pairs.append(json.dumps(self.provenance, sort_keys=True))
         return "sha256:" + _hash_fields(*pairs)
+
+    @property
+    def record(self) -> dict:
+        validate_lock_provenance(self.provenance, self.packages)
+        record = {"packages": dict(sorted(self.packages.items())), "lock_id": self.lock_id}
+        record["provenance"] = self.provenance
+        return record
 
 
 def _resolve_interpreter_identity(python: str | None, env: dict) -> str:
@@ -485,7 +497,7 @@ def _toml_escape(value: str) -> str:
 def _publish_staging_venv(
     staging_venv_dir: Path,
     target_dir: Path,
-    validated_index_url: str,
+    validated_index_url: str | PublicToolchainSource,
     python_identity: str,
     *,
     venv_dir: Path,
@@ -540,7 +552,10 @@ def _publish_staging_venv(
         ) from exc
 
 
-def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> ToolchainLock:
+def resolve_toolchain_lock(
+    venv_dir: Path, *, python: str | None = None,
+    source_policy: str = "governed", min_age_days: int | None = None,
+) -> ToolchainLock:
     """Resolves one pinned build-toolchain venv and returns its exact
     installed ``setuptools``/``wheel``/``packaging`` versions.
 
@@ -562,10 +577,13 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
     deterministic sibling keyed on its own identity
     (`_alternate_toolchain_dir`).
 
-    Never resolves from an untrusted index (`_validated_trusted_index_url`,
+    Governed mode never resolves from an untrusted index (`_validated_trusted_index_url`,
     failing closed); the install is pinned to EXACTLY that one validated
     URL, every ambient supplemental-index variable stripped -- never
-    trusting `uv`'s own ambient config.
+    trusting `uv`'s own ambient config. Explicit ``seasoned-public`` mode
+    instead pins aged public releases for public build runners only;
+    policy, age, pins, and interpreter bind provenance and reuse. It never
+    classifies the public index as governed or falls back between policies.
 
     Built in a unique staging directory and published via an atomic
     rename only AFTER `uv venv`/`uv pip install` succeed AND the
@@ -573,7 +591,13 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
     (`_query_toolchain_versions`) -- so neither an interrupted setup nor
     a broken install ever gets published as "complete"."""
     env = dict(os.environ)
-    validated = _validated_trusted_index_url(env)
+    if source_policy not in ("governed", "seasoned-public"):
+        raise ArtifactBuildError(f"unknown toolchain source policy: {source_policy!r}")
+    if source_policy == "governed" and min_age_days is not None:
+        raise ArtifactBuildError("min_age_days applies only to seasoned-public toolchains")
+    age = DEFAULT_MIN_AGE_DAYS if min_age_days is None else min_age_days
+    public = resolve_public_source(_LOCKED_TOOLCHAIN_PACKAGES, age) if source_policy == "seasoned-public" else None
+    validated = (public.provenance["index"], None) if public else _validated_trusted_index_url(env)
     if validated is None:
         raise ArtifactBuildError(
             "no affirmatively trusted governed package feed is configured "
@@ -588,6 +612,7 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             "an unverified index"
         )
     validated_index_url, validated_index_name = validated
+    provenance_source = public or validated_index_url
     # Strip every ambient variable that could supply packages from
     # somewhere other than the one validated URL below (see
     # `governed_feed_trust.strip_package_source_env_vars`'s own docstring
@@ -602,7 +627,7 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
     # `python`) while creating the venv with `--no-config` could let the
     # two silently disagree about which interpreter is actually in play.
     sanitized_env = sanitize_subprocess_env(env)
-    strip_package_source_env_vars(sanitized_env)
+    strip_package_source_env_vars(sanitized_env, strip_credentials=public is not None)
     python_identity = _resolve_interpreter_identity(python, sanitized_env)
     # Resolved as the LAST thing before the reuse/build decision itself
     # (immediately below), not any earlier -- a check performed earlier
@@ -610,7 +635,7 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
     # where a concurrent, different-identity publisher populates
     # `target_dir` between that check and its actual use, letting this
     # call trust now-stale provenance and return a mismatched venv.
-    target_dir = _target_dir_for_identity(venv_dir, validated_index_url, python_identity)
+    target_dir = _target_dir_for_identity(venv_dir, provenance_source, python_identity)
     venv_python = _venv_python_path(target_dir)
     if not venv_python.is_file():
         target_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -712,8 +737,9 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             install = subprocess.run(
                 [
                     "uv", "pip", "install",
+                    *(["--only-binary", ":all:"] if public else []),
                     "--python", str(staging_venv_python),
-                    *_LOCKED_TOOLCHAIN_PACKAGES,
+                    *(public.install_args(staging_venv_dir) if public else _LOCKED_TOOLCHAIN_PACKAGES),
                 ],
                 capture_output=True, text=True, env=install_env,
             )
@@ -729,6 +755,8 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             # shared slot forever (every retry trusting the same broken
             # venv and failing again, rather than rebuilding).
             packages = _query_toolchain_versions(staging_venv_python)
+            if public:
+                public.verify(packages)
             # Remove the credential-bearing index-config file NOW, before
             # `_publish_staging_venv` renames `staging_venv_dir` itself --
             # it lives INSIDE that directory (see above), so an unremoved
@@ -748,9 +776,9 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             # and a raced DIFFERENT identity (redirect our own staging
             # venv to our deterministic alternate slot instead of failing,
             # only when `target_dir` is still the original shared slot).
-            _write_provenance_marker(staging_venv_dir, validated_index_url, python_identity)
+            _write_provenance_marker(staging_venv_dir, provenance_source, python_identity)
             target_dir, venv_python, fresh = _publish_staging_venv(
-                staging_venv_dir, target_dir, validated_index_url, python_identity,
+                staging_venv_dir, target_dir, provenance_source, python_identity,
                 venv_dir=venv_dir, allow_redirect=(target_dir == venv_dir),
             )
             if not fresh:
@@ -768,7 +796,13 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
     else:
         packages = _query_toolchain_versions(venv_python)
 
-    return ToolchainLock(venv_python, packages)
+    if public:
+        public.verify(packages)
+    provenance = {
+        **source_provenance(provenance_source), "source_policy": source_policy,
+        "python": python_identity,
+    }
+    return ToolchainLock(venv_python, packages, provenance=provenance)
 
 
 #: Runs entirely INSIDE the locked toolchain venv's own interpreter (see

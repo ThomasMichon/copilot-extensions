@@ -3,6 +3,14 @@
 Dependency-free primitives for consumer-owned plugin contribution registries
 such as `providers.d`, `config.d`, Picker pivots, and `registrar.d`.
 
+**In dev**, most consumers' `pyproject.toml` reference this library through a
+`uv`-editable canonical pointer (`vendor-pointer-generalization` effort,
+Phase 1), so those consumers have no per-plugin dev copy to keep in sync (a
+few consumers not yet converted still carry a real per-plugin copy). **At
+release**, `tools/materialize_main.py` rewrites every such pointer into a
+real, promoted copy at `plugins/<plugin>/libs/dropin-registry/` -- non-
+editable, so a published plugin installs a self-contained source tree.
+
 The library owns only the behavior every registry shares:
 
 - **scan authority** is `complete`, `absent`, or `indeterminate`;

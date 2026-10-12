@@ -14,12 +14,15 @@ import shutil
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .harness_state import (
     build_projects,
     repo_plugin_enablement,
     user_enabled_plugins,
 )
+if TYPE_CHECKING:
+    from .production_picker.picker_tui.pivot_create_action import CreateAction
 
 CONTRACT_VERSION = 1
 PLUGINS_ROOT_ENV = "WORKTREE_MANAGER_PLUGINS_DIR"
@@ -80,6 +83,7 @@ class ConfigSectionContract:
     confirm: bool = False
     description: str = ""
     available: bool = True
+    configure_action: CreateAction | None = None
 
 
 @dataclass(frozen=True)
@@ -349,26 +353,25 @@ def _parse_worktree_actions(raw: object, *, name: str) -> tuple[WorktreeActionCo
 
 
 def _parse_config_sections(raw: object, *, name: str) -> tuple[ConfigSectionContract, ...]:
+    from .production_picker.picker_tui.pivot_actions import (
+        ManifestError,
+        parse_config_sections,
+    )
+
     if raw is None:
         return ()
-    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
-        raise ContractError("`config_sections` must be an array when present")
-    out: list[ConfigSectionContract] = []
-    for i, item in enumerate(raw):
-        if not isinstance(item, Mapping):
-            raise ContractError(f"`config_sections[{i}]` must be an object")
-        label = item.get("label")
-        if not isinstance(label, str) or not label.strip():
-            raise ContractError(f"`config_sections[{i}].label` is required")
-        key = item.get("key")
-        out.append(ConfigSectionContract(
-            key=key if isinstance(key, str) and key else f"{name}{i}",
-            label=label.strip(),
-            run=_as_argv(item.get("run"), where=f"`config_sections[{i}].run`"),
-            confirm=bool(item.get("confirm", False)),
-            description=str(item.get("description", "")),
-        ))
-    return tuple(out)
+    try:
+        sections = parse_config_sections({"config_sections": raw}, name=name)
+    except ManifestError as exc:
+        raise ContractError(str(exc)) from exc
+    return tuple(
+        ConfigSectionContract(
+            key=section.key, label=section.label, run=section.run,
+            confirm=section.confirm, description=section.description,
+            configure_action=section.configure_action,
+        )
+        for section in sections
+    )
 
 
 def parse_manifest(
@@ -545,10 +548,19 @@ def _probe_commands(
 
     config_sections = []
     for section in contribution.config_sections:
-        command = section.run[0]
-        available = shutil.which(command) is not None
-        if not available:
-            missing.append(f"config section {section.key}: {command}")
+        commands = [section.run]
+        if section.configure_action is not None:
+            commands.append(section.configure_action.run)
+            commands.extend(
+                _as_argv(field["options_command"], where="configuration options_command")
+                for field in section.configure_action.fields
+                if field.get("options_command")
+            )
+        available = True
+        for argv in commands:
+            if shutil.which(argv[0]) is None:
+                available = False
+                missing.append(f"config section {section.key}: {argv[0]}")
         config_sections.append(replace(section, available=available))
 
     return (

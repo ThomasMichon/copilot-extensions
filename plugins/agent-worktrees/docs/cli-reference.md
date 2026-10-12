@@ -19,6 +19,13 @@ agent-worktrees -p copilot-extensions worktree create --json
 Running a project binstub bare (e.g. `my-control-harness`) still launches the
 interactive picker.
 
+Project-only `get` scalars (`machine`, `platform`, `project`, `repo-dir`,
+`worktrees-root`, `src-dir`, and `config-dir`) read the layered project
+configuration without scanning current worktree/session identity. Worktree-
+scoped keys retain their binding and checkout resolution.
+An explicit `--session-id` still selects the session's project before any
+scalar read; the shortcut does not change that targeting contract.
+
 ## State-root and paired-worktree resolution
 
 `agent-worktrees state-root --json` resolves the repository that owns personal

@@ -122,6 +122,30 @@ because their effective-state proof is not yet implemented.
 
 ## Durable retry fence
 
+A fresh-generation authorization is not an instruction to create a second
+conversation on every reservation retry. If launch succeeded but delivery did
+not begin, reconciliation preserves a validated native receipt before marking
+the old attempt `superseded_before_delivery`. Automatic retries may reuse that
+specific non-retired, same-task, same-generation conversation only when its
+target/mode and native head agree with that receipt. Foreign or unbound
+holders, older generations, a newly issued freshness intent, and retired
+native IDs still refuse. Older superseded `launching` records without a result
+remain recoverable only when their positive creation authorization, exact
+native task/generation binding, and recorded launch caller (ACP) or driver (CLI)
+all agree. Missing records never establish that proof, and historical stages
+are not rewritten into fabricated result receipts.
+Durable turn admission consumes that recovery chain
+for other delivery IDs, even before completion is journaled. A completed receipt
+retains immutable proof only for replay of its own delivery ID; later
+reservations cannot use it to deliver the same fresh-generation task again.
+CLI recovery from `launching` revalidates the persisted native identity against
+its live registration and current head, without requiring the reused process
+to have acquired the retry's driver label. Already-admitted turns settle
+without a duplicate delivery or a new process.
+Updated acquisition clients require protocol 32 for this retirement-recovery
+guarantee and refuse an older daemon before sending a request. The protocol-32
+route explicitly continues accepting protocol-30 and protocol-31 requests.
+
 `acquisition_journal.AcquisitionJournal` uses the bridge database's existing
 SQLite connection/write machinery, with a separate internal attempt table.
 One delivery ID binds the complete request digest. A partial unique index
