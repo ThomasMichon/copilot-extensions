@@ -56,9 +56,10 @@ def _validate(worktree_id: str, config: Config, record: tracking.WorktreeRecord 
         if (pr.rewrite_owner or pr.rewrite_identity or pr.pr_revision != 0
                 or not legacy_identity(pr, cwd) or pr.number is None or not pr.url):
             raise ValueError("Missing publication ownership or compatible legacy evidence; inspect the tracked PR.")
+    from .pr_custom_head import saved_attestation
     if (pr.branch in {repo.default_branch, "main", "master", "dev", branch, *hooks._protected_branches(cwd)}
             or (not recovery and not pr.branch.endswith("-" + git_ops.worktree_suffix(worktree_id))
-                and not (pr.rewrite_owner == f"{worktree_id}:{pr.branch}" and pr.rewrite_identity))
+                and not saved_attestation(record, repo, pr, pr.head_sha))
             or "/" not in pr.branch
             or pr.branch.startswith(("worktree/", "release/"))):
         raise ValueError("--rewrite-pr only rewrites a worktree-scoped private PR head.")

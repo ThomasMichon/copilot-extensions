@@ -7,19 +7,24 @@ from . import git_ops, pr_authority, pr_publish, providers
 from .providers.pr_source import same_repository
 
 
-def verify_attested(record, repo, pr, remote: str, expected: str, *, cwd: str,
-                    config=None, observed=None, remote_tip: str | None = None) -> bool:
-    """Require exact saved publication ownership and live provider/remote agreement.
-
-This is not an adoption or recovery path: missing historical attestation
-cannot be replaced by matching strings supplied through set-pr.
-    """
-    if (
+def saved_attestation(record, repo, pr, expected: str) -> bool:
+    """Require complete historical publication identity before credential resolution."""
+    return not (
         pr.rewrite_owner != f"{record.worktree_id}:{pr.branch}"
         or not pr.rewrite_identity or not pr.number or not pr.repo or not pr.url
         or pr.head_sha != expected or pr.state not in ("open", "active")
         or pr.provider != repo.pr.provider
-    ):
+    )
+
+
+def verify_attested(record, repo, pr, remote: str, expected: str, *, cwd: str,
+                    config=None, observed=None, remote_tip: str | None = None) -> bool:
+    """Require exact saved publication ownership and live provider/remote agreement.
+
+    Missing historical attestation is not replaced by set-pr strings or a
+    guessed provider fallback; this is not an adoption or recovery path.
+    """
+    if not saved_attestation(record, repo, pr, expected):
         return False
     try:
         identity = pr_publish.push_identity(remote, cwd=cwd)
