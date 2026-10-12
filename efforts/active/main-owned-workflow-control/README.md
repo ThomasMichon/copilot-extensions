@@ -264,3 +264,12 @@ credential changes, broad policy weakening or unreviewed releases.
 - No partial baseline, enrollment removal, forced retry or evidence bypass is
   an acceptable release recovery. The duplicate full/coverage execution remains
   a consolidation seam after the failure is understood.
+
+### 2026-10-12 - Diagnostic overlap reconciled
+
+- Another driver landed the equivalent diagnostic implementation in #6321.
+  The operator authorized retaining only this campaign's unique regression
+  coverage and journal, adopting that implementation unchanged.
+- #6323 therefore contributes no production diagnostic change; its actual
+  collector failure regression and native-path test expectations remain useful.
+  The real missing-baseline repair stays open under #6319.

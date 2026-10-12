@@ -947,7 +947,7 @@ class TestBaselineCollectionErrorContract:
         assert "missing_baseline_fixture_dependency" in caught.value.stdout
         assert "missing_baseline_fixture_dependency" in str(caught.value)
         assert "No data was collected" in caught.value.stderr
-        assert caught.value.stderr in str(caught.value)
+        assert caught.value.stderr.rstrip() in str(caught.value)
 
     def test_measured_commit_round_trips_into_the_baseline_dict(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
