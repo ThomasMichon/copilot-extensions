@@ -1,0 +1,9 @@
+{
+  "comment": "Propagate canonical activation library ownership documentation after dev copy retirement",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
