@@ -302,10 +302,12 @@ class BaselineCollectionError(RuntimeError):
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
-        super().__init__(
-            f"coverage baseline collection failed (exit {returncode}):\n"
-            f"{stderr or stdout}"
+        details = "\n".join(
+            f"{label}:\n{stream.rstrip()}"
+            for label, stream in (("stdout", stdout), ("stderr", stderr))
+            if stream
         )
+        super().__init__(f"coverage baseline collection failed (exit {returncode}):\n{details}")
 
 
 def _timeout_error(exc: subprocess.TimeoutExpired, *, timeout_s: float) -> BaselineCollectionError:
