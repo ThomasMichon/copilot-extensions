@@ -55,6 +55,21 @@ def test_ready_is_explicit_snapshot_assertion_not_live_proof():
     assert result["evidence"] == "supplied-snapshot-only"
     assert not result["live_readiness_verified"] and not result["mutations_performed"]
     assert (release, observed) == before
+    assert result["inspected_at"] == 150
+    assert result["observed_at"] == 100 and result["valid_until"] == 200
+
+
+def test_evidence_window_survives_serialization_and_expiry():
+    release = manifest()
+    observed = observation(release)
+    saved = json.loads(json.dumps(inspect(release, observed)))
+    assert saved["inspected_at"] < saved["valid_until"]
+    expired = inspect(release, observed, now=200)
+    assert expired["status"] == "unknown"
+    assert expired["observed_at"] == saved["observed_at"]
+    assert expired["valid_until"] == saved["valid_until"]
+    absent = inspect(release, None)
+    assert absent["observed_at"] is None and absent["valid_until"] is None
 
 
 @pytest.mark.parametrize("state", ["installed", "ready", "unknown"])

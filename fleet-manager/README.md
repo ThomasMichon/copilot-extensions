@@ -90,6 +90,11 @@ the explicitly supplied observation; output always has
 `evidence: supplied-snapshot-only`, `live_readiness_verified: false`, and
 `mutations_performed: false`. Hash matching supplies integrity binding, not
 signature verification, authentication or authorization.
+Results preserve `inspected_at`, `observed_at` and `valid_until`. The latter two
+are explicitly null when no observation was supplied. Retained results are
+historical assertions: consumers must reject freshness at or after `valid_until`
+and must not infer readiness from null, expired, future or incomplete evidence.
+Preserved time bounds do not authenticate the supplied observation.
 
 The strict schema-v1 `fleet-manager.release` has:
 

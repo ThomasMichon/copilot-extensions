@@ -151,6 +151,9 @@ def inspect_release(release, observation, *, role, authority, installation, now)
         "schema": "fleet-manager.release-inspection", "version": 1,
         "release": release["id"], "release_digest": selected_digest, "role": role,
         "authority": authority, "installation": installation,
+        "inspected_at": now,
+        "observed_at": observation["observed_at"] if observation else None,
+        "valid_until": observation["expires_at"] if observation else None,
         "status": status, "components": results, "evidence": "supplied-snapshot-only",
         "live_readiness_verified": False, "mutations_performed": False,
     }
