@@ -8,7 +8,7 @@ import copy
 import pytest
 
 from agent_worktrees import git_collab, git_ops, pr_custom_head, pr_publish, tracking
-from tests.test_pr_rebase import _advance, _git, _prepare, _record
+from test_pr_rebase import _advance, _git, _prepare, _record
 
 pytestmark = pytest.mark.timeout(180)
 

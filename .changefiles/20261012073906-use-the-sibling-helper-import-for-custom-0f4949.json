@@ -1,0 +1,9 @@
+{
+  "comment": "Use the sibling helper import for custom-head tests so repository-root coverage collection succeeds.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
