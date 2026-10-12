@@ -49,14 +49,12 @@ retains full-roster behavior.
 
 **In dev**, most consumers' `pyproject.toml` reference this library through a
 `uv`-editable canonical pointer (`vendor-pointer-generalization` effort,
-Phase 1), so there is no per-plugin dev copy to keep in sync. The two
-deliberate exceptions keep this full local copy instead:
-
-- `agent-worktrees`, so a staged non-editable install never depends on a
-  throwaway passthrough source tree; and
-- `customizing-copilot`, whose standalone `installing-plugins` skill script
-  resolves `state.py` directly by file path and has no consuming
-  `pyproject.toml` surface the `uv`-editable form could target.
+Phase 1), so there is no per-plugin dev copy to keep in sync.
+`customizing-copilot` keeps a full local copy instead: its standalone
+`installing-plugins` skill script resolves `state.py` directly by file path
+and has no consuming `pyproject.toml` surface the `uv`-editable form could target.
+`agent-worktrees` uses canonical editable references on dev; its standalone
+release receives real local copies during materialization.
 
 **At release**, `tools/materialize_main.py` rewrites any `uv`-editable
 consumers into the same real, promoted copy shape present here -- non-editable,

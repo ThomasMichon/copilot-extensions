@@ -1,0 +1,9 @@
+{
+  "comment": "Retire redundant dev activation library copies so canonical references materialize safely",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -39,6 +39,22 @@ def test_runtime_dependencies_do_not_install_ui_stack() -> None:
 
 
 @pytest.mark.guard
+@pytest.mark.parametrize("library", ["plugin-resolve", "dropin-registry", "plugin-activation"])
+def test_activation_dependencies_match_their_delivery_form(library: str) -> None:
+    project = tomllib.loads((PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    source = project["tool"]["uv"]["sources"][f"agent-{library}"]
+    copy_root = PLUGIN_ROOT / "libs" / library
+    if source.get("editable") is True:
+        canonical = PLUGIN_ROOT.parents[1] / "libs" / library
+        assert (PLUGIN_ROOT / source["path"]).resolve() == canonical.resolve()
+        assert (canonical / "src").is_dir()
+        assert not copy_root.exists(), "canonical reference retains a conflicting vendor copy"
+    else:
+        assert source["path"] == f"libs/{library}"
+        assert (copy_root / "src").is_dir()
+
+
+@pytest.mark.guard
 @pytest.mark.parametrize(
     "ui_requirement",
     ["Textual", "RICH", "Pygments", "markdown_it_py", "Markdown.IT.Py", "markdown--it--py"],
