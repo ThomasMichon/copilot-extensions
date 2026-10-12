@@ -51,7 +51,6 @@ import logging
 import os
 import subprocess
 import sys
-import threading
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -306,7 +305,7 @@ def refresh_local_cache(
             argv += ["--agent-worktrees-path", agent_worktrees_command]
         render_timeout = deadline - time.monotonic()
         if render_timeout <= 0:
-            return _report(RefreshResult("timeout", detail="identity lookup exhausted refresh budget"))
+            return _report(RefreshResult("timeout", detail="pre-render lookup exhausted refresh budget"))
         from . import push_timeout
 
         result = push_timeout.run_bounded(
@@ -327,63 +326,26 @@ def refresh_local_cache(
 
 
 def _worker_directory(root: Path) -> Path:
-    from . import git_ops
+    from . import local_cache_worker
 
-    result = git_ops.git(
-        "rev-parse", "--absolute-git-dir", cwd=str(root),
-        check=False, isolated_repository=True, timeout=1.0,
-    )
-    if result.returncode or not result.stdout.strip():
+    directory = local_cache_worker.metadata_directory(root)
+    if directory is None:
         raise ValueError("cannot resolve this checkout's Git administrative directory")
-    return Path(result.stdout.strip()) / "agent-worktrees-local-guidance"
+    return directory
 
 
 def _queue_refresh(cwd: str) -> RefreshResult:
-    from agent_procutil import windowless_daemon_kwargs
-    from single_instance_lease import AlreadyRunningError, SingleInstance
-    from . import status_monitor_runtime
+    from . import local_cache_worker
 
     root = _checkout_root(cwd).resolve()
-    directory = _worker_directory(root)
-    directory.mkdir(parents=True, exist_ok=True)
-    log_path = directory / "refresh.log"
-    probe = SingleInstance(directory, service="local-guidance")
-    try:
-        probe.acquire()
-    except AlreadyRunningError:
-        return RefreshResult("queued", detail=f"refresh already active; not yet delivered; result: {log_path}")
-    else:
-        probe.release()
-    with log_path.open("w", encoding="utf-8") as log:
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "agent_worktrees.local_cache_refresh", "--refresh", str(root)],
-            stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-            cwd=status_monitor_runtime._daemon_cwd(),
-            env=status_monitor_runtime._daemon_environment(),
-            **windowless_daemon_kwargs(breakaway=True),
-        )
-    threading.Thread(target=proc.wait, daemon=True).start()
-    return RefreshResult(
-        "queued", detail=f"background refresh pid {proc.pid}; not yet delivered; result: {log_path}",
-    )
+    return local_cache_worker.queue(root, _worker_directory(root))
 
 
 def _run_refresh_worker(cwd: str) -> int:
-    from single_instance_lease import AlreadyRunningError, SingleInstance
+    from . import local_cache_worker
 
     root = _checkout_root(cwd).resolve()
-    lease = SingleInstance(_worker_directory(root), service="local-guidance")
-    try:
-        lease.acquire()
-    except AlreadyRunningError:
-        print(RefreshResult("skipped", detail="another refresh worker owns this repository").diagnostic)
-        return 0
-    try:
-        result = refresh_local_cache(root)
-        print(result.diagnostic, flush=True)
-        return 0 if result.status in ("ready", "skipped") else 1
-    finally:
-        lease.release()
+    return local_cache_worker.run(root, _worker_directory(root))
 
 
 def sessionstart_diagnostic(cwd: str, *, deadline: float | None) -> str:

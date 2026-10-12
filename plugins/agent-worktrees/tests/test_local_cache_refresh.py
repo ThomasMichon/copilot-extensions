@@ -162,7 +162,9 @@ def test_launch_refresh_repairs_nested_worktree_guidance(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("trusted", [True, False], ids=["trusted", "untrusted"])
-def test_real_global_discovery_and_renderer_fit_launch_budget(tmp_path, monkeypatch, trusted):
+@pytest.mark.parametrize("delivery", ["launch", "backup"])
+@pytest.mark.timeout(2 * lcr.DEFAULT_TIMEOUT_S + 15)
+def test_real_global_discovery_and_renderer_fit_launch_budget(tmp_path, monkeypatch, trusted, delivery):
     """Exercise both production subprocesses and source discovery, not stubs."""
     scripts = (
         _REPO_ROOT / "plugins" / "customizing-copilot" / "skills"
@@ -223,6 +225,37 @@ def test_real_global_discovery_and_renderer_fit_launch_budget(tmp_path, monkeypa
         siblings.append(repo / ".github" / "instructions" / name / "fallback.local.instructions.md")
     monkeypatch.setattr(lcr, "_resolve_own_agent_worktrees_command", lambda: None)
     started = time.monotonic()
+    if delivery == "backup":
+        processes = []
+        popen = subprocess.Popen
+
+        def spawn(argv, **kwargs):
+            process = popen(argv, **kwargs)
+            if "agent_worktrees.local_cache_worker" in argv:
+                processes.append(process)
+            return process
+
+        monkeypatch.setattr(lcr.subprocess, "Popen", spawn)
+        diagnostic = lcr.sessionstart_diagnostic(str(repo), deadline=time.time() + 2.0)
+        assert "[local-guidance] queued" in diagnostic
+        assert "not yet delivered" in diagnostic
+        assert len(processes) == 1
+        directory = lcr._worker_directory(repo.resolve())
+        try:
+            code = processes[0].wait(timeout=lcr.DEFAULT_TIMEOUT_S + 10)
+        except subprocess.TimeoutExpired:
+            pytest.fail(
+                f"Worker stalled: {(directory / 'request.json').read_text()}; "
+                f"{(directory / 'refresh.log').read_text()}"
+            )
+        log = (directory / "refresh.log").read_text(encoding="utf-8")
+        assert code == 0, log
+        assert f"[local-guidance] ready: {len(names) if trusted else 0} installed" in log
+        assert all(path.exists() == trusted for path in siblings)
+        if trusted:
+            assert sum(path.stat().st_size for path in siblings) > 48 * 1024
+            assert all("Useful guidance.\n" * 700 in path.read_text(encoding="utf-8") for path in siblings)
+        return
     first = lcr.refresh_local_cache(repo, home=home)
     assert first.status == "ready", first.diagnostic
     if not trusted:
@@ -235,30 +268,13 @@ def test_real_global_discovery_and_renderer_fit_launch_budget(tmp_path, monkeypa
     assert sum(path.stat().st_size for path in siblings) > 48 * 1024
     assert all("Useful guidance.\n" * 700 in path.read_text(encoding="utf-8") for path in siblings)
     templates[0].write_text('---\napplyTo: "**"\n---\n\nUpdated useful guidance.\n', encoding="utf-8")
+    started = time.monotonic()
     repaired = lcr.refresh_local_cache(repo, home=home)
     assert repaired.status == "ready", repaired.diagnostic
+    assert time.monotonic() - started < lcr.DEFAULT_TIMEOUT_S
     assert repaired.changed == 1
     assert repaired.unchanged == len(names) - 1
     assert "Updated useful guidance." in siblings[0].read_text(encoding="utf-8")
-    siblings[0].unlink()
-    processes = []
-    popen = subprocess.Popen
-
-    def spawn(argv, **kwargs):
-        process = popen(argv, **kwargs)
-        if "--refresh" in argv:
-            processes.append(process)
-        return process
-
-    monkeypatch.setattr(lcr.subprocess, "Popen", spawn)
-    diagnostic = lcr.sessionstart_diagnostic(str(repo), deadline=time.time() + 2.0)
-    assert "[local-guidance] queued" in diagnostic
-    assert "not yet delivered" in diagnostic
-    assert len(processes) == 1
-    assert processes[0].wait(timeout=20) == 0
-    assert "Updated useful guidance." in siblings[0].read_text(encoding="utf-8")
-    log = lcr._worker_directory(repo.resolve()) / "refresh.log"
-    assert "[local-guidance] ready: 1 installed, 7 unchanged" in log.read_text(encoding="utf-8")
 
 
 def test_json_base_launch_prepares_guidance_before_command(tmp_path, monkeypatch, capfd):
@@ -627,7 +643,7 @@ class TestRefreshLocalCache:
         )
         result = lcr.refresh_local_cache(tmp_path, home=tmp_path, timeout=5.0)
         assert result.status == "timeout"
-        assert result.detail == "identity lookup exhausted refresh budget"
+        assert result.detail == "pre-render lookup exhausted refresh budget"
 
     def test_command_lookup_also_consumes_the_shared_deadline(self, tmp_path, monkeypatch):
         from agent_worktrees import push_timeout
@@ -1013,8 +1029,7 @@ class TestSessionstartDiagnostic:
         assert "spawn refused" in diagnostic
 
     def test_worker_is_headless_survivable_and_reaped(self, tmp_path, monkeypatch):
-        import agent_procutil
-        from agent_worktrees import status_monitor_runtime
+        from agent_worktrees import status_monitor_runtime, local_cache_worker
 
         calls = []
         waits = []
@@ -1025,28 +1040,31 @@ class TestSessionstartDiagnostic:
         monkeypatch.setattr(status_monitor_runtime, "_daemon_cwd", lambda: str(tmp_path))
         monkeypatch.setattr(status_monitor_runtime, "_daemon_environment", lambda: {"HOME": str(tmp_path)})
         monkeypatch.setattr(
-            agent_procutil, "windowless_daemon_kwargs",
+            local_cache_worker, "windowless_daemon_kwargs",
             lambda **kwargs: calls.append(kwargs) or {"start_new_session": True},
         )
         monkeypatch.setattr(
             lcr.subprocess, "Popen",
             lambda argv, **kwargs: calls.append((argv, kwargs)) or SimpleNamespace(
-                pid=123, wait=lambda: waits.append(True),
+                pid=123, wait=lambda: waits.append(True) or 0,
             ),
         )
+        monkeypatch.setattr(local_cache_worker, "_owner", lambda pid: {"pid": pid, "start_time": "fixture"})
         result = lcr._queue_refresh(str(tmp_path))
         assert result.status == "queued"
         assert "not yet delivered" in result.detail
         assert calls[0] == {"breakaway": True}
         argv, kwargs = calls[1]
-        assert argv == [
-            sys.executable, "-m", "agent_worktrees.local_cache_refresh",
-            "--refresh", str(tmp_path.resolve()),
+        assert argv[:5] == [
+            sys.executable, "-m", "agent_worktrees.local_cache_worker",
+            str(tmp_path.resolve()), str(tmp_path / "worker"),
         ]
+        assert len(argv[5]) == 32
         assert kwargs["stdin"] == subprocess.DEVNULL
-        assert kwargs["stdout"] is kwargs["stderr"]
+        assert kwargs["stdout"] == kwargs["stderr"] == subprocess.DEVNULL
         assert kwargs["start_new_session"]
-        assert log_path.stat().st_size == 0
+        assert log_path.stat().st_size < local_cache_worker._MAX_LOG_BYTES
+        assert "old result" not in log_path.read_text()
         deadline = time.monotonic() + 1
         while not waits and time.monotonic() < deadline:
             time.sleep(0.01)
@@ -1068,7 +1086,7 @@ class TestSessionstartDiagnostic:
         finally:
             lease.release()
         assert result.status == "queued"
-        assert "refresh already active" in result.detail
+        assert "dispatch already reserved" in result.detail
         assert log_path.read_text() == "current worker result"
 
     def test_git_worktree_removal_reclaims_worker_metadata(self, tmp_path):

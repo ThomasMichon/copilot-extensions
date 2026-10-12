@@ -319,7 +319,7 @@ later provisioning diagnostics. It queues a headless, detached, bounded worker
 rather than waiting for discovery and rendering inside Copilot's hook deadline.
 The launch uses the canonical explicit breakaway primitive; contained tests
 retain containment. One worker per canonical checkout owns the kernel-released
-lease, and the parent reaps its child off the hook thread. A nested session cwd
+reservation, and the parent reaps its child off the hook thread. A nested session cwd
 resolves to the checkout root. An expired or nearly exhausted hook budget skips
 dispatch with an explicit diagnostic, and spawn failures remain visible.
 
@@ -331,6 +331,14 @@ registration root: a linked worktree uses its own Git administrative directory,
 so the normal finalization/GC Git worktree removal reclaims its lease and log.
 The log holds the latest attempt rather than an append-only history; dispatch
 leaves an active worker's log intact and does not start another worker.
+Admission holds a short kernel gate across reservation, process launch, and
+publication of the exact request nonce plus PID/start-time owner. The child
+claims only that request; another hook observes the live pending owner even
+before the child starts rendering. No lease or inherited log handle stays open
+in the Git administrative directory during rendering. The worker atomically
+publishes a latest-result log capped at 8 KiB and its completed receipt.
+Finalization and cleanup's normal liveness checks spare a live queued/running
+worker using its workspace-local receipt, without spawning Git per checkout.
 Creation and resume still perform synchronous primary publication before launch.
 The asynchronous backup can race instruction discovery and first-turn reads:
 neither a successful spawn nor a completed cache write proves model admission.
