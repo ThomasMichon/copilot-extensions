@@ -89,7 +89,7 @@ These are the load-bearing conventions. Apply them. Each maps to a phase.
 4. **`AGENTS.md` + "connective-tissue" skills** that bind the generic plugin
    skills to *this* repo — [Phase 4](#phase-4--agentsmd-and-connective-tissue-skills).
 5. **SSH mesh + agent-bridge topology** — [Phase 5](#phase-5--ssh-and-agent-bridge).
-6. **End-to-end validation through the Picker** —
+6. **End-to-end validation through the selected local CLI or Picker lane** —
    [Phase 6](#phase-6--validate-end-to-end-with-the-picker).
 7. **efforts + visions to guide change** — [Phase 7](#phase-7--enable-efforts-and-visions).
 8. **rubber-duck + customizing-copilot to validate skills and agents** —
@@ -355,9 +355,11 @@ From inside the harness repo (skill: **`agent-worktrees:copilot-extensions-setup
 agent-worktrees register <harness-repo-name>
 ```
 
-This writes `~/.<harness>/config.yaml`, picks a worktree root
-(`<parent>/.worktrees/<harness>/`), and drops a project binstub
-`~/.local/bin/<harness>` — the command that launches the Picker (Phase 6).
+Registration establishes the project configuration, worktree root, and project
+binstub according to the selected installation/adoption context. It does not
+prove a Picker host is installed. A selected Picker deployment needs the
+separate Manager setup in Phase 6; standalone local management uses the
+[worktrees CLI owner](../plugins/agent-worktrees/docs/cli-reference.md).
 
 ### Adopt related target repos
 
@@ -405,7 +407,9 @@ reaching across machines, and never hardcode a checkout path (resolve with
 > locus; a narrative with **no registry entry on any machine** is the actual gap
 > to reconcile (register it, or drop the stale narrative).
 
-**Done when:** `<harness>` launches the Picker; each product repo either resolves
+**Done when:** the harness registration and local CLI project resolution are
+verified (and, **if the Picker lane is selected**, its installed host launches);
+each product repo either resolves
 via `agent-worktrees related resolve <name>` with a concrete plan **or** is
 explicitly reference-class / owned by another machine, and every narrative has a
 matching registry entry somewhere.
@@ -531,13 +535,18 @@ For standalone local CLI use, validate the lifecycle through the
 [worktrees owner guide](../plugins/agent-worktrees/docs/getting-started.md)
 instead; do not make the optional Picker host a universal installation gate.
 
-Launch it:
+For the selected Picker lane, launch it:
 
 ```bash
 <harness>            # the project binstub from Phase 3 → opens the Picker
 ```
 
 Walk one full lifecycle:
+
+For standalone local management, use the owning CLI's create/status and
+configured finalization procedure instead of the Picker-specific navigation
+steps below. Do not treat an optional Manager bootstrap prompt as a failed
+repository registration.
 
 1. **Create/pick a worktree** from the Picker; confirm the session starts in an
    isolated worktree (not the anchor).
@@ -556,7 +565,7 @@ Walk one full lifecycle:
 > when *building* a harness, but wrong during a read-only audit. To audit Phase 6
 > without touching anything, verify the finalization path is **configured**
 > instead of exercised: the session is in an isolated worktree (not the anchor),
-> plugins/skills loaded, a setup script is present and ACP-safe, and the PR/branch
+> plugins/skills loaded, a chosen setup script is ACP-safe when present, and the PR/branch
 > policy is wired (`agent-worktrees get pr-required`, the `pr:`/hooks config) —
 > no trivial commit required.
 
