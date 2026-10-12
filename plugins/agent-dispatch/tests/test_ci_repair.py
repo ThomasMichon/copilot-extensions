@@ -517,9 +517,15 @@ def test_coordinator_launch_never_grants_caller_selected_spawn(tmp_path, monkeyp
         calls.append(k) or SimpleNamespace(returncode=0, stdout='{"session_id":"trusted"}', stderr="")
     ))
     monkeypatch.setattr(bridge, "resume_worker", lambda *a, **k: True)
-    monkeypatch.setattr("agent_dispatch.ci_repair_spawn._invoke", lambda command, config, **kwargs: {
-        **verdict(), **kwargs["request"],
-    })
+    def admission(command, config, **kwargs):
+        if kwargs["request"].get("phase") == "spawned":
+            staging = client.queue.latest_reservation(task["id"])
+            assert staging.state == "reserving"
+            assert staging.session_handle == "local-body:trusted"
+            assert client.queue.claim_one("premature", capabilities=["ci-repair-admitted"],
+                                          repo=task["repo"], task_id=task["id"]) is None
+        return {**verdict(), **kwargs["request"]}
+    monkeypatch.setattr("agent_dispatch.ci_repair_spawn._invoke", admission)
     app = FastAPI()
     register_spawn_routes(app, client.queue, EventBus())
     with TestClient(app) as http:
@@ -531,6 +537,25 @@ def test_coordinator_launch_never_grants_caller_selected_spawn(tmp_path, monkeyp
     assert result.json()["coordinator_launch"]["ok"] is True
     assert calls[0]["agent"] == EXECUTION["venue"]
     assert calls[0]["charter"] == EXECUTION["charter"]
+
+
+def test_terminal_coordinator_failure_does_not_starve_next_task(tmp_path, monkeypatch):
+    from agent_dispatch.supervisor import Supervisor
+    from tests.test_supervisor import QueueBackedClient
+    queue = TaskQueue(tmp_path / "starvation.db")
+    first = queue.create("first", repo="example/project", source="ci-repair", origin_ref="repair-lane")
+    second = queue.create("second", repo="example/project", source="ci-repair", origin_ref="repair-lane")
+    client = QueueBackedClient(queue)
+    calls = []
+    def reserve(task_id, **kwargs):
+        calls.append(task_id)
+        return {"reserved": False, "reservation": {"state": "failed" if task_id == first.id else "spawned"},
+                "coordinator_launch": {"ok": task_id != first.id}}
+    monkeypatch.setattr(client, "reserve_spawn", reserve)
+    supervisor = Supervisor(client, spawn_fn=lambda task: pytest.fail("caller must not launch"),
+                            repo="example/project", supervisor_id="repair-lane", max_attempts=0)
+    assert supervisor.poll_once() == [second.id]
+    assert calls == [first.id, second.id]
 
 
 def test_watchdog_source_cli_uses_only_scoped_wrapper(monkeypatch, capsys):

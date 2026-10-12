@@ -444,6 +444,14 @@ class SpawnReservationMixin:
             conn.execute("COMMIT")
         return SpawnReservation._from_row(row)
 
+    def record_staging_spawn(self, key: str, session_handle: str) -> SpawnReservation:
+        """Persist an idle body before admission without making it claimable."""
+        return self._update_reservation(
+            key, to_state=SpawnState.RESERVING,
+            allowed_from=frozenset({SpawnState.RESERVING}),
+            session_handle=session_handle,
+        )
+
     def record_spawn(
         self,
         key: str,

@@ -164,6 +164,7 @@ def register_spawn_routes(
             except (ValueError, KeyError, OSError) as exc:
                 ok, handle = False, {"error": str(exc)}
             if ok:
+                queue.record_staging_spawn(reservation.key, handle["session"])
                 from .ci_repair_spawn import authority_snapshot, reservation_authorized
                 with queue._connect() as probe:
                     expected = authority_snapshot(probe, task)
