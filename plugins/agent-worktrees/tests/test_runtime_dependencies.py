@@ -63,6 +63,8 @@ try:
 except SystemExit as exc:
     result = exc.code
 assert result == 0, result
+sys.stdout.flush()
+sys.stderr.flush()
 from agent_worktrees import manager_launch_cli
 assert not attempted_ui_imports, attempted_ui_imports
 manager_code = (
