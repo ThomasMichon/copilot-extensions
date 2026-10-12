@@ -303,3 +303,13 @@ credential changes, broad policy weakening or unreviewed releases.
   implementation remains #6321's, with only unique regression coverage here.
   Main optional validation duplication and complete campaign measurement remain
   unresolved gates; no completion declaration or policy bypass is implied.
+
+### 2026-10-12 - Verified peer repair and next runner reduction
+
+- #6337, not the still-open #6335, supplied the released vendor-layout repair;
+  merged source is `4b920e008227`. #6320 is closed after the real green release.
+  Keep historical owner pointers above as history, not the current blocker.
+- #6359 merged as `dbe9037692dc` after current-head Copilot approval and both
+  required checks passed. It prevents PR CI completions from allocating an
+  ancestry-filter runner, retaining success/ancestry checks for push/manual
+  events. Release and live skip evidence for that latest slice remain pending.
