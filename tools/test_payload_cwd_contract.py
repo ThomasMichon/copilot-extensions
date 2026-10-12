@@ -114,6 +114,7 @@ def _wait_for_smoke_receipt(
     deadline = time.monotonic() + timeout
     last_error: FileNotFoundError | json.JSONDecodeError | None = None
     while True:
+        child_exit = poll()
         try:
             data = json.loads(receipt.read_text(encoding="utf-8-sig"))
         except (FileNotFoundError, json.JSONDecodeError) as error:
@@ -122,7 +123,7 @@ def _wait_for_smoke_receipt(
             if not isinstance(data, dict):
                 pytest.fail(f"staged receipt is not a JSON object: {data!r}")
             return data
-        if poll() is not None or time.monotonic() >= deadline:
+        if child_exit is not None or time.monotonic() >= deadline:
             pytest.fail(f"no complete staged receipt: {last_error}")
         time.sleep(0.05)
 
@@ -147,6 +148,17 @@ def test_smoke_receipt_rejects_incomplete_json_after_child_exit(tmp_path: Path) 
     receipt.write_text("", encoding="utf-8")
     with pytest.raises(pytest.fail.Exception, match="no complete staged receipt"):
         _wait_for_smoke_receipt(receipt, lambda: 0)
+
+
+def test_smoke_receipt_parses_after_observing_child_exit(tmp_path: Path) -> None:
+    receipt = tmp_path / "smoke.json"
+    receipt.write_text('{"staged":', encoding="utf-8")
+
+    def finish_child() -> int:
+        receipt.write_text('{"staged": true}', encoding="utf-8")
+        return 0
+
+    assert _wait_for_smoke_receipt(receipt, finish_child) == {"staged": True}
 
 
 def test_smoke_receipt_timeout_is_explicit(tmp_path: Path) -> None:
