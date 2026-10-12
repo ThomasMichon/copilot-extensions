@@ -455,6 +455,16 @@ def reap_abandoned_passive_backstop(
         table = read_table(config_dir) or {}
         active = table.get("active") if isinstance(table, dict) else None
         active_pid = active.get("pid") if isinstance(active, dict) else None
+        recorded_pid = record.get("new_pid") if isinstance(record, dict) else None
+        if active_pid and recorded_pid and recorded_pid != active_pid:
+            from .cutover_process import is_windows, verified_pair
+
+            if is_windows():
+                pair = verified_pair(int(active_pid), active.get("process_start_time"))
+                # zdd's breadcrumb records the original spawn PID before health;
+                # the promoted route instead names the verified serving child.
+                if recorded_pid in pair:
+                    active_pid = recorded_pid
         kwargs: dict = {}
         if grace_seconds is not None:
             kwargs["grace_seconds"] = grace_seconds
@@ -467,4 +477,7 @@ def reap_abandoned_passive_backstop(
             **kwargs,
         )
     except Exception as exc:  # best-effort: reap must never raise into a caller
-        return {"reaped": False, "reason": f"reap skipped: {exc}", "pid": None}
+        return {
+            "reaped": False, "reason": f"reap skipped: {exc}",
+            "pid": record.get("new_pid") if isinstance(record, dict) else None,
+        }

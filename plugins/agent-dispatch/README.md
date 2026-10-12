@@ -258,6 +258,18 @@ cutover. Set `AGENT_DISPATCH_PORT` only when you deliberately need a fixed
 legacy port; clients resolve `AGENT_DISPATCH_URL` first, then the routing table /
 rendezvous file, then the legacy `127.0.0.1:9847` fallback.
 
+On Windows a venv `python.exe` can be a launcher whose child actually serves
+requests. Cutover verifies the `/health` server PID against that launcher's
+creation identity and direct ancestry before publishing the **server** PID,
+so active-route ownership and wake/self-retire checks agree. Post-cutover
+cleanup preserves only the verified matching launcher/server pair, not an
+arbitrary process family. Missing, changed, or ambiguous identities refuse
+promotion or explicitly skip cleanup; unrelated old coordinator generations
+remain eligible for retirement. The abandoned-passive backstop uses the same
+proof when a pre-health breadcrumb still records the promoted launcher PID.
+The existing health deadline still bounds
+readiness, and contained tests still suppress Job breakaway.
+
 ## Why
 
 A queue needs an **atomic leased claim** to be a correct coordinator: two agents

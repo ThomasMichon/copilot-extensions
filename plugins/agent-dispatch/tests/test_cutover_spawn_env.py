@@ -92,6 +92,7 @@ def test_cutover_spawn_passive_applies_service_env_overlay(tmp_path, monkeypatch
 
     monkeypatch.setattr(zdd_cutover, "CutoverOrchestrator", _FakeOrchestrator)
     popen_calls: list = []
+    monkeypatch.setattr("agent_dispatch.cutover_process.process_start_time", lambda _pid: None)
     launch_policy = []
     monkeypatch.setattr(
         "agent_procutil.windowless_daemon_kwargs",
@@ -104,7 +105,7 @@ def test_cutover_spawn_passive_applies_service_env_overlay(tmp_path, monkeypatch
         popen_calls.append((cmd, kwargs))
 
         class _P:
-            pass
+            pid = 99999999
 
         return _P()
 
@@ -175,6 +176,7 @@ def test_cutover_spawn_passive_fresh_port_wins_over_service_env_port_pin(tmp_pat
 
     monkeypatch.setattr(zdd_cutover, "CutoverOrchestrator", _FakeOrchestrator)
     popen_calls: list = []
+    monkeypatch.setattr("agent_dispatch.cutover_process.process_start_time", lambda _pid: None)
     monkeypatch.setattr("agent_procutil.windowless_daemon_kwargs", lambda **_k: {})
 
     import subprocess as _subprocess
@@ -183,7 +185,7 @@ def test_cutover_spawn_passive_fresh_port_wins_over_service_env_port_pin(tmp_pat
         popen_calls.append((cmd, kwargs))
 
         class _P:
-            pass
+            pid = 99999999
 
         return _P()
 
@@ -249,6 +251,7 @@ def test_cutover_honors_durable_host_from_service_env(tmp_path, monkeypatch):
 
     monkeypatch.setattr(zdd_cutover, "CutoverOrchestrator", _FakeOrchestrator)
     popen_calls: list = []
+    monkeypatch.setattr("agent_dispatch.cutover_process.process_start_time", lambda _pid: None)
     monkeypatch.setattr("agent_procutil.windowless_daemon_kwargs", lambda **_k: {})
 
     import subprocess as _subprocess
@@ -257,7 +260,7 @@ def test_cutover_honors_durable_host_from_service_env(tmp_path, monkeypatch):
         popen_calls.append((cmd, kwargs))
 
         class _P:
-            pass
+            pid = 99999999
 
         return _P()
 
