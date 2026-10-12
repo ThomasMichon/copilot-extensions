@@ -34,6 +34,9 @@ for the configuration lock, independently of the push timeout.
 Tracking refresh uses compare-and-swap and never rolls back a newer published
 tip. A refresh failure is reported as a post-push warning, not a false claim
 that the already-successful remote update failed.
+Stale-lease fast-forward recovery probes the same captured destination, retaining
+the upstream exact-lease rewrite guards. Probe timeout warnings name the
+operation and deadline without exposing credential-bearing command arguments.
 Positive exact/wildcard fetch mappings are applied only after negative fetch
 exclusions, preserving deliberately untracked namespaces.
 

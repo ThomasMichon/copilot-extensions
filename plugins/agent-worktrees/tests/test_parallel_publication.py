@@ -7,6 +7,7 @@ import sys
 
 import pytest
 
+import agent_procutil
 from agent_worktrees import git_ops, pr_publish
 from agent_procutil import no_window_kwargs
 
@@ -93,11 +94,13 @@ def test_unrelated_publications_overlap_at_real_pre_push_boundary(tmp_path):
         "if not r: raise SystemExit(r.stderr)\n"
     )
     children = []
+    dependency_source = str(Path(agent_procutil.__file__).resolve().parent.parent)
+    pythonpath = os.pathsep.join(filter(None, (dependency_source, os.environ.get("PYTHONPATH", ""))))
     try:
         for path, branch in [(root, "one"), (second, "two")]:
             children.append(subprocess.Popen(
                 [sys.executable, "-c", script, str(path), branch],
-                env={**os.environ, "PUBLISH_TEST_NAME": branch},
+                env={**os.environ, "PUBLISH_TEST_NAME": branch, "PYTHONPATH": pythonpath},
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                 **no_window_kwargs(),
             ))
@@ -138,6 +141,7 @@ def test_same_branch_stale_expected_object_is_rejected(tmp_path):
     assert pr_publish.push_checked(None, "origin", "HEAD:refs/heads/shared", cwd=str(root),
                                    force_with_lease_expect=old)
     first = git(root, "rev-parse", "HEAD")
+    git(root, "switch", "-qc", "stale-writer", old)
     git(root, "commit", "--allow-empty", "-qm", "stale writer")
     result = pr_publish.push_checked(None, "origin", "HEAD:refs/heads/shared", cwd=str(root),
                                      force_with_lease_expect=old)
