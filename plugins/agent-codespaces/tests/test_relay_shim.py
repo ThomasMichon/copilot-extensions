@@ -994,8 +994,12 @@ class TestRelayServingLiveness:
             "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.5",
         }
 
-        closed = _unused_closed_port()
-        with _OneShotRelay("pong\n\n") as serving:
+        # Keep the non-listening port reserved so the live relay cannot
+        # inherit its number after a bind-and-close probe releases it.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as closed_socket, _OneShotRelay("pong\n\n") as serving:
+            closed_socket.bind(("127.0.0.1", 0))
+            closed = closed_socket.getsockname()[1]
+            assert closed != serving.port
             serving_file = ports_dir / "serving.json"
             closed_file = ports_dir / "closed.json"
             _write_mapping(serving_file, serving.port, token="tok", ado_host="host")

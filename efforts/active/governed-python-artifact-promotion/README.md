@@ -536,6 +536,15 @@ win grows with build complexity.
   required-CI finding is already addressed by commit `7364f5232`: both resolver
   paths are in the artifact-builder gate and its test invocation includes the
   resolver suite.
+- **2026-10-12 hosted-CI detour:** run `38225329693` exposed a
+  Codespaces relay-discovery fixture race: the dead-port probe closed its socket
+  before the live relay started, so that relay could inherit the same port.
+  Discovery then correctly preferred the newer mapping, but the test mistook it
+  for adopting a dead endpoint. The test now holds a bound, non-listening socket
+  throughout discovery and asserts its port differs from the live relay.
+  The real Bash/Node discovery regression passes under the contained Windows
+  runner; a mandatory Codespaces patch changefile accompanies the fixture fix.
+  No production relay behavior, assertions, timeouts or retry budgets changed.
 - **Still open (this effort's own next slice):** actually wire this
   resolver into `resolve_toolchain_lock`/`build_python_artifacts.py`'s CLI
   (a caller-selectable "seasoned public" mode, distinct from and never
