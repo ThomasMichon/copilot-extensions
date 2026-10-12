@@ -137,6 +137,8 @@ rollback identity to retention before releasing the claim. Cleanup and claim
 mutations read dev ownership/rollback evidence strictly: only a missing file is
 absent; unreadable or malformed evidence refuses the operation. The public
 status reader retains its legacy malformed-as-absent behavior.
+Claim publication validates owner and rollback-version input before creating
+state, so rejected new/forced claims cannot wedge later strict cleanup/release.
 Unreadable selectors/storage errors propagate rather than
 authorizing reclamation. Incomplete selected numbered identities are refused
 with distinct-generation repair guidance, not detached and rebuilt as failed

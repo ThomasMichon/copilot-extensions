@@ -396,3 +396,36 @@ def test_malformed_dev_claim_does_not_authorize_cleanup(tmp_path, claim):
         vr.toss_incomplete(tmp_path)
     assert vr.version_dir(tmp_path, "1.0").is_dir()
     assert vr.version_dir(tmp_path, vr.DEV_VERSION).is_dir()
+
+
+@pytest.mark.parametrize("previous", ["../escape", "", "name.", 123, "a\\b", "a/b"])
+def test_invalid_rollback_input_never_publishes_or_overwrites_claim(tmp_path, previous):
+    fresh = tmp_path / "fresh"
+    with pytest.raises(ValueError, match="rollback version"):
+        vr.claim_dev(fresh, "test-owner", previous_version=previous)
+    assert not vr.dev_claim_path(fresh).exists()
+    assert not fresh.exists()
+    vr.claim_dev(tmp_path, "original-owner", previous_version="1.0")
+    before = vr.dev_claim_path(tmp_path).read_bytes()
+    with pytest.raises(ValueError, match="rollback version"):
+        vr.claim_dev(tmp_path, "replacement-owner", previous_version=previous, force=True)
+    assert vr.dev_claim_path(tmp_path).read_bytes() == before
+    assert vr.release_dev(tmp_path, "original-owner")["previous_version"] == "1.0"
+
+
+@pytest.mark.parametrize("owner", ["", " ", None, 123])
+def test_invalid_owner_input_never_publishes_claim(tmp_path, owner):
+    with pytest.raises(ValueError, match="owner"):
+        vr.claim_dev(tmp_path, owner)
+    assert not vr.dev_claim_path(tmp_path).exists()
+
+
+def test_cli_invalid_rollback_input_refuses_without_wedging_claim(tmp_path, capsys):
+    assert vr.main([
+        "--root", str(tmp_path), "dev-claim", "--owner", "test-owner",
+        "--previous-version", "../escape",
+    ]) == 1
+    assert "rollback version" in capsys.readouterr().err
+    assert not vr.dev_claim_path(tmp_path).exists()
+    vr.claim_dev(tmp_path, "test-owner", previous_version="1.0")
+    assert vr.release_dev(tmp_path, "test-owner")["previous_version"] == "1.0"

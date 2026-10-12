@@ -1062,6 +1062,14 @@ def dev_claim_path(root: Path) -> Path:
     return root / DEV_CLAIM_FILE
 
 
+def _validate_dev_previous_version(previous) -> None:
+    if previous is not None and (
+        not isinstance(previous, str) or
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", previous) or previous.endswith(".")
+    ):
+        raise ValueError("dev rollback version must be a single ordinary slot name or None")
+
+
 def read_dev_claim(root: Path, *, strict: bool = False) -> dict | None:
     """Return the current dev-slot claim record, or ``None`` if absent/malformed.
 
@@ -1084,18 +1092,17 @@ def read_dev_claim(root: Path, *, strict: bool = False) -> dict | None:
         if strict:
             raise ValueError(f"invalid dev claim ownership evidence: {path}")
         return None
-    previous = data.get("previous_version")
-    if strict and previous is not None and (
-        not isinstance(previous, str) or
-        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", previous) or previous.endswith(".")
-    ):
-        raise ValueError(f"invalid dev claim rollback evidence: {path}")
+    if strict:
+        _validate_dev_previous_version(data.get("previous_version"))
     return data
 
 
 def claim_dev(root: Path, owner: str, *, host: str | None = None,
              previous_version: str | None = None, force: bool = False) -> dict:
     """Publish a dev claim under the same selector guard as cleanup."""
+    if not isinstance(owner, str) or not owner.strip():
+        raise ValueError("dev claim owner must be a nonempty string")
+    _validate_dev_previous_version(previous_version)
     with _publication_lease(root):
         return _claim_dev(root, owner, host=host, previous_version=previous_version, force=force)
 
