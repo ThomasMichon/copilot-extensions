@@ -76,9 +76,10 @@ function validate(body) {
     (line) => /^ {0,3}<!--\s*(?:agent-worktrees:source\b|gh-aw-workflow-id:)/.test(line) ? line : withoutInlineCode(line),
   );
   const candidates = text.match(/<!--\s*agent-worktrees:source\b/g) || [];
+  const nativeCount = (text.match(/<!--\s*gh-aw-workflow-id:/g) || []).length;
   const markers = [...text.matchAll(/^ {0,3}<!--\s*agent-worktrees:source\s+([^\r\n]*?)\s*-->[ \t]*$/gm)];
+  if (candidates.length && nativeCount) return "Conflicting source attribution origins.";
   if (!candidates.length) {
-    const nativeCount = (text.match(/<!--\s*gh-aw-workflow-id:/g) || []).length;
     const native = [...text.matchAll(/^ {0,3}<!--\s*gh-aw-workflow-id:\s*(\S+)\s*-->[ \t]*$/gm)];
     if (!nativeCount) return "Missing source attribution marker.";
     if (nativeCount !== 1 || native.length !== 1 ||

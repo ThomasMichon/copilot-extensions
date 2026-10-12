@@ -219,5 +219,6 @@ test("the existing compiler-owned native workflow origin needs no artifact rewri
   assert.ok(gate.validate(native + "\n" + native));
   assert.ok(gate.validate(native.replace("ci-failure-fix-attempt", "bad/private")));
   assert.ok(gate.validate("<!-- agent-worktrees:source machine=raw -->\n" + native));
-  assert.equal(gate.validate(marker + "\n" + native), null);
+  assert.ok(gate.validate(marker + "\n" + native));
+  assert.ok(gate.validate(marker + "\n" + native.replace("ci-failure-fix-attempt", "bad/private")));
 });
