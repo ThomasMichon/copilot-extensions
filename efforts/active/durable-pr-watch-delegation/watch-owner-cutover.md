@@ -24,6 +24,15 @@ service coordinator or invent a second deployment framework.
 
 ## Service transaction
 
+Hold one installation-scoped exclusive cutover lease for this entire
+transaction, including rollback and commit-forward. Every repair or
+reconciliation path that mutates promotion, routing, selection, writer
+authority, or retirement state must acquire that same lease; only read-only
+audits may run without it. A competing attempt waits or refuses explicitly,
+never proceeds under a separate guard. Revalidate receipt, governance, and
+exact-instance ownership after acquiring the lease and immediately before
+each destructive action.
+
 1. The owning installer provisions and validates an immutable completed target
    under the exact installation identity. Activation discovers only an
    attributable incumbent in that installation. No incumbent means no daemon
@@ -107,6 +116,16 @@ authorize interrupting a shared process.
 - Passive startup leaves subscriptions, callback counters, and active discovery
   unchanged. Promotion refuses foreign receipts, stale generations, wrong
   process identity, and missing transaction authorization.
+- Overlapping installer cutovers and mutating repair/reconciliation attempts
+  contend for the same lease across the full transaction, including rollback
+  and commit-forward. Only one attempt may mutate generation state; a waiting
+  attempt revalidates ownership and governance after acquiring the lease.
+- Dedicated termination tests exercise both shared identity-bound signaling
+  and the higher-level owner-validation path. Accept an exact, live,
+  receipt-attested test-owned instance; refuse a stale or reused PID, a wrong
+  owner even with a matching start token, and ownership that changes between
+  audit and action. Assert no signal reaches a refused target. A cutover
+  rehearsal alone is not evidence for these cases.
 - Real upgrade drains concurrent register/unregister requests, poll results,
   slow acknowledged callbacks, and queued legacy batches before adoption.
   The final state includes every committed registration/cancellation/ACK;
@@ -129,9 +148,16 @@ authorize interrupting a shared process.
   retain separate state and endpoints, and cannot observe, stop, promote,
   repair, or retire each other's owner. Use actual adoption primitives,
   never a fabricated receipt or another plugin's payload.
-- Native Windows and Linux tests exercise headless startup, bounded shutdown,
-  identity-bound cleanup, and recovery. Record unavailable clean-room/live
-  lanes with their exact reason and named follow-up before effort closure.
+- Windows, Linux, and macOS each require an explicit startup, bounded shutdown,
+  identity-bound cleanup, and recovery contract. Windows and Linux use their
+  supported shared primitives and native test lanes. macOS must use portable
+  shared primitives rather than Linux `/proc` or `pidfd`; any unavailable
+  identity/ownership proof must refuse destructive cleanup explicitly, not
+  fall back to an unverified PID kill. This Windows development host cannot
+  supply a native macOS lane: obtain one for implementation validation or
+  record a justified macOS validation exemption, this fail-closed fallback,
+  and a named tracked follow-up before effort closure. Record unavailable
+  clean-room/live lanes with their exact reason and named follow-up as well.
 
 Required source gates remain owning-plugin tests, changed shared-library tests,
 fatal Python lint, canonical generation/vendor checks, module-size,
