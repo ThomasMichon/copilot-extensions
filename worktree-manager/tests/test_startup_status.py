@@ -59,6 +59,15 @@ def test_absent_manager_does_not_hide_observed_core_state(observed, capsys):
     assert "core: installed" in text
 
 
+def test_damaged_manager_with_marker_and_stub_still_shows_repair(observed, capsys):
+    observed["manager"] = SimpleNamespace(installed=False, installed_version="1.2.3")
+    startup_status.print_startup_status()
+    text = capsys.readouterr().out
+    assert "Installed Manager version: 1.2.3" in text
+    assert "incomplete or absent" in text
+    assert "self-install --apply" in text
+
+
 def test_missing_engine_does_not_claim_launch_readiness(observed, capsys):
     observed["engine"] = False
     startup_status.print_startup_status()

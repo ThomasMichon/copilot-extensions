@@ -376,7 +376,7 @@ class SelfInstallStatus:
 
     @property
     def installed(self) -> bool:
-        return self.installed_version is not None and self.binstub is not None
+        return self.installed_version is not None and _core_install_satisfied(self.installed_version, Path(self.root))
 
 
 def status(root: Path | None = None) -> SelfInstallStatus:

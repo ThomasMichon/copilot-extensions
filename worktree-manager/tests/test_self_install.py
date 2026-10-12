@@ -729,6 +729,29 @@ def test_status_reports_marker_and_binstub(tmp_path, monkeypatch):
     st = status(root)
     assert st.installed_version == "3.3.3"
     assert st.binstub is not None
+    assert st.installed is True
+
+
+def test_public_status_rejects_damaged_slot_and_stale_binstub(tmp_path, monkeypatch):
+    pd = _fake_payload(tmp_path, "3.3.3")
+    root = tmp_path / "root"
+    lb = _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+    self_install(pd, root=root, dry_run=False)
+    assert status(root).installed is True
+    (version_slot("3.3.3", root) / "src" / "worktree_manager" / "__main__.py").unlink()
+    damaged = status(root)
+    assert damaged.installed_version == "3.3.3"
+    assert damaged.binstub is not None
+    assert damaged.installed is False
+    self_install(pd, root=root, dry_run=False)
+    assert status(root).installed is True
+    stub = lb / ("worktree-manager.cmd" if os.name == "nt" else "worktree-manager")
+    stub.write_text("stale", encoding="ascii")
+    stale = status(root)
+    assert stale.installed_version == "3.3.3"
+    assert stale.binstub is not None
+    assert stale.installed is False
 
 
 def _fake_monorepo_with_pointer(tmp: Path, version: str) -> Path:
