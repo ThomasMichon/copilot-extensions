@@ -3,7 +3,7 @@
 - **Subject:** agent-worktrees' resident `status-monitor` process — the
   guarantee that at most one actively-serving instance exists per host
   across every lifecycle transition, with bounded zero-coverage windows,
-  and exactly one serving instance at healthy steady state.
+  and exactly one serving instance at healthy steady state while service is demanded.
 - **Scope:** leaf
 - **Status:** Active
 - **Last revised:** 2026-10-12
@@ -17,7 +17,9 @@ The resident `status-monitor` is the host-wide accelerator the parent
 [agent-worktrees vision](../README.md#derived-status)
 asserts must be "exactly **one** per host regardless of how many
 worktrees, sessions, or CLI invocations reach it." That sentence states the
-steady-state guarantee; this vision specializes the guarantee across the
+steady-state guarantee while resident service is demanded. Intentional idle
+shutdown when no demand remains is healthy and may leave zero residents;
+this vision specializes the guarantee across the
 process's **transitions**, not just while it sits idle serving readers.
 A resident process is never static — it is challenged by a cold start
 racing an existing incumbent, superseded by a newer runtime after a
@@ -31,8 +33,9 @@ The should-be is simple to state and hard to realize: **at every instant,
 including mid-transition, at most one `status-monitor` process is actively
 serving for a given host, and a transition never leaves a window where
 zero processes are serving for longer than a strictly bounded, intentional
-duration.** Exactly one serving resident is the healthy steady state, not
-an impossible promise that no startup or handoff can ever pass through zero.
+duration while service is demanded.** Exactly one serving resident is the
+healthy demanded steady state; zero residents is healthy after demand ends.
+This is not a promise that startup or handoff can never pass through zero.
 Exclusivity is not a cold-start-only property bolted onto an otherwise
 best-effort lifecycle — it is a property the *entire* lifecycle upholds,
 with cold start, replacement, restart, and promotion/cutover all held to the

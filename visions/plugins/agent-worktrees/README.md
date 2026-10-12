@@ -264,7 +264,9 @@ regardless of how many worktrees, sessions, or CLI invocations reach it — the
 suite-wide
 [*process-count-scales-with-services-not-sessions*](../../plugin-services/README.md#process-count-scales-with-services-not-sessions)
 guarantee, generalized here from session-lifecycle hooks to every ordinary
-reader. This is the healthy steady-state guarantee. Across cold start,
+reader. This is the healthy steady-state guarantee while resident service is
+demanded; intentional idle shutdown with no remaining demand may leave zero
+residents. Across cold start,
 replacement, restart, and promotion/cutover, at most one resident actively
 serves, with intentional bounded zero-coverage windows — not a promise of
 exactly one at every instant. The lifecycle standard is its own subject:

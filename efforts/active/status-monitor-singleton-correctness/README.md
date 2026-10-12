@@ -16,7 +16,8 @@ Realize Vision
 at every instant, including mid-transition, at most one resident
 `status-monitor` process is actively serving per host, no transition
 leaves an unbounded zero-coverage window, and exactly one resident serves
-at healthy steady state. PR #5412 establishes the ordinary-cold-start
+at healthy steady state while service is demanded. Intentional idle shutdown
+with no remaining demand may leave zero residents. PR #5412 establishes the ordinary-cold-start
 foundation only; it does not cover all lifecycle transitions. This effort
 closes replacement, the promotion/cutover handoff, and the restart
 (auto-update) seam. Restart is Phase 1 / #5512; muxless/superseded-runtime
@@ -115,6 +116,10 @@ stated outcome, not separately operator-specified line items.)_
   exits before metadata publication after predecessor retirement. Specify the
   deadline, retry/recovery owner and visible failed/deferred outcome; a restart
   cannot be declared complete with an unbounded zero-serving interval.
+- [ ] If PID-based termination remains, require both an identity-bound process
+  token and independent proof that the process is the intended resident owner
+  before signaling. Refuse stale identity, wrong ownership or uncertainty;
+  otherwise replace PID-based termination with an ownership-safe primitive.
 - [ ] Define and implement the reader-side ownership observation required by
   `a-reader-never-observes-a-false-resident`: distinguish no owner from an
   acquired lease whose resident metadata is not yet published, and distinguish
@@ -169,6 +174,10 @@ and replacement/cutover proofs belong to the later phase PRs.)_
   before publication after predecessor retirement. Demonstrate bounded recovery
   or an explicit reported failure/deferred state, preserved identity-scoped
   metadata and no overlapping active residents before Phase 1 closes.
+- [ ] Direct termination safety unit tests, if PID termination remains: a
+  genuine matching resident is terminated, stale/reused identity is refused,
+  and matching identity with a wrong owner is independently refused without
+  signaling. These direct tests do not rely solely on end-to-end restart proof.
 - [ ] Phase 2: new activation-path regression tests exercise muxless and
   superseded-runtime replacement and an actual cutover transition (not only
   mocked control-server calls). Demonstrate that a legitimate replacement
@@ -202,7 +211,8 @@ and replacement/cutover proofs belong to the later phase PRs.)_
   for all four named transitions (ordinary cold start via #5412; restart
   via Phase 1; replacement and promotion/cutover via Phase 2). Prove
   at-most-one active server throughout, bounded intentional zero windows,
-  and exactly one serving resident at healthy steady state; record the
+  and exactly one serving resident at healthy steady state while service is
+  demanded, preserving healthy zero-resident idle shutdown; record the
   confirmation in the Journal rather than assuming it.
 
 ## Proposal
