@@ -63,6 +63,8 @@ class QueueClaimQueriesMixin:
             lease = self.eval_lease_seconds
         else:
             lease = self.lease_seconds
+        from .ci_repair_spawn import authority_snapshot, claim_admissions
+        ci_admissions = claim_admissions(self, worker_id, full_caps, repo, task_id)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             if task_id is not None:
@@ -82,6 +84,10 @@ class QueueClaimQueriesMixin:
             best_affinity = -1
             producer_rejections: list[dict[str, object]] = []
             for row in rows:
+                if row["source"] == "ci-repair":
+                    task = self._fetch(conn, row["id"])
+                    if ci_admissions.get(task.id) != authority_snapshot(conn, task):
+                        continue
                 if repo is not None and row["repo"] != repo:
                     continue
                 rejection = self._claim_fence_rejection(conn, row)

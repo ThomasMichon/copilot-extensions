@@ -142,7 +142,7 @@ operator directive to remove the explicit claimed-dev exception.
 
 ### Phase 3 — Rollout to the remaining vendoring plugins
 
-- [ ] Finish publisher prerequisite #5817 before runtime-admission implementation:
+- [x] Finish publisher prerequisite #5817 before runtime-admission implementation:
       an updated, legitimately owned existing PR must publish through one
       supported command, including compatible legacy evidence reconciliation.
       Internal ownership bookkeeping must not require a manual old-tip,
@@ -154,9 +154,12 @@ operator directive to remove the explicit claimed-dev exception.
       exposes `--rewrite-pr`. Independent promotion blockers #6244/#6262
       were resolved before those releases. Consumer guidance refresh cleared its
       reviewed flow; the merged plan's PR claim was reconciled.
-      Reopened for the in-scope revised-legacy-record correction #6299, merged
-      after that deployment. Its normal promotion and installed verification
-      are still required before this prerequisite is complete.
+      The in-scope revised-legacy-record correction #6299 subsequently cleared
+      normal promotion #6358 and verified publisher activation. The selected installed
+      agent-worktrees `1.24.52-dev1` passed all 21 legacy rewrite contracts,
+      including revised records, exact live-authority refusals and real Git
+      publication, without importing the source-checkout implementation.
+      The 2026-10-12 revised-legacy delivery journal below records that proof.
 
 - [ ] Review the shared
       [runtime-admission/build-coalescing slice](phase-3-runtime-admission.md)
@@ -230,6 +233,58 @@ operator directive to remove the explicit claimed-dev exception.
       this worktree mid-effort.
 
 ## Journal
+
+### 2026-10-12 — Revised-legacy publisher prerequisite delivered
+
+Normal validation run `38305079883` completed successfully and promotion #6358
+merged into `main` as `67661d853e8f5de7a11c078dbc6dcf50cbce06be`.
+The gate's pinned dev snapshot `1fe40334e3e0e75208b1a11191a629101d81dd2a`
+contains #6299, the source-layout/staging correction #6337, and stale-publication
+diagnostic correction #6343. Released source bytes independently confirm both
+revised-legacy admission and fresh numbered-provider/ref/destination/head
+revalidation. The release materializes the three activation libraries as
+complete local dependencies rather than escaping canonical references.
+
+The authorized unified updater activated agent-worktrees `1.24.52-dev1`.
+A contained probe used that installed generation's interpreter
+and explicitly verified the loaded publication, tracking and CLI modules came
+from its installed site-packages, not the source checkout. All 21 existing
+legacy rewrite contracts passed against that runtime: real local Git
+publication after rebase, revised records, native lifecycle state, and refusal
+of mismatched or shared live authority. Provider observations were controlled
+fixtures; this did not rewrite an unrelated live hosted PR or grant new
+publication authority. The selected payload command independently reports the
+same installed version.
+
+This proves publisher deployment, not complete portfolio rollout. The separate
+#5817 handback records an overall update exit 124 and an ordinary retry exit 1
+with completed-slot refusal. Those reconciliation outcomes remain a Phase 3
+discrepancy; selected-generation activation and passing publication contracts
+must not turn a timed-out or refused whole-update attempt into a success claim.
+
+Coordinator health reports `ok` on agent-dispatch `0.16.9-dev1`, with no current
+loop failures. The updater preserved an unowned project-command receipt and
+left a dirty consumer anchor untouched. Its supervisor inventory/CIM-fallback
+warning remains tracked in #6218; a successful overall update and empty
+diagnostic error array do not prove that inventory path succeeded. No ad hoc
+service restart, process termination, or claim cleanup was performed.
+
+Existing source-layout PR ownership was retained. The overlapping unpublished
+local candidate was preserved without opening a competing PR; #6337 supplied
+the merged repair, while #6335's owner was asked to reconcile its distinct
+exclusivity guard. #6320's required baseline is now backed by successful normal
+promotion, not merely a green full-test job. The separate vault-timeout tracker
+#6330 is not claimed repaired by this milestone.
+
+Publisher prerequisite #5817 is complete. The effort and Phase 3 remain Active:
+the next reviewed shared slice is candidate/rollback retention, followed by
+construction coalescing and complete adopter integration. The existing
+shared-core worker's retention reservation under #5472 is preserved; the
+publisher worker posted the verified release/deployment handback and makes no
+competing retention edits. Immutable-slot
+refusal, explicit dev/release, distinct-generation repair, portfolio rollout
+and their full validation remain unchecked. The parked authoritative-daemon
+work is still separate; this delivery does not complete or transfer it.
 
 ### 2026-10-12 — Promotion baseline diagnostics preserve both streams
 

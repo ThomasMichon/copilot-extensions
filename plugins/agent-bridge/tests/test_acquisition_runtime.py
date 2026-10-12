@@ -71,6 +71,9 @@ def rig(tmp_db, session_manager, mock_acp_client, monkeypatch, tmp_path):
     async def command(args, project):
         calls.append((args, project))
         if args[0] == "list":
+            assert args == [
+                "list", "--json", "--cache-only", "--worktree-id", "worktree-a",
+            ]
             return {"worktrees": [{"id": "worktree-a", "path": str(tmp_path), "status": "active"}]}
         if args[0] == "head-session":
             return {"tracked": True, "head_session": head["id"],

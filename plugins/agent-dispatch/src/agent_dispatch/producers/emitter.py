@@ -38,10 +38,19 @@ def validate_spec(spec: dict[str, Any]) -> None:
     command = spec.get("command")
     builtin = spec.get("repository_issue_loop")
     effort_builtin = spec.get("effort_driver_loop")
-    if command is None and builtin is None and effort_builtin is None:
+    ci_builtin = spec.get("ci_repair")
+    if ci_builtin is not None:
+        if spec.get("side_load") is not None:
+            raise EmitterError("ci_repair does not permit ungated side_load")
+        if any(value is not None for value in (command, builtin, effort_builtin)):
+            raise EmitterError("ci_repair is mutually exclusive with other emitter types")
+        from .ci_repair import validate_config
+
+        validate_config(ci_builtin)
+    if command is None and builtin is None and effort_builtin is None and ci_builtin is None:
         raise EmitterError(
             "emitter needs a 'command', 'repository_issue_loop', or "
-            "'effort_driver_loop' configuration"
+            "'effort_driver_loop', or 'ci_repair' configuration"
         )
     if command is not None and (
         not isinstance(command, list)
@@ -479,6 +488,27 @@ def run_tick(
     }
     started_at = clock()
     try:
+        if spec.get("ci_repair") is not None:
+            from .ci_repair import AdmissionRefused, run_tick as run_ci_tick
+
+            try:
+                ci_config = dict(spec["ci_repair"])
+                for key in ("source_command", "admission_command"):
+                    ci_config[key] = _render_command(ci_config[key])
+                result = run_ci_tick(client, ci_config, runner=runner, cwd=spec.get("cwd"))
+            except AdmissionRefused as exc:
+                return {
+                    "held": True, "lease": lease.get("lease"), "scope": scope,
+                    "returncode": 2, "error": str(exc), "created": [],
+                    "result": {"status": "refused", "reason": str(exc)},
+                    "duration_seconds": max(0.0, clock() - started_at),
+                }
+            _append_receipts(spec["id"], result["created"], tick_id=f"{holder}:{started_at}", clock=clock)
+            return {
+                "held": True, "lease": lease.get("lease"), "scope": scope,
+                "returncode": 0, "error": None, "created": result["created"],
+                "result": result, "duration_seconds": max(0.0, clock() - started_at),
+            }
         if spec.get("repository_issue_loop") is not None:
             from ..repository_issue_loops import run_tick as run_issue_tick
 

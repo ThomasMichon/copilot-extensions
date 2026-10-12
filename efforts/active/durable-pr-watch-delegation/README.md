@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** `visions/plugins/agent-dispatch/README.md` / `hibernate-the-wait`; `visions/plugins/agent-worktrees/pull-requests/README.md` / `durable-shared-pr-transition-subscriptions`
 - **Umbrella issue:** #6007
-- **Sub-issues:** None yet
+- **Sub-issues:** #6286 (PR-owner installation-cell adoption)
 
 ## Guiding Intent
 
@@ -77,13 +77,31 @@ The real installation-cell integration test found that the PR owner had not
 adopted the shared installation-context payload contract. The operator selected
 adoption rather than a legacy-runtime-only optimization.
 
+Service-lifecycle scope selection, verbatim:
+
+> governed-cutover
+
+This selects the offered option to add and review canonical graceful cutover,
+then continue adoption. It does not waive the installation-cell lifecycle
+contract or authorize a stop/start exemption.
+
 ## Plan
+
+### Governed watch-owner cutover prerequisite
+
+_Agent-recommended design and validation, explicitly selected for review._
+
+- [ ] Review and merge the [watch-owner lifecycle plan](watch-owner-cutover.md) before implementing the service transaction.
+- [ ] Adopt canonical graceful-cutover primitives with installer-driven activation, passive health, exact-instance promotion and retirement, and crash-consistent marker/manifest/route recovery.
+- [ ] Define and enforce one installation-scoped watch-state writer across predecessor drain and successor subscription/delivery adoption; preserve event and registration identities without overlapping live-generation delivery.
+- [ ] Prove rollback, commit-forward, governance refusal, crash recovery, callback drain, and first upgrade from a lease-only owner on Windows and Linux before landing the cutover prerequisite.
+- [ ] Land and deploy the governed lifecycle prerequisite as part of PR-owner adoption before enabling installation-cell dispatch delegation.
 
 ### Installation-cell prerequisite
 
 _Agent-recommended prerequisite, explicitly selected by the operator._
 
-- [ ] Review and merge this plan amendment before adoption implementation.
+- [x] Review and merge the installation-cell plan amendment before adoption implementation (confirmed by #6146; the lifecycle amendment above remains a separate review gate).
 - [ ] Adopt the canonical installation-context payload, installer/runtime-resolution and state-root contract in `agent-pull-requests`, preserving supported legacy installs without silent cell-to-legacy fallback.
 - [ ] Include the PR owner in the generated same-cell peer-launch contract and declare release impact for every generated consumer.
 - [ ] Prove first installation, upgrade, invalid/foreign receipt refusal, state isolation, actual two-cell PR-owner invocation, and pending watch-subscription recovery using the shipped payload rather than a fabricated sibling contract.
@@ -155,6 +173,20 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-12 - Adoption service-boundary investigation
+
+- Stopped before implementation at the service-cutover architecture gate. `agent-pull-requests serve` starts the watch owner: it immediately acquires its singleton lease, restores subscriptions, starts polling/delivery, and publishes its authenticated control endpoint through the installation-owned rendezvous record. `agent-pull-requests serve status --json` probes that endpoint. Its current `serve restart` stops the predecessor and waits for lease release before starting a successor; it has no passive-instance promotion, route-bound ownership attestation, or installer-driven service transaction.
+- The installation-cell pattern's lifecycle contract and `docs/install-contract.md` requirements 10–12 require a durable marker/manifest selection transaction, passive health and exact-instance promotion, governance rechecks, and attributable recovery. The graceful-cutover pattern's invariant 0 applies to this endpoint-serving daemon even though its subscriptions and pending events are durable.
+- Reusable canonical boundaries are `validate_context_receipt`, `resolve_installation_mode`, `compare_and_swap_activation`, `provision_runtime_slot`, `complete_runtime_slot`, and `cutover_runtime_slot`, plus `peer-launch`'s receipt/governance validation and rebound child environment. Slot cutover publishes runtime markers; it does not supply a watch-service selection transaction or transfer its singleton lease. The shared installer engine supplies build/manifest helpers, not a generic service coordinator. Agent Index's selection/service coordinator remains plugin-specific and must not be copied or treated as a standalone PR-owner adapter.
+- Implementation stopped pending a scope decision: review a watch-owner service transaction using the canonical graceful-cutover primitives, including the safe subscription/delivery adoption boundary, or explicitly review a different lifecycle contract before coding. Merely vendoring validators, adding a peer name, or redirecting state would not satisfy adoption. No implementation or validation item was marked complete; no runtime, subscription, generated consumer, or release metadata was changed.
+- The operator then selected `governed-cutover`. Added the agent-recommended lifecycle plan for review before resuming implementation; the approved adoption and saved dispatch integration remain the parent objective.
+
+### 2026-10-12 - Adoption prerequisite authorized
+
+- #6146 merged after a current-head approving review with zero findings and successful required CI. The reviewed installation-cell prerequisite now governs implementation.
+- Claimed #6286 for PR-owner installation-cell adoption after checking for overlapping issues and pull requests.
+- Continuing from the merged plan; saved dispatch integration remains separate and gated on adoption.
 
 ### 2026-10-12 - Adoption amendment review reconciliation
 

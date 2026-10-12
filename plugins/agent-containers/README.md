@@ -16,6 +16,10 @@ this plugin and work standalone; without agent-bridge only bridge addressing
 
 ## Usage path
 
+The [portable CI repair template](templates/ci-repair/README.md) ships an inert,
+restricted image/fleet recipe with no repository, charter or credential baked
+in. It does not enable a repair worker or supply inference/repository authority.
+
 1. Enable the plugin, then run the cheap stamp action if the binstub is not
    already on PATH:
    - Windows: `pwsh -NoProfile -ExecutionPolicy Bypass -File <plugin>\scripts\init.ps1 stamp`

@@ -18,7 +18,7 @@ from agent_bridge import acquisition_authority as authority
 from agent_bridge import local_cache_refresh
 from agent_bridge import session_lifecycle_cli as lifecycle
 from agent_bridge._peer_launch import ContextRefused
-from agent_bridge.acquisition_contract import AcquisitionRefused
+from agent_bridge.acquisition_contract import AcquisitionRefused, AcquisitionRequest
 
 pytestmark = pytest.mark.contract("agent_bridge.acquisition.worktree_owner")
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -176,6 +176,49 @@ async def test_actual_installed_peer_executes_with_service_path(installation, mo
     monkeypatch.setenv("AGENT_HOME", "/caller/registry")
     result = await authority.worktree_command(["list", "--json", "--fresh"], "project-a")
     assert result == {"argv": ["--project", "project-a", "list", "--json", "--fresh"]}
+    which.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_installed_owner_verifies_exact_record_and_independent_head(installation, monkeypatch):
+    _, peer, which = installation
+    python = complete_slot(peer, interpreter=False)
+    slot = python.parent.parent
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(slot)],
+        check=True, capture_output=True, timeout=20, **no_window_kwargs(),
+    )
+    query = subprocess.run(
+        [str(python), "-I", "-c",
+         "import sysconfig; print(sysconfig.get_path('purelib'))"],
+        check=True, capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+    )
+    package = Path(query.stdout.strip()) / "agent_worktrees"
+    package.mkdir()
+    (package / "__main__.py").write_text(
+        "import json, sys\n"
+        "assert sys.argv[1:3] == ['--project', 'project-a']\n"
+        "args = sys.argv[3:]\n"
+        "if args[0] == 'list':\n"
+        " assert args == ['list', '--json', '--cache-only', '--worktree-id', 'worktree-a']\n"
+        " result = {'worktrees': [{'id': 'worktree-a', 'path': '/fixture', "
+        "'status': 'active', 'state': 'unknown'}]}\n"
+        "else:\n"
+        " assert args == ['head-session', '--worktree-id', 'worktree-a', '--json']\n"
+        " result = {'tracked': True, 'head_session': 'native-a', 'active': True, 'state': 'active'}\n"
+        "print(json.dumps(result))\n",
+        encoding="utf-8",
+    )
+    request = AcquisitionRequest.model_validate({
+        "target": "task-worker", "mode": "cli", "task_id": "task-a",
+        "task_generation": 0, "worktree_id": "worktree-a", "allocation": "created",
+        "conversation_retired": False, "reservation_key": "reservation-a",
+        "delivery_id": "delivery-a", "prompt": "Perform the assigned task",
+        "project": "project-a",
+    })
+    row, head = await authority.verify_worktree(request)
+    assert row["id"] == "worktree-a"
+    assert head == "native-a"
     which.assert_not_called()
 
 

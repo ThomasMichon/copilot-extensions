@@ -69,9 +69,9 @@
   the existing Phase 3 decision remains open); #6102 (portable local CI-repair
   container template and dispatch emitter requirements)
 
-**Local execution lane (requirements, not delivered):** the existing cloud
+**Local execution lane (constructed offline, not activated):** the existing cloud
 workflow is not the local `agent-dispatch` worker. The portable container
-template and verified-failure emitter remain outstanding under
+template and verified-failure emitter have offline regression coverage under
 [the local-dispatch slice](local-dispatch-lane.md). This amendment does not
 alter cloud credentials, enable either lane, or select a deployment venue.
 
@@ -169,14 +169,22 @@ Operator (verbatim): "let's also look into (carefully) setting up a cloud
 agent that will react to failed promotion runs and attempt targeted test
 fixes."
 
+Local construction authorization (verbatim): "Great. Build that template and emitter".
+This authorizes offline implementation, not autonomous activation or rollout.
+The existing #5890 policy and independent venue-authentication proof remain
+activation dependencies only.
+
 ## Plan
 
-### Local dispatch lane — outstanding template and emitter
-- [ ] Deliver the portable venue template and dispatch emitter under
+### Local dispatch lane — offline template and emitter
+- [x] Deliver the portable venue template and dispatch emitter under
       [the requirements and ownership contract](local-dispatch-lane.md)
       (#6102), using the existing container/dispatch infrastructure.
       Resolve the existing #5890 attempt-policy decision before autonomous
       activation; no competing scheduler or inferred account selection.
+- [ ] Prove the remaining live acceptance gates in the local slice before
+      autonomous activation; retain #5890 and independent venue-authentication
+      proof as unresolved dependencies. No live execution is authorized here.
 
 ### Phase 1 — Detection + dedup (no autonomous fix yet; report-only) — Done
 - [x] Add a step to `validate-and-promote.yml`'s `full`/`guards-full-sweep`/
@@ -884,6 +892,37 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
 _Pending._
 
 ## Journal
+
+### 2026-10-10 — Offline local-lane construction
+
+Implemented the default-OFF CI repair emitter, watchdog candidate adapter,
+explicit container/charter/workspace allowlist and neutral restricted
+image/fleet template. This closes the construction part of the
+CI-remediation vision without changing cloud workflows or choosing #5890's
+episode/rearm policy. Network-free tests exercise config and transport owners,
+coordinator dedup and completion review with fake authority. Live admission
+still requires independent source, policy and inference/repository proof;
+the starter template provides none of those credentials or activation.
+
+Documentation-impact review: plugin READMEs link their new source docs;
+the canonical local slice distinguishes implementation from unvalidated live
+provisioning/authentication/triage. No runtime update or deployment performed.
+
+Operator follow-up (summary): reduce redundant GitHub polling through existing
+provider/shared waiting infrastructure; keep broader centralized PR drivers as
+a separate dependency rather than expanding this construction slice.
+The local slice now links the existing shared watch contract and requires
+bounded reads/conservative cadence/provider backoff.
+
+Concrete PR validation evidence: `request-review-if-maintainer` in Actions run
+`38112737598`, job `114391490401`, received HTTP 403 while
+`copilotReviewIdsAtHeadSha` paginated `/pulls/6142/reviews` at
+2026-10-10 22:07:45 America/Los_Angeles. The response named the core rate
+resource, limit/used 5000, remaining 0 and reset 22:32:13 local.
+This identifies the failing review-request polling caller, not the complete
+set of quota consumers. The constructed CI emitter was not activated, so
+there is no evidence it consumed live GitHub quota. No reviewer internals,
+credential changes or alternate-auth workaround were used.
 
 ### 2026-10-10 — Local-lane requirements documented
 

@@ -446,7 +446,7 @@ class Supervisor:
         return out
 
     def _matches_pool(self, task: dict) -> bool:
-        if self.repo is not None and task.get("repo") != self.repo:
+        if (self.repo is not None and task.get("repo") != self.repo) or (task.get("source") == "ci-repair" and task.get("origin_ref") != self.supervisor_id):
             return False
         if self.labels is not None and not (self.labels & set(task.get("labels") or [])):
             return False
@@ -3703,16 +3703,16 @@ class Supervisor:
                         before_reserve.get("status"),
                     )
                     break
-                resp = self.client.reserve_spawn(task["id"], reserved_by=self.supervisor_id)
+                resp = self.client.reserve_spawn(task["id"], reserved_by=self.supervisor_id, **({"coordinator_launch": True} if task.get("source") == "ci-repair" else {}))
             except DispatchError:
                 continue
+            if resp.get("coordinator_launch") and (resp["coordinator_launch"].get("ok") or resp["reservation"].get("state") != "failed"): return spawned + ([task["id"]] if resp["coordinator_launch"].get("ok") else [])
             if not resp.get("reserved"):
-                continue  # already actively reserved -> never double-spawn
+                continue
             reservation = resp["reservation"]
             key = reservation["key"]
             from . import bridge
             from .embody import EmbodyUnavailable
-
             try:
                 spawn_task = self._prepare_spawn_task(task, reservation)
             except SpawnPreparationRetained as exc:

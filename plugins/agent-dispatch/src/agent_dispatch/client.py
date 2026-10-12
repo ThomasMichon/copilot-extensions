@@ -248,7 +248,8 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
             "lease_seconds": lease_seconds,
             "evaluation": evaluation,
         }
-        return self._unwrap(self._http.post("/claim", json=body))
+        probe_timeout = {"timeout": 60.0} if task_id and "ci-repair-admitted" in capabilities else {}
+        return self._unwrap(self._http.post("/claim", json=body, **probe_timeout))
 
     def mine(self, machine: str, worktree: str, *, repo: str | None = None) -> dict:
         params: dict[str, Any] = {"machine": machine, "worktree": worktree}
@@ -620,6 +621,7 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
     def reserve_spawn(
         self, task_id: str, *, reserved_by: str | None = None,
         allow_suspended_reembodiment: bool = False,
+        coordinator_launch: bool = False,
     ) -> dict:
         """Atomically reserve the right to spawn an embody worker for a task.
 
@@ -641,6 +643,7 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
                     "reserved_by": reserved_by,
                     "allow_suspended_reembodiment": allow_suspended_reembodiment,
                 },
+                **({"timeout": 180.0} if coordinator_launch else {}),
             )
         )
 

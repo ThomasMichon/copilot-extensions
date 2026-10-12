@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; release snapshot contract landed, operation/receipt shapes in implementation
+- **Status:** Active; release and receipt contracts landed, local journal in implementation
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts. Existing dependencies #5789, #6030, #5861, #5862 retain ownership.
@@ -221,3 +221,13 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   Existing routing/auth owners and production queues remain untouched.
 - Next is durable admission/outbox and node receipt state after this contract
   clears review. No runtime activation, fleet enrollment or deployment performed.
+
+### 2026-10-12 - Receipt contract reviewed; local persistence boundary
+- #6357 merged at `2026-10-12T21:07:34Z`, commit
+  `33b6ad00340d1e8759d69c3ee6a5e0c1036dd38f`, with current-head Copilot APPROVED,
+  zero findings and green required CI. Installed contained suite: 143 passed.
+- Re-read the full Plan and pulled forward before starting the local journal
+  primitive under #6241. This adds explicit admission/outbox/audit and receipt
+  transactions without a CLI mutator, executor or production task allocator.
+- Allocation claims, durable node-side effects, authentication, distributed
+  fencing, installer lifecycle and live adoption remain unresolved proof gates.

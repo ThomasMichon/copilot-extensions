@@ -139,12 +139,23 @@ class SpawnReservationMixin:
         carry-forward) is unchanged.
         """
         ts = self._now(now)
+        from .ci_repair_spawn import authority_snapshot, reservation_authorized
+        admission = None
+        with self._connect() as probe:
+            candidate = self._fetch(probe, task_id)
+            if candidate and candidate.source == "ci-repair":
+                admission = authority_snapshot(probe, candidate)
+                if not reservation_authorized(probe, candidate, reserved_by):
+                    raise TaskError("CI repair reservation requires independently verified authority")
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             task = self._fetch(conn, task_id)
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
+            if task.source == "ci-repair":
+                if admission != authority_snapshot(conn, task):
+                    raise TaskError("CI repair reservation requires its registered admission lane")
             rows = conn.execute(
                 "SELECT * FROM spawn_reservations WHERE task_id = ? ORDER BY attempt ASC",
                 (task_id,),
@@ -433,6 +444,14 @@ class SpawnReservationMixin:
             conn.execute("COMMIT")
         return SpawnReservation._from_row(row)
 
+    def record_staging_spawn(self, key: str, session_handle: str) -> SpawnReservation:
+        """Persist an idle body before admission without making it claimable."""
+        return self._update_reservation(
+            key, to_state=SpawnState.RESERVING,
+            allowed_from=frozenset({SpawnState.RESERVING}),
+            session_handle=session_handle,
+        )
+
     def record_spawn(
         self,
         key: str,
@@ -440,6 +459,7 @@ class SpawnReservationMixin:
         session_handle: str | None = None,
         worktree: str | None = None,
         now: float | None = None,
+        authority_expected: tuple | None = None,
     ) -> SpawnReservation:
         """Mark a reservation ``spawned`` and record its embody session handle.
 
@@ -447,6 +467,13 @@ class SpawnReservationMixin:
         handle is what lets a supervisor restart reconcile (join the reservation
         to the live session) instead of re-spawning.
         """
+        def authority_guard(row):
+            if authority_expected is not None:
+                from .ci_repair_spawn import authority_snapshot
+                with self._connect() as probe:
+                    task = self._fetch(probe, row["task_id"])
+                    if authority_snapshot(probe, task) != authority_expected:
+                        raise TaskError("CI repair authority changed before spawn publication")
         return self._update_reservation(
             key,
             to_state=SpawnState.SPAWNED,
@@ -455,6 +482,7 @@ class SpawnReservationMixin:
             worktree=worktree,
             exclusive_released=False,
             now=now,
+            guard=authority_guard,
         )
 
     def record_spawn_worktree(
@@ -828,4 +856,3 @@ class SpawnReservationMixin:
             release_requested=release_requested,
             now=now,
         )
-

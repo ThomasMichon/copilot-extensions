@@ -218,8 +218,9 @@ def _run_gh(args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(["gh", *args], capture_output=True, text=True)
 
 
-def _fetch_run_jobs(repo: str, run_id: str) -> list[dict]:
-    out = _run_gh(["api", f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"])
+def _fetch_run_jobs(repo: str, run_id: str, *, run_gh=None) -> list[dict]:
+    request = run_gh or _run_gh
+    out = request(["api", f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"])
     if out.returncode != 0:
         raise LookupFailed(out.stderr.strip() or f"gh api jobs exited {out.returncode}")
     try:
@@ -228,7 +229,7 @@ def _fetch_run_jobs(repo: str, run_id: str) -> list[dict]:
         raise LookupFailed(f"unparseable jobs response: {error}") from error
 
 
-def _fetch_job_log(repo: str, job_id: int) -> str:
+def _fetch_job_log(repo: str, job_id: int, *, run_gh=None) -> str:
     # `--allow-escape-sequences`: real job logs are plain text (not JSON), and
     # `gh api` (since ~2.94) refuses to print a raw non-JSON body containing
     # ANSI escape sequences without this flag -- a terminal-safety guard, not
@@ -246,9 +247,10 @@ def _fetch_job_log(repo: str, job_id: int) -> str:
     # escape-sequence guard to begin with, so it prints the raw body fine
     # without the flag; a genuinely broken/misconfigured `gh` still fails
     # the same way on the retry, so this never masks a real error.
-    out = _run_gh(["api", f"repos/{repo}/actions/jobs/{job_id}/logs", "--allow-escape-sequences"])
+    request = run_gh or _run_gh
+    out = request(["api", f"repos/{repo}/actions/jobs/{job_id}/logs", "--allow-escape-sequences"])
     if out.returncode != 0 and "unknown flag" in (out.stderr or "").lower():
-        out = _run_gh(["api", f"repos/{repo}/actions/jobs/{job_id}/logs"])
+        out = request(["api", f"repos/{repo}/actions/jobs/{job_id}/logs"])
     if out.returncode != 0:
         raise LookupFailed(out.stderr.strip() or f"gh api logs exited {out.returncode}")
     # Strip ANSI before any caller sees this text -- see `_strip_ansi`'s own

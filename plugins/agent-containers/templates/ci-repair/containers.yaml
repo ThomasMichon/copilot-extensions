@@ -1,0 +1,23 @@
+schema_version: 1
+exec_user: vscode
+workspace_folder: /workspace
+forward_gh_token: false
+relay:
+  enabled: false
+fleets:
+  ci-repair:
+    image: ci-repair:local
+    size: 1
+    name_prefix: ci-repair
+    security_profile: restricted
+    exec_user: vscode
+    workspace_folder: /workspace
+    acp_command: copilot --acp --stdio --experimental
+    network: none
+    forward_gh_token: false
+    relay_enabled: false
+    memory: 4g
+    cpus: 2
+    pids_limit: 256
+    workspace_size: 2g
+    home_size: 512m

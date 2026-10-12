@@ -178,6 +178,56 @@ def register_spawn_routes(
             status = 404 if msg.startswith("no such task") else 409
             raise HTTPException(status_code=status, detail=msg) from exc
         result = _reservation_dict(reservation)
+        task = queue.get(body.task_id)
+        if reserved and task and task.source == "ci-repair":
+            # CI bodies launch inside the trusted coordinator, never the
+            # caller-selected supervisor factory. Return no launch permission.
+            from .ci_repair_spawn import make_ci_repair_spawn
+            registration = queue.get_registration(task.origin_ref)
+            spec = registration.spec if registration else {}
+            try:
+                if not registration or registration.status != "active":
+                    raise ValueError("CI repair registration is no longer active")
+                spawn = make_ci_repair_spawn(
+                    spec["ci_repair_bindings"],
+                    admission_command=spec["ci_repair_admission_command"],
+                    route=" --shared" if spec.get("shared") is True else "",
+                )
+                ok, handle = spawn(asdict(task))
+            except (ValueError, KeyError, OSError) as exc:
+                ok, handle = False, {"error": str(exc)}
+            if ok:
+                queue.record_staging_spawn(reservation.key, handle["session"])
+                from .ci_repair_spawn import authority_snapshot, reservation_authorized
+                with queue._connect() as probe:
+                    expected = authority_snapshot(probe, task)
+                    ok = reservation_authorized(probe, task, task.origin_ref, transition={
+                        "phase": "spawned", "session_handle": handle["session"],
+                    })
+                if not ok:
+                    queue.request_spawn_release(reservation.key, session_handle=handle["session"], detail="spawned identity admission refused")
+                    return {"reserved": False, "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
+                            "coordinator_launch": {"ok": False, "error": "spawned identity admission refused", **handle}}
+                try:
+                    queue.record_spawn(reservation.key, session_handle=handle["session"], authority_expected=expected)
+                except TaskError:
+                    queue.request_spawn_release(reservation.key, session_handle=handle["session"], detail="authority changed before publication")
+                    return {"reserved": False, "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
+                            "coordinator_launch": {"ok": False, "error": "authority changed"}}
+                bus.publish({"type": "spawn.spawned", "reservation": _reservation_dict(queue.get_reservation(reservation.key))})
+                from . import bridge
+                try:
+                    delivered = bridge.resume_worker(handle["session"].removeprefix("local-body:"), handle["task_seed"], timeout=30)
+                except (OSError, __import__("subprocess").TimeoutExpired):
+                    delivered = False
+                if not delivered:
+                    queue.request_spawn_release(reservation.key, detail="admitted task turn delivery failed")
+                    return {"reserved": False, "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
+                            "coordinator_launch": {"ok": False, "error": "task turn delivery failed"}}
+            else:
+                queue.fail_spawn(reservation.key, detail=handle.get("error"))
+            return {"reserved": False, "reservation": _reservation_dict(queue.get_reservation(reservation.key)),
+                    "coordinator_launch": {"ok": ok, **handle}}
         if reserved:
             bus.publish({"type": "spawn.reserved", "reservation": result})
         return {"reserved": reserved, "reservation": result}
@@ -267,6 +317,15 @@ def register_spawn_routes(
 
     @app.post("/spawn-reservations/{key}/spawned")
     def record_spawn(key: str, body: RecordSpawnBody) -> dict:
+        reservation = queue.get_reservation(key)
+        task = queue.get(reservation.task_id) if reservation else None
+        if task and task.source == "ci-repair":
+            from .ci_repair_spawn import reservation_authorized
+            with queue._connect() as conn:
+                if not reservation_authorized(conn, task, task.origin_ref, transition={
+                    "phase": "spawned", "session_handle": body.session_handle,
+                }):
+                    raise HTTPException(status_code=403, detail="CI repair spawned identity not independently verified")
         result = _reservation_guard(
             lambda: queue.record_spawn(
                 key, session_handle=body.session_handle, worktree=body.worktree

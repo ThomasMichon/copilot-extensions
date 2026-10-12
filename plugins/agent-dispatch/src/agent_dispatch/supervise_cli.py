@@ -136,6 +136,14 @@ def _validate_spec_charter_mode(spec: dict) -> None:
     ``--spec`` bypasses that path entirely and would otherwise persist a
     registration the daemon can never actually start (agent-worktrees embody
     has no charter-binding flag)."""
+    if spec.get("ci_repair_bindings") is not None:
+        from .ci_repair_spawn import cli_bindings
+
+        cli_bindings(spec["ci_repair_bindings"], spec.get("ci_repair_admission_command"))
+        if spec.get("fleet") or spec.get("embody_backend", "headless") != "headless":
+            raise SystemExit("CI repair bindings require a local headless lane")
+        if spec.get("cli_labels") or spec.get("script_labels") or spec.get("labels") != ["ci-repair"]:
+            raise SystemExit("CI repair bindings require a dedicated label-gated headless lane")
     if not spec.get("charter"):
         return
     backend = spec.get("embody_backend")
@@ -680,6 +688,12 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         label for label in (getattr(args, "idle_nudge_exempt_label", None) or []) if label
     ]
     charter = getattr(args, "charter", None)
+    if getattr(args, "ci_repair_bindings", None):
+        from .ci_repair_spawn import cli_bindings
+
+        ci_bindings, ci_command = cli_bindings(args.ci_repair_bindings, args.ci_repair_admission_command)
+        if getattr(args, "pool", None) or backend != "headless" or cli_labels or script_labels or args.label != ["ci-repair"]:
+            raise SystemExit("CI repair bindings require a local label-gated headless lane")
     if charter and (backend in ("cli", "script") or cli_labels or script_labels):
         print(
             "agent-dispatch supervise: --charter is only supported for a fully "
@@ -780,6 +794,12 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             all_repos=all_repos,
             no_pair=bool(getattr(args, "no_pair", False)),
         )
+        if getattr(args, "ci_repair_bindings", None):
+            from .ci_repair_spawn import make_ci_repair_spawn
+
+            headless_spawn = make_ci_repair_spawn(
+                ci_bindings, route=route, admission_command=ci_command,
+            )
         script_spawn = make_script_spawn(
             route=route,
             all_repos=all_repos,
@@ -863,6 +883,8 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         _preflight_agent = (
             (getattr(args, "headless_agent", None) or "task-worker") if _headless_active else None
         )
+        if getattr(args, "ci_repair_bindings", None):
+            _preflight_agent = None  # Task-selected venues have their own admission probe.
         _preflight_pool = None
     # Best-effort, fail-loud preflight: warn (never block) when the headless
     # embody agent isn't registered with agent-bridge on the host(s) where a body

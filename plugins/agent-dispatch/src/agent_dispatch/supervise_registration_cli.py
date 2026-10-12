@@ -36,6 +36,8 @@ def register_supervise_commands(sub) -> None:
     p.add_argument("--no-pair", action="store_true")
     p.add_argument("--headless-agent", default="task-worker", metavar="AGENT")
     p.add_argument("--charter", metavar="AGENT", help="optional .github/agents/<charter>.agent.md behavior overlay -- passed as Copilot's own --agent flag on the launched session, independent of the venue targeted by --headless-agent")
+    p.add_argument("--ci-repair-bindings", metavar="JSON", help="explicit allowed CI repair venue/charter/workspace selections")
+    p.add_argument("--ci-repair-admission-command", metavar="JSON", help="independent launch-time CI provenance/policy/auth admission argv")
     p.add_argument("--verify-timeout", type=int, default=0)
     p.add_argument("--interval", type=float, default=30.0)
     p.add_argument("--no-reactive", action="store_true")

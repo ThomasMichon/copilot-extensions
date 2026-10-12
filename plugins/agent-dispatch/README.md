@@ -29,6 +29,14 @@ agent-bridge for live cross-boundary conversation and steering, and
 > service on both platforms: a **systemd user unit** (Linux) and a **Windows
 > Scheduled Task**.
 
+## Offline CI repair construction
+
+The optional [verified-failure emitter](docs/ci-repair.md) reuses the existing
+leased emitter, coordinator dedup and headless container dispatch. It is OFF
+by default. A separately reviewed admission adapter must verify the CI source,
+attempt policy and independent venue authentication; a signature/issue label is
+not authorization. Container selection and charter selection remain distinct.
+
 ## Install
 
 Supervisor transitions have a [structured lifecycle audit](docs/supervisor-lifecycle.md)

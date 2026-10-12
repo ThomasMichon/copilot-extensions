@@ -72,6 +72,11 @@ Reconciliation replays receipts, not effects. No transaction spans Git, SSH or
 prompts. Authorization, resource-owner fencing, mixed-version compatibility and
 partition reassignment remain explicit reviewed/runtime proof gates.
 
+The first [local operation journal](operation-ledger.md) implements explicit
+intent/outbox/audit and receipt transactions without executing effects. Node
+persistence, authenticated admission, claims and resource fencing remain later
+proof gates.
+
 This contract stays inside the standalone product until its mutation protocol
 and lifecycle are proven. Existing `agent-fleet-contracts` remains the owner of
 driver/registration/fixed-service routing records; no incompatible edit or

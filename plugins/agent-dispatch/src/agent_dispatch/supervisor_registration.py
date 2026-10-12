@@ -417,6 +417,16 @@ def _lane_flags(spec: dict) -> list[str]:
         argv += ["--headless-agent", str(spec["headless_agent"])]
     if spec.get("charter"):
         argv += ["--charter", str(spec["charter"])]
+    if spec.get("ci_repair_bindings") is not None:
+        from .ci_repair_spawn import validate_admission_command, validate_bindings
+
+        try:
+            validate_bindings(spec["ci_repair_bindings"])
+            validate_admission_command(spec.get("ci_repair_admission_command"))
+        except ValueError as exc:
+            raise UnsupportedKind(str(exc)) from exc
+        argv += ["--ci-repair-bindings", json.dumps(spec["ci_repair_bindings"])]
+        argv += ["--ci-repair-admission-command", json.dumps(spec["ci_repair_admission_command"])]
     argv += ["--interval", str(spec.get("interval", 30.0))]
     # Full supervise surface (a declaration is a lossless superset of the legacy env
     # profile): these keys are absent in older store-backed specs -- emitted only
@@ -495,6 +505,7 @@ def build_command(
             "command" in spec
             or "repository_issue_loop" in spec
             or "effort_driver_loop" in spec
+            or "ci_repair" in spec
         ):
             holder = str(reg.get("machine") or platform.node() or "local")
             return base + ["emitter", "serve", path, "--holder", holder]

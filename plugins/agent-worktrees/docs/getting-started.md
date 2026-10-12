@@ -66,6 +66,13 @@ lean `install.{ps1,sh} provision` path and then dispatches. For normal ongoing
 updates, use `agent-worktrees update`; it refreshes payloads and reconciles
 runtimes rather than requiring hand-run `copilot plugin update` plus init.
 
+Runtime source fingerprints exclude generated `.egg-info` and `.dist-info`
+metadata beneath package source roots. Building a wheel therefore does not
+make unchanged source appear different on the next update. Real source and
+runtime assets, including declared local and external dependencies, remain
+fingerprinted. Completed numbered slots remain immutable; genuine content
+changes require a new published generation rather than an in-place rebuild.
+
 Start a Copilot CLI session and ask: *"set up agent-worktrees"*
 
 Or run the init script directly:
