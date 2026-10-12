@@ -87,7 +87,6 @@ def _partial_success_then_rebase(pr_repo, monkeypatch):
     return config, wid, path, remote, branch, old, accepted
 
 
-@pytest.mark.guard
 def test_partial_success_before_rebase_recovers_only_verified_source_lineage(pr_repo, monkeypatch):
     config, wid, path, remote, branch, old, accepted = _partial_success_then_rebase(pr_repo, monkeypatch)
     monkeypatch.setattr(pr_publish, "_provider_head", lambda repo, pr: accepted)
@@ -104,7 +103,6 @@ def test_partial_success_before_rebase_recovers_only_verified_source_lineage(pr_
     assert proof["transport_expected_head"] == accepted
 
 
-@pytest.mark.guard
 @pytest.mark.parametrize("provider", ["unavailable", "different", "foreign", "racing"])
 def test_partial_success_recovery_rejects_unconfirmed_or_unrelated_remote_heads(pr_repo, monkeypatch, provider):
     config, wid, path, remote, branch, old, accepted = _partial_success_then_rebase(pr_repo, monkeypatch)
