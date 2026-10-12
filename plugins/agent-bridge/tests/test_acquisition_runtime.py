@@ -446,12 +446,13 @@ async def test_real_constructed_client_envelope_and_http_response(rig):
     assert sent[0][:2] == ("POST", "/api/v1/acquisitions")
     assert sent[0][2]["protocol_version"] == ACQUISITION_PROTOCOL_VERSION
     assert sent[0][2]["mode"] == "cli"
-    client._daemon_proto = (30, 1)
-    with pytest.raises(BridgeClientError) as error:
-        client_acquire(client, req(mode="cli"))
-    assert error.value.status == 426
-    assert error.value.detail["code"] == "unsupported_acquisition_protocol"
-    assert error.value.detail["effect"] == "not_started"
+    for old_protocol in (30, 31):
+        client._daemon_proto = (old_protocol, 1)
+        with pytest.raises(BridgeClientError) as error:
+            client_acquire(client, req(mode="cli"))
+        assert error.value.status == 426
+        assert error.value.detail["code"] == "unsupported_acquisition_protocol"
+        assert error.value.detail["effect"] == "not_started"
     assert len(sent) == 1
 
 

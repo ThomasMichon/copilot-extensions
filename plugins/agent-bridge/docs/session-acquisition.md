@@ -131,6 +131,9 @@ target/mode and native head agree with that receipt. Foreign or unbound
 holders, older generations, a newly issued freshness intent, and retired
 native IDs still refuse. A completed receipt retains the recovery proof;
 already-admitted turns settle without a duplicate delivery or a new process.
+Updated acquisition clients require protocol 32 for this retirement-recovery
+guarantee and refuse an older daemon before sending a request. The protocol-32
+route explicitly continues accepting protocol-30 and protocol-31 requests.
 
 `acquisition_journal.AcquisitionJournal` uses the bridge database's existing
 SQLite connection/write machinery, with a separate internal attempt table.
