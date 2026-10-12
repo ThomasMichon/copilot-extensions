@@ -13,6 +13,14 @@ around it plus the two bootstrap scripts below, so a bare machine with
 neither Copilot nor `git`/`uv` preinstalled can still get a running
 coordinator.
 
+The development wrapper resolves `agent-dispatch` directly from
+`plugins/agent-dispatch`. Release materialization permits only that exact
+standalone-consumer/package relationship, embeds it under the wrapper's local
+`libs/`, and materializes its shared dependencies without retaining editable
+external paths. This exception does not permit arbitrary plugin-to-plugin
+copying; canonical source identity, symlink and destination safeguards remain
+required. The trusted updater implements the same data-only contract.
+
 ## Install and run
 
 ```bash

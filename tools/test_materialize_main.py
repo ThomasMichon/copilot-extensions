@@ -626,7 +626,7 @@ def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
     actual_root = tmp_path / "actual"
 
     def _consumer_snapshot_dir(root: Path, consumer: str) -> Path:
-        return root / consumer if consumer == "worktree-manager" else root / "plugins" / consumer
+        return root / consumer if consumer in mm._EXTRA_CONSUMER_DIRS else root / "plugins" / consumer
 
     for consumer, consumer_dir, refs in discovered:
         actual_consumer_dir = _consumer_snapshot_dir(actual_root, consumer)
@@ -663,10 +663,13 @@ def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
         assert (actual_consumer_dir / "pyproject.toml").read_text(encoding="utf-8") == (
             expected_consumer_dir / "pyproject.toml"
         ).read_text(encoding="utf-8")
-        for _name, _raw_path, lib, _editable in refs:
+        for name, _raw_path, lib, _editable in refs:
             expected_lib = expected_consumer_dir / "libs" / lib
             if not expected_lib.exists():
-                shutil.copytree(repo / "libs" / lib, expected_lib, ignore=mm._ignore)
+                source = repo / "libs" / lib
+                if consumer == "agent-dispatch-service" and name == lib == "agent-dispatch":
+                    source = repo / "plugins" / lib
+                shutil.copytree(source, expected_lib, ignore=mm._ignore)
                 _build_expected_vendored_tree(expected_lib, canonical_root=repo)
 
             materialized = actual_consumer_dir / "libs" / lib
