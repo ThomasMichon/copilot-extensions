@@ -30,7 +30,6 @@ never edited to record that cycle; it changes only when the **intent** changes.
 | Vision | Scope | Subject |
 |--------|-------|---------|
 | [main-owned-workflow-control](main-owned-workflow-control/README.md) | leaf | Narrow owner-governed release control survives promotion; all other contribution, including admin-authored implementations, follows reviewed dev validation. |
-| [documentation](documentation/README.md) | leaf | **Adopter documentation** — progressive, capability-honest guidance for assembling a harness, authoritative owner references, portable examples, and change-coupled maintenance. |
 | [harness-guidance](harness-guidance/README.md) | leaf | **Harness guidance ownership and delivery** — repositories own local identity and invariants, plugins own concise generic ambient policy, skills own task-time procedures, operator policy remains portable, and context use is attributable and budgeted. |
 | [plugins/efforts](plugins/efforts/README.md) | leaf | The **durable planning and continuity layer** — repositories explicitly adopt effort-backed work, reviewed plans execute in waves, worktrees remain responsible until the effort completion gate, handoffs stay compact, and cross-repository ownership follows validated target capability. |
 | [plugin-services](plugin-services/README.md) | branch | The plugin **service model** — how installer-deployed plugin runtimes expose, coordinate, and are reached as local services, à la carte and without shared infrastructure. |
@@ -67,6 +66,7 @@ never edited to record that cycle; it changes only when the **intent** changes.
 | [process-telemetry](process-telemetry/README.md) | leaf | **Process telemetry** — generalizes the fail-open telemetry seam `agent-dispatch`/`agent-bridge` already ship (registrable sink, spool sink, env/config wiring) with a new `process_spawn` event kind, so any `agent-*` plugin's launch code can emit low-cardinality process-provenance (plugin, verb, source tag, parent lineage) and best-effort resource figures, letting a control-plane attribute fleet activity back to the fabric that caused it. |
 | [process-registry](process-registry/README.md) | leaf | **Process Registry** — one optional host-owned broker reconciles cheap file check-ins into attributable live process state and a bounded local snapshot journal, with no reporting subprocess or formal telemetry sink. |
 | [ci-failure-remediation](ci-failure-remediation/README.md) | leaf | **Automated CI-failure remediation** — a red trunk validation run gets detection + deduplication and a bounded, reviewed fix attempt through the repo's own ordinary contribution path, with an intent-preserving triage discipline (never mechanically forcing green) and escalation whenever that judgment can't be made confidently. |
+| [documentation](documentation/README.md) | leaf | **Adopter documentation** — progressive, capability-honest guidance for assembling a harness, authoritative owner references, portable examples, and change-coupled maintenance. |
 
 <!-- Add rows as visions are authored. A per-plugin vision lives at
      visions/plugins/<name>/; a cross-cutting capability vision at
