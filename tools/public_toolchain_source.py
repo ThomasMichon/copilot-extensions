@@ -72,6 +72,11 @@ def validate_lock_provenance(provenance: dict | None, packages: dict[str, str]) 
         identity = provenance.get("validated_index_identity")
         if not isinstance(identity, str) or not identity:
             raise ArtifactBuildError("governed toolchain requires validated index provenance")
+        if provenance != {
+            "source_policy": "governed", "python": provenance["python"],
+            "validated_index_identity": identity,
+        }:
+            raise ArtifactBuildError("governed toolchain provenance must have its canonical shape")
     elif policy == "seasoned-public":
         age = provenance.get("min_age_days")
         hashes = provenance.get("file_hashes")

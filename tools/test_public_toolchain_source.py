@@ -245,6 +245,8 @@ def test_cli_default_preserves_builder_validation_order(monkeypatch, capsys):
     {"python": "/python"},
     {"python": "/python", "source_policy": "unknown"},
     {"python": "/python", "source_policy": "governed"},
+    {"python": "/python", "source_policy": "governed", "validated_index_identity": "opaque", "extra": True},
+    {"python": "/python", "source_policy": "governed", "validated_index_identity": "opaque", "extra": object()},
     {"python": "/python", "source_policy": "seasoned-public", "packages": PINS},
     {**public.PublicToolchainSource(7, PINS, HASHES).provenance, "python": "/python", "min_age_days": -1},
     {**public.PublicToolchainSource(7, PINS, HASHES).provenance, "python": "/python", "packages": {}},

@@ -433,6 +433,8 @@ win grows with build complexity.
 - Review follow-through: schema-3 records reject caller-supplied locks lacking
   valid source/interpreter provenance before wheel building, not merely after
   resolution. Both fixture locks and negative regressions exercise this rule.
+  Governed records also reject noncanonical extra fields before serialization,
+  including non-JSON values, with an explicit artifact-build error.
 - Age-floor race follow-through: snapshot-qualified file SHA-256 hashes travel
   with exact pins into `uv pip install --require-hashes`. A later upload to the
   same version cannot supply unseasoned bytes; unknown hashes and unpinned
