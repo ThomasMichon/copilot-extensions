@@ -225,14 +225,25 @@ def _terminate_posix_if_identity(pid: int, expected_start_time: str) -> dict:
     pidfd_open = getattr(os, "pidfd_open", None)
     pidfd_send_signal = getattr(signal, "pidfd_send_signal", None)
     if not callable(pidfd_open) or not callable(pidfd_send_signal):
+        if platform.system() != "Linux":
+            return {
+                "killed": False,
+                "identity_verified": False,
+                "method": "pidfd-unavailable",
+            }
+        from .singleton_linux import _open_pidfd, _send_pidfd_signal
+
+        pidfd_open = _open_pidfd
+        pidfd_send_signal = _send_pidfd_signal
+    try:
+        fd = pidfd_open(pid)
+    except NotImplementedError:
         return {
             "killed": False,
             "identity_verified": False,
             "method": "pidfd-unavailable",
         }
-    try:
-        fd = pidfd_open(pid, 0)
-    except OSError:
+    except (OSError, NotImplementedError):
         return {
             "killed": False,
             "identity_verified": False,
