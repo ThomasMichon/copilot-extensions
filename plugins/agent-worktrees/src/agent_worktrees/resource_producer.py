@@ -15,6 +15,9 @@ SCHEMA = "copilot-extensions.resource-producer"
 VERSION = 1
 MAX_REF_BYTES = 4096
 MAX_INPUT_BYTES = 16384
+FROZEN_OWNER_STATUSES = frozenset({
+    "finalizing", "finalized", "orphaned", "archived", "complete", "completed",
+})
 _TOKEN = re.compile(r"^[A-Za-z0-9_-]{32,128}\Z")
 _write_paths: ContextVar[frozenset[str]] = ContextVar("producer_write_paths", default=frozenset())
 

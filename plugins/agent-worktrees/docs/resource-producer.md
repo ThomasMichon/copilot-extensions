@@ -30,6 +30,8 @@ remote, unauthorized or terminal owners fail; reserve never reopens a finalized
 record and never creates a guessed ledger. Session-qualified owner references
 are normalized to their worktree record.
 Read-only inspect remains available for terminal records with valid metadata.
+Archived tombstones, orphaned records and finalizing owners cannot receive new
+reservations or accepted producer transfers.
 
 All results carry `"schema":"copilot-extensions.resource-producer","version":1`.
 Success includes `ok`, current `owner`, original `creator`, `token`, full `ref`,

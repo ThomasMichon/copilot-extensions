@@ -175,7 +175,7 @@ def test_failed_bind_retains_pending_and_rejects_ref_collision(owner):
     assert tracking.load_record(path).resources[0].producer["phase"] == "pending"
 
 
-@pytest.mark.parametrize("status", ["finalized", "finalizing", "orphaned", "complete", "completed"])
+@pytest.mark.parametrize("status", ["finalized", "finalizing", "orphaned", "archived", "complete", "completed"])
 def test_terminal_owner_cannot_reserve_or_reopen(owner, status):
     path, _ = owner
     record = tracking.load_record(path)
@@ -336,6 +336,24 @@ def test_pending_handoff_refused_bound_accept_preserves_creator(owner):
     assert claim_handoffs.accept(bundle.bundle_id, actor="m/p/consumer", machine="m").state == "accepted"
     inspected = call(path.with_name("consumer.yaml"), "inspect", {"token": bound["token"]}, ref="m/p/consumer")
     assert inspected["owner"] == "m/p/consumer" and inspected["creator"] == "m/p/owner"
+
+
+@pytest.mark.parametrize("status", ["finalized", "finalizing", "orphaned", "archived", "complete", "completed"])
+def test_accept_terminal_consumer_retains_source_and_both_records(owner, status):
+    path, _ = owner
+    bound = bind(path, reserve(path))
+    bundle, _ = claim_handoffs.offer("m/p/owner", "m/p/consumer", [bound["ref"]], machine="m")
+    consumer_path = path.with_name("consumer.yaml")
+    consumer = tracking.load_record(consumer_path)
+    consumer.status = status
+    tracking.save_record(consumer, consumer_path)
+    before = {target: target.read_bytes() for target in (path, consumer_path, claim_handoffs.registry_path())}
+    with pytest.raises(claim_handoffs.ClaimHandoffError, match=status):
+        claim_handoffs.accept(bundle.bundle_id, actor="m/p/consumer", machine="m")
+    assert all(target.read_bytes() == content for target, content in before.items())
+    retained = tracking.load_record(path).resources[0]
+    assert retained.is_unsettled and retained.producer == bound["producer"]
+    assert retained.handoff_bundle == bundle.bundle_id
 
 
 def test_accept_consumer_persistence_failure_keeps_source_obligation(owner, monkeypatch):

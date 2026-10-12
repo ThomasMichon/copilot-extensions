@@ -32,8 +32,10 @@ def accept_producers(bundle_id: str, *, actor: str):
             for record, ref in ((source, source_ref), (consumer, consumer_ref)):
                 if (record.machine, record.repo, record.worktree_id) != (ref.machine, ref.project, ref.worktree_id):
                     raise handoffs.ClaimHandoffError("producer handoff record identity mismatch")
-            if consumer.status in {"finalized", "complete", "completed"}:
-                raise handoffs.ClaimHandoffError("producer consumer is terminal; ownership cannot be reopened")
+            if consumer.status in producer.FROZEN_OWNER_STATUSES:
+                raise handoffs.ClaimHandoffError(
+                    f"producer consumer is {consumer.status}; ownership cannot be reopened"
+                )
             evidence = {
                 "accepted": True, "bundle": bundle.bundle_id,
                 "source": bundle.source, "consumer": bundle.consumer,

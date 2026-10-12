@@ -64,7 +64,7 @@ def _owned_record(args: dict, path: Path, *, mutable: bool = True):
         raise ValueError("producer owner does not match the current record authority")
     if path.resolve() != (cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml").resolve():
         raise ValueError("producer record path does not match owning-project authority")
-    if mutable and record.status in {"finalizing", "finalized", "orphaned", "complete", "completed"}:
+    if mutable and record.status in producer.FROZEN_OWNER_STATUSES:
         raise ValueError(f"producer owner is {record.status}; ownership is frozen")
     return record, owner
 

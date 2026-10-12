@@ -608,6 +608,12 @@ installs, no service-specific config needed for this class of plugin.
   supported contained selections passed 611 tests; the full structural guard
   selection passed 528 tests with 13 intentional skips. Module-size,
   install-contract, lint and changefile checks passed without relaxed limits.
+- PR #6391's first current-head review found two additional terminal-owner
+  gaps: archived tombstones could receive reservations and accepted transfers.
+  Both now use one shared frozen-owner status set, including finalizing and
+  orphaned records. Regression cases prove rejected acceptance changes neither
+  owner record nor bundle registry and retains the source obligation.
+  The post-fix contained producer/handoff selection passed 113 tests.
 - An exact committed snapshot of
   `02d8773bf39647bf92386e30a1e6dd02781dedb0` passed 126 targeted native Windows
   tests under Python 3.12 and Windows PowerShell 5.1, including the producer,
