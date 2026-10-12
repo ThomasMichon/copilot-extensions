@@ -240,6 +240,29 @@ def test_audit_drive_remains_non_resolving_if_resolution_wording_changes():
     assert recipes.decide(recipe, "abandoned").kind == "work"
 
 
+@pytest.mark.parametrize("target", ["root", "report"])
+def test_report_resolution_loop_is_validation_error_on_older_python(
+    tmp_path, monkeypatch, capsys, target,
+):
+    values = recipes.render_recipe("worktree-audit", _params(tmp_path)).params
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps(_report(values)), encoding="utf-8")
+    failing = tmp_path if target == "root" else report
+    original_resolve = Path.resolve
+
+    def resolve(path, *args, **kwargs):
+        if path == failing:
+            raise RuntimeError("Symlink loop")
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    args = build_parser().parse_args(
+        [*_args("check-report", values), "--report", str(report)],
+    )
+    assert args.func(args) == 2
+    assert "symlink loop" in capsys.readouterr().err.lower()
+
+
 @pytest.mark.parametrize("fault", [
     "schema", "scope", "roster", "duplicate", "mutation", "partial-evidence",
     "remaining", "elapsed", "unsupported-evidence", "steering", "bool-budget",

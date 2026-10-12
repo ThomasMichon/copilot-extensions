@@ -221,16 +221,23 @@ def _cmd_recipes_kick(args: argparse.Namespace) -> int:
     return _cmd_create(create_ns)
 
 
+def _resolve_report_path(path: Path, *, strict: bool) -> Path:
+    try:
+        return path.resolve(strict=strict)
+    except RuntimeError as exc:
+        raise ValueError(f"could not resolve audit report path (symlink loop?): {exc}") from exc
+
+
 def _cmd_recipes_check_report(args: argparse.Namespace) -> int:
     from .recipes import RecipeError, render_recipe
     from .recipes.worktree_audit import validate_report
 
     try:
         rendered = render_recipe("worktree-audit", _parse_recipe_params(args.param))
-        root = Path(rendered.params["report_dir"]).resolve(strict=False)
+        root = _resolve_report_path(Path(rendered.params["report_dir"]), strict=False)
         if not root.is_dir():
             raise ValueError("approved report_dir must be an existing directory")
-        report_path = Path(args.report).resolve(strict=True)
+        report_path = _resolve_report_path(Path(args.report), strict=True)
         if report_path == root or not report_path.is_relative_to(root):
             raise ValueError("report must be inside the approved report_dir after resolving symlinks")
         if not report_path.is_file():
