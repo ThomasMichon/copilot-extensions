@@ -155,6 +155,7 @@ class FieldQuestionsMixin:
     def _advance_after_choice(self, widget) -> None:
         """Enter from a choice/multichoice: if the toggle activated the "Other…"
         box, focus it (keep typing); otherwise advance to the next question."""
+        self._sync_conditional_fields()
         rec = self._rec_for(widget)
         if rec and rec.get("other") is not None:
             if rec["type"] == "choice":

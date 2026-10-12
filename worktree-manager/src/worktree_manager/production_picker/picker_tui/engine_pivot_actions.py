@@ -81,14 +81,34 @@ class PickerScreenPivotActionsMixin:
 
         label, source = section.label, section.source
         ctx = self._config_section_ctx()
+        action = getattr(section, "configure_action", None)
 
         def _work():
-            return tasks.run_config_section(section, ctx)
+            ok, msg = tasks.run_config_section(section, ctx)
+            if action is None:
+                return ok, msg
+            fields = None
+            if ok:
+                try:
+                    fields = tasks.resolve_form_fields(action.fields, strict=True)
+                except ValueError as exc:
+                    ok, msg = False, str(exc)
+            return ok, msg, fields
 
         def _done(result):
-            ok, msg = result
+            if action is None:
+                ok, msg = result
+                fields = None
+            else:
+                ok, msg, fields = result
             self.debug = (f"{label} ({source}): {msg or 'done'}" if ok
                           else f"{label} ({source}) failed: {msg}")
+            if action is not None:
+                if ok:
+                    self._open_config_action(section, ctx, msg, fields)
+                else:
+                    self.app.push_screen(SubmitErrorScreen(label, msg, None))
+                return
             try:
                 self._start_setup_reload_worker()
                 self.sel = self.default_sel()
@@ -96,6 +116,39 @@ class PickerScreenPivotActionsMixin:
                 pass
 
         self._run_bg(label, _work, _done)
+    def _open_config_action(self, section, ctx, status, fields):
+        action = section.configure_action
+
+        def _after(values):
+            if values is None:
+                self.debug = f"{section.label} · cancelled"
+                return
+            self._run_config_action(section, ctx, values)
+
+        summary = "\n\n".join(part for part in (section.description, status) if part)
+        self.app.push_screen(
+            CreateActionScreen(
+                action.label, fields, confirm=action.confirm, submit_label="Apply",
+                summary=summary, confirm_values=True,
+            ),
+            _after,
+        )
+    def _run_config_action(self, section, ctx, values):
+        from . import tasks
+
+        def _work():
+            return tasks.run_config_section(section.configure_action, ctx, fields=values)
+
+        def _done(result):
+            ok, msg = result
+            self.debug = (f"{section.label}: {msg or 'applied'}" if ok
+                          else f"{section.label} failed: {msg}")
+            if not ok:
+                self.app.push_screen(SubmitErrorScreen(section.label, msg, None))
+            self._start_setup_reload_worker()
+            self.sel = self.default_sel()
+
+        self._run_bg(section.configure_action.label, _work, _done)
     def _open_task_menu(self):
         """Open the Enter action sub-menu for the focused task, built from the
         registered pivot's declared ``actions``.
@@ -493,18 +546,7 @@ class PickerScreenPivotActionsMixin:
         from . import tasks
 
         def _work():
-            resolved = []
-            for f in fields:
-                cmd = f.get("options_command")
-                if not cmd:
-                    resolved.append(f)
-                    continue
-                live = tasks.resolve_dynamic_options(cmd)
-                merged = dict(f)
-                if live:
-                    merged["options"] = live
-                resolved.append(merged)
-            return resolved
+            return tasks.resolve_form_fields(fields)
 
         def _done(resolved_fields):
             self._open_create_action_now(reg, action, resolved_fields)

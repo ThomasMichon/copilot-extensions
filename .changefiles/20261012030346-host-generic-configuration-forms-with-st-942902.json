@@ -1,0 +1,9 @@
+{
+  "comment": "Host generic configuration forms with strict choices and Apply confirmation",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

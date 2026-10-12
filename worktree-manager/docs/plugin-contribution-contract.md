@@ -57,6 +57,23 @@ Version-1 compatibility also covers the existing declarative fields:
   the action's keyboard affordance without hard-coding a provider's keys;
 - top-level `worktree_actions`;
 - top-level `config_sections`;
+- optional `config_sections[].configure_action`, with the same `label`, `key`,
+  `fields`, `run`, and `confirm` schema as `create_action` below. The section's
+  `run` remains a bounded read-only status query. After it succeeds, the Picker
+  displays its output and description alongside the form, with **Apply/Cancel**
+  controls. Apply substitutes `{field.<name>}`/`{fields}` and picker context in
+  one pass; collected values are never reinterpreted as templates. With
+  `confirm: true` on the form action, a second inline prompt shows the collected
+  target/action values and defaults to Cancel. Opening, loading options, or
+  cancelling never invokes the form's `run`. Dynamic `options_command` fields
+  return a JSON array of non-blank strings; missing/failed/invalid/empty results
+  stop this form with an explicit error, never an arbitrary free-text fallback.
+  Unlike create forms, configuration forms do not force `allow_other: true`.
+  All nested commands receive the same attributable target resolution and
+  validation as other contribution commands. The provider owns revalidation,
+  local persistence and the meaning of removing an override; the Manager does
+  not import its domain runtime. Without `configure_action`, existing one-shot
+  sections behave unchanged;
 - `confirm: true` on a pivot action, a `worktree_actions` entry, or a
   `config_sections` entry gates that action behind a native modal
   are-you-sure before it actually runs — Cancel is the gate's initial

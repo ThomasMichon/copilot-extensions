@@ -139,6 +139,7 @@ line-length = 99
 [tool.pytest.ini_options]
 markers = [
     "guard: fast structural and contract checks",
+    "contract(name): behavioral contract attribution",
 ]
 
 [tool.ruff.lint.per-file-ignores]

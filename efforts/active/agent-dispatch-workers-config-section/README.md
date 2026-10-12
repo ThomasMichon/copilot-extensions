@@ -5,7 +5,7 @@
   picker-support plugins)
 - **Branch(es):** per-slice worktrees
 - **Created:** 2026-10-06
-- **Status:** Active <!-- Phases 1-3 landed; Phase 4 local Picker controls proposed; remote UI/validation transferred to #6283 -->
+- **Status:** Active <!-- Phase 4 local controls implemented and validated; implementation review/merge pending; remote scope transferred to #6283 -->
 - **Vision:** [`visions/picker`](../../../visions/picker/README.md)'s
   plugin-pivot-extensibility behavior (a plugin's own pivot manifest
   contributes Picker surface without Picker-side code) and
@@ -296,29 +296,29 @@ in #6096. It does not authorize remote-machine controls or template activation.
 
 ### Phase 4 — Local pool selection and confirmed toggles
 
-- [ ] Reconcile with the Configuration Workbench vision's
+- [x] Reconcile with the Configuration Workbench vision's
       `machine-local-adjustments` and `domain-configuration-panels` behaviors:
       the Manager hosts generic interaction; agent-dispatch owns discovery,
       validation and user-local override persistence. No daemon or repository
       writer is introduced.
-- [ ] _(agent-recommended implementation)_ Extend `ConfigSection` with an
+- [x] _(agent-recommended implementation)_ Extend `ConfigSection` with an
       optional `configure_action` using the existing manifest field parser,
       dynamic `options_command` protocol and form-template substitution.
       Keep its existing `run` as the read-only status query. After a successful
       status query, show the optional form with that status and an **Apply**
       button; ordinary sections remain one-shot commands.
-- [ ] Reuse the existing form/confirmation screen. The form selects a local
+- [x] Reuse the existing form/confirmation screen. The form selects a local
       pool and an explicit Enable/Disable action, with an optional disable
       reason. Opening, loading options and cancelling never mutate state.
       Confirmation occurs after fields are collected and defaults to Cancel.
       Show the selected pool and action in the confirmation, not just the
       generic Workers title. Enabling clears a local disable override; it
       does not promise the declaration or running pool is active.
-- [ ] Add a read-only pool-options command and a strict UI mutation mode:
+- [x] Add a read-only pool-options command and a strict UI mutation mode:
       reject absent or ambiguous declarations before writing overrides.
       Preserve the existing CLI status and deliberately permissive named
       override behavior for non-UI callers.
-- [ ] Wire only the plugin-owned Workers manifest; keep Manager code generic.
+- [x] Wire only the plugin-owned Workers manifest; keep Manager code generic.
       Update the public manifest contract and worker-control documentation.
 - [ ] Land through the normal reviewed PR flow and journal the actual outcome.
 
@@ -338,12 +338,17 @@ in #6096. It does not authorize remote-machine controls or template activation.
       entry itself is schema-valid and discoverable. A live, driven Picker
       session was not run this session (no interactive TUI harness
       available in this environment); deferred to whoever next drives one.
-- [ ] Toggling disable/enable from the Picker round-trips to
+- [x] Toggling disable/enable from the Picker round-trips to
       `agent-dispatch supervise override list` reflecting the change.
       Exercise the real native Picker form and confirmation against an isolated
       fixture pool and override store. Assert Cancel performs no write, Disable
       creates the logical override and Enable removes it. Preserve the
       declaration byte-for-byte, and surface command failures explicitly.
+      **Proven:** the opt-in native Textual acceptance lane drives the shipped
+      Workers form against the real CLI, registrar and override store in fresh
+      isolated state, checks `supervise override list`, and refuses missing or
+      duplicate declarations introduced after selection without changing the
+      existing store. Generic native tests exercise query/options/action errors.
 - [x] Deferred to `ThomasMichon/copilot-extensions#6283`: A `--machine`-targeted toggle round-trips against a second real or
       test machine over `remote_dispatch.py`'s SSH transport. **Partially
       covered:** proven against a mocked SSH transport (the same style
@@ -362,6 +367,32 @@ no-name summary mode is proposal-level work in its own right; see that
 phase's first Plan item for the rationale.)_
 
 ## Journal
+
+### 2026-10-12 — Reviewed local plan executed and native round-trip proven
+
+- Plan #6287 cleared automated review with zero findings and merged before
+  implementation. Execution builds on that reviewed plan.
+- Added generic optional `configure_action` fields/Apply/confirmation hosting,
+  preserving ordinary one-shot sections and existing create-form defaults.
+  Manager remains domain-neutral; dispatch owns pool options and the
+  `--require-declared` guard around the existing logical override primitives.
+- Native validation exposed a conditional-field advance race when Enable hid
+  the disable-reason tab. Synchronizing visibility before advancing keeps
+  the shared form's focus on the next visible question/control.
+- Strict configuration choices use the existing bounded read-query budget;
+  create forms retain their shorter best-effort choice budget and fallback.
+  Real provider startup exceeded that shorter budget during acceptance,
+  demonstrating why a required choice query cannot use the enrichment deadline.
+- Validation tiers: targeted provider unit/CLI tests; native Manager
+  form/confirmation/registry contracts; a fresh-state real-CLI local
+  Picker-to-override round-trip including Cancel, Disable, Enable, stale target
+  refusal, unchanged declaration bytes and `supervise override list`.
+  Installer clean-room validation is not applicable because no provisioning or
+  install path changes. Remote UI and second-machine validation remain
+  explicitly transferred to #6283, not silently counted as proven.
+- Updated the manifest contract, worker-control docs and test-lane instructions;
+  added changefiles for both changed components. Implementation review/merge
+  and the effort's archive/release remain outstanding.
 
 ### 2026-10-12 — Local toggle slice resumed; remote scope transferred
 

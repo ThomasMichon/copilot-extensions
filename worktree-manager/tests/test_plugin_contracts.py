@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -38,6 +39,44 @@ def _pivot(**extra) -> dict:
         "entry": {"id": "id", "title": "title"},
         **extra,
     }
+
+
+@pytest.fixture(autouse=True)
+def _fixture_owned_plugin_roots(monkeypatch):
+    for key in (
+        "WORKTREE_MANAGER_PLUGINS_DIR",
+        "AGENT_WORKTREES_PLUGINS_DIR",
+        "AGENT_WORKTREES_PIVOTS_DIR",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
+def test_configuration_form_contract_and_command_availability():
+    from worktree_manager.plugin_contracts import _probe_commands
+
+    form = {
+        "label": "Controls", "confirm": True,
+        "run": [sys.executable, "{field.pool}"],
+        "fields": [{"name": "pool", "type": "choice",
+                    "options_command": ["definitely-missing-config-options"]}],
+    }
+    contribution = parse_manifest(
+        {"config_sections": [{"label": "Controls", "run": [sys.executable],
+                              "configure_action": form}]},
+        name="fixture", marketplace="example", plugin="fixture", source_path="fixture.json",
+    )
+    action = contribution.config_sections[0].configure_action
+    assert action.confirm and not action.fields[0].get("allow_other")
+    probed, missing = _probe_commands(contribution)
+    assert not probed.config_sections[0].available
+    assert missing == ["config section fixture0: definitely-missing-config-options"]
+    form["fields"] = [{"name": "pool"}, {"name": "pool"}]
+    with pytest.raises(ContractError, match="duplicates"):
+        parse_manifest(
+            {"config_sections": [{"label": "Controls", "run": [sys.executable],
+                                  "configure_action": form}]},
+            name="fixture", marketplace="example", plugin="fixture", source_path="fixture.json",
+        )
 
 
 def test_parses_pivot_actions_cards_forms_and_config_sections():

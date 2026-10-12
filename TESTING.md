@@ -595,6 +595,18 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   **Picker** UX, golden, cache, pivot, streaming, steering, profile, SSH-source,
   selection, capture, mock, and PNG-validation corpus under
   `worktree-manager/tests/production_picker/`.
+  The configuration-action contracts exercise native forms, Cancel-default
+  confirmation, safe argv substitution and visible command failures. For the
+  real Workers-to-override acceptance lane, prepare agent-dispatch's test venv
+  with `python tools/run-plugin-tests.py agent-dispatch --prepare-only`, set
+  `WORKERS_CONFIG_TEST_PYTHON` to that venv's interpreter, then run
+  `python tools/run-standalone-tests.py worktree-manager` with
+  `PYTEST_ADDOPTS='-k workers_picker_real_override_round_trip'` (add `--prepare`
+  only when the Manager test environment needs provisioning). It uses the
+  current source and shipped Workers form with an isolated registrar declaration
+  and override store: Cancel writes nothing, Disable sets the logical override,
+  Enable removes it, and declaration bytes stay unchanged. Ordinary Manager
+  runs skip this cross-distribution lane when no interpreter is supplied.
 - **ai-attribution:** payload-only hook tests covering authoritative
   `sessionStart` payload cwd, malformed/missing payloads, git-repo gating, safe
   defaults, bounded operator/repository config discovery, symlink/reparse

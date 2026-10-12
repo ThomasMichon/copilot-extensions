@@ -727,15 +727,25 @@ the existing `supervise override` local kill-switch) that one pool only;
 `--json` emits full structured detail instead of the compact line, for either
 shape. See `workers_config_cli.py` for the full contract.
 
-**Status-only from the Picker today.** The Configuration menu entry reports
-status only -- enabling/disabling a pool from the Picker itself is not yet
-wired up, blocked on
-[`ThomasMichon/copilot-extensions#6044`](https://github.com/ThomasMichon/copilot-extensions/issues/6044)
-(the Picker's `confirm` manifest field is parsed but not yet enforced before
-a destructive action/config-section dispatch runs -- a pre-existing,
-cross-cutting gap, not specific to this entry). The terminal `--toggle
-enable|disable` flag above remains the supported way to toggle a pool until
-that closes.
+**Local controls from the Picker.** After loading that status, Workers opens a
+pool/action form with an optional disable reason. **Apply** shows the selected
+pool and action in a confirmation that initially selects Cancel. Neither
+opening nor cancelling changes state. The controls always affect the invoking
+machine, even when another machine is selected in the Picker; remote controls
+are not part of this entry.
+
+`workers pool-options` is a read-only JSON list of declared local pool names.
+The form uses `workers config-section <name> --toggle enable|disable
+--require-declared`, which rechecks discovery and rejects absent or ambiguous
+declarations before changing the override store. Empty/error choices stop the
+form rather than permitting an arbitrary target. Existing terminal invocations
+without `--require-declared` remain deliberately permissive, including
+pre-disabling an undeclared logical pool.
+
+Disable writes the existing logical user-local override; Enable removes that
+override and restores the declaration's authority. Removing an override does
+**not** guarantee the declaration is enabled or the pool is running. No
+declaration, repository, or template is edited, and no daemon is started.
 
 `agent-dispatch emitter tick|serve SPEC --holder HOST` is the diagnostic/direct
 surface used by the supervised child. Normal deployments declare the emitter
