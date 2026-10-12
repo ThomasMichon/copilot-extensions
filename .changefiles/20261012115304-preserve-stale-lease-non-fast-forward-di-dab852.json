@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve stale-lease non-fast-forward diagnostics when source replay recovery is refused",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

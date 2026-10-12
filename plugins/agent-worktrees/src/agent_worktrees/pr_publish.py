@@ -502,10 +502,14 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                     result = git_ops.push(remote, refspec, cwd=cwd, timeout=timeout)
                 elif tip and repo is not None:
                     from . import pr_rebase
-                    result = pr_rebase.push(
+                    recovery_result = pr_rebase.push(
                         record, repo, remote, refspec, force_with_lease_expect,
                         cwd=cwd, timeout=timeout, reconcile_head=tip,
                     )
+                    if recovery_result:
+                        result = recovery_result
+                    else:
+                        result.stderr += "\n" + recovery_result.stderr
             if repo is not None and force_with_lease_expect and result.stderr == (
                 f"Refusing: {force_with_lease_expect} not an ancestor."
             ):
