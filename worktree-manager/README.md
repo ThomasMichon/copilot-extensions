@@ -21,6 +21,13 @@ plugins. It is the one piece that must work *before* the plugins do.
 
 ## Set up the harness
 
+A bare `worktree-manager` invocation reports its running and installed versions,
+observed core/engine availability, baseline prerequisite gaps, and registered
+project count. Next steps are derived from that snapshot: an installed setup
+is not repeatedly presented as a first-time Phase 2 install. The summary is
+read-only and does not claim a complete health or authentication verdict;
+use `doctor` for deeper inspection.
+
 ```bash
 uv run python -m worktree_manager doctor        # report prerequisites + the core install
 uv run python -m worktree_manager setup         # plan provisioning + core install (dry-run)
