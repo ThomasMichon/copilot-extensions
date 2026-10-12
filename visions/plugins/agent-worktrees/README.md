@@ -827,7 +827,7 @@ manager, or session-host implementation.
   for cold start, muxless/superseded-runtime replacement, restart and
   promotion/cutover. PR #5412 and issues #5453 / #5512 ground that distinction;
   the [effort Journal](../../../efforts/active/status-monitor-singleton-correctness/README.md#journal)
-  preserves its creation and review history.
+  preserves its planning history.
 - **2026-10-08** — Reconciled account-catalog versus repository-routing
   ownership, scoped operation credentials, and explicit identity failure
   distinct from ambient consent. Preserved independent Copilot inference

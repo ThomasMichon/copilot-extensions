@@ -255,5 +255,3 @@ this draft does not implement or validate either phase._
   for both phases. Linux-specific liveness facilities cannot establish
   macOS coverage; a missing platform proof requires a justified exemption
   with its degraded behavior and guarantee impact recorded.
-- Retained the existing timeless Context and vision provenance without
-  rewriting already-correct text in response to carried review findings.
