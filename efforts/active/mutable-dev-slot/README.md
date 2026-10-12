@@ -142,12 +142,15 @@ operator directive to remove the explicit claimed-dev exception.
 
 ### Phase 3 — Rollout to the remaining vendoring plugins
 
-- [ ] Finish publisher prerequisite #5817 before runtime-admission implementation:
+- [x] Finish publisher prerequisite #5817 before runtime-admission implementation:
       an updated, legitimately owned existing PR must publish through one
       supported command, including compatible legacy evidence reconciliation.
       Internal ownership bookkeeping must not require a manual old-tip,
       re-publish, restore-tip sequence. Preserve exact saved leases, destination
       and worktree/ref authority, real concurrency refusal, and normal hooks.
+      Delivered through #5835, repaired under #6244/#6256, normally promoted,
+      and verified in the installed CLI. Consumer guidance refresh cleared its
+      reviewed flow; the merged plan's PR claim was reconciled.
 
 - [ ] Review the shared
       [runtime-admission/build-coalescing slice](phase-3-runtime-admission.md)
@@ -221,6 +224,57 @@ operator directive to remove the explicit claimed-dev exception.
       this worktree mid-effort.
 
 ## Journal
+
+### 2026-10-12 — Publisher prerequisite deployed and consumer refreshed
+
+Normal promotion cleared after the owned release repairs and scoped standalone
+materialization repair #6262. The promoted `main` source contains the
+one-command legacy-update implementation. Unified update completed with
+agent-worktrees `1.24.50-dev1` active and the installed `--rewrite-pr` flag
+available; agent-dispatch health reported `ok` on `0.16.7-dev1`.
+The updater reported a supervisor-retirement warning, but the named diagnostic
+PID was subsequently absent; no manual process termination was performed.
+An existing unowned project-command receipt was preserved rather than silently
+transferred.
+
+Consumer refresh exposed a missing Windows LF attribute for reviewed fallback
+bodies. Byte-equivalent normalization and the generated sync landed through
+the consumer's reviewed flow after clean automated review and required
+validation. The old merged-plan #5788 obligation is now released. Publisher
+prerequisite completion does not close Phase 3: construction coalescing,
+candidate/rollback retention, complete guard/dev/distinct-generation adopter
+flows and remaining guidance/validation are still owed.
+
+### 2026-10-11 — Publisher prerequisite merged; release gate remains
+
+The one-command compatible-legacy update and exact-lease publication fixes
+merged as #5835 (`2724ce210191de4b66700a4ecd526e0368abaf31`).
+Current-head review cleared all Medium/High findings; the remaining Low
+installer-validation observation was addressed with corrected scope and a
+contained registration/prerequisite/manifest/binstub selection (52 passed,
+2 platform-skipped). Required CI completed successfully before merge.
+Additional completed selections exercised legacy migration, actual rebase and
+follow-up transport, authority/interleaving/publication state, and unregister
+lock ordering; no failing or timed-out broad selection was called green.
+
+Recovery-authored fixes were preserved, and updates used supported publication
+with exact saved leases and normal hooks. The parent prerequisite remains
+unchecked until normal release promotion, unified deployment, consumer refresh
+and old-plan claim reconciliation are verified. Runtime Phase 3 and the parked
+daemon-only effort remain open. Shared runtime admission code also advanced
+upstream while this prerequisite was in review; compare the reviewed plan
+against current source before beginning another implementation slice.
+
+The first post-merge full release gate exposed nine publication regressions
+and two stale bridge authority-fixture bindings. Existing repair ownership
+was honored: #6244 and #6256 landed through their own reviewed fixes.
+Validation run `38184375719` then passed every full test and guard job for
+`35eddcaaf`, but its promotion job refused the new standalone dispatch
+distribution's plugin-backed editable reference under the libs-only
+materialization contract. That separate release blocker is reported under
+#6177 and coordinated with the live distribution owner. No bypass, direct
+main mutation, duplicate repair PR or deployment occurred. The prerequisite
+therefore remains release-gated, not checked off by the publisher merge alone.
 
 ### 2026-10-09 — Reviewed runtime plan and publisher continuation
 
