@@ -37,8 +37,10 @@ const REPAIR = [
 function mapVisibleLines(body, visible, hidden = () => null) {
   let fence = null;
   return body.split(/\r?\n/).map((line) => {
-    const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
-    if (match) {
+    // Strip Markdown containers only for fence detection, never for metadata.
+    const fenceLine = line.replace(/^[ \t]*(?:(?:>[ \t]*|(?:[-+*]|\d{1,9}[.)])[ \t]+)[ \t]*)*/, "");
+    const match = fenceLine.match(/^(`{3,}|~{3,})(.*)$/);
+    if (match && (fence || match[1][0] !== "`" || !match[2].includes("`"))) {
       if (!fence) fence = match[1];
       else if (match[1][0] === fence[0] && match[1].length >= fence.length && !match[2].trim()) fence = null;
       return hidden(line);

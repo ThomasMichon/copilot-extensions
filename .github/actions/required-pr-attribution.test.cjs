@@ -66,6 +66,29 @@ test("non-dev and silent approvals emit no attribution diagnostic", async () => 
   }
 });
 
+test("Markdown container fences cannot turn examples into source metadata", () => {
+  const native = "<!-- gh-aw-workflow-id: maintenance -->";
+  for (const example of [
+    "- ```html\n  SOURCE\n  ```",
+    "1. ~~~html\n   SOURCE\n   ~~~",
+    "- outer\n  - ```html\n    SOURCE\n    ```",
+    "> - ```html\n  SOURCE\n>   ```",
+    "- ```html\n  SOURCE\n  ````",
+    "- ```html\n  SOURCE",
+  ]) {
+    for (const source of [marker, native]) {
+      const body = example.replace("SOURCE", source);
+      assert.ok(gate.validate(body), "an example alone must fail");
+      if (example.endsWith("```") || example.endsWith("~~~") || example.endsWith("````")) {
+        assert.equal(gate.validate(body + "\n\n" + source), null,
+                     "a real source after a closed example must pass");
+      }
+    }
+  }
+  assert.equal(gate.validate("```not `a valid opener`\n" + marker), null);
+  assert.ok(gate.validate("- ```html\n  " + marker + "\n  ```\n" + native) === null);
+});
+
 test("current description is reread and body-only repairs change the verdict", async () => {
   let current = pr("");
   const github = { rest: { pulls: { get: async () => ({ data: current }) } } };
