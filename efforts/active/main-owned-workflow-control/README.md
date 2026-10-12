@@ -220,3 +220,14 @@ credential changes, broad policy weakening or unreviewed releases.
 - Baseline recent 100 runs had 23 review-fallback and 23 lockdown runs. The
   intended reduction is one invocation per shared PR event, not fewer coverage
   tiers. Live post-promotion proof and final counts remain outstanding.
+
+### 2026-10-12 - First slice merged; queue-time grace
+
+- #6308 merged as `567488f973da` after current-head Copilot approval and both
+  required checks passed. The two-to-one trusted invocation reduction is merged
+  to dev, not yet claimed live on main.
+- Next slice counts time already spent queued toward the review fallback's
+  five-minute event grace. A recent manual request still retains its separate
+  five-minute suppression; latest-head and billing admission are unchanged.
+- This targets held runner time without adding a workflow or status check.
+  Live queue/start timestamps and actual script logs must confirm the saving.

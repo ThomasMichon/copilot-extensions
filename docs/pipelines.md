@@ -85,8 +85,11 @@ Both the required guard and the review fallback run on
 `main` via a promotion — request a review manually for any PR opened
 before that first promotion completes.
 
-The automatic fallback waits **five minutes after its run starts**, without API
-polling, then checks the live PR once. It skips closed/draft/retargeted PRs,
+The automatic fallback gives native/manual review **five minutes from the
+triggering PR event's `updated_at` timestamp**, without API polling. Queue time
+counts toward that grace: a run queued for five minutes does not occupy a runner
+for another five. Invalid/future event timestamps fail before requesting review.
+After any remaining grace, it checks the live PR once. It skips closed/draft/retargeted PRs,
 pending Copilot reviews, completed reviews of the current diff, and requests
 still inside their five-minute grace period. Completed reviews must be newer
 than the latest base-retarget/reopen event. Identity checks accept the observed

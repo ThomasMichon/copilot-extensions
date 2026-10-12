@@ -184,9 +184,16 @@ jobs:
             });
             const pull_number = context.payload.pull_request.number;
             const request = { ...context.repo, pull_number };
-            // One grace-period sleep, not a polling loop. Independent PRs
-            // remain concurrent; queued runs inspect the latest live head.
-            await new Promise(resolve => setTimeout(resolve, 5 * 60_000));
+            // Queue time already gives native/manual requests their grace.
+            const eventAt = Date.parse(context.payload.pull_request.updated_at);
+            const startedAt = Date.now();
+            if (!Number.isFinite(eventAt) || eventAt > startedAt) {
+              throw new Error("PR event has an invalid or future updated_at timestamp.");
+            }
+            const graceRemaining = Math.max(0, 5 * 60_000 - (startedAt - eventAt));
+            if (graceRemaining > 0) {
+              await new Promise(resolve => setTimeout(resolve, graceRemaining));
+            }
             const { data: livePr } = await reader.rest.pulls.get(request);
             if (livePr.state !== "open" || livePr.draft || livePr.base.ref !== "dev") {
               core.info("PR is closed, draft, or retargeted away from dev; no nudge.");

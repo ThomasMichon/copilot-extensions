@@ -70,6 +70,7 @@ const context = {
   repo: { owner: "owner", repo: "project" },
   payload: { pull_request: {
     number: 1, user: { login: input.author }, base: { ref: "dev" }, head: { sha: "a".repeat(40) },
+    updated_at: new Date(Date.now() - 300_000).toISOString(),
   } },
 };
 process.env.ALLOWED_LOGIN = "owner";
