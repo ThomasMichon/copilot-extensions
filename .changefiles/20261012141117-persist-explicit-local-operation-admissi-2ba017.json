@@ -1,0 +1,9 @@
+{
+  "comment": "Persist explicit local operation admission and correlated receipts transactionally",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

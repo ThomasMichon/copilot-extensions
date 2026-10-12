@@ -156,3 +156,9 @@ uncertainty. Parsing is not authentication, durable admission, execution,
 monotonic receipt ordering or objective settlement. No CLI mutation or resident
 control runtime is added; existing fixed-service routing contracts remain owned
 by `agent-fleet-contracts`.
+
+An explicit Python [local operation journal](docs/operation-ledger.md) now
+persists admission/outbox/audit and correlated receipt updates transactionally.
+It is not automatically installed or activated and supplies no executor,
+authentication, allocation claims, resource fencing or node effect journal.
+The offline CLI remains non-mutating.
