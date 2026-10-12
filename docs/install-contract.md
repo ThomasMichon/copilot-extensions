@@ -1318,6 +1318,21 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
 > only *where* it lives and *how* it is activated change. The per-plugin installer
 > points its venv/binstub/manifest at the slot the primitive returns.
 
+The canonical Python API additionally supplies OS-backed
+`construction_lease` and shared `retention_lease` lifetimes. Builders transfer
+to candidate retention before releasing construction; completed reuse rechecks
+its content under retention; candidate and rollback owners retain references
+through cutover/drain or rollback settlement. Canonical cleanup takes
+construction, exclusive retention, then selector-publication ownership and
+rechecks selectors before deleting; activation shares the same protection.
+The install-contract guard executes a small fresh-root lifetime/reclamation
+probe as well as checking byte-identical fan-out. See
+[`versioned-runtime`](../libs/versioned-runtime/README.md) for the exact API,
+ordering, storage-failure behavior, and installer-adoption boundary. Shipping
+this helper does not itself enroll an old shell installer's build lifetime.
+Installation-cell provenance/receipt governance and its receipt-only
+reservation release remain independently binding.
+
 ### Hard rules
 
 1. **No file-copy of the package** into `~/.<runtime>/lib`. Install via

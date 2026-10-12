@@ -66,20 +66,18 @@ def test_slot_clean_is_vacuous_when_target_does_not_exist(tmp_path, monkeypatch)
     assert vr.slot(tmp_path, "1.0.0", clean_incomplete=True).is_dir()
 
 
-def test_slot_cleans_incomplete_current_and_detaches_markers(tmp_path, monkeypatch):
+def test_slot_refuses_incomplete_current_without_detaching_markers(tmp_path, monkeypatch):
     current = _install(tmp_path, "1.0.0")
     (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
     (tmp_path / vr.LAST_KNOWN_GOOD_FILE).write_text("1.0.0\n", encoding="utf-8")
     monkeypatch.setattr(vr, "_versions_with_live_process", lambda root: set())
 
-    rebuilt = vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
-
-    assert rebuilt.is_dir()
-    assert not (rebuilt / "marker.txt").exists()
-    assert not (tmp_path / vr.CURRENT_VERSION_FILE).exists()
-    assert not (tmp_path / vr.LAST_KNOWN_GOOD_FILE).exists()
+    with pytest.raises(RuntimeError, match="distinct-generation health repair"):
+        vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
+    assert (current / "marker.txt").exists()
+    assert (tmp_path / vr.CURRENT_VERSION_FILE).read_text().strip() == "1.0.0"
+    assert (tmp_path / vr.LAST_KNOWN_GOOD_FILE).read_text().strip() == "1.0.0"
     assert not list(tmp_path.glob(".*.stale-*"))
-    assert current == rebuilt
 
 
 def test_slot_preserves_live_incomplete_current_and_fails(tmp_path, monkeypatch):
@@ -89,15 +87,15 @@ def test_slot_preserves_live_incomplete_current_and_fails(tmp_path, monkeypatch)
     (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
     (tmp_path / vr.LAST_KNOWN_GOOD_FILE).write_text("1.0.0\n", encoding="utf-8")
 
-    def live_after_withdrawal(root):
-        assert not completion.exists()
-        assert not (root / vr.CURRENT_VERSION_FILE).exists()
-        assert not (root / vr.LAST_KNOWN_GOOD_FILE).exists()
+    def live_without_withdrawal(root):
+        assert completion.exists()
+        assert (root / vr.CURRENT_VERSION_FILE).exists()
+        assert (root / vr.LAST_KNOWN_GOOD_FILE).exists()
         return {"1.0.0"}
 
-    monkeypatch.setattr(vr, "_versions_with_live_process", live_after_withdrawal)
+    monkeypatch.setattr(vr, "_versions_with_live_process", live_without_withdrawal)
 
-    with pytest.raises(RuntimeError, match="still in use"):
+    with pytest.raises(RuntimeError, match="distinct-generation health repair"):
         vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
 
     assert (current / "marker.txt").is_file()
@@ -106,28 +104,24 @@ def test_slot_preserves_live_incomplete_current_and_fails(tmp_path, monkeypatch)
     assert (tmp_path / vr.LAST_KNOWN_GOOD_FILE).read_text().strip() == "1.0.0"
 
 
-def test_slot_cleanup_preserves_concurrently_replaced_marker(tmp_path, monkeypatch):
+def test_slot_cleanup_does_not_withdraw_selected_marker(tmp_path, monkeypatch):
     _install(tmp_path, "1.0.0")
     _install(tmp_path, "2.0.0")
     current = tmp_path / vr.CURRENT_VERSION_FILE
     current.write_text("1.0.0\n", encoding="utf-8")
     monkeypatch.setattr(vr, "_versions_with_live_process", lambda root: set())
     real_replace = vr.os.replace
-    raced = False
-
-    def replace_with_race(src, dst):
-        nonlocal raced
-        if Path(src) == current and not raced:
-            raced = True
-            current.write_text("2.0.0\n", encoding="utf-8")
+    def forbid_selector_detach(src, dst):
+        if Path(src) == current:
+            pytest.fail("selected marker was withdrawn for ordinary cleanup")
         return real_replace(src, dst)
 
-    monkeypatch.setattr(vr.os, "replace", replace_with_race)
+    monkeypatch.setattr(vr.os, "replace", forbid_selector_detach)
 
-    vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
+    with pytest.raises(RuntimeError, match="distinct-generation health repair"):
+        vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
 
-    assert raced
-    assert current.read_text(encoding="utf-8").strip() == "2.0.0"
+    assert current.read_text(encoding="utf-8").strip() == "1.0.0"
 
 
 def test_current_incomplete_slot_is_retained_without_process_enumeration(
@@ -138,14 +132,14 @@ def test_current_incomplete_slot_is_retained_without_process_enumeration(
     monkeypatch.setattr(vr, "_reliable_process_enumeration", lambda: False)
     monkeypatch.setattr(vr, "_versions_with_live_process", lambda root: set())
 
-    with pytest.raises(RuntimeError, match="without reliable process enumeration"):
+    with pytest.raises(RuntimeError, match="distinct-generation health repair"):
         vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
 
     assert (current / "marker.txt").is_file()
     assert (tmp_path / vr.CURRENT_VERSION_FILE).read_text().strip() == "1.0.0"
 
 
-def test_stale_recorded_owner_allows_cleanup_without_process_enumeration(
+def test_stale_recorded_owner_does_not_allow_rebuilding_selected_identity(
     tmp_path, monkeypatch
 ):
     current = _install(tmp_path, "1.0.0")
@@ -158,12 +152,10 @@ def test_stale_recorded_owner_allows_cleanup_without_process_enumeration(
     monkeypatch.setattr(vr, "_pid_alive", lambda pid: False)
     monkeypatch.setattr(vr, "_versions_with_live_process", lambda root: set())
 
-    rebuilt = vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
-
-    assert rebuilt.is_dir()
-    assert not (rebuilt / "marker.txt").exists()
-    assert not (tmp_path / vr.CURRENT_VERSION_FILE).exists()
-    assert current == rebuilt
+    with pytest.raises(RuntimeError, match="distinct-generation health repair"):
+        vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
+    assert (current / "marker.txt").exists()
+    assert (tmp_path / vr.CURRENT_VERSION_FILE).read_text().strip() == "1.0.0"
 
 
 def test_unknown_recorded_owner_retains_current_without_process_enumeration(
@@ -182,7 +174,7 @@ def test_unknown_recorded_owner_retains_current_without_process_enumeration(
     monkeypatch.setattr(vr, "_pid_alive", lambda pid: False)
     monkeypatch.setattr(vr, "_versions_with_live_process", lambda root: set())
 
-    with pytest.raises(RuntimeError, match="without reliable process enumeration"):
+    with pytest.raises(RuntimeError, match="distinct-generation health repair"):
         vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
 
     assert (current / "marker.txt").is_file()
@@ -199,7 +191,7 @@ def test_duplicate_marker_cleanup_restores_state_on_conservative_failure(
     (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
     monkeypatch.setattr(vr, "_reliable_process_enumeration", lambda: False)
 
-    with pytest.raises(RuntimeError, match="without reliable process enumeration"):
+    with pytest.raises(RuntimeError, match="distinct-generation health repair"):
         vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
 
     assert current.is_dir()
@@ -1819,4 +1811,3 @@ def test_cli_check_admission_health_repair_required(tmp_path, capsys):
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
     assert out == {"version": "1.0.0", "admission": vr.ADMIT_HEALTH_REPAIR_REQUIRED}
-
