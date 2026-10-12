@@ -159,3 +159,24 @@ def test_reap_abandoned_passive_terminate_failure_is_reported(tmp_path: Path):
     )
     assert result["reaped"] is False
     assert "terminate failed" in result["reason"]
+
+
+def test_recovery_preserves_original_transition_identity_for_fresh_guarded_reap(tmp_path):
+    original = breadcrumb.write_breadcrumb(
+        tmp_path, state="draining", pid=987654321,
+        old={"bind": "127.0.0.1", "port": 61001}, new_pid=202, new_port=61002,
+    )
+
+    class Client:
+        def undrain(self):
+            return {}
+
+    recovery = breadcrumb.recover_stale_cutover(tmp_path, lambda _: Client())
+    assert recovery["recovered"]
+    assert breadcrumb.read_breadcrumb(tmp_path)["pid"] == original["pid"]
+    terminated = []
+    reap = breadcrumb.reap_abandoned_passive(
+        tmp_path, record=original, active_pid=101, grace_seconds=0,
+        pid_alive=lambda _: True, terminate=lambda pid: terminated.append(pid) or True,
+    )
+    assert reap["reaped"] and terminated == [202]

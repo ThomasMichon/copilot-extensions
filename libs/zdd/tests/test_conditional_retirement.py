@@ -591,3 +591,32 @@ def test_receiver_bound_adoption_refuses_a_later_route_owner(case):
     assert events == ["spawn", "drain", "shutdown"]
     assert result.serving_endpoint is None
     assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
+
+
+def test_rollback_rechecks_predecessor_identity_under_publication_lock(case, monkeypatch):
+    root, _, events, _, snapshot, request, orch = case
+    publish = routing.publish_active_with_previous_guarded
+
+    def attest(endpoint):
+        response = snapshot.attest(endpoint)
+        return replace(response, ready=False) if endpoint.pid == 202 and "drain" in events else response
+
+    def change_before_restore(*args, **kwargs):
+        expected = kwargs.get("expected_active")
+        if expected is not None and expected.pid == 202:
+            monkeypatch.setattr(
+                "zdd.diagnostics.process_start_time",
+                lambda pid: "reused" if pid == 101 else str(pid * 10),
+            )
+        return publish(*args, **kwargs)
+
+    monkeypatch.setattr(routing, "publish_active_with_previous_guarded", change_before_restore)
+    result = orch.run(
+        conditional=replace(
+            request, capture_runtime=lambda _: replace(snapshot, attest=attest)
+        )
+    )
+    assert not result.ok and not result.rolled_back
+    assert events == ["spawn", "drain"]
+    assert routing.read_table(root)["active"]["pid"] == 202
+    assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))

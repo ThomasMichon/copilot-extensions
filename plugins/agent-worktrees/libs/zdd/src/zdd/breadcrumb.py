@@ -236,6 +236,7 @@ def _recover_stale_cutover_locked(
         # Nothing to undrain (drain gate was never opened before the abort).
         write_breadcrumb(
             config_dir, state="rolled_back",
+            pid=record.get("pid"),
             old=None, new_port=record.get("new_port"),
             new_pid=record.get("new_pid"),
             error=record.get("error") or "aborted before drain",
@@ -260,6 +261,7 @@ def _recover_stale_cutover_locked(
         # do not keep retrying a dead endpoint.
         write_breadcrumb(
             config_dir, state="rolled_back", old=old,
+            pid=record.get("pid"),
             new_port=record.get("new_port"),
             new_pid=record.get("new_pid"),
             error=(record.get("error") or "aborted") + "; survivor unreachable",
@@ -288,6 +290,7 @@ def _recover_stale_cutover_locked(
 
     write_breadcrumb(
         config_dir, state="rolled_back", old=old,
+        pid=record.get("pid"),
         new_port=record.get("new_port"),
         new_pid=record.get("new_pid"),
         error=record.get("error") or "aborted cutover recovered",

@@ -291,6 +291,7 @@ class PreparedCutover:
                     version=self.old.version,
                     process_start_time=self.old.process_start_time,
                     expected_active=self.new,
+                    refuse_current=self.refuse_current,
                     lock_deadline=self.deadline(),
                     demote_existing=True,
                 )

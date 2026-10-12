@@ -141,6 +141,10 @@ Legacy recovery and passive reaping acquire native transition authority
 non-blockingly before reading or mutating recovery state, closing the race
 where an earlier legacy observation could overwrite a newly-started conditional
 attempt. Contention is an explicit refusal, not a stale-state repair.
+Legacy recovery preserves the originating orchestrator PID and transition
+identity when recording its terminal outcome. A subsequent guarded reap can
+consume the original observation only while the freshly locked record still
+describes that same transition; a replacement transition remains refused.
 Malformed refusal reasons are logged as outcome-contract failures and remain
 nonzero CLI outcomes. Invalid candidate PIDs cannot pass health or authorize
 disposal. Conditional cleanup uses the public deadline-bound `routing_lock`.
