@@ -74,7 +74,11 @@ async def verify_dispatch(request: AcquisitionRequest, resolver: Any) -> dict[st
 
 
 async def verify_worktree(request: AcquisitionRequest) -> tuple[dict[str, Any], str | None]:
-    listed = await worktree_command(["list", "--json", "--fresh"], request.project)
+    # Tracking identity is current; cached display enrichment is not authority.
+    listed = await worktree_command(
+        ["list", "--json", "--cache-only", "--worktree-id", request.worktree_id],
+        request.project,
+    )
     matches = [row for row in listed.get("worktrees", [])
                if isinstance(row, dict) and row.get("id") == request.worktree_id]
     if len(matches) != 1 or not matches[0].get("path"):

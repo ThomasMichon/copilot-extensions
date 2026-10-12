@@ -57,7 +57,9 @@ A legacy bridge uses its installed canonical versioned-runtime resolver to
 select a completed worktree-owner interpreter. Its execution trampoline rechecks
 legacy ownership and resolves the completed slot immediately before launch,
 retaining the legacy command
-compatibility path when no runtime resolves. A native service rooted in an
+compatibility path when no runtime resolves. The Windows trampoline explicitly
+forwards stdin, stdout and stderr to the headless owner process, preserving
+captured JSON and diagnostics across interpreter boundaries. A native service rooted in an
 installation cell derives its own `install.json` context when the launcher
 did not supply one; explicit and derived contexts use the existing validated
 same-cell peer launcher and never fall back to a global command. Retired legacy
@@ -68,6 +70,14 @@ owner reports the existing `worktrees_unavailable` refusal without certifying
 that an earlier launch did not happen. Historical and unknown effects retain
 their existing reconciliation requirement. No acquisition wire capability or
 protocol change is introduced by installed-owner resolution.
+
+Worktree identity preflight reads the exact current tracking record with
+`list --json --cache-only --worktree-id <id>`, avoiding global transcript scans
+and cached full-list results. Only tracking identity, path and terminal status
+are used from this row; cached display/session enrichment grants no authority.
+The separate `head-session` read still verifies current native-head and
+handoff state. Missing, duplicate, mismatched or terminal records refuse, as
+do unknown head authority and pending transitions.
 
 For an admitted new delivery, the bridge records the complete request in its
 `prepared` journal stage before the worktree-owner preflight. A preflight
