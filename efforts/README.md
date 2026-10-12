@@ -12,7 +12,7 @@ that pattern to this repository.
 |--------|--------|--------------|
 | [Main-Owned Workflow Control](active/main-owned-workflow-control/README.md) | Draft; plan review before implementation | #6237; run/check consolidation primary, ownership enabling |
 | [Fleet Control V2](active/fleet-control-v2/README.md) | Active; plan reviewed, contract assignment pending | #6236, #6240, #6241; existing #5789/#6030 owners retained |
-| [Lean Runtime Dependencies](active/lean-runtime-dependencies/README.md) | Draft; audit-backed proposal | #6234 |
+| [Lean Runtime Dependencies](active/lean-runtime-dependencies/README.md) | Active; proposal reviewed, dependency reduction | #6234 |
 | [Process Slot Ownership](active/process-slot-ownership/README.md) | Active; reader-lifetime continuation | #3963; registry presentation separately #5559 |
 | [Process Spawn Reduction](active/process-spawn-reduction/README.md) | Active | #6086 |
 | [Private PR Source Attribution](active/private-pr-source-attribution/README.md) | Active; originating identity slice | #6068 |

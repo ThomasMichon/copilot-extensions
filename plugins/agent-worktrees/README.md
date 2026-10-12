@@ -58,6 +58,12 @@ The plugin installs via the Copilot CLI marketplace. The runtime installs
 via init/install scripts (or first-use provisioning from the global binstub)
 and provides the `agent-worktrees` CLI and per-project binstubs.
 
+The runtime does not install Textual or the UI rendering stack. Picker and Mux
+Companion presentation belongs to the separately installed Worktree Manager,
+reached over a process boundary. The small `packaging` dependency is explicit
+so reconciliation preserves version ordering and downgrade protection without
+relying on UI dependencies.
+
 ## Independent Execution Spaces
 
 Native Windows and WSL can register independent execution-space keys without

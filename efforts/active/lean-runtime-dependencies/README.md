@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent sequential slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Plugin services](../../../visions/plugin-services/README.md):
   `capability-sized-runtime-dependencies`, `compatible-helper-runtime-reuse`;
   [agent-index](../../../visions/plugins/agent-index/README.md):
@@ -80,7 +80,7 @@ marked agent-recommended; exploratory backend replacements are not commitments.
 ## Plan
 
 ### Phase 1 - Reviewed intent and dependency baseline
-- [ ] Land this proposal, the audit motivation and vision amendments through review.
+- [x] Land this proposal, the audit motivation and vision amendments through review (#6235).
 - [ ] Refresh declaration/import and installation-profile evidence against the
   execution snapshot; record direct/transitive, active/retained and logical/physical distinctions.
 - [ ] Coordinate overlapping index and daemon work with existing owners.
@@ -155,7 +155,7 @@ marked agent-recommended; exploratory backend replacements are not commitments.
 
 ## Proposal
 
-Pending automated review. No implementation begins before the proposal clears.
+Approved and merged in #6235. Implementation proceeds in reviewed slices.
 Shared reuse is a design investigation; neither one global ZDD process nor one
 shared mutable venv is presumed acceptable.
 
@@ -175,3 +175,21 @@ shared mutable venv is presumed acceptable.
   dependency and its reference lifetime, not borrow a sibling's private venv.
 - Reuse remains an unimplemented investigation; reality-pattern changes will
   accompany a separately reviewed design before any runtime migration.
+
+### 2026-10-12 - Reviewed proposal and first implementation slice
+- #6235 merged after approval and green CI; the worktree advanced onto the
+  reviewed `dev` proposal before implementation.
+- Began Phase 2: remove unused Textual and declare `packaging` directly to
+  preserve monotonic version reconciliation, with an isolated no-UI import
+  regression and dependency-contract check.
+- Refreshed the execution census: 40 canonical pyprojects, 36 external base
+  declarations, 16 optional declarations and 25 external names. The historic
+  audit remains tied to its original snapshot rather than silently rewritten.
+- Phase 2 targeted validation: 144 tests passed, including actual isolated CLI
+  and Manager-process handoff with UI imports rejected; install contract reports
+  zero violations and touched Python passes focused lint.
+- The fresh managed test environment resolved without Textual/Rich; Pygments is
+  present only through the test runner's pytest dependency. Docker clean-room
+  execution is unavailable because no daemon is listening on this host.
+  Native Windows evidence is local; Linux runs in PR CI. No macOS lane or live
+  runtime rollout is claimed for this declaration-only slice.
