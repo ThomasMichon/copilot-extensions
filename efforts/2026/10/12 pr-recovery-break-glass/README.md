@@ -4,8 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase reviewed PRs off `dev`
 - **Created:** 2026-10-09
-- **Status:** Active
-- **Vision:** [pull-request capability](../../../visions/plugins/agent-worktrees/pull-requests/README.md)
+- **Status:** Done
+- **Vision:** [pull-request capability](../../../../visions/plugins/agent-worktrees/pull-requests/README.md)
   `operator-authorized-pr-recovery` and `recovery-does-not-require-perfect-bookkeeping`
 - **Coordination issue:** #5817
 
@@ -82,72 +82,72 @@ agent-recommended details, not additional verbatim operator instructions.
       with their named drivers, and shared adapter integration remains gated.
 
 ### Phase 2 - Explicit recovery exception
-- [ ] Extend the existing publication command with an explicit per-operation
+- [x] Extend the existing publication command with an explicit per-operation
       break-glass choice and a non-empty reason; no ambient/global bypass.
-- [ ] Use the existing `pr-abandon`-style confirmation contract: an unconfirmed
+- [x] Use the existing `pr-abandon`-style confirmation contract: an unconfirmed
       call previews the exact PR, destination, source and expected remote head,
       refuses, and mutates neither Git refs nor tracking nor the remote. Only
       an explicitly confirmed call after real operator sign-off for that PR
       and proposed rewrite proceeds. A reason, discovered flag, or prior guard
       failure is not sign-off; agents must not add confirmation on their own.
-- [ ] Bind confirmation to the previewed PR/destination, immutable source
+- [x] Bind confirmation to the previewed PR/destination, immutable source
       commit and exact expected remote head. Before admitting publication,
       refuse a changed source or expected head and require a new preview and
       sign-off; do not silently re-plan the confirmed operation. Pin the
       approved source object for transport so later branch movement cannot
       substitute unapproved content.
-- [ ] Allow operator-authorized recovery despite missing original-worktree,
+- [x] Allow operator-authorized recovery despite missing original-worktree,
       suffix, ownership-attestation or replay bookkeeping. Prefer source CWD
       where available, but support an explicitly selected target from a
       recovery context. Do not automatically choose the exception after refusal.
-- [ ] Retain exact expected-head leases, pinned committed source objects,
+- [x] Retain exact expected-head leases, pinned committed source objects,
       destination/provider authentication, publication serialization, real
       hooks, protected/default/release-history restrictions, and normal PR
       review/merge gates. Do not refresh a stale lease to manufacture permission.
-- [ ] Report what was overridden and preserve a durable local audit of reason,
+- [x] Report what was overridden and preserve a durable local audit of reason,
       target, pinned source/expected head, confirmation basis and the available
       invocation/session attribution. Distinguish observed provenance from
       authenticated identity, and record missing attribution as unknown rather
       than inventing it. Do not store credential-bearing URLs or automatically
       publish private rationale or invoker details.
-- [ ] Update authoritative CLI/help and worktree recovery guidance together;
+- [x] Update authoritative CLI/help and worktree recovery guidance together;
       keep normal incremental publication and compatible legacy recovery intact.
-- [ ] Add the agent-worktrees changefile and drive the implementation PR to merge.
+- [x] Add the agent-worktrees changefile and drive the implementation PR to merge.
 
 ### Phase 3 - Released and demonstrated recovery
-- [ ] Verify normal promotion and install the released change through the
+- [x] Verify normal promotion and install the released change through the
       unified update flow; no edits to deployed files or unmerged installation.
-- [ ] Demonstrate a deliberately authorized existing-PR recovery through the
+- [x] Demonstrate a deliberately authorized existing-PR recovery through the
       supported command from a recovery context, verify its actual remote head,
       and preserve the fresh review/merge gate on the changed head.
-- [ ] Journal the result, resolve this effort's validation items, archive it,
+- [x] Journal the result, resolve this effort's validation items, archive it,
       and leave unrelated #5817 work with its named publisher driver.
 
 ## Validation Plan
 
-- [ ] Normal incremental updates and source-owned rebase publication remain
+- [x] Normal incremental updates and source-owned rebase publication remain
       supported; a guard refusal never selects an exception on its own.
-- [ ] A break-glass request without per-PR confirmation changes no Git refs,
+- [x] A break-glass request without per-PR confirmation changes no Git refs,
       tracking or remote state; its explicit preview precedes operator sign-off.
       Confirmed input must match the previewed source and expected remote head.
       Advancing or amending the local source after preview, even with an
       unchanged remote, requires a fresh preview/sign-off and cannot push
       unseen content. A changed target or expected head is likewise refused.
-- [ ] Real isolated Git transport proves reasoned recovery with incomplete
+- [x] Real isolated Git transport proves reasoned recovery with incomplete
       historical source/ownership/replay evidence and an unchanged exact lease.
-- [ ] A moved or deleted remote head is refused even with break-glass selected;
+- [x] A moved or deleted remote head is refused even with break-glass selected;
       no plain force or opportunistic lease refresh occurs.
-- [ ] Wrong destination/provider, protected/default/release refs and uncommitted
+- [x] Wrong destination/provider, protected/default/release refs and uncommitted
       source are refused; real hooks still run and can reject the push.
-- [ ] CLI adapters select the same target from source CWD and explicit recovery
+- [x] CLI adapters select the same target from source CWD and explicit recovery
       context; empty reasons and inapplicable new-PR use fail before mutation.
-- [ ] Audit and diagnostics distinguish requested, attempted and successful
+- [x] Audit and diagnostics distinguish requested, attempted and successful
       overrides, preserve confirmation basis and available invoker/session
       attribution, and disclose unknown provenance honestly. Credential-bearing
       URLs, private reasons and invoker details are not published.
-- [ ] Targeted bounded tests, lint and source/install guards pass; required CI
+- [x] Targeted bounded tests, lint and source/install guards pass; required CI
       and release validation supply truthful platform coverage.
-- [ ] A released live recovery supplies provider-confirmed head evidence and
+- [x] A released live recovery supplies provider-confirmed head evidence and
       a new review gate, not merely a local flag or successful mocked transport.
 
 ## Proposal
@@ -329,6 +329,35 @@ at a later invocation.
   API in the cached test environment.
 - Required PR CI, reviewed publication, promotion and released live recovery
   remain open.
+
+### 2026-10-12 - Reviewed release and separately authorized live recovery
+- PR #6257 merged as `88dbb8f4fd9e9378d9a3613451f77ac22e5fc095` after a
+  clean current-head review and passing required CI. Corrected unavailable
+  passwd-user attribution, canonical `azure-devops` source comparison and
+  ambiguous transport outcomes: exact remote observation distinguishes accepted,
+  unchanged and unknown results, with explicit reconciliation rather than
+  success-shaped failure or blind retry. The affected selection passed 72 cases.
+- Verified normal promotion's critical source blobs against the merged
+  implementation, then completed the separately authorized unified Windows
+  update after rechecking status. The actual installed `1.24.50-dev1` package
+  matches those four recovery/provider/CLI source files; no installed edits
+  or unmerged runtime installation occurred.
+- A released no-mutation preview identified PR #5567, its exact destination,
+  immutable residual source and expected remote head. Only after separate
+  approval of that specific preview did confirmed publication proceed. Git and
+  provider evidence agree on the proposed source; retained source/published refs
+  and private successful-transport audit match the approved commits. The fresh
+  review and required CI gate remains open, so released demonstration is not
+  declared complete merely because transport succeeded.
+- The recovered PR's follow-up corrected the POSIX audit fixture and made the
+  pure restart regressions participate in the guard lane. Current-head approval,
+  passing required CI and resolved proven fixes preceded PR #5567's actual
+  merge as `06762279c8aa92a8a38ccaec61b41ca513c988c6`. The live released
+  recovery therefore retained its fresh review/merge gate through completion.
+- All Plan and Validation Plan items are resolved. Archive this completed
+  recovery-exception effort; compatible publisher work stays with its existing
+  driver. Native Linux systemd rollout is not claimed by the Windows recovery
+  demonstration or by its structural tests.
 
 ### 2026-10-11 - Merged publisher dependency and current development integration
 - Integrated current `dev` at `acd5401c42031e9d73aab708a3d607e3f69c5fd1`,
