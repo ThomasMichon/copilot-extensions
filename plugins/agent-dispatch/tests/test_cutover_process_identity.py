@@ -1,5 +1,6 @@
 """A Windows venv trampoline and its server are one coordinator generation."""
 
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -158,6 +159,7 @@ def test_launcher_exit_is_not_server_exit(monkeypatch):
     assert handle.accept_health({"slot": {"pid": 11}})
     tokens[10] = None
     assert handle.accept_health({"slot": {"pid": 11}})
+    monkeypatch.setattr(identity, "_identity_running", lambda *_: True)
     assert handle.poll() is None
     terminated = []
     monkeypatch.setattr(identity, "terminate_pid_if_identity", lambda pid, token: (
@@ -165,3 +167,32 @@ def test_launcher_exit_is_not_server_exit(monkeypatch):
     ))
     handle.terminate()
     assert terminated == [(11, "101")]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows process object")
+def test_retained_handle_does_not_make_exited_server_look_alive():
+    import subprocess
+    import sys
+
+    from agent_procutil import no_window_kwargs
+    from agent_dispatch import cutover_process as identity
+
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "pass"],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        **no_window_kwargs(),
+    )
+    try:
+        token = identity.process_start_time(proc.pid)
+        assert token
+        assert proc.wait(timeout=10) == 0
+        # Popen deliberately retains the process handle and its creation time.
+        assert identity.process_start_time(proc.pid) == token
+        assert identity._identity_running(proc.pid, token) is False
+        handle = identity.CoordinatorProcess(SimpleNamespace(pid=1, poll=lambda: 0))
+        handle.pid, handle.server_token = proc.pid, token
+        assert handle.poll() == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=5)

@@ -68,6 +68,32 @@ def verified_pair(pid: int, expected: str | None) -> dict[int, str]:
     return result
 
 
+def _identity_running(pid: int, token: str | None) -> bool | None:
+    """Observe exit, not merely an extant process object retained by a handle."""
+    import ctypes
+    from ctypes import wintypes
+
+    api = ctypes.WinDLL("kernel32", use_last_error=True)
+    api.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    api.OpenProcess.restype = wintypes.HANDLE
+    api.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    api.WaitForSingleObject.restype = wintypes.DWORD
+    api.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = api.OpenProcess(0x00100000 | 0x1000, False, pid)
+    if not handle:
+        return False if ctypes.get_last_error() == 87 else None
+    try:
+        current = process_start_time(pid)
+        if not current or not token:
+            return None
+        if current != token:
+            return False
+        status = api.WaitForSingleObject(handle, 0)
+        return {0: False, 258: True}.get(status)
+    finally:
+        api.CloseHandle(handle)
+
+
 class CoordinatorProcess:
     """Popen-compatible cutover handle whose promoted PID is the actual server.
 
@@ -104,7 +130,7 @@ class CoordinatorProcess:
             return False
 
     def poll(self):
-        if self.pid != self.launcher.pid and process_start_time(self.pid) == self.server_token:
+        if self.pid != self.launcher.pid and _identity_running(self.pid, self.server_token) is not False:
             return None
         return self.launcher.poll()
 
