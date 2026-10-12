@@ -4,30 +4,35 @@ version: 2
 updates:
   - package-ecosystem: "uv"
     directory: "/plugins/agent-bridge"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     commit-message:
       prefix: "deps"
   - package-ecosystem: "uv"
     directory: "/plugins/agent-codespaces"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     commit-message:
       prefix: "deps"
   - package-ecosystem: "uv"
     directory: "/plugins/agent-containers"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     commit-message:
       prefix: "deps"
   - package-ecosystem: "uv"
     directory: "/plugins/agent-dispatch"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     commit-message:
       prefix: "deps"
   - package-ecosystem: "uv"
     directory: "/plugins/agent-index"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     commit-message:
@@ -41,36 +46,42 @@ updates:
         update-types: ["version-update:semver-major"]
   - package-ecosystem: "uv"
     directory: "/plugins/agent-logger"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     commit-message:
       prefix: "deps"
   - package-ecosystem: "uv"
     directory: "/plugins/agent-machines"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     commit-message:
       prefix: "deps"
   - package-ecosystem: "uv"
     directory: "/plugins/agent-mcp"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     commit-message:
       prefix: "deps"
   - package-ecosystem: "uv"
     directory: "/plugins/agent-ssh"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     commit-message:
       prefix: "deps"
   - package-ecosystem: "uv"
     directory: "/plugins/agent-vault"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     commit-message:
       prefix: "deps"
   - package-ecosystem: "uv"
     directory: "/plugins/agent-worktrees"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     commit-message:

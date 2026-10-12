@@ -15,6 +15,13 @@ ROOT = Path(__file__).parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "promote-trigger.yml"
 
 
+def test_dependency_version_updates_use_the_contribution_branch():
+    config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
+    assert config["version"] == 2
+    assert config["updates"]
+    assert all(update["target-branch"] == "dev" for update in config["updates"])
+
+
 def test_one_trusted_followup_keeps_jobs_and_credentials_independent():
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     triggers = workflow.get("on", workflow.get(True))
