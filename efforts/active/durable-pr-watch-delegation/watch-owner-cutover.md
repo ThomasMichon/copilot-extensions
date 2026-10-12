@@ -14,7 +14,7 @@ restart stops the predecessor, waits for the singleton lease, and starts a
 successor. Durable state protects replay, but does not provide passive health,
 installer-driven promotion, or a recoverable runtime selection transaction.
 
-The binding sources are `docs/install-contract.md` requirements 10-12,
+The binding sources are `docs/install-contract.md` requirements 10 through 12,
 `docs/patterns/marketplace-installation-cells.md`, and
 `docs/patterns/graceful-daemon-cutover.md`. Reuse canonical `zdd` routing,
 cutover, and attributable recovery primitives and installation-context receipt,
