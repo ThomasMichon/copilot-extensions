@@ -5,14 +5,15 @@
 - **Branch(es):** serial proposal and implementation PRs
 - **Created:** 2026-10-10
 - **Status:** Draft
-- **Status detail:** Design-only proposal; charter agreement, pilot execution,
-  and recurring activation require separate operator decisions.
+- **Status detail:** Design-only authority baseline and clarifications agreed;
+  pilot scope, execution, and recurring activation remain separately gated.
 - **Vision:** `visions/plugins/agent-dispatch/README.md` scheduled production
   and durable goals; `visions/plugins/agent-worktrees/README.md` accountable
   worktree-lifetime state.
 - **Umbrella issue:** #6060
 - **Related issues:** #4101, #4216, #1488, #1918, #1646, #5543
-- **Pilot prerequisite:** #6063, stable FINAL display after successful finalize.
+- **Pilot prerequisite:** #6063 satisfied by #6070, released through #6233;
+  stable FINAL display verified independently of fresh removal authorization.
 
 ## Guiding Intent
 
@@ -121,8 +122,10 @@ Clarification, verbatim:
 > just need to ensure there is some stability after that so the FINAL status
 > doesn't get immediately tripped back to "MERGED".
 
-All mechanics and thresholds in [charter.md](charter.md) are
-**agent-recommended proposals**, not additional operator authorizations.
+The operator agreed the design-only authority baseline and the four
+clarifications recorded in the 2026-10-12 journal entry. Remaining mechanics
+and thresholds in [charter.md](charter.md) are **agent-recommended proposals**,
+not standing authorization, pilot approval, or scheduling approval.
 
 ## Plan
 
@@ -132,21 +135,26 @@ All mechanics and thresholds in [charter.md](charter.md) are
 - [x] Identify existing scheduling, lifecycle, and allocator boundaries.
 - [x] Draft [charter.md](charter.md), including authority, hold conditions,
   receipts, and staged rollout.
-- [ ] Operator approves or revises the charter's authority matrix.
-- [ ] Resolve #6063 before the tidier pilot: successful finalize must remain
-  visibly FINAL during normal polling, independently of fresh removal checks.
+- [x] Operator agrees the design-only authority baseline and clarifications;
+  an apply pilot still requires its own exact operation allowlist.
+- [x] Resolve #6063 before the tidier pilot: successful finalize remains
+  visibly FINAL during normal polling, independently of fresh removal checks
+  (#6070, released through #6233).
 - [ ] Select explicit project scope, budgets, and pilot candidates.
-- [ ] Resolve candidate mutation fencing and trusted completion-verification
-  requirements before an apply-capable worker is implemented.
+- [ ] Select transcript completeness, trusted completion-verification, and
+  private report-destination requirements for the audit pilot.
+- [ ] Obtain explicit approval to implement and run the audit-only pilot.
 
 ### Phase 2 - Implement an audit-only pilot
 
-_Agent-recommended; blocked on Phase 1 approval._
+_Agent-recommended; blocked on the remaining Phase 1 decisions and explicit
+audit-pilot approval. Mutation-fencing implementation is not an audit gate._
 
 - [ ] Implement deterministic discovery and one exclusive bounded worker using
   the existing registrar/supervisor; no new daemon.
 - [ ] Produce evidence-backed per-candidate decisions without lifecycle,
-  issue, effort, session, or source mutations.
+  issue, effort, session, source, or posted steering mutations for candidates;
+  use only the approved worker-run/report state for audit output.
 - [ ] Validate the safety cases below and obtain operator review of the
   proposed actions before any apply-mode pilot.
 
@@ -154,6 +162,9 @@ _Agent-recommended; blocked on Phase 1 approval._
 
 _Agent-recommended; blocked on a separate pilot approval._
 
+- [ ] Resolve candidate reservation, expected-revision fencing, and
+  unknown-outcome reconciliation before implementing an apply-capable worker;
+  audit snapshots never authorize later mutations.
 - [ ] Enable only the approved bookkeeping and scoped lifecycle operations.
 - [ ] Prove durable record updates land before dependent disposition changes.
 - [ ] Corroborate every claimed outcome and preserve every refusal.
@@ -174,7 +185,11 @@ _Agent-recommended; not authorized by the design request._
 
 _Agent-recommended acceptance cases for the future implementation._
 
-- [ ] Audit-only mode causes no lifecycle or external-record mutations.
+- [ ] Audit-only mode mutates no candidate lifecycle or external domain
+  records, including steering cards/comments; writes are limited to approved
+  worker-run/report state and tool-owned ephemeral evidence collation.
+- [ ] Apply-mode tracking records require an explicit filing policy and do
+  not allocate execution resources or transfer responsibility by themselves.
 - [ ] Live or unknown-liveness worktrees, active owners, ambiguous lineage,
   missing transcripts, pending handoffs, and dirty/unmerged work are retained.
 - [ ] A merged PR with an open parent effort is not classified as done.
@@ -215,3 +230,19 @@ this effort.
   unchecked.
 - Added optional nonblocking steering and stable explicit-finalization status
   as a prerequisite, following operator feedback; #6063 owns the status fix.
+
+### 2026-10-12 - Agreed design clarifications
+
+- Operator agreed the proposed clarifications and directed continuation of
+  the design revision; this is not pilot, apply-mode, or scheduling approval.
+- Recorded #6063 as satisfied by #6070 and release #6233 after installed
+  FINAL behavior was verified; no release work is reopened by this proposal.
+- Distinguished forbidden downstream execution allocations from tracking
+  records that an apply pilot may explicitly authorize.
+- Kept audit steering proposal-only in the approved report destination.
+  Posting candidate attention records remains an apply-mode mutation.
+- Moved mutation-fencing resolution to the gate before apply-capable
+  implementation. An approved read-only audit may identify fencing gaps,
+  but its conclusions are snapshots, not future mutation permissions.
+- Project scope, budgets, candidates, evidence/evaluator requirements,
+  report destination, and explicit audit-pilot approval remain open.
