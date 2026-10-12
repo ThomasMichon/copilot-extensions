@@ -83,6 +83,14 @@ Bind service identity, fleet scope and permitted operations. Preserve all
 supported retrieval commands and their health/failover behavior; lifecycle
 mutators remain separately authorized, not automatically exposed by query access.
 
+Every query also binds the authenticated principal to its permitted corpus and
+source scope, independently of fleet membership, service enrollment or operation
+permission. Both Gateway admission and the index execution boundary must verify
+that binding. Omitted filters mean the authorized scope, never all indexed
+sources; explicitly requested scope outside that grant is rejected. Apply this
+to search, similar/cluster retrieval and query-derived counts/metadata before
+retrieval, not merely by stripping unauthorized hits afterward.
+
 Reject unavailable, stale, mismatched, unauthorized and malformed responses
 explicitly. Gateway authentication failure or outage must not silently retry
 through SSH, a local corpus or another account. Keep ordinary native/SSH client
@@ -124,6 +132,9 @@ the live subscribed controller must separately prove the real contract.
    CLI query through the Gateway plus credential acquisition/refresh through a
    separately subscribed controller. Verify unauthenticated, cross-source,
    cross-role, expired, revoked and disconnected cases without secret output.
+   Use at least two sources in one corpus and distinct corpus grants to prove
+   that fleet/service/query permission alone cannot read another scope, including
+   omitted filters and similarity/cluster/metadata operations.
 5. Only after those proofs, propose native-host offload and data cutover. Retain
    the healthy native service and warm engine until migration and rollback
    eligibility are demonstrated. No Windows Scheduled Task is introduced.

@@ -192,6 +192,9 @@ unfinished native activation, rollback or platform-parity gates complete.
 - [ ] Actual CLI -> authenticated Gateway -> container retrieval and distinct
   container -> Gateway -> subscribed-controller credential acquisition; prove
   refresh, expiry, controller disconnect and unauthorized/cross-source denial.
+  Query admission and execution must bind each principal to its permitted
+  corpus/source independently of fleet/service/operation authority, including
+  omitted filters and query-derived metadata.
   Deterministic provider mocks supplement, never replace, live transport proof.
 - [ ] Independently hosted API/controller, execution and persistence contracts,
   without cross-container database-handle or shared-SQLite assumptions.
