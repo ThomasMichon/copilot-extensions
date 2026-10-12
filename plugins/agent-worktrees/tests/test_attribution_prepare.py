@@ -8,6 +8,11 @@ import pytest
 from agent_worktrees import attribution_prepare_cli as cli
 from agent_worktrees.providers import attribution
 
+pytestmark = [
+    pytest.mark.guard,
+    pytest.mark.contract("agent_worktrees.attribution_prepare"),
+]
+
 
 def fixture(mode="codename", source="built-in", explicit=False):
     record = SimpleNamespace(worktree_id="private-tree", machine="private-machine",
