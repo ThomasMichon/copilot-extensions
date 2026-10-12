@@ -561,7 +561,11 @@ esac
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer integration")
-def test_posix_health_gate_rejects_namespace_package_slot(tmp_path: Path) -> None:
+@pytest.mark.parametrize("stall_health_gate", [False, True])
+def test_posix_health_gate_rejects_namespace_package_slot(
+    tmp_path: Path,
+    stall_health_gate: bool,
+) -> None:
     """A partial ``uv pip install`` can leave ``agent_worktrees`` on disk as an
     empty directory -- no ``__init__.py``, no ``__main__.py``, no dist-info.
     Python still imports that as a PEP 420 *namespace* package with no error,
@@ -618,6 +622,9 @@ slot_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 _arg1="${1:-}"
 [ "$_arg1" = "-I" ] && shift
 if [ "${1:-}" = "-c" ]; then
+  if [ "${NAMESPACE_HEALTH_STALL:-}" = "1" ]; then
+    case "$2" in *"import agent_worktrees.__main__"*) sleep 60 ;; esac
+  fi
   # Exclude the runner venv's real package, which would beat a namespace.
   exec "$REAL_PYTHON" -I -S -c \
     'import sys; sys.path.insert(0, sys.argv[1]); exec(sys.argv[2])' \
@@ -645,7 +652,8 @@ esac
             "HOME": str(home),
             "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
             "REAL_PYTHON": sys.executable,
-            "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "0",
+            "AGENT_WORKTREES_INSTALL_DEADLINE_SEC": "10",
+            "NAMESPACE_HEALTH_STALL": "1" if stall_health_gate else "0",
         }
     )
     provision = subprocess.run(
@@ -658,8 +666,12 @@ esac
     )
 
     assert provision.returncode != 0
-    assert "failed its health gate" in provision.stderr
-    assert "No module named 'agent_worktrees.__main__'" in provision.stderr
+    if stall_health_gate:
+        assert provision.returncode == 124, provision.stderr
+        assert list((home / ".agent-worktrees" / ".install-stage").glob("*/.watchdog-fired"))
+    else:
+        assert "failed its health gate" in provision.stderr
+        assert "No module named 'agent_worktrees.__main__'" in provision.stderr
 
     # The broken slot must never be marked complete or activated: no
     # current-version marker, and no last-known-good pointing at it.
