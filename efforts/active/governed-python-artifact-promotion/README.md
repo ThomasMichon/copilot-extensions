@@ -553,6 +553,12 @@ win grows with build complexity.
   repeated POSIX-XDG test-path conversion. All 265 combined artifact/resolver
   cases pass locally; the latest resolver has 66 cases. No assertions or budgets
   were weakened.
+- **2026-10-12 sibling-fixture follow-through:** moved non-listening-port
+  reservation into one context-managed helper used by both Python and wrapper
+  discovery, plus the direct dead-endpoint probe. All fixtures retain the
+  reservation through probing; the Python discovery case asserts neither live
+  relay owns the reserved port. All eight real relay-liveness cases pass under
+  the contained Windows runner, with assertions and timeout bounds preserved.
 - **Still open (this effort's own next slice):** actually wire this
   resolver into `resolve_toolchain_lock`/`build_python_artifacts.py`'s CLI
   (a caller-selectable "seasoned public" mode, distinct from and never
