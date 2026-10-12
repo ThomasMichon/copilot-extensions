@@ -71,6 +71,11 @@ default-branch tools and downloads the unsigned bundles; it never executes
 candidate tools or build backends. Its non-executing validator checks the
 expected dev/main identities, manifest schema and plugin/version/artifact ID
 binding, exact declared first-party member set, and every wheel's SHA-256.
+It also enforces the complete schema-3 provenance: payload hash, wheel and
+aggregate tags, first-party source paths, locked generator, toolchain pins and
+canonical source/interpreter provenance. It recomputes both the toolchain lock
+ID and artifact ID using the trusted builder's identity rules, without
+resolving a toolchain or executing a build.
 It rejects duplicate, extra, missing, non-regular or unsafe members, with a
 1 MiB manifest limit and 512 MiB total uncompressed bundle limit.
 `actions/attest-build-provenance` then signs both this index and each

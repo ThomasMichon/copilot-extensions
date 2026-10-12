@@ -280,10 +280,15 @@ answer against the actual repository/CI configuration:
   `ci.yml` (~line 636) already consumes a third-party dependency (`psmux`)
   via a deterministic `.../releases/download/v<version>/<fixed-filename>`
   URL. Phase 2 adopts the same shape for first-party artifacts: a
-  deterministic tag per promotion (`<plugin>-v<version>`) with fixed,
-  predictable asset filenames (one per platform/arch/ABI, plus one per
-  vendored lib wheel), requiring no separate discovery service and matching
-  a pattern this codebase already trusts.
+  deterministic tag per plugin/version (`<plugin>-v<version>`).
+  **Refined by the 2026-10-12 integration:** each asset is a ZIP named
+  `<plugin>-<version>-<artifact-id-digest>.zip`, containing the schema-3
+  manifest, plugin wheel and declared vendored-lib wheels as one verified
+  set. The signed transfer index binds the complete candidate/project set
+  and every bundle digest. Content-addressed filenames permit independent
+  rebuilds without overwriting an existing asset. Consumers discover these
+  bundles through the deterministic release tag, not fixed per-wheel assets;
+  no separate discovery service is required.
 - **Wheel-tag semantic compatibility:** an artifact set's
   python/abi/platform tag reconciliation
   (`build_python_artifacts.overall_identity_tags`) currently treats any two
@@ -474,7 +479,15 @@ win grows with build complexity.
   signing. The same validator runs before promotion and publication, so an
   attacker-controlled outer ZIP digest cannot conceal malformed contents.
   Focused regressions cover archive mutations with recomputed outer digests
-  and a real validator subprocess that must not import build tooling.
+  and a real validator subprocess that must not import candidate tooling.
+- A subsequent review tightened this to the complete schema-3 contract:
+  trusted validation requires payload hash, aggregate/per-wheel tags,
+  first-party source paths, generator, exact toolchain pins and canonical
+  source/interpreter provenance. It independently recomputes the lock and
+  artifact IDs using existing builder helpers without resolving a toolchain
+  or executing a candidate/backend. Fixtures now use complete manifests.
+  The publication decision above now names content-addressed bundles rather
+  than its superseded fixed per-wheel asset format.
 
 ### 2026-10-12 - Phase 2 slice 4: explicit public build-toolchain integration
 

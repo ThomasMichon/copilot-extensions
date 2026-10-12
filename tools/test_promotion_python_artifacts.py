@@ -14,6 +14,7 @@ import pytest
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import build_python_artifacts as builder
 import promote_release as promotion
 import promotion_python_artifacts as artifacts
 import publish_python_artifacts as publisher
@@ -27,17 +28,49 @@ no_ambient_git_identity = _identity_fixture
 DEV, MAIN, TREE = "a" * 40, "b" * 40, "c" * 40
 
 
+def _complete_manifest(manifest: dict) -> dict:
+    toolchain = builder.ToolchainLock(Path("."), {
+        "setuptools": "80.9.0", "wheel": "0.45.1", "packaging": "25.0",
+    }, provenance={
+        "source_policy": "governed", "python": "/python",
+        "validated_index_identity": "sha256:" + "f" * 64,
+    })
+    manifest["build_toolchain"] = toolchain.record
+    manifest["payload_hash"] = "sha256:" + "e" * 64
+    infos = []
+    for wheel in manifest["wheels"]:
+        info = builder.parse_wheel_filename(Path(wheel["filename"]))
+        infos.append(info)
+        wheel.update({key: info[key] for key in ("name", "python_tag", "abi_tag", "platform_tag")})
+        wheel["generator"] = toolchain.generator
+        wheel["source"] = (
+            f"plugins/{manifest['plugin']}" if wheel["role"] == "plugin"
+            else f"plugins/{manifest['plugin']}/libs/library"
+        )
+    tags = builder.overall_identity_tags(infos)
+    manifest.update(tags)
+    wheel_fields = [
+        field for wheel in sorted(manifest["wheels"], key=lambda item: item["filename"])
+        for field in (wheel["filename"], wheel["sha256"])
+    ]
+    manifest["artifact_id"] = "sha256:" + builder._hash_fields(
+        manifest["payload_hash"], tags["python_tag"], tags["abi_tag"], tags["platform_tag"],
+        toolchain.lock_id, *wheel_fields,
+    )
+    return manifest
+
+
 def _manifest(directory: Path, *, role: str = "plugin") -> dict:
     directory.mkdir(parents=True, exist_ok=True)
     wheel = directory / "demo-1.0-py3-none-any.whl"
     wheel.write_bytes(b"first-party wheel")
-    return {
+    return _complete_manifest({
         "schema": "copilot-extensions.python-artifact-manifest", "schema_version": 3,
         "plugin": "demo", "version": "1.0", "artifact_id": "sha256:" + "d" * 64,
         "wheels": [{
             "filename": wheel.name, "role": role, "sha256": f"sha256:{artifacts._digest(wheel)}",
         }],
-    }
+    })
 
 
 def _index(directory: Path) -> dict:
@@ -155,17 +188,17 @@ def test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_dige
         _validate(directory)
 
 
-def test_trusted_validate_cli_does_not_import_build_or_candidate_code(tmp_path):
+def test_trusted_validate_cli_does_not_import_candidate_code(tmp_path):
     directory = tmp_path / "export"
     _index(directory)
-    tools = tmp_path / "trusted-tools"
-    tools.mkdir()
-    shutil.copy(Path(artifacts.__file__), tools / "promotion_python_artifacts.py")
-    (tools / "build_toolchain_lock.py").write_text("raise RuntimeError('must not execute')")
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    for name in ("build_toolchain_lock.py", "build_python_artifacts.py"):
+        (candidate / name).write_text("raise RuntimeError('must not execute candidate code')")
     result = artifacts._run([
-        sys.executable, str(tools / "promotion_python_artifacts.py"), "validate",
+        sys.executable, str(Path(artifacts.__file__)), "validate",
         "--out-dir", str(directory), "--dev-head", DEV, "--main-before", MAIN,
-    ], cwd=tools)
+    ], cwd=candidate)
     assert result == ""
 
 
@@ -181,13 +214,95 @@ def test_validator_accepts_declared_vendored_library_wheel(tmp_path):
         "filename": "library-1.0-py3-none-any.whl", "role": "vendored-lib",
         "sha256": "sha256:" + hashlib.sha256(b"library").hexdigest(),
     })
+    _complete_manifest(manifest)
     with zipfile.ZipFile(path, "w") as bundle:
         bundle.writestr("manifest.json", json.dumps(manifest))
         bundle.writestr(name, payload)
         bundle.writestr("library-1.0-py3-none-any.whl", b"library")
-    index["artifacts"][0]["sha256"] = artifacts._digest(path)
+    new_name = f"demo-1.0-{manifest['artifact_id'][7:]}.zip"
+    new_path = path.with_name(new_name)
+    path.rename(new_path)
+    index["artifacts"][0].update(
+        artifact_id=manifest["artifact_id"], filename=new_name, sha256=artifacts._digest(new_path),
+    )
     _write_index(directory, index)
     assert _validate(directory) == index
+
+
+@pytest.mark.parametrize("mutation", [
+    "missing-payload", "payload-format", "missing-tag", "wrong-tag", "missing-lock",
+    "lock-shape", "missing-package", "invalid-pin", "missing-provenance",
+    "missing-interpreter", "invalid-policy", "forged-lock", "missing-wheel-name",
+    "wrong-wheel-tag", "wrong-generator", "missing-source", "escaping-source",
+    "third-party-source", "wrong-wheel-version", "forged-artifact-id",
+])
+def test_schema3_requires_complete_provenance_and_computed_identity(tmp_path, mutation):
+    manifest = _manifest(tmp_path / "wheels")
+    if mutation == "missing-payload":
+        del manifest["payload_hash"]
+    elif mutation == "payload-format":
+        manifest["payload_hash"] = "invalid"
+    elif mutation == "missing-tag":
+        del manifest["python_tag"]
+    elif mutation == "wrong-tag":
+        manifest["python_tag"] = "cp310"
+    elif mutation == "missing-lock":
+        del manifest["build_toolchain"]
+    elif mutation == "lock-shape":
+        manifest["build_toolchain"] = []
+    elif mutation == "missing-package":
+        del manifest["build_toolchain"]["packages"]["setuptools"]
+    elif mutation == "invalid-pin":
+        manifest["build_toolchain"]["packages"]["wheel"] = False
+    elif mutation == "missing-provenance":
+        del manifest["build_toolchain"]["provenance"]
+    elif mutation == "missing-interpreter":
+        del manifest["build_toolchain"]["provenance"]["python"]
+    elif mutation == "invalid-policy":
+        manifest["build_toolchain"]["provenance"]["source_policy"] = "public"
+    elif mutation == "forged-lock":
+        manifest["build_toolchain"]["lock_id"] = "sha256:" + "a" * 64
+    elif mutation == "missing-wheel-name":
+        del manifest["wheels"][0]["name"]
+    elif mutation == "wrong-wheel-tag":
+        manifest["wheels"][0]["platform_tag"] = "win_amd64"
+    elif mutation == "wrong-generator":
+        manifest["wheels"][0]["generator"] = "unknown"
+    elif mutation == "missing-source":
+        del manifest["wheels"][0]["source"]
+    elif mutation == "escaping-source":
+        manifest["wheels"][0]["source"] = "plugins/demo/../other"
+    elif mutation == "third-party-source":
+        manifest["wheels"][0]["source"] = "third-party/demo"
+    elif mutation == "wrong-wheel-version":
+        manifest["wheels"][0]["filename"] = "demo-2.0-py3-none-any.whl"
+    else:
+        manifest["artifact_id"] = "sha256:" + "a" * 64
+    with pytest.raises(artifacts.PromotionArtifactError):
+        artifacts.validate_manifest(manifest)
+
+
+def test_forged_content_address_fails_even_when_manifest_index_filename_and_digest_agree(tmp_path):
+    directory = tmp_path / "export"
+    index = _index(directory)
+    entry = index["artifacts"][0]
+    path = directory / entry["filename"]
+    with zipfile.ZipFile(path) as bundle:
+        manifest = json.loads(bundle.read("manifest.json"))
+        name = manifest["wheels"][0]["filename"]
+        payload = bundle.read(name)
+    manifest["artifact_id"] = "sha256:" + "a" * 64
+    with zipfile.ZipFile(path, "w") as bundle:
+        bundle.writestr("manifest.json", json.dumps(manifest))
+        bundle.writestr(name, payload)
+    entry["artifact_id"] = manifest["artifact_id"]
+    entry["filename"] = "demo-1.0-" + "a" * 64 + ".zip"
+    target = path.with_name(entry["filename"])
+    path.rename(target)
+    entry["sha256"] = artifacts._digest(target)
+    _write_index(directory, index)
+    with pytest.raises(artifacts.PromotionArtifactError, match="artifact identity mismatch"):
+        _validate(directory)
 
 
 @pytest.mark.parametrize("payload", [b"", b"chunked digest" * 200000], ids=["empty", "multi-chunk"])
@@ -265,8 +380,10 @@ def test_bundle_rejects_unsafe_wheels(tmp_path, mutation):
 def _fake_builder(repo: Path) -> None:
     project = repo / "plugins" / "demo-plugin" / "pyproject.toml"
     project.write_text('[project]\nname = "demo"\nversion = "0.1.0-dev1"\n', encoding="utf-8")
+    template = _manifest(repo / "fixture-wheels")
+    shutil.rmtree(repo / "fixture-wheels")
     (repo / "tools" / "build_python_artifacts.py").write_text(
-        """import hashlib, pathlib
+        "TEMPLATE = " + repr(template) + "\n" + """import copy, hashlib, pathlib
 try:
     import tomllib
 except ModuleNotFoundError:
@@ -275,12 +392,23 @@ def build_plugin_artifacts(plugin, *, out_dir, toolchain):
     assert toolchain == {'shared': True}
     version = tomllib.loads((pathlib.Path('plugins') / plugin / 'pyproject.toml').read_text())['project']['version']
     out_dir.mkdir()
-    wheel = out_dir / 'demo-1.0-py3-none-any.whl'
+    wheel = out_dir / ('demo-' + version.replace('-', '.') + '-py3-none-any.whl')
     wheel.write_bytes(b'wheel')
     pathlib.Path('backend-residue.txt').write_text('must not enter promotion')
-    return {'schema': 'copilot-extensions.python-artifact-manifest', 'schema_version': 3,
-            'plugin': plugin, 'version': version, 'artifact_id': 'sha256:' + 'd' * 64,
-            'wheels': [{'role': 'plugin', 'filename': wheel.name, 'sha256': 'sha256:' + hashlib.sha256(b'wheel').hexdigest()}]}
+    manifest = copy.deepcopy(TEMPLATE)
+    manifest.update(plugin=plugin, version=version)
+    manifest['wheels'][0].update(filename=wheel.name, source='plugins/' + plugin,
+                               sha256='sha256:' + hashlib.sha256(b'wheel').hexdigest())
+    fields = [manifest['payload_hash'], manifest['python_tag'], manifest['abi_tag'],
+              manifest['platform_tag'], manifest['build_toolchain']['lock_id'],
+              wheel.name, manifest['wheels'][0]['sha256']]
+    digest = hashlib.sha256()
+    for field in fields:
+        encoded = field.encode('utf-8')
+        digest.update(len(encoded).to_bytes(8, 'big'))
+        digest.update(encoded)
+    manifest['artifact_id'] = 'sha256:' + digest.hexdigest()
+    return manifest
 """, encoding="utf-8",
     )
     (repo / "tools" / "build_toolchain_lock.py").write_text(

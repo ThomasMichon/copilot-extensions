@@ -225,6 +225,7 @@ def validate_bundle(path: Path, entry: dict) -> None:
                 plugin_wheels += role == "plugin"
             if plugin_wheels != 1 or set(names) != declared:
                 raise PromotionArtifactError(f"{path.name}: first-party wheel member set mismatch")
+            validate_manifest(manifest)
             for wheel in wheels:
                 digest = hashlib.sha256()
                 with bundle.open(wheel["filename"]) as stream:
@@ -239,6 +240,73 @@ def validate_bundle(path: Path, entry: dict) -> None:
         if isinstance(exc, PromotionArtifactError):
             raise
         raise PromotionArtifactError(f"{path.name}: cannot read artifact bundle: {exc}") from exc
+
+
+def validate_manifest(manifest: dict) -> None:
+    """Reuse trusted builder identity rules without resolving or running a toolchain."""
+    from build_python_artifacts import (
+        _assert_version_corresponds, overall_identity_tags, parse_wheel_filename,
+    )
+    from build_toolchain_lock import ArtifactBuildError, ToolchainLock, _hash_fields
+
+    try:
+        payload_hash = manifest.get("payload_hash")
+        if (
+            not isinstance(payload_hash, str) or not payload_hash.startswith("sha256:")
+            or not _DIGEST.fullmatch(payload_hash[7:])
+        ):
+            raise PromotionArtifactError("invalid manifest payload hash")
+        lock = manifest.get("build_toolchain")
+        if not isinstance(lock, dict) or set(lock) != {"packages", "provenance", "lock_id"}:
+            raise PromotionArtifactError("invalid manifest build-toolchain record")
+        packages = lock["packages"]
+        if (
+            not isinstance(packages, dict)
+            or set(packages) != {"setuptools", "wheel", "packaging"}
+            or any(not isinstance(version, str) or not _VERSION.fullmatch(version) for version in packages.values())
+        ):
+            raise PromotionArtifactError("invalid manifest build-toolchain pins")
+        toolchain = ToolchainLock(Path("."), packages, provenance=lock["provenance"])
+        if lock != toolchain.record:
+            raise PromotionArtifactError("manifest toolchain lock identity mismatch")
+        wheel_infos = []
+        for wheel in manifest["wheels"]:
+            info = parse_wheel_filename(Path(wheel["filename"]))
+            source = wheel.get("source")
+            if wheel["role"] == "plugin":
+                _assert_version_corresponds(
+                    raw_version=manifest["version"], wheel_version=info["version"],
+                    label=manifest["plugin"],
+                )
+            source_matches = (
+                source == f"plugins/{manifest['plugin']}" if wheel["role"] == "plugin"
+                else isinstance(source, str) and source.startswith(("libs/", f"plugins/{manifest['plugin']}/"))
+            )
+            if (
+                wheel.get("name") != info["name"]
+                or any(wheel.get(tag) != info[tag] for tag in ("python_tag", "abi_tag", "platform_tag"))
+                or wheel.get("generator") != toolchain.generator
+                or not isinstance(source, str) or "\\" in source
+                or any(part in ("", ".", "..") for part in source.split("/"))
+                or not source_matches
+            ):
+                raise PromotionArtifactError("invalid manifest wheel provenance or tags")
+            wheel_infos.append(info)
+        tags = overall_identity_tags(wheel_infos)
+        if any(manifest.get(tag) != value for tag, value in tags.items()):
+            raise PromotionArtifactError("manifest aggregate wheel tags mismatch")
+        wheel_fields = [
+            field for wheel in sorted(manifest["wheels"], key=lambda item: item["filename"])
+            for field in (wheel["filename"], wheel["sha256"])
+        ]
+        identity = "sha256:" + _hash_fields(
+            payload_hash, tags["python_tag"], tags["abi_tag"], tags["platform_tag"],
+            toolchain.lock_id, *wheel_fields,
+        )
+        if manifest["artifact_id"] != identity:
+            raise PromotionArtifactError("manifest artifact identity mismatch")
+    except ArtifactBuildError as exc:
+        raise PromotionArtifactError(f"invalid manifest provenance: {exc}") from exc
 
 
 def validate_artifacts(
