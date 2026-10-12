@@ -160,5 +160,12 @@ by `agent-fleet-contracts`.
 An explicit Python [local operation journal](docs/operation-ledger.md) now
 persists admission/outbox/audit and correlated receipt updates transactionally.
 It is not automatically installed or activated and supplies no executor,
-authentication, allocation claims, resource fencing or node effect journal.
+authentication, allocation claims or resource fencing.
 The offline CLI remains non-mutating.
+
+An explicit [node journal](docs/node-journal.md) now persists local acceptance,
+cooperative SQLite effects and correlated receipts with an append-only result
+spool. External attempts conservatively persist UNKNOWN before execution and
+cannot be retried blindly. This Python API is not a node service, remote
+executor, authenticated reconnect protocol or distributed fence; no role is
+installed or activated automatically.

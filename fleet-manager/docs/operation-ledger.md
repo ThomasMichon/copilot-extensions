@@ -46,7 +46,10 @@ SQLite/storage exceptions propagate explicitly. Paths and underlying files
 must remain under a trusted deployment owner's control on supported local
 storage; this is not hostile-client or network-filesystem isolation.
 
-**Not yet delivered:** durable node-side effect journal, target authentication,
+The separate explicit [node journal](node-journal.md) now owns local acceptance,
+cooperative effect receipts and a result spool; it does not share this database.
+
+**Not yet delivered:** target authentication,
 allocation claims and their effect-owner fences, bounded queue/audit retention,
 authoritative generation transfer, subscriptions, Gateway/node protocol,
 installer readiness or high availability. The current journal is a local
