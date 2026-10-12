@@ -12,7 +12,8 @@ name again. Per-command URL rules prevent a later rewrite
 rule from redirecting the captured URL. A temporary pre-push forwarding hook
 executes the resolved original hook with unchanged stdin, URL and environment,
 and its original logical remote as `$1`, preserving remote-scoped validation and
-failure propagation. No remote is persisted or repointed. The temporary remote
+failure propagation. Both its fetch and push URL lookups are pinned to the
+configuration snapshot. No remote is persisted or repointed. The temporary remote
 has no fetch mapping, so Git cannot race the guarded tracking refresh.
 Remote-scoped receive/upload-pack, proxy/auth method, remote-helper, mirror and push
 options are captured with the destinations and reproduced for transport.
@@ -35,6 +36,9 @@ Quoted temporary configuration preserves logical remote names containing `=`
 for forwarded hook lookups. The post-push probe
 has a 30-second deadline, and its best-effort refresh waits at most one second
 for the configuration lock, independently of the push timeout.
+Published-ref probes use the same injected-credential then plain-helper fallback
+as pushes, with a 30-second bound per attempt. Tracking is refreshed only while
+both the named fetch and push destinations still match their snapshot.
 Tracking refresh uses compare-and-swap and never rolls back a newer published
 tip. A refresh failure is reported as a post-push warning, not a false claim
 that the already-successful remote update failed.

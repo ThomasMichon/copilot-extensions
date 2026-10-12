@@ -15,16 +15,16 @@ from pathlib import Path
 from . import git_ops, push_timeout
 
 _destination: ContextVar[
-    tuple[str, tuple[str, ...], tuple[tuple[str, str], ...]] | None
+    tuple[str, tuple[str, ...], tuple[tuple[str, str], ...], str | None] | None
 ] = ContextVar("push_destination", default=None)
 REMOTE_TRANSPORT_SETTINGS = ("receivepack", "uploadpack", "proxy", "proxyauthmethod", "vcs", "mirror", "pushoption")
 
 
 @contextmanager
 def pinned_destination(remote: str, urls: tuple[str, ...],
-                       settings: tuple[tuple[str, str], ...] = ()):
+                       settings: tuple[tuple[str, str], ...] = (), *, fetch_url: str | None = None):
     """Bind this publication's transport/auth to an already verified URL."""
-    token = _destination.set((remote, urls, settings))
+    token = _destination.set((remote, urls, settings, fetch_url))
     try:
         yield
     finally:
@@ -36,7 +36,7 @@ def captured_urls(remote: str) -> tuple[str, ...]:
 
 
 @contextmanager
-def _url_aliases(pairs, *, logical_remote: str = ""):
+def _url_aliases(pairs, *, logical_remote: str = "", logical_fetch: str = ""):
     def quoted(value):
         return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\t", "\\t") + '"'
     with tempfile.TemporaryDirectory(prefix="agent-worktrees-url-config-") as directory:
@@ -46,7 +46,11 @@ def _url_aliases(pairs, *, logical_remote: str = ""):
             for url, alias in pairs
         )
         if logical_remote:
-            content += f"[remote {quoted(logical_remote)}]\n\tpushurl = \"\"\n"
+            fetch_alias = f"agent-worktrees-hook-fetch-{uuid.uuid4().hex}"
+            fetch_url = logical_fetch or pairs[0][0]
+            content += f"[url {quoted(fetch_url)}]\n\tinsteadOf = {quoted(fetch_alias)}\n"
+            content += (f"[remote {quoted(logical_remote)}]\n\turl = \"\"\n"
+                        f"\turl = {quoted(fetch_alias)}\n\tpushurl = \"\"\n")
             content += "".join(f"\tpushurl = {quoted(alias)}\n" for _url, alias in pairs)
         config.write_text(content, encoding="utf8")
         yield ["-c", f"include.path={config.as_posix()}"]
@@ -100,7 +104,7 @@ def push(
     for prefix in attempts:
         try:
             aliases = [(url, f"{transport_remote}-url-{index}") for index, url in enumerate(destinations)]
-            with _url_aliases(aliases, logical_remote=remote) if destinations else nullcontext([]) as alias_args, \
+            with _url_aliases(aliases, logical_remote=remote, logical_fetch=pinned[3] or "") if destinations else nullcontext([]) as alias_args, \
                     _hook_identity(remote, cwd) if destinations else nullcontext([]) as hook_args:
                 result = git_ops.git(
                     *prefix, *destination_args, *alias_args, *hook_args, "push", transport_remote, branch, *extra, "--quiet",
@@ -136,17 +140,20 @@ def published_ref(remote: str, destinations: tuple[str, ...], target: str,
     probe_settings = tuple((key, value) for key, value in (pinned[2] if pinned else ())
                            if key in ("uploadpack", "proxy", "proxyauthmethod", "vcs"))
     probe_remote = f"agent-worktrees-probe-{uuid.uuid4().hex}"
+    auth = git_ops._auth_config_args_for_url(destinations[0])
     with _url_aliases([(destinations[0], alias)]) as alias_args:
-        published = git_ops.git(
-        *git_ops._auth_config_args_for_url(destinations[0]),
-        *alias_args,
-        "-c", f"remote.{probe_remote}.url={alias}",
-        *[argument for key, value in probe_settings for argument in (
-            "-c", f"remote.{probe_remote}.{key}={value}",
-        )],
-        "ls-remote", probe_remote, target, cwd=cwd,
-        check=False, timeout=30, kill_tree=True, isolated_repository=True,
-        )
+        for prefix in [auth, []] if auth else [[]]:
+            published = git_ops.git(
+                *prefix, *alias_args,
+                "-c", f"remote.{probe_remote}.url={alias}",
+                *[argument for key, value in probe_settings for argument in (
+                    "-c", f"remote.{probe_remote}.{key}={value}",
+                )],
+                "ls-remote", probe_remote, target, cwd=cwd,
+                check=False, timeout=30, kill_tree=True, isolated_repository=True,
+            )
+            if published.returncode == 0:
+                break
     rows = [line.split() for line in published.stdout.splitlines()]
     sha = next((row[0] for row in rows if len(row) == 2 and row[1] == target), "")
     if published.returncode or not sha:
@@ -170,6 +177,12 @@ def _refresh_tracking(remote: str, destinations: tuple[str, ...], refspec: str, 
                               cwd=cwd, check=False, isolated_repository=True)
         if current.returncode or tuple(current.stdout.splitlines()) != destinations:
             return
+        pinned = _destination.get()
+        if pinned and pinned[0] == remote and pinned[3] is not None:
+            current_fetch = git_ops.git("remote", "get-url", remote, cwd=cwd,
+                                        check=False, isolated_repository=True)
+            if current_fetch.returncode or current_fetch.stdout.rstrip("\r\n") != pinned[3]:
+                return
         mappings = git_ops.git("config", "--get-all", f"remote.{remote}.fetch",
                                cwd=cwd, check=False, isolated_repository=True).stdout.splitlines()
         for mapping in mappings:

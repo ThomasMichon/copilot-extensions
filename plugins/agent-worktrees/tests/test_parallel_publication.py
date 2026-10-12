@@ -30,16 +30,22 @@ def repository(tmp_path):
 
 
 @pytest.mark.parametrize("remote_name", ["origin", "fork=alice"])
-def test_pinned_transport_survives_remote_repoint_and_retains_hook(tmp_path, monkeypatch, remote_name):
+@pytest.mark.parametrize("explicit_pushurl", [False, True])
+def test_pinned_transport_survives_remote_repoint_and_retains_hook(
+    tmp_path, monkeypatch, remote_name, explicit_pushurl,
+):
     root, remote = repository(tmp_path)
     if remote_name != "origin":
         git(root, "remote", "rename", "origin", remote_name)
+    if explicit_pushurl:
+        git(root, "config", f"remote.{remote_name}.pushurl", str(remote))
     other = tmp_path / "other.git"
     git(root, "init", "--bare", "-q", str(other))
     marker = tmp_path / "hook-ran"
     hook = root / ".git" / "hooks" / "pre-push"
     hook.write_text(f"#!/bin/sh\n[ \"$1\" = '{remote_name}' ] || exit 1\n"
                     f'[ "$(git remote get-url --push "$1")" = \'{remote}\' ] || exit 1\n'
+                    f'[ "$(git remote get-url "$1")" = \'{remote}\' ] || exit 1\n'
                     'read local_ref local_sha remote_ref remote_sha\n'
                     '[ "$local_ref" = HEAD ] || exit 1\n'
                     f"echo ran > '{marker.as_posix()}'\n", encoding="utf8")
@@ -58,6 +64,8 @@ def test_pinned_transport_survives_remote_repoint_and_retains_hook(tmp_path, mon
     assert git(remote, "rev-parse", "refs/heads/first") == git(root, "rev-parse", "HEAD")
     assert git_ops.git("show-ref", "--verify", "refs/heads/first", cwd=other,
                        check=False).returncode != 0
+    assert git_ops.git("rev-parse", "--verify", "refs/remotes/" + remote_name + "/first",
+                       cwd=root, check=False).returncode != 0
 
 
 @pytest.mark.timeout(30)
@@ -368,6 +376,26 @@ def test_remote_uploadpack_is_preserved_for_published_ref(tmp_path, uploadpack):
     else:
         assert "Cannot observe published remote ref" in result.stderr
         assert tracked.returncode != 0
+
+
+def test_probe_authentication_override_uses_same_plain_fallback(tmp_path, monkeypatch):
+    root, remote = repository(tmp_path)
+    monkeypatch.setattr(git_ops, "_auth_config_args_for_url",
+                        lambda _url: ["-c", "protocol.file.allow=never"])
+    original = git_ops.git
+    attempts = []
+
+    def capture(*args, **kwargs):
+        if "push" in args or "ls-remote" in args:
+            attempts.append(("push" if "push" in args else "probe",
+                             "protocol.file.allow=never" in args))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(git_ops, "git", capture)
+    result = pr_publish.push_checked(None, "origin", "HEAD:refs/heads/fallback", cwd=str(root))
+    assert result and not result.stderr
+    assert attempts == [("push", True), ("push", False), ("probe", True), ("probe", False)]
+    assert git(root, "rev-parse", "refs/remotes/origin/fallback") == git(remote, "rev-parse", "refs/heads/fallback")
 
 
 def test_equals_sign_destination_is_pinned_without_config_key_corruption(tmp_path):

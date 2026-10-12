@@ -458,6 +458,11 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
             destinations = tuple(destinations)
             if len({_identity(url, cwd) for url in destinations}) != 1:
                 return git_ops.PushResult(ok=False, stderr=UNREADABLE_REMOTE)
+            fetch = git_ops.git("remote", "get-url", remote, cwd=cwd, check=False,
+                                isolated_repository=True)
+            fetch_url = fetch.stdout.rstrip("\r\n")
+            if fetch.returncode or not fetch_url.strip():
+                return git_ops.PushResult(ok=False, stderr=UNREADABLE_REMOTE)
             from .git_push_transport import REMOTE_TRANSPORT_SETTINGS
             transport_settings = []
             for key in REMOTE_TRANSPORT_SETTINGS:
@@ -471,7 +476,7 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                     (key, value) for value in configured.stdout.split("\0")[:-1]
                 )
         from .git_push_transport import pinned_destination
-        with pinned_destination(remote, destinations, tuple(transport_settings)):
+        with pinned_destination(remote, destinations, tuple(transport_settings), fetch_url=fetch_url):
             result = git_ops.push(remote, refspec, cwd=cwd, force_with_lease=force_with_lease,
                                   force_with_lease_expect=force_with_lease_expect, timeout=timeout, **rewrite_args)
             if (
