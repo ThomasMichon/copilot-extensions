@@ -49,23 +49,36 @@ function mapVisibleLines(body, visible, hidden = () => null) {
   }).filter((line) => line !== null).join("\n");
 }
 
-function withoutInlineCode(line) {
+function withoutInlineCode(text) {
   let result = "";
-  for (let cursor = 0; cursor < line.length;) {
-    if (line[cursor] !== "`") { result += line[cursor++]; continue; }
-    let end = cursor;
-    while (line[end] === "`") end++;
-    const width = end - cursor;
-    let close = line.indexOf("`", end);
-    let after = -1;
-    while (close !== -1) {
-      let runEnd = close;
-      while (line[runEnd] === "`") runEnd++;
-      if (runEnd - close === width) { after = runEnd; break; }
-      close = line.indexOf("`", runEnd);
+  for (let cursor = 0; cursor < text.length;) {
+    if (text.startsWith("<!--", cursor)) {
+      const close = text.indexOf("-->", cursor + 4);
+      const after = close === -1 ? text.length : close + 3;
+      const comment = text.slice(cursor, after);
+      result += /^<!--\s*(?:agent-worktrees:source\b|gh-aw-workflow-id:)/.test(comment) ?
+        comment : comment.replace(/[^\r\n]/g, " ");
+      cursor = after;
+      continue;
     }
-    if (after !== -1) cursor = after;
-    else { result += line.slice(cursor, end); cursor = end; }
+    if (text[cursor] !== "`") { result += text[cursor++]; continue; }
+    let end = cursor;
+    while (text[end] === "`") end++;
+    const width = end - cursor;
+    const boundary = text.slice(end).search(/\n[ \t]*\n/);
+    const limit = boundary === -1 ? text.length : end + boundary;
+    let close = text.indexOf("`", end);
+    let after = -1;
+    while (close !== -1 && close < limit) {
+      let runEnd = close;
+      while (text[runEnd] === "`") runEnd++;
+      if (runEnd - close === width) { after = runEnd; break; }
+      close = text.indexOf("`", runEnd);
+    }
+    if (after !== -1) {
+      result += text.slice(cursor, after).replace(/[^\r\n]/g, " ");
+      cursor = after;
+    } else { result += text.slice(cursor, end); cursor = end; }
   }
   return result;
 }
@@ -73,10 +86,7 @@ function withoutInlineCode(line) {
 function validate(body) {
   if (body == null) body = "";
   if (typeof body !== "string" || body.length > 65536) return "Source attribution could not be validated.";
-  const text = mapVisibleLines(
-    body,
-    (line) => /^ {0,3}<!--\s*(?:agent-worktrees:source\b|gh-aw-workflow-id:)/.test(line) ? line : withoutInlineCode(line),
-  );
+  const text = withoutInlineCode(mapVisibleLines(body, (line) => line, () => ""));
   const candidates = text.match(/<!--\s*agent-worktrees:source\b/g) || [];
   const nativeCount = (text.match(/<!--\s*gh-aw-workflow-id:/g) || []).length;
   const markers = [...text.matchAll(/^ {0,3}<!--\s*agent-worktrees:source\s+([^\r\n]*?)\s*-->[ \t]*$/gm)];

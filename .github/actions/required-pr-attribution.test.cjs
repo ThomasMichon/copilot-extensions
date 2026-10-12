@@ -89,6 +89,25 @@ test("Markdown container fences cannot turn examples into source metadata", () =
   assert.ok(gate.validate("- ```html\n  " + marker + "\n  ```\n" + native) === null);
 });
 
+test("multiline code spans hide examples without changing actual comment fields", () => {
+  const native = "<!-- gh-aw-workflow-id: maintenance -->";
+  for (const source of [marker, native]) {
+    for (const ticks of ["`", "``", "````"]) {
+      const example = "Example: " + ticks + "\n" + source + "\nend" + ticks;
+      assert.ok(gate.validate(example));
+      assert.equal(gate.validate(example + "\n\n" + source), null);
+    }
+    assert.ok(gate.validate("Example: `\n" + source + "\n`"));
+    assert.ok(gate.validate("Example: ``\n" + source + "\n``"));
+    assert.equal(gate.validate("Unmatched ` example\n\n" + source + "\n\n`"), null);
+  }
+  assert.ok(gate.validate(marker.replace(" -->", " `machine=raw` -->")));
+  assert.ok(gate.validate(marker.replace("codename=clear-compass", "codename=`clear-compass`")));
+  assert.ok(gate.validate(marker + "\n<!-- gh-aw-workflow-id: `maintenance` -->"));
+  assert.ok(gate.validate("<!-- documented example\n" + marker + "\n-->"));
+  assert.equal(gate.validate("<!-- documented example\n" + marker + "\n-->\n\n" + marker), null);
+});
+
 test("current description is reread and body-only repairs change the verdict", async () => {
   let current = pr("");
   const github = { rest: { pulls: { get: async () => ({ data: current }) } } };
