@@ -136,7 +136,10 @@ marked agent-recommended; exploratory backend replacements are not commitments.
   boundaries in dependency-minimal environments, not only mocked imports.
 - [ ] Clean-room first installation proves each affected solo plugin/profile,
   combined installations, reuse and missing/incompatible helper outcomes.
-- [ ] Windows and Linux checks preserve headlessness, caller-Job independence,
+- [ ] Windows, Linux and macOS checks preserve supported installer and process
+  behavior; unavailable platform lanes require an explicit documented safe
+  fallback or feature exemption, not assumed parity. Checks preserve
+  headlessness, caller-Job independence,
   graceful cutover, ownership and rollback; shared-runtime concurrency includes
   two installers and two independent marketplace installations.
 - [ ] Index integration preserves authenticated routing, HTTP/SSE/MCP contracts,
