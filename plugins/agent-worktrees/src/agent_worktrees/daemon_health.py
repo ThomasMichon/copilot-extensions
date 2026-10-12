@@ -26,6 +26,13 @@ def _candidates() -> list[diagnostics.DaemonCandidate]:
                 candidates.append(
                     diagnostics.DaemonCandidate(pid=item["pid"], start_time=item["start_time"])
                 )
+        candidate_pids = {candidate.pid for candidate in candidates}
+        for candidate in candidates:
+            if procs.parent_pid(candidate.pid) in candidate_pids:
+                raise OSError(
+                    "Monitor census contains a parent/child interpreter pair; "
+                    "cannot safely classify it as duplicate daemons"
+                )
         return candidates
     if sys.platform == "darwin":
         scoped_pids = {

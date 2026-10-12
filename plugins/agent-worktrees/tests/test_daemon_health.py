@@ -106,3 +106,18 @@ def test_windows_matching_monitor_without_cwd_blocks_census(tmp_path, monkeypatc
     ])
     with pytest.raises(OSError, match="runtime scope for monitor PID 101"):
         daemon_health._candidates()
+
+
+def test_windows_interpreter_pair_is_not_reaped_as_duplicate(tmp_path, monkeypatch):
+    from agent_worktrees import windows_process_census
+
+    monkeypatch.setattr(daemon_health.sys, "platform", "win32")
+    monkeypatch.setattr(daemon_health.status_monitor_runtime, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(windows_process_census, "snapshot", lambda: [
+        {"pid": pid, "cwd": str(tmp_path), "start_time": str(pid),
+         "command_line": "python -m agent_worktrees status-monitor"}
+        for pid in (101, 202)
+    ])
+    monkeypatch.setattr(daemon_health.procs, "parent_pid", lambda pid: 101 if pid == 202 else 1)
+    with pytest.raises(OSError, match="parent/child interpreter pair"):
+        daemon_health._candidates()
