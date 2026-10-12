@@ -76,6 +76,12 @@ aggregate tags, first-party source paths, locked generator, toolchain pins and
 canonical source/interpreter provenance. It recomputes both the toolchain lock
 ID and artifact ID using the trusted builder's identity rules, without
 resolving a toolchain or executing a build.
+Using only those trusted tools, it recomposes the bound dev/main snapshot
+(including version bumps and materialization), discovers the plugin/vendored
+source closure, checks distribution names and versions, and recomputes each
+payload hash from that candidate data. Candidate-supplied hashes and
+first-party labels alone never establish source provenance. The publisher
+repeats this source binding against the actual merged snapshot.
 It rejects duplicate, extra, missing, non-regular or unsafe members, with a
 1 MiB manifest limit and 512 MiB total uncompressed bundle limit.
 `actions/attest-build-provenance` then signs both this index and each

@@ -47,6 +47,7 @@ def main() -> None:
         validate_artifacts(
             export, dev_head=identity, main_before=identity, content_tree=identity,
             projects={manifest["plugin"]: manifest["version"] for manifest in manifests},
+            candidate_root=Path(__file__).resolve().parent.parent,
         )
         print(json.dumps({
             "plugins": [manifest["plugin"] for manifest in manifests],

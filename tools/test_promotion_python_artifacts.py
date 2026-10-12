@@ -36,7 +36,7 @@ def _complete_manifest(manifest: dict) -> dict:
         "validated_index_identity": "sha256:" + "f" * 64,
     })
     manifest["build_toolchain"] = toolchain.record
-    manifest["payload_hash"] = "sha256:" + "e" * 64
+    manifest.setdefault("payload_hash", "sha256:" + "e" * 64)
     infos = []
     for wheel in manifest["wheels"]:
         info = builder.parse_wheel_filename(Path(wheel["filename"]))
@@ -60,22 +60,29 @@ def _complete_manifest(manifest: dict) -> dict:
     return manifest
 
 
-def _manifest(directory: Path, *, role: str = "plugin") -> dict:
+def _manifest(
+    directory: Path, *, role: str = "plugin", candidate_root: Path | None = None,
+) -> dict:
     directory.mkdir(parents=True, exist_ok=True)
     wheel = directory / "demo-1.0-py3-none-any.whl"
     wheel.write_bytes(b"first-party wheel")
-    return _complete_manifest({
+    manifest = {
         "schema": "copilot-extensions.python-artifact-manifest", "schema_version": 3,
         "plugin": "demo", "version": "1.0", "artifact_id": "sha256:" + "d" * 64,
         "wheels": [{
             "filename": wheel.name, "role": role, "sha256": f"sha256:{artifacts._digest(wheel)}",
         }],
-    })
+    }
+    if candidate_root is not None:
+        trusted = promotion._load_module(Path(builder.__file__), "test_artifact_sources")
+        trusted.REPO = candidate_root
+        manifest["payload_hash"] = trusted.compute_payload_hash([candidate_root / "plugins" / "demo"])
+    return _complete_manifest(manifest)
 
 
-def _index(directory: Path) -> dict:
+def _index(directory: Path, *, candidate_root: Path | None = None) -> dict:
     directory.mkdir()
-    manifest = _manifest(directory.parent / "wheels")
+    manifest = _manifest(directory.parent / "wheels", candidate_root=candidate_root)
     entry = artifacts.bundle_wheels(manifest, directory.parent / "wheels", directory)
     index = {
         "schema": artifacts.SCHEMA, "schema_version": 1,
@@ -188,16 +195,37 @@ def test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_dige
         _validate(directory)
 
 
-def test_trusted_validate_cli_does_not_import_candidate_code(tmp_path):
+def test_trusted_validate_cli_does_not_import_candidate_code(repo, tmp_path):
     directory = tmp_path / "export"
-    _index(directory)
+    _git(["checkout", "-q", "dev"], repo)
+    _fake_builder(repo)
+    dev = _commit(repo, "candidate")
+    main = _git(["rev-parse", "main"], repo)
+    promotion.promote(
+        repo=repo, dev_ref="dev", main_ref="main", build_python_artifacts_dir=directory,
+    )
+    for name in ("changefile.py", "accumulate_bumps.py", "materialize_main.py"):
+        (repo / "tools" / name).write_text("raise RuntimeError('must not execute candidate code')")
+    dev = _commit(repo, "poison candidate tooling")
+    scratch = promotion.add_scratch_worktree(dev, repo=repo)
+    try:
+        promotion.consume_pending_changes(
+            scratch, main_head=main, repo=repo,
+            trusted_source=Path(promotion.__file__).resolve().parent.parent,
+        )
+        content_tree = promotion.build_promotion_tree(scratch)
+    finally:
+        promotion.remove_scratch_worktree(scratch, repo=repo)
+    index = json.loads((directory / artifacts.INDEX_NAME).read_text())
+    index.update(dev_head=dev, content_tree=content_tree)
+    _write_index(directory, index)
     candidate = tmp_path / "candidate"
     candidate.mkdir()
     for name in ("build_toolchain_lock.py", "build_python_artifacts.py"):
         (candidate / name).write_text("raise RuntimeError('must not execute candidate code')")
     result = artifacts._run([
         sys.executable, str(Path(artifacts.__file__)), "validate",
-        "--out-dir", str(directory), "--dev-head", DEV, "--main-before", MAIN,
+        "--out-dir", str(directory), "--dev-head", dev, "--main-before", main, "--repo", str(repo),
     ], cwd=candidate)
     assert result == ""
 
@@ -383,31 +411,41 @@ def _fake_builder(repo: Path) -> None:
     template = _manifest(repo / "fixture-wheels")
     shutil.rmtree(repo / "fixture-wheels")
     (repo / "tools" / "build_python_artifacts.py").write_text(
-        "TEMPLATE = " + repr(template) + "\n" + """import copy, hashlib, pathlib
+        "TEMPLATE = " + repr(template) + "\n" + """import copy, hashlib, pathlib, re
 try:
     import tomllib
 except ModuleNotFoundError:
     import tomli as tomllib
 def build_plugin_artifacts(plugin, *, out_dir, toolchain):
     assert toolchain == {'shared': True}
-    version = tomllib.loads((pathlib.Path('plugins') / plugin / 'pyproject.toml').read_text())['project']['version']
+    project = tomllib.loads((pathlib.Path('plugins') / plugin / 'pyproject.toml').read_text())['project']
+    version = project['version']
+    name = re.sub(r'[-_.]+', '_', project['name']).lower()
     out_dir.mkdir()
-    wheel = out_dir / ('demo-' + version.replace('-', '.') + '-py3-none-any.whl')
+    wheel = out_dir / (name + '-' + version.replace('-', '.') + '-py3-none-any.whl')
     wheel.write_bytes(b'wheel')
     pathlib.Path('backend-residue.txt').write_text('must not enter promotion')
     manifest = copy.deepcopy(TEMPLATE)
     manifest.update(plugin=plugin, version=version)
-    manifest['wheels'][0].update(filename=wheel.name, source='plugins/' + plugin,
+    manifest['wheels'][0].update(name=name, filename=wheel.name, source='plugins/' + plugin,
                                sha256='sha256:' + hashlib.sha256(b'wheel').hexdigest())
+    def hash_fields(fields):
+        digest = hashlib.sha256()
+        for field in fields:
+            encoded = field.encode('utf-8')
+            digest.update(len(encoded).to_bytes(8, 'big'))
+            digest.update(encoded)
+        return digest.hexdigest()
+    source = pathlib.Path('plugins') / plugin
+    file_fields = []
+    for path in sorted(source.rglob('*')):
+        if path.is_file():
+            file_fields += [path.relative_to(source).as_posix(), hashlib.sha256(path.read_bytes()).hexdigest()]
+    manifest['payload_hash'] = 'sha256:' + hash_fields([source.as_posix(), hash_fields(file_fields)])
     fields = [manifest['payload_hash'], manifest['python_tag'], manifest['abi_tag'],
               manifest['platform_tag'], manifest['build_toolchain']['lock_id'],
               wheel.name, manifest['wheels'][0]['sha256']]
-    digest = hashlib.sha256()
-    for field in fields:
-        encoded = field.encode('utf-8')
-        digest.update(len(encoded).to_bytes(8, 'big'))
-        digest.update(encoded)
-    manifest['artifact_id'] = 'sha256:' + digest.hexdigest()
+    manifest['artifact_id'] = 'sha256:' + hash_fields(fields)
     return manifest
 """, encoding="utf-8",
     )
@@ -581,7 +619,10 @@ def test_verification_uses_read_token_not_release_authority(monkeypatch):
 
 def _publish_fixture(tmp_path, monkeypatch):
     directory = tmp_path / "export"
-    index = _index(directory)
+    plugin_dir = tmp_path / "plugins" / "demo"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "1.0"\n')
+    index = _index(directory, candidate_root=tmp_path)
     monkeypatch.setattr(promotion, "_git", lambda argv, **kw: MAIN if argv[1].endswith("^") else TREE)
     monkeypatch.setattr(promotion, "_tree_excluding_state", lambda *a, **kw: TREE)
     monkeypatch.setattr(promotion, "add_scratch_worktree", lambda *a, **kw: tmp_path)
@@ -654,6 +695,41 @@ def test_invalid_bundle_blocks_publication_even_with_valid_index_digest(tmp_path
             repo=tmp_path,
         )
     assert not calls
+
+
+def test_changed_candidate_source_blocks_publication_before_any_release_write(tmp_path, monkeypatch):
+    directory, _entry = _publish_fixture(tmp_path, monkeypatch)
+    (tmp_path / "plugins" / "demo" / "injected.py").write_text("changed source")
+    calls = []
+    monkeypatch.setattr(publisher, "_gh", lambda *a, **kw: calls.append(a))
+    with pytest.raises(artifacts.PromotionArtifactError, match="payload hash differs"):
+        publisher.publish_artifacts(
+            directory, repository="example/plugins", merged_commit=TREE, dev_head=DEV,
+            repo=tmp_path,
+        )
+    assert not calls
+
+
+def test_first_party_label_does_not_substitute_for_candidate_closure(tmp_path):
+    plugin_dir = tmp_path / "plugins" / "demo"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "1.0"\n')
+    manifest = _manifest(tmp_path / "wheels", candidate_root=tmp_path)
+    manifest["wheels"].append({
+        "filename": "library-1.0-py3-none-any.whl", "role": "vendored-lib",
+        "sha256": "sha256:" + "a" * 64,
+    })
+    _complete_manifest(manifest)
+    artifacts.validate_manifest(manifest)
+    with pytest.raises(artifacts.PromotionArtifactError, match="source closure differs"):
+        artifacts.validate_source_binding(manifest, tmp_path)
+
+
+def test_invalid_candidate_identity_fails_before_git_or_source_access(tmp_path):
+    with pytest.raises(artifacts.PromotionArtifactError, match="candidate commit identity"):
+        artifacts.validate_candidate_artifacts(
+            tmp_path, repo=tmp_path, dev_head="--untrusted-option", main_before=MAIN,
+        )
 
 
 def test_workflow_separates_candidate_execution_signing_and_release_authority():

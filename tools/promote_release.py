@@ -191,7 +191,9 @@ def _seed_versions_from_main(scratch: Path, main_head: str, *, acc, repo: Path) 
         acc.apply(seed_result)
 
 
-def _sync_instruction_projections(scratch: Path) -> list[str]:
+def _sync_instruction_projections(
+    scratch: Path, *, trusted_source: Path | None = None,
+) -> list[str]:
     """Re-render any declarative instruction-projection files (e.g.
     ``.github/instructions/efforts/completion-gate.instructions.md``) so
     they reflect the version bumps ``consume_pending_changes`` just applied.
@@ -212,7 +214,7 @@ def _sync_instruction_projections(scratch: Path) -> list[str]:
     promotion (a synthetic/stripped-down checkout, e.g. this module's own
     test fixtures, simply has nothing to sync)."""
     script = (
-        scratch / "plugins" / "customizing-copilot" / "skills"
+        (trusted_source or scratch) / "plugins" / "customizing-copilot" / "skills"
         / "reviewing-customizations" / "scripts" / "manage-instruction-projections.py"
     )
     if not script.exists():
@@ -239,11 +241,12 @@ def _sync_instruction_projections(scratch: Path) -> list[str]:
 
 
 def consume_pending_changes(
-    scratch: Path, *, last_dev_head: str | None = None, main_head: str, repo: Path = REPO
+    scratch: Path, *, last_dev_head: str | None = None, main_head: str, repo: Path = REPO,
+    trusted_source: Path | None = None,
 ) -> dict:
-    """Run accumulate_bumps' compute/apply against the scratch worktree's own
-    copy of the tooling, and materialize_main's pointer expansion. Returns a
-    summary dict used for the tag/commit message and tests.
+    """Compose candidate data using its tooling, or explicitly trusted tooling
+    for candidate-independent signing validation. Returns a summary used for
+    the tag/commit message and tests.
 
     ``last_dev_head`` is the ``dev`` commit the PREVIOUS promotion actually
     promoted (persisted as ``last_promotion.dev_head`` in the pipeline state
@@ -273,12 +276,20 @@ def consume_pending_changes(
     # repo's .changefiles/ entirely. Force the scratch worktree's own
     # changefile.py into sys.modules under its bare name before loading
     # accumulate_bumps, then restore whatever was there afterward.
-    changefile_mod = _load_module(scratch / "tools" / "changefile.py", "promote_changefile")
+    tool_root = (trusted_source or scratch) / "tools"
+    changefile_mod = _load_module(tool_root / "changefile.py", "promote_changefile")
+    if trusted_source is not None:
+        changefile_mod.REPO = scratch
+        changefile_mod.CHANGEFILES_DIR = scratch / ".changefiles"
     previous_changefile_mod = sys.modules.get("changefile")
     sys.modules["changefile"] = changefile_mod
     try:
-        acc = _load_module(scratch / "tools" / "accumulate_bumps.py", "promote_accumulate_bumps")
-        mm = _load_module(scratch / "tools" / "materialize_main.py", "promote_materialize_main")
+        acc = _load_module(tool_root / "accumulate_bumps.py", "promote_accumulate_bumps")
+        mm = _load_module(tool_root / "materialize_main.py", "promote_materialize_main")
+        if trusted_source is not None:
+            acc.REPO = scratch
+            acc.PLUGINS_DIR = scratch / "plugins"
+            acc.MARKETPLACE = scratch / ".github" / "plugin" / "marketplace.json"
 
         _seed_versions_from_main(scratch, main_head, acc=acc, repo=repo)
 
@@ -330,7 +341,7 @@ def consume_pending_changes(
                 "escaping pointer would otherwise ship as an unexpanded stub "
                 "in the main snapshot:\n  " + "\n  ".join(unresolved)
             )
-        projections_synced = _sync_instruction_projections(scratch)
+        projections_synced = _sync_instruction_projections(scratch, trusted_source=trusted_source)
     finally:
         if previous_changefile_mod is not None:
             sys.modules["changefile"] = previous_changefile_mod
@@ -736,6 +747,7 @@ def promote(
                     python_artifacts_dir, content_tree=content_tree,
                     dev_head=dev_head, main_before=main_head,
                     projects=candidate_projects(scratch),
+                    candidate_root=scratch,
                 )
             except PromotionArtifactError as exc:
                 raise PromotionError(str(exc)) from exc

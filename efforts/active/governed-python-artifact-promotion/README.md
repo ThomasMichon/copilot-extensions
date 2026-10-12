@@ -488,6 +488,15 @@ win grows with build complexity.
   or executing a candidate/backend. Fixtures now use complete manifests.
   The publication decision above now names content-addressed bundles rather
   than its superseded fixed per-wheel asset format.
+- Source provenance is now independently bound, not merely well-shaped:
+  the signer recomposes the exact dev/main candidate with trusted default-
+  branch versioning/materialization/projection tools, never importing the
+  candidate's own scripts. Trusted discovery checks the declared source
+  closure and each distribution/version, and rehashes the composed payload.
+  This uses the bumped/materialized candidate rather than raw dev bytes,
+  which deliberately differ. Before release writes, publication repeats the
+  check against the actual merged tree. Regressions poison candidate
+  composition modules and reject changed sources or invented library labels.
 
 ### 2026-10-12 - Phase 2 slice 4: explicit public build-toolchain integration
 

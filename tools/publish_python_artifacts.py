@@ -76,6 +76,7 @@ def publish_artifacts(
         index = validate_artifacts(
             directory, content_tree=promotion._tree_excluding_state(tree, repo=repo),
             dev_head=dev_head, main_before=main_before, projects=candidate_projects(scratch),
+            candidate_root=scratch,
         )
     finally:
         promotion.remove_scratch_worktree(scratch, repo=repo)

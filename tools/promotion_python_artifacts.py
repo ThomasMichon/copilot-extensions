@@ -167,6 +167,7 @@ def export_artifacts(
         validate_artifacts(
             staging, content_tree=content_tree, dev_head=dev_head, main_before=main_before,
             projects=projects,
+            candidate_root=scratch,
         )
         staging.rename(out_dir)
         return index
@@ -177,7 +178,7 @@ def export_artifacts(
             shutil.rmtree(staging)
 
 
-def validate_bundle(path: Path, entry: dict) -> None:
+def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = None) -> None:
     """Inspect untrusted ZIP bytes without extracting or executing candidate code."""
     try:
         with zipfile.ZipFile(path) as bundle:
@@ -226,6 +227,8 @@ def validate_bundle(path: Path, entry: dict) -> None:
             if plugin_wheels != 1 or set(names) != declared:
                 raise PromotionArtifactError(f"{path.name}: first-party wheel member set mismatch")
             validate_manifest(manifest)
+            if candidate_root is not None:
+                validate_source_binding(manifest, candidate_root)
             for wheel in wheels:
                 digest = hashlib.sha256()
                 with bundle.open(wheel["filename"]) as stream:
@@ -309,9 +312,79 @@ def validate_manifest(manifest: dict) -> None:
         raise PromotionArtifactError(f"invalid manifest provenance: {exc}") from exc
 
 
+def validate_source_binding(manifest: dict, root: Path) -> None:
+    """Hash the trusted-discovered closure in candidate data, never import its code."""
+    import promote_release as promotion
+    from build_toolchain_lock import ArtifactBuildError
+
+    builder = promotion._load_module(
+        Path(__file__).parent / "build_python_artifacts.py", "trusted_artifact_sources",
+    )
+    builder.REPO = root
+    builder.PLUGINS_DIR = root / "plugins"
+    builder.LIBS_DIR = root / "libs"
+    plugin_dir = builder.PLUGINS_DIR / manifest["plugin"]
+    try:
+        if plugin_dir.is_symlink() or builder.uer._find_symlink(plugin_dir) is not None:
+            raise PromotionArtifactError("artifact source tree contains a symlink")
+        libs = builder.resolve_vendored_libs(plugin_dir)
+        directories = [plugin_dir, *(directory for _name, directory in libs)]
+        expected = {
+            directory.resolve().relative_to(root.resolve()).as_posix(): directory
+            for directory in directories
+        }
+        sources = [wheel["source"] for wheel in manifest["wheels"]]
+        if len(sources) != len(set(sources)) or set(sources) != set(expected):
+            raise PromotionArtifactError("manifest source closure differs from candidate")
+        for wheel in manifest["wheels"]:
+            project = tomllib.loads(
+                (expected[wheel["source"]] / "pyproject.toml").read_text(encoding="utf-8"),
+            )["project"]
+            info = builder.parse_wheel_filename(Path(wheel["filename"]))
+            if info["name"].lower() != re.sub(r"[-_.]+", "_", project["name"]).lower():
+                raise PromotionArtifactError("manifest wheel distribution differs from candidate")
+            builder._assert_version_corresponds(
+                raw_version=project["version"], wheel_version=info["version"],
+                label=wheel["source"],
+            )
+        if manifest["payload_hash"] != builder.compute_payload_hash(directories):
+            raise PromotionArtifactError("manifest payload hash differs from candidate")
+    except (
+        ArtifactBuildError, OSError, UnicodeDecodeError, tomllib.TOMLDecodeError,
+        KeyError, TypeError, ValueError,
+    ) as exc:
+        raise PromotionArtifactError(f"cannot validate candidate artifact sources: {exc}") from exc
+
+
+def validate_candidate_artifacts(directory: Path, *, repo: Path, dev_head: str, main_before: str) -> dict:
+    """Recompose with trusted tools; candidate checkouts supply only source data."""
+    import promote_release as promotion
+
+    if not _SHA.fullmatch(dev_head) or not _SHA.fullmatch(main_before):
+        raise PromotionArtifactError("invalid expected candidate commit identity")
+    scratch = promotion.add_scratch_worktree(dev_head, repo=repo)
+    try:
+        state = promotion._read_pipeline_state(main_before, repo=repo)
+        promotion.consume_pending_changes(
+            scratch, main_head=main_before, repo=repo,
+            last_dev_head=(state.get("last_promotion") or {}).get("dev_head"),
+            trusted_source=Path(__file__).resolve().parent.parent,
+        )
+        return validate_artifacts(
+            directory, content_tree=promotion.build_promotion_tree(scratch),
+            dev_head=dev_head, main_before=main_before, projects=candidate_projects(scratch),
+            candidate_root=scratch,
+        )
+    except promotion.PromotionError as exc:
+        raise PromotionArtifactError(f"cannot compose trusted artifact sources: {exc}") from exc
+    finally:
+        promotion.remove_scratch_worktree(scratch, repo=repo)
+
+
 def validate_artifacts(
     directory: Path, *, content_tree: str, dev_head: str, main_before: str,
     projects: dict[str, str] | None = None,
+    candidate_root: Path | None = None,
 ) -> dict:
     """Validate transfer and exact composition binding, not signer authenticity."""
     try:
@@ -355,7 +428,7 @@ def validate_artifacts(
             path = directory / name
             if path.is_symlink() or not path.is_file() or _digest(path) != digest:
                 raise PromotionArtifactError(f"{name}: artifact digest mismatch")
-            validate_bundle(path, entry)
+            validate_bundle(path, entry, candidate_root=candidate_root)
         if {path.name for path in directory.iterdir()} != names:
             raise PromotionArtifactError("unexpected files in promotion artifact directory")
         if projects is not None and {
@@ -373,6 +446,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out-dir", required=True, type=Path)
     parser.add_argument("--dev-head")
     parser.add_argument("--main-before")
+    parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument(
         "--toolchain-source", choices=("governed", "seasoned-public"), default="governed",
     )
@@ -388,9 +462,8 @@ def main(argv: list[str] | None = None) -> int:
             index = json.loads(index_path.read_text(encoding="utf-8"))
             if not isinstance(index, dict):
                 raise PromotionArtifactError("invalid artifact index")
-            validate_artifacts(
-                args.out_dir, content_tree=index.get("content_tree"),
-                dev_head=args.dev_head, main_before=args.main_before,
+            validate_candidate_artifacts(
+                args.out_dir, repo=args.repo, dev_head=args.dev_head, main_before=args.main_before,
             )
         except (PromotionArtifactError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             print(f"promotion-python-artifacts: FAILED: {exc}", file=sys.stderr)
