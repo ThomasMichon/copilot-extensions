@@ -248,6 +248,7 @@ def _deferred_only_global_names() -> frozenset[str]:
 @pytest.mark.parametrize(
     "command, argv",
     [
+        ("attribution-prepare", ["attribution-prepare", "--json"]),
         ("status", ["status", "--json"]),
         ("claims", ["claims", "--json"]),
         ("status-context", ["status-context"]),

@@ -17,7 +17,7 @@ pytestmark = [
 def fixture(mode="codename", source="built-in", explicit=False):
     record = SimpleNamespace(worktree_id="private-tree", machine="private-machine",
                              codename="bolted-circuit", codename_source=source,
-                             worktree_path="fixture-root")
+                             worktree_path="fixture-root", sessions=[])
     config = SimpleNamespace(default_repo=SimpleNamespace(pr=SimpleNamespace(
         source_attribution=mode, source_attribution_configured=explicit,
     )))
@@ -67,10 +67,19 @@ def test_invalid_or_private_tag_is_refused(tag):
 
 def test_explicit_raw_mode_preserves_existing_contract():
     record, config = fixture(True)
+    record.sessions = [
+        SimpleNamespace(session_id="fixture-live", ended_at=None),
+        SimpleNamespace(session_id="fixture-ended", ended_at="past"),
+    ]
     result = cli.prepare("", record, config, head="abc")
     assert attribution.parse_marker(result["marker"]) == {
-        "worktree": "private-tree", "machine": "private-machine", "head": "abc",
+        "worktree": "private-tree", "machine": "private-machine",
+        "session": "fixture-live", "head": "abc",
     }
+    record.sessions[0].ended_at = "past"
+    assert attribution.parse_marker(cli.prepare("", record, config, head="abc")["marker"])[
+        "session"
+    ] == "fixture-ended"
 
 
 def test_empty_tagged_body_has_no_leading_blank_lines(monkeypatch):
