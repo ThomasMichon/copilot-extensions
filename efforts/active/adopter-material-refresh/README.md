@@ -225,7 +225,8 @@ repository creation, or private-environment capture was part of that proposal.
 - The current pull-request owner implements status/create/merge/wait; primary
   capability pages expose those verbs and the account-resolution dependency.
   The composition reference now describes the relay's discovered dynamic port,
-  explicit pinning, and compatibility fallback rather than a fixed default.
+  explicit pinning, and compatibility fallback rather than a fixed default;
+  the elevated sub-daemon row also follows its actual discovery owner.
 - Comment state is interpreted before fence markers outside real code, and
   angle-bracket destinations retain spaces in inline/reference links. Focused
   fixtures cover those rendered-navigation boundaries without changing runtime

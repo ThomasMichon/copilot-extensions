@@ -352,13 +352,13 @@ agent-logger is the reference cold-store provider (see its own plugin docs);
 
 Endpoint owners publish live discovery state rather than assigning a universal
 port map. Explicit port pinning and documented compatibility routes are
-component-specific; the table below distinguishes dynamic defaults from
-remaining fixed endpoints.
+component-specific; the table below distinguishes live discovery from
+explicit pinning and compatibility fallbacks.
 
 | Port | Owner | Purpose |
 |------|-------|---------|
 | **dynamic** (ephemeral) | agent-bridge daemon | HTTP API the CLI talks to. Binds an OS-assigned port and publishes it to the routing table (`active.json`); clients resolve it there — `agent-bridge status` reads the live port. The former fixed **9280/9281** (Windows/WSL) is retired as a default; a positive `port:` in `config.yaml` (or `--port`) still pins one, and `9280` remains only a last-resort client fallback. |
-| **9281** | agent-bridge elevated sub-daemon | Fixed loopback port for the Windows admin sub-daemon (`elevated.py` `ELEVATED_PORT`), reached via `acp-connect ws://127.0.0.1:9281/...`. Not yet migrated to discovery. |
+| **dynamic** (ephemeral) | agent-bridge elevated sub-daemon | Windows admin sub-daemon publishes its live endpoint in its own elevated routing table. Clients discover that port; `9281` is the legacy compatibility fallback when no active table is published. See the [endpoint owner](../plugins/agent-bridge/src/agent_bridge/elevated.py). |
 | **dynamic** by default | credential relay hosted by agent-bridge | `credentials.relay_port: 0` selects an OS-assigned port published by the daemon; agent-codespaces follows it for the SSH reverse-forward. A positive value pins a port; `9857` is only a last-resort compatibility fallback. See the [relay owner workflow](../plugins/agent-codespaces/skills/codespaces-lifecycle/SKILL.md#credential-relay). |
 
 ## Agent plugins vs harness plugins — and two senses of "harness"
