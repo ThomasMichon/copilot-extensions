@@ -220,14 +220,14 @@ def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
         return refuse("The destination must match exactly one live PR in the owning record.")
     pr = live[0]
     suffixes = [git_ops.worktree_suffix(record.worktree_id), record.codename]
+    suffix_bound = any(suffix and (
+        dest.endswith("-" + suffix) or dest in (f"pr/{suffix}", f"feature/{suffix}")
+    ) for suffix in suffixes)
     protected = {"main", "master", "dev", repo.default_branch, *hooks._protected_branches(cwd)}
     if (
         not pr.pr_id or pr.head_sha != expected
         or dest in protected or source in protected
         or not dest.startswith(("pr/", "feature/", "user/"))
-        or not any(suffix and (
-            dest.endswith("-" + suffix) or dest in (f"pr/{suffix}", f"feature/{suffix}")
-        ) for suffix in suffixes)
     ):
         return refuse("The saved PR identity/head or private suffix-bound destination is invalid.")
     from . import pr_publish
@@ -235,6 +235,10 @@ def verify(record, repo, remote: str, refspec: str, expected: str, *, cwd: str,
         pr.remote or remote != pr_publish.push_remote(repo, pr, cwd)
     ):
         return refuse("The destination is not the verified remote holding this PR's head.")
+    if not suffix_bound:
+        from .pr_custom_head import verify_attested
+        if not verify_attested(record, repo, pr, remote, expected, cwd=cwd):
+            return refuse("The custom PR head lacks matching saved and live publication ownership.")
     owner_branch = (
         f"worktree/{record.worktree_id}" if record.branch == record.worktree_id else record.branch
     )

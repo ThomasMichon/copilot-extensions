@@ -57,7 +57,8 @@ def _validate(worktree_id: str, config: Config, record: tracking.WorktreeRecord 
                 or not legacy_identity(pr, cwd) or pr.number is None or not pr.url):
             raise ValueError("Missing publication ownership or compatible legacy evidence; inspect the tracked PR.")
     if (pr.branch in {repo.default_branch, "main", "master", "dev", branch, *hooks._protected_branches(cwd)}
-            or (not recovery and not pr.branch.endswith("-" + git_ops.worktree_suffix(worktree_id)))
+            or (not recovery and not pr.branch.endswith("-" + git_ops.worktree_suffix(worktree_id))
+                and not (pr.rewrite_owner == f"{worktree_id}:{pr.branch}" and pr.rewrite_identity))
             or "/" not in pr.branch
             or pr.branch.startswith(("worktree/", "release/"))):
         raise ValueError("--rewrite-pr only rewrites a worktree-scoped private PR head.")
@@ -121,6 +122,10 @@ def push_changes(worktree_id: str, config: Config, record: tracking.WorktreeReco
             slug = pr_publish.push_slug(target.remote, cwd=cwd)
             if not identity or not slug:
                 raise ValueError(pr_publish.REPOINTED)
+            if not recovery and not pr.branch.endswith("-" + git_ops.worktree_suffix(worktree_id)):
+                from .pr_custom_head import verify_attested
+                if not verify_attested(fresh, repo, pr, target.remote, pr.head_sha, cwd=cwd):
+                    raise ValueError("Custom PR head lacks exact saved and live publication ownership.")
             if ((not recovery or pr.rewrite_identity)
                     and identity != (pr.rewrite_identity or legacy_identity(pr, cwd))):
                 raise ValueError("PR publication destination changed; nothing was pushed.")

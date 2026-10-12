@@ -953,6 +953,18 @@ The opt-in requires the owning `worktree/{id}` checkout, persisted successful
 head ending in that worktree's canonical creation suffix. Ownership also binds
 the full destination attested by publication, for origin as well as a fork;
 another destination with the same slug and tip does not inherit permission.
+An explicitly named head from `create-pr --branch pr/custom-name` also qualifies
+without the generated suffix when the successful publication already attested
+the exact worktree/branch and destination. The existing worktree PR ledger owns
+that branch-to-provider/repository/PR mapping; there is no parallel mapping
+store. Follow-up `push-changes`, watch, rebase and completion reuse the recorded
+branch. `set-pr --branch` records an association but does not manufacture
+publication ownership. For a custom head, rebase/rewrite publication freshly
+checks the same numbered open PR, head ref, expected full head SHA, destination
+identity, remote tip and exclusive ledger ownership. Missing, foreign or stale
+evidence fails closed; suffixes remain the default naming convenience, not the
+only proof of ownership.
+
 Legacy feature-branch checkouts, unowned `set-pr` associations, shared/default
 and release branches, missing leases, changed destinations and dirty trees
 are refused. Normal pre-push hooks, attribution and head tracking remain
