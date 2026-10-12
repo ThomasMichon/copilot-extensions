@@ -248,3 +248,19 @@ credential changes, broad policy weakening or unreviewed releases.
   still follow the dev contribution/release boundary, never a source exception.
 - These changes reduce workflow invocations and held review-grace time.
   Required/job check counts and test coverage have not been pruned in this wave.
+
+### 2026-10-12 - New coverage-evidence release blocker
+
+- Run `38250657887` passed canonical source suites but failed promotion because
+  the enrolled agent-worktrees coverage artifact was missing. Its separate
+  coverage rerun exited 2; optional-step handling hid that failure until the
+  required promotion evidence check correctly refused publication.
+- #6319 owns the repair. The collector exception rendered stderr *or* stdout,
+  so a no-data coverage warning hid the pytest collection cause. First preserve
+  both diagnostic streams, then fix the real cause using the live Linux lane.
+- Local Docker has no reachable daemon; no shared service is repaired or
+  started as a side effect. A contained synthetic real-collector failure covers
+  diagnostic behavior locally; this is not the actual worktrees reproduction.
+- No partial baseline, enrollment removal, forced retry or evidence bypass is
+  an acceptable release recovery. The duplicate full/coverage execution remains
+  a consolidation seam after the failure is understood.
