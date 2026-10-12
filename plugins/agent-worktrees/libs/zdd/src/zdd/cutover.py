@@ -400,7 +400,19 @@ class CutoverOrchestrator:
             detail={"old_port": old.port if old is not None else None},
         )
 
-        handle = spawn_passive(new_port)
+        try:
+            handle = spawn_passive(new_port)
+        except Exception as exc:
+            if conditional is None:
+                raise
+            result.error = f"conditional spawn failed ({type(exc).__name__})"
+            result.steps.append(result.error)
+            log.error(result.error)
+            write_breadcrumb(
+                state="started", old=old_dict, new_port=new_port,
+                error=result.error, started_at=started_at,
+            )
+            return result
         new_pid = getattr(handle, "pid", None)
         result.steps.append(f"spawned passive pid={new_pid if new_pid is not None else '?'} "
                             f"port={new_port}")

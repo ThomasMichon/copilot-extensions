@@ -335,6 +335,9 @@ def reap_abandoned_passive(
     now: datetime | None = None,
 ) -> dict:
     """Reap only under native transition authority with a fresh breadcrumb."""
+    import time
+
+    from . import routing
     from .cutover_lock import CutoverLock, CutoverLockedError
 
     try:
@@ -342,15 +345,44 @@ def reap_abandoned_passive(
             current = read_breadcrumb(config_dir)
             if current is not None and requires_conditional_recovery(current):
                 record = current
-            return _reap_abandoned_passive_locked(
-                config_dir, pid_alive=pid_alive, terminate=terminate,
-                active_pid=active_pid, grace_seconds=grace_seconds,
-                record=record, now=now,
-            )
+            elif record is not None and (
+                current is None or any(
+                    current.get(key) != record.get(key)
+                    for key in ("pid", "started_at", "old", "new_pid", "new_port")
+                )
+            ):
+                reason = "cutover identity changed; stale passive-reap evidence refused"
+                log.error(reason)
+                return {"reaped": False, "refused": True, "reason": reason, "pid": None}
+            with routing.routing_lock(config_dir, deadline=time.monotonic()):
+                table = routing.read_table(config_dir, strict=True) or {}
+                candidate = (record or current or {}).get("new_pid")
+                for key in ("active", "previous"):
+                    raw = table.get(key)
+                    if raw is not None and not isinstance(raw, dict):
+                        raise ValueError("routing entry is not an object")
+                    endpoint = routing.Endpoint.from_dict(raw) if raw else None
+                    if raw and endpoint is None:
+                        raise ValueError("routing entry identity is invalid")
+                    if endpoint is not None and endpoint.pid == candidate:
+                        return {
+                            "reaped": False,
+                            "reason": "recorded passive pid is published -- it was promoted",
+                            "pid": candidate,
+                        }
+                return _reap_abandoned_passive_locked(
+                    config_dir, pid_alive=pid_alive, terminate=terminate,
+                    active_pid=active_pid, grace_seconds=grace_seconds,
+                    record=record, now=now,
+                )
     except CutoverLockedError:
         log.error("Passive reap refused while native cutover authority is held")
         return {"reaped": False, "refused": True,
                 "reason": "native cutover in progress; reap refused", "pid": None}
+    except (OSError, ValueError) as exc:
+        reason = f"native routing authority unavailable; reap refused ({type(exc).__name__})"
+        log.error(reason)
+        return {"reaped": False, "refused": True, "reason": reason, "pid": None}
 
 
 def _reap_abandoned_passive_locked(

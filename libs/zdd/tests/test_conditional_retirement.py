@@ -227,3 +227,48 @@ def test_malformed_refusal_reason_is_explicit_failure(reason, caplog):
     message = breadcrumb.refusal_reason({"refused": True, "reason": reason})
     assert "outcome contract invalid" in message
     assert message in caplog.text
+
+
+def test_conditional_spawn_failure_is_redacted_and_preserves_owner_state(case):
+    root, old, _, _, snapshot, request, orch = case
+    secret = "fixture-sensitive-spawn-detail"
+
+    def spawn(port):
+        raise OSError(secret)
+
+    result = orch.run(
+        conditional=replace(
+            request, capture_runtime=lambda _: replace(snapshot, spawn_passive=spawn)
+        )
+    )
+    assert not result.ok and not result.committed
+    assert result.error == "conditional spawn failed (OSError)"
+    record = breadcrumb.read_breadcrumb(root)
+    assert record["state"] == "conditional-started"
+    assert record["error"] == result.error
+    assert routing.read_table(root)["active"] == old.to_dict()
+    assert secret not in repr(result.to_dict()) + repr(record)
+
+
+@pytest.mark.parametrize("publication", ["active", "previous", "changed-transition"])
+def test_passive_reap_revalidates_fresh_native_owner(case, publication):
+    root, old, _, _, _, _, _ = case
+    record = breadcrumb.write_breadcrumb(
+        root, state="started", old=old.to_dict(), new_pid=202, new_port=61002
+    )
+    if publication == "changed-transition":
+        breadcrumb.write_breadcrumb(root, state="started", new_pid=303, new_port=61003)
+    else:
+        candidate = replace(old, pid=202, process_start_time="2020", generation=2)
+        table = {"active": candidate.to_dict()} if publication == "active" else {
+            "active": old.to_dict(), "previous": candidate.to_dict()
+        }
+        routing._atomic_write(root / "active.json", table)
+    before = breadcrumb.breadcrumb_path(root).read_bytes()
+    calls = []
+    result = breadcrumb.reap_abandoned_passive(
+        root, record=record, active_pid=101, grace_seconds=0,
+        pid_alive=lambda pid: True, terminate=lambda pid: calls.append(pid) or True,
+    )
+    assert not result["reaped"] and calls == []
+    assert breadcrumb.breadcrumb_path(root).read_bytes() == before

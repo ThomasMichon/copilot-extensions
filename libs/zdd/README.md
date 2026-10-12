@@ -127,6 +127,11 @@ attempt. Contention is an explicit refusal, not a stale-state repair.
 Malformed refusal reasons are logged as outcome-contract failures and remain
 nonzero CLI outcomes. Invalid candidate PIDs cannot pass health or authorize
 disposal. Conditional cleanup uses the public deadline-bound `routing_lock`.
+Passive reaping revalidates the current transition identity and both active
+and previous routing publications while holding native routing authority
+through disposal. Caller-captured PID/record observations cannot authorize
+reaping a newly promoted process. Conditional spawn exceptions produce a
+redacted failed result and retain the unresolved owner breadcrumb.
 
 The supported in-process adapter is `run_conditional_cutover(config_dir,
 version=..., request=...)`. Bridge deployment/service restart and Dispatch
