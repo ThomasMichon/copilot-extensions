@@ -188,6 +188,15 @@ small and explicit while unit policy tests remain in-process.
   contract still needs ref/config/replacement/concurrency invalidation proof.
   Existing catalog, lifecycle, write-admission, provenance and test-portfolio
   owners retain their separately coordinated work.
+- Review identified that the initial second raw diff could enumerate
+  unrelated upstream files before filtering. Replaced it with exact,
+  nonrecursive `ls-tree` lookups, conservative argv-size batching and separate
+  ancestor/descendant requests. The final same-shape measurements retain
+  8 starts per cycle: one path 0.939s/0.867s, twenty 0.892s/0.776s. An
+  additional native fixture has 500 unrelated upstream paths and proves
+  those paths are absent from the lookup output. Large path sets may need
+  additional bounded batches; eight is the specified fixture budget, not
+  an unconditional promise for every repository.
 
 ### 2026-10-11 - Captured child safety
 

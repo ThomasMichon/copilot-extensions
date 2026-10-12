@@ -612,7 +612,7 @@ def _classify_git_state(
                 ahead=ahead, behind=behind, title=title,
                 **_drift_fields,
             )
-        upstream_changes = git_tree_diff.read(_g, upstream, effective_branch)
+        upstream_objects = git_tree_diff.read_objects(_g, upstream, branch_changes)
     except git_tree_diff.TreeDiffError as exc:
         log.warning("classify_worktree: tree comparison failed for %s: %s", path, exc)
         return WorktreeStateInfo(
@@ -624,9 +624,8 @@ def _classify_git_state(
     # Upstream-only changes do not make this branch WIP. Compare object IDs
     # only on paths changed by the branch, without two Git children per path.
     unmerged = any(
-        before != after
-        for file, (before, after) in upstream_changes.items()
-        if file in branch_changes
+        upstream_objects.get(file, "0" * len(after)) != after
+        for file, (_before, after) in branch_changes.items()
     )
     return WorktreeStateInfo(
         state=WorktreeState.WIP if unmerged else WorktreeState.COMPLETED,

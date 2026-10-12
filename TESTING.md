@@ -177,8 +177,10 @@ Agent-worktrees' tree-comparison policy tests also run in-process. The opt-in
 `--allow-explicit-tiers` and constructs isolated fresh Git repositories. It
 measures two unchanged divergent-WIP cycles with one and twenty changed
 paths, requiring eight direct classifier Git starts per cycle, excluding
-fixture setup. It also checks dirty/ref changes, Unicode names, replacement
-objects and differently shaped landed content. These are direct Git-launch
+fixture setup, with 500 unrelated upstream paths excluded from the actual
+lookup output. It also checks dirty/ref changes, Unicode names, replacement
+objects, exact ancestor/descendant lookups and differently shaped landed content.
+These are direct Git-launch
 budgets, not a host-wide spawn/window census or a deployed-daemon measurement.
 
 Large test modules should be split by behavioral contract, not by arbitrary

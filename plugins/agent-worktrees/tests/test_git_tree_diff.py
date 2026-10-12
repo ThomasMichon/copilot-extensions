@@ -27,6 +27,10 @@ def _raw(path, before=_BASE, after=_BRANCH, *, status="M", modes="100644 100644"
     return f":{modes} {before} {after} {status}\0{path}\0"
 
 
+def _tree(path, object_id=_BRANCH, *, kind="blob", mode="100644"):
+    return f"{mode} {kind} {object_id}\t{path}\0"
+
+
 def _result(stdout="", *, code=0):
     return subprocess.CompletedProcess(["git"], code, stdout, "unavailable" if code else "")
 
@@ -77,7 +81,7 @@ def _model(monkeypatch, tmp_path, comparisons, *, fetch=False):
             return _result("Pending work\n")
         if args[0] == "cherry":
             return _result("+ " + _BRANCH + "\n")
-        if args[0] == "diff":
+        if args[0] in ("diff", "ls-tree"):
             result = next(diffs)
             if isinstance(result, Exception):
                 raise result
@@ -94,20 +98,21 @@ def _model(monkeypatch, tmp_path, comparisons, *, fetch=False):
 @pytest.mark.portfolio_tier("T1")
 @pytest.mark.effect("filesystem")
 @pytest.mark.parametrize("branch,upstream,expected", [
-    (_raw("file"), _raw("file", _UPSTREAM, _BRANCH), "wip"),
-    (_raw("file"), _raw("unrelated"), "completed"),
-    (_raw("mode", modes="100644 100755"), _raw("mode", _BRANCH, _BRANCH), "completed"),
-    (_raw("mode", modes="100644 100755"), _raw("mode", _UPSTREAM, _BRANCH), "wip"),
-    (_raw("added", _ZERO, _BRANCH, status="A"), "", "completed"),
-    (_raw("added", _ZERO, _BRANCH, status="A"),
-     _raw("added", _ZERO, _BRANCH, status="A"), "wip"),
+    (_raw("file"), _tree("file", _UPSTREAM), "wip"),
+    (_raw("file"), _tree("file"), "completed"),
+    (_raw("mode", modes="100644 100755"), _tree("mode"), "completed"),
+    (_raw("mode", modes="100644 100755"), _tree("mode", _UPSTREAM), "wip"),
+    (_raw("added", _ZERO, _BRANCH, status="A"), _tree("added"), "completed"),
+    (_raw("added", _ZERO, _BRANCH, status="A"), "", "wip"),
     (_raw("deleted", _BASE, _ZERO, status="D"), "", "completed"),
+    (_raw("deleted", _BASE, _ZERO, status="D"), _tree("deleted", _BASE), "wip"),
     (_raw("deleted", _BASE, _ZERO, status="D"),
-     _raw("deleted", _BASE, _ZERO, status="D"), "wip"),
+     _tree("deleted", _UPSTREAM, kind="tree", mode="040000"), "wip"),
     (_raw("old", _BASE, _ZERO, status="D") + _raw("new", _ZERO, _BASE, status="A"),
-     _raw("old", _BASE, _ZERO, status="D"), "wip"),
-    (_raw("module", modes="160000 160000"), _raw("module", _UPSTREAM, _BRANCH), "wip"),
-    (_raw("line\nname"), _raw("line\nname", _UPSTREAM, _BRANCH), "wip"),
+     _tree("old", _BASE) + _tree("new", _BASE), "wip"),
+    (_raw("module", modes="160000 160000"),
+     _tree("module", _UPSTREAM, kind="commit", mode="160000"), "wip"),
+    (_raw("line\nname"), _tree("line\nname", _UPSTREAM), "wip"),
     ("", "", "unused"),
 ])
 def test_classifier_batches_objects_without_masking_unmerged_paths(
@@ -122,8 +127,13 @@ def test_classifier_batches_objects_without_masking_unmerged_paths(
     assert len(calls) == (8 if branch else 7)
     diff_calls = [call for call in calls if call[0] == "diff"]
     assert diff_calls[0][-3:] == (_BASE, "worktree/example", "--")
+    assert len(diff_calls) == 1
     if branch:
-        assert diff_calls[1][-3:] == ("origin/main", "worktree/example", "--")
+        lookup = [call for call in calls if call[0] == "ls-tree"]
+        assert lookup[0][:5] == ("ls-tree", "--full-tree", "-z", "origin/main", "--")
+        assert set(lookup[0][5:]) == {
+            f":(literal){path}" for path in git_tree_diff.parse(branch)
+        }
     for call in diff_calls:
         assert call[1:-3] == (
             "--raw", "--no-abbrev", "--no-renames", "--no-ext-diff",
@@ -156,8 +166,11 @@ def test_failed_tree_evidence_is_unknown_never_completed(
 @pytest.mark.effect("filesystem")
 def test_many_paths_still_use_two_tree_reads_and_no_blob_children(monkeypatch, tmp_path):
     branch = "".join(_raw(str(index)) for index in range(1000))
+    upstream = "".join(
+        _tree(str(index), _UPSTREAM if index == 999 else _BRANCH) for index in range(1000)
+    )
     info, calls = _model(monkeypatch, tmp_path, [
-        _result(branch), _result(_raw("999", _UPSTREAM, _BRANCH)),
+        _result(branch), _result(upstream),
     ])
     assert info.state == git_ops.WorktreeState.WIP
     assert len(calls) == 8
@@ -180,6 +193,67 @@ def test_comparisons_share_no_mutable_or_installation_state():
     assert compare("cell-c") == {"cell-c"}
 
 
+@pytest.mark.portfolio_tier("T0")
+@pytest.mark.parametrize("width", [40, 64])
+def test_lookup_preserves_literal_names_and_all_tree_entry_types(width):
+    object_id = "2" * width
+    entries = [
+        ("space name", "blob", "100644"),
+        ("line\nname", "tree", "040000"),
+        ("module", "commit", "160000"),
+    ]
+    output = "".join(
+        _tree(path, object_id, kind=kind, mode=mode) for path, kind, mode in entries
+    )
+    objects = git_tree_diff.read_objects(
+        lambda *args: _result(output), "upstream", [path for path, _kind, _mode in entries],
+    )
+    assert objects == {path: object_id for path, _kind, _mode in entries}
+
+
+@pytest.mark.portfolio_tier("T0")
+def test_lookup_bounds_arguments_and_keeps_ancestor_requests_separate(monkeypatch):
+    monkeypatch.setattr(git_tree_diff, "_MAX_ARG_UNITS", 220)
+    paths = ["dir", "dir/leaf", "colon:name", "star*[x]", "line\nname", "space name"]
+    calls = []
+
+    def run(*args):
+        assert sum(git_tree_diff._argument_cost(arg) for arg in ("git", *args)) <= 220
+        requested = [arg.removeprefix(":(literal)") for arg in args[5:]]
+        assert not any(
+            first != second and second.startswith(first + "/")
+            for first in requested for second in requested
+        )
+        calls.append(requested)
+        return _result("".join(_tree(path) for path in requested))
+
+    assert git_tree_diff.read_objects(run, "upstream", paths) == dict.fromkeys(paths, _BRANCH)
+    assert len(calls) > 1
+
+
+@pytest.mark.portfolio_tier("T0")
+@pytest.mark.parametrize("output", [
+    " ",
+    _tree("path")[:-1],
+    "100644 blob short\tpath\0",
+    _tree("path") + _tree("path"),
+    _tree("not-requested"),
+])
+def test_lookup_rejects_incomplete_or_unrequested_entries(output):
+    with pytest.raises(git_tree_diff.TreeDiffError):
+        git_tree_diff.read_objects(lambda *args: _result(output), "upstream", ["path"])
+
+
+@pytest.mark.portfolio_tier("T0")
+def test_lookup_reports_oversized_path_without_spawning(monkeypatch):
+    monkeypatch.setattr(git_tree_diff, "_MAX_ARG_UNITS", 120)
+    with pytest.raises(git_tree_diff.TreeDiffError, match="argument budget"):
+        git_tree_diff.read_objects(
+            lambda *args: pytest.fail("oversized argv must not be spawned"),
+            "upstream", ["x" * 200],
+        )
+
+
 def _native_fixture(root: Path, count: int) -> None:
     root.mkdir()
     git_ops.git("-c", "init.templateDir=", "init", "-q", "-b", "main", cwd=root)
@@ -200,7 +274,10 @@ def _native_fixture(root: Path, count: int) -> None:
     for index in range(count):
         value = "different\n" if index == count - 1 else "shared\n"
         (root / f"{index:03} caf\u00e9.txt").write_text(value, encoding="utf-8")
-    (root / "unrelated.txt").write_text("upstream only\n", encoding="utf-8")
+    unrelated = root / "upstream-only"
+    unrelated.mkdir()
+    for index in range(500):
+        (unrelated / f"{index:03}.txt").write_text("upstream only\n", encoding="utf-8")
     git_ops.git("add", ".", cwd=root)
     git_ops.git("commit", "-q", "-m", "Upstream work", cwd=root)
     git_ops.git("update-ref", "refs/remotes/origin/main", "HEAD", cwd=root)
@@ -231,6 +308,9 @@ def test_native_two_cycle_budget_and_fresh_mutable_state(monkeypatch, tmp_path, 
         result = real_run(cmd, **kwargs)
         if cmd[0] == "git":
             starts.append(tuple(cmd[1:]))
+            if cmd[1] == "ls-tree":
+                assert "upstream-only" not in result.stdout
+                assert len(result.stdout.split("\0")[:-1]) <= count
         return result
 
     monkeypatch.setattr(git_ops.subprocess, "run", counted_run)
@@ -267,6 +347,13 @@ def test_native_two_cycle_budget_and_fresh_mutable_state(monkeypatch, tmp_path, 
         lambda *args: git_ops.git(*args, cwd=root), "origin/main", "HEAD",
     ) == {}
     git_ops.git("replace", "-d", branch_head, cwd=root)
+    monkeypatch.setattr(git_ops.subprocess, "run", real_run)
+    exact = git_tree_diff.read_objects(
+        lambda *args: git_ops.git(*args, cwd=root),
+        "origin/main", ["upstream-only", "upstream-only/000.txt"],
+    )
+    assert set(exact) == {"upstream-only", "upstream-only/000.txt"}
+    monkeypatch.setattr(git_ops.subprocess, "run", counted_run)
     git_ops.git("checkout", "-q", "main", cwd=root)
     (root / f"{count - 1:03} caf\u00e9.txt").write_text("shared\n", encoding="utf-8")
     git_ops.git("commit", "-q", "-am", "Land content with a different patch shape", cwd=root)
