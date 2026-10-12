@@ -58,6 +58,12 @@ The plugin installs via the Copilot CLI marketplace. The runtime installs
 via init/install scripts (or first-use provisioning from the global binstub)
 and provides the `agent-worktrees` CLI and per-project binstubs.
 
+Structured installs capture the payload and canonical development libraries
+in one staging tree, preserving their relative dependency paths. Packaged
+releases retain their local library copies. Dependency builds use the captured
+stage rather than rereading the original checkout; canonical symbolic links and
+reparse points are refused rather than retained as external dependencies.
+
 The runtime does not install Textual or the UI rendering stack. Picker and Mux
 Companion presentation belongs to the separately installed Worktree Manager,
 reached over a process boundary. The small `packaging` dependency is explicit

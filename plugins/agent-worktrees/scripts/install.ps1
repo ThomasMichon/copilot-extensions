@@ -261,9 +261,23 @@ if ($ContextualInstall) {
         $contextStage = Join-Path $contextStageRoot (
             (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfff') + "-$PID"
         )
-        New-Item -ItemType Directory -Force -Path $contextStage | Out-Null
-        Copy-Item -LiteralPath $contextPayload -Destination $contextStage -Recurse -Force
-        $contextStagedPayload = Join-Path $contextStage (Split-Path -Leaf $contextPayload)
+        # Preserve ../../libs references in a self-contained context stage.
+        $contextPluginsStage = Join-Path $contextStage 'plugins'
+        New-Item -ItemType Directory -Force -Path $contextPluginsStage | Out-Null
+        Copy-Item -LiteralPath $contextPayload -Destination $contextPluginsStage -Recurse -Force
+        $contextCanonicalLibs = Join-Path $contextPayload '..\..\libs'
+        if (Test-Path -LiteralPath $contextCanonicalLibs -PathType Container) {
+            $contextIndirected = @(
+                Get-Item -LiteralPath $contextCanonicalLibs -Force
+                Get-ChildItem -LiteralPath $contextCanonicalLibs -Recurse -Force
+            ) | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }
+            if ($contextIndirected) {
+                throw 'Canonical context dependencies contain symbolic links or reparse points.'
+            }
+            Copy-Item -LiteralPath $contextCanonicalLibs `
+                -Destination (Join-Path $contextStage 'libs') -Recurse -ErrorAction Stop
+        }
+        $contextStagedPayload = Join-Path $contextPluginsStage (Split-Path -Leaf $contextPayload)
         $contextStagedEntry = Join-Path (
             Join-Path $contextStagedPayload 'scripts'
         ) (Split-Path -Leaf $PSCommandPath)

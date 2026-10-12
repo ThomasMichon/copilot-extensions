@@ -207,9 +207,21 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         cd "$HOME"
         __aw_stage_root="$__aw_install_root/.install-stage"
         __aw_stage="$__aw_stage_root/$(date -u +%Y%m%dT%H%M%S)-$$"
-        mkdir -p "$__aw_stage"
-        cp -a "$PLUGIN_DIR" "$__aw_stage/"
-        __aw_staged_payload="$__aw_stage/$(basename "$PLUGIN_DIR")"
+        # Preserve ../../libs references in a self-contained context stage.
+        mkdir -p "$__aw_stage/plugins"
+        cp -a "$PLUGIN_DIR" "$__aw_stage/plugins/"
+        __aw_canonical_libs="$PLUGIN_DIR/../../libs"
+        if [[ -d "$__aw_canonical_libs" ]]; then
+            __aw_dependency_links="$(find "$__aw_canonical_libs" -type l -print -quit)" ||
+                exit $?
+            if [[ -L "$__aw_canonical_libs" ||
+                  -n "$__aw_dependency_links" ]]; then
+                printf '%s\n' "ERROR: canonical context dependencies contain symbolic links" >&2
+                exit 1
+            fi
+            cp -a "$__aw_canonical_libs" "$__aw_stage/libs"
+        fi
+        __aw_staged_payload="$__aw_stage/plugins/$(basename "$PLUGIN_DIR")"
         for __aw_sibling in "$__aw_stage_root"/*; do
             [[ -d "$__aw_sibling" && "$__aw_sibling" != "$__aw_stage" ]] ||
                 continue
