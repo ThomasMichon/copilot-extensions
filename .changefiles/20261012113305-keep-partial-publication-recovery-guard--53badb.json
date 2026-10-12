@@ -1,0 +1,9 @@
+{
+  "comment": "Keep partial-publication recovery guard Git destination snapshots in-process",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

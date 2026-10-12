@@ -497,6 +497,13 @@ win grows with build complexity.
   which deliberately differ. Before release writes, publication repeats the
   check against the actual merged tree. Regressions poison candidate
   composition modules and reject changed sources or invented library labels.
+- Required CI against the moving dev merge baseline exposed a guard-fixture
+  leak: partial-publication dispatch mocked pushes but not the newer
+  destination-snapshot Git reads, trying to run Git in the fictional
+  `fixture` directory. The in-process guard now supplies bounded synthetic
+  remote/config reads while preserving all four recovery-dispatch assertions;
+  its isolated runner passes all 21 cases. No production publication logic
+  was relaxed.
 
 ### 2026-10-12 - Phase 2 slice 4: explicit public build-toolchain integration
 
