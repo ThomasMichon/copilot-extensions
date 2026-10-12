@@ -42,7 +42,10 @@ Only requested names incur source resolution, but all matching marketplace
 identities remain visible so ambiguity is never resolved by choosing the first.
 Report authority applies within the requested names; reconciliation preserves
 excluded prior entries while still removing authoritatively absent sources for
-selected names. Omitting the filter retains full-roster behavior.
+selected names. Excluded `enabledPlugins` entries do not affect filtered
+authority. Selected entry types, whole-document reads and shape, and shared
+marketplace definitions retain their existing validation. Omitting the filter
+retains full-roster behavior.
 
 **In dev**, most consumers' `pyproject.toml` reference this library through a
 `uv`-editable canonical pointer (`vendor-pointer-generalization` effort,

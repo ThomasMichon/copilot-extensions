@@ -196,7 +196,7 @@ def resolve_active_plugins(
     memo = MarketplaceMemo()
     selected_names = frozenset(plugin_names) if plugin_names is not None else None
 
-    global_settings = _user_settings(copilot_home)
+    global_settings = _user_settings(copilot_home, plugin_names=plugin_names)
     registry_findings.extend(global_settings.findings)
     for source in global_settings.settings.enabled_sources():
         if selected_names is not None and split_source(source)[0] not in selected_names:
@@ -219,7 +219,7 @@ def resolve_active_plugins(
         registry_findings.extend(project_findings)
         settings_authorities.append(projects_authority)
         for project, root in project_roots:
-            project_settings = _read_settings(root, SETTINGS_RELS)
+            project_settings = _read_settings(root, SETTINGS_RELS, plugin_names=plugin_names)
             settings_authorities.append(project_settings.authority)
             registry_findings.extend(project_settings.findings)
             for source in project_settings.settings.enabled_sources():
