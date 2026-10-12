@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, NoReturn, ParamSpec, TypeVar
 
-from . import breadcrumb, diagnostics, routing
+from . import breadcrumb, diagnostics, publication_history, routing
 from .cutover import CutoverError
 from .routing import Endpoint
 
@@ -94,6 +94,7 @@ class PreparedCutover:
         self.request = request
         self.old = request.expected_active
         self.new: Endpoint | None = None
+        self.publication_witness: str | None = None
         if not math.isfinite(request.routing_lock_timeout) or request.routing_lock_timeout < 0:
             raise ValueError("routing_lock_timeout must be finite and nonnegative")
         if not math.isfinite(request.retirement_timeout) or request.retirement_timeout < 0:
@@ -176,6 +177,9 @@ class PreparedCutover:
         )
 
     def spawn(self, port: int) -> _Handle:
+        self.publication_witness = routing.publication_witness(
+            self.orch.config_dir, deadline=self.deadline(),
+        )
         handle = self.snapshot.spawn_passive(port)
         raw_pid = getattr(handle, "pid", None)
         pid = raw_pid if type(raw_pid) is int and raw_pid > 0 else None
@@ -351,6 +355,10 @@ class PreparedCutover:
                         endpoint.pid == self.new.pid or endpoint.port == self.new.port
                     ):
                         raise CutoverError("candidate has been published; refusing disposal")
+                if not publication_history.never_published(
+                    table, self.publication_witness, pid=self.new.pid, port=self.new.port,
+                ):
+                    raise CutoverError("candidate publication history unverified; refusing disposal")
                 if handle.poll() is None:
                     if (
                         self.new is None

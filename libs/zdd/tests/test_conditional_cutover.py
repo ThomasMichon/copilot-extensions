@@ -194,6 +194,56 @@ def test_conditional_success_uses_captured_context_and_attests_retirement(case, 
     assert secret not in repr(request) + repr(result.to_dict())
 
 
+def test_candidate_promoted_then_displaced_twice_is_not_disposed(case):
+    root, _, events, handle, snapshot, request, orch = case
+
+    def attest(endpoint):
+        attested = snapshot.attest(endpoint)
+        if endpoint.pid == 202:
+            for pid, port in ((202, 61002), (303, 61003), (404, 61004)):
+                routing.publish_active(
+                    root, bind="127.0.0.1", port=port, pid=pid,
+                    version="2.0.0", demote_existing=True,
+                )
+            return replace(attested, ready=False)
+        return attested
+
+    request = replace(request, capture_runtime=lambda _: replace(snapshot, attest=attest))
+    result = orch.run(conditional=request, health_timeout=0)
+    assert not result.ok and not result.rolled_back
+    assert handle.poll() is None and events == ["spawn"]
+    assert any("candidate disposal refused" in step for step in result.steps)
+
+
+@pytest.mark.parametrize("content", ["{", "{}", '{"state":"unknown"}'])
+def test_ordinary_cutover_refuses_unverifiable_breadcrumb(case, content):
+    root, _, events, _, _, _, orch = case
+    breadcrumb.breadcrumb_path(root).write_text(content)
+    result = orch.run()
+    assert not result.ok and "owner-led recovery" in result.error
+    assert events == []
+    assert breadcrumb.breadcrumb_path(root).read_text() == content
+
+
+def test_ordinary_cutover_returns_failure_on_unverifiable_route(case):
+    root, _, events, _, _, _, orch = case
+    routing.routing_table_path(root).write_text("{corrupt")
+    result = orch.run()
+    assert not result.ok and "publication custody unavailable" in result.error
+    assert events == [] and breadcrumb.read_breadcrumb(root) is None
+    assert routing.routing_table_path(root).read_text() == "{corrupt"
+
+
+def test_saturated_history_does_not_block_verified_owner_handoff(case, monkeypatch):
+    from zdd import publication_history
+
+    root, _, events, _, _, request, orch = case
+    monkeypatch.setattr(publication_history, "MAX_ENTRIES", 1)
+    result = orch.run(conditional=request)
+    assert result.ok and events == ["spawn", "drain", "shutdown"]
+    assert routing.read_table(root)[publication_history.KEY]["saturated"]
+
+
 @pytest.mark.parametrize("after_flip", [False, True])
 def test_conditional_config_mismatch_rolls_back_before_retiring(case, after_flip):
     root, old, events, _, snapshot, request, orch = case

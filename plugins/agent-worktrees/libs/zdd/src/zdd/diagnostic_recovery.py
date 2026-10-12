@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import replace
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from . import breadcrumb
+from . import breadcrumb, publication_history, routing
 from .cutover_lock import CutoverLock, CutoverLockedError, lock_path
 
 if TYPE_CHECKING:
@@ -16,16 +17,44 @@ if TYPE_CHECKING:
 log = logging.getLogger("zdd")
 
 
+def terminate_unpromoted(ctx: DiagnosticContext, pid: int, start_time: str | None) -> dict:
+    """Generic diagnostics cannot discard a generation that may have served."""
+    try:
+        with routing.routing_lock(ctx.config_dir, deadline=time.monotonic() + 1.0):
+            table = routing.read_table(ctx.config_dir, strict=True) or {}
+            record = breadcrumb.read_breadcrumb(ctx.config_dir) or {}
+            if publication_history.candidate_never_published(
+                table, record, pid, start_time,
+            ):
+                return ctx.terminate_pid_if_identity(pid, start_time)
+            reason = "publication custody unverified; native owner retirement required"
+    except (OSError, ValueError) as exc:
+        reason = f"publication custody unavailable ({type(exc).__name__}); retirement refused"
+    log.error(reason)
+    return {"killed": False, "identity_verified": False, "blocked": True, "reason": reason}
+
+
+def mark_custody_refusals(findings: list[dict], table: dict, record: dict) -> None:
+    for finding in findings:
+        if finding.get("kind") not in {
+            "abandoned_passive", "superseded_generation", "duplicate_resident",
+        }:
+            continue
+        for target in finding.get("targets", []):
+            if not publication_history.candidate_never_published(
+                table, record, target.get("pid"), target.get("start_time"),
+            ):
+                finding["repairable"] = False
+                finding["blocked_reason"] = (
+                    "publication custody unverified; native owner retirement required"
+                )
+                break
+
+
 def conditional_recovery_report(ctx: DiagnosticContext) -> dict | None:
     record = breadcrumb.read_breadcrumb(ctx.config_dir)
-    unavailable = (
-        record is None and breadcrumb.breadcrumb_path(ctx.config_dir).exists()
-    ) or (
-        record is not None and record.get("state") not in {
-            "started", "flipped", "draining", "committed", "rolled_back", "failed",
-        } and not breadcrumb.requires_conditional_recovery(record)
-    )
-    if not unavailable and not breadcrumb.requires_conditional_recovery(record):
+    reason = breadcrumb.recovery_refusal(ctx.config_dir, record)
+    if reason is None:
         return None
     from .diagnostics import _candidate_map
 
@@ -36,10 +65,6 @@ def conditional_recovery_report(ctx: DiagnosticContext) -> dict | None:
         candidates = {}
         inventory_error = type(exc).__name__
         log.error("Conditional recovery inventory unavailable (%s)", inventory_error)
-    reason = (
-        "recovery state cannot be verified; owner-led recovery required" if unavailable
-        else "conditional cutover requires owner-led recovery"
-    )
     finding = {
         "kind": "conditional_recovery", "repairable": False,
         "reason": reason, "targets": [],

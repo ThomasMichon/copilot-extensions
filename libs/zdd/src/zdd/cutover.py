@@ -295,10 +295,9 @@ class CutoverOrchestrator:
             lock = CutoverLock(self.config_dir)
             lock.acquire(timeout=lock_timeout)
             try:
-                if conditional is None and breadcrumb.requires_conditional_recovery(
-                    breadcrumb.read_breadcrumb(self.config_dir)
-                ):
-                    reason = "conditional cutover requires owner-led recovery"
+                record = breadcrumb.read_breadcrumb(self.config_dir)
+                reason = breadcrumb.recovery_refusal(self.config_dir, record)
+                if conditional is None and reason is not None:
                     log.error("Ordinary cutover refused: %s", reason)
                     return CutoverResult(ok=False, error=reason, steps=[f"refused: {reason}"])
                 prepared = None
@@ -347,9 +346,13 @@ class CutoverOrchestrator:
         from zdd import lifecycle
 
         result = CutoverResult(ok=False, conditional=conditional is not None)
+        publication_witness = None
+        new_process_start_time = None
         def write_breadcrumb(**kwargs: Any) -> dict:
             if conditional:
                 kwargs["state"] = "conditional-" + kwargs["state"]
+            kwargs["publication_witness"] = publication_witness
+            kwargs["new_process_start_time"] = new_process_start_time
             return breadcrumb.write_breadcrumb(self.config_dir, **kwargs)
 
         spawn_passive = conditional.spawn if conditional else self.spawn_passive
@@ -388,6 +391,16 @@ class CutoverOrchestrator:
             result.error = "candidate port must differ from predecessor"
             result.steps.append(f"refused: {result.error}")
             return result
+        if self.routing is routing and conditional is None:
+            try:
+                publication_witness = routing.publication_witness(
+                    self.config_dir, deadline=time.monotonic() + 5.0,
+                )
+            except (routing.ActivePublicationRefused, OSError, ValueError) as exc:
+                result.error = f"native publication custody unavailable ({type(exc).__name__})"
+                result.steps.append(f"refused: {result.error}")
+                log.error(result.error)
+                return result
 
         # Durable breadcrumb (#1756): written *before* the drain gate is ever
         # touched, so if this orchestrator dies mid-cutover the aborted attempt
@@ -408,6 +421,8 @@ class CutoverOrchestrator:
 
         try:
             handle = spawn_passive(new_port)
+            if conditional:
+                publication_witness = conditional.publication_witness
         except Exception as exc:
             if conditional is None:
                 raise
@@ -420,6 +435,10 @@ class CutoverOrchestrator:
             )
             return result
         new_pid = getattr(handle, "pid", None)
+        if type(new_pid) is int and new_pid > 0:
+            from .diagnostics import process_start_time
+
+            new_process_start_time = process_start_time(new_pid)
         result.steps.append(f"spawned passive pid={new_pid if new_pid is not None else '?'} "
                             f"port={new_port}")
         # Record the passive's own pid the moment it is known -- before the

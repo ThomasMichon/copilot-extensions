@@ -52,6 +52,41 @@ an identity-bound supervisor must reject that unverified route, not substitute
 a fresh token. This field does not itself implement a singleton manager, provide
 Windows handle custody, or change listener-based client fallback.
 
+The same routing owner maintains `publication_history` in `active.json`.
+Every serialized publish, restore, clear and stale-route mutation preserves
+sticky nonsecret PID/start/address/generation evidence. Removing a daemon from
+both current rows does not erase its promotion. A passive launcher captures
+`publication_witness` under native routing authority **before** spawning;
+breadcrumbs preserve this epoch and the candidate's birth-time process token.
+Missing/malformed history, a changed epoch, an unknown birth token or a matching
+PID/port publication cannot authorize disposal. PID/port reuse conservatively
+blocks cleanup instead of weakening custody.
+Conservative custody is durably committed while the old route remains visible,
+before publishing a route that can admit work. Writes flush the file and parent
+directory on POSIX and use a flushed file plus native write-through replacement
+on Windows. A failed final flip may retain an extra protected candidate; it
+must never manufacture a false negative after a crash.
+
+Storage is capped at 2,048 retained entries. No remembered publication is pruned;
+capacity exhaustion sets a sticky saturation flag and disables negative proofs
+for all other candidates. Verified owner-controlled handoffs remain available,
+but unproven orphan cleanup stays refused. A legacy writer that drops the
+history invalidates earlier witnesses; later initialization cannot certify an
+already-running candidate. The passive spawn contract must actually block work
+admission before promotion, not merely refrain from publishing a route.
+
+Generic diagnostics now retains promoted or unverifiable generations for native
+owner retirement, even if classified as duplicates or superseded. It may
+dispose only a fresh, identity-matched candidate with a pre-birth witness and
+complete negative publication evidence, rechecked under native routing authority
+at the termination point. A valid current owner alone is not disposal authority.
+Ordinary cutover also refuses unreadable or unknown recovery states rather than
+overwriting them with a new attempt.
+An unreadable/corrupt routing table is a typed `ActivePublicationRefused` for
+writers and a failed result before spawn for ordinary cutover. Read-only
+client fallback remains tolerant; mutation must not infer an empty namespace
+from unavailable custody evidence.
+
 ### `zdd.cutover` -- the cutover orchestrator
 
 `CutoverOrchestrator` drives one active/passive cutover: spawn the new daemon on

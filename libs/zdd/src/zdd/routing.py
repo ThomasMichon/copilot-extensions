@@ -55,6 +55,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import publication_history, routing_persistence
+
 log = logging.getLogger("zdd")
 
 _TABLE_FILENAME = "active.json"
@@ -335,18 +337,39 @@ def read_active_endpoint(
 
 def _atomic_write(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=False), encoding="utf-8")
-    for attempt in range(20):
-        try:
-            os.replace(tmp, path)
-            return
-        except OSError as exc:
-            # Windows readers and scanners can temporarily deny replacement.
-            # Never retry unrelated errors or suppress a permanent failure.
-            if getattr(exc, "winerror", None) not in (5, 32, 33) or attempt == 19:
-                raise
-            time.sleep(0.05)
+    previous = _read_mutation_table(path.parent)
+    if publication_history.KEY in previous and publication_history.read(previous) is None:
+        log.error("Publication history unavailable; prior negative proofs invalidated")
+    data[publication_history.KEY] = publication_history.updated(previous, data)
+    # Persist conservative custody before making the new route visible. A
+    # daemon can admit work as soon as another process sees the renamed route.
+    protected = {**previous, publication_history.KEY: data[publication_history.KEY]}
+    routing_persistence.write(path, protected)
+    routing_persistence.write(path, data)
+
+
+def _read_mutation_table(config_dir: str | os.PathLike[str]) -> dict:
+    try:
+        return read_table(config_dir, strict=True) or {}
+    except (OSError, ValueError) as exc:
+        reason = f"routing state unverifiable ({type(exc).__name__}); owner-led recovery required"
+        log.error(reason)
+        raise ActivePublicationRefused(reason) from None
+
+
+def publication_witness(
+    config_dir: str | os.PathLike[str], *, deadline: float,
+) -> str:
+    """Capture routing-owned evidence before a passive candidate is born."""
+    with _routing_lock(config_dir, deadline=deadline):
+        table = _read_mutation_table(config_dir)
+        history = publication_history.read(table)
+        if history is None:
+            _atomic_write(routing_table_path(config_dir), table)
+            history = publication_history.read(table)
+        if history is None:
+            raise ActivePublicationRefused("publication history cannot establish candidate custody")
+        return history["epoch"]
 
 
 def _next_generation(data: dict | None) -> int:
@@ -393,7 +416,7 @@ def _publish_active_unlocked(
                 "identity-bound supervision must reject this route", pid,
             )
     path = routing_table_path(config_dir)
-    current = read_table(config_dir) or {}
+    current = _read_mutation_table(config_dir)
     gen = generation if generation is not None else _next_generation(current)
 
     new_active = Endpoint(

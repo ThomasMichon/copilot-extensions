@@ -100,6 +100,19 @@ def read_breadcrumb(config_dir: str | os.PathLike[str]) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def recovery_refusal(config_dir: str | os.PathLike[str], record: dict | None) -> str | None:
+    """Shared refusal for existing custody that legacy paths cannot interpret."""
+    if requires_conditional_recovery(record):
+        return "conditional cutover requires owner-led recovery"
+    if (
+        record is None and breadcrumb_path(config_dir).exists()
+    ) or (
+        record is not None and record.get("state") not in _NON_TERMINAL | _TERMINAL
+    ):
+        return "recovery state cannot be verified; owner-led recovery required"
+    return None
+
+
 def write_breadcrumb(
     config_dir: str | os.PathLike[str],
     *,
@@ -110,6 +123,8 @@ def write_breadcrumb(
     pid: int | None = None,
     error: str | None = None,
     started_at: str | None = None,
+    publication_witness: str | None = None,
+    new_process_start_time: str | None = None,
 ) -> dict:
     """Write/update the cutover breadcrumb atomically. Returns the record.
 
@@ -133,6 +148,8 @@ def write_breadcrumb(
         "new_port": new_port,
         "new_pid": new_pid,
         "error": error,
+        "publication_witness": publication_witness,
+        "new_process_start_time": new_process_start_time,
     }
     _atomic_write(breadcrumb_path(config_dir), record)
     return record
@@ -224,10 +241,11 @@ def _recover_stale_cutover_locked(
     gate would see nothing to do.
     """
     record = read_breadcrumb(config_dir)
-    if requires_conditional_recovery(record):
-        log.error("Conditional cutover requires owner-led recovery; legacy recovery refused")
+    refusal = recovery_refusal(config_dir, record)
+    if refusal is not None:
+        log.error("Legacy recovery refused: %s", refusal)
         return {"recovered": False, "refused": True,
-                "reason": "conditional cutover requires owner-led recovery"}
+                "reason": refusal}
     if not is_stale(record):
         return {"recovered": False, "reason": "no stale cutover breadcrumb"}
 
@@ -239,6 +257,8 @@ def _recover_stale_cutover_locked(
             pid=record.get("pid"),
             old=None, new_port=record.get("new_port"),
             new_pid=record.get("new_pid"),
+            publication_witness=record.get("publication_witness"),
+            new_process_start_time=record.get("new_process_start_time"),
             error=record.get("error") or "aborted before drain",
             started_at=record.get("started_at"),
         )
@@ -264,6 +284,8 @@ def _recover_stale_cutover_locked(
             pid=record.get("pid"),
             new_port=record.get("new_port"),
             new_pid=record.get("new_pid"),
+            publication_witness=record.get("publication_witness"),
+            new_process_start_time=record.get("new_process_start_time"),
             error=(record.get("error") or "aborted") + "; survivor unreachable",
             started_at=record.get("started_at"),
         )
@@ -293,6 +315,8 @@ def _recover_stale_cutover_locked(
         pid=record.get("pid"),
         new_port=record.get("new_port"),
         new_pid=record.get("new_pid"),
+        publication_witness=record.get("publication_witness"),
+        new_process_start_time=record.get("new_process_start_time"),
         error=record.get("error") or "aborted cutover recovered",
         started_at=record.get("started_at"),
     )
@@ -350,12 +374,17 @@ def reap_abandoned_passive(
     try:
         with CutoverLock(config_dir):
             current = read_breadcrumb(config_dir)
-            if current is not None and requires_conditional_recovery(current):
-                record = current
-            elif record is not None and (
+            refusal = recovery_refusal(config_dir, current)
+            if refusal is not None:
+                log.error("Passive reap refused: %s", refusal)
+                return {"reaped": False, "refused": True, "reason": refusal, "pid": None}
+            if record is not None and (
                 current is None or any(
                     current.get(key) != record.get(key)
-                    for key in ("pid", "started_at", "old", "new_pid", "new_port")
+                    for key in (
+                        "pid", "started_at", "old", "new_pid", "new_port",
+                        "publication_witness", "new_process_start_time",
+                    )
                 )
             ):
                 reason = "cutover identity changed; stale passive-reap evidence refused"
@@ -433,11 +462,9 @@ def _reap_abandoned_passive_locked(
       abandoned and must never be touched,
     - ``pid_alive(new_pid)`` is falsy (already gone -- nothing to do).
 
-    ``pid_alive`` and ``terminate`` are injected so this stays pure/stdlib:
-    a real caller should compose a positive identity check into ``pid_alive``
-    (e.g. re-verify the pid is still a coordinator process by cmdline, not
-    just "some process with this number") to guard against pid reuse, mirroring
-    the identity-check discipline in ``single_instance_lease``'s reaper.
+    The birth-time process token and pre-spawn publication witness must both
+    remain verifiable. ``terminate`` must additionally bind the final mutation
+    to that exact process using a native handle; preflight alone is not a fence.
 
     Callers must pass the **same breadcrumb record** they read before calling
     :func:`recover_stale_cutover` (via ``record=``) rather than letting this
@@ -476,6 +503,20 @@ def _reap_abandoned_passive_locked(
         }
     if not pid_alive(new_pid):
         return {"reaped": False, "reason": "recorded passive pid is not alive", "pid": new_pid}
+    from . import diagnostics, publication_history, routing
+
+    table = routing.read_table(config_dir, strict=True) or {}
+    start = rec.get("new_process_start_time")
+    if (
+        not isinstance(start, str) or not start
+        or diagnostics.process_start_time(new_pid) != start
+        or not publication_history.never_published(
+            table, rec.get("publication_witness"), pid=new_pid, port=rec.get("new_port"),
+        )
+    ):
+        reason = "candidate promoted or publication history unverified; owner-led recovery required"
+        log.error(reason)
+        return {"reaped": False, "refused": True, "reason": reason, "pid": new_pid}
     try:
         ok = bool(terminate(new_pid))
     except Exception as exc:  # noqa: BLE001 -- reap is best-effort, never raised

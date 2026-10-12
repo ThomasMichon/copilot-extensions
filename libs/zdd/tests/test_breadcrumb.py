@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from zdd import breadcrumb
+import pytest
+
+from zdd import breadcrumb, routing
+
+
+@pytest.fixture(autouse=True)
+def process_identities(monkeypatch):
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: str(pid * 10))
 
 
 def test_recover_stale_cutover_brackets_ipv6_old_endpoint(tmp_path: Path):
@@ -48,9 +55,14 @@ def _write_aged_breadcrumb(tmp_path: Path, *, new_pid: int | None, age_s: float,
                            state: str = "started") -> dict:
     """Write a breadcrumb whose ``updated_at`` is ``age_s`` seconds in the past."""
     from datetime import datetime, timedelta, timezone
+    import time
 
     record = breadcrumb.write_breadcrumb(
         tmp_path, state=state, old=None, new_port=9290, new_pid=new_pid,
+        publication_witness=routing.publication_witness(
+            tmp_path, deadline=time.monotonic() + 1,
+        ),
+        new_process_start_time=str(new_pid * 10) if new_pid is not None else None,
     )
     record["updated_at"] = (
         datetime.now(timezone.utc) - timedelta(seconds=age_s)
@@ -162,9 +174,15 @@ def test_reap_abandoned_passive_terminate_failure_is_reported(tmp_path: Path):
 
 
 def test_recovery_preserves_original_transition_identity_for_fresh_guarded_reap(tmp_path):
+    import time
+
     original = breadcrumb.write_breadcrumb(
         tmp_path, state="draining", pid=987654321,
         old={"bind": "127.0.0.1", "port": 61001}, new_pid=202, new_port=61002,
+        publication_witness=routing.publication_witness(
+            tmp_path, deadline=time.monotonic() + 1,
+        ),
+        new_process_start_time="2020",
     )
 
     class Client:
@@ -174,9 +192,25 @@ def test_recovery_preserves_original_transition_identity_for_fresh_guarded_reap(
     recovery = breadcrumb.recover_stale_cutover(tmp_path, lambda _: Client())
     assert recovery["recovered"]
     assert breadcrumb.read_breadcrumb(tmp_path)["pid"] == original["pid"]
+    assert breadcrumb.read_breadcrumb(tmp_path)["publication_witness"] == original["publication_witness"]
     terminated = []
     reap = breadcrumb.reap_abandoned_passive(
         tmp_path, record=original, active_pid=101, grace_seconds=0,
         pid_alive=lambda _: True, terminate=lambda pid: terminated.append(pid) or True,
     )
     assert reap["reaped"] and terminated == [202]
+
+
+@pytest.mark.parametrize("content", ["{", "{}", '{"state":"unknown"}'])
+def test_legacy_recovery_and_reap_preserve_unverifiable_custody(tmp_path, content):
+    path = breadcrumb.breadcrumb_path(tmp_path)
+    path.write_text(content)
+    recovered = breadcrumb.recover_stale_cutover(
+        tmp_path, lambda _: pytest.fail("unverifiable recovery must not contact a daemon"),
+    )
+    reaped = breadcrumb.reap_abandoned_passive(
+        tmp_path, pid_alive=lambda _: True,
+        terminate=lambda _: pytest.fail("unverifiable recovery must not terminate"),
+    )
+    assert recovered["refused"] and reaped["refused"]
+    assert path.read_text() == content

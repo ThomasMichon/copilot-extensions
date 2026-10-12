@@ -490,7 +490,7 @@ def _inspect_abandoned_passive(
     return (
         {
             "kind": "abandoned_passive",
-            "summary": "stale cutover breadcrumb names a never-promoted passive daemon",
+            "summary": "stale cutover breadcrumb names a passive candidate",
             "repairable": repairable,
             "blocked_reason": (
                 None
@@ -707,6 +707,9 @@ def _audit_daemon_health(
         duplicate = _inspect_duplicates(ctx, candidates, owner, excluded)
         if duplicate is not None:
             findings.append(duplicate)
+        from .diagnostic_recovery import mark_custody_refusals
+
+        mark_custody_refusals(findings, table or {}, record or {})
     finally:
         if guard is not None and hasattr(guard, "release"):
             guard.release()
@@ -757,6 +760,8 @@ def _apply_daemon_health_locked(
     *,
     now: datetime | None = None,
 ) -> dict[str, object]:
+    from .diagnostic_recovery import terminate_unpromoted
+
     guard, guard_error = _try_acquire_cutover_guard(ctx)
     if ctx.acquire_cutover_guard is not None and guard is None:
         blocked = _audit_daemon_health(ctx, now=now, cutover_state="busy")
@@ -870,8 +875,8 @@ def _apply_daemon_health_locked(
                     )
                     attempted.add(item["pid"])
                     continue
-                termination = ctx.terminate_pid_if_identity(
-                    item["pid"], item.get("start_time")
+                termination = terminate_unpromoted(
+                    ctx, item["pid"], item.get("start_time")
                 )
                 actions.append(
                     {
@@ -930,8 +935,8 @@ def _apply_daemon_health_locked(
                 )
                 attempted.add(item["pid"])
                 continue
-            termination = ctx.terminate_pid_if_identity(
-                item["pid"], item.get("start_time")
+            termination = terminate_unpromoted(
+                ctx, item["pid"], item.get("start_time")
             )
             actions.append(
                 {

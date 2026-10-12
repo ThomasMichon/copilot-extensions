@@ -24,9 +24,10 @@ def test_transient_windows_sharing_conflict_retries(tmp_path, monkeypatch, winer
     monkeypatch.setattr(routing.os, "replace", replace)
     monkeypatch.setattr(routing.time, "sleep", sleeps.append)
     routing._atomic_write(path, {"active": "new"})
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert sleeps == [0.05]
-    assert routing.read_table(tmp_path) == {"active": "new"}
+    assert routing.read_table(tmp_path)["active"] == "new"
+    assert routing.read_table(tmp_path)["publication_history"]["saturated"] is True
 
 
 @pytest.mark.parametrize("winerror,attempts", [(5, 20), (87, 1), (None, 1)])
