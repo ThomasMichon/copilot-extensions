@@ -155,7 +155,7 @@ operator directive to remove the explicit claimed-dev exception.
       were resolved before those releases. Consumer guidance refresh cleared its
       reviewed flow; the merged plan's PR claim was reconciled.
       The in-scope revised-legacy-record correction #6299 subsequently cleared
-      normal promotion #6358 and unified deployment. The selected installed
+      normal promotion #6358 and verified publisher activation. The selected installed
       agent-worktrees `1.24.52-dev1` passed all 21 legacy rewrite contracts,
       including revised records, exact live-authority refusals and real Git
       publication, without importing the source-checkout implementation.
@@ -245,8 +245,8 @@ revised-legacy admission and fresh numbered-provider/ref/destination/head
 revalidation. The release materializes the three activation libraries as
 complete local dependencies rather than escaping canonical references.
 
-The authorized unified update completed and selected agent-worktrees
-`1.24.52-dev1`. A contained probe used that installed generation's interpreter
+The authorized unified updater activated agent-worktrees `1.24.52-dev1`.
+A contained probe used that installed generation's interpreter
 and explicitly verified the loaded publication, tracking and CLI modules came
 from its installed site-packages, not the source checkout. All 21 existing
 legacy rewrite contracts passed against that runtime: real local Git
@@ -255,6 +255,12 @@ of mismatched or shared live authority. Provider observations were controlled
 fixtures; this did not rewrite an unrelated live hosted PR or grant new
 publication authority. The selected payload command independently reports the
 same installed version.
+
+This proves publisher deployment, not complete portfolio rollout. The separate
+#5817 handback records an overall update exit 124 and an ordinary retry exit 1
+with completed-slot refusal. Those reconciliation outcomes remain a Phase 3
+discrepancy; selected-generation activation and passing publication contracts
+must not turn a timed-out or refused whole-update attempt into a success claim.
 
 Coordinator health reports `ok` on agent-dispatch `0.16.9-dev1`, with no current
 loop failures. The updater preserved an unowned project-command receipt and
