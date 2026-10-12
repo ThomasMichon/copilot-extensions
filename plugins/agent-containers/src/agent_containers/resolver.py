@@ -246,9 +246,10 @@ def import_copilot_cli_token(
     a per-call uniquely named temp file (``os.getpid()`` + a random hex
     suffix -- never a fixed, predictable name two concurrent invocations or
     a symlink-planting adversary could race) created with ``O_CREAT|O_EXCL``
-    at mode 0600 FROM THE MOMENT OF CREATION (never written under the
-    process umask and chmod'd restrictive only afterward, which would leave
-    this plaintext OAuth-token store briefly world/group-readable), then
+    with requested mode 0600: the umask may remove owner bits but never
+    grant group/world access. Exact owner access is restored before any
+    credential bytes are written (ACL-backed platforms retain their
+    existing permission model), then the temp file is atomically
     replaced over the real path. Cooperating imports serialize the entire
     read/merge/write transaction using a persistent sibling lock file.
     This lock does not coordinate unrelated writers such as Copilot CLI.
