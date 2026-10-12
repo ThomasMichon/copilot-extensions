@@ -133,8 +133,9 @@ Scaffold, from
 [`references/templates/gitignore-rule.md`](references/templates/gitignore-rule.md):
 repository-root rule `.github/instructions/**/*.local.instructions.md`;
 retain `.github/copilot/context-locals/**/*.local.md` for compatibility.
-Full locals now live outside automatic instruction discovery; retain the legacy
-ignore rule while ownership-validated migration retires old locals.
+Current local instruction siblings are auto-discovered; only the compatibility
+bodies remain outside discovery. Retain the compatibility ignore rule while
+ownership-validated migration retires old bodies.
 The legacy rule does not make the orphan scan's git-tracked check work --
 `git ls-files` already excludes every untracked file regardless of ignore
 matching, so a freshly rendered, unignored local-cache file is still

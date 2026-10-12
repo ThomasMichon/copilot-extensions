@@ -887,14 +887,14 @@ _INSTRUCTIONS_SUFFIX = ".instructions.md"
 
 
 def local_sibling_destination(destination: str) -> str:
-    """Compatibility API name for the non-discovered derived local-body path."""
+    """Return the derived auto-discovered local instruction sibling path."""
     return delivery.local_destination(destination)
 
 
 def render_local_cache(
     repo_root: Path, discover_sources: Callable[[], Iterable[object]]
 ) -> Result:
-    """Render every enabled source's current body outside automatic discovery,
+    """Render every enabled source's current auto-discovered instruction sibling,
     at its gitignored ``*.local.instructions.md`` path; never mutate the checked-in
     destination, the projection lock, or any git state.
 

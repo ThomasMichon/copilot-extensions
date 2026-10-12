@@ -88,11 +88,12 @@ class ActivePlugin:
 
 @dataclass(frozen=True)
 class ActivationReport:
-    """Current decisions plus the authority needed for safe reconciliation."""
+    """Current decisions and authority within the optional plugin-name scope."""
 
     authority: ScanAuthority
     decisions: Mapping[str, EntryDecision[ActivePlugin]]
     findings: tuple[Finding, ...] = ()
+    plugin_names: tuple[str, ...] | None = None
 
     @property
     def active(self) -> Mapping[str, ActivePlugin]:
@@ -109,13 +110,28 @@ class ActivationReport:
         self,
         previous: Mapping[str, ActivePlugin] | None = None,
     ) -> dict[str, ActivePlugin]:
-        """Apply shared tri-state reconciliation to a prior effective set."""
-        return ScanSnapshot(
+        """Reconcile scanned names, preserving every excluded prior entry."""
+        selected = dict(previous or {})
+        excluded: dict[str, ActivePlugin] = {}
+        if self.plugin_names is not None:
+            names = frozenset(self.plugin_names)
+            excluded = {
+                source: value
+                for source, value in selected.items()
+                if split_source(source)[0] not in names
+            }
+            selected = {
+                source: value
+                for source, value in selected.items()
+                if source not in excluded
+            }
+        reconciled = ScanSnapshot(
             registry=REGISTRY_NAME,
             authority=self.authority,
             decisions=self.decisions,
             findings=self.findings,
-        ).reconcile(previous)
+        ).reconcile(selected)
+        return {**excluded, **reconciled}
 
 
 def _clean_git_env() -> dict[str, str]:
@@ -327,4 +343,5 @@ def resolve_active_plugins(
         authority=authority,
         decisions=decisions,
         findings=tuple(registry_findings + decision_findings),
+        plugin_names=plugin_names,
     )

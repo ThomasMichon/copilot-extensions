@@ -1039,7 +1039,7 @@ def test_render_local_cache_refuses_to_overwrite_a_foreign_file(
 
 
 def test_render_local_cache_stale_cleanup_ignores_a_marker_at_the_wrong_path(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -1063,14 +1063,26 @@ def test_render_local_cache_stale_cleanup_ignores_a_marker_at_the_wrong_path(
         / ".github"
         / "instructions"
         / "policy"
-        / "misplaced.local.md"
+        / "misplaced.local.instructions.md"
     )
-    misplaced_path.write_bytes(genuine_path.read_bytes())
+    original = genuine_path.read_bytes()
+    misplaced_path.write_bytes(original)
+    checked: list[str] = []
+    parse_marker = projections._parse_owned_local_cache_marker
 
+    def record_marker_check(raw: bytes, relative: str):
+        checked.append(relative)
+        return parse_marker(raw, relative)
+
+    monkeypatch.setattr(
+        projections, "_parse_owned_local_cache_marker", record_marker_check
+    )
     projections.render_local_cache(repo, lambda: [])
 
     assert not genuine_path.exists()
     assert misplaced_path.exists()
+    assert misplaced_path.relative_to(repo).as_posix() in checked
+    assert misplaced_path.read_bytes() == original
 
 
 def test_render_local_cache_reports_conflict_when_lock_already_held(

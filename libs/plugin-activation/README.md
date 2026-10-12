@@ -40,7 +40,9 @@ The default still aggregates all scopes.
 Callers locating one sibling may also pass `plugin_names=("customizing-copilot",)`.
 Only requested names incur source resolution, but all matching marketplace
 identities remain visible so ambiguity is never resolved by choosing the first.
-Omitting the filter retains full-roster behavior.
+Report authority applies within the requested names; reconciliation preserves
+excluded prior entries while still removing authoritatively absent sources for
+selected names. Omitting the filter retains full-roster behavior.
 
 **In dev**, most consumers' `pyproject.toml` reference this library through a
 `uv`-editable canonical pointer (`vendor-pointer-generalization` effort,
