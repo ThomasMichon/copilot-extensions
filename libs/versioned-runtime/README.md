@@ -46,6 +46,36 @@ fallback uses the same numeric-token ordering in Python, POSIX shell, and
 PowerShell, so development versions such as `dev10` sort after `dev9` without
 `packaging` or GNU `sort -V`.
 
+## Construction ownership (Python API)
+
+`construction_lease(root, version, timeout=60, poll_interval=0.05)` is a
+stdlib-only context manager for installer-owned construction. It uses a
+nonblocking kernel lease (`flock` on POSIX; a CRT byte lock on Windows) under
+`<root>/.construction-leases/`, outside immutable slot content. Contenders wait
+within a monotonic budget; `ConstructionTimeout` distinguishes exhausted
+contention from filesystem or lock-backend failures, which propagate unchanged.
+The persistent lock file is never deleted, and is not evidence of a live owner.
+Normal return, exceptions, cancellation, and process death close the descriptor
+and release ownership.
+
+After acquisition, call `check_admission` again before writing: another builder
+may have published while the caller waited. Matching input then reuses the winner;
+different input refuses construction. A completed-slot fast path does not need
+this exclusive construction lease. Hold it through construction, isolated health
+gating, and publication only; release before unrelated reconciliation or
+activation/cutover coordination. A repair's outer cutover guard remains required.
+
+This API is not yet wired into shell installers. A separate `acquire` command
+that exits could not retain kernel ownership for a subsequent shell build.
+Installer adoption must also implement candidate/rollback GC retention before
+construction release; this primitive alone does not protect a ready candidate
+or authorize rewriting a published slot. Existing installer lock schemes are
+not interchangeable with this protocol until all contenders on that path adopt
+the same lock.
+
+Focused native-process tests:
+`python tools/run-plugin-tests.py agent-bridge -k construction_lease`.
+
 ## Editing — one source of truth
 
 **Do not hand-edit `plugins/*/scripts/versioned_runtime.py`.** Edit
