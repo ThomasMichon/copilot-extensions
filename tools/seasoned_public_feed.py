@@ -32,6 +32,7 @@ guarantee to actually hold.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import urllib.error
@@ -191,6 +192,10 @@ def resolve_seasoned_public_version(
         raise SeasonedVersionError(
             f"{package}: PyPI JSON API request or response read timed out"
         ) from exc
+    except (http.client.HTTPException, OSError) as exc:
+        raise SeasonedVersionError(
+            f"{package}: PyPI JSON API request or response read failed"
+        ) from exc
 
     try:
         data = json.loads(raw)
@@ -212,7 +217,7 @@ def resolve_seasoned_public_version(
             # allows a registered-but-never-uploaded release) -- nothing
             # to install, never a candidate.
             continue
-        if any(not isinstance(f, dict) or f.get("yanked") for f in files):
+        if any(not isinstance(f, dict) or f.get("yanked") is not False for f in files):
             # ANY yanked file for this version excludes the whole
             # version, even if other files for it are not marked yanked
             # -- a partially-yanked release is not a safe pin.

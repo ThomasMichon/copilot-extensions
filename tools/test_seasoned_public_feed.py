@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import importlib.util
 import json
 from datetime import datetime, timezone
@@ -65,6 +66,32 @@ class TestResolveSeasonedPublicVersion:
         with pytest.raises(spf.SeasonedVersionError, match="not valid JSON") as caught:
             spf.resolve_seasoned_public_version("pkg", fetch=lambda url: b"\xff")
         assert isinstance(caught.value.__cause__, UnicodeDecodeError)
+
+    @pytest.mark.parametrize("failure", [http.client.IncompleteRead(b"partial"), ConnectionResetError("reset")])
+    def test_response_read_failures_wrapped(self, monkeypatch, failure):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                raise failure
+
+        monkeypatch.setattr(spf.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+        with pytest.raises(spf.SeasonedVersionError, match="response read failed") as caught:
+            spf.resolve_seasoned_public_version("pkg", now=_NOW)
+        assert caught.value.__cause__ is failure
+
+    @pytest.mark.parametrize("yank_fields", [{}, {"yanked": None}, {"yanked": 0}, {"yanked": ""}, {"yanked": "false"}])
+    def test_unknown_yank_status_disqualifies_release(self, yank_fields):
+        malformed_file = {"upload_time_iso_8601": "2026-01-01T00:00:00Z", **yank_fields}
+        payload = _releases_payload({
+            "2.0": [_file("2026-01-01T00:00:00Z"), malformed_file],
+            "1.0": [_file("2026-01-01T00:00:00Z")],
+        })
+        assert spf.resolve_seasoned_public_version("pkg", now=_NOW, fetch=lambda url: payload) == "1.0"
 
     def test_picks_newest_seasoned_release(self):
         payload = _releases_payload(

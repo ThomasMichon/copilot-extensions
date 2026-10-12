@@ -527,6 +527,15 @@ win grows with build complexity.
   lint passes. Guiding Intent, the original Request's clarification,
   build-hermeticity policy and umbrella issue #4876 now consistently scope
   the approved public-feed exception to promotion build tooling only.
+- **2026-10-12 response-contract follow-through:** truncated HTTP responses
+  and connection-reset failures are wrapped with their original cause, alongside
+  the existing timeout handling. A file is admitted only when its `yanked`
+  field is exactly boolean `False`; missing and wrong-type metadata disqualify
+  the whole version. Regression cases exercise response-read failures through
+  the real fetch helper and mixed valid/malformed file lists. The earlier
+  required-CI finding is already addressed by commit `7364f5232`: both resolver
+  paths are in the artifact-builder gate and its test invocation includes the
+  resolver suite.
 - **Still open (this effort's own next slice):** actually wire this
   resolver into `resolve_toolchain_lock`/`build_python_artifacts.py`'s CLI
   (a caller-selectable "seasoned public" mode, distinct from and never
