@@ -12,7 +12,7 @@ import os
 import socket
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable, NoReturn
+from typing import TYPE_CHECKING, Callable, NoReturn, ParamSpec, TypeVar
 
 from . import breadcrumb, diagnostics, routing
 from .cutover import CutoverError
@@ -22,6 +22,19 @@ if TYPE_CHECKING:
     from .cutover import CutoverOrchestrator, CutoverResult, _Client, _Handle
 
 log = logging.getLogger("zdd")
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
+
+def _captured_call(
+    operation: str, callback: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs,
+) -> _T:
+    try:
+        return callback(*args, **kwargs)
+    except Exception as exc:
+        raise CutoverError(
+            f"captured runtime {operation} failed ({type(exc).__name__})"
+        ) from None
 
 
 @dataclass(frozen=True)
@@ -116,7 +129,7 @@ class PreparedCutover:
             or request.selected_is_newer(orch.version, self.old.version) is not True
         ):
             raise CutoverError("selected runtime is not provably newer than serving runtime")
-        snapshot = request.capture_runtime(self.old)
+        snapshot = _captured_call("capture", request.capture_runtime, self.old)
         if snapshot is None or not snapshot.identity:
             raise CutoverError("authoritative effective runtime snapshot unavailable")
         self.snapshot = snapshot
@@ -144,7 +157,7 @@ class PreparedCutover:
     def matches(self, endpoint: Endpoint, *, require_ready: bool = True) -> bool:
         if not endpoint.pid or not endpoint.process_start_time:
             return False
-        attested = self.snapshot.attest(endpoint)
+        attested = _captured_call("attest", self.snapshot.attest, endpoint)
         return (
             (not require_ready or attested.ready is True)
             and attested.pid == endpoint.pid
@@ -202,7 +215,9 @@ class PreparedCutover:
         self.verify_before_retire()
         if self.new is None:
             raise CutoverError("successor identity unavailable before predecessor drain")
-        return self.snapshot.drain_predecessor(self.old, self.new, timeout)
+        return _captured_call(
+            "drain", self.snapshot.drain_predecessor, self.old, self.new, timeout
+        )
 
     def confirm_retired(self) -> None:
         if self.snapshot.confirm_retired(self.old, self.request.retirement_timeout) is not True:
@@ -260,7 +275,10 @@ class PreparedCutover:
                 log.error("Conditional cutover rollback cannot safely restore its predecessor")
                 return
             try:
-                self.snapshot.make_client(restored.base_url).undrain()
+                _captured_call(
+                    "undrain",
+                    lambda: self.snapshot.make_client(restored.base_url).undrain(),
+                )
                 if not self.matches(restored):
                     raise CutoverError("restored predecessor is not ready")
                 routing.validate_active(

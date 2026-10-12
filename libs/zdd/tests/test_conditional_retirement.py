@@ -451,3 +451,39 @@ def test_identity_bound_candidate_disposal_refusal_retains_recovery(case, monkey
     assert not result.ok and not result.rolled_back
     assert events == ["spawn"]
     assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
+
+
+@pytest.mark.parametrize("phase", ["capture", "attest"])
+def test_preparation_callback_errors_are_redacted_failed_results(case, caplog, phase):
+    root, old, events, _, snapshot, request, orch = case
+    secret = "fixture-sensitive-preparation-error"
+
+    def fail(*args):
+        raise OSError(secret)
+
+    capture = fail if phase == "capture" else lambda _: replace(snapshot, attest=fail)
+    result = orch.run(conditional=replace(request, capture_runtime=capture))
+    assert not result.ok and not result.committed
+    assert result.error == f"captured runtime {phase} failed (OSError)"
+    assert events == []
+    assert routing.read_table(root)["active"] == old.to_dict()
+    assert breadcrumb.read_breadcrumb(root) is None
+    assert secret not in repr(result.to_dict()) + caplog.text
+
+
+def test_drain_cutover_errors_cannot_leak_captured_credentials(case, caplog):
+    root, _, _, _, snapshot, request, orch = case
+    secret = "fixture-sensitive-drain-error"
+
+    def fail(*args):
+        raise CutoverError(secret)
+
+    result = orch.run(
+        conditional=replace(
+            request, capture_runtime=lambda _: replace(snapshot, drain_predecessor=fail)
+        )
+    )
+    assert not result.ok and not result.committed
+    assert result.error == "captured runtime drain failed (CutoverError)"
+    assert secret not in repr(result.to_dict()) + caplog.text
+    assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))

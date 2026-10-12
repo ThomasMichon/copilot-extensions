@@ -314,6 +314,12 @@ class CutoverOrchestrator:
                         return CutoverResult(
                             ok=False, error=str(exc), steps=[f"refused: {exc}"], conditional=True,
                         )
+                    except Exception as exc:
+                        reason = f"conditional preparation failed ({type(exc).__name__})"
+                        log.error(reason)
+                        return CutoverResult(
+                            ok=False, error=reason, steps=[reason], conditional=True,
+                        )
                 return self._run_locked(
                     health_timeout=health_timeout,
                     drain_timeout=drain_timeout,
