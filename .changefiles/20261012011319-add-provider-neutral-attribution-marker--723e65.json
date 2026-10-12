@@ -1,0 +1,9 @@
+{
+  "comment": "Add provider-neutral attribution marker and body preparation for externally opened pull requests, preserving provenance and opt-outs",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
