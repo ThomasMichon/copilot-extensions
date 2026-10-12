@@ -132,12 +132,9 @@ _PROVENANCE_MARKER_NAME = ".governed-feed-provenance.json"
 
 
 def _toolchain_identity_hash(validated_index_url: str | PublicToolchainSource, python: str | None) -> str:
-    """A stable identity for one (validated index, requested interpreter)
-    pairing -- the exact two inputs that determine what a locked
-    toolchain venv actually contains. Used to key a deterministic
-    alternate venv location (`_alternate_toolchain_dir`); via
-    `_opaque_index_identity`, never folds in a redacted (query/fragment-
-    stripped) form that could conflate two distinct indexes."""
+    """Key an alternate slot by source policy and interpreter. Governed
+    URLs use their full, opaque identity, never a conflating redaction;
+    public sources include the explicit index, age floor, and exact pins."""
     return _hash_fields(
         json.dumps(source_provenance(validated_index_url), sort_keys=True), python or ""
     )
@@ -146,13 +143,11 @@ def _toolchain_identity_hash(validated_index_url: str | PublicToolchainSource, p
 def _write_provenance_marker(
     venv_dir: Path, validated_index_url: str | PublicToolchainSource, python: str | None = None
 ) -> None:
-    """Records ``validated_index_url``'s opaque (one-way-hashed) identity,
-    and the requested ``python`` interpreter, into ``venv_dir``'s own
-    provenance marker -- called on the staging directory BEFORE the
-    atomic rename that publishes it, so the marker and the venv it
-    describes always arrive together, never as two separate, racy
-    writes. Never persists the raw URL (or any redacted-but-reversible
-    form of it) to disk -- see `_opaque_index_identity`."""
+    """Record source and interpreter BEFORE atomic publication, so the
+    marker and venv arrive together. Governed URLs persist only an opaque
+    keyed identity, never credentials or a reversible URL. Public sources
+    explicitly record the credential-free public index, policy, age, and
+    pins instead; that format never claims a validated governed identity."""
     marker = {
         **source_provenance(validated_index_url),
         "python": python or "",
@@ -165,12 +160,10 @@ def _write_provenance_marker(
 def _provenance_matches(
     venv_dir: Path, validated_index_url: str | PublicToolchainSource, python: str | None = None
 ) -> bool:
-    """Whether ``venv_dir``'s own provenance marker records EXACTLY
-    ``validated_index_url``'s opaque identity AND the requested ``python``
-    interpreter -- a missing, unreadable, or mismatched marker returns
-    ``False``, never "probably fine". Omitting the interpreter identity
-    would let a venv built for one Python version be silently reused for
-    a call that explicitly asked for a different one."""
+    """Match the complete source marker and interpreter: opaque index
+    identity for governed mode, or public policy/index/age/pins. Missing,
+    unreadable, or mismatched markers never license reuse. Interpreter
+    identity prevents reusing a slot built for a different Python."""
     marker_path = venv_dir / _PROVENANCE_MARKER_NAME
     try:
         data = json.loads(marker_path.read_text(encoding="utf-8"))
