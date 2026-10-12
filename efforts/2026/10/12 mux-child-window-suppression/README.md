@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Sequential proposal, implementation and completion PRs against `dev`.
 - **Created:** 2026-10-10
-- **Status:** Active
+- **Status:** Done
 - **Vision:** Below-altitude regression repair; restore the existing Windows background-process launch contract.
 - **Umbrella issue:** #6040
 
@@ -53,6 +53,14 @@ Additional request, with the private host identifier redacted:
 
 > I'm still seeing tons of windows on [affected Windows workstation], so we can stay focused here. But do also sweep test flows for failure to ensure processes are always headless
 
+Completion direction, with the private target identifier redacted:
+
+> Transfer [outbound-only target] rollout to a tracked follow-up and close out the completed work
+
+The remaining on-device adopter rollout is owned by the operator's downstream
+work queue as **On-device adopter rollout verification**. No deployment to that
+target is claimed by this effort.
+
 ## Plan
 
 ### Phase 1 - Review the repair contract
@@ -73,8 +81,10 @@ Additional request, with the private host identifier redacted:
 
 ### Phase 3 - Promote, deploy and close
 - [x] Verify the promotion pipeline publishes the fixed snapshot to `main`.
-- [ ] Deploy through the supported unified update on the declared targets.
-- [ ] Record live launch behavior and deployed versions, then archive this
+- [x] Deferred to `On-device adopter rollout verification`: Deploy through the
+      supported unified update on the remaining outbound-only target; the
+      primary Windows and second Linux target rollouts are complete.
+- [x] Record live launch behavior and deployed versions, then archive this
       completed effort through review.
 
 ## Validation Plan
@@ -92,8 +102,9 @@ Additional request, with the private host identifier redacted:
 - [x] Applicable lint, install-contract, headless-launch and documentation-impact
       gates pass. _(agent-recommended)_
 - [x] The promoted `main` snapshot contains the fix and release metadata.
-- [ ] Deployed runtime evidence establishes the fixed behavior, without private
-      identifiers in public artifacts.
+- [x] Deferred to `On-device adopter rollout verification`: Capture the
+      remaining target's deployed runtime evidence. Primary Windows desktop
+      evidence establishes the fixed behavior without private identifiers.
 - [x] Shared test-runner validation covers nested Python, PowerShell and Git
       launches, stdio, timeout cleanup, POSIX parity and native desktop window
       observation. _(agent-recommended)_
@@ -240,3 +251,28 @@ contain terminal-multiplexer descendants.
   manager release and updated plugin runtimes with graceful daemon cutovers.
   The outbound-only target still requires on-device rollout confirmation;
   retain the deployment and final archival gates until that evidence exists.
+
+### 2026-10-12 - Completed engineering and transferred final adopter rollout
+- The operator explicitly transferred the remaining outbound-only rollout to
+  **On-device adopter rollout verification**, tracked in the downstream work
+  queue with supported update, graceful cutover, runtime-version and two-cycle
+  desktop evidence requirements. The target remains unverified, not silently
+  counted as deployed.
+- The implementation, release fixes and deployment evidence landed through
+  PRs #6055, #6114, #6135 and #6158. Published manager `0.6.22-dev1` completed
+  the primary Windows cutover and second native Linux update; two Windows
+  production cycles observed 13 PSMux clients with zero owned visible windows
+  or focus acquisitions. Later local maintenance reports installed and active
+  manager `0.6.25-dev1`.
+- Promotion lifecycle repair #6172 is merged and published. Run `38175347474`
+  waited for its exact generated PR to merge before tagging commit
+  `3bd09511840d4ebb7d02ebd5d76879b4246d0d26`. A subsequent successful run
+  `38212582333` again completed the waiter after its release PR merged and
+  tagged afterward. The exclusive workflow lifecycle now spans delivery.
+- Investigated stale CI tracker #6220 and verified the already-merged fixture
+  correction #6221: the original non-final payload retained contradictory
+  FINAL display metadata. The exact regression and all 29 descriptor-validation
+  cases pass without weakening production validation; closed the stale tracker.
+- All engineering, release and reachable-target obligations are complete.
+  Remaining adopter verification has a named tracked owner, and this effort
+  is archived rather than claiming that verification already happened.

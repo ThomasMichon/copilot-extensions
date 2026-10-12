@@ -16,7 +16,6 @@ that pattern to this repository.
 | [Private PR Source Attribution](active/private-pr-source-attribution/README.md) | Active; originating identity slice | #6068 |
 | [Remote Picker Seed Parity](active/remote-picker-seed-parity/README.md) | Draft; operator-requested parity | #6057 |
 | [Worktree Conclusion Tidier](active/worktree-conclusion-tidier/README.md) | Draft; baseline agreed, pilot parameters/approval pending | #6060 |
-| [Mux Child Window Suppression](active/mux-child-window-suppression/README.md) | Active | #6040 |
 | [Native Context Handoff Compatibility](active/native-context-handoff-compatibility/README.md) | Active; capability-contract investigation | #6028 |
 | [Linux Role Fleet](active/linux-role-fleet/README.md) | Active; reviewed Komodo-first plan and isolated adoption proof | #6030, #5861 |
 | [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Active; proposal reviewed | #6007 |
@@ -103,6 +102,7 @@ that pattern to this repository.
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
 | [PR Recovery Break Glass](2026/10/12%20pr-recovery-break-glass/README.md) | Done; released recovery demonstrated | #5817 |
+| [Mux Child Window Suppression](2026/10/12%20mux-child-window-suppression/README.md) | Done; published repair, verified reachable rollout, remaining adopter verification transferred | #6040 |
 | [Vision Backport Sweep](2026/10/09%20vision-backport-sweep/README.md) | Done; 35-vision source reconciliation, implementation owners retained | #5456 |
 
 ## Local conventions
