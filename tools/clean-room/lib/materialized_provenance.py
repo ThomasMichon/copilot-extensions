@@ -76,6 +76,8 @@ def content_manifest(root: Path) -> dict[str, dict]:
             elif stat.S_ISDIR(mode):
                 entries[relative] = {"kind": "directory"}
             elif stat.S_ISREG(mode):
+                if info.st_nlink != 1:
+                    raise ValueError(f"materialized file must be single-link: {relative}")
                 entries[relative] = {
                     "kind": "file", "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                     "executable": bool(mode & 0o111),

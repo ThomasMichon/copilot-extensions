@@ -87,3 +87,25 @@ def test_machine_switch_does_not_cross_namespaced_cell_boundary(tmp_path, shell)
     assert result.stdout == "{}"
     assert "fixture-only pause" not in result.stderr
     assert not Path(environment["AGENT_INDEX_HOME"]).exists()
+
+
+@pytest.mark.parametrize("fault", ["throw", "missing", "child-exit"])
+def test_powershell_runtime_gate_failures_use_hook_emitter(tmp_path, fault):
+    command, environment, repo = _hook(tmp_path, "powershell")
+    gate = Path(environment["AGENT_INDEX_PAYLOAD_ROOT"]) / "scripts/runtime-gate.ps1"
+    if fault == "missing":
+        gate.unlink()
+    else:
+        gate.write_text(
+            'throw "fixture runtime admission failed"\n' if fault == "throw" else
+            "exit 23\n",
+            encoding="utf-8",
+        )
+    result = _run(command, environment, repo)
+    assert result.stdout == "{}"
+    assert result.returncode == (23 if fault == "child-exit" else 1)
+    if fault != "child-exit":
+        assert "agent-index session runtime gate failed" in result.stderr
+    if fault == "throw":
+        assert "fixture runtime admission failed" in result.stderr
+    assert not Path(environment["AGENT_INDEX_HOME"]).exists()

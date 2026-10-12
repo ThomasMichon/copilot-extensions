@@ -28,6 +28,11 @@ if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
         Exit-SessionStart 1
     }
 }
-& (Join-Path $PSScriptRoot 'runtime-gate.ps1') __session-stamp | Out-Null
-$rc = $LASTEXITCODE
+try {
+    & (Join-Path $PSScriptRoot 'runtime-gate.ps1') __session-stamp | Out-Null
+    $rc = $LASTEXITCODE
+} catch {
+    [Console]::Error.WriteLine("agent-index session runtime gate failed: $_")
+    Exit-SessionStart 1
+}
 Exit-SessionStart $rc

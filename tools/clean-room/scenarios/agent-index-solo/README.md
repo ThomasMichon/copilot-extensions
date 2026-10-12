@@ -24,6 +24,8 @@ Manifest traversal explicitly does not follow directory links: it records the
 link itself, prunes aliases/cycles and refuses unreadable subtrees rather than
 silently omitting paths. Windows junctions and other non-symlink reparse points,
 including a redirected root, are unsupported and refused before traversal.
+Regular artifact files and the receipt must each have exactly one hard link;
+external or in-tree hardlink aliases are refused even when their bytes match.
 The scenario's separately mounted trusted library compares the receipt with
 `CR_CANDIDATE_HEAD` and verifies the complete copied tree before installing any
 plugin. Missing, wrong-HEAD, stale, added/removed-path or tampered-byte evidence

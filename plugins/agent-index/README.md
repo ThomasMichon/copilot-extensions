@@ -30,6 +30,9 @@ into another engine mode.
 binding only when one effective repository configuration is active. The session
 hook cheaply stamps metadata and a callable binstub; it never installs packages,
 creates a venv, deploys, registers autostart, or starts a service/engine.
+The bootstrap hook emits exactly `{}` on both success and failure. PowerShell
+runtime-gate exceptions report a diagnostic on stderr and exit nonzero; normal
+child exit codes are forwarded across the hook process boundary.
 - **Self-supervised host lifecycle**: the light host runtime is installed into
 its own versioned slot, and the plugin's installer/runtime commands supervise
 it directly. `install`/`update` rebuild only the light `[store,server]` service

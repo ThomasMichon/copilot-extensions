@@ -86,6 +86,24 @@ def test_manifest_refuses_unreadable_subtree(
         PROVENANCE.content_manifest(root)
 
 
+@pytest.mark.parametrize("inside", [False, True], ids=["outside", "inside"])
+def test_manifest_refuses_hardlinks_before_read(tmp_path, monkeypatch, inside):
+    root = tmp_path / "tree"
+    root.mkdir()
+    artifact = root / "file"
+    artifact.write_bytes(b"shared inode")
+    alias = root / "alias" if inside else tmp_path / "alias"
+    os.link(artifact, alias)
+    assert artifact.stat().st_nlink == 2
+
+    def refuse_read(path):
+        raise AssertionError(f"hardlinked content must not be read: {path}")
+
+    monkeypatch.setattr(Path, "read_bytes", refuse_read)
+    with pytest.raises(ValueError, match="materialized file must be single-link"):
+        PROVENANCE.content_manifest(root)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows junction")
 @pytest.mark.parametrize("at_root", [False, True], ids=["subtree", "root"])
 def test_manifest_refuses_directory_junctions(tmp_path: Path, at_root: bool) -> None:
@@ -187,6 +205,18 @@ def test_receipt_special_or_multiple_link_file_fails_before_read(source, tmp_pat
     else:
         os.link(receipt, tmp_path / "receipt-alias")
     with pytest.raises(ValueError, match="single-link regular"):
+        PROVENANCE.verify(dest, head)
+
+
+def test_candidate_verification_refuses_external_hardlink_without_byte_changes(source, tmp_path):
+    root, head = source
+    dest = tmp_path / "candidate"
+    PROVENANCE.build(dest, source_root=root)
+    artifact = dest / "plugins/example/docs/shared.md"
+    before = artifact.read_bytes()
+    os.link(artifact, tmp_path / "external-alias")
+    assert artifact.read_bytes() == before
+    with pytest.raises(ValueError, match="materialized file must be single-link"):
         PROVENANCE.verify(dest, head)
 
 
