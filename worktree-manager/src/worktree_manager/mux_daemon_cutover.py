@@ -641,7 +641,15 @@ def activate_after_update(
             lambda base_url: _make_client(base_url, root=resolved_root),
             health_check=lambda host, port: _health_check(host, port, root=resolved_root),
         )
+        if summary["recovery"].get("refused"):
+            reason = breadcrumb.refusal_reason(summary["recovery"])
+            summary.update(action="refused", reason=reason, result={"ok": False, "error": reason})
+            return summary
         summary["passive_reap"] = _reap_abandoned_passive(resolved_root, pre_recovery)
+        if summary["passive_reap"].get("refused"):
+            reason = breadcrumb.refusal_reason(summary["passive_reap"])
+            summary.update(action="refused", reason=reason, result={"ok": False, "error": reason})
+            return summary
 
         # Re-check now, under the lock and after recovery/reap: another
         # caller may have already cut over to this exact version while we

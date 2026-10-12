@@ -138,6 +138,8 @@ and previous routing publications while holding native routing authority
 through disposal. Caller-captured PID/record observations cannot authorize
 reaping a newly promoted process. Conditional spawn exceptions produce a
 redacted failed result and retain the unresolved owner breadcrumb.
+Relay-adoption exception values and malformed response values are never copied
+into logs or result JSON; failures expose only their exception class.
 
 The supported in-process adapter is `run_conditional_cutover(config_dir,
 version=..., request=...)`. Bridge deployment/service restart and Dispatch
@@ -173,6 +175,9 @@ that should already have self-retired. Destructive repairs are gated on the
 same two rules everywhere: first confirm a validated live owner from the
 consumer's lock/routing state, then terminate only through an identity-bound
 OS handle tied to the target process's start time.
+On Linux, portable Python builds without Python-level pidfd exports reuse the
+existing native libc pidfd adapter. If neither backend exists, identity-bound
+termination remains explicitly unavailable; there is no numeric-PID fallback.
 
 ### `zdd.singleton_manager` -- Linux supervision across cutover and exec
 

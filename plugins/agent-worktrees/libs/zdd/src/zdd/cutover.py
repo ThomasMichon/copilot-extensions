@@ -550,7 +550,8 @@ class CutoverOrchestrator:
             )
 
             if old is not None and old.port != new_port:
-                old_client = make_client(old.base_url)
+                if conditional is None:
+                    old_client = make_client(old.base_url)
                 # About to open the old daemon's drain gate -- record it first
                 # so an abort during the (possibly long) drain is traceable.
                 write_breadcrumb(
@@ -739,10 +740,14 @@ class CutoverOrchestrator:
         try:
             new_client = (make_client or self.make_client)(self._base_url(new_port))
             adopt = new_client.adopt_relay()
-            result.steps.append(f"relay adopt: {adopt.get('adopted')}")
+            adopted = adopt.get("adopted")
+            if adopted is not None and type(adopted) is not bool:
+                raise CutoverError("relay adoption response has an invalid boolean")
+            result.steps.append(f"relay adopt: {adopted}")
         except Exception as exc:  # noqa: BLE001 -- relay is non-fatal
-            result.steps.append(f"relay adopt failed (non-fatal): {exc}")
-            log.warning("Relay adoption failed after cutover: %s", exc)
+            failure = type(exc).__name__
+            result.steps.append(f"relay adopt failed (non-fatal): {failure}")
+            log.warning("Relay adoption failed after cutover (%s)", failure)
 
     def _undrain(self, old: Endpoint, result: CutoverResult) -> None:
         """Best-effort release of the old daemon's drain gate (#1756).

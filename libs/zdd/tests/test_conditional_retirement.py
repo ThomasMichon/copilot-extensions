@@ -371,3 +371,30 @@ def test_receiver_bound_drain_refuses_route_changed_after_caller_check(case, mon
     assert events == ["spawn"]
     assert routing.read_table(root)["active"] == winner.to_dict()
     assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
+
+
+@pytest.mark.parametrize("phase", ["client", "adopt", "response"])
+def test_relay_adoption_never_serializes_captured_secrets(case, caplog, phase):
+    _, _, _, _, snapshot, request, orch = case
+    secret = "fixture-sensitive-relay-error"
+
+    class Client:
+        def adopt_relay(self):
+            if phase == "adopt":
+                raise OSError(secret)
+            return {"adopted": secret}
+
+    def client(url):
+        if phase == "client":
+            raise OSError(secret)
+        return Client()
+
+    result = orch.run(
+        conditional=replace(
+            request, capture_runtime=lambda _: replace(snapshot, make_client=client)
+        )
+    )
+    assert secret not in repr(result.to_dict())
+    assert secret not in caplog.text
+    if phase != "client":
+        assert any("relay adopt failed" in step for step in result.steps)
