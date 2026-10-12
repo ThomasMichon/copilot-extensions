@@ -122,7 +122,10 @@ observation has `artifact_sha256`, selected integer `api`/`data_schema`, and
 mandatory CLI inputs; a mismatch is an error, not a different state source.
 
 An omitted observation produces `unknown`; a supplied unreadable/malformed file
-is an error. Future, expired or incomplete observations produce `unknown`.
+is an error. A mismatched release digest takes precedence and produces
+`incompatible` even when the supplied observation is stale or incomplete; this
+states a manifest binding mismatch, not the live host's state.
+For a matching release, future, expired or incomplete observations produce `unknown`.
 Only fresh complete observations can assert `missing`. A release/artifact/
 API/data-schema mismatch produces `incompatible`. Required components alone
 determine the selected role's result; observed unrelated components do not add

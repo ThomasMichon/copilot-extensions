@@ -119,6 +119,18 @@ def test_release_digest_binds_content_not_only_display_identity():
     assert inspect(release, observed)["components"][0]["reason"] == "release-mismatch"
 
 
+@pytest.mark.parametrize("change", [{"complete": False}, {"observed_at": 160},
+                                  {"expires_at": 140}])
+def test_release_mismatch_is_not_masked_by_observation_freshness(change):
+    release = manifest()
+    observed = observation(release)
+    observed.update(change)
+    observed["release_digest"] = "f" * 64
+    result = inspect(release, observed)
+    assert result["status"] == "incompatible"
+    assert {row["reason"] for row in result["components"]} == {"release-mismatch"}
+
+
 def test_invalid_release_digest_has_correct_diagnostic():
     release = manifest()
     observed = observation(release)

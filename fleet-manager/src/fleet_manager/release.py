@@ -118,14 +118,14 @@ def inspect_release(release, observation, *, role, authority, installation, now)
         _snapshot(observation)
         if (observation["authority"], observation["installation"]) != (authority, installation):
             raise PlanError("observation authority or installation mismatch")
-        if observation["observed_at"] > now:
+        if observation["release_digest"] != selected_digest:
+            reason = "release-mismatch"
+        elif observation["observed_at"] > now:
             reason = "observation-from-future"
         elif now >= observation["expires_at"]:
             reason = "observation-expired"
         elif not observation["complete"]:
             reason = "observation-incomplete"
-        elif observation["release_digest"] != selected_digest:
-            reason = "release-mismatch"
     results = []
     for name in required:
         declaration = release["components"][name]
