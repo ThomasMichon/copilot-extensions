@@ -70,7 +70,7 @@ def validate_release(value):
 
 
 def _time(value, name):
-    if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 2**63 - 1:
+    if type(value) not in (int, float) or not 0 <= value <= 2**63 - 1 or not math.isfinite(value):
         raise PlanError(f"{name} must be a finite epoch time")
 
 

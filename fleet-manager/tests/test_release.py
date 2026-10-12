@@ -235,7 +235,8 @@ def test_strict_release_contract(change):
 
 @pytest.mark.parametrize("field,value", [
     ("complete", 1), ("observed_at", True), ("expires_at", 100),
-    ("expires_at", float("inf")), ("schema", "unknown"),
+    ("expires_at", float("inf")), ("observed_at", 10**1000),
+    ("expires_at", 10**1000), ("schema", "unknown"),
 ])
 def test_invalid_observation_is_error_not_unknown(field, value):
     release = manifest()
@@ -288,3 +289,20 @@ def test_cli_missing_explicit_observation_file_is_error(tmp_path, capsys):
     assert main(base + ["--observation", str(tmp_path / "missing-private")]) == 1
     output = capsys.readouterr()
     assert not output.out and "missing-private" not in output.err
+
+
+def test_cli_oversized_epoch_is_bounded_error(tmp_path, capsys):
+    from fleet_manager.__main__ import main
+
+    release = manifest()
+    observed = observation(release)
+    observed["observed_at"] = 10**1000
+    release_path, observed_path = tmp_path / "release.json", tmp_path / "observed.json"
+    release_path.write_text(json.dumps(release), encoding="utf-8")
+    observed_path.write_text(json.dumps(observed), encoding="utf-8")
+    assert main(["inspect", "--release", str(release_path), "--observation", str(observed_path),
+                 "--role", "client", "--authority", "test-authority",
+                 "--installation", "test-installation"]) == 1
+    output = capsys.readouterr()
+    assert not output.out and "Traceback" not in output.err
+    assert "finite epoch time" in output.err
