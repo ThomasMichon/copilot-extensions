@@ -142,7 +142,8 @@ def test_plugin_activation_import_survives_stage_cleanup_when_installed_from_rea
     after installation. The installed `agent-worktrees` vendored
     `plugin-activation` copy must remain importable anyway -- the runtime
     package itself must be self-contained, not a passthrough stub that
-    still needs the staging source to exist later."""
+    still needs the staging source to exist later. Use the declared sources:
+    canonical libraries on dev, materialized local libraries on main."""
     stage_root = tmp_path / ".install-stage" / "agent-worktrees"
     site_packages = tmp_path / "venv" / "lib" / "python3.12" / "site-packages"
     site_packages.mkdir(parents=True)
@@ -151,6 +152,7 @@ def test_plugin_activation_import_survives_stage_cleanup_when_installed_from_rea
 
     for lib in ("plugin-activation", "dropin-registry", "plugin-resolve"):
         source = (PLUGIN_ROOT / sources[f"agent-{lib}"]["path"]).resolve()
+        assert source.is_relative_to(REPO)
         shutil.copytree(source, stage_root / lib)
         _copy_installed_package(stage_root, site_packages, lib)
 

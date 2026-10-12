@@ -19,6 +19,9 @@ agent-codespaces's copy, so a redeploy that reinstalled the sibling downgraded
 
 This check freezes the only invariant that keeps that safe:
 
+* a consumer using an editable canonical reference must not also retain a
+  source-bearing local tree for that library; even identical copies collide
+  with the materializer's destination and block release publication,
 * every lib with multiple *real* vendored copies must have a **byte-identical
   ``src/`` tree** across those copies (the importable surface -- the thing that
   actually gets installed and imported),
@@ -201,6 +204,17 @@ def verify() -> list[str]:
         pointer_paths = [p for p in paths if _is_pointer_copy(p)]
         real_paths = [p for p in paths if not _is_pointer_copy(p)]
         editable_consumers = editable_consumers_by_lib.get(lib, [])
+        for path in paths:
+            consumer_dir = path.parent.parent
+            if consumer_dir.name not in editable_consumers:
+                continue
+            refs = uer.find_uv_editable_refs(consumer_dir)
+            if any(ref_lib == lib and editable for _, _, ref_lib, editable in refs):
+                problems.append(
+                    f"{lib}: {path.relative_to(base).as_posix()} coexists with an editable "
+                    "canonical reference in the same consumer -- remove the redundant "
+                    "local tree before materialization"
+                )
         compare_paths = list(real_paths)
         canonical = LIBS_DIR / lib
         # Pointer copies (VENDOR_POINTER.json OR a `uv`-editable canonical

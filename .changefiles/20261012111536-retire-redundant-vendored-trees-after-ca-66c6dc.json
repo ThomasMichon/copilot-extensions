@@ -1,0 +1,9 @@
+{
+  "comment": "Retire redundant vendored trees after canonical uv-source migration and reject same-consumer local-tree collisions before publication.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

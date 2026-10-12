@@ -104,6 +104,27 @@ def test_vendor_check_retains_malformed_copy_with_real_source(fake_repo: Path):
     assert any("no version declared" in issue for issue in check_vendored_libs_sync.verify())
 
 
+@pytest.mark.parametrize("consumer", ["plugins/consumer", "worktree-manager"])
+@pytest.mark.parametrize("copy_kind", ["real", "pointer"])
+def test_vendor_check_rejects_same_consumer_canonical_reference_and_local_tree(
+    fake_repo: Path, consumer: str, copy_kind: str,
+):
+    _seed_real_lib(fake_repo, "libs/shared-lib", content="value = 1\n")
+    _seed_editable_pointer_consumer(fake_repo, consumer, "shared-lib")
+    local_tree = f"{consumer}/libs/shared-lib"
+    if copy_kind == "real":
+        _seed_real_lib(fake_repo, local_tree, content="value = 1\n")
+    else:
+        _seed_pointer_copy(fake_repo, local_tree)
+
+    problems = check_vendored_libs_sync.verify()
+
+    assert any(
+        local_tree in issue and "same consumer" in issue
+        for issue in problems
+    ), problems
+
+
 @pytest.mark.parametrize("package", ["build", "dist", ".venv"])
 def test_inventory_retains_nested_source_named_like_root_artifacts(
     fake_repo: Path, package: str,
