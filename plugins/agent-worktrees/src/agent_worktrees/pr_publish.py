@@ -509,6 +509,7 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                     if recovery_result:
                         result = recovery_result
                     else:
+                        result.stdout += "\n" + recovery_result.stdout
                         result.stderr += "\n" + recovery_result.stderr
             if repo is not None and force_with_lease_expect and result.stderr == (
                 f"Refusing: {force_with_lease_expect} not an ancestor."

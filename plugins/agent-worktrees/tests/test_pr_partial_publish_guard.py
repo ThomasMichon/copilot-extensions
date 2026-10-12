@@ -11,18 +11,20 @@ from agent_worktrees.providers.base import PullResult
 
 
 @pytest.mark.guard
+@pytest.mark.parametrize("recovered", [True, False])
 @pytest.mark.parametrize("tip,ancestor,has_repo", [
     ("b" * 40, False, True),
     ("b" * 40, True, True),
     ("", False, True),
     ("b" * 40, False, False),
 ])
-def test_initial_stale_publication_dispatches_only_proven_recovery(monkeypatch, tip, ancestor, has_repo):
+def test_initial_stale_publication_dispatches_only_proven_recovery(monkeypatch, tip, ancestor, has_repo, recovered):
     record = object()
     repo = object() if has_repo else None
     pr = SimpleNamespace(remote="", rewrite_identity="")
     stale = git_ops.PushResult(ok=False, stderr="rejected (stale info)")
     success = git_ops.PushResult(ok=True)
+    refused = git_ops.PushResult(ok=False, stdout="recovery stdout", stderr="recovery refused")
     pushes, replays = [], []
     monkeypatch.setattr(pr_publish, "_pr_for", lambda *_: pr)
     monkeypatch.setattr(pr_publish, "publish_lock", lambda *_a, **_k: nullcontext())
@@ -30,6 +32,13 @@ def test_initial_stale_publication_dispatches_only_proven_recovery(monkeypatch, 
     monkeypatch.setattr(pr_publish, "push_identity", lambda *_a, **_k: "github.com/owner/repo")
     monkeypatch.setattr(pr_publish, "_tip", lambda *_: tip)
     monkeypatch.setattr(git_ops, "is_commit_ancestor", lambda *_a, **_k: ancestor)
+    def metadata(*args, **kwargs):
+        if args[:2] == ("remote", "get-url"):
+            return SimpleNamespace(returncode=0, stdout="https://github.com/owner/repo.git\n", stderr="")
+        if args[0] == "config":
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
+        pytest.fail(f"unexpected Git metadata probe: {args}")
+    monkeypatch.setattr(git_ops, "git", metadata)
 
     def push(*args, **kwargs):
         pushes.append((args, kwargs))
@@ -37,7 +46,7 @@ def test_initial_stale_publication_dispatches_only_proven_recovery(monkeypatch, 
 
     def replay(*args, **kwargs):
         replays.append((args, kwargs))
-        return success
+        return success if recovered else refused
 
     monkeypatch.setattr(git_ops, "push", push)
     monkeypatch.setattr(pr_rebase, "push", replay)
@@ -48,7 +57,10 @@ def test_initial_stale_publication_dispatches_only_proven_recovery(monkeypatch, 
         force_with_lease_expect=expected,
     )
     if tip and not ancestor and has_repo:
-        assert result is success
+        assert result is (success if recovered else stale)
+        if not recovered:
+            assert "stale info" in result.stderr and "recovery refused" in result.stderr
+            assert "recovery stdout" in result.stdout
         assert len(pushes) == len(replays) == 1
         args, kwargs = replays[0]
         assert args == (record, repo, "origin", refspec, expected)
