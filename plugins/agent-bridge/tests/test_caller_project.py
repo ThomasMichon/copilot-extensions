@@ -35,6 +35,8 @@ def test_explicit_project_override_wins(monkeypatch):
     ("host/harness/extra/worktree#session", "session"),
     ("host/ /worktree#session", "session"),
     ("host/harness/worktree#session#extra", "session"),
+    ("host/harness/worktree#" + "s" * 129, "s" * 129),
+    ("host/harness/worktree#unsafe!session", "unsafe!session"),
 ])
 def test_unproven_owner_does_not_rebind_project(monkeypatch, reference, session):
     monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", reference)

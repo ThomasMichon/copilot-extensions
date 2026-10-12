@@ -2416,11 +2416,12 @@ class TestSenderRepoFallback:
         monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "host/harness-fixture/wt#session")
         monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "session")
         monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
+        sender_repo = cli._sender_repo()
         with self._resolver():
             resolver = AgentResolver(self.agents, self.machines)
-            target = await resolver.resolve_async("dev6", sender_repo=cli._sender_repo())
+            target = await resolver.resolve_async("dev6", sender_repo=sender_repo)
             explicit = await resolver.resolve_async(
-                "product-fixture@dev6", sender_repo=cli._sender_repo(),
+                "product-fixture@dev6", sender_repo=sender_repo,
             )
         assert target.project == "harness-fixture"
         assert explicit.project == "product-fixture"
