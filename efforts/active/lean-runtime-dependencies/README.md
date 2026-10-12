@@ -227,3 +227,8 @@ shared mutable venv is presumed acceptable.
 - Docker clean-room and local Linux/macOS execution remain unavailable.
   Available Linux validation belongs to PR CI; existing live canary/warm-engine
   rollout remains with the standalone-service owner and was not performed.
+- The first Linux CI run exposed eight stale POSIX test-harness expectations:
+  a missing dropin fixture, an optional-server success assertion and an overly
+  broad procutil extraction. Corrected those harnesses to exercise the required
+  host package failure before activation; Linux execution of the corrections
+  remains a gate rather than being inferred from Windows skips.
