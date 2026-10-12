@@ -1,8 +1,12 @@
 """Isolated cutover validation must remain isolated even across PID reuse."""
 
+import pytest
+
 from agent_dispatch.reap import CoordProc, reap_superseded_coordinators
 
 from . import windows_cutover_identity_fixture as fixture
+
+pytestmark = pytest.mark.guard
 
 
 def test_fixture_reap_excludes_reused_unknown_and_unowned_pids(monkeypatch):
