@@ -93,9 +93,9 @@ marked agent-recommended; exploratory backend replacements are not commitments.
   and ship the slice with a changefile.
 
 ### Phase 3 - Index client and hosted-runtime separation
-- [ ] Complete lightweight client import/install boundaries and route hosted
+- [x] Complete lightweight client import/install boundaries and route hosted
   controller, indexing workers and foreground commands through their owning runtime.
-- [ ] Eliminate duplicated store/server installs only after replacing the
+- [x] Eliminate duplicated store/server installs only after replacing the
   primary-runtime fallback with a supported explicit outcome.
 - [ ] Preserve native and standalone-service contracts, configuration, queue,
   corpus state and the separately managed warm embedding engine.
@@ -232,3 +232,18 @@ shared mutable venv is presumed acceptable.
   broad procutil extraction. Corrected those harnesses to exercise the required
   host package failure before activation; Linux execution of the corrections
   remains a gate rather than being inferred from Windows skips.
+
+### 2026-10-14 - Merge reconciliation and next slice
+- #6317 merged to `dev` as `a0869fbae` on 2026-10-13 after the POSIX fixture
+  corrections. Its final Linux index suite, Windows checks and required PR gate
+  all passed. The PR description now records the graceful-cutover assessment.
+- Marked the delivered client/host boundary and duplicate-install removal items
+  complete. The broader native/state-preservation validation remains open:
+  passing contained checks are not authorized live rollout or macOS evidence.
+- The Textual slice includes the dependency-minimal regression, docs and patch
+  changefile in merged #6293. Its remaining "ship" checkbox awaits release
+  attribution rather than treating a `dev` merge as a release.
+- Prepared the bounded two-consumer helper experiment for review. It does not
+  introduce a shared runtime or close the compatibility/lifecycle design gate.
+  Next implementation slice: isolate legacy stdio MCP dependencies, retaining
+  the existing CLI bridge and explicit opt-in legacy entry point.

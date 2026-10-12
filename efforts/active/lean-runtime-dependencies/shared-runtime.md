@@ -77,3 +77,64 @@ That is a substantially larger current opportunity than copying the small ZDD
 library. It does not reject shared helpers: the next experiment must identify
 the actual expensive process or build being shared, rather than introduce a
 broker solely to deduplicate a cheap routing-table read.
+
+## Bounded two-consumer process probe - 2026-10-12
+
+The reproducible [probe](experiments/helper_process_probe.py) reads two synthetic,
+distinct ZDD routing tables using the real `zdd.routing.read_table` and
+`work_coalescing_singleton` TCP implementation. It compares direct warm reads,
+fresh Python processes, two resident helper processes and one shared helper
+process. Two concurrent trusted consumers each issue 100 requests per warm lane;
+the fresh-process lane uses ten per consumer. Every reply asserts the correct
+consumer identity. Helpers prove readiness with a real request and exit before
+the probe returns. A closed helper must refuse requests while direct reads
+remain correct.
+
+From the repository root, using a supported Python:
+
+```text
+python efforts/active/lean-runtime-dependencies/experiments/helper_process_probe.py --rounds 100
+python -m unittest discover -s efforts/active/lean-runtime-dependencies/experiments -p test_helper_process_probe.py
+```
+
+Three Windows runs on Python 3.11.9, with source imports rather than installed
+package environments, produced these ranges:
+
+| Lane | Median request latency (ms) | p95 (ms) | Warm requests per run |
+|------|-----------------------------|----------|----------------------|
+| Direct routing-table read | 0.293-0.372 | 0.415-0.489 | 200 |
+| Fresh experiment-driver process per read | 379.631-428.284 | 393.300-493.952 | 20 cold |
+| Two resident helpers | 1.505-1.805 | 18.345-24.246 | 200 |
+| One shared helper | 1.925-2.390 | 24.287-25.949 | 200 |
+
+This is an upper-level synthetic mechanism comparison, not a production CLI
+benchmark: fresh drivers import the probe's libraries, and the resident lanes
+read files on the same host. It does not establish installed closure size,
+physical allocation, RSS, CPU savings, platform parity, authentication isolation,
+concurrent installers, rollback, crash recovery or real service cutover.
+The shared endpoint deliberately uses one fixture credential; consumer keys
+verify result separation, not authorization. No production daemon, route,
+supervisor, installation cell or active-version marker is touched.
+
+### Evidence-led next design gate
+
+- **Routing reads:** retain the existing direct table path. Both resident
+  alternatives add overhead to an already warm client, and ZDD itself has no
+  front proxy to consolidate. The cold result supports amortizing repeated
+  interpreter startup when a real consumer pays it, not adding RPC to every
+  routing-table lookup.
+- **Compatible helper runtime, separate processes:** remains a candidate for
+  avoiding repeated environment construction, not a demonstrated CPU/RSS win.
+  Next measure first/second installations with content-addressed immutable
+  artifacts and physical-allocation accounting before introducing a broker.
+- **Shared multi-service front:** remains unaccepted. Identify two actual
+  expensive fronts before measuring RSS/CPU and reviewing independent
+  authentication, route ownership, drain and update failure boundaries.
+
+For a routing-only candidate, a provisional performance screen is p95 at most
+twice the existing warm direct-read p95 on the same host, before accounting for
+startup/storage benefits. This generous roughly one-millisecond screen is
+derived from the measured sub-half-millisecond direct baseline; both tested RPC
+lanes fail it. It is not a general service-front SLA or an accepted migration
+threshold. A real front's thresholds must derive from its own workload.
+No reuse implementation item is closed or transferred by this partial probe.
