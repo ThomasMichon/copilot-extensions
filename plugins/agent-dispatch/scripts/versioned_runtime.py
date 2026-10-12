@@ -1254,10 +1254,10 @@ def toss_incomplete(root: Path, link_name: str = CURRENT_LINK) -> list[str]:
 # or can it reuse an already-completed, matching-content slot" -- stateless,
 # no construction lease taken, so a caller can make this check cheaply and
 # often (e.g. as an ordinary installer's own fast-path probe before it ever
-# considers contending for a build). This is the 3a "exact completed reuse"
-# half of the shared admission seam; the construction-lease half (bounded
-# join for genuine concurrent first builds) is tracked as this effort's next
-# slice -- see efforts/active/mutable-dev-slot/phase-3-runtime-admission.md.
+# considers contending for a build). The construction lease below supplies
+# bounded ownership for genuine concurrent first builds. Installer adoption
+# and GC retention remain separate prerequisites -- see
+# efforts/active/mutable-dev-slot/phase-3-runtime-admission.md.
 # --------------------------------------------------------------------------
 
 

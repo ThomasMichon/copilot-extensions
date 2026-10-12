@@ -48,7 +48,7 @@ PowerShell, so development versions such as `dev10` sort after `dev9` without
 
 ## Construction ownership (Python API)
 
-`construction_lease(root, version, timeout=60, poll_interval=0.05)` is a
+`construction_lease(root, version, *, timeout=60.0, poll_interval=0.05)` is a
 stdlib-only context manager for installer-owned construction. It uses a
 nonblocking kernel lease (`flock` on POSIX; a CRT byte lock on Windows) under
 `<root>/.construction-leases/`, outside immutable slot content. Contenders wait

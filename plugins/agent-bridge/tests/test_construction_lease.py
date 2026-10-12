@@ -143,6 +143,37 @@ def test_storage_failure_is_not_contention(tmp_path):
     assert not isinstance(error.value, vr.ConstructionTimeout)
 
 
+@pytest.mark.parametrize("mismatch_check", [1, 2])
+def test_lock_identity_mismatch_refuses_and_releases(tmp_path, monkeypatch, mismatch_check):
+    with vr.construction_lease(tmp_path, "1.0"):
+        pass
+    lock = next((tmp_path / ".construction-leases").glob("*.lock"))
+    alternate = tmp_path / "different-file"
+    alternate.write_text("different identity")
+    alternate_stat = alternate.stat()
+    assert alternate_stat.st_ino != lock.stat().st_ino
+    original_lstat = vr.os.lstat
+    checks = 0
+
+    def changed_identity(path, *args, **kwargs):
+        nonlocal checks
+        if Path(path) == lock:
+            checks += 1
+            if checks == mismatch_check:
+                return alternate_stat
+        return original_lstat(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(vr.os, "lstat", changed_identity)
+        with pytest.raises(OSError, match="construction lease path") as error:
+            with vr.construction_lease(tmp_path, "1.0", timeout=0):
+                pytest.fail("unsafe lock identity admitted construction")
+        assert not isinstance(error.value, vr.ConstructionTimeout)
+    assert checks == mismatch_check
+    with vr.construction_lease(tmp_path, "1.0", timeout=0):
+        pass
+
+
 def test_timeout_budget_is_bounded(tmp_path, owner):
     start = time.monotonic()
     with pytest.raises(vr.ConstructionTimeout):
