@@ -86,6 +86,33 @@ def test_manifest_refuses_unreadable_subtree(
         PROVENANCE.content_manifest(root)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows junction")
+@pytest.mark.parametrize("at_root", [False, True], ids=["subtree", "root"])
+def test_manifest_refuses_directory_junctions(tmp_path: Path, at_root: bool) -> None:
+    shell = shutil.which("powershell.exe") or shutil.which("pwsh")
+    if shell is None:
+        pytest.skip("PowerShell is unavailable")
+    root = tmp_path / "tree"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret").write_bytes(b"never included")
+    if not at_root:
+        root.mkdir()
+    link = root if at_root else root / "junction"
+    result = subprocess.run(
+        [shell, "-NoProfile", "-Command",
+         "New-Item -ItemType Junction -Path $env:MANIFEST_TEST_LINK "
+         "-Target $env:MANIFEST_TEST_TARGET -ErrorAction Stop | Out-Null"],
+        env={**os.environ, "MANIFEST_TEST_LINK": str(link),
+             "MANIFEST_TEST_TARGET": str(outside)},
+        capture_output=True, text=True, check=False, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+    assert getattr(link.lstat(), "st_file_attributes", 0) & 0x400
+    with pytest.raises(ValueError, match="reparse path|real directory"):
+        PROVENANCE.content_manifest(root)
+
+
 @pytest.fixture
 def source(tmp_path: Path) -> tuple[Path, str]:
     root = tmp_path / "source with spaces"

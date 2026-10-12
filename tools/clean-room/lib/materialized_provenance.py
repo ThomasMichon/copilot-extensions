@@ -46,7 +46,8 @@ def extract_source(tree: tarfile.TarFile, root: Path) -> None:
 
 def content_manifest(root: Path) -> dict[str, dict]:
     """Inventory every artifact path, excluding only the root receipt itself."""
-    if root.is_symlink() or not root.is_dir():
+    if (root.is_symlink() or not root.is_dir()
+            or getattr(root.lstat(), "st_file_attributes", 0) & 0x400):
         raise ValueError("materialized root must be a real directory")
     entries = {}
 
@@ -62,7 +63,10 @@ def content_manifest(root: Path) -> dict[str, dict]:
             relative = path.relative_to(root).as_posix()
             if relative == RECEIPT:
                 continue
-            mode = path.lstat().st_mode
+            info = path.lstat()
+            mode = info.st_mode
+            if getattr(info, "st_file_attributes", 0) & 0x400 and not stat.S_ISLNK(mode):
+                raise ValueError(f"unsupported materialized reparse path: {relative}")
             if stat.S_ISLNK(mode):
                 if not path.resolve().is_relative_to(root.resolve()):
                     raise ValueError(f"materialized link escapes root: {relative}")
