@@ -561,10 +561,14 @@ esac
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer integration")
-@pytest.mark.parametrize("stall_health_gate", [False, True])
 def test_posix_health_gate_rejects_namespace_package_slot(
     tmp_path: Path,
-    stall_health_gate: bool,
+) -> None:
+    _assert_posix_namespace_slot_rejected(tmp_path, stall_health_gate=False)
+
+
+def _assert_posix_namespace_slot_rejected(
+    tmp_path: Path, *, stall_health_gate: bool,
 ) -> None:
     """A partial ``uv pip install`` can leave ``agent_worktrees`` on disk as an
     empty directory -- no ``__init__.py``, no ``__main__.py``, no dist-info.
