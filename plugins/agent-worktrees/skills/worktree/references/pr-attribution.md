@@ -183,7 +183,10 @@ explicitly rather than inventing a source or falling back to raw identifiers.
 
 `--tag` is an optional visible public label supplied by the adopter's own
 invocation/configuration, not an upstream repository or organization default.
-Private machine/worktree identifiers and malformed labels are refused. Copy
+Labels containing the immediate machine/worktree identifier as a
+case-insensitive substring, and malformed labels, are refused. Body composition
+uses the existing source-marker helper's trailing-whitespace normalization;
+the input file itself is unchanged. Copy
 the prepared body into the existing GitHub or Azure DevOps publication flow;
 those tools retain ownership of provider-specific rendering and posting.
 An encrypted marker is optional when the common key is unavailable, following

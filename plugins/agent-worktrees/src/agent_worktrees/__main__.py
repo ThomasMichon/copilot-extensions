@@ -5672,14 +5672,14 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 # a var, or via `_core_helper()`) is bound at module level BEFORE the
 # deferred `_load_full_command_surface()` block, AND no function it reaches
 # transitively (in __main__.py or a sibling module) touches a name bound
-# only inside that block. Skips `_ensure_cluster_loaded()` in
-# `_dispatch_lazy()` for these modules only. Regenerate/diff via
+# only inside that block; these modules skip `_ensure_cluster_loaded()`. Regenerate/diff via
 # `tests/_core_cluster_scan.py`'s `compute_cluster_free_modules()` -- never
 # hand-edit, never trust static analysis alone (a regex scan shipped
 # `create-pr`'s regression; this transitive class needs runtime exercise
 # too -- see the effort's Journal). Adding a module requires running its
 # real commands end-to-end, not just `--help`.
 _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
+    "attribution_prepare_cli",
     "claims_cli",
     "cleanup_gc_cli",
     "finalize_cli",

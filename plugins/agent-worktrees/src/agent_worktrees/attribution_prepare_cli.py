@@ -46,7 +46,7 @@ def prepare(body: str, record, config, *, head: str, omit: bool = False, tag: st
     if marker and tag:
         line = f"Attribution: {tag}"
         if line not in prepared.splitlines():
-            prepared = f"{prepared.rstrip()}\n\n{line}\n"
+            prepared = f"{prepared}\n\n{line}\n" if prepared else f"{line}\n"
     if marker:
         prepared = attribution.append_marker(prepared, marker)
     return {"version": 1, "marker": marker, "body": prepared, "attributed": bool(marker)}

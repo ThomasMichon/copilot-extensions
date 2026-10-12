@@ -73,6 +73,17 @@ def test_explicit_raw_mode_preserves_existing_contract():
     }
 
 
+def test_empty_tagged_body_has_no_leading_blank_lines(monkeypatch):
+    record, config = fixture()
+    monkeypatch.setattr(
+        cli.root_chain, "build_codename_marker_with_root",
+        lambda *args: attribution.build_codename_marker("bolted-circuit"),
+    )
+    assert cli.prepare("", record, config, head="", tag="control-harness")["body"].startswith(
+        "Attribution: control-harness\n",
+    )
+
+
 def test_real_lazy_dispatch_exposes_provider_neutral_command(tmp_path):
     import os
     import subprocess
