@@ -95,7 +95,10 @@ def test_posix_cleanup_warns_only_on_actual_failure(monkeypatch, caplog, error):
     process = Mock(pid=123, stdout=BytesIO(value))
     process.wait.return_value = 0
     process.poll.return_value = 0
-    monkeypatch.setattr(identity_vault, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(
+        identity_vault, "os",
+        SimpleNamespace(name="posix", waitid=True, P_PID=1, WEXITED=2, WNOHANG=4, WNOWAIT=8),
+    )
     monkeypatch.setattr(identity_vault, "signal", SimpleNamespace(SIGKILL=9))
     monkeypatch.setattr(identity_vault, "_wait_without_reaping", lambda pid: 0)
     monkeypatch.setattr(
@@ -123,7 +126,11 @@ def test_reaped_posix_reader_identity_refuses_group_signal(monkeypatch):
     process = Mock(pid=123, stdout=BytesIO(b"fixture"))
     process.wait.return_value = 0
     killpg = Mock()
-    monkeypatch.setattr(identity_vault, "os", SimpleNamespace(name="posix", killpg=killpg))
+    monkeypatch.setattr(
+        identity_vault, "os",
+        SimpleNamespace(name="posix", killpg=killpg, waitid=True, P_PID=1,
+                        WEXITED=2, WNOHANG=4, WNOWAIT=8),
+    )
     monkeypatch.setattr(
         identity_vault, "spawn_sync_in_kill_on_close_job",
         lambda *args, **kwargs: (process, None),
@@ -146,6 +153,24 @@ def test_posix_exit_observation_reserves_leader_identity(monkeypatch):
     )
     assert identity_vault._wait_without_reaping(123) == 0
     waitid.assert_called_once_with(1, 123, 2 | 4 | 8)
+
+
+def test_missing_posix_observer_fails_closed_before_spawn(monkeypatch, caplog):
+    import os
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    monkeypatch.setenv(identity_vault.ARGV_ENV, json.dumps([sys.executable]))
+    monkeypatch.setattr(
+        identity_vault, "os", SimpleNamespace(name="posix", environ=os.environ, path=os.path),
+    )
+    spawn = Mock()
+    monkeypatch.setattr(identity_vault, "spawn_sync_in_kill_on_close_job", spawn)
+    with pytest.raises(RuntimeError, match="non-reaping POSIX exit observer"):
+        identity_vault._read_key_output(["fixture"])
+    assert identity_vault.load_cached_vault_key() is None
+    assert "shared vault key unavailable" in caplog.text
+    spawn.assert_not_called()
 
 
 def test_timeout_reaps_adapter_and_stdout_holding_descendant(monkeypatch, tmp_path):

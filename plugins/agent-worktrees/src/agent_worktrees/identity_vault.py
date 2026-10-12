@@ -34,6 +34,10 @@ def _wait_without_reaping(pid: int) -> int:
 
 
 def _read_key_output(argv: list[str]) -> bytes:
+    if os.name != "nt" and not all(
+        hasattr(os, name) for name in ("waitid", "P_PID", "WEXITED", "WNOHANG", "WNOWAIT")
+    ):
+        raise RuntimeError("vault key reader requires a non-reaping POSIX exit observer")
     process, job = spawn_sync_in_kill_on_close_job(
         argv, require_job=True, allow_breakaway=False,
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,

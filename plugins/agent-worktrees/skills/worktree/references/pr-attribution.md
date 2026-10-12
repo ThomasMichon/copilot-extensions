@@ -112,6 +112,12 @@ DPAPI protection applies only to local vault cache data. On other platforms,
 a missing encryption package produces a sanitized warning and omits `enc=`;
 decoding reports an explicit error.
 
+Bounded vault reads require a non-reaping POSIX exit observer so cleanup cannot
+signal a reused process-group identity. Older macOS Python builds without
+`os.waitid`/`WNOWAIT` omit the optional vault-backed encrypted layer with a
+sanitized warning before launching an adapter; use a runtime exposing those
+primitives for vault-backed reads. Existing file-key decoding remains available.
+
 If the marker carries an `enc=<token>` field, it is a self-contained
 AES-256-GCM-encrypted blob of the FULL raw identity (worktree id, machine,
 session, head SHA, project, timestamp). Worktree, machine, session and head
