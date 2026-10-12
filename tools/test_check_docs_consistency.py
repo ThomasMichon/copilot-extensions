@@ -58,14 +58,14 @@ def test_fences_comments_and_external_links_are_not_local_navigation(tmp_path):
 
 def test_duplicate_headings_and_explicit_anchors():
     assert mod.heading_anchors(
-        '# Use\n# Use\n# Use-1\n<a id="legacy"></a>\n'
+        '# Use\n# Use\n# Use-1\n<a id="legacy"></a>\n\n'
         '# Deploying: one command — `<repo> update`\n'
     ) == {"use", "use-1", "use-1-1", "legacy", "deploying-one-command--repo-update"}
 
 
 def test_reference_links_html_and_encoded_paths(tmp_path):
     (tmp_path / "README.md").write_text(
-        '[guide][owner]\n[owner]: guide%20one.md#ready\n'
+        '[guide][owner]\n\n[owner]: guide%20one.md#ready\n\n'
         '<a href="guide%20one.md#ready">owner</a>\n'
         '<img src="image.svg">\n', encoding="utf-8")
     (tmp_path / "guide one.md").write_text("# Ready\n", encoding="utf-8")
@@ -88,7 +88,7 @@ def test_shortcut_reference_checks_its_actual_destination(tmp_path):
 
 def test_unused_definitions_and_full_inline_labels_are_not_shortcuts(tmp_path):
     (tmp_path / "README.md").write_text(
-        "[Label][owner]\n[Inline](guide.md)\n"
+        "[Label][owner]\n[Inline](guide.md)\n\n"
         "[Label]: missing.md\n[Inline]: missing.md\n"
         "[unused]: missing.md\n[owner]: guide.md\n", encoding="utf-8")
     (tmp_path / "guide.md").write_text("# Guide\n", encoding="utf-8")
@@ -96,7 +96,7 @@ def test_unused_definitions_and_full_inline_labels_are_not_shortcuts(tmp_path):
 
 
 def test_collapsed_and_shortcut_reference_labels_share_normalization(tmp_path):
-    text = "[My  Guide][]\n[my guide]\n[My Guide]: guide.md#ready\n"
+    text = "[My  Guide][]\n[my guide]\n\n[My Guide]: guide.md#ready\n"
     (tmp_path / "README.md").write_text(text, encoding="utf-8")
     (tmp_path / "guide.md").write_text("# Ready\n", encoding="utf-8")
     assert mod.local_links(text) == ["guide.md#ready", "guide.md#ready"]
@@ -119,11 +119,12 @@ def test_images_do_not_satisfy_reading_edges(tmp_path):
     (tmp_path / "guide.md").write_text("# Guide\n", encoding="utf-8")
     for text in (
         "![preview](guide.md)", '<img src="guide.md">',
-        "![preview][owner]\n[owner]: guide.md",
-        "![preview][]\n[preview]: guide.md",
-        "![preview]\n[preview]: guide.md",
+        "![preview][owner]\n\n[owner]: guide.md",
+        "![preview][]\n\n[preview]: guide.md",
+        "![preview]\n\n[preview]: guide.md",
     ):
         (tmp_path / "README.md").write_text(text, encoding="utf-8")
+        assert mod.local_links(text) == ["guide.md"]
         assert mod.check_adopter_navigation(
             tmp_path, ("README.md",), {"README.md": ("guide.md",)})
 
@@ -190,7 +191,7 @@ def test_inline_code_comment_openers_do_not_hide_navigation(tmp_path):
 def test_angle_destinations_preserve_spaces_inline_and_reference(tmp_path):
     (tmp_path / "README.md").write_text(
         '[guide](<guide one.md#ready> "Title")\n'
-        "[guide][owner]\n[shortcut]\n"
+        "[guide][owner]\n[shortcut]\n\n"
         '[owner]: <guide one.md#ready> "Owner"\n'
         "[shortcut]: <guide one.md#ready>\n", encoding="utf-8")
     (tmp_path / "guide one.md").write_text("# Ready\n", encoding="utf-8")
@@ -205,6 +206,33 @@ def test_first_normalized_reference_definition_wins(tmp_path):
         ("[My Guide]: guide.md", "[my guide]: missing.md", False),
     ):
         label = "Guide" if first.startswith("[Guide]") else "My Guide"
-        text = f"[{label}]\n{first}\n{second}\n"
+        text = f"[{label}]\n\n{first}\n{second}\n"
         (tmp_path / "README.md").write_text(text, encoding="utf-8")
         assert bool(mod.check_adopter_navigation(tmp_path, ("README.md",), {})) == expected_problem
+
+
+def test_multiline_code_span_comments_cannot_hide_rendered_navigation(tmp_path):
+    (tmp_path / "README.md").write_text(
+        "`<!--\n` [broken](missing.md)\n", encoding="utf-8")
+    assert mod.check_adopter_navigation(tmp_path, ("README.md",), {})
+
+
+def test_all_sequential_waypoints_are_required(tmp_path):
+    sequence = {
+        "docs/installation.md": "docs/capabilities.md",
+        "docs/capabilities.md": "docs/adoption.md",
+        "docs/adoption.md": "docs/configuration.md",
+        "docs/configuration.md": "docs/architecture.md",
+        "docs/architecture.md": "docs/harness-runbook.md",
+    }
+    (tmp_path / "docs").mkdir()
+    for source, target in sequence.items():
+        assert target in mod.READING_EDGES[source]
+        (tmp_path / target).write_text("# Next\n", encoding="utf-8")
+        page = tmp_path / source
+        page.write_text(f"[next]({Path(target).name})\n", encoding="utf-8")
+        assert not mod.check_adopter_navigation(
+            tmp_path, (source,), {source: (target,)})
+        page.write_text("# No next link\n", encoding="utf-8")
+        assert mod.check_adopter_navigation(
+            tmp_path, (source,), {source: (target,)})

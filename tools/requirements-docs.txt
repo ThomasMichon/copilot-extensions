@@ -1,0 +1,2 @@
+# Dev-only CommonMark parsing for check-docs-consistency.py.
+markdown-it-py==3.0.0
