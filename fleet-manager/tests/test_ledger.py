@@ -47,6 +47,20 @@ def test_admission_survives_restart_with_one_outbox_and_audit(tmp_path):
         assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
+def test_inspection_does_not_reserve_writer_slot_or_read_uncommitted_changes(tmp_path):
+    store, request = ledger(tmp_path / "journal.db"), intent()
+    store.admit(request)
+    writer = sqlite3.connect(store.path, timeout=1, isolation_level=None)
+    try:
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute("UPDATE outbox SET state='uncertain'")
+        assert store.inspect(request)["state"] == "pending"
+    finally:
+        writer.rollback()
+        writer.close()
+    assert store.inspect(request)["state"] == "pending"
+
+
 def test_atomic_admission_rollback_on_audit_failure(tmp_path, monkeypatch):
     store, request = ledger(tmp_path / "journal.db"), intent()
     def fail(*args):

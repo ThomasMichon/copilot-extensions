@@ -55,12 +55,14 @@ class OperationLedger:
                 raise PlanError("operation ledger identity mismatch")
 
     @contextmanager
-    def _transaction(self, *, verify=True):
+    def _transaction(self, *, verify=True, write=True):
         connection = sqlite3.connect(self.path, timeout=5, isolation_level=None)
         try:
             connection.execute("PRAGMA foreign_keys=ON")
             connection.execute("PRAGMA synchronous=FULL")
-            connection.execute("BEGIN IMMEDIATE")
+            if not write:
+                connection.execute("PRAGMA query_only=ON")
+            connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             if verify:
                 if connection.execute("PRAGMA user_version").fetchone()[0] != 1:
                     raise PlanError("unsupported operation ledger schema")
@@ -146,7 +148,7 @@ class OperationLedger:
     def inspect(self, intent):
         """Read durable operation status; never infer parent objective settlement."""
         value = self._scope(intent)
-        with self._transaction() as connection:
+        with self._transaction(write=False) as connection:
             admitted = self._find(connection, value)
             if admitted is None:
                 return None

@@ -17,6 +17,10 @@ conflicting intent fails. Separate SQLite connections serialize concurrent
 admission using short `BEGIN IMMEDIATE` transactions, five-second contention
 timeout, foreign keys and FULL synchronous commits. No external effect executes
 under the transaction.
+Inspection uses a deferred query-only transaction rather than reserving a
+writer slot, and sees a coherent committed snapshot while another connection
+holds a reserved write transaction. It can still be blocked by an exclusive
+storage lock; this is not a lock-free availability guarantee.
 
 Receipt recording requires an admitted exact intent and correlated scope/digest.
 The receipt, outbox status and audit commit together. Identical sequence/content
