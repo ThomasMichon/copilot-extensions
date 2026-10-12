@@ -250,7 +250,7 @@ def _fire_launch_resolution_watchdog() -> None:
 # expected and healthy) may run before the watchdog above assumes it is stuck.
 # Generous for a cold git call on a slow disk/network, nowhere close to a
 # human-perceptible delay for the normal case.
-_LAUNCH_RESOLUTION_TIMEOUT_SECS = 60.0
+_LAUNCH_RESOLUTION_TIMEOUT_SECS = 180.0
 
 
 def cmd_launch(argv: list[str]) -> int:
