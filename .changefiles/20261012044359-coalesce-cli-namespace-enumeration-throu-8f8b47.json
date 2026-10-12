@@ -1,0 +1,9 @@
+{
+  "comment": "Coalesce CLI namespace enumeration through caller cancellation until the native subprocess completes.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
