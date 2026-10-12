@@ -118,8 +118,10 @@ marked agent-recommended; exploratory backend replacements are not commitments.
   separate-process reuse and a shared ZDD front candidate.
 - [ ] Review the chosen compatibility, lifecycle and installation-cell design
   before implementing a reuse mechanism.
-- [ ] Implement the smallest proven reuse slice, or transfer implementation to
-  a named issue if evidence rejects it; record measured costs and the decision.
+- [ ] Implement the smallest accepted reuse slice, or explicitly transfer an
+  accepted-but-deferred design to a named tracked objective. If evidence rejects
+  reuse, retain per-service execution and close that implementation path with
+  measured costs and the rejection decision; do not transfer rejected work.
 
 ### Phase 6 - Close the measured delta
 - [ ] Publish before/after profile footprint and fresh-install evidence, with
