@@ -13,13 +13,17 @@ around it plus the two bootstrap scripts below, so a bare machine with
 neither Copilot nor `git`/`uv` preinstalled can still get a running
 coordinator.
 
-The development wrapper resolves `agent-dispatch` directly from
-`plugins/agent-dispatch`. Release materialization permits only that exact
-standalone-consumer/package relationship, embeds it under the wrapper's local
-`libs/`, and materializes its shared dependencies without retaining editable
-external paths. This exception does not permit arbitrary plugin-to-plugin
-copying; canonical source identity, symlink and destination safeguards remain
-required. The trusted updater implements the same data-only contract.
+This package's own `pyproject.toml` declares a plain versioned `agent-dispatch`
+dependency with no `[tool.uv.sources]` escape (a local dev/CI install supplies
+`plugins/agent-dispatch` as an explicit extra source instead -- see
+`tools/run-standalone-tests.py`'s `prepare()`), so release materialization
+(`tools/materialize_main.py`) has nothing to vendor for this package today.
+`tools/materialize_main.py` and its trusted-updater parity copy in
+`worktree-manager` still carry a narrow, well-tested exception recognizing
+exactly this standalone-consumer/`agent-dispatch` relationship if a future
+revision reintroduces an editable pointer at `../plugins/agent-dispatch` --
+canonical source identity, symlink and destination safeguards remain required
+either way; it does not permit arbitrary plugin-to-plugin copying.
 
 ## Install and run
 
