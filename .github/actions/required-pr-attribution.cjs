@@ -186,13 +186,26 @@ async function backfill({ github, context, core, pause = (ms) => new Promise((re
         }
       } finally {
         if (!stable) {
-          await github.rest.checks.update({
-            ...context.repo, check_run_id: created.data.id, status: "completed", conclusion: "failure",
+          const invalidated = {
+            ...context.repo, name: CONTEXT, head_sha: pr.head.sha,
+            external_id: externalId + ":superseded",
+            status: "completed", conclusion: "failure",
+            details_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             output: {
               title: "Required source attribution",
               summary: "Source metadata changed or could not be verified; this result is superseded.",
             },
+          };
+          await github.rest.checks.create(invalidated);
+          const original = await github.rest.checks.get({
+            ...context.repo, check_run_id: created.data.id,
           });
+          if (original.data.status !== "completed") {
+            await github.rest.checks.update({
+              ...context.repo, check_run_id: created.data.id, status: "completed", conclusion: "failure",
+              output: invalidated.output,
+            });
+          }
         }
       }
       if (stable) break;

@@ -158,13 +158,16 @@ test("changes during pacing and publication cannot leave a stale success", async
         checks: {
           listForRef: async () => ({ data: { check_runs: [] } }),
           create: async (check) => {
-            assert.equal(check.status, "in_progress");
-            assert.equal(check.conclusion, undefined);
+            if (check.status === "in_progress") assert.equal(check.conclusion, undefined);
+            else assert.equal(check.conclusion, "failure");
             created.push(check);
-            if (!changed && changeAt === "create") invalidate();
+            if (!changed && changeAt === "create" && check.status === "in_progress") invalidate();
             return { data: { id: created.length } };
           },
+          get: async ({ check_run_id }) => ({ data: created[check_run_id - 1] }),
           update: async (check) => {
+            assert.notEqual(created[check.check_run_id - 1].status, "completed",
+                            "completed platform conclusions are immutable");
             Object.assign(created[check.check_run_id - 1], check);
             if (!changed && changeAt === "complete" && check.conclusion === "success") invalidate();
           },
@@ -176,7 +179,11 @@ test("changes during pacing and publication cannot leave a stale success", async
       pause: async () => { if (!changed && changeAt === "pause") invalidate(); },
     });
     assert.ok(created.length);
-    assert.ok(created.every((check) => check.conclusion === "failure"));
+    assert.equal(created.at(-1).conclusion, "failure");
+    if (changeAt === "complete") {
+      assert.equal(created[0].conclusion, "success");
+      assert.equal(created[1].conclusion, "failure");
+    } else assert.ok(created.every((check) => check.conclusion === "failure"));
     assert.ok(!JSON.stringify(created).includes("attribution-exempt"));
   }
 });
@@ -193,8 +200,9 @@ test("unverifiable publication is failed closed without exposing metadata", asyn
       } },
       checks: {
         listForRef: async () => ({ data: { check_runs: [] } }),
-        create: async (check) => { created.push(check); published = true; return { data: { id: 1 } }; },
-        update: async (check) => Object.assign(created[0], check),
+        create: async (check) => { created.push(check); published = true; return { data: { id: created.length } }; },
+        get: async ({ check_run_id }) => ({ data: created[check_run_id - 1] }),
+        update: async (check) => Object.assign(created[check.check_run_id - 1], check),
       },
     },
   };
