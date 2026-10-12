@@ -107,7 +107,21 @@ def validate_result(
     if result.native_session_id in retired_native_ids:
         raise AcquisitionRefused("retired_identity_reused", "adapter revived a retired native ID")
     fresh = request.intent == "fresh" or request.conversation_retired is True
-    if fresh and result.acquired != "created":
+    recovered_retirement = (
+        decision is not None
+        and decision.retirement_recovered
+        and decision.conversation is not None
+        and decision.conversation.task_generation == request.task_generation
+        and decision.conversation.task_id == request.task_id
+        and decision.conversation.target == request.target
+        and decision.conversation.mode == request.mode
+        and decision.conversation.worktree_id == request.worktree_id
+        and decision.conversation.retired is False
+        and decision.conversation.generation_bound
+        and request.intent == "automatic"
+        and request.conversation_retired is True
+    )
+    if fresh and result.acquired != "created" and not recovered_retirement:
         raise AcquisitionRefused("retired_or_fresh_reused", "fresh intent requires creation")
     if request.intent == "continue" and result.acquired == "created":
         raise AcquisitionRefused("continuation_recreated", "continuation cannot create")

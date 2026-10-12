@@ -122,6 +122,16 @@ because their effective-state proof is not yet implemented.
 
 ## Durable retry fence
 
+A fresh-generation authorization is not an instruction to create a second
+conversation on every reservation retry. If launch succeeded but delivery did
+not begin, reconciliation preserves a validated native receipt before marking
+the old attempt `superseded_before_delivery`. Automatic retries may reuse that
+specific non-retired, same-task, same-generation conversation only when its
+target/mode and native head agree with that receipt. Foreign or unbound
+holders, older generations, a newly issued freshness intent, and retired
+native IDs still refuse. A completed receipt retains the recovery proof;
+already-admitted turns settle without a duplicate delivery or a new process.
+
 `acquisition_journal.AcquisitionJournal` uses the bridge database's existing
 SQLite connection/write machinery, with a separate internal attempt table.
 One delivery ID binds the complete request digest. A partial unique index

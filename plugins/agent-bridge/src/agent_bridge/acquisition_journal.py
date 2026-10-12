@@ -6,13 +6,13 @@ import hashlib
 import json
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from .acquisition_contract import (
     AcquisitionRefused, AcquisitionRequest, AcquisitionResult, validate_result,
 )
 from .db import Database
-from .acquisition_policy import AcquisitionDecision
+from .acquisition_policy import AcquisitionDecision, ConversationEvidence
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS acquisition_attempts (
@@ -106,6 +106,9 @@ class AcquisitionJournal:
             result = AcquisitionResult.model_validate(receipt.get("result", receipt))
             decision = AcquisitionDecision(
                 result.acquired, creation_authorized=receipt.get("creation_authorized", False),
+                retirement_recovered=receipt.get("retirement_recovered", False),
+                conversation=ConversationEvidence(**receipt["conversation"])
+                if receipt.get("conversation") else None,
             )
             validate_result(request, result, decision=decision)
             return AcquisitionClaim(None, result)
@@ -123,6 +126,9 @@ class AcquisitionJournal:
         receipt = json.dumps({
             "result": result.model_dump(mode="json"),
             "creation_authorized": bool(decision and decision.creation_authorized),
+            "retirement_recovered": bool(decision and decision.retirement_recovered),
+            "conversation": asdict(decision.conversation)
+            if decision and decision.retirement_recovered and decision.conversation else None,
         })
         updated = self.db.execute_write(
             "UPDATE acquisition_attempts SET state='completed', result_json=?, updated_at=? "

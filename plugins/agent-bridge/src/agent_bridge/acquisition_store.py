@@ -94,13 +94,44 @@ class AcquisitionStore:
             (request.worktree_id, request.delivery_id),
         )
 
+    def retirement_recovery_proven(
+        self, request: AcquisitionRequest, session: str, native: str,
+    ) -> bool:
+        rows = self.db.execute_read(
+            "SELECT e.data_json FROM acquisition_attempts a "
+            "JOIN acquisition_effects e USING(delivery_id) "
+            "WHERE a.worktree_id=? AND a.state='refused' "
+            "AND a.refusal_code='superseded_before_delivery' AND e.stage='launched'",
+            (request.worktree_id,),
+        )
+        for row in rows:
+            data = json.loads(row["data_json"])
+            previous = data["_request"]
+            result = data["result"]
+            if (
+                previous.get("conversation_retired") is True
+                and previous.get("task_generation") == request.task_generation
+                and previous.get("task_id") == request.task_id
+                and previous.get("target") == request.target
+                and previous.get("mode") == request.mode
+                and result.get("acquired") == "created"
+                and result.get("session_id") == session
+                and result.get("native_session_id") == native
+                and native not in data.get("retired_native_ids", [])
+            ):
+                return True
+        return False
+
     def stage(self, request: AcquisitionRequest, stage: str, **data: Any) -> None:
         previous = self.db.execute_read(
             "SELECT data_json FROM acquisition_effects WHERE delivery_id=?", (request.delivery_id,),
         )
         if previous:
-            authority = json.loads(previous[0]["data_json"]).get("creation_authorized", False)
+            previous_data = json.loads(previous[0]["data_json"])
+            authority = previous_data.get("creation_authorized", False)
             data.setdefault("creation_authorized", authority)
+            data.setdefault("retirement_recovered", previous_data.get("retirement_recovered", False))
+            data.setdefault("retirement_conversation", previous_data.get("retirement_conversation"))
         self.db.execute_write(
             "INSERT INTO acquisition_effects VALUES (?, ?, ?) "
             "ON CONFLICT(delivery_id) DO UPDATE SET stage=excluded.stage, data_json=excluded.data_json",
