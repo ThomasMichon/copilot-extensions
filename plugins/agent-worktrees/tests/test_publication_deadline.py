@@ -81,8 +81,8 @@ def test_real_publication_forwards_deadline_and_lock_budgets(pr_repo, monkeypatc
     assert finalize.push_changes(wid, config)
 
     assert attempts == [timeout] * 3
-    assert waits and set(waits) == {2 * timeout + 30}
-    budget = 4 * timeout + 180
+    assert waits and set(waits) == {4 * timeout + 30}
+    budget = 8 * timeout + 180
     assert lifecycle == [{"timeout": budget, "stale_after": budget}]
     assert marker.read_text().splitlines() == ["1"] * 3
 
@@ -141,7 +141,7 @@ def test_maximum_deadline_is_usable_by_real_subprocess(tmp_path):
 
     from agent_worktrees import publication_deadline
 
-    maximum = (publication_deadline.MAX_WAIT_SECONDS - 180) / 4
+    maximum = (publication_deadline.MAX_WAIT_SECONDS - 180) / 8
     assert publication_deadline.validate(maximum) == maximum
     with pytest.raises(ValueError, match=r"pr.push_timeout_seconds.*dependent wait budgets"):
         publication_deadline.validate(math.nextafter(maximum, math.inf))

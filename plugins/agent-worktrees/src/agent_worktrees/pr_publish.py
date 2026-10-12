@@ -35,7 +35,7 @@ PROBE_TIMEOUT = 30.0
 #: while holding the publication lock: ``git_ops.push`` retries once without its auth
 #: override after a failure, each attempt bounded by the push timeout; plus buffer
 #: for scheduling/cleanup.
-PUBLISH_LOCK_ACQUIRE_TIMEOUT_S = 2 * push_timeout.DEFAULT_PUSH_TIMEOUT + 30.0
+PUBLISH_LOCK_ACQUIRE_TIMEOUT_S = publication_deadline.lock_wait(push_timeout.DEFAULT_PUSH_TIMEOUT)
 PUBLISH_LOCK_RETRY_INTERVAL_S = 0.1
 #: A scheme's own port: naming it explicitly is still the same destination.
 _DEFAULT_PORTS = {"http": 80, "https": 443, "ssh": 22, "git": 9418}
@@ -436,6 +436,16 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
             rewrite_args = {"allow_history_rewrite": True} if allow_history_rewrite else {}
             result = git_ops.push(remote, refspec, cwd=cwd, force_with_lease=force_with_lease,
                                   force_with_lease_expect=force_with_lease_expect, timeout=timeout, **rewrite_args)
+            if (
+                not result and force_with_lease_expect and "stale info" in result.stderr
+            ):
+                # A timed-out push may have succeeded without recording its head.
+                # Normal fast-forward publication cannot overwrite a racing update.
+                source, _, destination = refspec.partition(":")
+                destination = destination or source
+                tip = _tip(remote, destination.removeprefix("refs/heads/"), cwd)
+                if tip and git_ops.is_commit_ancestor(tip, source, cwd=cwd):
+                    result = git_ops.push(remote, refspec, cwd=cwd, timeout=timeout)
             if repo is not None and force_with_lease_expect and result.stderr == (
                 f"Refusing: {force_with_lease_expect} not an ancestor."
             ):

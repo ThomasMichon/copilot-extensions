@@ -76,11 +76,11 @@ remain compatible, but this workflow must not create independent machine keys.
 - [x] Review and land this proposal before implementing new behavior (#6072).
 
 ### Phase 2 — Originating identity
-- [ ] Include the root/control worktree's machine, project and worktree ID
+- [x] Include the root/control worktree's machine, project and worktree ID
   inside the encrypted payload, retaining the immediate producer identity.
-- [ ] Preserve codename/root fields, attribution opt-outs and existing token
+- [x] Preserve codename/root fields, attribution opt-outs and existing token
   decoding. Unresolved or unsafe ancestry must not invent an origin.
-- [ ] _(agent-recommended)_ Reuse validated ownership-chain traversal and
+- [x] _(agent-recommended)_ Reuse validated ownership-chain traversal and
   define capture behavior across handoffs, reaped ancestors and changed chains.
 
 ### Phase 3 — Portable key and protected local cache
@@ -88,7 +88,7 @@ remain compatible, but this workflow must not create independent machine keys.
   machines; never allocate a PR identity key per machine. Retain file-key
   compatibility only as a reference to that same shared key, not independent
   machine key generation.
-- [ ] Do not use machine-bound KEKs as the shared identity key. Machine-bound
+- [x] Do not use machine-bound KEKs as the shared identity key. Machine-bound
   protection wraps only the local cached copy of the common vault key.
 - [ ] Serve routine PR publication and lookup from a protected local cached key
   without unlocking the vault after successful initial population.
@@ -97,7 +97,7 @@ remain compatible, but this workflow must not create independent machine keys.
 - [ ] _(agent-recommended)_ Reuse the vault's cache contract where possible,
   with native Windows user-bound protection that works on ARM64 without a
   source-build prerequisite. Keep vault access at the declared tool boundary.
-- [ ] _(agent-recommended)_ Make shared-key PR encryption/decryption work on
+- [x] _(agent-recommended)_ Make shared-key PR encryption/decryption work on
   native Windows ARM64 independently of local cache wrapping. Cache protection
   and portable token encryption are different operations; neither substitutes
   for the other.
@@ -123,7 +123,7 @@ remain compatible, but this workflow must not create independent machine keys.
   without probing each source machine for a key.
 - [ ] Prove lookup with vault locked after cache population, including a
   process restart; cache miss does not prompt invisibly or fabricate success.
-- [ ] Native Windows ARM64 exercises real encryption/decryption and protected
+- [x] Native Windows ARM64 exercises real encryption/decryption and protected
   cache reads, not only mocks or platform skips.
 - [ ] Concurrent key/cache writes, malformed cache, rotation and permissions
   preserve recoverability and do not overwrite authoritative key material.
@@ -170,3 +170,22 @@ No production secret is read or written by the planning slice.
   portable file-key compatibility is retained without divergent machine keys.
 - Kept provider fallback after the identity/key work. No immediate updater or
   manual instruction sync is part of merge completion.
+
+### 2026-10-11 — Shared source and publication review follow-up
+
+- Native local cache protection landed in #6108 and portable native Windows
+  token encryption landed in #6115. Disposable native ARM64 exercises prove
+  protected cache reads and common-key token round trips, not actual owner
+  vault provisioning or synchronized fleet rollout.
+- Shared-source integration uses explicit payload argv and the same common vault
+  entry on every machine. A configured source miss never selects another key,
+  unlocks implicitly, or allocates a divergent identity key. Initial population,
+  explicit refresh after rotation and prior-key retention remain operator actions.
+- Successful POSIX reads can leave no process group to reap; accept that normal
+  absence silently while retaining sanitized warnings for actual cleanup failures.
+  Real output-bound and descendant-timeout tests remain in the focused selection.
+- Coupled stale-publication recovery only retries an ordinary fast-forward push
+  after a stale expected-head lease rejection under the existing publication lock
+  and destination identity checks. Divergent heads are not force-adopted.
+- Actual synced-vault population, locked-cache lookup across the real fleet,
+  provider fallback and final validation reconciliation remain incomplete.

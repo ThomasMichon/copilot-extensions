@@ -165,6 +165,15 @@ class PersistentCache:
     # -- atomic file I/O ---------------------------------------------------
 
     def _read_store(self) -> dict:
+        if not self._cache_file.exists():
+            return {"v": 1, "entries": {}}
+        if not self._key_file.exists():
+            from .cache_dpapi import MAGIC, CacheProtectionError
+
+            with self._cache_file.open("rb") as stream:
+                native = stream.read(len(MAGIC)) == MAGIC
+            if not IS_WINDOWS or not native:
+                raise CacheProtectionError("existing cache key missing; cache was not replaced")
         f = self._get_fernet()
         if f is None or not self._cache_file.exists():
             return {"v": 1, "entries": {}}

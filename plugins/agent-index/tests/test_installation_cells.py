@@ -4779,6 +4779,8 @@ def test_cell_installers_preserve_reserved_coordinator_exit(
         fake_python = fake_bin / "python.cmd"
         fake_python.write_text(
             "@echo off\r\n"
+            "echo %* | findstr /C:\"cell-runtime.py\" >nul\r\n"
+            "if errorlevel 1 exit /b 0\r\n"
             "(\r\n"
             "  echo %CD%\r\n"
             "  if defined PYTHONPATH (echo set) else (echo unset)\r\n"
@@ -4792,6 +4794,7 @@ def test_cell_installers_preserve_reserved_coordinator_exit(
         fake_python = fake_bin / "python"
         fake_python.write_text(
             "#!/bin/sh\n"
+            "case \"$*\" in *cell-runtime.py*) ;; *) exit 0 ;; esac\n"
             "{\n"
             "  pwd\n"
             '  if [ -n "${PYTHONPATH+x}" ]; then echo set; else echo unset; fi\n'

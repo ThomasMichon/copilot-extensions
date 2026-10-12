@@ -17,21 +17,18 @@ that actually wires it into a published marker (see
 ``true`` mode already discloses the underlying worktree identity in plaintext, and
 ``false`` (anonymous opt-out) never publishes any marker, encrypted or not.
 
-Key custody (operator-confirmed design, effort README): a single raw
-base64-encoded 32-byte key file, deliberately **not** machine-bound (no
-DPAPI/KEK wrapping, unlike :mod:`agent_vault.kek`) so the SAME key decrypts
-markers from every one of the operator's machines. The default location is
-OneDrive-rooted specifically so the file travels with the operator rather
-than staying pinned to one machine -- the whole point of this marker versus
-the existing SSH-scan-based codename resolution, which must ask every known
-machine in turn. This is intentionally a lighter-weight mechanism than
-agent-vault (no KeePass database, no daemon, no MFA) -- a low-stakes
-reverse-lookup convenience, not a secrets vault.
+Key custody uses one base64-encoded 32-byte owner key shared across machines.
+A configured agent-vault payload retrieves that common synced entry through
+its protected local cache only: no implicit unlock or key creation. DPAPI/KEK
+protection wraps only the local cached copy, not the portable identity key.
+An explicit file override remains compatible with that same shared key;
+without a configured vault source, legacy OneDrive file resolution remains.
+Configured vault failures never silently select another source.
 
-The key is never auto-generated on a publish path: :func:`load_identity_key`
-only reads an already-provisioned file and returns ``None`` (the layer is
-simply omitted) when none resolves. :func:`generate_identity_key` is the
-explicit, operator-invoked provisioning step.
+The key is never auto-generated on publication: :func:`load_identity_key`
+reads an already-provisioned file or protected vault cache and returns ``None``
+when unavailable. :func:`generate_identity_key` is explicit file provisioning
+for legacy adopters and refuses generation when a vault source is configured.
 
 Kept as its own module (mirroring :mod:`agent_worktrees.root_chain`'s own
 rationale) rather than growing ``pr_ops.py``/``tracking.py``/``config.py``,
@@ -132,16 +129,18 @@ def identity_key_path() -> Path | None:
 
 
 def load_identity_key() -> bytes | None:
-    """Load the raw 32-byte symmetric identity key, or ``None`` if no key
-    file is configured, resolvable, or readable as a valid key.
+    """Load the shared owner key from an explicit file or vault cache.
 
-    Never auto-creates one -- unlike a machine-bound KEK, this key must be
-    the IDENTICAL file on every machine (see :func:`generate_identity_key`),
-    so silently generating a fresh one here would fragment it across
-    machines instead of sharing it. Any failure (missing file, bad base64,
-    wrong length) returns ``None`` rather than raising -- this is the
-    hot-path reader used by every PR publish.
+    A nonempty explicit file override wins; otherwise a configured vault
+    source uses cache-only retrieval without unlocking. The same logical
+    key must serve every owner machine; this reader never creates one.
+    Configured source failures return None with sanitized diagnostics.
+    Without explicit sources, legacy shared-file discovery remains available.
     """
+    from .identity_vault import ARGV_ENV, load_cached_vault_key
+
+    if ARGV_ENV in os.environ and not os.environ.get(KEY_ENV_VAR):
+        return load_cached_vault_key()
     path = identity_key_path()
     if path is None:
         return None
@@ -171,6 +170,13 @@ def generate_identity_key(path: Path | None = None, *, force: bool = False) -> P
     since overwriting silently would strand every marker already published
     under the old key (they would stop decrypting, with no warning).
     """
+    from .identity_vault import ARGV_ENV
+
+    if ARGV_ENV in os.environ:
+        raise IdentityMarkerError(
+            "vault-backed identity uses one shared owner key; provision it in the vault, "
+            "not as a new machine file"
+        )
     target = path or identity_key_path()
     if target is None:
         raise IdentityMarkerError(
@@ -294,6 +300,15 @@ def decrypt_identity_payload(token_b64: str, key: bytes | None = None) -> dict:
             raise IdentityMarkerError("identity decoding requires the cryptography package") from exc
     resolved_key = key if key is not None else load_identity_key()
     if resolved_key is None:
+        from .identity_vault import ARGV_ENV
+
+        if not os.environ.get(KEY_ENV_VAR) and ARGV_ENV in os.environ:
+            raise IdentityMarkerError(
+                "configured shared vault key unavailable -- explicitly populate or "
+                "refresh its protected cache with agent-vault cache-populate --entry "
+                "<the configured AGENT_WORKTREES_IDENTITY_VAULT_ENTRY, or "
+                "Identity/PR-attribution when unset>"
+            )
         raise IdentityMarkerError(
             "no identity key configured -- set "
             f"{KEY_ENV_VAR} or place one at {identity_key_path()}"

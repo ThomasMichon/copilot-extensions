@@ -82,12 +82,41 @@ session on a machine you didn't expect.
 
 ## Decrypting the `enc=` field
 
+### One owner key through the vault cache
+
+Set `AGENT_WORKTREES_IDENTITY_VAULT_ARGV` to a JSON argv array naming the
+absolute payload-local agent-vault command from its session catalog.
+`AGENT_WORKTREES_IDENTITY_VAULT_ENTRY` selects the common entry (default:
+`Identity/PR-attribution`). Store one base64-encoded 32-byte owner key in that
+entry in the synced vault database; all machines use the same entry and key.
+Do not create an identity key independently on each machine.
+
+Enable the vault's protected local cache and explicitly unlock/populate it
+once on each machine with the vault's `cache-populate` flow. Publication and
+decode use `get <entry> password --cache-only`: no daemon contact, automatic
+unlock, prompt or key creation. A cache miss or invalid key emits a sanitized
+warning and never switches silently to another key source. The existing
+`AGENT_WORKTREES_IDENTITY_KEY` file override takes precedence for compatibility;
+it must contain the same owner key. Without either explicit source, legacy
+OneDrive file resolution is unchanged.
+
+The vault database is the common portable authority; local cache wrapping is
+machine-bound and must not itself be synced. Rotating the vault key requires
+explicit cache refresh on every machine; keep the previous key securely for
+older PR tokens, which cannot be decrypted with a replacement key.
+
 Windows encryption uses native CNG AES-256-GCM, including on ARM64, with the
 same portable token format and shared key as the cryptography backend used on
 other platforms. No machine-derived key is used for PR tokens. Machine-bound
 DPAPI protection applies only to local vault cache data. On other platforms,
 a missing encryption package produces a sanitized warning and omits `enc=`;
 decoding reports an explicit error.
+
+Bounded vault reads require a non-reaping POSIX exit observer so cleanup cannot
+signal a reused process-group identity. Older macOS Python builds without
+`os.waitid`/`WNOWAIT` omit the optional vault-backed encrypted layer with a
+sanitized warning before launching an adapter; use a runtime exposing those
+primitives for vault-backed reads. Existing file-key decoding remains available.
 
 If the marker carries an `enc=<token>` field, it is a self-contained
 AES-256-GCM-encrypted blob of the FULL raw identity (worktree id, machine,
@@ -110,10 +139,14 @@ store, and no network access needed:
 python -m agent_worktrees.identity_marker decode "<token>"
 ```
 
-The key resolves from `AGENT_WORKTREES_IDENTITY_KEY` (an explicit path) or,
-by default, a OneDrive-rooted location (`<OneDrive root>/Apps/agent-worktrees/identity.key`)
-so the SAME key file works from any of the key holder's machines --
-provision one with `python -m agent_worktrees.identity_marker generate`.
+### Existing file-key compatibility
+
+With no configured vault argv, the key resolves from
+`AGENT_WORKTREES_IDENTITY_KEY` or the legacy OneDrive location
+(`<OneDrive root>/Apps/agent-worktrees/identity.key`). Existing file-key adopters
+may provision once with `python -m agent_worktrees.identity_marker generate`;
+that command refuses generation when a vault source is configured. Vault
+users provision the common entry and populate the cache as described above.
 Generation publishes a complete key file without replacing an existing key,
 including when another process creates it concurrently. Keep the old key
 before using `generate --force`: replacing it prevents old markers from
@@ -121,7 +154,7 @@ decrypting. Local atomic creation cannot serialize two machines before
 their sync client reconciles; provision once and wait for synchronization
 before generating markers on another machine. A malformed or unreadable
 key omits encryption with a sanitized warning, rather than regenerating it.
-This is a lighter-weight, lower-assurance mechanism than a real secrets
+The legacy file-key alternative is a lighter-weight, lower-assurance mechanism than a real secrets
 vault (a plain file, not machine-bound, not MFA-gated) -- a convenience for
 low-stakes reverse lookup, not a security boundary. Without a configured
 key, the `enc=` field is simply absent from every marker; nothing else

@@ -98,6 +98,16 @@ python tools/run-plugin-tests.py agent-dispatch \
 Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
 than repeatedly importing file groups that contain no selected tests.
 
+The agent-worktrees namespace-package health-gate regression uses a minimal
+payload containing the real installer and slot/resolver helpers, with fake uv
+and a real isolated Python namespace import. It retains staging and activation
+rejection without copying or fingerprinting unrelated runtime sources as the
+plugin grows. The installer's 10-second process-tree watchdog runs inside a
+15-second subprocess bound and the unchanged 30-second per-test budget.
+The stalled descendant/captured-pipe case lives separately in
+`test_first_install_bootstrap_watchdog.py` and runs only in the full suite,
+not the required guard lane.
+
 There is no host-wide test singleton. Each target takes a lease keyed by its
 **concrete environment directory's filesystem identity** (`st_dev`, `st_ino`),
 held across venv preparation,

@@ -21,7 +21,7 @@ def validate(value: object, *, location: str = "pr.push_timeout_seconds") -> flo
         raise ValueError(error) from None
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError(error)
-    if 4 * timeout + 180 > MAX_WAIT_SECONDS:
+    if 8 * timeout + 180 > MAX_WAIT_SECONDS:
         raise ValueError(
             f"{location} must keep dependent wait budgets at or below {MAX_WAIT_SECONDS:.3f} seconds"
         )
@@ -33,8 +33,8 @@ def configured(prcfg) -> float:
 
 
 def lock_wait(timeout: float) -> float:
-    """Allow both authentication attempts and process-tree cleanup."""
-    return 2 * validate(timeout) + 30.0
+    """Allow initial/recovery pushes, their authentication retries, and tip cleanup."""
+    return 4 * validate(timeout) + 30.0
 
 
 def lifecycle_budget(prcfg) -> float:

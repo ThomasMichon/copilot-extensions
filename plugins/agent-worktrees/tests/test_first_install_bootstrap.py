@@ -561,7 +561,15 @@ esac
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer integration")
-def test_posix_health_gate_rejects_namespace_package_slot(tmp_path: Path) -> None:
+def test_posix_health_gate_rejects_namespace_package_slot(
+    tmp_path: Path,
+) -> None:
+    _assert_posix_namespace_slot_rejected(tmp_path, stall_health_gate=False)
+
+
+def _assert_posix_namespace_slot_rejected(
+    tmp_path: Path, *, stall_health_gate: bool,
+) -> None:
     """A partial ``uv pip install`` can leave ``agent_worktrees`` on disk as an
     empty directory -- no ``__init__.py``, no ``__main__.py``, no dist-info.
     Python still imports that as a PEP 420 *namespace* package with no error,
@@ -580,16 +588,22 @@ def test_posix_health_gate_rejects_namespace_package_slot(tmp_path: Path) -> Non
         / "copilot-extensions"
         / "agent-worktrees"
     )
-    shutil.copytree(
-        PLUGIN,
-        payload,
-        ignore=shutil.ignore_patterns(
-            "__pycache__",
-            "*.pyc",
-            ".pytest_cache",
-            ".test-venvs",
-        ),
-    )
+    # uv is fake here: copying/fingerprinting the full growing source tree
+    # adds unrelated, load-dependent work before the health gate is reached.
+    # Keep the real staging, slot admission, resolver and activation code.
+    for relative in (
+        "plugin.json",
+        "pyproject.toml",
+        "scripts/install.sh",
+        "scripts/versioned_runtime.py",
+        "scripts/resolve-runtime.sh",
+        "scripts/resolve-runtime.ps1",
+    ):
+        destination = payload / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(PLUGIN / relative, destination)
+    assert not (payload / "src").exists()
+    assert not (payload / "libs").exists()
 
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
@@ -608,13 +622,17 @@ case "${1:-}" in
     cat > "$target/bin/python" <<'PY'
 #!/bin/sh
 set -eu
+slot_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 _arg1="${1:-}"
 [ "$_arg1" = "-I" ] && shift
 if [ "${1:-}" = "-c" ]; then
-  case "${2:-}" in
-    *"import agent_worktrees.__main__"*) exit 1 ;;
-    *"import agent_worktrees"*) exit 0 ;;
-  esac
+  if [ "${NAMESPACE_HEALTH_STALL:-}" = "1" ]; then
+    case "$2" in *"import agent_worktrees.__main__"*) sleep 60 ;; esac
+  fi
+  # Exclude the runner venv's real package, which would beat a namespace.
+  exec "$REAL_PYTHON" -I -S -c \
+    'import sys; sys.path.insert(0, sys.argv[1]); exec(sys.argv[2])' \
+    "$slot_dir/fake-site" "$2"
 fi
 if [ "${1:-}" = "-m" ] && [ "${2:-}" = "agent_worktrees" ]; then
   echo "should never run: broken slot was activated" >&2
@@ -638,7 +656,8 @@ esac
             "HOME": str(home),
             "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
             "REAL_PYTHON": sys.executable,
-            "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "0",
+            "AGENT_WORKTREES_INSTALL_DEADLINE_SEC": "10",
+            "NAMESPACE_HEALTH_STALL": "1" if stall_health_gate else "0",
         }
     )
     provision = subprocess.run(
@@ -647,13 +666,36 @@ esac
         env=env,
         capture_output=True,
         text=True,
+        timeout=15,
     )
 
     assert provision.returncode != 0
-    assert "failed its health gate" in provision.stderr
+    if stall_health_gate:
+        assert provision.returncode == 124, provision.stderr
+        assert list((home / ".agent-worktrees" / ".install-stage").glob("*/.watchdog-fired"))
+    else:
+        assert "failed its health gate" in provision.stderr
+        assert "No module named 'agent_worktrees.__main__'" in provision.stderr
 
     # The broken slot must never be marked complete or activated: no
     # current-version marker, and no last-known-good pointing at it.
     install_dir = home / ".agent-worktrees"
     assert not (install_dir / "current-version").exists()
     assert not (install_dir / "last-known-good").exists()
+    slots = list((install_dir / "versions").iterdir())
+    assert len(slots) == 1
+    slot = slots[0]
+    assert not (slot / ".install-complete.json").exists()
+    namespace = subprocess.run(
+        [
+            str(slot / "bin" / "python"),
+            "-I",
+            "-c",
+            "import agent_worktrees; assert agent_worktrees.__file__ is None",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert namespace.returncode == 0, namespace.stderr

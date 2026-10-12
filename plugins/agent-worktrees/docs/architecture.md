@@ -1117,25 +1117,23 @@ discloses the underlying worktree identity in plaintext (encrypting it alongside
 would add ciphertext with no additional privacy value), and `false` (the
 anonymous opt-out) continues to emit no marker of any kind, encrypted or
 not -- an operator who explicitly chose full anonymity gets it, full stop.
-Key custody is
-deliberately lightweight (an operator-confirmed design choice, effort
-`pr-attribution-codenames`): a single raw base64-encoded 32-byte key file,
-**not** machine-bound (unlike `agent_vault.kek`'s DPAPI-wrapped KEKs) so the
-SAME key decrypts markers from every one of the key holder's machines. It
-resolves from `AGENT_WORKTREES_IDENTITY_KEY` (an explicit path) or, by
-default, a OneDrive-rooted location
-(`<OneDrive root>/Apps/agent-worktrees/identity.key`) -- OneDrive
-specifically because the file must travel with the operator, not stay
-pinned to one machine, which is the whole point of this layer versus the
-existing SSH-scan-based codename resolution (that must ask every known
-machine in turn; this just needs the one shared key). The key is never
-auto-generated on a publish path -- `python -m agent_worktrees.identity_marker
-generate` is the explicit, operator-invoked provisioning step; a missing key
-simply omits the `enc=` field, exactly like an unresolvable `root=` chain.
+Key custody uses one portable owner-level 32-byte key, never a per-machine
+PR key. An explicit nonempty `AGENT_WORKTREES_IDENTITY_KEY` path overrides
+the optional `AGENT_WORKTREES_IDENTITY_VAULT_ARGV` source, whose JSON argv
+names the absolute vault payload command. That source reads the common
+`AGENT_WORKTREES_IDENTITY_VAULT_ENTRY` (default `Identity/PR-attribution`)
+with `--cache-only`; the synced vault holds the shared key, while each local
+protected cache serves routine lookup without vault unlock.
+Configured vault failure never silently falls back to a different key.
+Without an explicit source, the legacy OneDrive file location remains
+compatible. File generation is only for file-key adopters and is refused
+when vault sourcing is configured. Vault provisioning and cache population
+are explicit; normal publish/decode never creates keys or unlocks the vault.
+Missing keys omit the encrypted field with sanitized failure reporting.
 Decrypt with `python -m agent_worktrees.identity_marker decode <token>`.
-This is intentionally a lighter-weight mechanism than `agent-vault` (no
-KeePass database, no daemon, no MFA) -- a low-stakes reverse-lookup
-convenience, not a secrets vault.
+Windows tokens use portable AES-GCM through native CNG (including ARM64);
+machine-bound DPAPI is used only for the local vault cache. The file-key
+alternative remains lower-assurance than vault-backed custody.
 
 **Resolution path.** `resolve --codename <name>` and `embody --codename
 <name>` both resolve **locally first** (the codename is looked up in this
