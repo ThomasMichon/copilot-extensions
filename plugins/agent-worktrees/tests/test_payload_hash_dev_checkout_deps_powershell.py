@@ -145,6 +145,23 @@ def test_get_payload_hash_is_stable_for_identical_content(tmp_path: Path) -> Non
     assert first == second
 
 
+def test_get_payload_hash_ignores_generated_packaging_metadata(tmp_path: Path) -> None:
+    plugin_dir, external_src = _make_plugin_tree(tmp_path / "ancestor.egg-info")
+    local_src = plugin_dir / "libs" / "local-lib" / "src" / "local_lib"
+    local_src.mkdir(parents=True)
+    (local_src / "__init__.py").write_text("z = 1\n", encoding="utf-8")
+    roots = (plugin_dir / "src", local_src.parent, external_src.parent)
+    before = _run_get_payload_hash(plugin_dir)
+    for root in roots:
+        for suffix in ("egg-info", "dist-info"):
+            metadata = root / f"generated.{suffix}"
+            metadata.mkdir()
+            (metadata / "PKG-INFO").write_text("generated build metadata\n", encoding="utf-8")
+    assert _run_get_payload_hash(plugin_dir) == before
+    (external_src / "runtime.json").write_text('{"enabled": true}\n', encoding="utf-8")
+    assert _run_get_payload_hash(plugin_dir) != before
+
+
 def test_get_payload_hash_does_not_double_hash_a_local_materialized_dependency(
     tmp_path: Path,
 ) -> None:

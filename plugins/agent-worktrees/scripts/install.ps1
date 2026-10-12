@@ -1367,7 +1367,12 @@ function Get-PayloadHash {
             if (-not (Test-Path $root)) { continue }
             $rootReal = (Resolve-Path $root).Path
             Get-ChildItem $root -Recurse -File -ErrorAction SilentlyContinue |
-                Where-Object { $_.Extension -notin @('.pyc', '.pyo') -and $_.Name -ne '__pycache__' } |
+                Where-Object {
+                    $sourceRelative = $_.FullName.Substring($rootReal.Length)
+                    $_.Extension -notin @('.pyc', '.pyo') -and
+                        $_.Name -ne '__pycache__' -and
+                        $sourceRelative -notmatch '(^|[\\/])[^\\/]+\.(egg|dist)-info([\\/]|$)'
+                } |
                 Sort-Object FullName | ForEach-Object {
                     if ($_.FullName.StartsWith($PluginDir.ToString(), [StringComparison]::OrdinalIgnoreCase)) {
                         $rel = $_.FullName.Substring($PluginDir.ToString().Length).Replace('\', '/')

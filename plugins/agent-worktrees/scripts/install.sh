@@ -954,7 +954,7 @@ _payload_hash() {
         [[ -d "$__root" ]] || continue
         while IFS= read -r __f; do
             __parts="$__parts"$'\n'"${__f#"$PLUGIN_DIR"}"$'\n'"$(cat "$__f" 2>/dev/null)"
-        done < <(find "$__root" -type f ! -name '*.pyc' ! -name '*.pyo' ! -path '*/__pycache__/*' 2>/dev/null | sort)
+        done < <(find "$__root" -type d \( -name '*.egg-info' -o -name '*.dist-info' \) -prune -o -type f ! -name '*.pyc' ! -name '*.pyo' ! -path '*/__pycache__/*' -print 2>/dev/null | sort)
     done
     # #5472: [tool.uv.sources] `path = "../../libs/<lib>"` dev-checkout
     # dependencies live OUTSIDE $PLUGIN_DIR entirely and are invisible to the
@@ -975,7 +975,7 @@ _payload_hash() {
             [[ -d "$__resolved/src" ]] || continue
             while IFS= read -r __f; do
                 __parts="$__parts"$'\n'"${__f#"$__resolved"}"$'\n'"$(cat "$__f" 2>/dev/null)"
-            done < <(find "$__resolved/src" -type f ! -name '*.pyc' ! -name '*.pyo' ! -path '*/__pycache__/*' 2>/dev/null | sort)
+            done < <(find "$__resolved/src" -type d \( -name '*.egg-info' -o -name '*.dist-info' \) -prune -o -type f ! -name '*.pyc' ! -name '*.pyo' ! -path '*/__pycache__/*' -print 2>/dev/null | sort)
         done < <(
             sed -n '/^\[tool\.uv\.sources\]/,/^\[/p' "$PLUGIN_DIR/pyproject.toml" |
             grep -o 'path[[:space:]]*=[[:space:]]*"[^"]*"' |

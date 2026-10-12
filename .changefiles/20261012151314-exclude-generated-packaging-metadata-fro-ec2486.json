@@ -1,0 +1,9 @@
+{
+  "comment": "Exclude generated packaging metadata from immutable runtime source fingerprints",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
