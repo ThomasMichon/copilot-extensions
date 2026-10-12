@@ -119,9 +119,16 @@ silent, indefinite stall that readers mistake for a healthy steady state.
 
 ### exit-awareness-not-existence-checking
 Any logic that waits for a predecessor process to be gone before acting
-confirms actual process termination (reaped exit), not merely that a PID
-no longer answers an existence probe — a zombie, an unreaped child, or a
-recycled PID must never be mistaken for "gone."
+confirms that the identified predecessor has terminated and can no longer
+execute or serve, not merely whether its PID answers an existence probe.
+A terminated zombie has exited and is non-serving even while its process
+record remains unreaped; reaping that record is resource cleanup, not a
+prerequisite for replacement admission. An unreaped record is not proof of
+active service, and a recycled PID must not be mistaken for the predecessor
+or used to infer its continued liveness. Identity-bound exit evidence and
+the exclusivity backstop govern admission; uncertainty is bounded and
+reported, never resolved by permitting two active servers or waiting
+indefinitely for a terminated process record to disappear.
 
 ### identity-scoped-cleanup
 Any cleanup of shared metadata is conditioned on the specific identity

@@ -64,7 +64,8 @@ does not by itself establish safe lifecycle ownership transfer:
   Its design must handle termination failure without skipping the wait,
   preserve a concurrent new owner's published metadata, and use actual
   exit/identity evidence rather than `os.kill(pid, 0)`-based existence
-  checks vulnerable to zombies or PID reuse.
+  checks that confuse a terminated, unreaped zombie record with a serving
+  process or a recycled PID with the predecessor.
 
 These are the same class of problem — transition points requiring the
 same exclusivity standard as cold start — which is why the vision states
@@ -101,6 +102,12 @@ stated outcome, not separately operator-specified line items.)_
   `identity-scoped-cleanup` behaviors. Specifically address the
   terminate-failure-skip and concurrent-new-owner-metadata-deletion races,
   not only a bounded wait followed by a PID-existence re-check.
+- [ ] Define the process-exit and PID-identity contract separately for
+  Windows, Linux and macOS, including the native evidence each uses,
+  termination failure, bounded uncertainty and cleanup. Linux `/proc` or
+  `pidfd` facilities are not generic POSIX or macOS proof. A terminated
+  zombie is non-serving and must not block admission merely because its
+  record has not been reaped.
 - [ ] Add regression coverage for all three known races (terminate failure,
   concurrent-publish-during-wait, zombie/PID-reuse) before considering the
   phase done.
@@ -148,6 +155,18 @@ and replacement/cutover proofs belong to the later phase PRs.)_
   candidates cannot publish or delete another owner's metadata, and
   the predecessor cannot continue serving once the successor is confirmed
   promoted; existing cutover/control-server test suite stays green.
+- [ ] Platform accounting for both phases: complete the design and
+  validation obligations below on Windows, Linux and macOS. Any unavailable
+  proof requires an explicit justified exemption documenting the degraded
+  behavior and its impact on the cross-platform guarantee before that
+  phase can be considered complete; Linux results alone cannot satisfy it.
+
+  | Platform | Design obligation | Validation obligation |
+  |----------|-------------------|-----------------------|
+  | Windows | Identify the native process identity and exit signal, including a retained handle/record after termination; do not equate PID visibility with active service. | Exercise real predecessor termination and termination failure, retained terminated-process evidence, PID-reuse protection and concurrent-owner metadata publication; prove exclusive admission and bounded zero-coverage windows. |
+  | Linux | Distinguish execution-capable processes from terminated zombies using identity-bound exit evidence; any `/proc` or `pidfd` use is Linux-specific. Reaping remains cleanup, not an admission prerequisite. | Keep a terminated child unreaped and prove it cannot serve or defer replacement indefinitely; also cover termination failure, PID reuse and concurrent-owner publication through real lifecycle boundaries. |
+  | macOS | Specify native identity and termination evidence without assuming `/proc` or Linux `pidfd` availability; distinguish terminated unreaped children from execution-capable incumbents. | Demonstrate the native path on macOS, including terminated/unreaped-child admission, termination failure, PID-reuse protection and concurrent-owner publication; prove exclusive admission and bounded zero-coverage windows. |
+
 - [ ] After both phases merge: re-read Vision
   `status-monitor-singleton`'s Behaviors section and confirm each one holds
   for all four named transitions (ordinary cold start via #5412; restart
@@ -203,3 +222,16 @@ this draft does not implement or validate either phase._
   Cold-start serialization remains the completed prerequisite only;
   restart, muxless/superseded-runtime replacement and promotion/cutover
   remain separate, unimplemented deliverables.
+
+### 2026-10-12 — Exit semantics and platform proof
+- Corrected exit-awareness to treat a terminated zombie as non-serving
+  even while its record is unreaped. Requiring record disappearance would
+  let PID-existence probes defer replacement indefinitely; identity-bound
+  termination evidence must reject PID reuse without mistaking visibility
+  for active service.
+- Added explicit Windows, Linux and macOS design and validation obligations
+  for both phases. Linux-specific liveness facilities cannot establish
+  macOS coverage; a missing platform proof requires a justified exemption
+  with its degraded behavior and guarantee impact recorded.
+- Retained the existing timeless Context and vision provenance without
+  rewriting already-correct text in response to carried review findings.
