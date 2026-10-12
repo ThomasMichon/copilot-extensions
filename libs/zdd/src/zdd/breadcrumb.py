@@ -190,6 +190,10 @@ def recover_stale_cutover(
         log.error("Legacy recovery refused while native cutover authority is held")
         return {"recovered": False, "refused": True,
                 "reason": "native cutover in progress; recovery refused"}
+    except OSError as exc:
+        reason = f"native recovery authority unavailable ({type(exc).__name__})"
+        log.error(reason)
+        return {"recovered": False, "refused": True, "reason": reason}
 
 
 def _recover_stale_cutover_locked(
@@ -357,6 +361,7 @@ def reap_abandoned_passive(
             with routing.routing_lock(config_dir, deadline=time.monotonic()):
                 table = routing.read_table(config_dir, strict=True) or {}
                 candidate = (record or current or {}).get("new_pid")
+                candidate_port = (record or current or {}).get("new_port")
                 for key in ("active", "previous"):
                     raw = table.get(key)
                     if raw is not None and not isinstance(raw, dict):
@@ -364,7 +369,10 @@ def reap_abandoned_passive(
                     endpoint = routing.Endpoint.from_dict(raw) if raw else None
                     if raw and endpoint is None:
                         raise ValueError("routing entry identity is invalid")
-                    if endpoint is not None and endpoint.pid == candidate:
+                    if endpoint is not None and (
+                        (candidate is not None and endpoint.pid == candidate)
+                        or endpoint.port == candidate_port
+                    ):
                         return {
                             "reaped": False,
                             "reason": "recorded passive pid is published -- it was promoted",

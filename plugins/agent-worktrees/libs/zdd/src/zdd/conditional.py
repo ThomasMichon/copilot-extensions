@@ -263,8 +263,14 @@ class PreparedCutover:
                     raise CutoverError("restored route changed before candidate disposal")
                 for key in ("active", "previous"):
                     raw = table.get(key)
+                    if raw is not None and not isinstance(raw, dict):
+                        raise CutoverError("publication cannot be verified; refusing disposal")
                     endpoint = Endpoint.from_dict(raw) if isinstance(raw, dict) else None
-                    if endpoint is not None and endpoint.pid == self.new.pid:
+                    if raw and endpoint is None:
+                        raise CutoverError("publication identity invalid; refusing disposal")
+                    if endpoint is not None and (
+                        endpoint.pid == self.new.pid or endpoint.port == self.new.port
+                    ):
                         raise CutoverError("candidate has been published; refusing disposal")
                 if handle.poll() is None:
                     if (

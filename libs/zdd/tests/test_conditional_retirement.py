@@ -251,7 +251,8 @@ def test_conditional_spawn_failure_is_redacted_and_preserves_owner_state(case):
 
 
 @pytest.mark.parametrize("publication", ["active", "previous", "changed-transition"])
-def test_passive_reap_revalidates_fresh_native_owner(case, publication):
+@pytest.mark.parametrize("published_pid", [202, None, 999])
+def test_passive_reap_revalidates_fresh_native_owner(case, publication, published_pid):
     root, old, _, _, _, _, _ = case
     record = breadcrumb.write_breadcrumb(
         root, state="started", old=old.to_dict(), new_pid=202, new_port=61002
@@ -259,7 +260,10 @@ def test_passive_reap_revalidates_fresh_native_owner(case, publication):
     if publication == "changed-transition":
         breadcrumb.write_breadcrumb(root, state="started", new_pid=303, new_port=61003)
     else:
-        candidate = replace(old, pid=202, process_start_time="2020", generation=2)
+        candidate = replace(
+            old, pid=published_pid, port=61002,
+            process_start_time="2020", generation=2,
+        )
         table = {"active": candidate.to_dict()} if publication == "active" else {
             "active": old.to_dict(), "previous": candidate.to_dict()
         }
@@ -272,3 +276,38 @@ def test_passive_reap_revalidates_fresh_native_owner(case, publication):
     )
     assert not result["reaped"] and calls == []
     assert breadcrumb.breadcrumb_path(root).read_bytes() == before
+
+
+def test_recovery_lock_io_failure_is_explicit_refusal(case, monkeypatch):
+    root, _, _, _, _, _, _ = case
+
+    def unavailable(*args, **kwargs):
+        raise PermissionError("fixture private path")
+
+    monkeypatch.setattr("zdd.cutover_lock.CutoverLock.acquire", unavailable)
+    result = breadcrumb.recover_stale_cutover(root, lambda _: pytest.fail("must not control"))
+    assert result["refused"] and not result["recovered"]
+    assert "PermissionError" in result["reason"]
+    assert "fixture private path" not in result["reason"]
+
+
+@pytest.mark.parametrize("published_pid", [None, 999])
+def test_rollback_retains_address_only_published_candidate(case, published_pid):
+    root, _, events, _, snapshot, request, orch = case
+
+    def attest(endpoint):
+        if endpoint.pid == 202:
+            routing._atomic_write(
+                root / "active.json",
+                {"active": replace(endpoint, pid=published_pid, generation=9).to_dict()},
+            )
+        return snapshot.attest(endpoint)
+
+    result = orch.run(
+        conditional=replace(
+            request, capture_runtime=lambda _: replace(snapshot, attest=attest)
+        )
+    )
+    assert not result.ok and not result.rolled_back
+    assert events == ["spawn"]
+    assert breadcrumb.is_stale(breadcrumb.read_breadcrumb(root))
