@@ -87,6 +87,8 @@ def validate_lock_provenance(provenance: dict | None, packages: dict[str, str]) 
             ) for values in hashes.values()
         ):
             raise ArtifactBuildError("public toolchain requires eligible file-hash provenance")
+        if any(values != sorted(set(values)) for values in hashes.values()):
+            raise ArtifactBuildError("public toolchain hash provenance must be sorted and unique")
         if type(age) is not int or age < 0 or provenance != {
             **PublicToolchainSource(age, packages, {name: tuple(values) for name, values in hashes.items()}).provenance,
             "python": provenance["python"],

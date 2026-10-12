@@ -435,6 +435,8 @@ win grows with build complexity.
   resolution. Both fixture locks and negative regressions exercise this rule.
   Governed records also reject noncanonical extra fields before serialization,
   including non-JSON values, with an explicit artifact-build error.
+  Public hash arrays must be sorted and unique, preserving a single canonical
+  identity for each eligible digest set.
 - Age-floor race follow-through: snapshot-qualified file SHA-256 hashes travel
   with exact pins into `uv pip install --require-hashes`. A later upload to the
   same version cannot supply unseasoned bytes; unknown hashes and unpinned

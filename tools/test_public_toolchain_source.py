@@ -250,6 +250,12 @@ def test_cli_default_preserves_builder_validation_order(monkeypatch, capsys):
     {"python": "/python", "source_policy": "seasoned-public", "packages": PINS},
     {**public.PublicToolchainSource(7, PINS, HASHES).provenance, "python": "/python", "min_age_days": -1},
     {**public.PublicToolchainSource(7, PINS, HASHES).provenance, "python": "/python", "packages": {}},
+    {**public.PublicToolchainSource(7, PINS, HASHES).provenance, "python": "/python",
+     "file_hashes": {**{name: list(values) for name, values in HASHES.items()},
+                    "wheel": ["a" * 64, "a" * 64]}},
+    {**public.PublicToolchainSource(7, PINS, HASHES).provenance, "python": "/python",
+     "file_hashes": {**{name: list(values) for name, values in HASHES.items()},
+                    "wheel": ["b" * 64, "a" * 64]}},
 ])
 def test_schema_three_record_rejects_incomplete_or_mismatched_provenance(provenance):
     lock = btl.ToolchainLock(Path("/python"), dict(PINS), provenance=provenance)

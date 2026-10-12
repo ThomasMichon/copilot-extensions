@@ -48,13 +48,14 @@ artifact set's identity folds together:
   on the same `artifact_id`.
 
 **Manifest schema note (version 3):** ``build_toolchain`` is a structured
-record (``{"packages": {"setuptools": "...", "wheel": "...", "packaging":
-"..."}, "lock_id": "sha256:..."}``) describing the one locked toolchain
+record containing ``packages``, ``lock_id``, and mandatory ``provenance``
+(source policy and resolved interpreter; public policy also binds age,
+pins, and eligible file hashes), describing the one locked toolchain
 every wheel in the set was built against -- not schema version 1's ad hoc
 list of per-wheel ``Generator:`` strings gathered after the fact.
 ``packaging`` is locked alongside ``setuptools``/``wheel`` so this tool's
 own ``[build-system].requires`` verification can run inside the locked,
-governed-feed-sourced venv rather than depending on ``packaging`` being
+policy-selected venv rather than depending on ``packaging`` being
 importable in whatever process runs this tool. Resolved locks also record
 source policy and interpreter provenance, both included in ``lock_id``.
 The default remains governed-only. Public promotion runners may explicitly
