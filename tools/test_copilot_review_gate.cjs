@@ -5,12 +5,17 @@ const test = require("node:test");
 const { spawnSync } = require("node:child_process");
 
 const workflow = fs.readFileSync(
-  path.join(__dirname, "../.github/workflows/copilot-review-gate.yml"), "utf8",
-);
-const script = workflow.split(
+  path.join(__dirname, "../.github/workflows/workflow-lockdown-guard.yml"), "utf8",
+).replace(/\r\n/g, "\n");
+const scriptLines = workflow.split(
   "      - name: Request Copilot review as a licensed Maintainer account\n",
 )[1].split("          script: |\n")[1]
-  .split("\n").filter(line => line.trim()).map(line => {
+  .split("\n");
+const scriptEnd = scriptLines.findIndex(
+  line => line.trim() && !line.startsWith("            "),
+);
+const script = scriptLines.slice(0, scriptEnd === -1 ? undefined : scriptEnd)
+  .filter(line => line.trim()).map(line => {
     assert.ok(line.startsWith("            "));
     return line.slice(12);
   }).join("\n");

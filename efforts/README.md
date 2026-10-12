@@ -10,7 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Main-Owned Workflow Control](active/main-owned-workflow-control/README.md) | Draft; plan review before implementation | #6237; run/check consolidation primary, ownership enabling |
+| [Main-Owned Workflow Control](active/main-owned-workflow-control/README.md) | Active; first consolidation slice | #6237; run/check consolidation primary, ownership enabling |
 | [Fleet Control V2](active/fleet-control-v2/README.md) | Active; plan reviewed, contract assignment pending | #6236, #6240, #6241; existing #5789/#6030 owners retained |
 | [Lean Runtime Dependencies](active/lean-runtime-dependencies/README.md) | Draft; audit-backed proposal | #6234 |
 | [Process Slot Ownership](active/process-slot-ownership/README.md) | Draft; reader-lifetime continuation | #3963; registry presentation separately #5559 |

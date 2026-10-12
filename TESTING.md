@@ -12,7 +12,7 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 The review-request workflow's fast contract uses
 `node --test tools/test_copilot_review_gate.cjs`. To exercise its exact script
 against the bundled `actions/github-script` runtime as well, download
-`dist/index.js` from the commit pinned in `copilot-review-gate.yml` into a
+`dist/index.js` from the commit pinned in `workflow-lockdown-guard.yml` into a
 task-specific scratch folder and pass its absolute path as
 `COPILOT_REVIEW_ACTION_BUNDLE` to that same command. The opt-in test uses
 synthetic read/write tokens and an in-memory HTTP adapter; it makes no live API
