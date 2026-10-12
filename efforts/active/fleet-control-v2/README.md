@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; release/role snapshot contract slice in implementation
+- **Status:** Active; release snapshot contract landed, operation/receipt shapes in implementation
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts. Existing dependencies #5789, #6030, #5861, #5862 retain ownership.
@@ -27,7 +27,7 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Plan steward | Plan/vision reconciliation, issue coordination and review stewardship | Managed planning worktree; umbrella issue |
-| Contract implementer | Release/role snapshot contract under #6240; later operation slice separately assigned | Managed implementation worktree; assigned sub-issue |
+| Contract implementer | Release/role contract #6240; first operation/receipt shape slice #6241 | Managed implementation worktree; assigned sub-issues |
 | Existing campaign owners | Routing, standalone client, role deployment and provider integration | Existing campaign issues and canonical efforts |
 | Adopter | Configuration, capacity, enrollment and live activation approval | Explicit downstream adoption workflow |
 
@@ -103,6 +103,8 @@ All detailed slices are **agent-recommended** and remain subject to review.
 ### Phase 1 - One release and role-selective lifecycle
 - [ ] Define a fleet-manager release manifest for thin client, Gateway and node
   roles; reuse existing lifecycle code rather than implementing parallel installers.
+  Declaration and offline snapshot inspection landed in #6285; actual product
+  assembly, signature verification and lifecycle activation remain pending.
 - [ ] Prove independent setup/update/doctor/recovery and bounded activation,
   with no installation or update from Copilot hooks.
 - [ ] Prove thin client installation has no controller/container-manager effects;
@@ -203,3 +205,19 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 - Added strict release role declarations and explicit non-mutating observation
   inspection. Snapshot readiness is not a live probe or signed-artifact proof.
   Installation, Gateway/node service execution and migration remain pending.
+
+### 2026-10-12 - Release snapshot contract landed; receipt seam started
+- #6285 merged at `2026-10-12T20:40:47Z`, commit
+  `1604313dc1971fc37e551aaa2ee05575b6068757`, after current-head Copilot APPROVED
+  with zero open findings and green required CI. Installed contained suite:
+  104 passed; lint and contract guards passed.
+- Review corrections preserve observation validity windows, refuse oversized
+  epoch integers without tracebacks and retain manifest mismatch precedence.
+  Results remain supplied-snapshot assertions, not live readiness.
+- Re-read the full Plan and pulled forward the verified squash merge, preserving
+  newer documentation-owner and effort-index changes.
+- Claimed a distinct first #6241 slice: immutable intent/receipt shape validation,
+  content/scope/generation correlation and conservative UNKNOWN semantics.
+  Existing routing/auth owners and production queues remain untouched.
+- Next is durable admission/outbox and node receipt state after this contract
+  clears review. No runtime activation, fleet enrollment or deployment performed.

@@ -57,7 +57,9 @@ permissions:
 jobs:
   filter-and-dispatch:
     name: filter (dev-ancestry) and dispatch
-    if: github.event.workflow_run.conclusion == 'success'
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event != 'pull_request'
     permissions:
       contents: write
     runs-on: ubuntu-latest

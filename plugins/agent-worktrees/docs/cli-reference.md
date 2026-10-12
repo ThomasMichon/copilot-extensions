@@ -311,6 +311,7 @@ Repos without `pr.roles` and non-GitHub providers keep their prior behavior.
 | `pr-comment` | Post a general (non-verdict) comment on the active tracked PR: `pr-comment <body>` |
 | `pr-review` | Publish a review verdict on the active tracked PR: `--approve` / `--request-changes` / `--comment`, with an optional `--body` |
 | `attribution-audit` | Config-only check: flags this repo's `pr.head_pattern` for the branch-name leak class (embeds `{machine}` while `pr.source_attribution` isn't `true`; `{worktree_id}` is never flagged -- it isn't part of `pr_head_name`'s rendering contract, so it can't actually leak). Plain mode prints findings and exits 1 if any are found (0 if none); `--json` exits 0 whenever it can report findings (empty or not). A configuration-load failure exits 1 in both modes |
+| `attribution-prepare` | Emit a source marker, or prepare a UTF-8 `--body-file`, for an external GitHub/Azure DevOps PR tool without provider access. Optional `--tag` supplies an adopter-owned public label; `--omit-source` honors anonymous publication. `--json` returns `version`, `marker`, `body`, `attributed`. Runs from a managed source worktree; leaves files and remote PRs unchanged. See the worktree skill's `pr-attribution.md` reference. |
 | `pr` | Namespace grouping the `pr-*` verbs |
 
 `get pr-profile` / `get pr-required` / `get pr-provider` are deliberately

@@ -340,7 +340,7 @@ targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `promote-trigger.yml` | `workflow_run: ["CI"]` | One trusted invocation hosts independent dev-ancestry dispatch and fork-safe identifier scanning jobs. Job-scoped permissions preserve the two original credential boundaries. No concurrency group or cross-job dependency can hold the filter behind scanning or full release validation. PR objects are read as inert data, never executed. |
+| `promote-trigger.yml` | `workflow_run: ["CI"]` | One trusted invocation hosts independent dev-ancestry dispatch and fork-safe identifier scanning jobs. PR CI completions never start the ancestry-filter runner: synthetic PR success is not committed dev advancement. Successful push/manual completions still prove ancestry rather than trusting branch metadata. Job-scoped permissions and independent concurrency preserve the original trust boundary; PR objects are inert data only. |
 
 **The promotion pipeline (dev → main):**
 

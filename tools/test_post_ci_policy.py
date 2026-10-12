@@ -32,7 +32,8 @@ def test_one_trusted_followup_keeps_jobs_and_credentials_independent():
     dispatch = workflow["jobs"]["filter-and-dispatch"]
     scan = workflow["jobs"]["scan-and-report"]
     assert "needs" not in dispatch and "needs" not in scan
-    assert dispatch["if"] == "github.event.workflow_run.conclusion == 'success'"
+    assert "github.event.workflow_run.conclusion == 'success'" in dispatch["if"]
+    assert "github.event.workflow_run.event != 'pull_request'" in dispatch["if"]
     assert dispatch["permissions"] == {"contents": "write"}
     assert scan["permissions"] == {
         "contents": "read", "pull-requests": "read", "issues": "write", "checks": "write",
@@ -46,6 +47,22 @@ def test_one_trusted_followup_keeps_jobs_and_credentials_independent():
     assert publish["env"]["CHECK_NAME"] == "identifier leak guard"
     assert "github.rest.checks.create" in publish["with"]["script"]
     assert "repository_dispatch" not in "\n".join(step.get("run", "") for step in scan["steps"])
+
+
+@pytest.mark.parametrize("event,conclusion,expected", [
+    ("pull_request", "success", False),
+    ("pull_request", "failure", False),
+    ("push", "success", True),
+    ("push", "failure", False),
+    ("workflow_dispatch", "success", True),
+])
+def test_only_committed_or_manual_success_can_enter_the_filter(event, conclusion, expected):
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    condition = workflow["jobs"]["filter-and-dispatch"]["if"]
+    executable = condition.replace(
+        "github.event.workflow_run.conclusion", "conclusion",
+    ).replace("github.event.workflow_run.event", "event").replace("&&", "and")
+    assert eval(executable, {"__builtins__": {}}, {"event": event, "conclusion": conclusion}) is expected
 
 
 @pytest.fixture

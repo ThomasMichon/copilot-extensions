@@ -5369,6 +5369,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--lease-seconds", type=int, default=_EXECUTION_LEG_RESERVATION_DEFAULT_SECONDS)
     p.add_argument("--json", action="store_true")
 
+    from . import attribution_prepare_cli
+    attribution_prepare_cli.add_parsers(sub)
     finalize_cli.add_parsers(sub)
     pr_state_cli.add_parsers(sub)
 
@@ -5520,17 +5522,13 @@ def _current_session_ids() -> set[str]:
 # maintenance / doctor surfaces are componentized into maintenance_cli.py.
 
 # ── Lazy dispatch (agent-cli-lazy-dispatch effort, Phase 1) ────────────────
-# {command: (module_name, handler_attr_name)} for every subcommand whose own
-# module owns BOTH its argparse subparser (via that module's `add_parsers`,
-# or `register_cli` for pane_lifecycle) AND its COMMAND_MAP handler, with no
-# naming conflict against any other module. Regenerate by importing
+# Command -> (module, handler); modules expose add_parsers/register_cli. Regenerate by importing
 # agent_worktrees.__main__ once (pays the full cost, offline), then for each
 # add_parsers-owning module, building a throwaway
 # `argparse.ArgumentParser().add_subparsers()` and calling that module's own
 # `add_parsers(sub)` to see which command names land in `sub.choices`;
-# cross-check module/attr via `COMMAND_MAP[name].__module__`/`__name__`.
-# Deliberately excludes: commands with no module-owned parser (parser built
-# inline in build_parser() -- activity, activity-log, stage-update,
+# Cross-check COMMAND_MAP module/name; exclude inline build_parser parsers
+# (activity, activity-log, stage-update,
 # reconcile-marketplaces, execution-leg, copilot), commands whose handler is
 # native to __main__ itself (resolve, handoff-trace), and commands that never
 # reach COMMAND_MAP at all (their own hand-rolled manual-dispatch branches in
@@ -5541,6 +5539,7 @@ def _current_session_ids() -> set[str]:
 _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'anchor-check': ('maintenance_cli', 'cmd_anchor_check'),
     'attribution-audit': ('finalize_cli', 'cmd_attribution_audit'),
+    'attribution-prepare': ('attribution_prepare_cli', 'cmd_attribution_prepare'),
     'backfill-sessions': ('maintenance_cli', 'cmd_backfill_sessions'),
     'bind-nudge': ('session_binding_cli', 'cmd_bind_nudge'),
     'bind-session': ('session_binding_cli', 'cmd_bind_session'),
@@ -5673,14 +5672,14 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 # a var, or via `_core_helper()`) is bound at module level BEFORE the
 # deferred `_load_full_command_surface()` block, AND no function it reaches
 # transitively (in __main__.py or a sibling module) touches a name bound
-# only inside that block. Skips `_ensure_cluster_loaded()` in
-# `_dispatch_lazy()` for these modules only. Regenerate/diff via
+# only inside that block; these modules skip `_ensure_cluster_loaded()`. Regenerate/diff via
 # `tests/_core_cluster_scan.py`'s `compute_cluster_free_modules()` -- never
 # hand-edit, never trust static analysis alone (a regex scan shipped
 # `create-pr`'s regression; this transitive class needs runtime exercise
 # too -- see the effort's Journal). Adding a module requires running its
 # real commands end-to-end, not just `--help`.
 _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
+    "attribution_prepare_cli",
     "claims_cli",
     "cleanup_gc_cli",
     "finalize_cli",
@@ -6256,6 +6255,7 @@ def _load_full_command_surface() -> None:
         "create-pr": cmd_create_pr,
         "pr-create": cmd_create_pr,  # pr-* family alias (also rewritten pre-argparse)
         "attribution-audit": cmd_attribution_audit,
+        "attribution-prepare": __import__(f"{__package__}.attribution_prepare_cli", fromlist=["cmd_attribution_prepare"]).cmd_attribution_prepare,
         "set-pr": cmd_set_pr,
         "pr-ready": cmd_pr_ready,
         "pr-status": cmd_pr_status,

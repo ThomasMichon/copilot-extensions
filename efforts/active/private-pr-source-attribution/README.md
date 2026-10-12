@@ -72,6 +72,13 @@ remain compatible, but this workflow must not create independent machine keys.
 
 ## Plan
 
+Provider fallback clarification:
+
+> "Emit a marker / prepare a PR body (recommended)"
+
+The operator selected preparation for existing provider tools, not independent
+remote PR mutation. Adopter labels are optional public invocation configuration.
+
 ### Phase 1 — Reviewed completion contract
 - [x] Review and land this proposal before implementing new behavior (#6072).
 
@@ -92,22 +99,22 @@ remain compatible, but this workflow must not create independent machine keys.
   protection wraps only the local cached copy of the common vault key.
 - [ ] Serve routine PR publication and lookup from a protected local cached key
   without unlocking the vault after successful initial population.
-- [ ] Missing or invalid cache must require explicit provisioning/unlock;
+- [x] Missing or invalid cache must require explicit provisioning/unlock;
   never create a divergent replacement key or fall back to plaintext storage.
-- [ ] _(agent-recommended)_ Reuse the vault's cache contract where possible,
+- [x] _(agent-recommended)_ Reuse the vault's cache contract where possible,
   with native Windows user-bound protection that works on ARM64 without a
   source-build prerequisite. Keep vault access at the declared tool boundary.
 - [x] _(agent-recommended)_ Make shared-key PR encryption/decryption work on
   native Windows ARM64 independently of local cache wrapping. Cache protection
   and portable token encryption are different operations; neither substitutes
   for the other.
-- [ ] _(agent-recommended)_ Define bounded key-fetch failures, cache lifetime,
+- [x] _(agent-recommended)_ Define bounded key-fetch failures, cache lifetime,
   rotation and old-token lookup before publishing the integration.
 
 ### Phase 4 — Provider fallback attribution
-- [ ] Add a configurable, provider-neutral fallback attribution path for PRs
+- [x] Add a configurable, provider-neutral fallback attribution path for PRs
   opened outside managed `create-pr`, including Azure DevOps.
-- [ ] Keep adopter-specific tags and repository names in adopter configuration,
+- [x] Keep adopter-specific tags and repository names in adopter configuration,
   never in the public plugin's defaults.
 
 ### Phase 5 — Required dev PR source metadata
@@ -195,3 +202,22 @@ No production secret is read or written by the planning slice.
   and destination identity checks. Divergent heads are not force-adopted.
 - Actual synced-vault population, locked-cache lookup across the real fleet,
   provider fallback and final validation reconciliation remain incomplete.
+
+### 2026-10-12 — Shared source landed; provider preparation slice
+
+- Shared owner-key sourcing landed in #6127 after current-head approval and
+  required CI. Publication deadlines include recovery attempts; POSIX cleanup
+  retains the group leader's identity until termination. Unsupported older
+  macOS observer primitives omit the optional layer with sanitized diagnostics.
+- The common vault entry and one protected local cache were populated with
+  explicit operator authorization. Fresh-process cache-only reads and native
+  token round trips passed without publishing key material. Actual locked-vault
+  and synchronized multi-machine deployment evidence remains separate.
+- The operator chose a provider-neutral preparation command for existing
+  GitHub/Azure DevOps tools, not a second authenticated remote-posting path.
+  It reuses the existing codename/root/encrypted marker builders, strips stale
+  source markers, honors provenance/opt-outs, and takes any public adopter
+  label explicitly rather than embedding a private repository default.
+- Merge to `dev`, promotion to `main`, and authorized local rollout remain
+  distinct states; no immediate force-update or manual projection sync is
+  part of this continuation.

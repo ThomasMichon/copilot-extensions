@@ -162,6 +162,36 @@ about the `codename=`/`root=` fields changes.
 
 ## When there's no marker at all
 
+### PRs opened by another tool, including Azure DevOps
+
+From the managed source worktree, emit a marker or prepare an existing UTF-8
+body before handing it to your existing PR-opening tool:
+
+```text
+<agent-worktrees catalog argv[0]> attribution-prepare
+<agent-worktrees catalog argv[0]> attribution-prepare --body-file description.md --json
+<agent-worktrees catalog argv[0]> attribution-prepare --body-file description.md --tag control-harness
+```
+
+This provider-neutral command does not open or modify a remote PR, resolve
+provider credentials, or change the input file. Its JSON result contains
+`version`, `marker`, `body` and `attributed`. It uses the source repository's
+attribution mode, codename provenance, validated root-chain and configured
+shared identity key; anonymous opt-out or `--omit-source` removes stale source
+markers and emits no adopter tag. Unmanaged sources and unsafe codenames fail
+explicitly rather than inventing a source or falling back to raw identifiers.
+
+`--tag` is an optional visible public label supplied by the adopter's own
+invocation/configuration, not an upstream repository or organization default.
+Labels containing the immediate machine/worktree identifier as a
+case-insensitive substring, and malformed labels, are refused. Body composition
+uses the existing source-marker helper's trailing-whitespace normalization;
+the input file itself is unchanged. Copy
+the prepared body into the existing GitHub or Azure DevOps publication flow;
+those tools retain ownership of provider-specific rendering and posting.
+An encrypted marker is optional when the common key is unavailable, following
+the same sanitized warning contract as managed publication.
+
 - Confirm the repo actually has `pr.source_attribution` configured and not
   set to `false` -- run `<agent-worktrees catalog argv[0]> attribution-audit`
   against the repo to check its configuration and branch-name-leak

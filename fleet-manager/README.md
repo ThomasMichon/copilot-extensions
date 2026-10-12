@@ -146,3 +146,13 @@ Vision reconciliation: closes the first contract portion of machine-fleet
 `unified-coordination-product` under [Fleet Control V2](../efforts/active/fleet-control-v2/README.md).
 Ordinary standalone client planning remains unchanged. Live lifecycle, signed
 release distribution and node/Gateway operation remain pending.
+
+## Operation and receipt shapes
+
+The first [operation contract](docs/operation-contract.md) adds immutable,
+content-bound intent and target-receipt records as a Python API only. Strict
+scope/generation/digest correlation distinguishes acceptance, effect outcome and
+uncertainty. Parsing is not authentication, durable admission, execution,
+monotonic receipt ordering or objective settlement. No CLI mutation or resident
+control runtime is added; existing fixed-service routing contracts remain owned
+by `agent-fleet-contracts`.
