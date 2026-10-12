@@ -165,6 +165,11 @@ def _isolated_provenance_key_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 _FAKE_TOOLCHAIN = bpa.ToolchainLock(
     Path("/fake/toolchain-venv/bin/python"),
     {"setuptools": "84.1.0", "wheel": "0.44.0"},
+    provenance={
+        "source_policy": "governed",
+        "python": "/fake/interpreter",
+        "validated_index_identity": "test-index-identity",
+    },
 )
 
 
@@ -964,6 +969,17 @@ def test_build_wheel_ambiguous_output_raises(tmp_path: Path, monkeypatch: pytest
 
 # --- build_plugin_artifacts (end-to-end, mocked build_wheel) ---------------
 
+@pytest.mark.parametrize("provenance", [None, {}, {"source_policy": "governed"}])
+def test_build_plugin_artifacts_rejects_missing_provenance_before_build(
+    fake_repo: Path, monkeypatch: pytest.MonkeyPatch, provenance
+):
+    _write_pyproject(fake_repo / "plugins" / "demo", sources={})
+    lock = bpa.ToolchainLock(Path("/fake/python"), {"setuptools": "84.1.0"}, provenance=provenance)
+    monkeypatch.setattr(bpa, "build_wheel", lambda *args, **kwargs: pytest.fail("unprovenanced build"))
+    with pytest.raises(bpa.ArtifactBuildError, match="provenance"):
+        bpa.build_plugin_artifacts("demo", out_dir=fake_repo / "dist", toolchain=lock)
+    assert list((fake_repo / "dist").iterdir()) == []
+
 
 def test_build_plugin_artifacts_end_to_end(
     fake_repo: Path, monkeypatch: pytest.MonkeyPatch
@@ -990,6 +1006,7 @@ def test_build_plugin_artifacts_end_to_end(
     assert manifest["build_toolchain"] == {
         "packages": {"setuptools": "84.1.0", "wheel": "0.44.0"},
         "lock_id": _FAKE_TOOLCHAIN.lock_id,
+        "provenance": _FAKE_TOOLCHAIN.provenance,
     }
     assert manifest["python_tag"] == "py3"
     assert {e["role"] for e in manifest["wheels"]} == {"plugin", "vendored-lib"}

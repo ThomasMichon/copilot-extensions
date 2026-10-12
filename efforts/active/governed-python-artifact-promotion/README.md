@@ -430,6 +430,9 @@ win grows with build complexity.
   real wheel builds sharing one lock. Public-mode package installation is not
   run on a managed device. Full installer clean-room and external consumption
   matrices remain owned by later phases, which change those paths.
+- Review follow-through: schema-3 records reject caller-supplied locks lacking
+  valid source/interpreter provenance before wheel building, not merely after
+  resolution. Both fixture locks and negative regressions exercise this rule.
 
 ### 2026-10-10 - Phase 2 slice 3: seasoned public-PyPI version resolution for public CI runners
 

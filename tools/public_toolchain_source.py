@@ -48,3 +48,21 @@ def source_provenance(source: str | PublicToolchainSource) -> dict:
     if isinstance(source, PublicToolchainSource):
         return source.provenance
     return {"validated_index_identity": _opaque_index_identity(source)}
+
+
+def validate_lock_provenance(provenance: dict | None, packages: dict[str, str]) -> None:
+    if not isinstance(provenance, dict) or not isinstance(provenance.get("python"), str) or not provenance["python"]:
+        raise ArtifactBuildError("schema-3 toolchain requires explicit interpreter provenance")
+    policy = provenance.get("source_policy")
+    if policy == "governed":
+        identity = provenance.get("validated_index_identity")
+        if not isinstance(identity, str) or not identity:
+            raise ArtifactBuildError("governed toolchain requires validated index provenance")
+    elif policy == "seasoned-public":
+        age = provenance.get("min_age_days")
+        if type(age) is not int or age < 0 or provenance != {
+            **PublicToolchainSource(age, packages).provenance, "python": provenance["python"],
+        }:
+            raise ArtifactBuildError("public toolchain provenance does not match its policy and pins")
+    else:
+        raise ArtifactBuildError("schema-3 toolchain requires explicit source-policy provenance")

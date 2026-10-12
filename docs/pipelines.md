@@ -30,7 +30,9 @@ age floor, not proof that any consumer's governed feed has mirrored a version.
 Manifest schema 3 records toolchain source policy and resolved interpreter in
 `build_toolchain.provenance`; public provenance additionally records the
 index, seasoning floor, and exact pins. These fields participate in
-`lock_id`, hence `artifact_id`. Shared `--toolchain-venv` reuse checks the
+`lock_id`, hence `artifact_id`. Caller-supplied toolchain locks with missing
+or inconsistent provenance are rejected before any wheel is built.
+Shared `--toolchain-venv` reuse checks the
 same policy/pins/interpreter identity and rechecks installed public pins;
 a different identity uses an alternate slot without disturbing an active
 build. The existing `.governed-feed-provenance.json` filename is retained

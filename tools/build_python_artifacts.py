@@ -870,6 +870,7 @@ def build_plugin_artifacts(
             )
             toolchain = resolve_toolchain_lock(toolchain_root / "venv", python=python)
 
+        toolchain_record = toolchain.record
         def _build_and_verify(source_dir: Path) -> tuple[Path, dict, str]:
             wheel = build_wheel(
                 source_dir, out_dir, toolchain=toolchain, reserved_names=reserved_names
@@ -947,7 +948,7 @@ def build_plugin_artifacts(
             "abi_tag": identity_tags["abi_tag"],
             "platform_tag": identity_tags["platform_tag"],
             "payload_hash": payload_hash,
-            "build_toolchain": toolchain.record,
+            "build_toolchain": toolchain_record,
             "artifact_id": artifact_id,
             "wheels": entries,
         }

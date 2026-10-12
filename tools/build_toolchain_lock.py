@@ -64,6 +64,7 @@ from public_toolchain_source import (  # noqa: E402
     PublicToolchainSource,
     resolve_public_source,
     source_provenance,
+    validate_lock_provenance,
 )
 from seasoned_public_feed import DEFAULT_MIN_AGE_DAYS  # noqa: E402
 
@@ -397,9 +398,9 @@ class ToolchainLock:
 
     @property
     def record(self) -> dict:
+        validate_lock_provenance(self.provenance, self.packages)
         record = {"packages": dict(sorted(self.packages.items())), "lock_id": self.lock_id}
-        if self.provenance is not None:
-            record["provenance"] = self.provenance
+        record["provenance"] = self.provenance
         return record
 
 

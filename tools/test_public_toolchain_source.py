@@ -220,3 +220,17 @@ def test_cli_default_preserves_builder_validation_order(monkeypatch, capsys):
         raise btl.ArtifactBuildError("invalid plugin before provisioning")
     assert cli.main(build, "demo") == 1
     assert "invalid plugin before provisioning" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("provenance", [
+    {"python": "/python"},
+    {"python": "/python", "source_policy": "unknown"},
+    {"python": "/python", "source_policy": "governed"},
+    {"python": "/python", "source_policy": "seasoned-public", "packages": PINS},
+    {**public.PublicToolchainSource(7, PINS).provenance, "python": "/python", "min_age_days": -1},
+    {**public.PublicToolchainSource(7, PINS).provenance, "python": "/python", "packages": {}},
+])
+def test_schema_three_record_rejects_incomplete_or_mismatched_provenance(provenance):
+    lock = btl.ToolchainLock(Path("/python"), dict(PINS), provenance=provenance)
+    with pytest.raises(btl.ArtifactBuildError, match="provenance"):
+        _ = lock.record
