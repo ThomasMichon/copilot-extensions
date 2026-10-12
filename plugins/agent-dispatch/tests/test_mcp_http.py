@@ -137,6 +137,27 @@ def test_mcp_endpoint_lists_tools(coord):
     assert {variant.get("type") for variant in variants} == {"array", "object"}
 
 
+def test_http_audit_recipe_retains_verification_and_exclusivity(coord, tmp_path):
+    import asyncio
+    import json
+
+    response = asyncio.run(_call(
+        coord, "dispatch_recipe_kick",
+        {
+            "name": "worktree-audit", "repo": TEST_REPO,
+            "params": {
+                "scope": "fixture-project", "candidates": "wt-a",
+                "budget_minutes": "5", "report_dir": str(tmp_path),
+            },
+        },
+    ))
+    assert not response.is_error
+    task = json.loads(response.content[0].text)
+    assert task["require_verification"] is True
+    assert task["exclusive_key"] == "worktree-audit:fixture-project"
+    assert "mode:report-only" in task["labels"]
+
+
 def test_hosted_emitter_side_load_routes_to_registration_owner(tmp_path, monkeypatch):
     import asyncio
 

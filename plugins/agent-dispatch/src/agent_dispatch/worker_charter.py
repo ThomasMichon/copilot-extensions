@@ -30,6 +30,8 @@ string to inline; no separate copy is maintained for that path).
 
 from __future__ import annotations
 
+from .recipes.worktree_audit import CHARTER as WORKTREE_AUDIT_CHARTER
+
 AUTOPILOT_CHARTER_NAME = "autopilot"
 OPERATING_PROCEDURES_CHARTER_NAME = "operating-procedures"
 
@@ -174,6 +176,7 @@ transcript; emit one at real transitions, never on a timer.
 _CHARTERS: dict[str, str] = {
     AUTOPILOT_CHARTER_NAME: _AUTOPILOT_CHARTER,
     OPERATING_PROCEDURES_CHARTER_NAME: _OPERATING_PROCEDURES,
+    "worktree-audit": WORKTREE_AUDIT_CHARTER,
 }
 
 #: The exact operating-procedures text, exported for a worker in the

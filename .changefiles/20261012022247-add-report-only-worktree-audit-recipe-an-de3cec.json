@@ -1,0 +1,13 @@
+{
+  "comment": "Add report-only worktree audit recipe and independent-verification contract; strengthen real-Git FINAL regression coverage",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

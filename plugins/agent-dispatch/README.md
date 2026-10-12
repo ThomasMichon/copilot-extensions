@@ -1526,14 +1526,16 @@ posted verdict is progress followed by **SUSPEND**, never a progress **SUBMIT**.
 ## Recipes (loop archetypes)
 
 A **recipe** is a packaged *shape* of long-running agentic work -- a charter
-template plus the suspend/resume rhythm and the resolution it drives toward. Three
+template plus the suspend/resume rhythm and the resolution it drives toward. Four
 archetypes ship in-box: **reviewer** (review under an explicit `land=self|author`
 model),
 **conflict-resolution** (take the last mile of a stalled change), and
-**goal-driven** (drive an arbitrary goal through PRs). A recipe is a *first-class,
+**goal-driven** (drive an arbitrary goal through PRs), and **worktree-audit**
+(produce a bounded private report without candidate mutations). A recipe is a *first-class,
 directly-invokable* capability: you can kick a one-off from the CLI with only a
 coordinator + a worker body -- no standing service, emitter, or evaluator is
-required (the "recipes run ad-hoc" path).
+required (the "recipes run ad-hoc" path). The audit recipe always requires
+independent report verification; its driver never executes resolve/unwind.
 
 ```bash
 agent-dispatch recipes list                       # the available recipes + their params
@@ -1554,11 +1556,40 @@ in a fresh worktree with a full checkout -- the right body for a recipe). A
 the identity is the repository + pull-request reference only, so landing-policy,
 base-branch, or guidance drift cannot fork a live review. Once that generation
 is terminal, the queue releases the key and permits a later review generation
-(override with `--dedup-key`). The rendered charter reaffirms the two safety
+(override with `--dedup-key`). The source-work recipes' rendered charters reaffirm the two safety
 invariants -- *drive the worktree to a clean resolved state on abandon* and *report
 what you did* -- so a worker carries them even on the ad-hoc, no-service path. See
 [`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
 (§Concepts/*The recipe*, §Features/*loop-recipes* + *recipes-run-ad-hoc*).
+
+### Report-only worktree conclusion audit
+
+Use the `auditing-worktree-conclusions` skill for the approval and private
+workspace flow. `worktree-audit` requires four explicit parameters: `scope`
+(registered local project), `candidates` (1-5 exact IDs, comma-list or JSON),
+`report_dir` (approved absolute private directory), and `budget_minutes`
+(1-30). `render` and `kick --dry-run` perform no queue or lifecycle writes.
+Installing this capability never creates a worker or schedule.
+
+After explicit pilot approval, `kick` creates a goal task with report-only
+policy, coordinator-local project spawn exclusivity, stable normalized-roster
+dedup and `require_verification=true`. CLI, local MCP and HTTP MCP preserve
+those execution controls. The CLI rejects `--no-require-verification` for
+this recipe. The charter also lives at `charter show worktree-audit`.
+
+The worker may write only its own task progress/result and approved private
+report artifacts. Questions are proposed steering in the report, not posted
+candidate cards; unknown/incomplete evidence and unreviewed budget remainders
+remain explicit holds. No candidate edits, source work, claim releases,
+finalization, removal or recurring producer is authorized.
+
+`recipes check-report --report <path>` with the original four parameters
+checks the `worktree-conclusion-audit/v1` report's exact roster, empty
+`actions_taken`, bounds, evidence references and retained-work reasons.
+It does not prove evidence truth or that no mutations occurred. A human or
+separately authorized trusted evaluator corroborates those before confirming
+the submitted report. This is an advisory charter, not an OS-level read-only
+sandbox or a removal safety primitive.
 
 The reviewer defaults to backward-compatible `land=self`: the reviewer owns
 landing and is not done at a verdict. With `land=author`, the reviewer posts and

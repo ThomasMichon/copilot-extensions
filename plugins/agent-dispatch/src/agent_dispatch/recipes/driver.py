@@ -100,6 +100,14 @@ def decide(recipe: Recipe, signal: str) -> DriverAction:
       (be conservative -- don't busy-loop), yields **suspend** until a
       ``suspend_on`` event fires.
     """
+    if recipe.resolution == "report-submitted-for-independent-verification":
+        return DriverAction(
+            kind=WORK,
+            directive=(
+                "Produce or submit the bounded private report for independent verification; "
+                "never resolve, unwind, or mutate any candidate workspace."
+            ),
+        )
     outcome = resolution_outcome(signal)
     if outcome is not None:
         verb = "Land it" if outcome == LANDED else "Unwind it"
