@@ -436,6 +436,11 @@ win grows with build complexity.
   run; consumer clean-room/install/rollback paths are unchanged and belong
   to Phase 3. Native OIDC signing can only be proved by the trusted
   default-branch promotion job after this workflow reaches that branch.
+- Hosted Windows CI caught a fixture-only dependency on an ambient Git
+  identity during `commit-tree`. The shared promotion fixture now sets its
+  own repository-local identity, and the new contract suite disables
+  global/system Git configuration to prove it is independently runnable.
+  Production promotion already configures its own job-local identity.
   Dependency closure/admission, shared-installer consumption, the full
   consumer/platform matrix and durable retention remain open.
 

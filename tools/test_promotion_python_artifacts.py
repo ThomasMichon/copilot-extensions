@@ -15,9 +15,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import promote_release as promotion
 import promotion_python_artifacts as artifacts
 import publish_python_artifacts as publisher
-from test_promote_release import _commit, _git, repo as _repo_fixture
+from test_promote_release import (
+    _commit, _git, no_ambient_git_identity as _identity_fixture, repo as _repo_fixture,
+)
 
 repo = _repo_fixture
+no_ambient_git_identity = _identity_fixture
 
 DEV, MAIN, TREE = "a" * 40, "b" * 40, "c" * 40
 
