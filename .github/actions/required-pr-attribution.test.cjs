@@ -97,7 +97,11 @@ test("existing PR heads receive distinct current metadata results", async () => 
       },
       checks: {
         listForRef: async () => ({ data: { check_runs: [] } }),
-        create: async (check) => created.push(check),
+        create: async (check) => {
+          created.push(check);
+          return { data: { id: created.length } };
+        },
+        update: async (check) => Object.assign(created[check.check_run_id - 1], check),
       },
     },
   };
@@ -119,7 +123,11 @@ test("unchanged decisions avoid repeated writes while body changes are reevaluat
         listForRef: async () => ({ data: {
           check_runs: created.map((check, index) => ({ ...check, id: index + 1, app: { slug: "github-actions" } })),
         } }),
-        create: async (check) => created.push(check),
+        create: async (check) => {
+          created.push(check);
+          return { data: { id: created.length } };
+        },
+        update: async (check) => Object.assign(created[check.check_run_id - 1], check),
       },
     },
   };
@@ -131,6 +139,69 @@ test("unchanged decisions avoid repeated writes while body changes are reevaluat
   await gate.backfill(args);
   assert.equal(created.length, 2);
   assert.equal(created[1].conclusion, "failure");
+});
+
+test("changes during pacing and publication cannot leave a stale success", async () => {
+  for (const scenario of [
+    ...["pause", "create", "complete"].map((stage) => ({ stage, policy: false })),
+    ...["pause", "create", "complete"].map((stage) => ({ stage, policy: true })),
+  ]) {
+    const changeAt = scenario.stage;
+    let current = scenario.policy ? pr("", [{ name: "attribution-exempt" }]) : pr(marker);
+    const created = [];
+    let changed = false;
+    const invalidate = () => { changed = true; current = pr(""); };
+    const github = {
+      paginate: async () => [{ number: 1 }],
+      rest: {
+        pulls: { list() {}, get: async () => ({ data: current }) },
+        checks: {
+          listForRef: async () => ({ data: { check_runs: [] } }),
+          create: async (check) => {
+            assert.equal(check.status, "in_progress");
+            assert.equal(check.conclusion, undefined);
+            created.push(check);
+            if (!changed && changeAt === "create") invalidate();
+            return { data: { id: created.length } };
+          },
+          update: async (check) => {
+            Object.assign(created[check.check_run_id - 1], check);
+            if (!changed && changeAt === "complete" && check.conclusion === "success") invalidate();
+          },
+        },
+      },
+    };
+    await gate.backfill({
+      github, context, core: core(),
+      pause: async () => { if (!changed && changeAt === "pause") invalidate(); },
+    });
+    assert.ok(created.length);
+    assert.ok(created.every((check) => check.conclusion === "failure"));
+    assert.ok(!JSON.stringify(created).includes("attribution-exempt"));
+  }
+});
+
+test("unverifiable publication is failed closed without exposing metadata", async () => {
+  let published = false;
+  const created = [];
+  const github = {
+    paginate: async () => [{ number: 1 }],
+    rest: {
+      pulls: { list() {}, get: async () => {
+        if (published) throw new Error("metadata unavailable");
+        return { data: pr(marker) };
+      } },
+      checks: {
+        listForRef: async () => ({ data: { check_runs: [] } }),
+        create: async (check) => { created.push(check); published = true; return { data: { id: 1 } }; },
+        update: async (check) => Object.assign(created[0], check),
+      },
+    },
+  };
+  await assert.rejects(gate.backfill({ github, context, core: core(), pause: async () => {} }),
+                       /metadata unavailable/);
+  assert.equal(created[0].conclusion, "failure");
+  assert.ok(!JSON.stringify(created).includes("attribution-exempt"));
 });
 
 test("the existing compiler-owned native workflow origin needs no artifact rewrite", () => {

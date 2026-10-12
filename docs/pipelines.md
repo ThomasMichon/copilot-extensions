@@ -307,6 +307,10 @@ distinct context on current open dev PR heads without editing their descriptions
 or labels. Unchanged metadata/validator decisions are deduplicated and writes
 are paced. This refresh closes the rollout gap for already-open PRs whose old
 green lockdown runs never examined attribution.
+Refresh publication starts pending, rereads metadata before and after completing
+its result, and supersedes any changed/unverifiable snapshot with a failure
+before a bounded retry. A delayed refresh must not leave a stale successful
+result after a concurrent description or metadata edit.
 
 **Activation is separate from implementation merge.** After promotion to
 `main`, verify a real source-check failure and a body-only repair from the

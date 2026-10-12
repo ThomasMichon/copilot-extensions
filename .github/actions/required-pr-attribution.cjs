@@ -129,36 +129,75 @@ async function enforce({ github, context, core }) {
   }
 }
 
+function snapshot(pr) {
+  return "source-metadata:" + crypto.createHash("sha256").update(JSON.stringify({
+    definition: DEFINITION, number: pr.number, body: pr.body,
+    head: pr.head.sha, base: pr.base.ref, state: pr.state,
+    labels: (pr.labels || []).map((label) => typeof label === "string" ? label : label.name).sort(),
+  })).digest("hex");
+}
+
 async function backfill({ github, context, core, pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
   const prs = await github.paginate(github.rest.pulls.list, {
     ...context.repo, state: "open", base: "dev", per_page: 100,
   });
   for (const listed of prs) {
-    const pr = await currentPR(github, context, listed.number);
-    if (pr.state !== "open" || pr.base.ref !== "dev") continue;
-    const error = decision(pr);
-    const externalId = "source-metadata:" + crypto.createHash("sha256").update(JSON.stringify({
-      definition: DEFINITION, number: pr.number, body: pr.body,
-      labels: (pr.labels || []).map((label) => typeof label === "string" ? label : label.name).sort(),
-    })).digest("hex");
-    const { data } = await github.rest.checks.listForRef({
-      ...context.repo, ref: pr.head.sha, check_name: CONTEXT, per_page: 100,
-    });
-    const latest = data.check_runs.filter((check) => check.app?.slug === "github-actions")
-      .sort((a, b) => b.id - a.id)[0];
-    if (latest?.external_id === externalId && latest.status === "completed" &&
-        latest.conclusion === (error ? "failure" : "success")) continue;
-    await pause(1000);
-    await github.rest.checks.create({
-      ...context.repo, name: CONTEXT, head_sha: pr.head.sha,
-      external_id: externalId,
-      status: "completed", conclusion: error ? "failure" : "success",
-      details_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-      output: {
-        title: "Required source attribution",
-        summary: error ? `${error}\n\n${REPAIR}` : "Required source metadata check completed.",
-      },
-    });
+    let stable = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let pr = await currentPR(github, context, listed.number);
+      if (pr.state !== "open" || pr.base.ref !== "dev") { stable = true; break; }
+      const { data } = await github.rest.checks.listForRef({
+        ...context.repo, ref: pr.head.sha, check_name: CONTEXT, per_page: 100,
+      });
+      const latest = data.check_runs.filter((check) => check.app?.slug === "github-actions")
+        .sort((a, b) => b.id - a.id)[0];
+      const observed = snapshot(pr);
+      if (latest?.external_id === observed && latest.status === "completed" &&
+          latest.conclusion === (decision(pr) ? "failure" : "success")) {
+        if (snapshot(await currentPR(github, context, listed.number)) === observed) { stable = true; break; }
+        continue;
+      }
+      await pause(1000);
+      pr = await currentPR(github, context, listed.number);
+      if (pr.state !== "open" || pr.base.ref !== "dev") { stable = true; break; }
+      const externalId = snapshot(pr);
+      const error = decision(pr);
+      const created = await github.rest.checks.create({
+        ...context.repo, name: CONTEXT, head_sha: pr.head.sha,
+        external_id: externalId,
+        status: "in_progress",
+        details_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+        output: {
+          title: "Required source attribution",
+          summary: "Validating current source metadata.",
+        },
+      });
+      try {
+        if (snapshot(await currentPR(github, context, listed.number)) === externalId) {
+          await github.rest.checks.update({
+            ...context.repo, check_run_id: created.data.id, status: "completed",
+            conclusion: error ? "failure" : "success",
+            output: {
+              title: "Required source attribution",
+              summary: error ? `${error}\n\n${REPAIR}` : "Required source metadata check completed.",
+            },
+          });
+          stable = snapshot(await currentPR(github, context, listed.number)) === externalId;
+        }
+      } finally {
+        if (!stable) {
+          await github.rest.checks.update({
+            ...context.repo, check_run_id: created.data.id, status: "completed", conclusion: "failure",
+            output: {
+              title: "Required source attribution",
+              summary: "Source metadata changed or could not be verified; this result is superseded.",
+            },
+          });
+        }
+      }
+      if (stable) break;
+    }
+    if (!stable) throw new Error("Source metadata changed too often to validate; retry the check.");
   }
   core.info("Current dev pull request metadata checks refreshed.");
 }
