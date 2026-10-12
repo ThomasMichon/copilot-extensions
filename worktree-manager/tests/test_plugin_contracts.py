@@ -17,15 +17,6 @@ from worktree_manager.plugin_contracts import (
 from worktree_manager.__main__ import main
 
 
-@pytest.fixture(autouse=True)
-def _explicit_fixture_plugin_home(monkeypatch):
-    # These tests supply isolated homes; runner-level plugin roots must not
-    # override them. Environment-specific cases can set their own override.
-    monkeypatch.delenv("WORKTREE_MANAGER_PLUGINS_DIR", raising=False)
-    monkeypatch.delenv("AGENT_WORKTREES_PLUGINS_DIR", raising=False)
-    monkeypatch.delenv("AGENT_WORKTREES_PIVOTS_DIR", raising=False)
-
-
 def _settings(home: Path, enabled: dict[str, bool]) -> None:
     root = home / ".copilot"
     root.mkdir(parents=True, exist_ok=True)

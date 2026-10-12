@@ -132,7 +132,9 @@ launch. The target daemon admits the request, allocates at most one New
 worktree, and stages the prompt in that target's worktree state. The launch then
 carries only the target worktree and seed identity. Arbitrary prompt text is
 encoded, not interpolated into the remote shell. Requests are limited to an
-8 KiB UTF-8 envelope to stay within remote command limits.
+7 KiB UTF-8 envelope, including JSON metadata, to stay within remote command
+limits after PowerShell's UTF-16LE/Base64 wrapping. Oversized envelopes or shell
+commands are rejected before SSH admission.
 
 An old target engine refuses the structured request before creating or staging
 anything; seedless remote launches remain compatible. An uncertain response

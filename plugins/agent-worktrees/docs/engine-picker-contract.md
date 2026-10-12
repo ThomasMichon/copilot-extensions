@@ -12,7 +12,7 @@ entirely out of the plugin engine.
 The Worktrees composer is host-rendered for local and machine-SSH sources.
 Prompted remote `resolve --json --machine <target>` invokes the target's own
 `resolve --json --launch-request-b64 <envelope>` first. The UTF-8 JSON envelope
-is bounded to 8192 bytes and carries version 1, a 32-character hexadecimal
+is bounded to 7168 bytes (7 KiB, including JSON metadata) and carries version 1, a 32-character hexadecimal
 `request_id`, `kind` (`new` or `resume`), `worktree_id` (null for New), `text`
 and Boolean `no_mux`. POSIX shell arguments are quoted; PowerShell commands
 are encoded. Prompt text never enters the interactive SSH launch string.

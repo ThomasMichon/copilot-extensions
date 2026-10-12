@@ -271,3 +271,21 @@ hiding the problem or silently dropping text.
   returns; no test result or completed Manager update is claimed for it.
   Remaining gates are native Windows/lifecycle disposition, current-head green
   CI and review, promotion/deployment, delivered Picker observation and closure.
+- **2026-10-12** -- Current-head required CI is now green; the independently
+  claimed publication-fixture repairs landed through their own PRs. The draft
+  remains mergeable without another history rewrite. Review found two remaining
+  remote-boundary gaps: invalid or mismatched zero-exit receipts also represent
+  uncertain admission, and an 8 KiB envelope exceeds the PowerShell command
+  budget after wrapping. All uncertain receipts now name the original request,
+  prohibit resubmission and give its target status command without automatic
+  replay. Reduced the shared envelope ceiling to 7 KiB including metadata and
+  documented the pre-admission command-size check.
+  Contained admission/transport regressions pass 47 cases (one native POSIX
+  skip), including exact-limit and one-byte-over checks for both kinds and shell
+  families. The native PowerShell process round-trip also passes at the full
+  envelope limit with Unicode and shell metacharacters. Removed a duplicate
+  Manager fixture while retaining its canonical root isolation; its 20 contract
+  cases pass. Changed Python lint passes. The authorized Windows target remains
+  unreachable on a bounded recheck, so its native conversation lane and source
+  worktree disposition remain open. Candidate proof is still not delivered
+  Picker proof; release, rollout and effort closure are outstanding.

@@ -16,7 +16,7 @@ from . import config as cfg
 from . import launch_seed_state, tracking, tracking_write
 from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
 
-MAX_REQUEST_BYTES = 8192
+MAX_REQUEST_BYTES = 7 * 1024
 
 
 def decode(encoded: str) -> dict:

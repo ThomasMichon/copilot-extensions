@@ -13,10 +13,21 @@ from agent_procutil import no_window_kwargs
 from . import config as cfg
 from .launch_request import MAX_REQUEST_BYTES
 
+MAX_REMOTE_COMMAND_CHARS = 28000
+
+
+def _unconfirmed_admission(project: str, alias: str, request_id: str, kind: str,
+                           reason: str) -> RuntimeError:
+    return RuntimeError(
+        f"Remote launch admission {request_id} is unconfirmed on {alias}: {reason}. "
+        f"Do not resubmit this {kind} prompt; run {project} resolve --json "
+        f"--launch-request-status {request_id} on the target."
+    )
+
 
 def shell_command(shell: str, argv: list[str]) -> str:
     shell = shell.lower()
-    if shell.lower() in ("pwsh", "powershell", "powershell.exe", "pwsh.exe"):
+    if shell in ("pwsh", "powershell", "powershell.exe", "pwsh.exe"):
         script = "& " + " ".join("'" + part.replace("'", "''") + "'" for part in argv)
         script += "; exit $LASTEXITCODE"
         encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
@@ -48,7 +59,7 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
     command = shell_command(shell, [
         project, "resolve", "--json", "--launch-request-b64", encoded,
     ])
-    if len(command) > 28000:
+    if len(command) > MAX_REMOTE_COMMAND_CHARS:
         raise ValueError("Remote launch request exceeds the remote shell command limit")
     try:
         result = subprocess.run(
@@ -58,11 +69,7 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         reason = "SSH admission timed out" if isinstance(exc, subprocess.TimeoutExpired) else str(exc)
-        raise RuntimeError(
-            f"Remote launch admission {request_id} is unconfirmed on {alias}: {reason}. "
-            f"Do not resubmit this {kind} prompt; run {project} resolve --json "
-            f"--launch-request-status {request_id} on the target."
-        ) from exc
+        raise _unconfirmed_admission(project, alias, request_id, kind, reason) from exc
     if result.returncode:
         detail = result.stdout.strip()
         try:
@@ -81,7 +88,9 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
     try:
         receipt = json.loads(result.stdout)
     except ValueError as exc:
-        raise RuntimeError(f"Remote admission {request_id} returned an invalid receipt") from exc
+        raise _unconfirmed_admission(
+            project, alias, request_id, kind, "invalid receipt",
+        ) from exc
     if (
         not isinstance(receipt, dict) or receipt.get("version") != 1
         or receipt.get("request_id") != request_id or receipt.get("seed_id") != request_id
@@ -89,7 +98,9 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
         or not isinstance(receipt.get("worktree_id"), str) or not receipt["worktree_id"]
         or (wid is not None and receipt["worktree_id"] != wid)
     ):
-        raise RuntimeError(f"Remote admission {request_id} returned mismatched launch identity")
+        raise _unconfirmed_admission(
+            project, alias, request_id, kind, "mismatched launch identity",
+        )
     launch_args = [project, "--worktree-id", receipt["worktree_id"],
                    "--stage-launch-seed", "--seed-id", receipt["seed_id"]]
     if request["no_mux"]:

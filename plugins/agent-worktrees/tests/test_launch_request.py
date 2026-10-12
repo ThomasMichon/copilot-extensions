@@ -225,6 +225,9 @@ def test_real_powershell_transport_preserves_encoded_intent(tmp_path):
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
     intent = _intent()
+    intent["text"] += "x" * (
+        request.MAX_REQUEST_BYTES - len(json.dumps(intent, ensure_ascii=False).encode())
+    )
     encoded = base64.b64encode(json.dumps(intent, ensure_ascii=False).encode()).decode()
     script = (
         "import base64,json,sys;"
@@ -247,6 +250,9 @@ def test_real_posix_transport_preserves_encoded_intent():
     if not bash:
         pytest.skip("Bash is unavailable")
     intent = _intent()
+    intent["text"] += "x" * (
+        request.MAX_REQUEST_BYTES - len(json.dumps(intent, ensure_ascii=False).encode())
+    )
     encoded = base64.b64encode(json.dumps(intent, ensure_ascii=False).encode()).decode()
     script = (
         "import base64,json,sys;"
@@ -318,3 +324,65 @@ def test_malformed_base64_returns_structured_cli_error(capfd):
 def test_remote_selector_refuses_before_admission(selectors):
     with pytest.raises(ValueError, match="exactly one"):
         remote_seed_launch.prepare(None, "target", "bash", selectors, "task")
+
+
+@pytest.mark.parametrize("kind", ["new", "resume"])
+@pytest.mark.parametrize("shell", ["bash", "powershell.exe"])
+@pytest.mark.parametrize("extra", [0, 1])
+def test_envelope_boundary_fits_both_shells_before_admission(kind, shell, extra, monkeypatch):
+    monkeypatch.setattr(remote_seed_launch.cfg, "project_name", lambda: "p" * 64)
+    monkeypatch.setattr(remote_seed_launch.uuid, "uuid4", lambda: SimpleNamespace(hex="a" * 32))
+    intent = {**_intent(kind, ""), "no_mux": True}
+    intent["text"] = "x" * (
+        request.MAX_REQUEST_BYTES - len(json.dumps(intent, ensure_ascii=False).encode()) + extra
+    )
+    encoded = base64.b64encode(json.dumps(intent, ensure_ascii=False).encode()).decode()
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        assert len(argv[-1]) <= remote_seed_launch.MAX_REMOTE_COMMAND_CHARS
+        return SimpleNamespace(returncode=0, stdout=json.dumps({
+            "version": 1, "request_id": intent["request_id"], "seed_id": intent["request_id"],
+            "worktree_id": intent["worktree_id"] or "wt-new", "seed_kind": kind,
+        }))
+
+    monkeypatch.setattr(remote_seed_launch.subprocess, "run", run)
+    args = ["--new"] if kind == "new" else ["--worktree-id", "wt-a"]
+    if extra:
+        with pytest.raises(ValueError, match="transport limit"):
+            request.decode(encoded)
+        with pytest.raises(ValueError, match="transport limit"):
+            remote_seed_launch.prepare(None, "target", shell, [*args, "--no-mux"], intent["text"])
+        assert not calls
+    else:
+        assert request.decode(encoded) == intent
+        plan = remote_seed_launch.prepare(None, "target", shell, [*args, "--no-mux"], intent["text"])
+        assert len(calls) == 1
+        assert plan["seed_kind"] == kind
+
+
+@pytest.mark.parametrize("kind", ["new", "resume"])
+@pytest.mark.parametrize("receipt", [
+    "not-json", "null", "[]", "{}", '{"request_id": "wrong"}',
+    json.dumps(dict(version=1, request_id="a" * 32, seed_id="a" * 32,
+                    seed_kind="resume", worktree_id="another-worktree")),
+])
+def test_uncertain_receipt_requires_same_request_recovery(kind, receipt, monkeypatch):
+    monkeypatch.setattr(remote_seed_launch.cfg, "project_name", lambda: "demo")
+    monkeypatch.setattr(remote_seed_launch.uuid, "uuid4", lambda: SimpleNamespace(hex="a" * 32))
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout=receipt)
+
+    monkeypatch.setattr(remote_seed_launch.subprocess, "run", run)
+    args = ["--new"] if kind == "new" else ["--worktree-id", "wt-a"]
+    with pytest.raises(RuntimeError) as exc:
+        remote_seed_launch.prepare(None, "target", "bash", args, "task")
+    message = str(exc.value)
+    assert "unconfirmed on target" in message
+    assert f"Do not resubmit this {kind} prompt" in message
+    assert f"demo resolve --json --launch-request-status {'a' * 32} on the target" in message
+    assert len(calls) == 1
