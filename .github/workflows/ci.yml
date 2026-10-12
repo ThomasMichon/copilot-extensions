@@ -747,6 +747,13 @@ jobs:
         if: steps.python-artifact-builder.outputs.run == 'true'
         timeout-minutes: 3
         run: python tools/smoke_public_toolchain.py
+      - name: Promotion artifact compatibility (Python 3.10 floor)
+        if: steps.python-artifact-builder.outputs.run == 'true'
+        timeout-minutes: 2
+        run: >-
+          uv run --python 3.10 --with pytest --with pyyaml --with tomli
+          python -m pytest -q tools/test_promotion_python_artifacts.py
+          -k "bundle_and_transfer_roundtrip or digest_matches_sha256 or real_export_subprocess"
       - name: Asyncio timeout handlers (Python 3.10 daemon)
         # The agent-bridge daemon venv is pinned to Python 3.10 (uv venv
         # --python 3.10), where asyncio.wait_for raises asyncio.TimeoutError --

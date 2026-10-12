@@ -1,6 +1,7 @@
 """Promotion composition, transfer integrity, signing and immutable publication."""
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -32,7 +33,7 @@ def _manifest(directory: Path, *, role: str = "plugin") -> dict:
     return {
         "plugin": "demo", "version": "1.0", "artifact_id": "sha256:" + "d" * 64,
         "wheels": [{
-            "filename": wheel.name, "role": role, "sha256": artifacts._digest(wheel),
+            "filename": wheel.name, "role": role, "sha256": f"sha256:{artifacts._digest(wheel)}",
         }],
     }
 
@@ -68,6 +69,13 @@ def test_bundle_and_transfer_roundtrip(tmp_path):
         assert set(bundle.namelist()) == {"manifest.json", "demo-1.0-py3-none-any.whl"}
         assert json.loads(bundle.read("manifest.json"))["plugin"] == "demo"
         assert bundle.read("demo-1.0-py3-none-any.whl") == b"first-party wheel"
+
+
+@pytest.mark.parametrize("payload", [b"", b"chunked digest" * 200000], ids=["empty", "multi-chunk"])
+def test_digest_matches_sha256_across_multiple_chunks(tmp_path, payload):
+    path = tmp_path / "data.bin"
+    path.write_bytes(payload)
+    assert artifacts._digest(path) == hashlib.sha256(payload).hexdigest()
 
 
 @pytest.mark.parametrize("field", ["dev_head", "main_before", "content_tree"])
@@ -115,7 +123,9 @@ def test_transfer_rejects_corruption(tmp_path, mutation):
         _validate(directory, projects={"another": "1.0"} if mutation == "wrong-project-set" else None)
 
 
-@pytest.mark.parametrize("mutation", ["third-party", "changed-digest", "traversal", "duplicate"])
+@pytest.mark.parametrize("mutation", [
+    "third-party", "changed-digest", "traversal", "duplicate", "bare-digest",
+])
 def test_bundle_rejects_unsafe_wheels(tmp_path, mutation):
     wheel_dir = tmp_path / "wheels"
     manifest = _manifest(wheel_dir)
@@ -125,6 +135,8 @@ def test_bundle_rejects_unsafe_wheels(tmp_path, mutation):
         (wheel_dir / manifest["wheels"][0]["filename"]).write_bytes(b"altered")
     elif mutation == "traversal":
         manifest["wheels"][0]["filename"] = "../escape.whl"
+    elif mutation == "bare-digest":
+        manifest["wheels"][0]["sha256"] = manifest["wheels"][0]["sha256"].removeprefix("sha256:")
     else:
         manifest["wheels"].append(dict(manifest["wheels"][0]))
     with pytest.raises(artifacts.PromotionArtifactError):
@@ -135,7 +147,11 @@ def _fake_builder(repo: Path) -> None:
     project = repo / "plugins" / "demo-plugin" / "pyproject.toml"
     project.write_text('[project]\nname = "demo"\nversion = "0.1.0-dev1"\n', encoding="utf-8")
     (repo / "tools" / "build_python_artifacts.py").write_text(
-        """import hashlib, pathlib, tomllib
+        """import hashlib, pathlib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 def build_plugin_artifacts(plugin, *, out_dir, toolchain):
     assert toolchain == {'shared': True}
     version = tomllib.loads((pathlib.Path('plugins') / plugin / 'pyproject.toml').read_text())['project']['version']
@@ -144,7 +160,7 @@ def build_plugin_artifacts(plugin, *, out_dir, toolchain):
     wheel.write_bytes(b'wheel')
     pathlib.Path('backend-residue.txt').write_text('must not enter promotion')
     return {'plugin': plugin, 'version': version, 'artifact_id': 'sha256:' + 'd' * 64,
-            'wheels': [{'role': 'plugin', 'filename': wheel.name, 'sha256': hashlib.sha256(b'wheel').hexdigest()}]}
+            'wheels': [{'role': 'plugin', 'filename': wheel.name, 'sha256': 'sha256:' + hashlib.sha256(b'wheel').hexdigest()}]}
 """, encoding="utf-8",
     )
     (repo / "tools" / "build_toolchain_lock.py").write_text(

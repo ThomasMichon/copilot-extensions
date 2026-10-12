@@ -110,7 +110,7 @@ private consumer feed. Consumer-side admission still checks the actual feed.
 
 ### Phase 2 - Promotion-built, content-addressed first-party artifacts
 
-- [x] **Tool built (2026-10-02); pipeline wiring still open.**
+- [x] **Builder and promotion wiring implemented (2026-10-12).**
       `tools/build_python_artifacts.py` builds a plugin's own wheel plus
       every vendored `libs/<lib>` wheel it needs, discovering both the
       dev-branch live `editable = true` canonical-reference form and an
@@ -147,18 +147,22 @@ private consumer feed. Consumer-side admission still checks the actual feed.
       `artifact_id`. Smoke-tested for real: building `agent-bridge` then
       `agent-worktrees` against the SAME `--toolchain-venv` produced
       identical `lock_id`s, confirming the shared-lock mechanism. **Not yet
-      done:** wiring this into the real promotion pipeline
-      (`promote_release.py`) - `build_python_artifacts.py` is still a
-      standalone, independently usable tool today, not yet invoked anywhere
-      in `validate-and-promote.yml`'s actual promotion flow. This checklist
-      item stays open until promotion actually invokes the builder.
+      done:** live release-lane proof. The `python-artifacts` job now
+      invokes `promote_release.py --build-python-artifacts-dir` to compose
+      the real candidate and build every first-party set in a second,
+      disposable checkout with one shared public-runner toolchain. The
+      builder remains independently usable. Actual trusted-main signing
+      and publication evidence is tracked explicitly in Validation Plan.
 - [ ] Resolve and pin a dependency closure for the third-party portion only,
       using a lag-tolerant selection policy informed by Phase 1, and record
       it in the manifest.
-- [ ] Design and implement an artifact trust/publication contract (digest
-      authentication, publication channel, credential model) - see Open
-      Design Questions below; resolve these concretely during this phase,
-      not deferred further.
+- [x] **Contract implemented (2026-10-12).** Native GitHub OIDC attestations
+      authenticate both the transfer index and first-party bundles.
+      Signing runs without release-write credentials. Verification constrains
+      the pinned hosted workflow/source identity; the writer checks exact
+      candidate composition before push and actual merge composition before
+      immutable GitHub Release publication. Live signing/release proof remains
+      a named Validation Plan gate, not an implementation gap.
 
 
 
@@ -221,9 +225,10 @@ answer against the actual repository/CI configuration:
   Sigstore's public transparency log -- not a value this repo's own commits
   or `APERTURE_RELEASE_TOKEN` can produce. Neither `id-token:` nor any
   `attest`/`sigstore`/`cosign` usage exists anywhere in `.github/workflows/`
-  today (confirmed absent in both `ci.yml` and `validate-and-promote.yml`),
-  so this is net-new infrastructure for Phase 2, not a reuse of an existing
-  mechanism.
+  at design time (confirmed absent in both `ci.yml` and
+  `validate-and-promote.yml`). Phase 2 now provides this through the
+  credential-separated `python-artifacts` job; it does not reuse repo-write
+  authority as an authentication root.
 - **Credential separation -- resolved (2026-10-01):** confirmed against the
   actual configuration (`validate-and-promote.yml` lines ~104-108 and
   ~455-510): the `promote` job's `main-promotion` environment holds both
@@ -311,10 +316,14 @@ answer against the actual repository/CI configuration:
   one directly. See `tools/seasoned_public_feed.py` and this Journal's
   2026-10-10 entry. The API/CLI now expose an explicit `seasoned-public`
   build-tooling mode with policy/pins/interpreter-bound reuse and manifest
-  provenance. Still open: invoking the builder in the actual promotion job.
+  provenance. The actual promotion job now invokes this mode explicitly.
 
 ## Validation Plan
 
+- [ ] Prove the trusted default-branch promotion workflow builds, signs and
+      publishes real artifact sets for the exact merged candidate. Record
+      native signer identity, bundle/manifest digest agreement and immutable
+      retry evidence; local mocks do not complete this release-lane gate.
 - [ ] A clean-cache test proves third-party resolution uses only the
       governed feed; verify the effective `uv`/`pip` configuration
       independently and never log credentials.
@@ -441,6 +450,15 @@ win grows with build complexity.
   own repository-local identity, and the new contract suite disables
   global/system Git configuration to prove it is independently runnable.
   Production promotion already configures its own job-local identity.
+- Hosted real-wheel smoke then caught a manifest-boundary mismatch:
+  wheel digests include the builder's `sha256:` prefix, while bundle-file
+  transfer digests are bare hex. The bundler now checks the actual wheel
+  shape, and fixtures use that same shape with a negative bare-digest case.
+- Review follow-through: mirrored the established `tomli` fallback and
+  chunked SHA-256 pattern for the Python 3.10 floor. CI exercises real
+  import/parsing/hash/export behavior on 3.10. The effort index now agrees
+  with Active status; the plan distinguishes implemented pipeline/trust
+  work from its still-open native-signing/release validation gate.
   Dependency closure/admission, shared-installer consumption, the full
   consumer/platform matrix and durable retention remain open.
 

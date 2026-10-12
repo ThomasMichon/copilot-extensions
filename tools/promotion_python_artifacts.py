@@ -10,9 +10,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import tomllib
 import zipfile
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 uses the existing tooling backport.
+    import tomli as tomllib
 
 SCHEMA = "copilot-extensions.promotion-python-artifacts"
 INDEX_NAME = "python-artifacts.json"
@@ -40,8 +44,11 @@ def _run(argv: list[str], *, cwd: Path | None = None) -> str:
 
 
 def _digest(path: Path) -> str:
+    digest = hashlib.sha256()
     with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def candidate_projects(root: Path) -> dict[str, str]:
@@ -83,7 +90,7 @@ def bundle_wheels(manifest: dict, wheel_dir: Path, out_dir: Path) -> dict:
                 raise PromotionArtifactError("invalid or duplicate first-party wheel entry")
             names.add(name)
             path = wheel_dir / name
-            if path.is_symlink() or _digest(path) != wheel["sha256"]:
+            if path.is_symlink() or f"sha256:{_digest(path)}" != wheel["sha256"]:
                 raise PromotionArtifactError(f"{name}: wheel digest changed before bundling")
             bundle.write(path, name)
     return {
