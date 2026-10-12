@@ -10,13 +10,35 @@ import sys
 import threading
 import time
 
-from zdd.diagnostics import process_start_time
+from zdd.diagnostics import process_start_time, terminate_pid_if_identity
 
 
 def publish(path, payload):
     pending = path.with_suffix(".pending")
     pending.write_text(json.dumps(payload))
     pending.replace(path)
+
+
+def reap_fixture_processes(owned, *, keep_pids, list_procs, reap_fn):
+    """Never signal a host process merely because it reused a fixture PID."""
+    expected = dict(owned)
+
+    def identified():
+        return [
+            proc for proc in list_procs()
+            if expected.get(proc.pid)
+            and process_start_time(proc.pid) == expected[proc.pid]
+        ]
+
+    def terminate(pid):
+        token = expected.get(pid)
+        if not token:
+            return False
+        # Re-check through the shared native handle at the destructive boundary,
+        # not only before enumeration: the candidate can exit/reuse in between.
+        return bool(terminate_pid_if_identity(pid, token).get("killed"))
+
+    return reap_fn(keep_pids=keep_pids, list_procs=identified, terminate=terminate)
 
 
 def server():
@@ -40,7 +62,7 @@ def caller(root: Path):
     from zdd import routing
 
     procutil.resolve_own_runtime_python = lambda: sys.executable
-    owned = set()
+    owned = {}
     real_popen = subprocess.Popen
     real_list = reap.iter_coordinator_processes
 
@@ -50,9 +72,9 @@ def caller(root: Path):
         # Only add the fixture's finite-lifetime wrapper; launch options and
         # actual CLI/server/bootstrap remain production code.
         proc = real_popen([argv[0], __file__, "server", *argv[1:]], **kwargs)
-        owned.add(proc.pid)
+        owned[proc.pid] = process_start_time(proc.pid)
         publish(root / f"owned-{proc.pid}.json", {
-            "pid": proc.pid, "token": process_start_time(proc.pid),
+            "pid": proc.pid, "token": owned[proc.pid],
         })
         return proc
 
@@ -64,8 +86,8 @@ def caller(root: Path):
         # Census is read-only; NEVER hand the production reaper host PIDs.
         active = routing.read_table(root / "routing")["active"]
         owned.update(verified_pair(active["pid"], active["process_start_time"]))
-        return real_reap(
-            **kwargs, list_procs=lambda: [p for p in real_list() if p.pid in owned],
+        return reap_fixture_processes(
+            owned, **kwargs, list_procs=real_list, reap_fn=real_reap,
         )
 
     reap.reap_superseded_coordinators = isolated_reap
@@ -85,7 +107,7 @@ def caller(root: Path):
     publish(root / "ready.json", {
         "active": active, "pair": pair,
         "elapsed": time.monotonic() - started,
-        "owned": {pid: process_start_time(pid) for pid in owned},
+        "owned": owned,
     })
     deadline = time.monotonic() + 30
     while not (root / "pinned").exists():

@@ -1,0 +1,9 @@
+{
+  "comment": "Identity-pin isolated Windows cutover fixture selection and termination across PID reuse",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    }
+  ]
+}
