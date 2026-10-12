@@ -248,7 +248,7 @@ def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = No
                 validate_source_binding(manifest, candidate_root)
             for wheel in wheels:
                 digest = hashlib.sha256()
-                with tempfile.SpooledTemporaryFile(max_size=8 << 20) as archive:
+                with tempfile.TemporaryFile() as archive:
                     with bundle.open(wheel["filename"]) as stream:
                         for chunk in iter(lambda: stream.read(1 << 20), b""):
                             digest.update(chunk)

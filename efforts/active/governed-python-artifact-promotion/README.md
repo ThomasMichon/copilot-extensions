@@ -522,6 +522,11 @@ win grows with build complexity.
   their exact first-party source closure and payload still match. Requiring
   every unchanged version tag to point to each latest global promotion would
   contradict the chosen stable-tag/content-addressed-rebuild contract.
+- The native Python 3.10 hosted lane caught a compatibility defect in nested
+  ZIP verification: that version's SpooledTemporaryFile lacks the seekable
+  interface zipfile requires. Wheel bytes now stream into a standard
+  TemporaryFile, keeping memory bounded and preserving the real seekable
+  file contract on the supported floor.
 
 ### 2026-10-12 - Phase 2 slice 4: explicit public build-toolchain integration
 
