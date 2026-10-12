@@ -29,6 +29,7 @@ never edited to record that cycle; it changes only when the **intent** changes.
 
 | Vision | Scope | Subject |
 |--------|-------|---------|
+| [main-owned-workflow-control](main-owned-workflow-control/README.md) | leaf | Narrow owner-governed release control survives promotion; all other contribution, including admin-authored implementations, follows reviewed dev validation. |
 | [harness-guidance](harness-guidance/README.md) | leaf | **Harness guidance ownership and delivery** — repositories own local identity and invariants, plugins own concise generic ambient policy, skills own task-time procedures, operator policy remains portable, and context use is attributable and budgeted. |
 | [plugins/efforts](plugins/efforts/README.md) | leaf | The **durable planning and continuity layer** — repositories explicitly adopt effort-backed work, reviewed plans execute in waves, worktrees remain responsible until the effort completion gate, handoffs stay compact, and cross-repository ownership follows validated target capability. |
 | [plugin-services](plugin-services/README.md) | branch | The plugin **service model** — how installer-deployed plugin runtimes expose, coordinate, and are reached as local services, à la carte and without shared infrastructure. |

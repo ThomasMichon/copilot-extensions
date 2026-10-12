@@ -1,0 +1,91 @@
+# Proposed control ownership and migration
+
+Parent contract: [README.md](README.md).
+
+## Ownership
+
+Keep main as GitHub's default and consumable release branch. Critical control
+declarations and control metadata may change through authenticated-owner,
+reviewed main PRs. The complete diff must fit the trusted allowlist. A mixed
+workflow/source PR is rejected even from an admin; metadata cannot authorize
+other changes in its own PR.
+
+Reusable helper source, tests, documentation and implementation workflows/actions
+remain dev-owned. Critical wrappers use local `workflow_call` implementations
+from the same composed commit, never mutable `@dev` or arbitrary YAML loading.
+Privileged helper imports and action references are part of the validated
+execution contract. An unprivileged test job must not inherit publication
+credentials or persistent trusted-runner access.
+
+Use distinct top-level control and implementation workflow names. GitHub does
+not discover nested workflow directories. Initial exact ownership paths must be
+specified and owner-reviewed before activation; broad directory exemptions are
+not the default.
+
+## Composition
+
+Extend, do not replace, the existing changefile/materialization composer:
+
+1. Pin dev and main inputs.
+2. Materialize dev content and generated versions through the existing engine.
+3. Read the ownership declaration from pinned trusted main, never dev.
+4. Preserve only declared regular control files from that main tree.
+5. Validate final composition, compatible local implementations and provenance.
+6. Admit the exact generated candidate through independently trusted gates.
+
+Absent declaration keeps current behavior until support has safely shipped.
+An active malformed declaration fails, never silently falls back. Validate
+paths canonically on every OS; reject traversal, case-equivalent duplicates,
+unsafe modes/types, missing declarations and ambiguous ownership.
+Intentional retirement changes the trusted declaration through review before
+the corresponding promotion; no accidental deletion or arbitrary drift retention.
+
+## Evidence, freshness and trust
+
+Bind evidence to repository, exact dev/control commits, execution recipe,
+expected suites/platforms, run and attempt. Read authoritative run/job evidence;
+do not accept an arbitrary dispatch payload or candidate-provided success blob.
+PR synthetic-merge tests are not evidence for a different dev snapshot.
+Generated output needs its own contract tests, not only pre-materialization tests.
+
+Final merge freshness must be enforced. A candidate composed against an older
+main cannot overwrite a later critical repair. Select and prove a provider
+mechanism before enabling publication; a last-minute read plus an unfenced merge
+still has a race. Rebuild stale candidates and revalidate changed inputs.
+Rollback restores release-owned content while preserving current control and
+uses the same admission/provenance contract.
+
+Authenticated owner-only checks protect both targets' critical wrappers,
+implementation/actions and ownership metadata. Required check names emitted by
+the same Actions app are not a cryptographic guarantee against a malicious
+Write actor. Either enforce an independently trusted publisher/required-workflow
+mechanism available on this account or explicitly document the accepted narrower
+threat model. Do not enable a stronger claimed guarantee without proof.
+
+## Cutover and recovery
+
+Land preservation support through dev before any active manifest. Add enforcement
+and shadow final-tree validation while old gates remain. Test rejection paths
+and compatible wrapper/helper upgrades. Only then activate a reviewed manifest
+and narrow main wrappers through a main PR.
+
+Prefer existing bootstrap authority without policy relaxation. If a bounded
+administrative adjustment is necessary, obtain execution-time confirmation with
+exact PR, rule IDs, before-state, expiry and restoration procedure. Fence release
+credentials/admissions and drain existing privileged runs first; a pause flag
+alone is insufficient. Restore and prove policy before resuming publication.
+No bypass actor, broader token or direct-main helper implementation is needed.
+
+Keep one release writer. Switch only after old runs settle and one canary proves
+the merged tree and tag, concurrent main repair and rollback. Required statuses
+and caller references migrate before old definitions disappear.
+
+## Separate validation consolidation
+
+After ownership is proven, consolidate one contributor gate, one exact-SHA
+trunk/release gate and one reusable deep/platform scheduler. Execute identical
+tests once per identical trusted input tuple; retain Windows, heavy, stress and
+fresh-install coverage. Promotion PRs should run compact candidate verification,
+not ordinary lint again. Name a component owner and release steward for every
+failure, deduplicate signatures and escalate when the bounded repair worker is
+disabled. Reconcile existing #6142 rather than introducing a second repair loop.

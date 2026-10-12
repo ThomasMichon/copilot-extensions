@@ -13,6 +13,13 @@ this document as the thing to port, not as documentation of this repo
 specifically — every identifier below (`RELEASE_AUTOMATION_TOKEN`, `dev`,
 `main`, `@maintainer-1`) is a placeholder for you to name.
 
+**Proposed narrow extension:** `visions/main-owned-workflow-control/README.md`
+states explicitly owner-governed critical workflow/metadata preservation.
+`efforts/active/main-owned-workflow-control/README.md` owns its reviewed migration.
+Until that migration is implemented and proven, the wholesale-regeneration
+mechanics below remain the as-is contract. The extension does not admit source,
+tests or docs directly to main, even from administrators.
+
 ## 1. The role of `dev` vs `main`
 
 Two branches, two audiences, one direction of travel (`dev` → `main`,
