@@ -156,6 +156,12 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-10-12 - Adoption amendment review reconciliation
+
+- Refreshed the amendment onto current `dev` after review exposed the old payload working directory in its source head.
+- The separately merged #6183 resolves #6161 with profile-directory execution on both platforms and absolute coordinator inputs. Retained that upstream fixture unchanged and removed this amendment's redundant agent-index changefile.
+- The adoption amendment remains documentation-only; adoption implementation still awaits this PR's current-head review and merge.
+
 ### 2026-10-10 - Installation-cell prerequisite selected
 
 - The notification prerequisite #6019 merged. Dispatch integration remains saved locally, not publication-ready.

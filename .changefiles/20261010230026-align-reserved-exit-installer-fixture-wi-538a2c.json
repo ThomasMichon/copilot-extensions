@@ -1,9 +1,0 @@
-{
-  "comment": "Align reserved-exit installer fixture with the platform-specific subprocess working directory.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}
