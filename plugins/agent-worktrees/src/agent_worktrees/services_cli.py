@@ -80,6 +80,7 @@ _WORKTREE_VERBS = {
     "create": "create",
     "run": "run",
     "claims": "claims",
+    "resource-producer": "resource-producer",
     "follow-ups": "follow-ups",
     "claimant-liveness": "claimant-liveness",
     "codename-lookup": "codename-lookup",

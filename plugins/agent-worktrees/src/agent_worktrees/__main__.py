@@ -1225,13 +1225,7 @@ def _worktree_to_dict(
         d["pair_kind"] = rec.pair_kind
     if rec.resources:
         d["resources"] = [
-            {
-                "kind": c.kind,
-                "ref": c.ref,
-                "created_at": c.created_at,
-                "state": c.state,
-                **({"note": c.note} if c.note else {}),
-            }
+            c.to_public_dict()
             for c in rec.resources
         ]
     if getattr(rec, "profile_assignments", None):
@@ -5388,6 +5382,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     list_cli.add_parsers(sub)
     claims_cli.add_parsers(sub)
+    resource_producer_cli.add_parsers(sub)
     follow_ups_cli.add_parsers(sub)
     session_metadata_cli.add_parsers(sub)
 
@@ -5545,6 +5540,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'bind-session': ('session_binding_cli', 'cmd_bind_session'),
     'claimant-liveness': ('session_metadata_cli', 'cmd_claimant_liveness'),
     'claims': ('claims_cli', 'cmd_claims'),
+    'resource-producer': ('resource_producer_cli', 'cmd_resource_producer'),
     'cleanup': ('cleanup_gc_cli', 'cmd_cleanup'),
     'codename-lookup': ('session_metadata_cli', 'cmd_codename_lookup'),
     'conclude-disposable': ('session_tracking_cli', 'cmd_conclude_disposable'),
@@ -5697,6 +5693,7 @@ _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "pr_state_cli",
     "reap_cli",
     "reclaim_cli",
+    "resource_producer_cli",
     "session_binding_cli",
     "session_inspection_cli",
     "session_metadata_cli",
@@ -5843,6 +5840,7 @@ def _load_full_command_surface() -> None:
     global handoff_cli, handoff_diagnostics, handoff_successor_repair_cli, installation_cli, list_cli, maintenance_cli, doctor_render, picker_profiles_cli, plan_pre_launch, pr_cli
     global pr_state_cli, reap_cli, reap_orphan_launcher_shells, reclaim_cli, reclaim_one, related_cli, repos_cli, resolve_cli
     global identifier_blocklist_cli
+    global resource_producer_cli
     global resolve_launch_cli, resolve_machine_cli, resolve_picker_cli, resolve_system_cli, services_cli, session_binding_cli, session_inspection_cli, session_metadata_cli
     global session_tracking_cli, status_bar_cli, status_cli, status_monitor_cli, status_monitor_reap_stale, status_monitor_runtime, status_updater_cli, sweep_finished_session_worktrees
     global sweep_managed_worktrees
@@ -5872,6 +5870,7 @@ def _load_full_command_surface() -> None:
         reap_cli,
         reclaim_cli,
         related_cli,
+        resource_producer_cli,
         resolve_cli,
         resolve_launch_cli,
         resolve_machine_cli,
@@ -6285,6 +6284,7 @@ def _load_full_command_surface() -> None:
         "copilot": cmd_copilot,
         "list": cmd_list,
         "claims": cmd_claims,
+        "resource-producer": resource_producer_cli.cmd_resource_producer,
         "follow-ups": cmd_follow_ups,
         "claimant-liveness": cmd_claimant_liveness,
         "codename-lookup": cmd_codename_lookup,

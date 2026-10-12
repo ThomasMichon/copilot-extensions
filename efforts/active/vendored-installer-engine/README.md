@@ -416,11 +416,12 @@ engine under this effort.
       this before completing the remaining adopters). Implementation merged
       as PR #5885; release and live deployment verification remain paused
       at the operator's request.
-- [ ] Resolve the POSIX installer/stamp permission mismatch before the stricter
+- [x] Resolve the POSIX installer/stamp permission mismatch before the stricter
       startup admission ships. New installer-created artifacts must not inherit
       group/other write access from `umask 0002`. Include practical, bounded
       session-start repair per the 2026-10-12 operator clarification below;
-      the exact migration protocol and its adversarial proof remain pending.
+      merged as PR #6116 with actual installer/stamp/activation and adversarial
+      proofs. Release and live rollout remain tracked by the open Index item.
 - [x] `agent-dispatch` — PR #5832 merged, release #5866 promoted the
       adopter, and the normal update verified payload/runtime `0.14.0-dev1`
       with a healthy routed coordinator and running supervisor.
@@ -447,8 +448,9 @@ engine under this effort.
 
 ### Validation infrastructure — temporary Docker accountability (#6109)
 
-- [ ] Review the [temporary-container obligation proposal](temporary-container-obligations.md)
-      before implementing its new producer transaction and identity contract.
+- [x] Review the [temporary-container obligation proposal](temporary-container-obligations.md)
+      before implementing its new producer transaction and identity contract —
+      PR #6116 merged after current-head review and successful source CI.
 - [ ] After that review, implement and validate automatic reservations, exact
       Docker identity binding and verified close-out across both clean-room
       wrappers and the devcontainer test runner. Existing Index live-proof
@@ -592,6 +594,66 @@ installs, no service-specific config needed for this class of plugin.
 - No installer code, service, runtime slot or live deployment was changed by
   this capture. Implementation and live convergence remain open. The new
   acceptance recommendations are explicitly agent-recommended.
+
+### 2026-10-12 — Generic disposable producer ledger implemented and validated
+
+- The first ownership implementation slice adds a provider-neutral
+  `resource-producer` ABI to the existing ledger: durable pending reservation,
+  immutable identity binding, exact-subject provider-verified close-out and
+  local, explicitly accepted ownership transfer. Generic release, repair,
+  stale saves and finalization cannot discharge these obligations, including
+  malformed metadata and duplicate-reference corruption.
+- Independent review found two preservation gaps in damaged ledger records;
+  both were corrected with regression coverage before publication. The
+  supported contained selections passed 611 tests; the full structural guard
+  selection passed 528 tests with 13 intentional skips. Module-size,
+  install-contract, lint and changefile checks passed without relaxed limits.
+- An exact committed snapshot of
+  `02d8773bf39647bf92386e30a1e6dd02781dedb0` passed 126 targeted native Windows
+  tests under Python 3.12 and Windows PowerShell 5.1, including the producer,
+  protected claim writes, transitive finalization and lazy dispatch selections.
+  The proof archive's byte count and SHA-256 were verified before extraction;
+  the bounded supervisor reported successful cleanup. An initial proof
+  transport stalled before tests began; replacing its PowerShell Console
+  ingestion with a byte-verified native Python reader resolved that harness
+  issue without changing the implementation or installing dependencies.
+- This is source validation, not released/live proof. Docker identity/provider
+  callbacks, clean-room and devcontainer producer integration, actual resource
+  allocation/removal and their scoped validation gates remain open under
+  issue #6109. Fleet borrowing remains unchanged. The generic API does not
+  allocate resources; integrated producers must not be enabled until every
+  ledger-writing runtime understands their metadata.
+- The effort remains Active. Publish this generic slice for review, then
+  implement the exact Docker identity/provider and producer integrations.
+
+### 2026-10-12 — Stamp/permission/provenance slice and ownership proposal merged
+
+- PR #6116 merged to `dev` as `cbb7256268e6fb3943b88fffcb0b8fd12da2b5ba`.
+  The final source head `bccca50e2aae793fbc546fed79e7da168b48804f` received a
+  fresh Balanced review with zero open findings and all 30 visible source
+  checks completed successfully or intentionally skipped. No review-gate
+  bypass was applied.
+- The practical bounded POSIX repair, safe installer stamp/publication paths,
+  activation marker mask and committed-code candidate transformation are now
+  reviewed source. Final contained Index evidence: 985 passed, 25 skips;
+  materializer/provenance: 103 passed, 2 native junction skips; exact-head
+  native Windows PowerShell 5.1/Python 3.12 combined proof: 93 passed,
+  75 platform skips. Native proof does not substitute for POSIX mode tests
+  or released/live behavior.
+- Post-merge reconciliation required refreshing the canonical PR status
+  before the merged-boundary proof could exclude squash-merged commits.
+  Reconciliation then preserved the backup and moved this same worktree onto
+  the merge, without a manual reset, new serial worktree or finalization.
+- The temporary Docker resource proposal's plan-review item is closed.
+  **Next execution slice:** implement its generic producer transaction,
+  exact Docker identity/provider and integrated clean-room/devcontainer
+  allocation/close-out guarantees. No automatic disposable claiming exists
+  yet, no container was allocated here, and its entire validation plan remains
+  open.
+- The effort remains Active. Index release/live verification and remaining
+  adopters, permanent exception enforcement, opt-in retirement, linked bug
+  sweep and aggregate validation remain unresolved. This merge does not
+  satisfy those gates or authorize deployment/deletion.
 
 ### 2026-10-12 — Include practical session-start permission repair
 

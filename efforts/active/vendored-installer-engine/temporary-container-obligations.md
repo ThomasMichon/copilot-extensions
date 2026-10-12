@@ -1,6 +1,6 @@
 # Temporary Docker resource obligations
 
-**Status:** Proposed; requires plan review before implementation.
+**Status:** Plan reviewed in PR #6116; implementation and validation pending.
 **Coordination:** #6109.
 **Canonical effort:** [Vendored Installer Engine](README.md).
 
@@ -76,10 +76,11 @@ agent-worktrees or finalize-time recursive Docker census is proposed.
   obtains its container ID afterward, and has separate teardown/orphan cleanup.
   Its host admission lease is not a creator obligation on a worktree.
 
-## Design decisions for review
+## Reviewed design decisions
 
-The following placements are **agent-recommended**, not approved implementation
-choices. This is a new cross-owner lifecycle contract, not a call-site-only fix.
+The following placements originated as **agent-recommended** choices and cleared
+the plan-review gate in PR #6116. They govern the pending implementation of this
+cross-owner lifecycle contract, not merely a call-site-only fix.
 
 1. **Ledger authority stays in agent-worktrees.** Add a versioned generic
    resource-producer transaction API for reserve, bind, confirmed close-out and
@@ -117,10 +118,11 @@ choices. This is a new cross-owner lifecycle contract, not a call-site-only fix.
    identity receipt outside the checkout. This receipt is diagnostic evidence,
    not another claim ledger or a promise that finalize is gated.
 
-Review must approve or revise these five choices before code starts. In
-particular, accept the shared-helper/provider placement, the temporary-only
-settlement restriction and explicit unowned standalone mode; do not infer those
-decisions from an existing installer-plan approval.
+The plan review explicitly covers these five choices, including the
+shared-helper/provider placement, temporary-only settlement restriction and
+explicit unowned standalone mode. A material change to that protocol requires
+an amendment through the normal review flow; implementation is not permission
+to bypass its invariants or the live cleanup confirmation gate.
 
 ## Transaction and failure requirements
 

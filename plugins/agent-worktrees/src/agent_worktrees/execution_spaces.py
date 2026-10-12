@@ -176,8 +176,8 @@ def require_record_mutation(record: Any, config: Any) -> None:
             )
 
 
-def require_project_record_mutation(record: Any) -> None:
-    """Resolve receiving-side project authority, never caller-supplied identity."""
+def project_record_config(record: Any) -> Any:
+    """Resolve registered receiving-side configuration under the shared fence."""
     from . import config as cfg
 
     try:
@@ -190,7 +190,12 @@ def require_project_record_mutation(record: Any) -> None:
         raise ExecutionSpaceError(
             f"cannot establish receiving-side authority for project {record.repo!r}: {exc}"
         ) from exc
-    require_record_mutation(record, config)
+    return config
+
+
+def require_project_record_mutation(record: Any) -> None:
+    """Resolve receiving-side project authority, never caller-supplied identity."""
+    require_record_mutation(record, project_record_config(record))
 
 
 def require_cleanup_identity(record: Any, anchor: str | Path) -> None:

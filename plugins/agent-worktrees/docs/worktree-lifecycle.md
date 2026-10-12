@@ -308,8 +308,12 @@ live. Never hand-run `git merge`/`push`/`worktree remove`.
 ### Pausing a worktree instead of finalizing (a runbook, not a subcommand)
 
 `finalize` is all-or-nothing on its resource-obligation-settlement gate: any
-unsettled outbound claim either blocks it outright, or `--abandon
+unsettled outbound legacy claim either blocks it outright, or `--abandon
 --handoff-to <recipient>` re-homes the *entire* unsettled set elsewhere.
+Disposable-owned producer claims are stricter: verified close or an explicitly
+accepted bound-claim handoff is required, and abandon, sweep, disconnect, generic
+release and gate-mode overrides cannot discharge them. Pending/unknown producer
+claims always block. See [the producer ABI](resource-producer.md).
 Neither fits "sync and tidy everything that's actually done, but leave this
 one claim open on purpose" — e.g. a deliberate pending `context-handoff` task
 meant to resume in this exact worktree, or any other genuinely-still-open

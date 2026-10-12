@@ -743,7 +743,7 @@ def _dispatch_handoff_repair(verb: str, verb_args: dict):
         verb_args,
         read_lock_data=lambda: locks.read_lock(_smr._monitor_lock_path()),
         ensure_monitor=_smr._ensure_status_monitor if _smr._status_monitor_enabled() else None,
-        min_version=2 if verb in ("claim_settle", "session_conclude") else 1,
+        min_version=3 if verb == "claim_settle" else 2 if verb == "session_conclude" else 1,
     )
 
 

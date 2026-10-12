@@ -141,6 +141,8 @@ def apply_claim_release(args: dict) -> dict:
         match = next((c for c in record.resources if c.ref == ref), None)
         if match is None:
             return {"error": "not_found"}
+        if match.has_producer:
+            return {"error": "rejected", "message": "producer claims require verified close or accepted handoff"}
         reservation = tracking.claim_handoff_reservation(record, match)
         if reservation:
             return {
@@ -213,6 +215,8 @@ def apply_claim_settle(args: dict) -> dict:
         if rejection := _authority_rejection(record):
             return rejection
         match = next((c for c in record.resources if c.ref == ref), None)
+        if match is not None and match.has_producer:
+            return {"error": "rejected", "message": "producer claims require verified close or accepted handoff"}
         if skip_if_released and match is not None and match.state == "released":
             return {"ok": True, "skipped": "released"}
         reservation = (
@@ -243,6 +247,6 @@ def apply_claim_settle(args: dict) -> dict:
     return {"ok": True, "kind": settled.kind, "disposition": disposition}
 
 
-tracking_write.register_verb("claim_add", apply_claim_add, version=2)
-tracking_write.register_verb("claim_release", apply_claim_release, version=2)
-tracking_write.register_verb("claim_settle", apply_claim_settle, version=2)
+tracking_write.register_verb("claim_add", apply_claim_add, version=3)
+tracking_write.register_verb("claim_release", apply_claim_release, version=3)
+tracking_write.register_verb("claim_settle", apply_claim_settle, version=3)

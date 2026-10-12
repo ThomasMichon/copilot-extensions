@@ -320,6 +320,7 @@ _NO_PROJECT_COMMANDS = {
     "register",
     "hook",
     "knowledge",
+    "resource-producer",
     "reconcile-marketplaces",
     "picker",
     "doctor",
@@ -651,5 +652,4 @@ _is_noninteractive_invocation = _mlc._is_noninteractive_invocation
 cmd_noninteractive_bare = _mlc.cmd_noninteractive_bare
 cmd_headless_bare = _mlc.cmd_headless_bare
 dispatch_bare_invocation = _mlc.dispatch_bare_invocation
-
 

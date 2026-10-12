@@ -4,6 +4,14 @@
 agent-worktrees <subcommand> [options]
 ```
 
+## Disposable producer ownership
+
+`resource-producer <capabilities|reserve|bind|inspect|close> --json
+[--owner-ref REF]` exposes version-1 provider-neutral disposable ownership.
+Except for capabilities, operations read exactly one JSON object from stdin.
+See [the exact ABI and callback contract](resource-producer.md). These claims
+cannot be settled through generic release, at-rest, sweep or abandon commands.
+
 ## CLI mode (no project binstub)
 
 The generic `agent-worktrees` command works without a project binstub. If

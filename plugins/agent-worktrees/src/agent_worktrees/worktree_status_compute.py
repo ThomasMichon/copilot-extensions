@@ -181,7 +181,7 @@ def compute(project: str, worktree_id: str) -> dict:
         # answers to, e.g. a knowledge worktree paired to a harness worktree).
         # A consumer needs both to render the complete claims graph.
         claims = {
-            "resources": [dataclasses.asdict(claim) for claim in record.resources],
+            "resources": [claim.to_dict() for claim in record.resources],
             "owner_ref": record.owner_ref,
         }
         facts["claims"] = _worktree_status_fact(claims, confirmed=True, observed_at=time.time())
