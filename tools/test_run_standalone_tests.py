@@ -130,12 +130,13 @@ def test_run_is_contained_and_releases_interpreter_environment_lease(tmp_path, m
         captured.update(kwargs)
         assert command[1:4] == ["-I", "-m", "pytest"]
         if smoke:
-            assert command[5:12] == [
+            assert command[5:13] == [
                 str(root / "tests" / "test_cli.py"), str(root / "tests" / "test_config.py"),
                 str(root / "tests" / "test_release.py"),
                 str(root / "tests" / "test_release_cli.py"),
                 str(root / "tests" / "test_staging.py"),
                 str(root / "tests" / "test_staging_cli.py"),
+                str(root / "tests" / "test_staging_cleanup_review.py"),
                 str(root / "tests" / "test_staging_processes.py"),
             ]
         else:

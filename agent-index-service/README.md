@@ -83,6 +83,11 @@ completed same-version identical request is idempotent; conflicting completed
 or preexisting incomplete slots fail and remain inspectable. Failure cleanup
 removes only the current transaction's proven-owned incomplete slot; unconfirmed
 descendant cleanup preserves it.
+Removable build output is cleaned even when teardown fails, with explicit
+uncertainty if removal cannot complete. Receipt temporary files are created
+exclusively with restrictive permissions before atomic publication. Invalid
+lock/policy UTF-8 and preserved completed-slot receipt conflicts report their
+specific cause without printing feed contents.
 
 Windows staging requires strict owned Job termination and an empty-Job
 confirmation before candidate deletion. Best-effort handle closure alone is

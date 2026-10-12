@@ -178,7 +178,8 @@ def _read_json(path: Path):
 def _write(path: Path, value: dict) -> None:
     temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
-        with temporary.open("xb") as stream:
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as stream:
             stream.write(_json(value))
             stream.flush()
             os.fsync(stream.fileno())
@@ -189,7 +190,10 @@ def _write(path: Path, value: dict) -> None:
 
 def _lock_requirements(data: bytes) -> dict[str, str]:
     """Accept a resolved per-platform pip-style lock, no includes/options/markers."""
-    text = data.decode("utf-8").replace("\\\r\n", " ").replace("\\\n", " ")
+    try:
+        text = data.decode("utf-8").replace("\\\r\n", " ").replace("\\\n", " ")
+    except UnicodeDecodeError as exc:
+        raise CandidateError("third-party lock must be UTF-8") from exc
     pins = {}
     for line in text.splitlines():
         line = line.strip()
@@ -228,6 +232,8 @@ def _uv_policy(data: bytes) -> None:
             raise CandidateError("uv policy validation requires Python 3.11+ or tomli") from exc
     try:
         policy = tomllib.loads(data.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        raise CandidateError("uv configuration must be UTF-8") from exc
     except ValueError as exc:
         raise CandidateError("invalid explicit uv TOML configuration") from exc
     if not policy:
@@ -497,21 +503,24 @@ def _run(argv: list[str], *, cwd: Path, env: dict[str, str], deadline: float) ->
                 raise CandidateError(f"{operation}: exit status {code}{classification}")
         return _bytes(output, label=f"{operation} output").decode("utf-8")
     finally:
-        _teardown(process, job, token, supervised, operation)
         try:
-            cleanup_deadline = time.monotonic() + 5
-            while True:
-                try:
-                    output.unlink(missing_ok=True)
-                    break
-                except PermissionError:
-                    if time.monotonic() >= cleanup_deadline:
-                        raise _CleanupUnconfirmed(
-                            f"{operation}: output handles remained open after cleanup"
-                        ) from None
-                    time.sleep(0.05)
-        except BaseException as exc:
-            raise _CleanupUnconfirmed(f"{operation}: output cleanup unconfirmed") from exc
+            _teardown(process, job, token, supervised, operation)
+        finally:
+            # Even unconfirmed descendant teardown cannot leave removable secret output behind.
+            try:
+                cleanup_deadline = time.monotonic() + 5
+                while True:
+                    try:
+                        output.unlink(missing_ok=True)
+                        break
+                    except PermissionError:
+                        if time.monotonic() >= cleanup_deadline:
+                            raise _CleanupUnconfirmed(
+                                f"{operation}: output handles remained open after cleanup"
+                            ) from None
+                        time.sleep(0.05)
+            except BaseException as exc:
+                raise _CleanupUnconfirmed(f"{operation}: output cleanup unconfirmed") from exc
 
 
 def _long_path(path: Path) -> str:
@@ -719,12 +728,24 @@ def stage_candidate(
             slot = primitive.version_dir(root, version)
             _path(slot)
             if slot.exists():
+                context = f"candidate {version} at {slot}"
                 marker = primitive.read_marker(root, version)
                 if marker is None:
-                    raise CandidateError("preexisting incomplete candidate preserved")
-                existing = _receipt(slot, primitive, root, version)
+                    raise CandidateError(f"{context}: preexisting incomplete candidate preserved")
+                if not (slot / _RECEIPT).exists():
+                    raise CandidateError(f"{context}: missing candidate receipt; slot preserved")
+                try:
+                    existing = _receipt(slot, primitive, root, version)
+                except (OSError, ValueError) as exc:
+                    raise CandidateError(
+                        f"{context}: invalid candidate receipt/integrity; slot preserved"
+                    ) from exc
+                if existing is None:
+                    raise CandidateError(
+                        f"{context}: invalid candidate receipt/completeness; slot preserved"
+                    )
                 if existing != receipt:
-                    raise CandidateError("preexisting candidate identity/completeness conflict")
+                    raise CandidateError(f"{context}: candidate identity conflict; slot preserved")
                 return _result(root, version, primitive, "already_staged", receipt)
             slot.parent.mkdir(parents=True, exist_ok=True)
             _path(slot.parent)

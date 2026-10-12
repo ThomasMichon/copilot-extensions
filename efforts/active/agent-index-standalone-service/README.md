@@ -421,3 +421,9 @@ boundaries from implementation decisions and deployment-specific policy.
   with two Linux-specific process skips. Authority fixtures/registry are
   recaptured for the new helper bytes; targeted bridge authority validation
   passed 41 tests with platform skips. No service activation is introduced.
+- Fallback-review refinements ensure removable output cleanup is attempted
+  even after teardown uncertainty, atomically created receipts use restrictive
+  permissions, malformed UTF-8 identifies the lock/policy input, and preserved
+  completed-slot conflicts identify their version/path and receipt category.
+  The complete installed Windows suite and real offline uv fixture passed
+  381 tests with two Linux-specific process cases separately validated.
