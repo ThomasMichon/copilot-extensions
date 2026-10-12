@@ -165,9 +165,9 @@
         ],
         "confirm": true,
         "run": [
-          "agent-dispatch", "workers", "config-section", "{field.pool}",
+          "agent-dispatch", "workers", "config-section",
           "--toggle", "{field.action}", "--reason={field.reason}",
-          "--require-declared"
+          "--require-declared", "--", "{field.pool}"
         ]
       }
     }

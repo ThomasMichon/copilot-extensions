@@ -268,8 +268,9 @@ def test_workers_picker_real_override_round_trip(tmp_path, monkeypatch):
     declaration_dir = tmp_path / "declarations"
     declaration_dir.mkdir()
     declaration = declaration_dir / "fixture.json"
+    pool_name = "-fixture-pool"
     declaration.write_text(
-        json.dumps({"name": "fixture-pool", "kind": "supervised-lane", "concurrency": 2}),
+        json.dumps({"name": pool_name, "kind": "supervised-lane", "concurrency": 2}),
         encoding="utf-8",
     )
     original = declaration.read_bytes()
@@ -328,11 +329,12 @@ def test_workers_picker_real_override_round_trip(tmp_path, monkeypatch):
                     env=tasks._child_process_env(), creationflags=no_window_flags(),
                 )
                 effective = json.loads(listed.stdout)["overridden_off"]
+                override_id = f"logical:repo:fixture:{pool_name}"
                 if toggle == "disable":
-                    assert state["logical:repo:fixture:fixture-pool"]["disabled"] is True
-                    assert effective == ["logical:repo:fixture:fixture-pool"]
+                    assert state[override_id]["disabled"] is True
+                    assert effective == [override_id]
                 else:
-                    assert "logical:repo:fixture:fixture-pool" not in state
+                    assert override_id not in state
                     assert effective == []
                 assert declaration.read_bytes() == original
             for stale in ("absent", "ambiguous"):

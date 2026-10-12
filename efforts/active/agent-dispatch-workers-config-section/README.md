@@ -396,6 +396,10 @@ phase's first Plan item for the rationale.)_
 - Addressed review diagnostics: keep the form type import type-only in the
   contract layer, identify the failing dynamic-choice field and duplicated pool
   names, and name the strict configuration-choice deadline independently.
+- A subsequent review identified valid option-like pool names. The shipped
+  mutation template now places its options before `--` and the selected
+  positional name, with parser coverage for `-pool`/`--toggle` and the native
+  acceptance fixture itself using a leading-hyphen name.
 
 ### 2026-10-12 — Local toggle slice resumed; remote scope transferred
 

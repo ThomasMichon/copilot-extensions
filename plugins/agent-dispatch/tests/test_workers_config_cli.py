@@ -91,6 +91,22 @@ def test_strict_toggle_round_trip(monkeypatch, capsys):
     capsys.readouterr()
 
 
+@pytest.mark.parametrize("name", ["-pool", "--toggle"])
+def test_strict_toggle_addresses_option_like_declared_names(monkeypatch, capsys, name):
+    from agent_dispatch.config import overrides_path
+    from agent_dispatch.overrides import load_overrides, overridden_off_ids
+
+    _patch_discover(monkeypatch, [_declare(name)])
+    args = _args([
+        "workers", "config-section", "--toggle", "disable", "--require-declared", "--", name,
+    ])
+    assert args.func(args) == 0
+    assert overridden_off_ids(load_overrides(overrides_path())) == {
+        f"logical:repo:example:{name}"
+    }
+    assert name in capsys.readouterr().out
+
+
 def test_ui_commands_report_discovery_failure(monkeypatch, capsys):
     from agent_dispatch.config import overrides_path
     from agent_dispatch.registrar import RegistrarError
