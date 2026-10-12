@@ -1,0 +1,9 @@
+{
+  "comment": "Align stale-tip fixture metadata responses with pinned publication boundary",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
