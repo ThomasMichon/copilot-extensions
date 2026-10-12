@@ -14,7 +14,7 @@
 ## Purpose & Intent
 
 The resident `status-monitor` is the host-wide accelerator the parent
-[agent-worktrees vision](../README.md#the-resident-daemon-as-the-authoritative-live-state-database)
+[agent-worktrees vision](../README.md#derived-status)
 asserts must be "exactly **one** per host regardless of how many
 worktrees, sessions, or CLI invocations reach it." That sentence states the
 steady-state guarantee; this vision specializes the guarantee across the

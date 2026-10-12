@@ -111,6 +111,12 @@ stated outcome, not separately operator-specified line items.)_
 - [ ] Add regression coverage for all three known races (terminate failure,
   concurrent-publish-during-wait, zombie/PID-reuse) before considering the
   phase done.
+- [ ] Define and implement the reader-side ownership observation required by
+  `a-reader-never-observes-a-false-resident`: distinguish no owner from an
+  acquired lease whose resident metadata is not yet published, and distinguish
+  both from a validated serving resident. Readers must report bounded starting
+  or uncertain state rather than infer absence or healthy service from metadata
+  presence alone. Phase 2 must preserve this contract during ownership handoff.
 - [ ] Open a PR scoped to this phase only; drive it through review to merge
   per the usual `copilot-extensions` PR flow.
 - [ ] Close #5512 on merge; update this README's Journal.
@@ -155,6 +161,11 @@ and replacement/cutover proofs belong to the later phase PRs.)_
   candidates cannot publish or delete another owner's metadata, and
   the predecessor cannot continue serving once the successor is confirmed
   promoted; existing cutover/control-server test suite stays green.
+- [ ] Reader-state regression: pause an actual contender after lease acquisition
+  but before metadata publication and prove readers distinguish it from no
+  owner and from a validated serving resident. Cover stale metadata and the
+  Phase 2 ownership-handoff window; no transition may fabricate absence,
+  healthy service or an unbounded uncertain state.
 - [ ] Platform accounting for both phases: complete the design and
   validation obligations below on Windows, Linux and macOS. Any unavailable
   proof requires an explicit justified exemption documenting the degraded
