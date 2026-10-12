@@ -55,6 +55,9 @@ nonblocking kernel lease (`flock` on POSIX; a CRT byte lock on Windows) under
 within a monotonic budget; `ConstructionTimeout` distinguishes exhausted
 contention from filesystem or lock-backend failures, which propagate unchanged.
 The persistent lock file is never deleted, and is not evidence of a live owner.
+Version case aliases always share a lease, including on case-insensitive macOS
+volumes; distinct case-only names on a case-sensitive volume conservatively
+serialize too.
 Normal return, exceptions, cancellation, and process death close the descriptor
 and release ownership.
 

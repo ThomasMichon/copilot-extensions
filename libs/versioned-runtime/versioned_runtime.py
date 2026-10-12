@@ -1294,8 +1294,8 @@ def construction_lease(root: Path, version: str, *, timeout: float = 60.0,
     if not math.isfinite(poll_interval) or poll_interval <= 0:
         raise ValueError("construction poll interval must be finite and positive")
 
-    # Windows slot names are case-insensitive; contenders must share a lock.
-    key = hashlib.sha256(os.path.normcase(version).encode("utf-8")).hexdigest()
+    # Case aliases share ownership, including on case-insensitive POSIX volumes.
+    key = hashlib.sha256(version.lower().encode("utf-8")).hexdigest()
     lock_dir = root / ".construction-leases"
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_path = lock_dir / (key + ".lock")

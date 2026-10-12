@@ -159,8 +159,7 @@ def test_keyboard_interrupt_releases_ownership(tmp_path):
         pass
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows case-insensitive slot identity")
-def test_windows_case_aliases_share_ownership(tmp_path):
+def test_case_aliases_share_ownership_on_every_platform(tmp_path):
     with vr.construction_lease(tmp_path, "VERSION"):
         with pytest.raises(vr.ConstructionTimeout):
             with vr.construction_lease(tmp_path, "version", timeout=0):
