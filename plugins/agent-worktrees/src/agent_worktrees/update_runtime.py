@@ -793,7 +793,16 @@ def _update_modules(
 
         from . import reconcile as _reconcile
 
-        module_scope = _reconcile.manifest_runtime_scope(module_dir) or "none"
+        module_scope = _reconcile.manifest_runtime_scope(module_dir)
+        if module_scope is None:
+            # A module always ships a runtime installer; a missing or malformed
+            # scope must not bypass the machine gate on its way to it.
+            output.warn(f"{name}: module manifest has no valid runtimeScope -- not installing")
+            results.append((name, "invalid runtimeScope"))
+            continue
+        if module_scope == "none":
+            results.append((name, "SKIPPED (payload-only)"))
+            continue
         try:
             gate_blocks = _machine_gate_blocks(
                 name, module_scope, target.context if target is not None else None
