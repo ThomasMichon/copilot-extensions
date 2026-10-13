@@ -392,7 +392,13 @@ def test_replacement_after_outer_cleanup_check_is_not_deleted(tmp_path, primitiv
     monkeypatch.setattr(staging, "remove_owned_stage", race)
     with pytest.raises(PlanError, match="ownership is unconfirmed"):
         context.__exit__(None, None, None)
-    assert (frozen._root / "foreign-content").read_bytes() == b"must be preserved"
+    if os.name == "nt":
+        preserved = frozen._root
+    else:
+        quarantines = list(parent.glob(".fleet-stage-cleanup-*"))
+        assert len(quarantines) == 1
+        preserved = quarantines[0] / "owned-root"
+    assert (preserved / "foreign-content").read_bytes() == b"must be preserved"
     assert (moved / "versions").is_dir()
 
 
@@ -408,10 +414,10 @@ def test_cleanup_root_is_pinned_during_recursive_traversal(tmp_path, monkeypatch
     def raced_scan(path):
         if not attempted:
             attempted.append(True)
-            try:
-                root.rename(moved)
-            except OSError as error:
-                assert os.name == "nt" and getattr(error, "winerror", None) in {5, 32}
+            if os.name == "nt":
+                with pytest.raises(OSError) as error:
+                    root.rename(moved)
+                assert getattr(error.value, "winerror", None) in {5, 32}
             else:
                 root.mkdir()
                 (root / "foreign-content").write_bytes(b"must be preserved")
@@ -422,10 +428,89 @@ def test_cleanup_root_is_pinned_during_recursive_traversal(tmp_path, monkeypatch
         cleanup.remove_owned_stage(root, expected)
         assert attempted and not root.exists() and not moved.exists()
     else:
-        with pytest.raises(PlanError, match="ownership is unconfirmed"):
-            cleanup.remove_owned_stage(root, expected)
+        cleanup.remove_owned_stage(root, expected)
+        assert attempted and not moved.exists()
         assert (root / "foreign-content").read_bytes() == b"must be preserved"
-        assert list(moved.iterdir()) == []
+        assert list(root.iterdir()) == [root / "foreign-content"]
+        assert not list(tmp_path.glob(".fleet-stage-cleanup-*"))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX quarantine removal contract")
+@pytest.mark.parametrize("entry", ["file", "child", "root"])
+def test_published_replacement_at_final_removal_is_preserved(tmp_path, monkeypatch, entry):
+    root = tmp_path / "owned-root"
+    root.mkdir()
+    (root / "owned-file").write_bytes(b"owned")
+    (root / "owned-child").mkdir()
+    expected = staging._directory(root)
+    original = cleanup.os.unlink if entry == "file" else cleanup.os.rmdir
+    target = {"file": "owned-file", "child": "owned-child", "root": "owned-root"}[entry]
+    attempted = []
+
+    def replace_before_removal(name, *, dir_fd):
+        if name == target and not attempted:
+            attempted.append(True)
+            root.mkdir()
+            if entry == "file":
+                (root / target).write_bytes(b"must be preserved")
+            elif entry == "child":
+                (root / target).mkdir()
+        return original(name, dir_fd=dir_fd)
+
+    monkeypatch.setattr(cleanup.os, "unlink" if entry == "file" else "rmdir",
+                        replace_before_removal)
+    monkeypatch.setattr(cleanup.os, "supports_dir_fd",
+                        cleanup.os.supports_dir_fd | {replace_before_removal})
+    cleanup.remove_owned_stage(root, expected)
+    assert attempted and root.is_dir()
+    if entry == "file":
+        assert (root / target).read_bytes() == b"must be preserved"
+    elif entry == "child":
+        assert (root / target).is_dir()
+    else:
+        assert list(root.iterdir()) == []
+    assert not list(tmp_path.glob(".fleet-stage-cleanup-*"))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX atomic capture contract")
+def test_replacement_at_quarantine_capture_is_retained_with_explicit_error(tmp_path, monkeypatch):
+    root = tmp_path / "owned-root"
+    root.mkdir()
+    (root / "owned-file").write_bytes(b"owned")
+    expected = staging._directory(root)
+    moved = tmp_path / "moved-original"
+    original = cleanup.os.rename
+
+    def replace_before_capture(source, target, *, src_dir_fd, dst_dir_fd):
+        original(root, moved)
+        root.mkdir()
+        (root / "foreign-file").write_bytes(b"must be preserved")
+        return original(source, target, src_dir_fd=src_dir_fd, dst_dir_fd=dst_dir_fd)
+
+    monkeypatch.setattr(cleanup.os, "rename", replace_before_capture)
+    monkeypatch.setattr(cleanup.os, "supports_dir_fd",
+                        cleanup.os.supports_dir_fd | {replace_before_capture})
+    with pytest.raises(PlanError, match="ownership is unconfirmed; cleanup quarantine retained:"):
+        cleanup.remove_owned_stage(root, expected)
+    quarantines = list(tmp_path.glob(".fleet-stage-cleanup-*"))
+    assert len(quarantines) == 1
+    assert (quarantines[0] / "owned-root" / "foreign-file").read_bytes() == b"must be preserved"
+    assert (moved / "owned-file").read_bytes() == b"owned"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX quarantine linked-entry refusal")
+def test_quarantine_refuses_linked_entries_and_preserves_external_target(tmp_path):
+    root = tmp_path / "owned-root"
+    root.mkdir()
+    foreign = tmp_path / "foreign-target"
+    foreign.write_bytes(b"must be preserved")
+    (root / "linked-file").symlink_to(foreign)
+    with pytest.raises(PlanError, match="linked or reparse.*cleanup quarantine retained:"):
+        cleanup.remove_owned_stage(root, staging._directory(root))
+    quarantines = list(tmp_path.glob(".fleet-stage-cleanup-*"))
+    assert len(quarantines) == 1
+    assert (quarantines[0] / "owned-root" / "linked-file").is_symlink()
+    assert foreign.read_bytes() == b"must be preserved"
 
 
 def test_initial_signature_refusal_creates_no_stage(tmp_path, primitive):

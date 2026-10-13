@@ -4,6 +4,7 @@ from contextlib import ExitStack, contextmanager
 import os
 from pathlib import Path
 import stat
+import uuid
 
 from .planning import PlanError
 
@@ -133,6 +134,52 @@ def _posix_contents(descriptor):
             os.unlink(name, dir_fd=descriptor)
 
 
+def _posix_remove(root, expected):
+    required = (os.open, os.stat, os.unlink, os.rmdir, os.rename, os.mkdir)
+    if not hasattr(os, "O_NOFOLLOW") or any(item not in os.supports_dir_fd for item in required):
+        raise PlanError("identity-bound artifact cleanup is unavailable")
+    parent = os.open(root.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    quarantine = None
+    name = ".fleet-stage-cleanup-" + uuid.uuid4().hex
+    retained = False
+    try:
+        os.mkdir(name, mode=0o700, dir_fd=parent)
+        retained = True
+        quarantine = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                             dir_fd=parent)
+        info = os.fstat(quarantine)
+        if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077:
+            raise PlanError("artifact cleanup quarantine is not private to its owner")
+        # Capture first, then admit: never unlink from the published stage namespace.
+        os.rename(root.name, "owned-root", src_dir_fd=parent, dst_dir_fd=quarantine)
+        descriptor = os.open("owned-root", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                             dir_fd=quarantine)
+        try:
+            if _identity(os.fstat(descriptor)) != expected:
+                raise PlanError("artifact stage cleanup ownership is unconfirmed")
+            _posix_contents(descriptor)
+            if _identity(os.stat("owned-root", dir_fd=quarantine,
+                                 follow_symlinks=False)) != expected:
+                raise PlanError("artifact stage cleanup ownership is unconfirmed")
+            os.rmdir("owned-root", dir_fd=quarantine)
+        finally:
+            os.close(descriptor)
+        os.rmdir(name, dir_fd=parent)
+        retained = False
+    except (OSError, PlanError) as error:
+        message = (
+            str(error) if isinstance(error, PlanError)
+            else "artifact stage cleanup could not safely complete"
+        )
+        if retained:
+            message += f"; cleanup quarantine retained: {name}"
+        raise PlanError(message) from None
+    finally:
+        if quarantine is not None:
+            os.close(quarantine)
+        os.close(parent)
+
+
 def remove_owned_stage(root: Path, expected: tuple[int, int]) -> None:
     """Anchor traversal to the admitted identity; never recursively follow its replacement."""
     try:
@@ -144,24 +191,6 @@ def remove_owned_stage(root: Path, expected: tuple[int, int]) -> None:
                         raise PlanError("artifact cleanup ancestor is not a directory")
                 _windows_remove(root, expected)
         else:
-            required = (os.open, os.stat, os.unlink, os.rmdir)
-            if not hasattr(os, "O_NOFOLLOW") or any(item not in os.supports_dir_fd for item in required):
-                raise PlanError("identity-bound artifact cleanup is unavailable")
-            parent = os.open(root.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-            try:
-                descriptor = os.open(root.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                                     dir_fd=parent)
-                try:
-                    if _identity(os.fstat(descriptor)) != expected:
-                        raise PlanError("artifact stage cleanup ownership is unconfirmed")
-                    _posix_contents(descriptor)
-                    if _identity(os.stat(root.name, dir_fd=parent, follow_symlinks=False)) != expected:
-                        raise PlanError("artifact stage cleanup ownership is unconfirmed")
-                    # Only remove an empty top-level name; recursive traversal used the fd.
-                    os.rmdir(root.name, dir_fd=parent)
-                finally:
-                    os.close(descriptor)
-            finally:
-                os.close(parent)
+            _posix_remove(root, expected)
     except OSError:
         raise PlanError("artifact stage cleanup could not safely complete") from None

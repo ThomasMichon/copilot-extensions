@@ -79,10 +79,21 @@ open throughout its separately admitted use and coordinate that lifetime.
 On normal exit or interruption, retention is released, the handle is closed,
 and cleanup binds traversal to the admitted directory identity, not a prior
 path-only check. Windows keeps ancestor and entry handles open without delete
-sharing and deletes through those handles. POSIX traverses the held directory
-descriptor with no-follow, directory-relative operations; removal of the
-top-level name is empty-directory-only, with its identity rechecked. A moved
-root's replacement is never recursively traversed. Unsafe entry types, changed
+sharing and deletes through those handles. POSIX atomically captures the named
+root into a fresh owner-only quarantine, verifies the captured identity before
+traversal, and removes entries only inside that exclusively owned namespace
+using held descriptors and no-follow, directory-relative operations. It never
+unlinks from the former published stage namespace: replacing a published file,
+child or root between a final check and removal cannot substitute the deletion
+target. A capture mismatch is not restored over another entry or deleted;
+the captured entry and quarantine remain, and the error names the quarantine
+for explicit owner investigation.
+
+The caller must exclusively own the quarantine and stop its other stage
+mutators before context exit. Owner-only permissions exclude other unprivileged
+OS principals; this local API is not isolation from a hostile process running
+as the same OS user or an administrator. Such a threat requires an isolated
+cleanup owner, not another pathname check. Unsafe entry types, changed
 ownership and unavailable native cleanup support refuse rather than falling
 back to a path-based recursive deletion. Closed handles cannot be reused;
 serialized reports cannot recreate retention or authorize artifact execution.
