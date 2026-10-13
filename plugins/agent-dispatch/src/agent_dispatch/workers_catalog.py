@@ -140,7 +140,10 @@ def catalog() -> dict:
         declarations = ()
         try:
             _, declarations = validate_configuration(record["name"], conf["declaration"], conf["repo_root"])
-            _validate_dependencies(declarations, conf["repo_root"])
+            _validate_dependencies(
+                declarations, conf["repo_root"],
+                available_declarations=report.combined.declarations,
+            )
         except RegistrarError as exc:
             draft_errors.append(str(exc))
         publication = active_dir() / f"{record['name']}.json"

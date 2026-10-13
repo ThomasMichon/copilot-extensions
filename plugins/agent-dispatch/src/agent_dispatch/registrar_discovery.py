@@ -525,7 +525,14 @@ def read_declaration_file_set(
     if data.get("kind") == "user-worker-instance":
         from .worker_instances import active_dir, validate_configuration
 
-        if p.parent.resolve() != active_dir().resolve():
+        try:
+            local_directory = active_dir()
+            in_local_directory = p.parent.resolve() == local_directory.resolve()
+        except (OSError, RuntimeError) as exc:
+            raise RegistrarIndeterminateError(
+                f"{p}: local instance directory could not be resolved: {exc}"
+            ) from exc
+        if not in_local_directory:
             raise RegistrarError(f"{p}: local instance envelope outside its user-local directory")
         return validate_configuration(
             p.stem, data.get("configuration"), data.get("repo_root", "")

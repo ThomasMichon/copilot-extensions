@@ -131,7 +131,9 @@ def validate_configuration(name: str, document: object, repo_root: str = "") -> 
     return data, declarations
 
 
-def _validate_dependencies(declarations: tuple, repo_root: str) -> None:
+def _validate_dependencies(
+    declarations: tuple, repo_root: str, *, available_declarations: tuple | None = None,
+) -> None:
     from .registrations import RegistrationKind
     for declaration in declarations:
         if declaration.fleet.enabled and not shutil.which("ssh"):
@@ -156,13 +158,16 @@ def _validate_dependencies(declarations: tuple, repo_root: str) -> None:
                 raise RegistrarError("worker body agent is required")
         spec = declaration.spec.get("repository_issue_loop", declaration.spec)
         if spec.get("evaluator_ref") and declaration.kind != RegistrationKind.EVALUATOR:
-            available = rd.RegistrarSources().refresh(emit_warnings=False).combined.declarations
+            if available_declarations is None:
+                available_declarations = rd.RegistrarSources().refresh(
+                    emit_warnings=False,
+                ).combined.declarations
             if not any(
                 candidate.kind == RegistrationKind.EVALUATOR
                 and (
                     candidate.name == spec["evaluator_ref"]
                     or candidate.spec.get("evaluator_ref") == spec["evaluator_ref"]
-                ) for candidate in available
+                ) for candidate in available_declarations
             ) and not any(
                 candidate.kind == RegistrationKind.EVALUATOR
                 and (

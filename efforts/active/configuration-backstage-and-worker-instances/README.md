@@ -274,3 +274,19 @@ configuration, arbitrary source editing, or automatic maintenance dispatch.
   Their implementation/test files match the publication base; this is not a
   claim that the broader suite passed. Required CI remains authoritative, with
   no failed gate waived.
+
+### 2026-10-12 - Catalog discovery snapshot and path diagnostics
+
+- The current-head review confirmed the explicit Configuration scope fix.
+  Its full agentic lane timed out waiting for a GitHub runner; the fallback
+  review identified repeated registrar scans and raw path-resolution errors.
+- Dependency validation now reuses one discovery snapshot across declarations;
+  catalog validation shares the already-fetched snapshot across all instances.
+  An explicitly empty snapshot remains authoritative and still rejects missing
+  evaluators. No extra registry or cache lifetime is introduced.
+- Local instance envelope discovery reports filesystem and symlink-resolution
+  failures as contextual indeterminate registrar errors instead of leaking
+  unrelated exception types.
+- Forty-two worker-instance/catalog guard checks passed, including seven new
+  regression cases for snapshot reuse and both source/active path failures.
+  Required CI, fresh review, promotion and installed local proof remain pending.

@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -324,6 +325,57 @@ def test_missing_evaluator_dependency_refused_before_effects(tmp_path):
     assert not instance_dir().exists()
 
 
+@pytest.mark.parametrize("precomputed", [False, True])
+def test_dependency_validation_reuses_one_discovery_snapshot(monkeypatch, precomputed):
+    from agent_dispatch.worker_instances import _validate_dependencies
+
+    evaluator = SimpleNamespace(kind="evaluator", name="fixture-evaluator", spec={})
+    declaration = SimpleNamespace(
+        kind="emitter", fleet=SimpleNamespace(enabled=False),
+        spec={"evaluator_ref": evaluator.name},
+    )
+    available = (evaluator,)
+    calls = []
+
+    def refresh(*args, **kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(combined=SimpleNamespace(declarations=available))
+
+    monkeypatch.setattr(rd.RegistrarSources, "refresh", refresh)
+    options = {"available_declarations": available} if precomputed else {}
+    _validate_dependencies((declaration, declaration), "", **options)
+    assert len(calls) == (0 if precomputed else 1)
+    with pytest.raises(RegistrarError, match="missing evaluator dependency"):
+        _validate_dependencies((declaration,), "", available_declarations=())
+    assert len(calls) == (0 if precomputed else 1)
+
+
+def test_catalog_shares_discovery_snapshot_across_instance_validation(monkeypatch):
+    from agent_dispatch import workers_catalog
+
+    create("first")
+    create("second")
+    refresh = rd.RegistrarSources.refresh
+    validate = workers_catalog._validate_dependencies
+    snapshots = []
+    validations = []
+
+    def record_refresh(*args, **kwargs):
+        report = refresh(*args, **kwargs)
+        snapshots.append(report.combined.declarations)
+        return report
+
+    def record_validation(*args, **kwargs):
+        validations.append(kwargs["available_declarations"])
+        return validate(*args, **kwargs)
+
+    monkeypatch.setattr(rd.RegistrarSources, "refresh", record_refresh)
+    monkeypatch.setattr(workers_catalog, "_validate_dependencies", record_validation)
+    assert catalog()["summary"]["configured"] == 2
+    assert len(snapshots) == 1 and len(validations) == 2
+    assert all(snapshot is snapshots[0] for snapshot in validations)
+
+
 def test_missing_emitter_command_refused_before_effects():
     with pytest.raises(RegistrarError, match="missing command dependency"):
         save_instance(
@@ -416,6 +468,29 @@ def test_local_envelope_refused_outside_instance_active_directory(tmp_path):
     }), encoding="utf-8")
     with pytest.raises(RegistrarError, match="outside"):
         rd.read_declaration_file_set(path)
+
+
+@pytest.mark.parametrize("error", [OSError("permission denied"), RuntimeError("symlink loop")])
+@pytest.mark.parametrize("directory", ["source", "active"])
+def test_local_envelope_resolution_failure_is_indeterminate(tmp_path, monkeypatch, error, directory):
+    path = tmp_path / "source" / "instance.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({
+        "kind": "user-worker-instance", "configuration": templates()["worker-pool"],
+    }), encoding="utf-8")
+    target = path.parent if directory == "source" else active_dir()
+    resolve = Path.resolve
+
+    def fail_target(self, *args, **kwargs):
+        if self == target:
+            raise error
+        return resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", fail_target)
+    with pytest.raises(rd.RegistrarIndeterminateError, match="could not be resolved") as caught:
+        rd.read_declaration_file_set(path)
+    assert str(path) in str(caught.value)
+    assert caught.value.__cause__ is error
 
 
 def test_pointer_transaction_preserves_concurrent_distinct_sources(tmp_path):
