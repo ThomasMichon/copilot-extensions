@@ -569,11 +569,12 @@ outside PR at their discretion — this only removes the automatic path for
 someone the repo owner never invited. Trusted metadata checks may still run
 without executing any fork/PR-head content.
 
-**This also means an unapproved fork PR against `main` gets zero automated
-feedback**, including from `main-gate` (below) — GitHub holds the *entire*
+**The legacy CI invocation for an unapproved fork PR against `main` is held**,
+including its `main-gate` (below) — GitHub holds the *entire*
 `ci.yml` run, every job included, in `action_required` until a maintainer
-approves it. `.github/workflows/base-branch-reminder.yml` exists
-specifically to close that gap: see
+approves it. `.github/workflows/base-branch-reminder.yml` supplies the safe
+reminder and a trusted, metadata/Git-data-only gate without running fork code:
+see
 [If you opened a PR against `main` by mistake](#if-you-opened-a-pr-against-main-by-mistake).
 
 ## Automated workflows reference
@@ -592,7 +593,7 @@ targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
 | `ci.yml` | `pull_request`, `push` (`main`/`dev`), `workflow_dispatch` | The fast smoke-CI suite (guards, lint, per-plugin tests) that gates every PR. Contains `main-gate` (rejects a non-promotion PR against `main`) and the `PR gate` fixed-name required-check aggregate, including native Windows archive-source/chronicler smoke when `agent-logger` is selected. |
 | `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` (including body/label edits), `push` → `main`, `workflow_dispatch` | Independent trusted jobs host the existing required `workflow-lockdown-guard` check, the separate `source-attribution` metadata check, and the Maintainer-only review fallback. Default-branch push/manual runs refresh source-attribution checks for already-open `dev` PRs; job-scoped permissions/concurrency preserve the review boundary. No PR code executes. |
 | `source-attribution-departures.yml` | `pull_request_target` (`synchronize`, `closed`, `edited`) | Trusted metadata-only refresh of remaining dev PRs on a departed shared head, including retargets away from dev. Publishes no required-context skipped jobs and never executes PR content. |
-| `base-branch-reminder.yml` | `pull_request_target` → `main` | Posts a one-time comment asking a non-owner author to retarget a PR against `main` to `dev` (see [If you opened a PR against `main` by mistake](#if-you-opened-a-pr-against-main-by-mistake)). Never checks out or executes PR code. |
+| `base-branch-reminder.yml` | `pull_request_target` → `main` | Hosts the trusted `main source gate` and the existing one-time retarget reminder. Gate permissions are contents-read only; any checkout is pinned trusted main, and owner PR commits are fetched only as Git data. No PR code executes. Legacy CI admission remains until the replacement producer is released and proven. |
 | `trusted-ci.yml` | `pull_request_target`, paths-scoped to `.github/workflows/trusted-ci.yml`/`libs/**`/`agent-bridge`/`tools/**` | Opt-in (`vars.TRUSTED_SELF_HOSTED_CI`), collaborator-gated self-hosted CI lane for paths too sensitive/expensive for the standard runner pool; includes its own file so a change to the gate itself also re-runs it. |
 
 **Reactive, post-CI (triggered by `ci.yml` completing):**
@@ -791,9 +792,24 @@ would disagree with those on a diverged branch (e.g. wrongly rejecting a
 workflow-only PR solely because `main` independently gained an unrelated
 file after the branch forked).
 
+The same unchanged admission program is staged in
+`base-branch-reminder.yml`, using the existing `main source gate` context.
+Its job is independent of the reminder and has only contents-read permission.
+Promotion and non-owner cases need no checkout; owner workflow/state/rollback
+cases check out pinned trusted main and fetch the PR commit as Git objects,
+never as an executable working tree. The original CI producer remains during
+rollout because `pull_request_target` loads its definition from default main:
+removing legacy CI before a covering promotion would strand that very promotion
+behind a missing required context. Only after live producer proof may main PRs
+stop allocating CI. Full main-push validation, contributor CI, fork approval and
+deep/platform lanes are not removed by this staging change.
+Cutover must also retain the trusted identifier scan of generated main-PR
+content: that scan currently follows the CI completion and is not replaced by
+main-push CI. Its caller must migrate and be proven before disabling main-PR CI.
+
 ### If you opened a PR against `main` by mistake
 
-`main-gate` (above) only ever runs as part of `ci.yml`, a plain
+The legacy `main-gate` in `ci.yml` is part of a plain
 `pull_request`-triggered workflow — for a first-time or otherwise
 unapproved external contributor, GitHub holds that *entire* workflow run
 in `action_required` until a maintainer manually approves it, so such a
@@ -802,9 +818,11 @@ contributor can get zero automated feedback at all.
 narrow, `pull_request_target`-triggered job (not subject to the
 fork-approval gate) posts a one-time comment asking the author to retarget
 to `dev`, for any PR against `main` not authored by the repo owner. It
-never checks out or executes the PR's own code and never runs tests — its
-only effect is that one comment, so it adds no capability a
-non-collaborator didn't already have.
+never checks out or executes the PR's own code and never runs tests or requests
+review. The independent contents-read gate in the same trusted invocation can
+report the existing admission decision without approving a fork's code execution.
+On `synchronize`, only admission runs; the reminder retains its original event
+scope and one-time-comment behavior.
 
 It recognizes `main-gate`'s own four legitimate automated-PR shapes (the
 release pipeline's own PR, a workflow-only bootstrap PR, and `rollback_release.py`'s

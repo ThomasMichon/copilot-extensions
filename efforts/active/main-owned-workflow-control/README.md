@@ -105,6 +105,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
+- [ ] Consolidate main-PR admission into its existing trusted reminder
+  invocation: release and prove admission and generated-content identifier
+  scanning first, then remove legacy CI allocation while retaining full
+  main-push validation.
 - [x] Coalesce or prevent redundant event-triggered runs, not merely mark all
   jobs skipped; preserve timely contributor feedback and review delivery.
   #6308/#6314 reduce trusted invocations; released #6359 prevents irrelevant
@@ -116,12 +120,13 @@ authorizes critical main-path acceptance or a bounded administrative change.
 
 ### Phase 2 - Inert preservation support where needed
 
-- [ ] Extend the existing composer with strict, exact-path preservation from
-  pinned main; absent manifest retains existing behavior.
-- [ ] Reject unsafe/missing files, collisions and conflicting ownership; record
-  control provenance and test intentional deletion.
-- [ ] Land implementation, tests and related documentation via dev, then promote
-  while no preservation manifest is active.
+- [x] Extend the existing composer with strict, exact-path preservation from
+  pinned main; absent manifest retains existing behavior (#6521).
+- [x] Reject unsafe/missing files, collisions and conflicting ownership; record
+  control provenance and test intentional deletion (#6521).
+- [x] Land implementation, tests and related documentation via dev (#6521).
+- [ ] Verify a covering promotion releases inert support while no preservation
+  manifest is active; release is separate from source merge.
 
 ### Phase 3 - Trusted admission and composed validation
 
@@ -565,3 +570,55 @@ credential changes, broad policy weakening or unreviewed releases.
   without weakening any console, stream or exit assertion; the real five-second
   timeout/tree-reap contract is unchanged. Both native local cases passed.
   Current-head hosted Windows proof is still required, not waived as a flake.
+
+### 2026-10-13 - Inert preservation source merged; admission decision next
+
+- #6521 merged at `11:59:40Z` as `5f4ce4d8926f`. Final head `d3aae9957781`
+  received Copilot approval `5503062211` with zero open threads. Current-head CI
+  `38391167703` and lockdown `38391414726` passed, and the real source preflight
+  verified every configured requirement, applicable integration binding and
+  unchanged head before the managed merge. No bypass of CI was used.
+- Hosted Linux exercised 598 artifact/composer cases. The dedicated Windows
+  artifact job explicitly executed `test_promotion_control.py` with the shared
+  artifact suites: 259 passed. The separate Windows runner's 85-case native
+  containment selection also passed, proving #6322's diagnosed fixture recovery.
+  That issue is closed; no assertion or five-second tree-timeout was suppressed.
+- Preservation is dev-landed, not activated or claimed released. No manifest
+  exists. The full Plan/Validation Plan remains open for admission, atomic
+  freshness, compatibility, rollback, covering release and observed cycles.
+- A read-only live policy snapshot found `main source gate` required by ruleset
+  `18553911`, with strict=false and an Admin always-bypass actor on that combined
+  rule. Native GraphQL schema confirms merge accepts an expected head OID but no
+  expected base OID. A last-minute main read cannot supply atomic freshness.
+- The next cutover needs a separately accepted provider freshness mechanism and
+  explicit trust boundary. Dev's loose policy remains unchanged; no new App,
+  token, service, merge queue or policy mutation is authorized by this journal.
+
+### 2026-10-13 - Operator keeps current process; consolidation resumes
+
+- The operator reaffirmed that the current release process works and the task
+  is consolidation/deduplication, not making new ownership/freshness machinery
+  a prerequisite. Accepted the existing trusted-collaborator boundary.
+  No strict-base policy or new infrastructure was authorized.
+- Independent main-control activation remains dormant. Its hypothetical base
+  race is not a blocker for reductions covered by today's existing process.
+- The next staged reduction reuses the existing main-PR reminder invocation
+  for the unchanged `main source gate`. The temporary legacy CI producer stays
+  until trusted default-main deployment is proven; removing it earlier would
+  deadlock the promotion that deploys its replacement.
+- Main-push validation, contribution review/CI, fork approval and platform/deep
+  lanes remain intact. The final cutover removes a redundant main-PR workflow
+  invocation and its optional duplicate guards, not distinct coverage.
+- Coverage tracing found that main-PR identifier scanning follows the CI
+  completion and does not run on main pushes. Preserve and prove that caller
+  too before disabling main-PR CI; admission staging alone is not cutover.
+- Native Git/Bash tests exercise admitted/rejected shapes, actual rollback
+  trees and read-only head-object fetching without switching the trusted
+  working tree. Gate permissions are contents-read only; PR code never runs.
+- Prior resolver repair #6508 and standalone alias repair #6506 are merged.
+  New artifact-validation recovery stays with its existing #6535/#4876 owner;
+  no competing signer or publication fix is introduced here.
+- Later recovery run `38457217400` failed two project-scalar config-reuse
+  assertions in the full worktrees suite. Existing #6556/#6557 owners are
+  already validating a receiving-config reuse fix and coupled fixture repairs.
+  Preserve that ownership rather than loosen assertions or fork the repair.

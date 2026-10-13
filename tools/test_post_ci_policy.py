@@ -103,6 +103,34 @@ def test_widen_only_keeps_ordinary_ceiling_checks_without_an_exact_baseline_gate
     assert "checks" in workflow["jobs"]["pr-gate"]["needs"]
 
 
+def test_staged_main_gate_keeps_legacy_policy_and_a_read_only_trusted_producer():
+    ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
+    host = yaml.safe_load((WORKFLOW.parent / "base-branch-reminder.yml").read_text(encoding="utf-8"))
+    events = host.get("on", host.get(True))["pull_request_target"]
+    assert events["branches"] == ["main"]
+    assert set(events["types"]) == {"opened", "reopened", "edited", "synchronize"}
+    assert "pull_request" in ci.get("on", ci.get(True))
+    old = ci["jobs"]["main-gate"]["steps"][-1]
+    gate = host["jobs"]["main-gate"]
+    assert gate["name"] == "main source gate"
+    assert gate["permissions"] == {"contents": "read"}
+    assert gate["timeout-minutes"] == 2
+    assert "needs" not in gate
+    assert gate["steps"][-1]["run"] == old["run"]
+    assert gate["steps"][-1]["env"] == old["env"]
+    checkout, fetch = gate["steps"][:2]
+    assert checkout["with"] == {"ref": "${{ github.sha }}", "fetch-depth": 0}
+    assert checkout["if"] == fetch["if"]
+    assert "github.event.pull_request.user.login == github.repository_owner" in checkout["if"]
+    assert "!startsWith(github.event.pull_request.head.ref, 'release/promote-')" in checkout["if"]
+    assert fetch["env"] == {"HEAD_SHA": "${{ github.event.pull_request.head.sha }}"}
+    assert 'fetch --no-tags --no-recurse-submodules origin "$HEAD_SHA"' in fetch["run"]
+    assert "checkout" not in fetch["run"]
+    assert "secrets." not in json.dumps(gate)
+    assert gate["env"]["GIT_CONFIG_GLOBAL"] == "/dev/null"
+    assert host["jobs"]["remind"]["if"] == "github.event.action != 'synchronize'"
+
+
 @pytest.mark.parametrize("event,branch,same_repo,conclusion,expected", [
     ("push", "dev", True, "success", True),
     ("push", "dev", True, "failure", True),
@@ -325,16 +353,17 @@ def test_actual_baseline_fence_and_diff_restriction(baseline_fixture, change, li
         assert output.read_text().strip() == ("changed=true" if expected == "run" else "changed=false")
 
 
+@pytest.mark.parametrize("producer", ["ci.yml", "base-branch-reminder.yml"])
 @pytest.mark.parametrize("branch", [
     "automation/module-size-baseline-widen", "automation/module-size-baseline-widen-dev",
 ])
-def test_real_main_gate_rejects_baseline_automation(baseline_fixture, branch):
+def test_real_main_gate_rejects_baseline_automation(baseline_fixture, branch, producer):
     run, git_run, candidate, baseline, _, base, _ = baseline_fixture
     baseline.write_text('{"source.py": 1001}\n', encoding="utf-8")
     git_run("add", ".")
     git_run("commit", "-qm", "baseline change")
     head = git_run("rev-parse", "HEAD")
-    ci = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
+    ci = yaml.safe_load((WORKFLOW.parent / producer).read_text(encoding="utf-8"))
     code = ci["jobs"]["main-gate"]["steps"][-1]["run"]
     result = run(
         f'cd "{candidate.as_posix()}"\n{code}',
@@ -343,3 +372,83 @@ def test_real_main_gate_rejects_baseline_automation(baseline_fixture, branch):
     )
     assert result.returncode != 0
     assert "retarget" in result.stdout.lower()
+
+
+@pytest.mark.parametrize("shape,expected", [
+    ("promotion", True), ("foreign-promotion", False), ("workflow", True),
+    ("mixed", False), ("state", True), ("state-plus-source", False),
+])
+def test_trusted_main_gate_preserves_admitted_shapes(baseline_fixture, shape, expected):
+    run, git_run, candidate, _, other, base, _ = baseline_fixture
+    branch = "release/promote-fixture" if "promotion" in shape else "pr/workflow"
+    author = "outsider" if shape == "foreign-promotion" else "owner"
+    if shape in ("state", "state-plus-source"):
+        branch = "release-pipeline/state-fixture"
+        path = candidate / ".github" / "release-pipeline-state.json"
+    else:
+        path = candidate / ".github" / "workflows" / "fixture.yml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("fixture\n", encoding="utf-8")
+    if shape in ("mixed", "state-plus-source"):
+        other.write_text("value = 2\n", encoding="utf-8")
+    git_run("add", ".")
+    git_run("commit", "-qm", shape)
+    head = git_run("rev-parse", "HEAD")
+    host = yaml.safe_load((WORKFLOW.parent / "base-branch-reminder.yml").read_text(encoding="utf-8"))
+    result = run(
+        f'cd "{candidate.as_posix()}"\n{host["jobs"]["main-gate"]["steps"][-1]["run"]}',
+        HEAD_REF=branch, PR_AUTHOR=author, REPO_OWNER="owner",
+        BASE_SHA=base, HEAD_SHA=head, PR_COMMITS="1",
+    )
+    assert (result.returncode == 0) is expected, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_trusted_main_gate_validates_actual_rollback_tree(baseline_fixture, valid):
+    run, git_run, candidate, _, other, _, _ = baseline_fixture
+    other.write_text("value = 2\n", encoding="utf-8")
+    git_run("commit", "-qam", "promotion")
+    git_run("tag", "promote-fixture")
+    state = candidate / ".github" / "release-pipeline-state.json"
+    state.parent.mkdir()
+    state.write_text('{"paused":true}\n', encoding="utf-8")
+    git_run("add", ".")
+    git_run("commit", "-qm", "pause")
+    base = git_run("rev-parse", "HEAD")
+    other.write_text("value = 1\n" if valid else "value = 3\n", encoding="utf-8")
+    git_run("commit", "-qam", "revert")
+    head = git_run("rev-parse", "HEAD")
+    host = yaml.safe_load((WORKFLOW.parent / "base-branch-reminder.yml").read_text(encoding="utf-8"))
+    result = run(
+        f'cd "{candidate.as_posix()}"\n{host["jobs"]["main-gate"]["steps"][-1]["run"]}',
+        HEAD_REF="release-pipeline/rollback-fixture", PR_AUTHOR="owner", REPO_OWNER="owner",
+        BASE_SHA=base, HEAD_SHA=head, PR_COMMITS="1",
+    )
+    assert (result.returncode == 0) is valid, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_real_trusted_fetch_keeps_main_checkout_and_fails_loudly(baseline_fixture, available):
+    run, git_run, candidate, _, other, base, tmp_path = baseline_fixture
+    git_run("branch", "trusted", base)
+    other.write_text("untrusted head data\n", encoding="utf-8")
+    git_run("commit", "-qam", "PR data")
+    head = git_run("rev-parse", "HEAD")
+    remote, trusted = tmp_path / "origin.git", tmp_path / "trusted"
+    git_run("clone", "--bare", str(candidate), str(remote))
+    git_run("clone", "--no-local", "--single-branch", "--branch", "trusted", str(remote), str(trusted))
+    host = yaml.safe_load((WORKFLOW.parent / "base-branch-reminder.yml").read_text(encoding="utf-8"))
+    fetch = host["jobs"]["main-gate"]["steps"][1]["run"]
+    source = f'cd "{trusted.as_posix()}"\n'
+    if not available:
+        source += f'git remote set-url origin "{(tmp_path / "missing.git").as_posix()}"\n'
+    source += (
+        'if git cat-file -e "$HEAD_SHA" 2>/dev/null; then exit 9; fi\n'
+        f'{fetch}\n'
+        'test "$(git rev-parse HEAD)" = "$BASE_SHA"\n'
+        'test "$(cat source.py)" = "value = 1"\n'
+        'git cat-file -e "$HEAD_SHA"\n'
+    )
+    result = run(source, HEAD_SHA=head, BASE_SHA=base)
+    assert (result.returncode == 0) is available, result.stdout + result.stderr
+    assert (trusted / "source.py").read_text(encoding="utf-8") == "value = 1\n"
