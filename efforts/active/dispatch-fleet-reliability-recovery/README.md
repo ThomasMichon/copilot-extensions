@@ -255,3 +255,17 @@ requested contract.
   exercised. Fatal CI lint, module-size, headless and install-contract checks
   pass. This is still source validation, not release, adoption or the separate
   master-watchdog completion gate.
+
+### 2026-10-13 - Same-root implicit owner preservation
+
+- Review of #6531 identified implicit checkout-derived owners changing during
+  identity-only pointer migration when the checkout and registered names differ.
+  The new regression failed before correction; migration now materializes the
+  existing effective owner without changing explicit owner overrides.
+- Registrar/resource consumer coverage passes 137 tests on Windows with three
+  native POSIX skips; fatal lint and the install contract pass. The preceding
+  revision's native Linux agent-dispatch CI job passed its complete suite.
+- Required CI remains blocked by the independently tracked Windows launch
+  failure (#6266, owned by #6274) and a distinct MCP routing-publication failure.
+  Existing owners have been contacted before any overlapping implementation.
+  No merge, release, deployment, or recovery-record mutation is claimed.

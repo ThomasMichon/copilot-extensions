@@ -301,21 +301,23 @@ def test_named_recipe_ref_keeps_nested_resource_identity(tmp_path, monkeypatch):
     assert result["spec"]["command"][1] == "repo:tools:tick.py"
 
 
-def test_explicit_same_root_pointer_migration_preserves_provenance(tmp_path, monkeypatch):
+@pytest.mark.parametrize("owner", ["existing-owner", None])
+def test_explicit_same_root_pointer_migration_preserves_provenance(tmp_path, monkeypatch, owner):
     from agent_dispatch import registrar_discovery as discovery
 
-    root = tmp_path / "tools"
+    root = tmp_path / "checkout-name"
     root.mkdir()
     base = tmp_path / "pointers"
-    discovery.add_pointer(
-        "tools", root, kind="repo", owner="existing-owner",
+    original = discovery.add_pointer(
+        "tools", root, kind="repo", owner=owner,
         aliases=["example.test/team/tools", "team/tools"], base=base,
     )
     _registry(monkeypatch, root)
     migrated = discovery.add_pointer(
         "tools", kind="repo", repository="tools", base=base,
     )
-    assert migrated.owner == "existing-owner"
+    assert migrated.owner == original.effective_owner()
+    assert migrated.effective_owner() == original.effective_owner()
     assert migrated.aliases == ("example.test/team/tools", "team/tools")
     assert "location" not in migrated.to_dict()
     assert discovery.add_pointer("tools", root, kind="repo", base=base) == migrated

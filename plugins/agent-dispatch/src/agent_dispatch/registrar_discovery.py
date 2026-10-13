@@ -309,6 +309,11 @@ def _add_pointer(
             ) from exc
     if owner is _UNSET:
         resolved_owner = current.owner if (current is not None and not retargeted) else None
+        if (
+            current is not None and not retargeted
+            and current.repository is None and repository is not None
+        ):
+            resolved_owner = current.effective_owner()
     else:
         resolved_owner = owner
     if aliases is not None:

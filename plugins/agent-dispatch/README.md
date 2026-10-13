@@ -843,7 +843,8 @@ agent-dispatch registrar add-pointer tools --kind repo --repository tools
 
 The stored pointer contains `repository`, not a second checkout `location`.
 Explicitly migrating an existing repo pointer to the same registered root
-preserves its owner and lane aliases. A different target remains a retarget,
+preserves its effective owner and lane aliases, materializing an implicit
+checkout-derived owner so registration identities do not change. A different target remains a retarget,
 not an inferred migration; an unavailable legacy target requires provenance
 verification before replacement. Legacy setup writers cannot downgrade a named
 pointer back to a checkout path; changing a named target requires an explicit
