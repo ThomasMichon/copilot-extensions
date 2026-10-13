@@ -117,7 +117,8 @@ Follow-up, 2026-10-12:
 > per-session metrics and their associated transcripts. That should give us the
 > ability to produce a historical estimate.
 
-Editorial note: "dervice" is retained verbatim from the operator's request.
+Editorial note: the entire blockquote preserves the operator's wording verbatim,
+including its original typos and nonstandard phrasing; only line wrapping changes.
 
 Historical-estimate policy selected by the operator: `best-effort-with-uncertainty`
 (report best-effort estimates with measured error ranges and explicit

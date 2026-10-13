@@ -47,8 +47,10 @@ partial input, bounded-read refusal, writer contention or invalid schema.
 ## Estimation contract
 
 Transcript-derived features are deterministic, count-only and versioned.
-Visible output includes recorded textual response, reasoning and emitted
-tool-call arguments where available, not just prose. Input features account
+Visible output includes recorded textual response, explicitly exposed reasoning
+fields already present in the transcript artifact, and emitted tool-call
+arguments where available, not just prose. No hidden reasoning is requested,
+decrypted, reconstructed or persisted. Input features account
 for replayed visible context and observable compaction/resume/reset boundaries.
 Hidden instructions, unrecorded reasoning, cache behavior and discarded
 context are acknowledged limitations, not reconstructed billing facts.

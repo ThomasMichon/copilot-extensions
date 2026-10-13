@@ -35,8 +35,8 @@ summarize the same corpus without recreating the backend.
 Session state and the process logs needed for accounting are preserved and
 synchronized to configured storage. Scheduled cold compaction bounds waste
 without making evidence unreadable or losing subsequent writes.
-Per-session accounting evidence also survives loss or rebuild of a shared
-session index; preserving one global database is not the only durable ledger.
+Per-session accounting evidence also survives loss or rebuild of the shared CLI
+accounting database; preserving one global database is not the only durable ledger.
 
 ### evidence-calibrated-historical-estimates
 Sessions without measured token accounting can receive explicitly estimated
