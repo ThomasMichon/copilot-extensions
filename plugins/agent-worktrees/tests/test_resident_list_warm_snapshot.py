@@ -56,10 +56,12 @@ def no_unit_processes(request, monkeypatch):
 
 @pytest.fixture
 def warm_model(tmp_path, monkeypatch):
+    real_time = time.time
     monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path)
     monkeypatch.setattr(cfg, "project_name", lambda: "example")
     monkeypatch.setattr(cfg, "_load_config_uncached", lambda: types.SimpleNamespace())
-    cache_clock = types.SimpleNamespace(**vars(time))
+    cache_clock = types.ModuleType(time.__name__)
+    cache_clock.__dict__.update(vars(time))
     cache_clock.time = lambda: 1001.0
     monkeypatch.setattr(list_cache, "time", cache_clock)
     calls = Counter()
@@ -135,13 +137,14 @@ def warm_model(tmp_path, monkeypatch):
         calls=calls, record=record, state=state, shapes=shapes, demand=demand,
         production_classify=production_classify,
         production_render=production_render,
+        real_time=real_time,
     )
 
 
 @pytest.mark.portfolio_tier("T0")
 def test_cache_clock_does_not_freeze_classify_transport_deadlines(warm_model):
     assert list_cache.time is not time
-    assert isinstance(time.time, types.BuiltinFunctionType)
+    assert time.time is warm_model.real_time
     assert list_cache.time.monotonic is time.monotonic
     assert list_cache.time.time() == 1001.0
     assert time.time is not list_cache.time.time
