@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import stat
 import subprocess
 import sys
 import sysconfig
@@ -643,9 +644,115 @@ def test_sandbox_cleanup_removes_deep_owned_paths():
         deep = deep / (f"nested-{index}-" + "a" * 30)
     extended = Path("\\\\?\\" + str(deep.resolve()))
     extended.mkdir(parents=True)
-    (extended / "fixture.txt").write_text("fixture")
+    blob = extended / "readonly-git-object"
+    blob.write_text("fixture")
+    blob.chmod(stat.S_IREAD)
+    assert not blob.stat().st_mode & stat.S_IWRITE
     runner.cleanup_sandbox(temporary)
     assert not root.exists()
+
+
+def _access_denied(path, *, winerror=5):
+    error = PermissionError("fixture access denied", str(path))
+    error.winerror = winerror
+    return error
+
+
+def test_readonly_cleanup_retries_only_the_owned_file(tmp_path):
+    root = tmp_path / "owned"
+    root.mkdir()
+    blob = root / "object"
+    blob.write_text("fixture")
+    blob.chmod(stat.S_IREAD)
+    error = _access_denied(blob)
+    runner._remove_readonly_file(root.resolve(), os.unlink, str(blob), (type(error), error, None))
+    assert not blob.exists()
+
+
+@pytest.mark.parametrize("reason", ["outside", "writable", "sharing", "non-unlink", "hardlinked"])
+def test_readonly_cleanup_preserves_unowned_or_non_readonly_failures(tmp_path, reason):
+    root = tmp_path / "owned"
+    root.mkdir()
+    blob = (tmp_path if reason == "outside" else root) / "object"
+    blob.write_text("fixture")
+    if reason == "hardlinked":
+        os.link(blob, tmp_path / "external-link")
+    if reason != "writable":
+        blob.chmod(stat.S_IREAD)
+    before = blob.stat().st_mode
+    error = _access_denied(blob, winerror=32 if reason == "sharing" else 5)
+    function = os.rmdir if reason == "non-unlink" else os.unlink
+    try:
+        with pytest.raises(PermissionError) as failure:
+            runner._remove_readonly_file(root.resolve(), function, str(blob), (type(error), error, None))
+        assert failure.value is error
+        assert blob.exists() and blob.stat().st_mode == before
+    finally:
+        blob.chmod(before | stat.S_IWRITE)
+
+
+def test_readonly_cleanup_never_changes_a_symlink_target(tmp_path):
+    root = tmp_path / "owned"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.write_text("fixture")
+    link = root / "link"
+    try:
+        link.symlink_to(outside)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("native symlink creation requires privilege")
+        raise
+    outside.chmod(stat.S_IREAD)
+    before = outside.stat().st_mode
+    error = _access_denied(link)
+    try:
+        with pytest.raises(PermissionError):
+            runner._remove_readonly_file(root.resolve(), os.unlink, str(link), (type(error), error, None))
+        assert link.is_symlink() and outside.stat().st_mode == before
+    finally:
+        outside.chmod(before | stat.S_IWRITE)
+
+
+def test_readonly_cleanup_allows_hardlinks_only_when_every_link_is_owned(tmp_path):
+    root = tmp_path / "owned"
+    root.mkdir()
+    blob = root / "object"
+    blob.write_text("fixture")
+    second = root / "second-object"
+    os.link(blob, second)
+    blob.chmod(stat.S_IREAD)
+    error = _access_denied(blob)
+    runner._remove_readonly_file(root.resolve(), os.unlink, str(blob), (type(error), error, None))
+    assert not blob.exists() and second.read_text() == "fixture"
+
+
+@pytest.mark.skipif(runner.os.name != "nt", reason="Windows redirected cleanup root")
+def test_sandbox_cleanup_refuses_a_redirected_root_before_changing_permissions(tmp_path):
+    temporary = runner.tempfile.TemporaryDirectory(prefix="standalone-cleanup-test-")
+    root = Path(temporary.name)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    blob = outside / "object"
+    blob.write_text("fixture")
+    root.rmdir()
+    try:
+        root.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        temporary.cleanup()
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("native symlink creation requires privilege")
+        raise
+    blob.chmod(stat.S_IREAD)
+    before = blob.stat().st_mode
+    try:
+        with pytest.raises(OSError, match="redirected"):
+            runner.cleanup_sandbox(temporary)
+        assert blob.exists() and blob.stat().st_mode == before
+    finally:
+        root.unlink()
+        temporary.cleanup()
+        blob.chmod(before | stat.S_IWRITE)
 
 
 @pytest.mark.parametrize(("path", "expected"), [

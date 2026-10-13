@@ -965,7 +965,7 @@ def test_sync_setup_disposes_payload_when_apply_raises():
     assert disposed.is_set()
 
 
-def test_setup_sync_runs_one_local_reconcile_batch_per_epoch():
+def test_setup_sync_keeps_current_roster_free_of_local_reconcile():
     pytest.importorskip("textual")
     from worktree_manager.production_picker.picker_tui import engine as eng
     from worktree_manager.production_picker.picker_tui import data_local
@@ -993,7 +993,7 @@ def test_setup_sync_runs_one_local_reconcile_batch_per_epoch():
     finally:
         monkeypatch.undo()
 
-    assert calls == {"batch": 2}
+    assert calls == {"batch": 0}
 
 
 def test_apply_setup_payload_cancels_replaced_loader():

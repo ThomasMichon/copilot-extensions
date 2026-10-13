@@ -716,14 +716,17 @@ def list_worktree_rows(
     fresh: bool = False,
     worktree_id: str | None = None,
     refresh: bool = False,
+    current: bool = True,
     runner=None,
 ) -> list[dict]:
     """Return raw worktree rows from the provider's JSON list contract.
 
-    Unsupported optional flags are dropped one at a time so an older provider
-    still supplies the richest listing it understands.
+    Current-roster authority is mandatory by default. Optional presentation
+    flags may be dropped for compatibility; authority is never downgraded.
     """
     args = ["list", "--json"]
+    if current:
+        args.append("--current")
     optional: list[tuple[str, bool]] = [
         ("--classify", classify),
         ("--mux-details", mux_details),
@@ -740,6 +743,10 @@ def list_worktree_rows(
         obj = run_json(project, args, runner=runner)
     except EngineError as error:
         detail = _engine_error_detail(error)
+        if current and "unrecognized arguments" in detail and "--current" in detail:
+            raise EngineFeatureUnavailable(
+                "the selected engine predates resident current-roster reads; update and retry"
+            ) from error
         for flag, enabled in optional:
             if enabled and "unrecognized arguments" in detail and flag in detail:
                 return list_worktree_rows(
@@ -750,9 +757,12 @@ def list_worktree_rows(
                     fresh=fresh and flag != "--fresh",
                     worktree_id=worktree_id,
                     refresh=refresh,
+                    current=current,
                     runner=runner,
                 )
         if (
+            not current
+            and
             "unrecognized arguments" in detail
             and worktree_id
             and ("--worktree-id" in detail or "--refresh" in detail)
@@ -783,6 +793,13 @@ def list_worktree_rows(
             return matches if len(matches) == 1 else []
         raise
     rows = obj.get("worktrees")
+    if current:
+        from .worktree_rows_contract import parse_current_rows
+
+        try:
+            return parse_current_rows(obj)
+        except (TypeError, ValueError) as error:
+            raise EngineError(str(error)) from error
     if not isinstance(rows, list):
         return []
     return [row for row in rows if isinstance(row, dict)]
@@ -791,10 +808,8 @@ def list_worktree_rows(
 def list_worktrees(project: str, *, classify: bool = True) -> list[Worktree]:
     """List a project's worktrees via ``agent-worktrees list --json``.
 
-    Requests ``--classify`` (git state + sync tags) by default; if an **older**
-    engine rejects the flag, transparently retries the plain listing so the
-    Manager degrades a feature (no state block) instead of failing -- the
-    version-skew tolerance the contract calls for.
+    Requests the resident current roster. An older engine is an explicit
+    upgrade error, never permission to enumerate tracking or compute state.
     """
     return [
         worktree_from_dict(row)

@@ -563,6 +563,22 @@ sharing it contend. The override requires `--python` and cannot be used with
 preparation and test use share one held lease. POSIX venv `bin/python`
 symlinks are invoked as venv launchers, not resolved to the base interpreter.
 
+Windows standalone cleanup retains extended-length paths and the unchanged
+15-second transient sharing retry. A read-only regular file may have its write
+bit restored only inside the runner-owned temporary sandbox before retrying
+that same unlink. Shared Git objects require every hardlink to be accounted
+for within that sandbox; the link inventory is captured lazily once.
+Symlink/junction traversal, outside targets, writable-file denials and
+non-unlink failures do not gain a permission-changing fallback. Permanent
+cleanup failures remain runner failures, not silently successful test runs.
+
+The complete Manager portfolio can be partitioned without raising its
+per-run budget: run `tools/run-standalone-tests.py worktree-manager` once with
+`PYTEST_ADDOPTS='-k "production_picker"'` and once with
+`PYTEST_ADDOPTS='-k "not production_picker"'`. Account for both test/skip totals;
+neither selector alone is a full-suite pass. Keep the dedicated viewport timing
+lane isolated as described above.
+
 A second exception, for a different reason: the container itself enforces
 FIXED, lower outer resource ceilings (`--memory=14g`, `--pids-limit=512`,
 and `/tmp`'s own `size=6144m` tmpfs) regardless of what the inner runner's

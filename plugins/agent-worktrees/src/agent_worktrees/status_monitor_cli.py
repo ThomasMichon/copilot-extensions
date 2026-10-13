@@ -160,6 +160,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     from . import resident_push, self_retire, status_monitor_cutover, status_monitor_runtime, status_updater_cli
     from . import tracking_write
     from . import worktree_status_daemon
+    from .worktrees_runtime import READ_ACTION, WorktreesRuntime
+    from .worktrees_projection_index import ProjectionError, ProjectionUnavailable
+    from .worktrees_producer import publish_active_project
     from .hook_ipc import HookIpcServer, HookUnavailable
 
     core = _core()
@@ -335,6 +338,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     segment_cache = status_segment_cache_type(cache_ttl)
     wake_event = threading.Event()
+    worktrees_runtime = WorktreesRuntime(
+        status_monitor_runtime._aw_runtime_home() / "worktrees-current.sqlite3",
+        wake=wake_event,
+        elected=lambda: status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None,
+    )
     resident_push.bind(wake_event, segment_cache)
     published: dict[tuple[str, str], str] = {}
     incarnations: dict[str, str] = {}
@@ -444,6 +452,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         nonlocal hook_server, classify_server, tracking_write_server
         if admission_closed or not published_lock:
             return
+        if status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None:
+            try:
+                worktrees_runtime.activate()
+            except (ProjectionError, ProjectionUnavailable, OSError) as exc:
+                print(f"current-roster authority unavailable: {exc}", file=sys.stderr)
         if hook_server is None and hook_policy.ready():
             try:
                 hook_server = HookIpcServer(_decide)
@@ -514,6 +527,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         nonlocal admission_closed, published_lock
         admission_closed = True
         published_lock = False
+        worktrees_runtime.close_admission("draining")
         _close_request_surface_admission()
         # Stop admitting new managed-mux push observations too (a genuine
         # "new source" admission vector, distinct from worktree_status_runtime's
@@ -598,21 +612,19 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             reasons.append("classify")
         if _tracking_write_busy():
             reasons.append("tracking-write")
+        if worktrees_runtime.feed.active_count():
+            reasons.append("worktrees-feed")
+        if control_server.current_read_count():
+            reasons.append("worktrees-read")
         return reasons
 
     control_server = status_monitor_cutover.ControlServer(
         lambda action, payload: _handle_control(action, payload),
         port=getattr(args, "control_port", None),
+        stream_handle=lambda action, payload, disconnected: worktrees_runtime.feed.stream(
+            payload, disconnected
+        ),
     )
-    control_server.start()
-    status_monitor_cutover.publish_route(
-        control_server.port,
-        pid=os.getpid(),
-        version=None,
-    ) if not passive_mode else None
-    _start_request_surfaces()
-    if published_lock:
-        _locks.write_lock(lock, extra=_lock_extra())
     empty_strikes = 0
     max_empty_strikes = 3
 
@@ -623,7 +635,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 "status": "draining" if admission_closed else "ready",
                 "published": published_lock,
                 "pid": os.getpid(),
+                **worktrees_runtime.health(),
             }
+        if action == READ_ACTION:
+            if status_monitor_cutover.active_generation_for_pid(os.getpid()) is None:
+                worktrees_runtime.close_admission("superseded")
+            return worktrees_runtime.handle(payload)
         if action == "promote":
             with state_lock:
                 _cleanup_retired_request_surfaces()
@@ -633,6 +650,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             wake_event.set()
             return {"adopted": True}
         if action == "shutdown":
+            worktrees_runtime.close_admission("shutdown")
             shutdown_requested.set()
             wake_event.set()
             return {"shutdown": True}
@@ -671,6 +689,13 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     "busy_sessions": reasons,
                 }
             time.sleep(max(0.05, poll))
+
+    control_server.start()
+    if not passive_mode:
+        status_monitor_cutover.publish_route(control_server.port, pid=os.getpid(), version=None)
+    _start_request_surfaces()
+    if published_lock:
+        _locks.write_lock(lock, extra=_lock_extra())
 
     try:
         while True:
@@ -745,7 +770,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 sweep_mux_pane_args()
                 picker_projects = monitor_roots.live_picker_projects()
                 demand_projects = core.list_cache.recent_demand_projects()
-                external_projects = picker_projects | demand_projects
+                external_projects = picker_projects | demand_projects | worktrees_runtime.demand_projects()
                 served = core._monitor_sweep(
                     mux_bin,
                     token,
@@ -764,6 +789,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     governance=governance,
                     managed_mux_cache=managed_mux_runtime.cache,
                     config_cache_for_project=_config_cache_for_project,
+                    roster_publisher=lambda: publish_active_project(worktrees_runtime),
                 )
                 wait_for_lifecycle_priority(lifecycle_priority)
                 with state_lock:
@@ -802,6 +828,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 and not reconciler.has_live_worktree_mux
                 and not worktree_status_runtime.has_active_demand()
                 and not managed_mux_runtime.has_active_demand()
+                and not worktrees_runtime.demand_projects()
                 and not _tracking_write_busy()
             ):
                 empty_strikes += 1
@@ -818,6 +845,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         or core.list_cache.recent_demand_projects()
                         or worktree_status_runtime.has_active_demand()
                         or managed_mux_runtime.has_active_demand()
+                        or worktrees_runtime.demand_projects()
                         or _tracking_write_busy()
                     ):
                         empty_strikes = 0
@@ -827,9 +855,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 empty_strikes = 0
             _wake_interruptible_wait(wake_event, interval)
     finally:
+        worktrees_runtime.close_admission("shutdown")
+        worktrees_runtime.feed.wait_closed(status_monitor_cutover._READ_TIMEOUT_S)
         _close_request_surfaces()
         control_server.close()
         resident_push.reset()
+        worktrees_runtime.shutdown()
         worktree_status_runtime.shutdown()
         managed_mux_runtime.shutdown()
         status_monitor_cutover.clear_route_if_owner(os.getpid())

@@ -96,13 +96,16 @@ The initial loading tab is labelled `Local` with its environment until the
 machine roster resolves its canonical name. It does not present the OS hostname
 as a configured machine or add roster/configuration I/O to first paint.
 
-The Picker's fast worktree listing joins cached rows with one mux-session
-enumeration on the target machine. Mux presence and attached-client counts
-therefore make Open available before git and transcript enrichment completes.
-If mux enumeration is unavailable, the listing reports the failure and leaves
-the live mux observation unknown rather than probing each worktree or declaring
-its session absent. Slow classification failures retain the fast rows and are
-reported separately.
+Ordinary Worktrees loads require the engine's resident current-roster
+publication, including its observed git/session/mux facts and bounded claim
+aggregates. The local and machine-SSH loaders hold the CLI's
+`list --current --stream --follow` feed by default; the Manager never connects
+to daemon transport directly or recomputes/overlays those facts. Complete
+snapshot/update barriers replace rows atomically. Planned cutover notices and
+abrupt disconnects are distinct; reconnect retains explicitly stale last-good
+rows until the replacement generation completes. Unsupported authority is an
+actionable engine-upgrade error. Explicit `AGENT_WORKTREES_PICKER_STREAM=0`
+selects current one-shot reads, not a direct computation fallback.
 
 Sessionless workspaces retained by another controller appear separately under
 **Owned**, not as ordinary resumable conversations. Use **Go to controller**

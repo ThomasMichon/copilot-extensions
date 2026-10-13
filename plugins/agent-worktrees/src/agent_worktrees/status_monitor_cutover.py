@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import select
 import socket
 import socketserver
 import subprocess
@@ -122,6 +123,7 @@ class _ControlServer(socketserver.ThreadingTCPServer):
 
 class _ControlHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
+        current_read = False
         try:
             self.request.settimeout(_READ_TIMEOUT_S)
             raw = self.rfile.readline(256 * 1024)
@@ -137,15 +139,40 @@ class _ControlHandler(socketserver.StreamRequestHandler):
             payload = request.get("payload")
             if not isinstance(payload, dict):
                 payload = {}
+            owner = self.server.owner
+            if action == "worktrees-read":
+                owner._on_current_read_started()
+                current_read = True
+            if owner.stream_handle is not None and action == "worktrees-feed":
+                def disconnected():
+                    readable, _, _ = select.select([self.request], [], [], 0)
+                    return bool(readable)
+
+                frames = owner.stream_handle(action, payload, disconnected)
+                try:
+                    for frame in frames:
+                        self.wfile.write(
+                            json.dumps(frame, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+                            + b"\n"
+                        )
+                        self.wfile.flush()
+                finally:
+                    frames.close()
+                return
             result = self.server.owner.handle(action, payload)  # type: ignore[attr-defined]
             if not isinstance(result, dict):
                 result = {}
             self.wfile.write(
-                json.dumps({"version": 1, "result": result}, separators=(",", ":")).encode("utf-8")
+                json.dumps(
+                    {"version": 1, "result": result}, separators=(",", ":"), ensure_ascii=False,
+                ).encode("utf-8")
                 + b"\n"
             )
         except Exception:
             return
+        finally:
+            if current_read:
+                self.server.owner._on_current_read_finished()
 
 
 class ControlServer:
@@ -157,9 +184,12 @@ class ControlServer:
         *,
         port: int | None = None,
         token: str | None = None,
+        stream_handle: Callable | None = None,
     ):
         self._handle = handle
+        self.stream_handle = stream_handle
         self._active_handlers = 0
+        self._current_read_handlers = 0
         self._active_handlers_lock = threading.Lock()
         self.token = token or load_or_create_control_token()
         bind = (_BIND, int(port) if port is not None else 0)
@@ -197,6 +227,18 @@ class ControlServer:
         with self._active_handlers_lock:
             return self._active_handlers
 
+    def _on_current_read_started(self) -> None:
+        with self._active_handlers_lock:
+            self._current_read_handlers += 1
+
+    def _on_current_read_finished(self) -> None:
+        with self._active_handlers_lock:
+            self._current_read_handlers -= 1
+
+    def current_read_count(self) -> int:
+        with self._active_handlers_lock:
+            return self._current_read_handlers
+
 
 class ControlClient:
     """Small JSON-line client for the status-monitor control surface."""
@@ -219,21 +261,37 @@ class ControlClient:
         self.config_dir = Path(config_dir) if config_dir is not None else None
         self.timeout = timeout
 
-    def _request(self, action: str, payload: dict | None = None) -> dict:
+    def _request(
+        self, action: str, payload: dict | None = None, *,
+        max_response_bytes: int | None = None, total_timeout: float | None = None,
+    ) -> dict:
         body = json.dumps(
             {"version": 1, "token": self.token, "action": action, "payload": payload or {}},
             separators=(",", ":"),
         ).encode("utf-8") + b"\n"
+        deadline = None if total_timeout is None else time.monotonic() + total_timeout
         with socket.create_connection((self.host, self.port), timeout=self.timeout) as sock:
             sock.settimeout(self.timeout)
             sock.sendall(body)
             sock.shutdown(socket.SHUT_WR)
-            buf = b""
-            while not buf.endswith(b"\n"):
+            chunks = []
+            size = 0
+            while True:
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("status-monitor current-roster read deadline exceeded")
+                    sock.settimeout(min(self.timeout, remaining))
                 chunk = sock.recv(65536)
                 if not chunk:
                     break
-                buf += chunk
+                size += len(chunk)
+                if max_response_bytes is not None and size > max_response_bytes:
+                    raise ValueError("status-monitor response exceeds the point-read bound")
+                chunks.append(chunk)
+                if chunk.endswith(b"\n"):
+                    break
+        buf = b"".join(chunks)
         response = json.loads(buf.decode("utf-8"))
         result = response.get("result")
         if not isinstance(result, dict):
@@ -242,6 +300,17 @@ class ControlClient:
 
     def health(self) -> dict:
         return self._request("health")
+
+    def worktrees_read(self, payload: dict) -> dict:
+        from .worktrees_runtime import READ_ACTION
+        from .worktrees_projection import MAX_ROW_BYTES
+
+        point = bool(payload.get("worktree_id") or payload.get("codename"))
+        return self._request(
+            READ_ACTION, payload,
+            max_response_bytes=MAX_ROW_BYTES + 16384 if point else None,
+            total_timeout=self.timeout,
+        )
 
     def drain(self, *, timeout: float, poll: float, force: bool) -> dict:
         if self.config_dir is not None:

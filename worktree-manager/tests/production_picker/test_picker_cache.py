@@ -142,7 +142,6 @@ def test_local_load_uses_cache_only_then_classified_provider_reads(monkeypatch):
             "cache_only": True,
             "runner": None,
         }),
-        ("batch", "example"),
         ("list", ("example",), {
             "classify": True,
             "mux_details": True,
@@ -152,7 +151,7 @@ def test_local_load_uses_cache_only_then_classified_provider_reads(monkeypatch):
     ]
 
 
-def test_local_classify_load_invokes_group_c_batch_once(monkeypatch):
+def test_local_classify_load_cannot_overlay_group_c_batch(monkeypatch):
     calls = []
     runner = object()
     monkeypatch.setattr(data_local.context, "project", lambda: "example")
@@ -187,11 +186,11 @@ def test_local_classify_load_invokes_group_c_batch_once(monkeypatch):
 
     rows = data_local.load("machine", "Win", classify=True, runner=runner)
 
-    assert calls == [("example", (), runner), ("list", runner)]
+    assert calls == [("list", runner)]
     assert len(rows) == 3
-    assert rows[0]["state"] == "ACTIVE"
-    assert rows[0]["mux_live"] is True
-    assert rows[2]["session_lock_stale"] is True
+    assert rows[0]["state"] == "WIP"
+    assert rows[0]["mux_live"] is False
+    assert rows[2]["session_lock_stale"] is False
 
 
 def test_group_c_reconcile_preserves_existing_mux_fields_when_scan_unknown(monkeypatch):

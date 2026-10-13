@@ -8,19 +8,17 @@ mode. The roster comes from the canonical ``machines.yaml`` registry (via
 ``config.load_machines_yaml``), so display names, env labels, SSH aliases and
 shells never drift from config.
 
-A :class:`LiveLoader` runs ``<project> list --json --classify --mux-details``
-on a background daemon thread per machine: the local machine in-process (reusing
-``data_local.load``, no subprocess), every reachable remote over its multi-machine system
-SSH alias. The picker shows the connect spinner while a machine loads and
-resolves it to ``ready`` (data) or ``failed`` (unreachable / errored).
+A :class:`LiveLoader` holds ``<project> list --current --stream --follow`` on
+a background thread per visible machine, locally through the selected engine
+CLI and remotely over its configured SSH alias. Complete snapshots and update
+transactions replace rows atomically; disconnects retain labeled last-good rows.
 
 This module only *reads* worktree listings -- it never creates, opens, cleans,
 or syncs anything.
 
-Graceful degradation: a remote running an agent-worktrees older than dev59 does
-not recognize ``--classify``. When the list command fails with an
-"unrecognized arguments" error mentioning ``--classify``, the loader retries
-without it, so older remotes still load (their rows just lack canonical state).
+Every ordinary listing requires the resident current-roster contract.
+Compatibility retries retain ``--current``; an older remote lacking authority
+is an actionable upgrade error, not permission to recompute.
 """
 from __future__ import annotations
 
@@ -42,6 +40,7 @@ from machine_transport import local_execution_platform
 from .. import project_config as cfg
 from . import data_local, derive, provider_sources, roster, source_identity
 from .loader_lazy import LazyLoadMixin, _lazy_loading_enabled, _ping_argv, _PING_TIMEOUT_SECS  # noqa: F401
+from .loader_current_feed import CurrentFeedMixin
 
 # Shared display surface so the engine treats this exactly like ``data_local``.
 # ``LOCAL`` is resolved from the actual local source below (so it carries the
@@ -64,7 +63,7 @@ _ENV_LABEL = {"windows": "Win", "wsl": "WSL", "linux": "Linux"}
 
 # Base list args shared by every source. ``--include-other-platforms`` is added
 # for Windows targets so a Windows machine's WSL worktrees come back too.
-_LIST_ARGS = "list --json --classify --mux-details"
+_LIST_ARGS = "list --json --current --classify --mux-details"
 _LIST_ARGS_WIN = _LIST_ARGS + " --include-other-platforms"
 SOURCE_KIND_MACHINE_SSH = source_identity.MACHINE_SSH_KIND
 SOURCE_KIND_PROVIDER_EXEC = source_identity.PROVIDER_EXEC_KIND
@@ -553,17 +552,13 @@ def _is_stream_unsupported(stderr: str) -> bool:
 
 
 def _stream_enabled() -> bool:
-    """Whether the Picker attempts single-connection NDJSON streaming before the
-    two-phase load.
+    """Held authority is the default. Explicit 0 selects current one-shot reads.
 
-    Off by default during the fleet-rollout window: a remote that lacks the
-    ``--stream`` producer costs a wasted connect + argparse probe (~seconds)
-    before the two-phase fallback, which would regress first paint. So streaming
-    is **opt-in** until the producer is deployed mesh-wide -- enable with
-    ``AGENT_WORKTREES_PICKER_STREAM=1`` (any of 1/true/yes/on). Once every
-    machine's runtime carries the producer, this can flip to on by default."""
+    Neither path drops ``--current`` or recomputes domain facts in the caller.
+    A live engine lacking ``--follow`` is an actionable upgrade error.
+    """
     return os.environ.get(
-        "AGENT_WORKTREES_PICKER_STREAM", "").strip().lower() in (
+        "AGENT_WORKTREES_PICKER_STREAM", "1").strip().lower() in (
         "1", "true", "yes", "on")
 
 
@@ -726,49 +721,23 @@ def list_sessions_argv(
     Returns the ssh argv, or ``None`` for the local host or an unknown /
     not-ready target (the caller loads local worktrees in-process).
     """
-    project = _project()
-    s = _find_source(machine, env, source_id=source_id)
-    if s is not None:
-        if s.source_kind == SOURCE_KIND_PROVIDER_EXEC:
-            if (
-                not expected_transport_fingerprint
-                or _provider_transport_fingerprint(s)
-                != expected_transport_fingerprint
-            ):
-                return None
-            try:
-                _resolve_provider_source(s, _run)
-            except (OSError, RuntimeError, ValueError):
-                return None
-            if (
-                not expected_instance_id
-                or s.instance_id != expected_instance_id
-                or not isinstance(expected_assignment, dict)
-                or s.venue.get("assignment") != expected_assignment
-            ):
-                return None
-        if (
-            s.local
-            or not s.ready
-            or not s.alias
-            or not s.capabilities.get(
-                "sessions", s.source_kind == SOURCE_KIND_MACHINE_SSH
-            )
-        ):
-            return None
-        inner = (
-            f"{project} list-sessions --worktree "
-            f"{_remote_arg(s.shell, worktree_id)} --json"
-        )
-        if s.source_kind == SOURCE_KIND_PROVIDER_EXEC:
-            return _provider_remote_argv(
-                s,
-                inner,
-                expected_instance_id=expected_instance_id,
-                expected_assignment=expected_assignment,
-            )
-        return _wrap_remote(s.shell, s.alias, inner)
-    return None
+    from .worktree_detail_queries import remote_argv
+
+    return remote_argv(
+        machine, env, worktree_id, command="list-sessions --worktree", capability="sessions",
+        source_id=source_id, expected_instance_id=expected_instance_id,
+        expected_assignment=expected_assignment,
+        expected_transport_fingerprint=expected_transport_fingerprint,
+    )
+
+
+def claims_argv(machine, env, worktree_id, **source_identity):
+    """Explicit full claim inspection through the selected remote source."""
+    from .worktree_detail_queries import remote_argv
+
+    return remote_argv(
+        machine, env, worktree_id, command="claims", capability="claims", **source_identity,
+    )
 
 
 def profiles_argv(machine, env, *, action, set_json=None, no_mirror=False):
@@ -1243,6 +1212,9 @@ def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None,
         )
     try:
         data = _extract_json(proc.stdout)
+        from ...worktree_rows_contract import parse_current_rows
+
+        rows = parse_current_rows(data)
     except Exception as exc:
         raise _RemoteFetchError(
             f"unparseable output: {exc}", returncode=proc.returncode,
@@ -1266,10 +1238,10 @@ def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None,
                 },
                 source_capabilities=source.capabilities,
             )
-            for w in data.get("worktrees", [])]
+            for w in rows]
 
 
-class LiveLoader(LazyLoadMixin):
+class LiveLoader(CurrentFeedMixin, LazyLoadMixin):
     """Background, per-machine loader feeding the picker's spinner -> resolve.
 
     On :meth:`start`, spawns one daemon thread per *ready* source. Each thread
@@ -1315,6 +1287,9 @@ class LiveLoader(LazyLoadMixin):
         # merge the prefix over bootstrap rows instead of treating omitted
         # identities as removals during the first paint.
         self._stream_incomplete: dict = {}
+        self._held_sources: set = set()
+        self._feed_complete: set = set()
+        self._feed_backoff: dict = {}
         # Sources whose full worktree listing has been DEFERRED behind a cheap
         # connectivity ping (see `start`'s `focus_keys`) -- machine tabs the
         # operator hasn't actually looked at yet. `ensure_loaded`/
@@ -1403,6 +1378,8 @@ class LiveLoader(LazyLoadMixin):
         """Re-fetch one source by its canonical identity."""
         for s in self._sources:
             if s.cache_key == source_id:
+                with self._procs_lock:
+                    procs = list(self._procs_by_source.get(s.cache_key, ()))
                 with self._lock:
                     self._state[s.cache_key] = "loading"
                     self._pinged_only.discard(s.cache_key)
@@ -1410,6 +1387,8 @@ class LiveLoader(LazyLoadMixin):
                     # its (older) rows can't land after this reload (#1421).
                     self._gen[s.cache_key] = self._gen.get(s.cache_key, 0) + 1
                     gen = self._gen[s.cache_key]
+                for proc in procs:
+                    _kill_proc_tree(proc)
                 threading.Thread(
                     target=self._load_one, args=(s, gen),
                     name=f"reload-{s.machine}-{s.env}", daemon=True,
@@ -1444,6 +1423,8 @@ class LiveLoader(LazyLoadMixin):
                     continue
                 if self._state.get(s.cache_key) != "ready":
                     continue
+                if s.cache_key in self._held_sources:
+                    continue
                 if s.cache_key in self._refreshing:
                     continue
                 self._refreshing.add(s.cache_key)
@@ -1473,6 +1454,9 @@ class LiveLoader(LazyLoadMixin):
         """Serialized implementation of :meth:`_refresh_one`."""
         try:
             if self._cancelled.is_set():
+                return
+            if source.source_kind == SOURCE_KIND_MACHINE_SSH and _stream_enabled():
+                self._load_current_feed(source, gen)
                 return
             changed = False
             if source.source_kind == SOURCE_KIND_PROVIDER_EXEC:
@@ -1539,7 +1523,7 @@ class LiveLoader(LazyLoadMixin):
 
         Returns the number of sources a reconcile was actually started for.
         """
-        if self._cancelled.is_set():
+        if self._cancelled.is_set() or _stream_enabled():
             return 0
         started = 0
         with self._lock:
@@ -1726,6 +1710,9 @@ class LiveLoader(LazyLoadMixin):
                 self._active_source.key = None
 
     def _load_one_serial(self, source: Source, gen: int):
+        if source.source_kind == SOURCE_KIND_MACHINE_SSH and _stream_enabled():
+            self._load_current_feed(source, gen)
+            return
         if source.local:
             # Local tab: fast-then-fill so rows paint immediately (see below).
             self._load_local_two_phase(source, gen)
@@ -1807,9 +1794,12 @@ class LiveLoader(LazyLoadMixin):
         t0 = _dt.datetime.now()
         by_id: dict = {}
         order: list = []
-        ready = False
         done = False
         err = ""
+        stream_error = None
+        from ...worktree_rows_contract import CurrentSnapshot
+
+        snapshot = CurrentSnapshot()
         try:
             proc = self._spawn_stream(argv)
         except Exception as exc:
@@ -1835,45 +1825,29 @@ class LiveLoader(LazyLoadMixin):
                 obj = _parse_ndjson_line(raw)
                 if obj is None:
                     continue
-                typ = obj.get("type")
-                if typ == "worktree":
-                    wt = obj.get("wt") or {}
-                    rid = wt.get("id")
-                    if not rid:
-                        continue
-                    rec = derive.norm(
-                        wt,
-                        source.machine,
-                        source.env,
-                        source_kind=source.source_kind,
-                        source_id=source.source_id,
+                rows = snapshot.receive(obj)
+                if rows is None:
+                    continue
+                for wt in rows:
+                    rid = wt["id"]
+                    order.append(rid)
+                    by_id[rid] = derive.norm(
+                        wt, source.machine, source.env,
+                        source_kind=source.source_kind, source_id=source.source_id,
                         source_label=source.source_label,
                         source_metadata={
-                            "provider": source.provider,
-                            "target_id": source.target_id,
-                            "instance_id": source.instance_id,
-                            "venue": dict(source.venue),
+                            "provider": source.provider, "target_id": source.target_id,
+                            "instance_id": source.instance_id, "venue": dict(source.venue),
                         },
                         source_capabilities=source.capabilities,
                     )
-                    with self._lock:
-                        if self._cancelled.is_set():
-                            break
-                        if self._gen.get(source.cache_key, 0) != gen:
-                            break   # superseded by a reload()
-                        self._stream_incomplete[source.cache_key] = gen
-                        if rid not in by_id:
-                            order.append(rid)
-                        by_id[rid] = rec
-                        self._records[source.cache_key] = [by_id[i] for i in order]
-                        if not ready:
-                            self._state[source.cache_key] = "ready"
-                            ready = True
-                elif typ == "done":
-                    done = True
-                    with self._lock:
-                        if self._stream_incomplete.get(source.cache_key) == gen:
-                            self._stream_incomplete.pop(source.cache_key, None)
+                done = True
+                with self._lock:
+                    if self._stream_incomplete.get(source.cache_key) == gen:
+                        self._stream_incomplete.pop(source.cache_key, None)
+        except (TypeError, ValueError) as exc:
+            stream_error = str(exc)
+            done = False
         finally:
             timer.cancel()
             try:
@@ -1887,15 +1861,13 @@ class LiveLoader(LazyLoadMixin):
             self._untrack(proc)
         elapsed = (_dt.datetime.now() - t0).total_seconds()
         rc = proc.returncode
-        if ready or done:
-            # Fully or partially resolved (or an empty remote) -- keep the rows.
+        if done:
             with self._lock:
                 if (not self._cancelled.is_set()
                         and self._gen.get(source.cache_key, 0) == gen):
                     self._records[source.cache_key] = [by_id[i] for i in order]
                     self._state[source.cache_key] = "ready"
-            note = "streamed" if done else "streamed (partial)"
-            _ssh_log(f"  OK      {source.machine}/{source.env} {note} "
+            _ssh_log(f"  OK      {source.machine}/{source.env} streamed "
                      f"{len(order)} worktree(s) in {elapsed:.1f}s")
             return True
         # No rows: an old remote falls back to two-phase; anything else is a
@@ -1904,8 +1876,10 @@ class LiveLoader(LazyLoadMixin):
             _ssh_log(f"  ~       {source.machine}/{source.env} --stream "
                      f"unsupported; falling back to two-phase")
             return False
+        if stream_error is None and rc == 0:
+            stream_error = "current-roster stream ended before completing its publication"
         exc = _RemoteFetchError(
-            (err.strip().splitlines()[-1] if err.strip() else f"exit {rc}"),
+            stream_error or (err.strip().splitlines()[-1] if err.strip() else f"exit {rc}"),
             returncode=rc, stderr=err, argv=argv)
         self._log_fetch_failure(source, exc, t0, phase="stream", timeout=deadline)
         with self._lock:

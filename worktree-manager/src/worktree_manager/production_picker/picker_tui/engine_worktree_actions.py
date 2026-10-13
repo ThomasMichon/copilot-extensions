@@ -476,11 +476,12 @@ class PickerScreenWorktreeActionsMixin:
             # / re-syncs a stale one) without a full-fleet reload.
             self._start_refresh(rec)
         elif cur == "View details":
-            # Instant, IO-free scrollable card (fold-the-claims-list
-            # follow-up): everything the Actions menu's own bounded header
-            # can't fit -- full title/path/id/status, held claims, session
-            # detail -- from data already on ``rec`` (no new gather).
-            self.app.push_screen(WtDetailsScreen(rec))
+            self.app.push_screen(WtDetailsScreen(rec, engine=self))
+
+    def _load_worktree_claim_details(self, rec):
+        from .worktree_detail_queries import load_claims
+
+        return load_claims(self, rec)
     def _wt_action_ctx(self, rec: dict) -> dict:
         """Placeholder context for a contributed worktree action's argv template:
         the worktree's id/machine/env/repo plus its (scalar) raw fields."""
