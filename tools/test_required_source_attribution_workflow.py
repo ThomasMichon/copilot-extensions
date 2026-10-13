@@ -68,6 +68,8 @@ def test_metadata_parser_is_exactly_pinned_with_integrity():
     parser = lock["packages"]["node_modules/commonmark"]
     assert parser["version"] == manifest["dependencies"]["commonmark"]
     assert parser["integrity"].startswith("sha512-")
+    assert manifest["dependencies"]["parse5"] == "7.2.1"
+    assert lock["packages"]["node_modules/parse5"]["version"] == "7.2.1"
     for name, package in lock["packages"].items():
         if name:
             assert package["resolved"].startswith("https://registry.npmjs.org/")

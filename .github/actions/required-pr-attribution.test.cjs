@@ -129,6 +129,29 @@ test("list continuation and quoted containers retain their rendered code boundar
   }
 });
 
+test("HTML containers cannot conceal duplicate, conflicting or raw source comments", () => {
+  const native = "<!-- gh-aw-workflow-id: maintenance -->";
+  for (const tag of ["div", "details", "template"]) {
+    const wrap = (source) => `<${tag}>\n${source}\n</${tag}>`;
+    assert.equal(gate.validate(wrap(marker)), null);
+    assert.ok(gate.validate(wrap(marker) + "\n\n" + marker));
+    assert.ok(gate.validate(wrap(native) + "\n\n" + marker));
+    assert.ok(gate.validate(wrap(marker.replace(" -->", " machine=private-source -->"))));
+    assert.ok(gate.validate(wrap("`\n" + marker + "\n`") + "\n\n" + marker));
+  }
+  for (const example of [
+    `<div title="${marker}"></div>`,
+    `<script>\n${marker}\n</script>`,
+    `<svg>\n<![CDATA[\n${marker}\n]]>\n</svg>`,
+    `<blockquote><template>\n${marker}\n</template></blockquote>`,
+    `<pre>\n${marker}\n</pre>`,
+    "<!-- documented example\n" + marker + "\n-->",
+  ]) {
+    assert.ok(gate.validate(example));
+    assert.equal(gate.validate(example + "\n\n" + marker), null);
+  }
+});
+
 test("indented or container-prefixed fence content cannot close another fence", () => {
   for (const body of [
     "```html\n    ```\n" + marker + "\n```",

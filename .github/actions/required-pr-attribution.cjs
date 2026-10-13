@@ -1,7 +1,8 @@
 const fs = require("node:fs");
 const crypto = require("node:crypto");
 const path = require("node:path");
-const { Parser } = require("commonmark");
+const { Parser, HtmlRenderer } = require("commonmark");
+const { parseFragment } = require("parse5");
 
 const HANDLE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const WORKFLOW = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
@@ -40,28 +41,46 @@ const REPAIR = [
 function metadataText(body) {
   const lines = body.split(/\r?\n/);
   const comments = [];
-  const walker = new Parser().parse(body).walker();
+  const quotes = [];
+  const tree = new Parser().parse(body);
+  const walker = tree.walker();
   let event;
   while ((event = walker.next())) {
     if (!event.entering) continue;
     const node = event.node;
     if (node.type === "code_block" || node.type === "block_quote") {
       for (let line = node.sourcepos[0][0] - 1; line < node.sourcepos[1][0]; line++) lines[line] = "";
+      if (node.type === "block_quote") quotes.push(node);
       continue;
     }
-    if (!["html_block", "html_inline"].includes(node.type) ||
-        !/^<!--\s*(?:agent-worktrees:source\b|gh-aw-workflow-id:)/.test(node.literal.trimStart())) continue;
-    let quoted = false;
-    for (let parent = node.parent; parent; parent = parent.parent) {
-      if (parent.type === "block_quote") { quoted = true; break; }
-    }
-    if (!quoted) comments.push(node);
+    if (node.type === "html_block" && node.literal.trimStart().startsWith("<!--")) comments.push(node);
   }
   // Also exclude source-looking comments between multiline example backticks.
   const visible = withoutInlineCode(lines.join("\n")).split("\n");
-  return comments.map((node) => node.type === "html_block" ?
-    visible.slice(node.sourcepos[0][0] - 1, node.sourcepos[1][0]).join("\n") :
-    "not-standalone " + node.literal).join("\n");
+  for (const node of comments) {
+    node.literal = visible.slice(node.sourcepos[0][0] - 1, node.sourcepos[1][0]).join("\n") + "\n";
+  }
+  for (const node of quotes) node.unlink();
+  return htmlSourceComments(new HtmlRenderer().render(tree)).join("\n");
+}
+
+function htmlSourceComments(html) {
+  const pending = [parseFragment(html, { sourceCodeLocationInfo: true })];
+  const comments = [];
+  while (pending.length) {
+    const node = pending.pop();
+    if (["blockquote", "code", "pre"].includes(node.tagName)) continue;
+    if (node.nodeName === "#comment" && /^\s*(?:agent-worktrees:source\b|gh-aw-workflow-id:)/.test(node.data)) {
+      const { startOffset, endOffset } = node.sourceCodeLocation;
+      const before = html.slice(0, startOffset).split("\n").at(-1);
+      const after = html.slice(endOffset).split("\n")[0];
+      const standalone = /^ {0,3}$/.test(before) && /^[ \t]*$/.test(after);
+      comments.push((standalone ? "" : "not-standalone ") + html.slice(startOffset, endOffset));
+    }
+    pending.push(...(node.childNodes || []));
+    if (node.content) pending.push(node.content);
+  }
+  return comments;
 }
 
 function withoutInlineCode(text) {

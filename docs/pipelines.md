@@ -298,9 +298,11 @@ account — it's an Enterprise-only feature.)
 `github.workflow_sha`, never the PR head, and reads the current description
 through the GitHub API. Body/base edits and metadata changes reevaluate the
 same head; repository automation and manually opened PRs are covered too.
-The trusted checkout's integrity-locked CommonMark parser identifies actual
-HTML comments, excluding fenced/indented code and quoted examples even inside
-continuation list items. Both metadata jobs install these pinned dependencies
+The trusted checkout's integrity-locked CommonMark and HTML parsers identify
+actual HTML comments, excluding fenced/indented code and quoted examples even
+inside continuation list items. HTML containers cannot conceal additional
+source comments; attribute strings and raw-text elements are not comments.
+Both metadata jobs install these pinned dependencies
 with `npm ci --ignore-scripts`; no PR-head package or lifecycle script runs.
 CONTRIBUTING.md and failure output publish the accepted codename, workflow and
 native gh-aw origin forms and concrete manual repair steps. Encryption remains
