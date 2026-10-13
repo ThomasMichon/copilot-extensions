@@ -426,7 +426,7 @@ def test_named_recipe_reads_same_snapshot_as_nested_base(tmp_path, monkeypatch):
         }), encoding="utf-8")
     result = resolve_extends({"extends": "repo:tools:recipe.json"}, base_dir=tmp_path)
     assert result["description"] == "first"
-    assert result["spec"]["cwd"] == str(roots[0])
+    assert result["spec"]["cwd"] == "repo:tools:."
     assert len(calls) == 1
 
 
@@ -444,4 +444,120 @@ def test_named_nested_recipe_chain_shares_registry_snapshot(tmp_path, monkeypatc
         }), encoding="utf-8")
     result = resolve_extends({"extends": "repo:tools:recipe.json"}, base_dir=tmp_path)
     assert result["description"] == "first"
+    assert len(calls) == 1
+
+
+def test_snapshot_allows_reference_reads_but_refuses_cached_execution(tmp_path, monkeypatch):
+    calls = _registry(monkeypatch, tmp_path, repo_class="reference")
+    snapshot = resources.RepositoryResourceSnapshot()
+    assert snapshot.resolve("repo:tools:.", execution=False, directory=True) == str(tmp_path)
+    with pytest.raises(RegistrarError, match="reference-only"):
+        snapshot.resolve("repo:tools:.", execution=True, directory=True)
+    assert len(calls) == 1
+
+
+def test_effort_state_root_is_a_read_of_reference_repo(tmp_path, monkeypatch):
+    from agent_dispatch.effort_driver_loops import _resolve_state_root
+
+    calls = _registry(monkeypatch, tmp_path, repo_class="reference")
+    assert _resolve_state_root(
+        "repo:tools:.", cwd=None, snapshot=resources.RepositoryResourceSnapshot(),
+    ) == str(tmp_path)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("pending", [False, True])
+def test_named_recipe_relative_cwd_keeps_reference_provenance(tmp_path, monkeypatch, pending):
+    from agent_dispatch.registrar_recipes import resolve_extends
+
+    recipes = tmp_path / "recipes"
+    recipes.mkdir()
+    (recipes / "base.json").write_text(json.dumps({
+        "kind": "emitter", "name": "fixture",
+        "spec": {"command": ["python"], "cwd": "{workdir}" if pending else ".",
+                 "interval_seconds": 60},
+    }), encoding="utf-8")
+    (recipes / "mid.json").write_text(json.dumps({"extends": "base.json"}), encoding="utf-8")
+    calls = _registry(monkeypatch, tmp_path, repo_class="reference")
+    result = resolve_extends({
+        "extends": "repo:tools:recipes/mid.json", "params": {"workdir": "."},
+    }, base_dir=tmp_path / "leaf")
+    assert result["spec"]["cwd"] == "repo:tools:recipes"
+    assert len(calls) == 1
+    with pytest.raises(RegistrarError, match="reference-only"):
+        resources.resolve_execution_resources(["python"], result["spec"]["cwd"])
+
+
+@pytest.mark.parametrize("kind", ["issue", "effort", "script"])
+def test_builtin_standby_performs_only_shape_validation(tmp_path, monkeypatch, kind):
+    from agent_dispatch.producers.emitter import load_spec, run_tick
+    from tests.test_producers_emitter import FakeClient
+    from tests.test_repository_issue_loops import _config as issue_config
+    from tests.test_effort_driver_loops import _config as effort_config
+
+    monkeypatch.setattr(
+        resources, "run_agent_worktrees_capture",
+        lambda *a, **k: pytest.fail("builtin standby performed registry lookup"),
+    )
+    client = FakeClient()
+    monkeypatch.setattr(client, "acquire_schedule_lease", lambda *a, **k: {"granted": False})
+    spec = {"id": "standby", "interval_seconds": 60, "cwd": "repo:tools:."}
+    if kind == "effort":
+        spec["effort_driver_loop"] = effort_config(
+            tmp_path, execution_repo="tools", state_root="repo:tools:.",
+            effort_slugs=["unfinished"], worker_identity="missing-until-held",
+        )
+    else:
+        config = issue_config(execution_repo="tools", worker_identity="missing-until-held")
+        if kind == "script":
+            config["forge"] = {
+                "provider": "script", "producer_login": "fixture",
+                "command": ["repo:tools:backlog.py"], "cwd": "repo:tools:.",
+            }
+        spec["repository_issue_loop"] = config
+    path = tmp_path / "emitter.json"
+    path.write_text(json.dumps(spec), encoding="utf-8")
+    assert run_tick(client, load_spec(path), holder="fixture")["held"] is False
+
+
+def test_builtin_standby_still_refuses_malformed_script_config(tmp_path, monkeypatch):
+    from agent_dispatch.producers.emitter import EmitterError, run_tick
+    from tests.test_producers_emitter import FakeClient
+    from tests.test_repository_issue_loops import _config
+
+    monkeypatch.setattr(
+        resources, "run_agent_worktrees_capture",
+        lambda *a, **k: pytest.fail("malformed standby performed registry lookup"),
+    )
+    client = FakeClient()
+    monkeypatch.setattr(
+        client, "acquire_schedule_lease", lambda *a, **k: pytest.fail("invalid spec took lease"),
+    )
+    with pytest.raises(EmitterError, match="timeout_seconds"):
+        run_tick(client, {
+            "id": "standby", "interval_seconds": 60, "cwd": "repo:tools:.",
+            "repository_issue_loop": _config(
+                execution_repo="tools",
+                forge={"provider": "script", "producer_login": "fixture",
+                       "command": ["repo:tools:backlog.py"], "timeout_seconds": -1},
+            ),
+        }, holder="fixture")
+
+
+def test_field_provenance_and_merge_share_named_snapshot(tmp_path, monkeypatch):
+    from agent_dispatch.registrar_document import expand_declaration_document
+    from tests.test_repository_issue_loops import _config
+
+    roots, calls = _moving_registry(monkeypatch, tmp_path)
+    leaf = tmp_path / "leaf"
+    leaf.mkdir()
+    for root in roots:
+        (root / "recipe.json").write_text(json.dumps(_config(
+            forge={"provider": "script", "producer_login": "fixture",
+                   "command": ["relative.py"], "cwd": "."},
+        )), encoding="utf-8")
+    with pytest.raises(RegistrarError, match="inherited"):
+        expand_declaration_document(
+            {"extends": "repo:tools:recipe.json"}, directory=leaf, repo_root=leaf,
+        )
     assert len(calls) == 1

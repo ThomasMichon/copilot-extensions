@@ -681,7 +681,9 @@ def _ref_identity(
 _PureAnyPath = (PurePosixPath, PureWindowsPath)
 
 
-def _absolutize_emitter_cwd(template: Mapping[str, Any], *, directory: Path) -> dict[str, Any]:
+def _absolutize_emitter_cwd(
+    template: Mapping[str, Any], *, directory: Path | str,
+) -> dict[str, Any]:
     """Absolutize an ``emitter`` template's own relative ``spec.cwd``
     against the directory the template was itself loaded from, before it is
     merged upward into whatever extends it.
@@ -736,12 +738,18 @@ def _absolutize_emitter_cwd(template: Mapping[str, Any], *, directory: Path) -> 
     if is_absolute:
         return dict(template)
     new_spec = dict(spec)
-    new_spec["cwd"] = str((directory / cwd).resolve())
+    if isinstance(directory, str):
+        from .repository_resources import relative_repository_resource
+
+        new_spec["cwd"] = relative_repository_resource(directory, cwd)
+    else:
+        new_spec["cwd"] = str((directory / cwd).resolve())
     return {**template, "spec": new_spec}
 
 
 def resolve_extends(
-    data: Mapping[str, Any], *, base_dir: Path, _chain: tuple[str, ...] = ()
+    data: Mapping[str, Any], *, base_dir: Path, _chain: tuple[str, ...] = (),
+    snapshot: RepositoryResourceSnapshot | None = None,
 ) -> dict[str, Any]:
     """Expand an ``extends:``-bearing declaration mapping into its fully
     resolved, ordinary ``kind:``-shaped form.
@@ -790,7 +798,7 @@ def resolve_extends(
     error further down the pipeline).
     """
     resolved, _pending_cwd_origin = _resolve_extends_tracking_cwd_origin(
-        data, base_dir=base_dir, _chain=_chain
+        data, base_dir=base_dir, _chain=_chain, _snapshot=snapshot,
     )
     return resolved
 
@@ -798,7 +806,8 @@ def resolve_extends(
 def _resolve_extends_tracking_cwd_origin(
     data: Mapping[str, Any], *, base_dir: Path, _chain: tuple[str, ...],
     _snapshot: RepositoryResourceSnapshot | None = None,
-) -> tuple[dict[str, Any], Path | None]:
+    _base_resource: str | None = None,
+) -> tuple[dict[str, Any], Path | str | None]:
     """:func:`resolve_extends`'s actual implementation, additionally
     returning the directory a still-unresolved inherited ``spec.cwd``
     placeholder *originated* from (``None`` once resolved, not pending, or
@@ -836,6 +845,15 @@ def _resolve_extends_tracking_cwd_origin(
     ref = data["extends"]
     if not isinstance(ref, str) or not ref:
         raise RegistrarError(f"extends: expected a non-empty string ref, got {ref!r}")
+    from .repository_resources import (
+        is_repository_resource, relative_repository_resource, split_repository_resource,
+    )
+
+    if (
+        _base_resource is not None and not ref.startswith(("global:", "plugin:", "repo:"))
+        and not any(cls(ref).is_absolute() for cls in _PureAnyPath)
+    ):
+        ref = relative_repository_resource(_base_resource, ref)
     snapshot = _snapshot or RepositoryResourceSnapshot(execution=False)
     identity, resolved_path = _ref_identity(ref, base_dir=base_dir, snapshot=snapshot)
     if identity in _chain:
@@ -874,10 +892,15 @@ def _resolve_extends_tracking_cwd_origin(
         )
     else:
         next_base_dir = None
-    pending_cwd_origin: Path | None = None
+    next_base_resource = None
+    if is_repository_resource(ref):
+        name, relative = split_repository_resource(ref)
+        next_base_resource = f"repo:{name}:{PurePosixPath(relative).parent}"
+    pending_cwd_origin: Path | str | None = None
     if "extends" in template:
         template, pending_cwd_origin = _resolve_extends_tracking_cwd_origin(
             template, base_dir=next_base_dir, _chain=(*_chain, identity), _snapshot=snapshot,
+            _base_resource=next_base_resource,
         )
     if pending_cwd_origin is None and next_base_dir is not None:
         # This hop's own (non-inherited, or no-longer-pending) template
@@ -891,7 +914,7 @@ def _resolve_extends_tracking_cwd_origin(
             and isinstance(spec.get("cwd"), str)
             and spec.get("cwd")
         ):
-            pending_cwd_origin = next_base_dir
+            pending_cwd_origin = next_base_resource or next_base_dir
     params_block = data.get("params", {})
     if not isinstance(params_block, Mapping):
         raise RegistrarError(

@@ -802,12 +802,21 @@ Paths must remain within that root, including after symlink resolution.
 One validation or script invocation uses a transient root snapshot shared by
 execution context, argv, cwd and effort state. A recipe chain likewise shares
 its resolved roots for identity, document reads and nested references.
+Inherited relative emitter cwd values retain their named repository authority,
+including placeholders filled by a later hop. Discovery's field-provenance
+walk and recipe merge share that same snapshot. Repository class is checked
+per use: a reference checkout may supply read-only effort state or recipe
+content, but an execution use of the same cached root is refused.
 Registry lookups share a 15-second execution budget rather than receiving a
 new full budget per field. Finite probes own a non-breakaway Windows Job or
-POSIX process group; timeout teardown gets at most one additional second and
+POSIX process group. POSIX keeps the leader unreaped until group retirement,
+using kernel child custody rather than signaling a potentially reused PID;
+unknown custody is refused. Timeout teardown gets at most one additional second and
 unconfirmed teardown is an explicit error. These bounds are separate from
 the script execution timeout. A standby emitter does no resource lookup before
-acquiring its schedule lease.
+acquiring its schedule lease. Loading a builtin emitter and validating a
+standby tick check declaration shape only; registry, worker-identity and
+filesystem resolution occur in the held tick.
 
 Repository and effort loops may set `execution_repo: tools` to bind their
 script/worker-identity context to a registered repository. This is independent

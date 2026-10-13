@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import posixpath
 import re
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -38,6 +39,17 @@ def split_repository_resource(value: str) -> tuple[str, str]:
 def registered_repository_root(
     name: str, *, execution: bool = False, timeout: float = 15,
 ) -> Path:
+    root, repo_class = _registered_repository(name, timeout=timeout)
+    _check_execution_class(name, repo_class, execution=execution)
+    return root
+
+
+def _check_execution_class(name: str, repo_class: str, *, execution: bool) -> None:
+    if execution and repo_class == "reference":
+        raise RegistrarError(f"registered repository {name!r} is reference-only; execution is refused")
+
+
+def _registered_repository(name: str, *, timeout: float) -> tuple[Path, str]:
     if not isinstance(name, str) or not _NAME.fullmatch(name):
         raise RegistrarError("registered repository name must use letters, digits, '.', '_' or '-'")
     result = run_agent_worktrees_capture(
@@ -64,8 +76,6 @@ def registered_repository_root(
         or data["class"] not in {"reference", "singleton", "worktree", "knowledge"}
     ):
         raise RegistrarError("registered repository resolution returned an invalid identity or class")
-    if execution and data["class"] == "reference":
-        raise RegistrarError(f"registered repository {name!r} is reference-only; execution is refused")
     raw = data.get("path")
     if not isinstance(raw, str) or not Path(raw).is_absolute():
         raise RegistrarError("registered repository resolution did not return an absolute local root")
@@ -75,7 +85,16 @@ def registered_repository_root(
             raise RegistrarError(f"registered repository {name!r} local root is not a directory")
     except (OSError, RuntimeError, ValueError) as exc:
         raise RegistrarError(f"registered repository {name!r} local root is unavailable: {exc}") from exc
-    return root
+    return root, data["class"]
+
+
+def relative_repository_resource(directory: str, relative: str) -> str:
+    """Retain the registry authority of a path derived from a named directory."""
+    name, base = split_repository_resource(directory)
+    relative = relative.replace("\\", "/")
+    value = f"repo:{name}:{posixpath.normpath(posixpath.join(base, relative))}"
+    split_repository_resource(value)
+    return value
 
 
 def resolve_repository_resource(
@@ -113,24 +132,28 @@ class RepositoryResourceSnapshot:
 
     def __init__(self, *, execution: bool = True):
         self._execution = execution
-        self._roots: dict[str, Path] = {}
+        self._roots: dict[str, tuple[Path, str]] = {}
         self._deadline = monotonic() + 15
 
-    def root(self, name: str) -> Path:
+    def root(self, name: str, *, execution: bool | None = None) -> Path:
         if name not in self._roots:
             remaining = self._deadline - monotonic()
             if remaining <= 0:
                 raise RegistrarError("repository resource resolution exceeded its shared 15s budget")
-            self._roots[name] = registered_repository_root(
-                name, execution=self._execution, timeout=remaining,
-            )
-        return self._roots[name]
+            self._roots[name] = _registered_repository(name, timeout=remaining)
+        root, repo_class = self._roots[name]
+        _check_execution_class(
+            name, repo_class, execution=self._execution if execution is None else execution,
+        )
+        return root
 
-    def resolve(self, value: str, *, directory: bool = False) -> str:
+    def resolve(
+        self, value: str, *, directory: bool = False, execution: bool | None = None,
+    ) -> str:
         if not is_repository_resource(value):
             return value
         name, relative = split_repository_resource(value)
-        path = _resource_at_root(value, self.root(name), relative)
+        path = _resource_at_root(value, self.root(name, execution=execution), relative)
         if directory and not path.is_dir():
             raise RegistrarError(f"repository resource {value!r} must be a directory")
         return str(path)
@@ -139,14 +162,20 @@ class RepositoryResourceSnapshot:
 def execution_root(
     repository: object, cwd: str | Path | None, *,
     snapshot: RepositoryResourceSnapshot | None = None,
+    resolve_resources: bool = True,
 ) -> str | Path | None:
     snapshot = snapshot or RepositoryResourceSnapshot()
     if repository is not None:
-        if not isinstance(repository, str):
+        if not isinstance(repository, str) or not _NAME.fullmatch(repository):
             raise RegistrarError("execution_repo must be a registered repository name")
-        return snapshot.root(repository)
     if isinstance(cwd, str) and is_repository_resource(cwd):
-        return snapshot.resolve(cwd, directory=True)
+        split_repository_resource(cwd)
+    if not resolve_resources:
+        return cwd
+    if repository is not None:
+        return snapshot.root(repository, execution=True)
+    if isinstance(cwd, str) and is_repository_resource(cwd):
+        return snapshot.resolve(cwd, directory=True, execution=True)
     return cwd
 
 
@@ -156,6 +185,6 @@ def resolve_execution_resources(
 ) -> tuple[list[str], str | None]:
     """Use one transient registered-root snapshot for a single invocation."""
     snapshot = snapshot or RepositoryResourceSnapshot()
-    resolved_argv = [snapshot.resolve(part) for part in argv]
-    resolved_cwd = snapshot.resolve(cwd, directory=True) if cwd is not None else None
+    resolved_argv = [snapshot.resolve(part, execution=True) for part in argv]
+    resolved_cwd = snapshot.resolve(cwd, directory=True, execution=True) if cwd is not None else None
     return resolved_argv, resolved_cwd

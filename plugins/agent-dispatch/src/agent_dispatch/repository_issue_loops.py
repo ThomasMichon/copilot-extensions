@@ -164,6 +164,7 @@ def validate_config(
     *,
     cwd: str | Path | None = None,
     inherited_script_fields: frozenset[str] = frozenset(),
+    resolve_resources: bool = True,
 ) -> dict[str, Any]:
     """Validate/normalize a declaration. ``cwd`` (declaring repo root, if
     known) threads a named ``worker_identity`` to its repo-local override.
@@ -184,7 +185,9 @@ def validate_config(
     if data.get("kind") != "repository-issue-loop":
         raise RegistrarError("repository-issue-loop kind must be 'repository-issue-loop'")
     snapshot = RepositoryResourceSnapshot()
-    cwd = execution_root(data.get("execution_repo"), cwd, snapshot=snapshot)
+    cwd = execution_root(
+        data.get("execution_repo"), cwd, snapshot=snapshot, resolve_resources=resolve_resources,
+    )
     name = _string(data, "name")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
         raise RegistrarError("repository-issue-loop name: use letters, digits, '.', '_' or '-'")
@@ -248,6 +251,7 @@ def validate_config(
         repo_root=cwd,
         inherited_script_fields=inherited_script_fields,
         snapshot=snapshot,
+        resolve_resources=resolve_resources,
     )
     validate_repo_field(repo, provider=provider_name)
 
@@ -357,7 +361,7 @@ def validate_config(
             "guidance, not both"
         )
     identity_name = ""
-    if worker_identity:
+    if worker_identity and resolve_resources:
         identity = load_worker_identity(worker_identity, cwd=Path(cwd) if cwd else None)
         guidance = identity.rules
         identity_name = identity.name

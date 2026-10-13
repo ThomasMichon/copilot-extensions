@@ -30,7 +30,7 @@ class EmitterError(ValueError):
     """A malformed command-emitter spec."""
 
 
-def validate_spec(spec: dict[str, Any]) -> None:
+def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = True) -> None:
     """Validate a periodic command-emitter spec."""
     if not isinstance(spec, dict):
         raise EmitterError("emitter spec must be a JSON object")
@@ -74,7 +74,7 @@ def validate_spec(spec: dict[str, Any]) -> None:
         from ..repository_issue_loops import validate_config
 
         try:
-            validate_config(builtin, cwd=spec.get("cwd"))
+            validate_config(builtin, cwd=spec.get("cwd"), resolve_resources=resolve_resources)
         except ValueError as exc:
             raise EmitterError(str(exc)) from exc
     if effort_builtin is not None:
@@ -88,7 +88,7 @@ def validate_spec(spec: dict[str, Any]) -> None:
         from ..effort_driver_loops import validate_config
 
         try:
-            validate_config(effort_builtin, cwd=spec.get("cwd"))
+            validate_config(effort_builtin, cwd=spec.get("cwd"), resolve_resources=resolve_resources)
         except ValueError as exc:
             raise EmitterError(str(exc)) from exc
     try:
@@ -149,7 +149,7 @@ def validate_spec(spec: dict[str, Any]) -> None:
 def load_spec(path: str | Path) -> dict[str, Any]:
     """Load and validate a command-emitter JSON spec."""
     data = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
-    validate_spec(data)
+    validate_spec(data, resolve_resources=False)
     return data
 
 
@@ -469,7 +469,7 @@ def run_tick(
     clock: Callable[[], float] = time.time,
 ) -> dict[str, Any]:
     """Acquire/renew the emitter lease and invoke one command tick when held."""
-    validate_spec(spec)
+    validate_spec(spec, resolve_resources=False)
     cwd = spec.get("cwd")
     scope = lease_scope(spec)
     lease = client.acquire_schedule_lease(

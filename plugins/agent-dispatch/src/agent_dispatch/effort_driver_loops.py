@@ -116,7 +116,9 @@ def _resolve_state_root(
             return str(Path.cwd().resolve())
         return str(Path(cwd).resolve())
     if is_repository_resource(state_root):
-        return (snapshot or RepositoryResourceSnapshot()).resolve(state_root, directory=True)
+        return (snapshot or RepositoryResourceSnapshot()).resolve(
+            state_root, directory=True, execution=False,
+        )
     root = Path(state_root)
     if not root.is_absolute():
         if cwd is None:
@@ -130,6 +132,7 @@ def validate_config(
     data: Mapping[str, Any],
     *,
     cwd: str | Path | None = None,
+    resolve_resources: bool = True,
 ) -> dict[str, Any]:
     """Validate/normalize a declaration. ``cwd`` (declaring repo root, if
     known) threads a named ``worker_identity`` to its repo-local override and
@@ -144,7 +147,9 @@ def validate_config(
     if data.get("kind") != "effort-driver-loop":
         raise RegistrarError("effort-driver-loop kind must be 'effort-driver-loop'")
     snapshot = RepositoryResourceSnapshot()
-    cwd = execution_root(data.get("execution_repo"), cwd, snapshot=snapshot)
+    cwd = execution_root(
+        data.get("execution_repo"), cwd, snapshot=snapshot, resolve_resources=resolve_resources,
+    )
     name = _string(data, "name")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
         raise RegistrarError("effort-driver-loop name: use letters, digits, '.', '_' or '-'")
@@ -176,7 +181,14 @@ def validate_config(
         not isinstance(raw_state_root, str) or not raw_state_root
     ):
         raise RegistrarError("effort-driver-loop state_root: expected a non-empty string")
-    state_root = _resolve_state_root(raw_state_root, cwd=cwd, snapshot=snapshot)
+    if raw_state_root and is_repository_resource(raw_state_root):
+        from .repository_resources import split_repository_resource
+
+        split_repository_resource(raw_state_root)
+    state_root = (
+        _resolve_state_root(raw_state_root, cwd=cwd, snapshot=snapshot)
+        if resolve_resources else raw_state_root
+    )
 
     pool = data.get("pool")
     if not isinstance(pool, Mapping):
@@ -243,7 +255,7 @@ def validate_config(
             "guidance, not both"
         )
     identity_name = ""
-    if worker_identity:
+    if worker_identity and resolve_resources:
         identity = load_worker_identity(worker_identity, cwd=Path(cwd) if cwd else None)
         guidance = identity.rules
         identity_name = identity.name

@@ -26,6 +26,9 @@ def expand_declaration_document(
     this_repo_root = Path(repo_root).expanduser() if repo_root is not None else directory
     inherited_script_fields = set()
     if "extends" in data:
+        from .repository_resources import RepositoryResourceSnapshot
+
+        snapshot = RepositoryResourceSnapshot(execution=False)
         try:
             this_repo_root = this_repo_root.resolve()
             # Check the nearest defining hop for each field: an unrelated
@@ -36,6 +39,7 @@ def expand_declaration_document(
                 if _field_defining_hop_is_cross_repo(
                     field, data.get("extends"),
                     base_dir=this_repo_root, repo_root=this_repo_root,
+                    snapshot=snapshot,
                 ):
                     inherited_script_fields.add(field)
         except (OSError, RuntimeError, ValueError, RegistrarError):
@@ -45,7 +49,7 @@ def expand_declaration_document(
         from .registrar_recipes import resolve_extends
 
         base_dir = Path(repo_root).expanduser() if repo_root is not None else directory
-        data = resolve_extends(data, base_dir=base_dir)
+        data = resolve_extends(data, base_dir=base_dir, snapshot=snapshot)
     if data.get("kind") == "reviewer-loop":
         from .reviewer_loops import expand_reviewer_loop
 

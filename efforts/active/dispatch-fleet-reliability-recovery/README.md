@@ -233,3 +233,25 @@ requested contract.
   clone tests and 42 resource/capture tests after the finite-probe correction.
   Native headless, module-size and fatal-lint gates pass. Review, promotion,
   authorized rollout and actual adopter migration remain outstanding.
+
+### 2026-10-13 - Registered-resource provenance and custody follow-through
+
+- The next #6531 review exposed five remaining boundaries: derived recipe cwd
+  lost its repository class, reference effort state was treated as execution,
+  builtin loading/standby validation still resolved resources, the field
+  provenance walk used different roots, and POSIX retirement could signal a
+  reaped leader's reused PID.
+- Added failing regression coverage before correction. Named recipe directories
+  now survive relative nesting and delayed placeholders as named resources.
+  The field walk and merge share roots; cached class metadata is checked per
+  read/execution use. Builtin spec loading and standby ticks validate shape,
+  deferring identity and filesystem resolution to the held tick.
+- POSIX captured-pipe handling retains the original leader unreaped until group
+  retirement. Kernel child custody fences signaling without an external identity
+  query; reaped or unknown custody refuses cleanup. Pipe EOF alone does not
+  prematurely terminate a still-running leader.
+- The affected consumer suites pass 418 tests on Windows; three native POSIX
+  tests await the existing Linux CI lane. Native Windows containment remains
+  exercised. Fatal CI lint, module-size, headless and install-contract checks
+  pass. This is still source validation, not release, adoption or the separate
+  master-watchdog completion gate.

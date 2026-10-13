@@ -31,6 +31,7 @@ from .issue_loop_markers import validate_marker_payload
 from .registrar import RegistrarError
 from .repository_resources import (
     RepositoryResourceSnapshot, is_repository_resource, resolve_execution_resources,
+    split_repository_resource,
 )
 
 if TYPE_CHECKING:
@@ -169,6 +170,7 @@ def validate_script_forge_config(
     repo_root: str | Path | None = None,
     inherited_script_fields: frozenset[str] = frozenset(),
     snapshot: RepositoryResourceSnapshot | None = None,
+    resolve_resources: bool = True,
 ) -> dict[str, Any] | None:
     """Validate the ``script``-only ``forge.command``/``forge.cwd``/
     ``forge.timeout_seconds`` fields, mirroring
@@ -235,16 +237,49 @@ def validate_script_forge_config(
             "inheritance shape). Use an absolute path, or declare "
             "`forge.command` directly in this file instead of inheriting it."
         )
-    base = (
-        _safe_resolve_path(Path(repo_root).expanduser(), field="repo_root")
-        if repo_root is not None
-        else None
-    )
     declared_cwd_value = forge.get("cwd")
     if declared_cwd_value is not None and (
         not isinstance(declared_cwd_value, str) or not declared_cwd_value
     ):
         raise RegistrarError("repository-issue-loop forge.cwd: expected a non-empty string")
+    timeout = forge.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+        raise RegistrarError(
+            "repository-issue-loop forge.timeout_seconds: expected a number"
+        )
+    timeout_error = RegistrarError(
+        "repository-issue-loop forge.timeout_seconds: expected a finite "
+        f"number > 0 and <= {MAX_TIMEOUT_SECONDS:g}"
+    )
+    try:
+        timeout = float(timeout)
+    except OverflowError:
+        raise timeout_error from None
+    if timeout <= 0 or timeout > MAX_TIMEOUT_SECONDS or not math.isfinite(timeout):
+        raise timeout_error
+    namespace = forge.get("namespace")
+    if namespace is not None and (not isinstance(namespace, str) or not namespace):
+        raise RegistrarError(
+            "repository-issue-loop forge.namespace: expected a non-empty string"
+        )
+    backlog = forge.get("backlog")
+    if backlog is not None and (not isinstance(backlog, str) or not backlog):
+        raise RegistrarError(
+            "repository-issue-loop forge.backlog: expected a non-empty string"
+        )
+    for value in (*command, declared_cwd_value):
+        if is_repository_resource(value):
+            split_repository_resource(value)
+    if not resolve_resources:
+        return {
+            "command": list(command), "cwd": declared_cwd_value,
+            "timeout_seconds": timeout, "namespace": namespace, "backlog": backlog,
+        }
+    base = (
+        _safe_resolve_path(Path(repo_root).expanduser(), field="repo_root")
+        if repo_root is not None
+        else None
+    )
     resolved_command, resource_cwd = resolve_execution_resources(
         command, declared_cwd_value, snapshot=snapshot,
     )
@@ -315,36 +350,6 @@ def validate_script_forge_config(
             # rule as `command`'s own default resolution.
             resolved_cwd = str(base)
 
-    timeout = forge.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
-    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
-        raise RegistrarError(
-            "repository-issue-loop forge.timeout_seconds: expected a number"
-        )
-    timeout_error = RegistrarError(
-        "repository-issue-loop forge.timeout_seconds: expected a finite "
-        f"number > 0 and <= {MAX_TIMEOUT_SECONDS:g}"
-    )
-    try:
-        timeout = float(timeout)
-    except OverflowError:
-        # An arbitrarily large JSON/YAML integer (e.g. far beyond any
-        # float's range) raises OverflowError on conversion rather than
-        # producing a non-finite float -- treat it the same as any other
-        # out-of-range timeout instead of letting the conversion itself
-        # crash validation.
-        raise timeout_error from None
-    if timeout <= 0 or timeout > MAX_TIMEOUT_SECONDS or not math.isfinite(timeout):
-        raise timeout_error
-    namespace = forge.get("namespace")
-    if namespace is not None and (not isinstance(namespace, str) or not namespace):
-        raise RegistrarError(
-            "repository-issue-loop forge.namespace: expected a non-empty string"
-        )
-    backlog = forge.get("backlog")
-    if backlog is not None and (not isinstance(backlog, str) or not backlog):
-        raise RegistrarError(
-            "repository-issue-loop forge.backlog: expected a non-empty string"
-        )
     declared_command = [str(part) for part in command]
     declared_command[0] = _normalize_declared_path(declared_command[0])
     return {
