@@ -132,14 +132,17 @@ class BoundedReconciliation:
                 self._resolution_futures.pop(rid, None)
 
     def _reconcile_companion_receipts(self, adopted: set[str]) -> None:
-        bounded = getattr(self._companion(), "reconcile_receipts_bounded", None)
+        controller = self._companion()
+        bounded = getattr(controller, "reconcile_receipts_bounded", None)
         if callable(bounded):
-            self._managed_uncertain.update(bounded(
-                adopted, executor=self._receipt_pool(),
-                deadline=self._reconcile_deadline if self._reconcile_deadline is not None
-                else time.monotonic() + self._reconcile_call_budget,
-            ))
-            self._probe_inflight.update(self._companion().receipt_futures())
+            try:
+                self._managed_uncertain.update(bounded(
+                    adopted, executor=self._receipt_pool(),
+                    deadline=self._reconcile_deadline if self._reconcile_deadline is not None
+                    else time.monotonic() + self._reconcile_call_budget,
+                ))
+            finally:
+                self._probe_inflight.update(controller.receipt_futures())
             return
         if self._receipt_reconcile_future is None:
             self._receipt_reconcile_future = self._receipt_pool().submit(

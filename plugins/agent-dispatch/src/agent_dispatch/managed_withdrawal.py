@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from .managed_runtime import ManagedRuntimeError, _ensure_safe_root, _reject_link, _RootLock
+from .managed_runtime import (
+    ManagedRuntimeError, _assert_safe_descendant, _ensure_safe_root, _integrity_budget,
+    _reject_link, _RootLock,
+)
 
 
 class SelectionWithdrawal:
@@ -41,6 +45,37 @@ class SelectionWithdrawal:
             _reject_link(self.root, description="managed retention root")
             return
         self._withdrawal_snapshot(registration_id, receipt_dir, deadline)
+
+    def selection_withdrawn(
+        self, registration_id: str, receipt_dir: Path, *, deadline: float
+    ) -> bool:
+        """Observe every matching domain pin; never withdraw or repair one here."""
+        _integrity_budget(deadline)
+        if not self.root.exists():
+            _reject_link(self.root, description="managed retention root")
+            _integrity_budget(deadline)
+            return True
+        root = _ensure_safe_root(self.root)
+        directory = root / ".retention" / "selections"
+        receipt_identity = os.path.normcase(str(receipt_dir.expanduser().absolute()))
+        with _RootLock(root, **self._lock_budget(deadline)):
+            _assert_safe_descendant(root, directory, description="managed selection pin directory")
+            if not directory.exists():
+                _integrity_budget(deadline)
+                return True
+            if not directory.is_dir():
+                raise ManagedRuntimeError("managed selection pin directory is invalid")
+            for path in directory.glob("*.json"):
+                _integrity_budget(deadline)
+                record, _ = self._check_record(path, "selections", check_references=False)
+                scope = record["scope"]
+                if (
+                    scope["registration_id"] == registration_id
+                    and os.path.normcase(scope["receipt_dir"]) == receipt_identity
+                ):
+                    return False
+            _integrity_budget(deadline)
+            return True
 
     @contextmanager
     def withdraw_selection(

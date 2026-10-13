@@ -37,14 +37,18 @@ class ReceiptReconciliation:
             return self._receipt_owner_identity[1]
         if self._receipt_owner_future is None:
             self._receipt_owner_future = executor.submit(lambda: (pid, self.token_source(pid)))
+        future = self._receipt_owner_future
         try:
-            owner, token = self._receipt_owner_future.result(
+            owner, token = future.result(
                 timeout=max(0.0, deadline - self.monotonic())
             )
         except TimeoutError:
-            if self._receipt_owner_future.done():
+            if future.done():
                 raise
             return None
+        finally:
+            if future.done() and self._receipt_owner_future is future:
+                self._receipt_owner_future = None
         if owner != pid or not isinstance(token, str) or not token:
             raise lifecycle.CompanionIndeterminate("receipt operation owner identity is unavailable")
         self._receipt_owner_identity = (owner, token)
@@ -140,6 +144,10 @@ class ReceiptReconciliation:
             ) else "unknown"
             if state == "complete" and any(
                 value is not None for value in self._receipt_generation(rid).values()
+            ):
+                state = "unknown"
+            if state == "complete" and not self._managed_retention().selection_withdrawn(
+                rid, self.receipt_dir, deadline=deadline,
             ):
                 state = "unknown"
             with self._receipt_state_lock:
@@ -273,6 +281,10 @@ class ReceiptReconciliation:
                         raise lifecycle.CompanionIndeterminate("receipt deletion is not confirmed")
                 if generation["selection"] is not None:
                     self.forget_managed(rid, _operation=operation)
+                if not self._managed_retention().selection_withdrawn(
+                    rid, self.receipt_dir, deadline=operation["deadline"],
+                ):
+                    raise lifecycle.CompanionIndeterminate("managed selection withdrawal is not confirmed")
                 state = "complete"
         finally:
             with self._receipt_state_lock:

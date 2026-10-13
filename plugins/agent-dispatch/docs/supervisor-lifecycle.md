@@ -20,11 +20,19 @@ preserve prior operation generations; this slice does not prune that history.
 A new supervisor reads back the same generation;
 it never repeats an unconfirmed retirement or withdrawal. Completion requires
 absent receipts **and** confirmed retirement of the recorded process generation.
+Matching durable root selection pins must also be absent, including matching
+pins from another process-identity domain. Pin readback is non-mutating metadata
+inspection under the root lock and its deadline; a surviving pin keeps the
+operation unknown rather than authorizing cleanup or a duplicate launch.
 Restart identity readback and initial owner-token sampling use the receipt
 executor, never synchronous per-receipt process probes on the master. Owner
 sampling waits only for the remaining shared deadline; unfinished identity work
 stays in shutdown accounting. Late readback does not settle authority. A receipt
 deletion failure remains unknown and cannot schedule another destructive retirement.
+Completed owner probes are discarded on every outcome, so a transient probe
+error or unusable token can retry in the same daemon. Receipt futures enter
+shutdown accounting even when a later record aborts the controller's pass;
+partial scheduling cannot be reported as a clean drain.
 Changed receipts are superseded rather than retired. The existing crash-safe OS
 lock primitive serializes the exact receipt operation. No new reservation store,
 force-release policy or automatic recovery scheduler is introduced.

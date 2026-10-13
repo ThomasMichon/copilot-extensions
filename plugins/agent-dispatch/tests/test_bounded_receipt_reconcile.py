@@ -221,6 +221,170 @@ def test_owner_identity_probe_uses_shared_deadline_and_shutdown_accounting(tmp_p
         daemon.shutdown()
 
 
+def test_partial_receipt_schedule_failure_still_accounts_every_running_mutation(tmp_path, monkeypatch):
+    from agent_dispatch import supervisor_daemon
+
+    controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
+    for rid in ("a-withdrawn", "b-withdrawn"):
+        _receipt(controller, rid)
+    _unknown_operation(controller, "z-malformed")
+    malformed = controller._operation_record("z-malformed")
+    malformed["generation_digest"] = "invalid"
+    controller._operation_path("z-malformed").write_text(json.dumps(malformed), encoding="utf-8")
+    entered = {rid: threading.Event() for rid in ("a-withdrawn", "b-withdrawn")}
+    release = threading.Event()
+
+    def mutation(receipt, **kwargs):
+        entered[receipt["registration_id"]].set()
+        assert release.wait(3)
+
+    monkeypatch.setattr(controller, "_retire_receipt", mutation)
+    monkeypatch.setattr(supervisor_daemon, "_SHUTDOWN_GRACE_SECONDS", 0.05)
+    daemon = SupervisorDaemon(
+        FakeClient([_reg("unrelated", machine="host")]), "host", launcher=FakeLauncher(),
+        companion_controller=controller, reconcile_call_budget=1,
+    )
+    try:
+        assert daemon.reconcile_once().started == ["unrelated"]
+        assert all(event.wait(1) for event in entered.values())
+        running = tuple(controller._receipt_operations.values())
+        assert len(running) == 2
+        assert set(running) <= daemon._probe_inflight
+        assert all(not future.done() for future in running)
+        started = time.monotonic()
+        assert daemon.shutdown() is False
+        elapsed = time.monotonic() - started
+        print(f"partial-schedule failed drain elapsed={elapsed:.3f}s")
+        assert elapsed < 0.5
+        assert all(
+            controller._operation_record(rid)["state"] in {"pending", "timeout", "unknown"}
+            for rid in entered
+        )
+    finally:
+        release.set()
+        for future in controller._receipt_operations.values():
+            future.result(2)
+        daemon.shutdown()
+
+
+@pytest.mark.parametrize("outcome", [OSError("transient"), TimeoutError("transient"), None, "", 123])
+def test_completed_owner_probe_failure_can_retry_in_same_daemon(tmp_path, monkeypatch, outcome):
+    controller = DefaultCompanionController(tmp_path / "receipts")
+    _receipt(controller, owner_ready=False)
+    outcomes = [outcome, "owner"]
+    calls = []
+    retired = []
+
+    def identity(pid):
+        calls.append(threading.get_ident())
+        value = outcomes.pop(0) if outcomes else "owner"
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    monkeypatch.setattr(controller, "token_source", identity)
+    monkeypatch.setattr(controller, "_retire_receipt", lambda *args, **kwargs: retired.append(1))
+    daemon = SupervisorDaemon(
+        FakeClient([_reg("unrelated", machine="host")]), "host", launcher=FakeLauncher(),
+        companion_controller=controller, reconcile_call_budget=2,
+    )
+    try:
+        assert daemon.reconcile_once().started == ["unrelated"]
+        assert controller._receipt_owner_future is None
+        assert controller._receipt_owner_identity is None
+        assert controller._receipt_operations == {}
+        assert controller._read_receipt("withdrawn") is not None
+        assert daemon.reconcile_once().running == ["unrelated"]
+        controller._receipt_operations["withdrawn"].result(2)
+        assert controller._receipt_owner_future is None
+        assert controller._receipt_owner_identity == (os.getpid(), "owner")
+        assert outcomes == []
+        assert retired == [1]
+        assert len(daemon.launcher.launched) == 1
+        assert threading.get_ident() not in calls
+    finally:
+        daemon.shutdown()
+
+
+@pytest.mark.parametrize("foreign_domain", [False, True])
+def test_absent_receipts_cannot_complete_while_durable_selection_pin_remains(tmp_path, foreign_domain):
+    h = RetentionHarness(tmp_path)
+    snapshot = h.generation("1")
+    rid = snapshot.to_dict()["registration"]["id"]
+    keeper = h.make_retention(domain="b" * 64) if foreign_domain else h.retention
+    keeper.select(snapshot, h.state)
+    controller = DefaultCompanionController(h.state, retention=h.retention, token_source=h.tokens.get)
+    _unknown_operation(controller, rid)
+    pins = {path: path.read_bytes() for path in h.record_paths("selections")}
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        assert controller.reconcile_receipts_bounded(
+            set(), executor=pool, deadline=time.monotonic() + 2,
+        ) == {rid}
+        controller._receipt_operations[rid].result(2)
+    assert controller._receipt_generation(rid) == {"receipt": None, "selection": None}
+    assert controller._operation_record(rid)["state"] == "unknown"
+    assert {path: path.read_bytes() for path in h.record_paths("selections")} == pins
+    assert snapshot.runtimes[0].cell.exists()
+    with pytest.raises(CompanionIndeterminate, match="not confirmed"):
+        controller._assert_receipt_available(rid)
+
+
+def test_retirement_cannot_complete_or_replay_when_only_root_pin_survives(tmp_path, monkeypatch):
+    h = RetentionHarness(tmp_path)
+    snapshot = h.generation("1")
+    rid = snapshot.to_dict()["registration"]["id"]
+    h.retention.select(snapshot, h.state)
+    controller = DefaultCompanionController(h.state, retention=h.retention, token_source=h.tokens.get)
+    _receipt(controller, rid)
+    retired = []
+    monkeypatch.setattr(controller, "_retire_receipt", lambda *args, **kwargs: retired.append(1))
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        controller.reconcile_receipts_bounded(set(), executor=pool, deadline=time.monotonic() + 2)
+        with pytest.raises(CompanionIndeterminate, match="withdrawal is not confirmed"):
+            controller._receipt_operations[rid].result(2)
+        assert controller._receipt_generation(rid) == {"receipt": None, "selection": None}
+        assert controller._operation_record(rid)["state"] == "unknown"
+        controller.reconcile_receipts_bounded(set(), executor=pool, deadline=time.monotonic() + 2)
+        controller._receipt_operations[rid].result(2)
+    assert controller._operation_record(rid)["state"] == "unknown"
+    assert h.record_paths("selections")
+    assert retired == [1]
+
+
+def test_readback_completes_only_after_durable_pin_is_verified_withdrawn(tmp_path):
+    h = RetentionHarness(tmp_path)
+    snapshot = h.generation("1")
+    rid = snapshot.to_dict()["registration"]["id"]
+    h.retention.select(snapshot, h.state)
+    controller = DefaultCompanionController(h.state, retention=h.retention, token_source=h.tokens.get)
+    _unknown_operation(controller, rid)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        controller.reconcile_receipts_bounded(set(), executor=pool, deadline=time.monotonic() + 2)
+        controller._receipt_operations[rid].result(2)
+        assert controller._operation_record(rid)["state"] == "unknown"
+        h.retention.forget(rid, h.state)
+        controller.reconcile_receipts_bounded(set(), executor=pool, deadline=time.monotonic() + 2)
+        controller._receipt_operations[rid].result(2)
+    assert controller._operation_record(rid)["state"] == "complete"
+    assert h.record_paths("selections") == []
+    controller._assert_receipt_available(rid)
+
+
+def test_pin_absence_probe_bounds_root_lock_contention(tmp_path):
+    h = RetentionHarness(tmp_path)
+    snapshot = h.generation("1")
+    rid = snapshot.to_dict()["registration"]["id"]
+    h.retention.select(snapshot, h.state)
+    with _RootLock(h.policy.root):
+        started = time.monotonic()
+        with pytest.raises(ManagedRuntimeLockTimeout):
+            h.retention.selection_withdrawn(rid, h.state, deadline=started + 0.05)
+        elapsed = time.monotonic() - started
+        print(f"durable-pin readback contention elapsed={elapsed:.3f}s")
+        assert elapsed < 0.7
+    assert h.record_paths("selections")
+
+
 def test_readback_rechecks_receipt_absence_after_identity_probe(tmp_path, monkeypatch):
     controller = DefaultCompanionController(tmp_path / "receipts", token_source=lambda pid: "owner")
     _unknown_operation(controller, "withdrawn")
@@ -591,27 +755,39 @@ def test_discovery_and_receipt_wait_share_one_cycle_budget():
 
 def test_native_captured_timeout_bounds_inherited_descendant_pipes(tmp_path):
     # A first-touch subprocess, not a mocked communicate boundary.
+    child_code = (
+        "import os,sys,time\n"
+        "end=time.monotonic()+15\n"
+        "while not os.path.exists(sys.argv[1]) and time.monotonic()<end: time.sleep(0.05)\n"
+        "open(sys.argv[2],'w').write('done')\n"
+    )
     script = (
         "import os,sys,subprocess,time;"
         "from agent_procutil import no_window_kwargs;"
-        "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(3.5)'],"
+        f"child=subprocess.Popen([sys.executable,'-c',{child_code!r},sys.argv[2],sys.argv[3]],"
         "stdout=sys.stdout,stderr=sys.stderr,close_fds=False,"
         "**(no_window_kwargs() if os.name=='nt' else {}));"
         "open(sys.argv[1],'w').write(str(child.pid));time.sleep(10)"
     )
     ready = tmp_path / "descendant-ready"
+    release = tmp_path / "descendant-release"
+    exited = tmp_path / "descendant-exited"
     started = time.monotonic()
     try:
         with pytest.raises(CompanionIndeterminate, match="timed out"):
             companion._run_captured(
-                (sys.executable, "-c", script, str(ready)), cwd=str(tmp_path),
-                environment=dict(os.environ), timeout=1.0,
+                (sys.executable, "-c", script, str(ready), str(release), str(exited)), cwd=str(tmp_path),
+                environment=dict(os.environ), timeout=4.0,
             )
         assert ready.exists()
         assert companion._process_exists(int(ready.read_text()))
         elapsed = time.monotonic() - started
         print(f"ready inherited-pipe timeout elapsed={elapsed:.3f}s")
-        assert 1.8 <= elapsed < 2.8
+        assert 4.8 <= elapsed < 5.8
     finally:
-        # The contained fixture's descendant exits on its own bounded clock.
-        time.sleep(max(0, 4.5 - (time.monotonic() - started)))
+        release.write_text("release", encoding="utf-8")
+        cleanup_deadline = time.monotonic() + 5
+        while ready.exists() and not exited.exists() and time.monotonic() < cleanup_deadline:
+            time.sleep(0.05)
+        if ready.exists():
+            assert exited.exists(), "fixture descendant did not acknowledge release"
