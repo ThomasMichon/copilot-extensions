@@ -20,7 +20,7 @@ name: Purge consumed changefiles
 # YAML from whichever ref is dispatched (not the default branch), so
 # adding it here would let a `dev`-branch (zero-review-required) copy of
 # this file execute with that same privileged token -- the identical
-# untrusted-YAML risk `module-size-baseline-widen.yml` and
+# untrusted-YAML risk `promote-trigger.yml` and
 # `validate-and-promote.yml`'s own design notes already document.
 # `repository_dispatch` shares `workflow_run`'s default-branch-only YAML
 # resolution instead (confirmed against GitHub's own docs, not assumed).

@@ -92,7 +92,7 @@ jobs:
           python-version: "3.12"
       - name: Refresh and validate using only trusted tooling
         run: |
-          python -I trusted/tools/check-module-size.py --repository candidate --refresh-baseline --allow-widen
+          python -I trusted/tools/check-module-size.py --repository candidate --refresh-baseline --widen-only
           python -I trusted/tools/check-module-size.py --repository candidate
       - id: baseline
         name: Fence stale dev inputs and restrict the publication diff
@@ -135,8 +135,9 @@ jobs:
           body: |
             Mechanical baseline-only refresh of committed dev, using trusted
             default-branch tooling. Existing ceilings may widen to current
-            sizes; shrinking/graduated entries tighten. New offenders are
-            never automatically grandfathered.
+            sizes; shrinking/graduated entries are never lowered or removed.
+            New offenders are never automatically grandfathered. Tightening
+            remains a deliberate manual refresh, not automated maintenance.
 
             This targets dev and requires ordinary current-head CI and review.
             It never advances generated main or rebases a promotion candidate.

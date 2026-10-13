@@ -90,7 +90,7 @@ def test_trusted_tooling_can_refresh_a_poisoned_target_checkout(repo: Path):
     _commit_all(repo)
     result = subprocess.run(
         [sys.executable, "-I", str(SCRIPT), "--repository", str(repo),
-         "--refresh-baseline", "--allow-widen"],
+         "--refresh-baseline", "--widen-only"],
         cwd=repo, capture_output=True, text=True, timeout=15,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
@@ -104,7 +104,11 @@ def test_trusted_target_refresh_still_rejects_new_offenders(repo: Path):
     _write_lines(repo, "src/new.py", 1200)
     _write_baseline(repo, {})
     _commit_all(repo)
-    for extra in [("--refresh-baseline", "--allow-widen"), ()]:
+    for extra in [
+        ("--refresh-baseline", "--allow-widen"),
+        ("--refresh-baseline", "--widen-only"),
+        (),
+    ]:
         result = subprocess.run(
             [sys.executable, "-I", str(SCRIPT), "--repository", str(repo), *extra],
             cwd=repo.parent, capture_output=True, text=True, timeout=15,
@@ -114,38 +118,70 @@ def test_trusted_target_refresh_still_rejects_new_offenders(repo: Path):
     assert json.loads((repo / "tools/module-size-baseline.json").read_text()) == {}
 
 
-def test_automatic_baseline_rejects_dev_shrink_after_publication_fence(repo: Path):
+def test_widen_only_tolerates_a_stale_high_ceiling_after_dev_shrinks(repo: Path):
     _write_lines(repo, "src/legacy.py", 1200)
     _write_baseline(repo, {"src/legacy.py": 1100})
     _commit_all(repo)
     _git(repo, "branch", "dev")
     _git(repo, "checkout", "-qb", "automation/module-size-baseline-widen-dev")
-    assert _run(repo, "--refresh-baseline", "--allow-widen").returncode == 0
+    assert _run(repo, "--refresh-baseline", "--widen-only").returncode == 0
     _commit_all(repo)
     _git(repo, "checkout", "-q", "dev")
     _write_lines(repo, "src/legacy.py", 1100)
     _commit_all(repo)
     _git(repo, "merge", "-q", "--no-edit", "automation/module-size-baseline-widen-dev")
     baseline = repo / "tools/module-size-baseline.json"
-    stale = baseline.read_bytes()
-
     assert _run(repo).returncode == 0
-    result = _run(repo, "--check-automatic-baseline")
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "automatic baseline is stale" in result.stdout
-    assert baseline.read_bytes() == stale
+    assert _run(repo, "--refresh-baseline", "--widen-only").returncode == 0
+    assert json.loads(baseline.read_text()) == {"src/legacy.py": 1200}
     assert _run(repo, "--refresh-baseline", "--allow-widen").returncode == 0
-    assert _run(repo, "--check-automatic-baseline").returncode == 0
     assert json.loads(baseline.read_text()) == {"src/legacy.py": 1100}
 
 
-def test_automatic_baseline_still_rejects_new_offenders(repo: Path):
-    _write_lines(repo, "src/new.py", 1200)
-    _write_baseline(repo, {})
+def test_widen_only_never_lowers_or_removes_existing_entries(repo: Path):
+    for path, count in [
+        ("src/grown.py", 1300), ("src/shrunk.py", 1100), ("src/graduated.py", 900),
+    ]:
+        _write_lines(repo, path, count)
+    _write_baseline(repo, {
+        "src/grown.py": 1200, "src/shrunk.py": 1200, "src/graduated.py": 1200,
+    })
     _commit_all(repo)
-    result = _run(repo, "--check-automatic-baseline")
-    assert result.returncode == 1
-    assert "1000-line cap" in result.stdout
+    result = _run(repo, "--refresh-baseline", "--widen-only")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads((repo / "tools/module-size-baseline.json").read_text()) == {
+        "src/grown.py": 1300, "src/shrunk.py": 1200, "src/graduated.py": 1200,
+    }
+
+
+def test_widen_only_cannot_introduce_a_low_ceiling_after_dev_grows(repo: Path):
+    _write_lines(repo, "src/legacy.py", 1100)
+    _write_lines(repo, "src/other.py", 1300)
+    _write_baseline(repo, {"src/legacy.py": 1500, "src/other.py": 1200})
+    _commit_all(repo)
+    _git(repo, "branch", "dev")
+    _git(repo, "checkout", "-qb", "automation/module-size-baseline-widen-dev")
+    assert _run(repo, "--refresh-baseline", "--widen-only").returncode == 0
+    _commit_all(repo)
+    _git(repo, "checkout", "-q", "dev")
+    _write_lines(repo, "src/legacy.py", 1400)
+    _commit_all(repo)
+    _git(repo, "merge", "-q", "--no-edit", "automation/module-size-baseline-widen-dev")
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads((repo / "tools/module-size-baseline.json").read_text()) == {
+        "src/legacy.py": 1500, "src/other.py": 1300,
+    }
+
+
+@pytest.mark.parametrize("args", [
+    ("--widen-only",),
+    ("--refresh-baseline", "--widen-only", "--allow-widen"),
+])
+def test_widen_only_requires_an_unambiguous_refresh_mode(repo: Path, args):
+    result = _run(repo, *args)
+    assert result.returncode == 2
+    assert "--widen-only" in result.stderr
 
 
 def test_nonfile_target_baseline_is_a_controlled_cli_failure(repo: Path):

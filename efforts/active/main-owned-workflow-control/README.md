@@ -484,3 +484,27 @@ credential changes, broad policy weakening or unreviewed releases.
   successful regenerated policy, new-offender rejection and required-job
   wiring. Focused lint and documentation consistency passed.
   No new workflow, required check or credential was introduced.
+
+### 2026-10-13 - Operator-selected widen-only maintenance
+
+- The operator explicitly prioritizes avoiding an excessively low ceiling
+  that blocks code over avoiding a stale, unnecessarily high ceiling.
+  Confirmed automated maintenance must widen only; tightening remains a
+  deliberate componentization/manual refresh, not a subsequent automatic pass.
+- Automation now invokes `--refresh-baseline --widen-only`. It raises an
+  existing entry when necessary but never lowers, removes or creates an
+  entry. Manual refresh and `--allow-widen` retain their existing behavior;
+  the hard cap for new offenders remains enforced.
+- Removed the earlier experimental exact-baseline canonicality gate:
+  it rejected the stale-high proposals the operator accepts, and it could
+  not establish atomic base freshness under the non-strict status policy.
+  Ordinary PR ceiling checks and both required contexts remain intact.
+  No global strict-base policy, merge queue or additional CI run was introduced.
+- Sixty-two focused cases passed, including real Git races: a stale high
+  proposal remains admissible after a shrink, while widen-only maintenance
+  cannot publish a tightening that blocks subsequent growth within the
+  existing ceiling. Shrunk/graduated entries are preserved, new offenders
+  still fail, and deliberate manual tightening is unchanged.
+- Updated the reviewer contract and remaining live references to the retired
+  workflows. Historical incident references remain historical; the independent
+  attestation/control implementation is not changed.

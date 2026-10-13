@@ -874,17 +874,17 @@ binstub in `~/.local/bin/`.
   baselined ceiling in the ordinary case is a **manual, reviewed edit** to
   the JSON, never something a plain refresh does silently — bare
   `--refresh-baseline` only lowers or removes entries, it never raises one.
-  The one exception is the opt-in `--refresh-baseline --allow-widen` flag,
+  Automated maintenance uses `--refresh-baseline --widen-only`,
   restricted to a trusted post-merge CI-completion run against committed `dev`
   (`.github/workflows/promote-trigger.yml`), which additionally
   ratchets a grown file's ceiling up to its current size and opens its own
   small, reviewable PR targeting `dev` — never something a PR branch's own CI run applies to
-  its own diff. Automated baseline PRs also run read-only
-  `--check-automatic-baseline` in the existing required guards job: their
-  baseline must equal the refresh of the merged dev tree exercised by CI.
-  A stale ceiling left by an intervening shrink fails rather than passing
-  merely because the file remains below that ceiling. Ordinary manual
-  baseline edits retain their reviewed-ceiling behavior.
+  its own diff. Automation never lowers or removes an existing ceiling,
+  including graduated entries, so a stale tightening cannot block later
+  growth. A stale higher ceiling is an accepted reviewed proposal, not a
+  reason to require exact-baseline equality or global strict-base CI.
+  Manual `--refresh-baseline` retains tightening; adding `--allow-widen`
+  also permits widening during that deliberate refresh.
   A separate `--changed-since REF` flag scopes the ordinary
   (non-widening) check to files this branch's own commits actually touch
   (used by CI on `pull_request` events) — this repo's high concurrent-PR

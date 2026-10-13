@@ -30,20 +30,24 @@ file has shrunk) or *removes* one entirely (when a file has shrunk to or
 below the cap); it never raises an entry, even if a file has grown -- that
 case is a guard failure to fix, not baseline noise to absorb.
 
-The one exception is the opt-in ``--allow-widen`` flag:
+The opt-in ``--allow-widen`` flag additionally permits widening:
 concurrent-agent development can legitimately grow several already-baselined
 files within the same short window (a shared module touched by parallel,
 unrelated PRs), which then forces every subsequent PR -- even ones that never
 touched the grown file -- to carry an unrelated manual baseline-widening
 diff just to pass CI. ``--refresh-baseline --allow-widen`` additionally
 *raises* a ceiling up to a file's current size when it is over its recorded
-ceiling. This is still never silent: it is restricted by convention (see
-``.github/workflows/promote-trigger.yml``) to a trusted post-merge
-CI-completion run against committed ``dev``, producing its own dev-targeted
-reviewable PR -- **never** something a PR branch's own CI run does to its
-own diff, which would let a PR silently launder its own growth past review.
+ceiling while retaining manual tightening. Automation instead uses
+``--refresh-baseline --widen-only``: it raises existing ceilings but never
+lowers or removes an entry, including after a file shrinks below the cap.
+This avoids a stale tightening proposal blocking later code growth.
+Excessively high ceilings are tolerated until a deliberate manual refresh.
+The trusted post-merge CI-completion run against committed ``dev`` produces
+its own dev-targeted reviewable PR (see ``.github/workflows/promote-trigger.yml``)
+-- **never** something a PR branch's own CI run applies to its own diff,
+which would let a PR silently launder its own growth past review.
 
-**PR-time scoping (``--changed-since REF``).** ``--allow-widen`` closes the
+**PR-time scoping (``--changed-since REF``).** Post-merge widening closes the
 gap *after* it opens, but there is still a window between another PR's merge
 growing a shared file past its ceiling and the widen job's own PR landing --
 during which *every* PR's ordinary (non-``--allow-widen``) CI run sees the
@@ -92,8 +96,7 @@ Usage::
                                                              # once the base branch has moved.
     python tools/check-module-size.py --refresh-baseline  # tighten after shrinking a file
     python tools/check-module-size.py --refresh-baseline --allow-widen  # post-merge only; see above
-    python -I trusted/tools/check-module-size.py --repository candidate --refresh-baseline --allow-widen
-    python tools/check-module-size.py --check-automatic-baseline  # read-only PR canonicality
+    python -I trusted/tools/check-module-size.py --repository candidate --refresh-baseline --widen-only
 
 ``--repository`` selects a data checkout without importing or running its
 tooling. Automation pins the invoked script to the trusted workflow commit,
@@ -289,7 +292,7 @@ def check(baseline: dict[str, int], *, only_paths: set[str] | None = None) -> li
 
 
 def refresh_baseline(
-    baseline: dict[str, int], *, allow_widen: bool = False,
+    baseline: dict[str, int], *, allow_widen: bool = False, widen_only: bool = False,
 ) -> dict[str, int]:
     """Tighten (and, with ``allow_widen``, ratchet up) the baseline.
 
@@ -309,10 +312,18 @@ def refresh_baseline(
     ``refresh_baseline`` (``allow_widen=False``) keeps its prior behaviour of
     recording a new offender, since it is always a manual, deliberate,
     reviewed invocation.
+
+    ``widen_only=True`` is the automated mode: it raises existing entries
+    without lowering, removing or adding any entry. Manual refresh modes
+    retain their previous tightening behavior.
     """
     updated = dict(baseline)
     for path in sorted(_tracked_py_files()):
         lines = _line_count(path)
+        if widen_only:
+            if path in updated and lines > updated[path]:
+                updated[path] = lines
+            continue
         if path in updated:
             if lines <= CAP_LINES:
                 del updated[path]  # graduated: no longer needs grandfathering
@@ -341,9 +352,9 @@ def main() -> int:
         help="Rewrite the baseline, tightening any shrunk entries (never widens).",
     )
     parser.add_argument(
-        "--check-automatic-baseline",
+        "--widen-only",
         action="store_true",
-        help="Require the automated refresh to match this tree, without changing any file.",
+        help="With --refresh-baseline, only raise existing ceilings; never tighten or add entries.",
     )
     parser.add_argument(
         "--allow-widen",
@@ -394,20 +405,19 @@ def main() -> int:
             parser.error("the target baseline must be a regular path inside the checkout")
     if args.allow_widen and not args.refresh_baseline:
         parser.error("--allow-widen requires --refresh-baseline")
+    if args.widen_only and not args.refresh_baseline:
+        parser.error("--widen-only requires --refresh-baseline")
+    if args.widen_only and args.allow_widen:
+        parser.error("--widen-only and --allow-widen select different refresh modes")
     if args.changed_since and args.refresh_baseline:
         parser.error("--changed-since is incompatible with --refresh-baseline")
-    if args.check_automatic_baseline and (args.refresh_baseline or args.changed_since):
-        parser.error("--check-automatic-baseline is incompatible with refresh or diff scoping")
 
     baseline = _load_baseline()
 
-    if args.check_automatic_baseline:
-        if refresh_baseline(baseline, allow_widen=True) != baseline:
-            print("[FAIL] automatic baseline is stale for this tree; regenerate against current dev.")
-            return 1
-
     if args.refresh_baseline:
-        updated = refresh_baseline(baseline, allow_widen=args.allow_widen)
+        updated = refresh_baseline(
+            baseline, allow_widen=args.allow_widen, widen_only=args.widen_only,
+        )
         if updated != baseline:
             _write_baseline(updated)
             print(f"[OK] refreshed {BASELINE_PATH.relative_to(REPO)}")
