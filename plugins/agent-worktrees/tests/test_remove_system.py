@@ -27,7 +27,7 @@ def receiving_project_authority(monkeypatch, tmp_path):
         lambda *, include_control_plane_related_pr=True: config,
     )
     monkeypatch.setattr(cli.cfg, "load_project_config", load_project_config)
-    monkeypatch.setattr(cli.cfg, "load_machines_yaml", lambda anchor: {})
+    monkeypatch.setattr(cli.cfg, "load_machines_yaml", lambda anchor, **_kwargs: {})
 
 
 @pytest.mark.guard

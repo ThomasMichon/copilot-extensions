@@ -125,7 +125,7 @@ def test_resolve_cli_reports_foreign_authority_without_success(
         key: MachineEntry(key=key, display_name=key, execution_platform="wsl")
         for key in ("test", "other-space")
     }
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: entries)
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: entries)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
     _wire_evidence(monkeypatch, cwd=rec.worktree_path)
     result = _run(

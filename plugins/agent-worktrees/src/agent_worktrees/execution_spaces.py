@@ -133,7 +133,7 @@ def registry_for_config(config: Any) -> dict[str, MachineEntry]:
     except (AttributeError, KeyError):
         return {}
     try:
-        return cfg.load_machines_yaml(anchor)
+        return cfg.load_machines_yaml(anchor, config=config)
     except FileNotFoundError:
         return {}
     except (OSError, ValueError, yaml.YAMLError) as exc:

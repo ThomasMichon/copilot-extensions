@@ -208,7 +208,7 @@ def test_finalize_rechecks_each_fresh_locked_identity_before_mutation_or_cleanup
         key: MachineEntry(key=key, display_name=key, execution_platform="linux")
         for key in (config.machine, "other-space")
     }
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: entries)
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: entries)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
     monkeypatch.setattr(tracking, "seal_worktree_identity", lambda record: None)
     monkeypatch.setattr(
@@ -305,7 +305,7 @@ def test_finalize_preserves_committed_child_when_fresh_parent_authority_refuses(
         key: MachineEntry(key=key, display_name=key, execution_platform="linux")
         for key in (config.machine, "other-space")
     }
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: entries)
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: entries)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
     monkeypatch.setattr(finalize.sessions, "kill_tmux_session", lambda *_args: None)
     monkeypatch.setattr(finalize.procs, "terminate_processes_under", lambda *_args: [])

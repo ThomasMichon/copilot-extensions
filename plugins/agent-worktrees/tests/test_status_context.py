@@ -95,7 +95,7 @@ def test_status_context_resolves_machine_alias_from_tracked_record(monkeypatch, 
         alias="box1",
         hostname="raw-host-01",
     )
-    monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda repo_dir: {"owner_user-box1": entry})
+    monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda repo_dir, **_kwargs: {"owner_user-box1": entry})
     rc = m.cmd_status_context(_ns())
     assert rc == 0
     assert capsys.readouterr().out.strip() == "box1  win  test-chamber:8e45"

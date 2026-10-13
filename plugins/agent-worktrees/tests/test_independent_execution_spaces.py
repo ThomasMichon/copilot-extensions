@@ -114,6 +114,37 @@ def test_distinct_registered_spaces_are_not_local_through_shared_hostname():
     )
 
 
+def test_execution_space_registry_reuses_resolved_overlay_config(tmp_path, monkeypatch):
+    registry_path = tmp_path / "overlay-machines.yaml"
+    registry_path.write_text(
+        "machines:\n  workstation-windows:\n"
+        "    execution_platform: windows\n    physical_host: workstation\n",
+        encoding="utf-8",
+    )
+    config = cfg.Config(
+        machine="workstation-windows", platform="windows", repo_name="project",
+        srcroot=str(tmp_path), repos={"project": cfg.RepoConfig(
+            anchor=str(tmp_path / "anchor"), worktree_root=str(tmp_path / "children"),
+        )},
+    )
+    calls = []
+
+    def overlay_path(anchor, *, config=None):
+        calls.append((anchor, config))
+        return registry_path
+
+    def unexpected_config_reload(*_args, **_kwargs):
+        raise AssertionError("execution-space registry must reuse resolved configuration")
+
+    monkeypatch.setattr(cfg, "machines_yaml_path", overlay_path)
+    monkeypatch.setattr(cfg, "load_config", unexpected_config_reload)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    execution_spaces.require_current_execution_space(config)
+    assert calls
+    assert all(anchor == config.default_repo.anchor and supplied is config
+               for anchor, supplied in calls)
+
+
 @pytest.fixture
 def scoped_config(tmp_path, monkeypatch):
     entries = {
@@ -125,7 +156,7 @@ def scoped_config(tmp_path, monkeypatch):
             ("workstation-windows", "windows"), ("workstation-wsl", "wsl"),
         )
     }
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: entries)
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: entries)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     config = cfg.Config(
         machine="workstation-windows", platform="windows", repo_name="project",
@@ -415,7 +446,7 @@ def test_legacy_multi_environment_registry_keeps_lifecycle_behavior(tmp_path, mo
             SSHEnvironment(name="wsl", alias="workstation-wsl"),
         ],
     )}
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: entries)
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: entries)
     config = SimpleNamespace(machine="workstation", default_repo=SimpleNamespace(anchor=tmp_path))
     record = SimpleNamespace(
         machine="workstation", worktree_id="legacy", owner_ref="workstation/project/parent",
@@ -577,7 +608,7 @@ def test_cleanup_malformed_registry_parser_is_structured_refusal(tmp_path, monke
         "    ssh:\n      environments: 42\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: parse_machines_yaml_file(path))
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: parse_machines_yaml_file(path))
     with pytest.raises(execution_spaces.ExecutionSpaceError, match="registry is invalid") as result:
         execution_spaces.require_cleanup_identity(SimpleNamespace(), tmp_path)
     assert isinstance(result.value.__cause__, TypeError)
@@ -805,7 +836,7 @@ def test_project_authority_uses_requested_repo_anchor(scoped_config, tmp_path, m
     monkeypatch.setattr(cfg, "load_project_config", lambda project, **kwargs: scoped_config)
     anchors = []
 
-    def registry(anchor):
+    def registry(anchor, **_kwargs):
         anchors.append(anchor)
         return scoped_entries if anchor == requested_anchor else {}
 

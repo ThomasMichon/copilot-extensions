@@ -62,7 +62,7 @@ def test_resolve_new_with_machine_and_no_seed_is_unaffected(monkeypatch, capfd, 
     --seed) must still reach the existing remote-dispatch path untouched."""
     state = resolve_cli.ResolveCommandState.from_args(_args(seed=None))
     state.config = _config(tmp_path, "")
-    monkeypatch.setattr(resolve_cli.cfg, "load_machines_yaml", lambda _: {})
+    monkeypatch.setattr(resolve_cli.cfg, "load_machines_yaml", lambda _, **_kwargs: {})
     called = []
     monkeypatch.setattr(
         resolve_cli, "_emit_remote_plan_for_env",
@@ -157,7 +157,7 @@ def test_resolve_machine_differing_from_the_local_machine_still_dispatches_remot
     is specific to the self-match case, not a blanket skip."""
     state = resolve_cli.ResolveCommandState.from_args(_args(seed=None))
     state.config = _config(tmp_path, "a-different-machine")
-    monkeypatch.setattr(resolve_cli.cfg, "load_machines_yaml", lambda _: {})
+    monkeypatch.setattr(resolve_cli.cfg, "load_machines_yaml", lambda _, **_kwargs: {})
     called = []
     monkeypatch.setattr(
         resolve_cli, "_emit_remote_plan_for_env",
@@ -185,7 +185,7 @@ def test_json_launch_canonicalizes_self_target_before_selecting_transport(
     )
     state.config = config
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _: {entry.key: entry})
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _, **_kwargs: {entry.key: entry})
     calls = []
     monkeypatch.setattr(
         resolve_cli, "_emit_remote_plan_for_env",
@@ -228,7 +228,7 @@ def test_self_alias_rejects_unknown_environment(monkeypatch, tmp_path, capfd):
     state.config = _config(tmp_path, "example-host")
     monkeypatch.setattr(
         cfg, "load_machines_yaml",
-        lambda _: {"example-host": cfg.MachineEntry(
+        lambda _, **_kwargs: {"example-host": cfg.MachineEntry(
             key="example-host", alias="local-alias", display_name="Example Host",
         )},
     )
@@ -277,7 +277,7 @@ def test_ambiguous_self_alias_never_launches_locally(monkeypatch, tmp_path, capf
     ]
     if reverse:
         entries.reverse()
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _: {e.key: e for e in entries})
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _, **_kwargs: {e.key: e for e in entries})
     state = resolve_cli.ResolveCommandState.from_args(
         _args(new_worktree=False, base=True, machine="shared", environment="Win")
     )

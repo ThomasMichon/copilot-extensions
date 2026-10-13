@@ -89,6 +89,9 @@ and child record while holding its sidecar lock. Authority comes from the
 receiving execution user's registered project configuration, never a caller's
 transport alias or supplied machine label. An unavailable project registration
 is an explicit authority failure, not permission to mutate an orphaned ledger.
+Registry reads reuse that resolved configuration, including its machine-registry
+overlay; they do not reload the caller's ambient project. Project scalar reads
+retain this authority check without scanning worktree identity.
 
 Launch-seed staging, handoff receipts, completion, and removal also authorize
 the freshly loaded record within the write lock, before changing either the

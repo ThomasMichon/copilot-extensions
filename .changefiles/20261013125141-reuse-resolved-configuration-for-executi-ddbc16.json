@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse resolved configuration for execution-space registry reads without reloading ambient project state",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
