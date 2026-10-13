@@ -61,8 +61,8 @@ def _wheel_bytes(
     return output.getvalue()
 
 
-def _complete_manifest(manifest: dict) -> dict:
-    toolchain = builder.ToolchainLock(Path("."), {
+def _complete_manifest(manifest: dict, *, toolchain=None) -> dict:
+    toolchain = toolchain or builder.ToolchainLock(Path("."), {
         "setuptools": "80.9.0", "wheel": "0.45.1", "packaging": "25.0",
     }, provenance={
         "source_policy": "governed", "python": "/python",
@@ -262,10 +262,10 @@ def test_trusted_validator_rejects_archive_corruption_even_with_valid_outer_dige
         _validate(directory)
 
 
-def test_trusted_validate_cli_does_not_import_candidate_code(repo, tmp_path):
+def test_trusted_validate_cli_does_not_import_candidate_code(repo, tmp_path, monkeypatch):
     directory = tmp_path / "export"
     _git(["checkout", "-q", "dev"], repo)
-    _fake_builder(repo)
+    _fake_builder(repo, monkeypatch)
     dev = _commit(repo, "candidate")
     main = _git(["rev-parse", "main"], repo)
     promotion.promote(
@@ -568,7 +568,43 @@ def test_bundle_rejects_unsafe_wheels(tmp_path, mutation):
         artifacts.bundle_wheels(manifest, wheel_dir, tmp_path)
 
 
-def _fake_builder(repo: Path) -> None:
+@pytest.mark.parametrize("case", ["public-match", "wrong-source", "wrong-floor", "mixed-locks"])
+def test_signer_requires_configured_policy_and_one_shared_lock(tmp_path, case):
+    wheel_dir, directory = tmp_path / "wheels", tmp_path / "export"
+    directory.mkdir()
+    manifest = _manifest(wheel_dir)
+    packages = manifest["build_toolchain"]["packages"]
+    provenance = {
+        "source_policy": "seasoned-public", "index": "https://pypi.org/simple",
+        "min_age_days": 0 if case == "wrong-floor" else 7,
+        "packages": packages, "file_hashes": {name: ["a" * 64] for name in packages},
+        "python": "/python",
+    }
+    if case != "wrong-source":
+        _complete_manifest(manifest, toolchain=builder.ToolchainLock(Path("."), packages, provenance=provenance))
+    index = {
+        "schema": artifacts.SCHEMA, "schema_version": 1,
+        "dev_head": DEV, "main_before": MAIN, "content_tree": TREE,
+        "artifacts": [artifacts.bundle_wheels(manifest, wheel_dir, directory)],
+    }
+    if case == "mixed-locks":
+        manifest["plugin"] = "other"
+        provenance["python"] = "/different-python"
+        _complete_manifest(manifest, toolchain=builder.ToolchainLock(Path("."), packages, provenance=provenance))
+        index["artifacts"].append(artifacts.bundle_wheels(manifest, wheel_dir, directory))
+    _write_index(directory, index)
+    kwargs = {
+        "content_tree": TREE, "dev_head": DEV, "main_before": MAIN,
+        "source_policy": "seasoned-public", "min_age_days": 7,
+    }
+    if case == "public-match":
+        artifacts.validate_artifacts(directory, **kwargs)
+    else:
+        with pytest.raises(artifacts.PromotionArtifactError, match="policy|share one"):
+            artifacts.validate_artifacts(directory, **kwargs)
+
+
+def _fake_builder(repo: Path, monkeypatch) -> None:
     project = repo / "plugins" / "demo-plugin" / "pyproject.toml"
     project.write_text('[project]\nname = "demo"\nversion = "0.1.0-dev1"\n', encoding="utf-8")
     package = project.parent / "src" / "demo"
@@ -584,14 +620,14 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib
 def build_plugin_artifacts(plugin, *, out_dir, toolchain):
-    assert toolchain == {'shared': True}
-    project = tomllib.loads((pathlib.Path('plugins') / plugin / 'pyproject.toml').read_text())['project']
+    assert toolchain.record == TEMPLATE['build_toolchain']
+    project = tomllib.loads((REPO / 'plugins' / plugin / 'pyproject.toml').read_text())['project']
     version = project['version']
     name = re.sub(r'[-_.]+', '_', project['name']).lower()
     out_dir.mkdir()
     wheel = out_dir / (name + '-' + version.replace('-', '.') + '-py3-none-any.whl')
     wheel.write_bytes(_wheel_bytes(name, version.replace('-', '.')))
-    pathlib.Path('backend-residue.txt').write_text('must not enter promotion')
+    (REPO / 'backend-residue.txt').write_text('must not enter promotion')
     manifest = copy.deepcopy(TEMPLATE)
     manifest.update(plugin=plugin, version=version)
     manifest['wheels'][0].update(name=name, filename=wheel.name, source='plugins/' + plugin,
@@ -603,12 +639,12 @@ def build_plugin_artifacts(plugin, *, out_dir, toolchain):
             digest.update(len(encoded).to_bytes(8, 'big'))
             digest.update(encoded)
         return digest.hexdigest()
-    source = pathlib.Path('plugins') / plugin
+    source = REPO / 'plugins' / plugin
     file_fields = []
     for path in sorted(source.rglob('*')):
         if path.is_file():
             file_fields += [path.relative_to(source).as_posix(), hashlib.sha256(path.read_bytes()).hexdigest()]
-    manifest['payload_hash'] = 'sha256:' + hash_fields([source.as_posix(), hash_fields(file_fields)])
+    manifest['payload_hash'] = 'sha256:' + hash_fields([source.relative_to(REPO).as_posix(), hash_fields(file_fields)])
     fields = [manifest['payload_hash'], manifest['python_tag'], manifest['abi_tag'],
               manifest['platform_tag'], manifest['build_toolchain']['lock_id'],
               wheel.name, manifest['wheels'][0]['sha256']]
@@ -617,21 +653,39 @@ def build_plugin_artifacts(plugin, *, out_dir, toolchain):
 """, encoding="utf-8",
     )
     (repo / "tools" / "build_toolchain_lock.py").write_text(
-        """class ArtifactBuildError(RuntimeError): pass
+        "RECORD = " + repr(template["build_toolchain"]) + "\n"
+        + """class ArtifactBuildError(RuntimeError): pass
+class Toolchain:
+    record = RECORD
 calls = 0
 def resolve_toolchain_lock(*args, **kwargs):
     global calls
     calls += 1
     assert calls == 1
-    return {'shared': True}
+    return Toolchain()
 """, encoding="utf-8",
     )
     shutil.copy(Path(artifacts.__file__), repo / "tools" / "promotion_python_artifacts.py")
+    driver = repo.parent / "trusted" / "tools"
+    shutil.copytree(repo / "tools", driver)
+    shutil.copy(Path(promotion.__file__), driver / "promote_release.py")
+    for name in ("promotion_python_artifacts.py", "build_python_artifacts.py", "build_toolchain_lock.py"):
+        (repo / "tools" / name).write_text("raise RuntimeError('candidate forged toolchain provenance')")
+    real_run = artifacts._run
+
+    def trusted_fixture_run(argv, *, cwd=None):
+        if argv[2] == "--repo":
+            assert Path(argv[1]) == Path(artifacts.__file__).resolve()
+            argv = [argv[0], str(driver / "promotion_python_artifacts.py"), *argv[2:]]
+            cwd = driver
+        return real_run(argv, cwd=cwd)
+
+    monkeypatch.setattr(artifacts, "_run", trusted_fixture_run)
 
 
-def test_real_export_subprocess_uses_bumped_candidate_without_polluting_it(repo, tmp_path):
+def test_real_export_subprocess_uses_bumped_candidate_without_polluting_it(repo, tmp_path, monkeypatch):
     _git(["checkout", "-q", "dev"], repo)
-    _fake_builder(repo)
+    _fake_builder(repo, monkeypatch)
     other = repo / "plugins" / "other-plugin"
     other.mkdir()
     (other / "plugin.json").write_text(
@@ -719,7 +773,7 @@ def test_export_refuses_an_existing_output_without_touching_it(repo, tmp_path):
 
 
 def test_failed_builder_never_publishes_partial_export(repo, tmp_path, monkeypatch):
-    _fake_builder(repo)
+    _fake_builder(repo, monkeypatch)
     commit = _commit(repo, "Python project")
     monkeypatch.setattr(artifacts, "_run", lambda *a, **kw: (_ for _ in ()).throw(
         artifacts.PromotionArtifactError("build failed")

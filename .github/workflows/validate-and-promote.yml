@@ -491,7 +491,8 @@ jobs:
         run: |
           git fetch origin main
           "$RUNNER_TEMP/artifact-validator/bin/python" tools/promotion_python_artifacts.py validate --out-dir "$ARTIFACT_DIR" \
-            --dev-head "$DEV_SHA" --main-before "$(git rev-parse origin/main)"
+            --dev-head "$DEV_SHA" --main-before "$(git rev-parse origin/main)" \
+            --toolchain-source seasoned-public --toolchain-min-age-days 7
       - name: Attest the validated index and every first-party bundle
         if: needs.build-python-artifacts.outputs.exported == 'true'
         uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3

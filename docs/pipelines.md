@@ -62,6 +62,10 @@ It calls `promote_release.py --build-python-artifacts-dir <dir>` without
 first seeds shipped versions, consumes new changefiles and materializes
 vendored sources. Wheel builds run in a second disposable checkout of the
 resulting candidate commit, so build residue cannot change the promoted tree.
+Export executes the pinned trusted driver and builder against that disposable
+candidate's source data, never its copies of promotion or toolchain code.
+The signer requires every bundle to share one lock and enforces the hosted
+`seasoned-public` source policy with the configured seven-day floor.
 This candidate-executing job has only `contents: read`, no OIDC or attestation
 permissions, and no persisted checkout credentials. Every Python plugin
 shares one toolchain venv; every bundle contains only its

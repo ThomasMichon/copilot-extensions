@@ -125,10 +125,14 @@ def bundle_wheels(manifest: dict, wheel_dir: Path, out_dir: Path) -> dict:
 def build_candidate_bundles(
     root: Path, out_dir: Path, *, source_policy: str, min_age_days: int | None,
 ) -> None:
-    """Runs inside the disposable candidate: resolve exactly one shared lock."""
-    from build_python_artifacts import build_plugin_artifacts
+    """Trusted driver builds candidate data using exactly one shared lock."""
+    import promote_release as promotion
     from build_toolchain_lock import resolve_toolchain_lock
 
+    builder = promotion._load_module(
+        Path(__file__).with_name("build_python_artifacts.py"), "trusted_promotion_builder",
+    )
+    builder.REPO, builder.PLUGINS_DIR, builder.LIBS_DIR = root, root / "plugins", root / "libs"
     if any(out_dir.iterdir()):
         raise PromotionArtifactError("candidate bundle directory must be empty")
     projects = candidate_projects(root)
@@ -140,9 +144,11 @@ def build_candidate_bundles(
         )
         for plugin, version in projects.items():
             wheel_dir = out_dir / plugin
-            manifest = build_plugin_artifacts(plugin, out_dir=wheel_dir, toolchain=toolchain)
+            manifest = builder.build_plugin_artifacts(plugin, out_dir=wheel_dir, toolchain=toolchain)
             if manifest["plugin"] != plugin or manifest["version"] != version:
                 raise PromotionArtifactError(f"{plugin}: builder returned another project identity")
+            if manifest["build_toolchain"] != toolchain.record:
+                raise PromotionArtifactError(f"{plugin}: builder did not use the trusted shared toolchain")
             entries.append(bundle_wheels(manifest, wheel_dir, out_dir))
             shutil.rmtree(wheel_dir)
     (out_dir / _BUNDLES_NAME).write_text(json.dumps(entries), encoding="utf-8")
@@ -164,12 +170,12 @@ def export_artifacts(
         scratch = promotion.add_scratch_worktree(commit, repo=repo)
         projects = candidate_projects(scratch)
         argv = [
-            sys.executable, str(scratch / "tools" / "promotion_python_artifacts.py"),
-            "--out-dir", str(staging), "--toolchain-source", source_policy,
+            sys.executable, str(Path(__file__).resolve()),
+            "--repo", str(scratch), "--out-dir", str(staging), "--toolchain-source", source_policy,
         ]
         if min_age_days is not None:
             argv += ["--toolchain-min-age-days", str(min_age_days)]
-        _run(argv, cwd=scratch)
+        _run(argv, cwd=Path(__file__).resolve().parent)
         bundles_path = staging / _BUNDLES_NAME
         try:
             entries = json.loads(bundles_path.read_text(encoding="utf-8"))
@@ -188,6 +194,7 @@ def export_artifacts(
             staging, content_tree=content_tree, dev_head=dev_head, main_before=main_before,
             projects=projects,
             candidate_root=scratch,
+            source_policy=source_policy, min_age_days=min_age_days,
         )
         staging.rename(out_dir)
         return index
@@ -198,7 +205,7 @@ def export_artifacts(
             shutil.rmtree(staging)
 
 
-def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = None) -> None:
+def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = None) -> dict:
     """Inspect untrusted ZIP bytes without extracting or executing candidate code."""
     try:
         with zipfile.ZipFile(path) as bundle:
@@ -263,6 +270,7 @@ def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = No
                     )
                 if f"sha256:{digest.hexdigest()}" != wheel["sha256"]:
                     raise PromotionArtifactError(f"{path.name}: wheel digest mismatch")
+            return manifest
     except (
         OSError, UnicodeDecodeError, json.JSONDecodeError, zipfile.BadZipFile,
         RuntimeError, NotImplementedError,
@@ -668,7 +676,10 @@ def validate_source_binding(manifest: dict, root: Path) -> None:
         raise PromotionArtifactError(f"cannot validate candidate artifact sources: {exc}") from exc
 
 
-def validate_candidate_artifacts(directory: Path, *, repo: Path, dev_head: str, main_before: str) -> dict:
+def validate_candidate_artifacts(
+    directory: Path, *, repo: Path, dev_head: str, main_before: str,
+    source_policy: str | None = None, min_age_days: int | None = None,
+) -> dict:
     """Recompose with trusted tools; candidate checkouts supply only source data."""
     import promote_release as promotion
 
@@ -686,6 +697,7 @@ def validate_candidate_artifacts(directory: Path, *, repo: Path, dev_head: str, 
             directory, content_tree=promotion.build_promotion_tree(scratch),
             dev_head=dev_head, main_before=main_before, projects=candidate_projects(scratch),
             candidate_root=scratch,
+            source_policy=source_policy, min_age_days=min_age_days,
         )
     except promotion.PromotionError as exc:
         raise PromotionArtifactError(f"cannot compose trusted artifact sources: {exc}") from exc
@@ -697,6 +709,7 @@ def validate_artifacts(
     directory: Path, *, content_tree: str, dev_head: str, main_before: str,
     projects: dict[str, str] | None = None,
     candidate_root: Path | None = None,
+    source_policy: str | None = None, min_age_days: int | None = None,
 ) -> dict:
     """Validate transfer and exact composition binding, not signer authenticity."""
     try:
@@ -719,6 +732,7 @@ def validate_artifacts(
         if not isinstance(entries, list):
             raise PromotionArtifactError("artifact entries must be a list")
         names, plugins = {INDEX_NAME}, set()
+        shared_toolchain = None
         for entry in entries:
             if not isinstance(entry, dict):
                 raise PromotionArtifactError("invalid artifact entry")
@@ -740,7 +754,19 @@ def validate_artifacts(
             path = directory / name
             if path.is_symlink() or not path.is_file() or _digest(path) != digest:
                 raise PromotionArtifactError(f"{name}: artifact digest mismatch")
-            validate_bundle(path, entry, candidate_root=candidate_root)
+            manifest = validate_bundle(path, entry, candidate_root=candidate_root)
+            toolchain = manifest["build_toolchain"]
+            if shared_toolchain is not None and toolchain != shared_toolchain:
+                raise PromotionArtifactError("artifact sets do not share one build-toolchain lock")
+            shared_toolchain = toolchain
+            provenance = toolchain["provenance"]
+            if source_policy is not None and provenance["source_policy"] != source_policy:
+                raise PromotionArtifactError("artifact toolchain source policy differs from required policy")
+            if source_policy == "seasoned-public":
+                from seasoned_public_feed import DEFAULT_MIN_AGE_DAYS
+                floor = DEFAULT_MIN_AGE_DAYS if min_age_days is None else min_age_days
+                if provenance["min_age_days"] != floor:
+                    raise PromotionArtifactError("artifact toolchain seasoning differs from required policy")
         if {path.name for path in directory.iterdir()} != names:
             raise PromotionArtifactError("unexpected files in promotion artifact directory")
         if projects is not None and {
@@ -776,6 +802,7 @@ def main(argv: list[str] | None = None) -> int:
                 raise PromotionArtifactError("invalid artifact index")
             validate_candidate_artifacts(
                 args.out_dir, repo=args.repo, dev_head=args.dev_head, main_before=args.main_before,
+                source_policy=args.toolchain_source, min_age_days=args.toolchain_min_age_days,
             )
         except (PromotionArtifactError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             print(f"promotion-python-artifacts: FAILED: {exc}", file=sys.stderr)
@@ -784,7 +811,7 @@ def main(argv: list[str] | None = None) -> int:
     from build_toolchain_lock import ArtifactBuildError
     try:
         build_candidate_bundles(
-            Path(__file__).resolve().parent.parent, args.out_dir,
+            args.repo, args.out_dir,
             source_policy=args.toolchain_source, min_age_days=args.toolchain_min_age_days,
         )
     except (PromotionArtifactError, ArtifactBuildError) as exc:
