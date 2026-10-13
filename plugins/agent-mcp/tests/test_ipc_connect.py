@@ -35,11 +35,14 @@ async def test_connect_retries_past_a_transient_refusal(tmp_path, monkeypatch):
     """The first two attempts raise a mocked ``ConnectionRefusedError``; the
     third reaches a real, live listener (bound to an OS-assigned port, so
     there is no released-port reuse race) and must still succeed."""
-    # Close each accepted connection's server side. Since Python 3.12.1,
-    # ``Server.wait_closed()`` waits for every accepted connection to close,
-    # and a stream transport stays half-open after the client's EOF, so a
-    # handler that never closes its writer hangs the ``finally`` forever.
-    server = await asyncio.start_server(lambda _r, w: w.close(), "127.0.0.1", 0)
+    async def _accept(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            await reader.read()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_server(_accept, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     sock_path = _write_endpoint(tmp_path, port)
 
@@ -53,12 +56,15 @@ async def test_connect_retries_past_a_transient_refusal(tmp_path, monkeypatch):
         return await real_open_connection(host, p, *a, **kw)
 
     monkeypatch.setattr("asyncio.open_connection", _flaky_open_connection)
+    writer: asyncio.StreamWriter | None = None
     try:
         _reader, writer, secret = await ipc._connect(sock_path)
         assert secret == "tok"
-        writer.close()
-        await writer.wait_closed()
     finally:
+        if writer is not None:
+            writer.close()
+            await writer.wait_closed()
+        # Windows Server.wait_closed() also waits for accepted transports to close.
         server.close()
         await server.wait_closed()
     assert attempts["n"] == 3
