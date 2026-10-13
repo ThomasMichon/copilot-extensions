@@ -167,11 +167,17 @@
         {
           "path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
           "sha256": "212ba2f30dfc0c1cdfe788b379f473620b48a1e5a4f6fd5b20fb211074e1f88d",
-          "semantic": false,
-          "non_semantic_reason": "RegisterLiveSessionRequest is extracted from models.py and re-exported there without changing existing fields. Its optional clear_targeting_metadata flag defaults to false, preserving ordinary null-metadata heartbeats; the bundled generation-35 extension opts in to atomic session-only registration while its qualified peer identity is unresolved. Existing representative wire fixtures remain unchanged."
+          "semantic": true,
+          "non_semantic_reason": null
         }
       ],
       "fixtures": [
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-registration-generation-35.json",
+          "sha256": "b704a07e42953c7354dc7dae98bf555d2f1ae459eeb91a6f847b79fa53a753fd",
+          "role": "Generation-35 live registration opt-in and ordinary heartbeat compatibility",
+          "generation": 35
+        },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-generation-34.json",
           "sha256": "1f65087acdef6b225ea8cd0056b974ab49e216050a2627ff5459dfba308ee401",
@@ -492,6 +498,14 @@
         }
       ],
       "provenance": [
+        {
+          "commit": "9aa7aa03f5ba2762eba4c92d02bf7b6c6b425934",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 35,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Freeze the opt-in registration payload from the actual owning model; independent serialization/default assertions and HTTP clearing, retention and recovery assertions exercise it with matching incarnation identity."
+        },
         {
           "commit": "eab727b8afc4de461934a3e801f75d61ddfb516e",
           "plugin_version": "0.4.1-dev3",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from pathlib import Path
@@ -343,6 +344,8 @@ def test_route_register_list_get_deregister(client: TestClient) -> None:
 def test_route_explicit_clear_removes_stale_lineage_until_metadata_recovers(
     client: TestClient, tmp_db: Database,
 ) -> None:
+    fixture_path = Path(__file__).resolve().parents[1] / "contract/fixtures/http/current/live-registration-generation-35.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
     qualified = {
         "session_id": "cli-clear", "machine": "host", "repo": "project",
         "worktree_id": "wt-clear", "cwd": "/fixture", "branch": "main",
@@ -359,10 +362,12 @@ def test_route_explicit_clear_removes_stale_lineage_until_metadata_recovers(
     assert retained.status_code == 200
     assert retained.json()["worktree_id"] == "wt-clear"
     cleared = client.post(
-        "/api/v1/live-sessions", json={**unresolved, "clear_targeting_metadata": True},
+        fixture["request"]["path"],
+        json={**fixture["request"]["json"], "process_started_at": qualified["process_started_at"]},
     )
-    assert cleared.status_code == 200, cleared.text
+    assert cleared.status_code == fixture["response_projection"]["status_code"], cleared.text
     row = cleared.json()
+    assert {key: row[key] for key in fixture["response_projection"]["json"]} == fixture["response_projection"]["json"]
     assert all(row[key] is None for key in ("machine", "repo", "worktree_id"))
     assert (row["cwd"], row["branch"], row["pid"]) == ("/fixture", "main", 4242)
     now = time.time()

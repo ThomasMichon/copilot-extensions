@@ -91,6 +91,19 @@ def test_qualified_peer_contract_matches_current_fixture() -> None:
     assert body.timeout >= body.wait_timeout + 15
 
 
+def test_live_registration_fixture_preserves_opt_in_wire_shape_and_default() -> None:
+    from agent_bridge.cli_mode_models import RegisterLiveSessionRequest
+
+    fixture = _fixture("fixtures/http/current/live-registration-generation-35.json")
+    payload = fixture["request"]["json"]
+    model = RegisterLiveSessionRequest.model_validate(payload)
+    assert model.model_dump(mode="json", exclude_unset=True) == payload
+    assert model.clear_targeting_metadata is True
+    ordinary = RegisterLiveSessionRequest(session_id=payload["session_id"])
+    assert ordinary.clear_targeting_metadata is fixture["compatibility"]["clear_targeting_metadata_default"]
+    assert fixture["compatibility"]["ordinary_null_heartbeat_retains_metadata"] is True
+
+
 @pytest.mark.parametrize("owner", ["prompt_models", "routes-prompts"])
 def test_native_bound_wire_is_preserved_at_the_new_peer_generation(owner) -> None:
     from agent_bridge.prompt_models import SubmitPromptRequest, SubmitPromptResponse
