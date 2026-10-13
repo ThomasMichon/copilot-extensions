@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import sysconfig
 import venv
 from pathlib import Path
 
@@ -161,12 +162,21 @@ def test_native_legacy_service_cli_runs_canonical_tests_without_separate_environ
         tests = root / "tests"
         tests.mkdir(parents=True)
         environment = tmp_path / ".test-venvs" / sys.platform / canonical
-        venv.EnvBuilder(with_pip=False, system_site_packages=True).create(environment)
+        venv.EnvBuilder(with_pip=False).create(environment)
+        site = Path(sysconfig.get_path(
+            "purelib", vars={"base": str(environment), "platbase": str(environment)},
+        ))
+        dependency_paths = {sysconfig.get_path("purelib"), sysconfig.get_path("platlib")}
+        (site / "test-harness.pth").write_text(
+            "\n".join(sorted(dependency_paths)) + "\n", encoding="utf-8",
+        )
         (tests / "test_contract.py").write_text(
-            "import os, sys\nfrom pathlib import Path\n"
+            "import os, sys, pytest\nfrom pathlib import Path\n"
             "def test_contract():\n"
             f"    assert Path.cwd() == Path({str(root)!r})\n"
             f"    assert Path(sys.prefix).resolve() == Path({str(environment.resolve())!r})\n"
+            f"    assert Path(pytest.__file__).resolve().parent.parent in "
+            f"{{Path(path).resolve() for path in {sorted(dependency_paths)!r}}}\n"
             "    assert os.environ['COPILOT_EXTENSIONS_TEST_CONTAINED'] == '1'\n"
             "    Path('executed.txt').write_text('canonical')\n",
             encoding="utf-8",
