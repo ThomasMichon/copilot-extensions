@@ -1,15 +1,15 @@
 {
   "captured_from": {
-    "commit": "945debc080e13f388d598d2230a18c7536fbf41b",
+    "commit": "0a769336caa7abda1421560e68835e7010a8b8de",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 34,
+    "protocol_generation": 35,
     "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
     "source_git_blob": "b24f0c1b2b53d2cb9dcf92ae63a44d65f8052ba8",
     "source_sha256": "03bbc897a991d68c0e862e7d87b802d9b2d5a058647ce7117385cb5f1de60509"
   },
   "capability": {
     "operation": "GET /api/v1/live-sessions/{session_id}/messages/{message_id}/receipt",
-    "required_protocol_version": 34,
+    "required_protocol_version": 35,
     "unsupported_status": 426
   },
   "request": {

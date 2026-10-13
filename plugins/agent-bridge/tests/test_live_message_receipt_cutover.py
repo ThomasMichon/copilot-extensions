@@ -27,7 +27,7 @@ class _Response(io.BytesIO):
         super().__init__(json.dumps(payload).encode())
 
 
-@pytest.mark.parametrize("cli_floor", [0, 20, 35])
+@pytest.mark.parametrize("cli_floor", [0, 20, LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION + 1])
 @pytest.mark.parametrize("replacement", ["new-url", "same-url", "pinned"])
 @pytest.mark.parametrize("refusal", ["connection-refused", "draining", "initializing"])
 def test_reply_wait_reprobes_the_maximum_floor_before_retry(

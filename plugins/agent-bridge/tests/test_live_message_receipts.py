@@ -486,7 +486,10 @@ def test_receipt_only_send_does_not_use_ignored_reply_timeout(monkeypatch, capsy
     assert json.loads(capsys.readouterr().out)["outcome"] == "admitted"
 
 
-@pytest.mark.parametrize("protocol", [0, 32, 33, LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION])
+@pytest.mark.parametrize("protocol", sorted({
+    0, 32, 33, LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION - 1,
+    LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION,
+}))
 @pytest.mark.parametrize("wait", [False, True])
 def test_reply_wait_requires_receipt_protocol_before_message_submission(
     monkeypatch: pytest.MonkeyPatch, protocol: int, wait: bool,
