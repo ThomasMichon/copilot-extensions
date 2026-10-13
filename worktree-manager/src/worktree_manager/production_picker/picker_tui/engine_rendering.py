@@ -389,10 +389,13 @@ class PickerScreenRenderingMixin:
             r = secs.get("Recent", 0)
             c = secs.get("Completed", 0)
             u = sum(n for lbl, n in secs.items() if lbl.startswith("Unowned"))
+            owned = sum(n for lbl, n in secs.items() if lbl.startswith("Owned"))
             t.append("●", style=C_PULSE[self.pulse])
             if compact:
                 t.append(f"{a} ", style=C_LABEL)
                 t.append(f"◷{r} ✓{c}", style=C_FAINT)
+                if owned:
+                    t.append(f" own:{owned}", style=C_FAINT)
                 if u:
                     t.append(f" ?{u}", style=C_FAINT)
             else:
@@ -401,6 +404,9 @@ class PickerScreenRenderingMixin:
                 t.append(f"{r} recent", style=C_META)
                 t.append(" · ", style=C_DIM)
                 t.append(f"{c} done", style=C_META)
+                if owned:
+                    t.append(" · ", style=C_DIM)
+                    t.append(f"{owned} owned", style=C_META)
                 if u:
                     t.append(" · ", style=C_DIM)
                     t.append(f"{u} unowned", style=C_META)

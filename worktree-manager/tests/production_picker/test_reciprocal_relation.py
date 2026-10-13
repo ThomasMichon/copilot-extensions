@@ -38,6 +38,24 @@ def test_sessionless_owned_workspace_is_not_an_ordinary_resume_target(ownership)
     assert next(rows for label, rows in sections if label.startswith("Owned")) == [row]
 
 
+@pytest.mark.parametrize("compact", [False, True])
+@pytest.mark.parametrize("mux_attached", [False, True])
+def test_picker_status_counts_owned_workspaces_in_full_and_compact_headers(compact, mux_attached):
+    row = derive.norm(_raw(
+        session_count=0, owner_ref="host/example/controller", mux_attached=mux_attached,
+    ), "host", "windows")
+    screen = types.SimpleNamespace(
+        src=types.SimpleNamespace(bucket=derive.bucket),
+        is_all=lambda: False,
+        _visible_scope_data=lambda: [row],
+        _kind=lambda: "worktrees",
+        pulse=0, live=False, loader=None, _orphans=[],
+    )
+    screen.current_list = lambda: PickerScreen.current_list(screen)
+    text = PickerScreen.status_text(screen, compact=compact).plain
+    assert ("own:1" if compact else "1 owned") in text
+
+
 @pytest.mark.parametrize("values", [
     {"session_count": 1},
     {"session_count": 0, "last_session_id": "own-session"},
