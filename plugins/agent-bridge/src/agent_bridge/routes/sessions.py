@@ -568,12 +568,16 @@ def _enforce_worktree_head_guard(worktree_id: str, mgr=None) -> None:
     )
 
 
-@router.post("", response_model=StartSessionResponse, status_code=201)
 @router.post("/workspace-creations", response_model=StartSessionResponse)
+async def create_workspace(req: StartSessionRequest, request: Request):
+    if req.creation_key is None:
+        raise HTTPException(status_code=422, detail="workspace-creations requires creation_key")
+    return await start_session(req, request)
+
+
+@router.post("", response_model=StartSessionResponse, status_code=201)
 async def start_session(req: StartSessionRequest, request: Request):
     mgr: SessionManager = request.app.state.session_manager
-    if request.url.path.endswith("/workspace-creations") and req.creation_key is None:
-        raise HTTPException(status_code=422, detail="workspace-creations requires creation_key")
     resolver = getattr(request.app.state, "resolver", None)
     agent_name = req.agent
     if agent_name and not getattr(request.app.state, "ready", True):

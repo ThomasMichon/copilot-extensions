@@ -252,6 +252,7 @@ async def start(
                             or session.target.worktree_id != worktree_id or session.target.cwd != saved["path"]
                         ):
                             raise AcquisitionRefused("native_identity_changed", "strict creation replay changed native identity")
+                    store.release_workspace_gate(worktree_id, delivery_id)
                     return session, result
                 gates = db.execute_read(
                     "SELECT * FROM acquisition_launch_gates WHERE worktree_id=?", (worktree_id,),

@@ -338,3 +338,18 @@ takeover, blanket freshness authorization, or parallel session owner is proposed
 - Independent registry and parser/creation contracts passed 47/one platform
   skip; affected dispatch replay/revision selection passed 65. PR updates,
   subsequent current-head review, required CI, and actual merge remain open.
+
+### 2026-10-13 - Completed replay cleanup and route compatibility
+
+- The subsequent Copilot review returned a current-head Comment with zero open
+  findings, while its overview called out a possible stranded completed gate.
+  Confirmed and fixed that interruption window: exact completed replay now
+  settles its own launch gate without rebinding or resubmitting. A foreign gate
+  is preserved. Both own/foreign gate cases have regression coverage.
+- The sole remaining full-suite CI failure was a direct `start_session`
+  consumer without HTTP URL metadata. Restored the existing helper contract
+  by placing keyed-endpoint validation in its own route wrapper, not by
+  weakening validation or repeatedly expanding unrelated test stubs.
+- Connected bridge/keyed/registry/readiness/preference selection passed
+  115/one platform skip; module-size guard remains green. The required keyed
+  endpoint still refuses missing keys before effects.

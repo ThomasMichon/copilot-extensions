@@ -86,6 +86,34 @@ async def test_completed_creation_with_missing_turn_evidence_never_resubmits(cre
     assert not rig.db.execute_read("SELECT * FROM turns")
     await asyncio.sleep(0)
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("foreign_gate", [False, True])
+async def test_completed_replay_releases_only_its_stranded_launch_gate(creation_rig, monkeypatch, foreign_gate):
+    rig = creation_rig
+    release = workspace_creation.AcquisitionStore.release_workspace_gate
+
+    def interrupted(*_args, **_kwargs):
+        raise RuntimeError("after completed receipt, before launch-gate release")
+
+    monkeypatch.setattr(workspace_creation.AcquisitionStore, "release_workspace_gate", interrupted)
+    with pytest.raises(RuntimeError, match="completed receipt"):
+        await workspace_creation.start(rig.manager, rig.target, key="logical-work", prompt="Do the work")
+    assert rig.db.execute_read("SELECT state FROM workspace_embodiments")[0]["state"] == "complete"
+    assert rig.db.execute_read("SELECT 1 FROM acquisition_launch_gates")
+    if foreign_gate:
+        rig.db.execute_write("UPDATE acquisition_launch_gates SET delivery_id='another-request'")
+    monkeypatch.setattr(workspace_creation.AcquisitionStore, "release_workspace_gate", release)
+    _, replay = await workspace_creation.start(rig.manager, rig.target, key="logical-work", prompt="Do the work")
+    assert replay["replayed"]
+    gates = rig.db.execute_read("SELECT delivery_id FROM acquisition_launch_gates")
+    assert bool(gates) is foreign_gate
+    if foreign_gate:
+        assert gates[0]["delivery_id"] == "another-request"
+    assert len(rig.db.execute_read("SELECT * FROM turns")) == 1
+    assert sum(args[0] == "create" for args, _ in rig.calls) == 1
+    assert sum(args[0] == "bind-session" for args, _ in rig.calls) == 1
+    await asyncio.sleep(0)
+
 
 @pytest.mark.asyncio
 async def test_cold_pending_first_prompt_strictly_resumes_original_native(creation_rig, monkeypatch):
@@ -292,6 +320,9 @@ def test_keyed_http_endpoint_replays_one_session(creation_rig):
     app.state.resolver = SimpleNamespace(resolve_async=resolve)
     app.include_router(router)
     with TestClient(app) as client:
+        missing = client.post("/api/v1/sessions/workspace-creations", json={"agent": "worker"})
+        assert missing.status_code == 422
+        assert not rig.manager.list_sessions()
         first = client.post("/api/v1/sessions/workspace-creations", json={
             "agent": "worker", "creation_key": "logical-work",
         })
