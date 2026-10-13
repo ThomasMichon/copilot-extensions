@@ -337,3 +337,20 @@ hiding the problem or silently dropping text.
   different prefix. The complete contained admission portfolio passes 116
   cases (one native POSIX skip), including lost-admission-response recovery,
   machine/platform drift and empty-option dispatch guards.
+- **2026-10-13** -- Current-head CI completed successfully. A later fallback
+  review, whose full agentic portion did not start before its runner deadline,
+  found a valid corrupt-admission-file robustness gap. Centralized validation
+  of every stored receipt read and new receipt write, returning domain errors
+  for missing/wrong fields and unsafe identities rather than leaking KeyError
+  or TypeError from the daemon handler. The exhaustive 28-case registered-
+  handler matrix and a separate real-wire malformed-response/liveness check
+  pass; the complete contained admission portfolio passes 145 cases (one
+  native POSIX skip). RPC and containment deadlines are unchanged.
+  The first repeated network matrix encountered intermittent healthy-follow-up
+  response deadlines; separated exhaustive handler-shape checks from the
+  focused socket contract instead of increasing budgets or claiming those runs
+  passed. Receiving-side authority remains real. Manager harness-state fixtures
+  now use explicit UTF-8; all 19 cases pass. Platform detection is sampled once.
+  The fallback import finding is incorrect: machine_transport is the declared
+  top-level shared distribution, not an agent_worktrees sibling, and the
+  actual SSH/PowerShell process checks exercise that existing dependency.

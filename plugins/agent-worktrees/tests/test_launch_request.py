@@ -19,7 +19,7 @@ def _intent(kind="resume", text="line one\n'\";$() \u2603"):
 
 
 @pytest.fixture
-def authority(tmp_path, monkeypatch):
+def admission_config(tmp_path, monkeypatch):
     monkeypatch.setattr(request.cfg, "tracking_dir", lambda: tmp_path)
     monkeypatch.setattr(request.cfg, "detect_platform", lambda: "windows")
     for project in ("demo", "demo-repo"):
@@ -28,7 +28,12 @@ def authority(tmp_path, monkeypatch):
         (directory / "config.yaml").write_text(json.dumps({
             "repo_name": project, "machine": "test",
             "repos": {project: {"anchor": str(tmp_path), "default_branch": "dev"}},
-        }))
+        }), encoding="utf-8")
+    return SimpleNamespace(machine="test", default_repo=SimpleNamespace(worktree_root=tmp_path / "trees"))
+
+
+@pytest.fixture
+def authority(admission_config, monkeypatch):
     server = tracking_write.start_server(tracking_write.compute)
     server.start()
     endpoint = tracking_write.rendezvous_fields(server)
@@ -39,9 +44,8 @@ def authority(tmp_path, monkeypatch):
             **kwargs,
         ),
     )
-    config = SimpleNamespace(machine="test", default_repo=SimpleNamespace(worktree_root=tmp_path / "trees"))
     try:
-        yield config
+        yield admission_config
     finally:
         server.close()
 
@@ -276,7 +280,7 @@ def test_status_never_exposes_incomplete_new_creation_as_ready(tmp_path, authori
     intent = _intent("new")
     request._dispatch("launch_request_admit", {
         "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
-        "fingerprint": "fixture", "kind": "new", "worktree_id": "wt-a",
+        "fingerprint": "f" * 64, "kind": "new", "worktree_id": "wt-a",
         "timestamp": "20261010-120000",
     })
     launch_seed_state.stage(record.yaml_path, kind="new", text=intent["text"],
@@ -289,11 +293,77 @@ def test_status_unstaged_resume_is_admission_incomplete(tmp_path, authority):
     intent = _intent()
     request._dispatch("launch_request_admit", {
         "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
-        "fingerprint": "fixture", "kind": "resume", "worktree_id": "wt-a",
+        "fingerprint": "f" * 64, "kind": "resume", "worktree_id": "wt-a",
         "timestamp": "20261010-120000",
     })
     status = request.inspect(intent["request_id"])
     assert not status["ready"] and status["state"] == "admission-incomplete"
+
+
+@pytest.mark.parametrize("verb", [
+    "launch_request_admit", "launch_request_stage",
+    "launch_request_creation_start", "launch_request_creation_finish",
+])
+@pytest.mark.parametrize("corruption", [
+    "null", "[]", "{}", "missing-field", "bad-fingerprint",
+    "bad-flags", "bad-worktree",
+])
+def test_corrupt_admission_is_structured_for_every_registered_handler(
+    tmp_path, admission_config, verb, corruption,
+):
+    record = tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
+                                       "demo", "test", "windows", tmp_path)
+    args = {
+        "tracking_dir": str(tmp_path), "request_id": "a" * 32,
+        "fingerprint": "f" * 64, "kind": "resume", "worktree_id": "wt-a",
+        "timestamp": "20261010-120000", "text": "task",
+    }
+    tracking_write.compute(tracking_write.KIND, {"verb": "launch_request_admit", "args": args})
+    admission = request._admission_path(tmp_path, args["request_id"])
+    original = admission.read_text(encoding="utf-8")
+    if corruption in ("null", "[]", "{}"):
+        damaged = corruption
+    else:
+        receipt = json.loads(original)
+        if corruption == "missing-field":
+            del receipt["prior_revision"]
+        elif corruption == "bad-fingerprint":
+            receipt["fingerprint"] = None
+        elif corruption == "bad-flags":
+            receipt["accepted"] = "yes"
+        else:
+            receipt["worktree_id"] = "../outside"
+        damaged = json.dumps(receipt)
+    admission.write_text(damaged, encoding="utf-8")
+    error = tracking_write.compute(tracking_write.KIND, {"verb": verb, "args": args})
+    assert "Invalid stored launch admission" in error["error"]
+    with pytest.raises(ValueError, match="Invalid stored launch admission"):
+        request.inspect(args["request_id"])
+    assert launch_seed_state.peek(record.yaml_path) is None
+    admission.write_text(original, encoding="utf-8")
+    recovered = tracking_write.compute(
+        tracking_write.KIND,
+        {"verb": "launch_request_admit", "args": {**args, "timestamp": "20261010-120001"}},
+    )
+    assert recovered["seed_id"] == args["request_id"]
+    assert recovered["timestamp"] == "20261010-120000"
+    assert request.inspect(args["request_id"])["state"] == "admission-incomplete"
+
+
+def test_corrupt_admission_returns_over_real_wire_and_daemon_remains_usable(tmp_path, authority):
+    args = {
+        "tracking_dir": str(tmp_path), "request_id": "a" * 32,
+        "fingerprint": "f" * 64, "kind": "resume", "worktree_id": "wt-a",
+        "timestamp": "20261010-120000", "text": "task",
+    }
+    request._dispatch("launch_request_admit", args)
+    request._admission_path(tmp_path, args["request_id"]).write_text("null", encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid stored launch admission"):
+        request._dispatch("launch_request_stage", args)
+    tracking_write.register_verb(
+        "test_launch_request_health", lambda args: {"healthy": True}, version=2,
+    )
+    assert request._dispatch("test_launch_request_health", {}) == {"healthy": True}
 
 
 def test_structured_cli_uses_no_selector_and_returns_no_seed_text(tmp_path, authority, monkeypatch, capsys):

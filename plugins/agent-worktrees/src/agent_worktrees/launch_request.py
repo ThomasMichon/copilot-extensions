@@ -61,13 +61,48 @@ def _admission_path(directory: Path, request_id: str) -> Path:
     return directory / "launch-requests" / f"{request_id}.json"
 
 
+def _validate_admission(receipt: object, request_id: str) -> dict:
+    required = {
+        "version", "request_id", "fingerprint", "kind", "worktree_id",
+        "timestamp", "suffix", "seed_id", "prior_revision",
+    }
+    if (
+        not isinstance(receipt, dict) or not required.issubset(receipt)
+        or type(receipt["version"]) is not int or receipt["version"] != 1
+        or receipt["request_id"] != request_id or receipt["seed_id"] != request_id
+        or receipt["suffix"] != request_id or receipt["kind"] not in ("new", "resume")
+        or not isinstance(receipt["fingerprint"], str)
+        or re.fullmatch(r"[0-9a-f]{64}", receipt["fingerprint"]) is None
+        or not isinstance(receipt["timestamp"], str)
+        or re.fullmatch(r"\d{8}-\d{6}", receipt["timestamp"]) is None
+        or type(receipt["prior_revision"]) is not int or receipt["prior_revision"] < 0
+        or any(
+            key in receipt and type(receipt[key]) is not bool
+            for key in ("accepted", "creation_started", "creation_complete")
+        )
+    ):
+        raise ValueError("Invalid stored launch admission")
+    wid = receipt["worktree_id"]
+    if (
+        not isinstance(wid, str) or not wid or "\0" in wid
+        or Path(wid).name != wid or "/" in wid or "\\" in wid
+    ):
+        raise ValueError("Invalid stored launch admission worktree identity")
+    return receipt
+
+
+def _read_admission(directory: Path, request_id: str) -> dict:
+    receipt = json.loads(_admission_path(directory, request_id).read_text(encoding="utf-8"))
+    return _validate_admission(receipt, request_id)
+
+
 def _apply_admit(args: dict) -> dict:
     directory = Path(args["tracking_dir"])
     path = _admission_path(directory, args["request_id"])
     path.parent.mkdir(parents=True, exist_ok=True)
     with tracking._RecordLock(path.with_suffix(".yaml"), require_sidecar=True):
         try:
-            receipt = json.loads(path.read_text(encoding="utf-8"))
+            receipt = _read_admission(directory, args["request_id"])
         except FileNotFoundError:
             record_path = directory / f"{args['worktree_id']}.yaml"
             prior_revision = (
@@ -81,6 +116,7 @@ def _apply_admit(args: dict) -> dict:
                 "suffix": args["request_id"], "seed_id": args["request_id"],
                 "prior_revision": prior_revision,
             }
+            _validate_admission(receipt, args["request_id"])
             tracking._atomic_write(path, json.dumps(receipt) + "\n")
         if (
             not isinstance(receipt, dict) or receipt.get("version") != 1
@@ -95,7 +131,8 @@ def execute(config, request: dict) -> dict:
     """Admit once; recover the same worktree after a lost response."""
     directory = cfg.tracking_dir()
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    platform = "win" if cfg.detect_platform() == "windows" else cfg.detect_platform()
+    detected_platform = cfg.detect_platform()
+    platform = "win" if detected_platform == "windows" else detected_platform
     request_id = request["request_id"]
     wid = request["worktree_id"] or f"{config.machine}-{platform}-{timestamp}-{request_id}"
     fingerprint = hashlib.sha256(
@@ -110,7 +147,7 @@ def execute(config, request: dict) -> dict:
     path = directory / f"{wid}.yaml"
     execution_lock = _admission_path(directory, request_id).with_suffix(".execution.yaml")
     with tracking._RecordLock(execution_lock, require_sidecar=True):
-        receipt = json.loads(_admission_path(directory, request_id).read_text(encoding="utf-8"))
+        receipt = _read_admission(directory, request_id)
         if not path.exists():
             if receipt.get("accepted") or receipt.get("creation_started"):
                 raise ValueError(
@@ -162,7 +199,7 @@ def _apply_stage(args: dict) -> dict:
     directory = Path(args["tracking_dir"])
     admission = _admission_path(directory, args["request_id"])
     with tracking._RecordLock(admission.with_suffix(".yaml"), require_sidecar=True):
-        receipt = json.loads(admission.read_text(encoding="utf-8"))
+        receipt = _read_admission(directory, args["request_id"])
         if receipt["fingerprint"] != args["fingerprint"]:
             raise ValueError("Launch request identity mismatch")
         path = directory / f"{receipt['worktree_id']}.yaml"
@@ -200,7 +237,7 @@ def _apply_stage(args: dict) -> dict:
 def _apply_creation_start(args: dict) -> dict:
     path = _admission_path(Path(args["tracking_dir"]), args["request_id"])
     with tracking._RecordLock(path.with_suffix(".yaml"), require_sidecar=True):
-        receipt = json.loads(path.read_text(encoding="utf-8"))
+        receipt = _read_admission(Path(args["tracking_dir"]), args["request_id"])
         if receipt["fingerprint"] != args["fingerprint"]:
             raise ValueError("Launch request identity mismatch")
         receipt["creation_started"] = True
@@ -211,7 +248,7 @@ def _apply_creation_start(args: dict) -> dict:
 def _apply_creation_finish(args: dict) -> dict:
     path = _admission_path(Path(args["tracking_dir"]), args["request_id"])
     with tracking._RecordLock(path.with_suffix(".yaml"), require_sidecar=True):
-        receipt = json.loads(path.read_text(encoding="utf-8"))
+        receipt = _read_admission(Path(args["tracking_dir"]), args["request_id"])
         if receipt["fingerprint"] != args["fingerprint"] or not receipt.get("creation_started"):
             raise ValueError("Launch creation identity mismatch")
         receipt["creation_complete"] = True
@@ -261,8 +298,7 @@ def cmd_request(args) -> int:
 def inspect(request_id: str) -> dict:
     """Read-only recovery: no prompt or new creation is submitted."""
     directory = cfg.tracking_dir()
-    admission = _admission_path(directory, request_id)
-    receipt = json.loads(admission.read_text(encoding="utf-8"))
+    receipt = _read_admission(directory, request_id)
     path = directory / f"{receipt['worktree_id']}.yaml"
     seed = launch_seed_state.peek(path)
     creation_complete = receipt["kind"] == "resume" or bool(receipt.get("creation_complete"))
