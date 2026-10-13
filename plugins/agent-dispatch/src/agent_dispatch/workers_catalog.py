@@ -136,23 +136,16 @@ def catalog() -> dict:
     local_names = set()
     for record in records:
         conf = record["configuration"]
+        draft_errors = []
+        declarations = ()
         try:
             _, declarations = validate_configuration(record["name"], conf["declaration"], conf["repo_root"])
             _validate_dependencies(declarations, conf["repo_root"])
         except RegistrarError as exc:
-            rows.append(_cards({
-                "id": record["id"], "title": record["name"], "group": "Configured",
-                "editable": "true", "instantiable": "false", "validity": "invalid",
-                "enabled": "unknown", "activity": "unknown", "revision": record["revision"],
-                "fields": _fields(record["name"], conf["declaration"], conf["repo_root"]),
-                "provenance": record["source"]["id"], "description": str(exc),
-                "dependency_status": "invalid-or-missing", "dependency_errors": [str(exc)],
-            }, str(exc)))
-            continue
-        current_names = {d.name for d in declarations}
-        local_names.update(current_names)
+            draft_errors.append(str(exc))
         publication = active_dir() / f"{record['name']}.json"
-        published = False
+        active_conf = None
+        active_declarations = ()
         if publication.exists():
             from .worker_instances import _regular
             _regular(publication)
@@ -162,35 +155,62 @@ def catalog() -> dict:
                 if payload.get("kind") == "user-worker-instance"
                 else {"declaration": payload, "repo_root": ""}
             )
-            published = digest(active_conf) == record["revision"]
-        state = _states(declarations, overrides, observed)
-        discovered = any(d.name in current_names and d.owner == OWNER for d in report.combined.declarations)
+            _, active_declarations = validate_configuration(
+                record["name"], active_conf["declaration"], active_conf["repo_root"],
+            )
+        local_names.update(d.name for d in (*declarations, *active_declarations))
+        runtime_declarations = active_declarations if active_conf is not None else declarations
+        state = _states(runtime_declarations, overrides, observed)
+        discovered_names = {
+            d.name for d in report.combined.declarations if d.owner == OWNER
+        }
+        discovered = bool(active_declarations) and all(
+            d.name in discovered_names for d in active_declarations
+        )
+        published_revision = digest(active_conf) if active_conf is not None else None
         row = {
             "id": record["id"], "title": record["name"], "group": "Configured",
             "description": conf["declaration"].get("description") or "User-local worker instance",
-            "validity": "valid", "editable": "true", "instantiable": "false",
+            "validity": "invalid" if draft_errors else "valid",
+            "editable": "true", "instantiable": "false",
             "revision": record["revision"], "fields": _fields(record["name"], conf["declaration"], conf["repo_root"]),
             "provenance": record["source"]["id"], "source": record["source"],
-            "publication": "published" if published and discovered else "draft",
+            "publication": "published" if discovered else (
+                "not-discovered" if active_conf is not None else "draft"
+            ),
+            "published_revision": published_revision,
+            "draft_state": "matches-published" if published_revision == record["revision"]
+            else "modified" if active_conf is not None else "unpublished",
+            "draft_statistics": {
+                "declarations": len(declarations),
+                "lanes": sum(d.concurrency for d in declarations if d.kind == "supervised-lane"),
+            },
             "pool_toggleable": str(
-                not errors and publication.exists() and len(declarations) == 1
-                and declarations[0].kind == "supervised-lane"
+                not errors and discovered and len(runtime_declarations) == 1
+                and runtime_declarations[0].kind == "supervised-lane"
             ).lower(),
-            "pool_name": declarations[0].name, "owner": OWNER,
-            "dependency_status": "resolved", "dependency_errors": [],
+            "pool_name": runtime_declarations[0].name if len(runtime_declarations) == 1 else "",
+            "owner": OWNER,
+            "dependency_status": "invalid-or-missing" if draft_errors else "resolved",
+            "dependency_errors": draft_errors,
             **state,
         }
-        if not publication.exists():
+        if active_conf is None:
             row.update(enabled="not-published", activity="not-published")
         body = (
             f"{row['description']}\n\nSource: {row['provenance']} ({record['source']['revision']}). "
             f"Local publication: {row['publication']}; effective state: {row['enabled']}; "
             f"activity: {row['activity']}. Statistics: {json.dumps(row['statistics'])}."
+            f"\n\nDraft: {row['draft_state']} ({record['revision']}); "
+            f"draft capacity: {json.dumps(row['draft_statistics'])}. "
+            f"Published revision: {published_revision or 'none'}."
         )
-        fleets = [d.fleet for d in declarations if d.fleet.enabled]
+        if draft_errors:
+            body += "\n\nUnmet draft prerequisites: " + "; ".join(draft_errors)
+        fleets = [d.fleet for d in runtime_declarations if d.fleet.enabled]
         if fleets:
             body += (
-                "\n\nFleet transport: SSH is available. Host reachability and remote "
+                "\n\nFleet transport requires SSH. Host reachability and remote "
                 "runtime readiness are unknown here; the existing FleetSpawner probes "
                 "them at dispatch time. An all-asleep fleet defers without reserving tasks."
             )

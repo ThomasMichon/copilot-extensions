@@ -43,8 +43,7 @@ class PickerConfigurationMixin:
 
         def reload():
             # Reload the originating scope, never the newly selected section.
-            runtime.invalidate()
-            runtime.ensure(scope)
+            runtime.repoll(scope)
 
         self._run_configuration_command(action.label, work, reload)
 

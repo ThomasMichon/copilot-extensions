@@ -26,6 +26,10 @@ supervisor receipt supplies `observed-running`; an absent/stale receipt means
 `unknown`, not active. Statistics count expanded declarations, lane capacity,
 and observed running registrations, not fabricated task-throughput metrics.
 Registrar failures appear in `summary.errors`; unsafe mutations refuse them.
+For an instance with a newer Save-only draft, runtime state, capacity and
+enable/disable controls come from its still-published snapshot. Details expose
+`draft_state`, `draft_statistics`, the current edit revision and the published
+revision separately; editing the draft does not relabel a running worker.
 
 ## Edit or instantiate
 
@@ -55,6 +59,8 @@ fleet without reserving tasks. A sleeping host is not an invalid declaration.
 Inputs are validated before publication. Duplicate names, changed templates,
 stale edits, redirected files, ambiguous discovery and missing dependencies fail
 explicitly. Cancel never executes a provider command or writes task-steering drafts.
+The stored name and ID must match the exact edit target, including case;
+Windows case-insensitive file lookup cannot rename an existing instance.
 
 ### Effects require confirmation
 

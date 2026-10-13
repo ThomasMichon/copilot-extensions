@@ -67,6 +67,10 @@ def _read(path: Path) -> dict:
         raise RegistrarError(f"{path}: cannot read instance: {exc}") from exc
     if not isinstance(value, dict):
         raise RegistrarError(f"{path}: instance must be an object")
+    if value.get("name") != path.stem or value.get("id") != f"instance:{path.stem}":
+        raise RegistrarError(f"{path}: corrupt or mismatched instance identity")
+    if value.get("revision") != digest(value.get("configuration")):
+        raise RegistrarError(f"{path}: corrupt instance revision")
     return value
 
 
@@ -78,10 +82,6 @@ def read_records() -> list[dict]:
     result = []
     for path in sorted(root.glob("*.json")):
         record = _read(path)
-        if record.get("name") != path.stem or record.get("id") != f"instance:{path.stem}":
-            raise RegistrarError(f"{path}: corrupt instance identity")
-        if record.get("revision") != digest(record.get("configuration")):
-            raise RegistrarError(f"{path}: corrupt instance revision")
         result.append(record)
     return result
 

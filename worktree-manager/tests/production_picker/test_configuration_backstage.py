@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from test_config_actions import _install_section, _section, _wait
@@ -234,6 +235,58 @@ def test_configuration_receipt_preserves_real_child_output_even_on_partial_failu
             assert ("Failed" if returncode else "Completed") in text
             if returncode:
                 assert "exit 1" in text
+
+    asyncio.run(run())
+
+
+def test_post_submit_refresh_keeps_rows_and_selected_identity_until_swap(monkeypatch):
+    reg = pivots.parse_manifest({
+        "label": "Resources", "placement": "config", "scope": "global",
+        "list": ["fixture"], "actions": [{"key": "save", "label": "Save", "run": ["fixture"]}],
+    }, name="fixture", source_path="fixture.json")
+    monkeypatch.setattr(pivots, "scan_pivot_registry", lambda: SimpleNamespace(
+        pivots=[reg], worktree_actions=[], config_sections=[], findings=(),
+    ))
+    entered, release = threading.Event(), threading.Event()
+    rows = [{"id": "one", "title": "One"}, {"id": "two", "title": "Two"}]
+    calls = []
+
+    def read(runtime, context):
+        calls.append(1)
+        if len(calls) > 1:
+            entered.set()
+            assert release.wait(10), "test did not release refresh"
+            return "ready", list(reversed(rows)), "", {}
+        return "ready", rows, "", {}
+
+    monkeypatch.setattr(tasks.RegisteredPivotRuntime, "_exec_list", read)
+    monkeypatch.setattr(tasks.RegisteredPivotRuntime, "run_resolved", lambda *a, **k: (True, "saved"))
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test() as pilot:
+            scr = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, scr)
+            scr._open_cfgmenu()
+            while scr.htabs[scr.htab] != "Resources":
+                scr._rotate_machine(1)
+                await pilot.pause()
+            await _wait(pilot, lambda: scr._task_state()[0] == "ready")
+            scr._task_rows()
+            scr.sel = ("T", 1)
+            try:
+                scr._submit_configuration_form(reg, reg.actions[0], {"id": "two"}, {})
+                await _wait(pilot, lambda: entered.is_set()
+                            and isinstance(app.screen, ConfigurationResultScreen)
+                            and not app.screen.pending)
+                app.screen.action_close()
+                await pilot.pause()
+                assert scr._task_rows() == rows and scr.sel == ("T", 1)
+                release.set()
+                await _wait(pilot, lambda: scr._task_rows()[0]["id"] == "two")
+                assert scr.sel == ("T", 0)
+            finally:
+                release.set()
 
     asyncio.run(run())
 

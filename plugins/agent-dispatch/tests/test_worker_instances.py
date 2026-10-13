@@ -93,7 +93,56 @@ def test_save_only_edit_does_not_change_activated_version():
     assert (active_dir() / "local-pool.json").read_bytes() == before
     assert rd.discover()[0].concurrency == 1
     row = next(r for r in catalog()["entries"] if r["id"] == receipt["id"])
-    assert row["publication"] == "draft"
+    assert row["publication"] == "published" and row["draft_state"] == "modified"
+    assert row["lanes"] == 1 and row["draft_statistics"]["lanes"] == 4
+
+
+@pytest.mark.skipif(os.name != "nt", reason="real case-insensitive Windows path contract")
+def test_case_variant_cannot_rename_existing_instance():
+    receipt = create("CasePool", activate=True)
+    draft = (instance_dir() / "CasePool.json").read_bytes()
+    active = (active_dir() / "CasePool.json").read_bytes()
+    with pytest.raises(RegistrarError, match="instance identity"):
+        save_instance(
+            "instance:casepool", receipt["revision"], fields("casepool"),
+            activate=True, consent=ACTIVATION_CONSENT,
+        )
+    assert (instance_dir() / "CasePool.json").read_bytes() == draft
+    assert (active_dir() / "CasePool.json").read_bytes() == active
+    assert read_records()[0]["id"] == receipt["id"]
+
+
+def test_published_runtime_and_controls_survive_differently_shaped_draft(tmp_path, monkeypatch):
+    from agent_dispatch.config import overrides_path
+    from agent_dispatch.overrides import logical_override_id, set_override
+    from agent_dispatch.registrar_reconcile import declared_registration_id
+
+    receipt = create(activate=True)
+    rid = declared_registration_id(rd.discover()[0])
+    monkeypatch.setattr(
+        "agent_dispatch.workers_catalog._observation",
+        lambda: {"known": True, "running": [rid]},
+    )
+    set_override(overrides_path(), logical_override_id(OWNER, "local-pool"), disabled=True)
+    document = copy.deepcopy(templates()["reviewer"])
+    document.update(
+        repo="github.com/example/project", task_label="review-work",
+        emitter={"command": [sys.executable, "-c", "print('[]')"], "interval_seconds": 60},
+        evaluator={"evaluator_spec": {"rules": []}},
+    )
+    save_instance(
+        receipt["id"], receipt["revision"],
+        {"name": "local-pool", "declaration": document, "repo_root": str(tmp_path)},
+    )
+    data = catalog()
+    row = next(r for r in data["entries"] if r["id"] == receipt["id"])
+    assert row["draft_state"] == "modified" and row["publication"] == "published"
+    assert row["published_revision"] == receipt["revision"]
+    assert row["pool_toggleable"] == "true" and row["pool_name"] == "local-pool"
+    assert row["lanes"] == 1 and row["statistics"]["declarations"] == 1
+    assert row["draft_statistics"]["declarations"] == 3
+    assert row["enabled"] == "disabled" and row["activity"] == "observed-running"
+    assert not any(r["group"] == "Source declarations" for r in data["entries"])
 
 
 def test_create_and_activation_retries_are_idempotent():

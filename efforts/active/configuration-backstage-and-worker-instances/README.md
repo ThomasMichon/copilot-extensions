@@ -235,3 +235,19 @@ configuration, arbitrary source editing, or automatic maintenance dispatch.
   Config/Profiles/region/navigation checks, including the thirteen walkthrough
   captures and real provider round-trip, passed after reinstalling the changed
   Manager test package. No publication gate was bypassed.
+
+### 2026-10-12 - Current-head review corrections
+
+- The first GitHub review on #6427 identified exact-case stored identity,
+  draft-versus-published runtime reporting, and selection during a slow
+  post-submit refresh. Addressed all three rather than merging past them.
+- Every instance read verifies its stored immutable name/ID/revision against
+  the requested filename; Windows cannot rewrite an existing identity through
+  a differently cased path. Runtime state, lane statistics and local controls
+  now derive from the active snapshot, while draft validity/capacity/revision
+  remain separately visible. Configuration post-submit reads swap in place.
+- Ninety-six Manager and 296 provider checks passed. New regressions exercise
+  a real case-insensitive Windows edit, a published pool beneath a differently
+  shaped reviewer draft, and selected-row preservation while the reload is
+  deliberately blocked and subsequently reordered. Current-head review and
+  required CI are still release gates, followed by installed proof.
