@@ -168,7 +168,7 @@ def _redact_obj(value):
     if isinstance(value, str):
         return redact(value)
     if isinstance(value, dict):
-        return {str(k): _redact_obj(v) for k, v in value.items()}
+        return {redact(str(k)): _redact_obj(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_redact_obj(v) for v in value]
     return value
@@ -316,7 +316,14 @@ class Run:
             if self.is_owner and event == "end" and component == "run" and due:
                 self._write_status(final=False)
         except Exception as exc:
-            _warn(exc)
+            self._trip(exc)
+
+    def _trip(self, exc: BaseException) -> None:
+        """Per-run circuit breaker: after a persistence failure, stop writing
+        so a broken store can't add a lock wait to every later event. The
+        in-memory outcomes that decide the exit code are kept."""
+        _warn(exc)
+        self.enabled = False
 
     def _begin(self, phase: str, component: str, action: str | None, argv) -> float:
         if component == RUN_COMPONENT:
@@ -426,7 +433,7 @@ class Run:
                 if document is not None:
                     write_json_atomic(status_path, document)
         except Exception as exc:
-            _warn(exc)
+            self._trip(exc)
 
 
 def _newer_run(previous, run_id: str, started_at: str) -> str | None:

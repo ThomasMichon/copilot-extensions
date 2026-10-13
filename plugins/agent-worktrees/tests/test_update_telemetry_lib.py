@@ -393,7 +393,52 @@ def test_status_write_error_never_raises(telemetry_env, monkeypatch):
     assert ut.ENV_RUN_ID not in telemetry_env
 
 
-def test_prune_keeps_newest_runs(telemetry_env):
+def test_persistence_failure_trips_a_per_run_breaker(telemetry_env, monkeypatch):
+    run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
+    appends = []
+    status_writes = []
+
+    def broken_append(*_a, **_k):
+        appends.append(1)
+        raise ut.LockTimeout("could not lock events")
+
+    def broken_status(*_a, **_k):
+        status_writes.append(1)
+        raise ut.LockTimeout("could not lock status")
+
+    monkeypatch.setattr(run_mod, "append_line", broken_append)
+    monkeypatch.setattr(run_mod, "write_json_atomic", broken_status)
+    run.enter("payload_refresh")
+    for index in range(5):
+        run.target("payload_refresh", f"p{index}@m", ut.VERIFIED_CURRENT)
+    run.target("runtime_reconcile", "a@m", ut.TIMEOUT)
+    assert run.finish() == 6
+    assert len(appends) == 1
+    assert status_writes == []
+
+
+def test_status_failure_also_trips_the_breaker(telemetry_env, monkeypatch):
+    run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
+    status_writes = []
+
+    def broken_status(*_a, **_k):
+        status_writes.append(1)
+        raise ut.LockTimeout("could not lock status")
+
+    monkeypatch.setattr(run_mod, "write_json_atomic", broken_status)
+    run._write_status(final=False)
+    assert not run.enabled
+    run.target("runtime_reconcile", "a@m", ut.COMMAND_FAILED)
+    assert run.finish() == 1
+    assert len(status_writes) == 1
+
+
+def test_credential_shaped_dict_keys_are_redacted(telemetry_env):
+    pat = "gh" + "p_" + "K" * 36
+    run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
+    run.emit("prune", "run", "info", error={"code": "x", pat: "v"}, details={pat: {pat: 1}})
+    run.finish()
+    assert ("K" * 20) not in run.events_path.read_text(encoding="utf-8")
     runs = Path(telemetry_env[ut.ENV_HOME]) / "runs"
     for index in range(25):
         (runs / f"20200101T0000{index:02d}Z-1-abcd").mkdir(parents=True)

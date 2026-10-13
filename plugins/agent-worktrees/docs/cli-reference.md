@@ -660,8 +660,8 @@ forwarded through `worktree-manager update`, and a name this update would not
 deploy (unknown, inactive, skipped, payload-only or not allowed on this machine)
 is a configuration error (exit 3). Inactive inventory failures are
 advisories and never fail the run. Telemetry
-is best-effort: if events or status cannot be written, `update` warns once and
-its result is unchanged.
+is best-effort: if events or status cannot be written, `update` warns once,
+stops writing telemetry for the rest of that run, and its result is unchanged.
 
 ### Deregistering a project (`unregister`) vs. tearing down the runtime (`uninstall --remove-config`)
 
