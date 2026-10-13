@@ -49,9 +49,9 @@ def _request_with_floor(
     retrying = False
     last_error: Exception | None = None
     while True:
+        client._daemon_proto = None
         if retrying:
             time.sleep(0.5)
-            client._daemon_proto = None
             base = resolve() if resolve else None
             if base:
                 client._base = base.rstrip("/")

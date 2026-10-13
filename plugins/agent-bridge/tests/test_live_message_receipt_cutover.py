@@ -408,3 +408,29 @@ def test_cached_negative_capability_is_refreshed_before_rejecting_an_upgrade(
     assert resources
     assert client.daemon_protocol()[0] == floor
     assert healths[0] < floor and all(value == floor for value in healths[1:])
+
+
+@pytest.mark.parametrize("predecessor,successor", [(8, 7), (7, 8)])
+def test_first_floor_probe_clears_preflight_cache_without_a_transport_retry(
+    monkeypatch: pytest.MonkeyPatch, predecessor: int, successor: int,
+) -> None:
+    client = BridgeClient(
+        "http://127.0.0.1:57585", "test",
+        reresolve=lambda: pytest.fail("a successful first attempt must not retry discovery"),
+    )
+    healths: list[str] = []
+    resources: list[str] = []
+
+    def transport(req: urllib.request.Request, timeout: float | None = None) -> _Response:
+        if req.full_url.endswith("/health"):
+            healths.append(req.full_url)
+            return _Response({"protocol_version": predecessor if len(healths) == 1 else successor})
+        resources.append(req.full_url)
+        assert client._daemon_proto is None
+        return _Response({"session_id": "live-1"})
+
+    monkeypatch.setattr("agent_bridge.client.urllib.request.urlopen", transport)
+    assert client.get_live_result_snapshot("live-1")["session_id"] == "live-1"
+    assert client.daemon_supports(8) is (successor >= 8)
+    assert client.daemon_protocol()[0] == successor
+    assert len(resources) == 1 and len(healths) == 3
