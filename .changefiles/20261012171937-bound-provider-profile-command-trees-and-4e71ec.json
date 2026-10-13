@@ -1,0 +1,9 @@
+{
+  "comment": "Bound provider profile command trees and captured pipes to their deadline",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
