@@ -184,6 +184,12 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
             cli._cmd_send(args)
         assert refused.value.code == 69
         assert len(a_db.list_pending_live_messages("a-new")) == 1
+        args.expected_session_id = None
+        args.no_wait, args.reply_timeout, args.prompt = True, 0, "no-wait reply"
+        monkeypatch.setattr(live_sessions, "await_turn_reply", lambda *_a, **_k: pytest.fail("no-wait"))
+        cli._cmd_send(args)
+        received = a_db.list_pending_live_messages("a-new")
+        assert len(received) == 2 and received[-1]["body"] == "no-wait reply"
     finally:
         a_db.close()
         b_db.close()

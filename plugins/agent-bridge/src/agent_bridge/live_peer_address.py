@@ -64,7 +64,7 @@ def send_remote_peer(client: BridgeClient, args: Namespace, address: LivePeerAdd
     from .send_outcome import SendRefused
 
     wait = not getattr(args, "no_wait", False)
-    wait_timeout = getattr(args, "reply_timeout", 120.0)
+    wait_timeout = getattr(args, "reply_timeout", 120.0) if wait else 120.0
     result = client.send_remote_live_message(
         address.machine, str(address), sender=sender, message=prompt,
         reply_to=reply_to, kind=kind, delivery=delivery, wait=wait,
