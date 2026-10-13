@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import shutil
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -202,3 +205,54 @@ def test_validator_provisioning_never_exposes_release_authority():
         assert "secrets." not in json.dumps(provision)
         if job == "promote":
             assert provision["env"]["GH_TOKEN"] == "${{ github.token }}"
+
+
+def test_promotion_actions_never_receive_or_persist_the_release_pat():
+    import yaml
+    root = Path(__file__).resolve().parent.parent
+    job = yaml.safe_load(
+        (root / ".github" / "workflows" / "validate-and-promote.yml").read_text(),
+    )["jobs"]["promote"]
+    assert job["env"]["GH_TOKEN"] == "${{ github.token }}"
+    allowed = {
+        "Promote (push a candidate branch; report-only if push=false)",
+        "Publish coverage baselines as a GitHub Release (durable evidence for this dev commit)",
+        "Land the candidate branch on main via PR + squash-merge",
+        "Tag the real post-merge commit",
+    }
+    writers = set()
+    for step in job["steps"]:
+        if "APERTURE_RELEASE_TOKEN" in json.dumps(step):
+            assert "uses" not in step
+            writers.add(step["name"])
+        if step.get("uses", "").startswith("actions/checkout@"):
+            assert step["with"]["persist-credentials"] is False
+            assert "token" not in step["with"]
+    assert writers == allowed
+    identity = next(step for step in job["steps"] if step.get("name") == "Configure git identity for the generated commit")
+    assert "gh auth setup-git --hostname github.com" in identity["run"]
+
+
+def test_git_helper_uses_each_steps_token_without_storing_it(tmp_path):
+    if shutil.which("gh") is None:
+        pytest.skip("the hosted promotion credential helper requires GitHub CLI")
+    config = tmp_path / "gitconfig"
+    environment = {
+        **os.environ, "GH_TOKEN": "read-only-sentinel", "GH_HOST": "github.com",
+        "GH_CONFIG_DIR": str(tmp_path / "gh"), "GIT_CONFIG_GLOBAL": str(config),
+        "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0",
+    }
+    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    subprocess.run(
+        ["gh", "auth", "setup-git", "--hostname", "github.com"], env=environment,
+        capture_output=True, text=True, check=True, creationflags=flags,
+    )
+    for token in ("read-only-sentinel", "release-write-sentinel"):
+        result = subprocess.run(
+            ["git", "credential", "fill"], input="protocol=https\nhost=github.com\n\n",
+            cwd=tmp_path, env={**environment, "GH_TOKEN": token},
+            capture_output=True, text=True, check=True, creationflags=flags,
+        )
+        fields = dict(line.split("=", 1) for line in result.stdout.splitlines())
+        assert fields.get("password") == token
+        assert token not in config.read_text()

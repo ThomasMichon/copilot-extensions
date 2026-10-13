@@ -772,10 +772,11 @@ jobs:
     # squash-merge produces a new sha; the pre-merge candidate commit this
     # job built locally is never the thing that actually lands).
     #
-    # Token: uses the `APERTURE_RELEASE_TOKEN` environment secret (scoped to
+    # Write steps use the `APERTURE_RELEASE_TOKEN` environment secret (scoped to
     # `main-promotion`; a fine-grained PAT scoped to this repo, Contents:
     # Read and write + Pull requests: Read and write), NOT the default
-    # `github.token`. GitHub
+    # `github.token`. Other steps use the read-only job token; the PAT is
+    # neither a job-wide environment value nor a persisted checkout credential. GitHub
     # never fires other workflow events (including `pull_request`) for
     # content pushed/authored with the default `GITHUB_TOKEN` -- a
     # documented anti-recursion safeguard -- so a `GITHUB_TOKEN`-authored
@@ -794,7 +795,7 @@ jobs:
     # (the non-incremental-update guard) unless `--force` is passed after
     # `dev` has moved forward with a real fix.
     env:
-      GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
       CANDIDATE_BRANCH: release/promote-${{ github.run_id }}
     steps:
       - name: Decide whether this run should actually promote
@@ -843,7 +844,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.sha }}
-          token: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -851,6 +852,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          gh auth setup-git --hostname github.com
       - uses: astral-sh/setup-uv@v9.0.0
         if: steps.decide.outputs.proceed == 'true'
         env:
@@ -926,6 +928,7 @@ jobs:
         id: promote
         if: steps.decide.outputs.proceed == 'true'
         env:
+          GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
           PUSH_INPUT: ${{ github.event.inputs.push }}
           # Pin to the EXACT commit `gate` validated as a real `dev`
           # ancestor -- the same commit `full`/`worktree-manager`/
@@ -1045,6 +1048,7 @@ jobs:
           steps.promote.outputs.land == 'true' &&
           steps.promote.outputs.baselines_written == 'true'
         env:
+          GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
           DEV_SHA: ${{ needs.gate.outputs.sha }}
         run: |
           # Mirrors `correlation.release_tag_for` -- duplicated here (not
@@ -1078,6 +1082,8 @@ jobs:
       - name: Land the candidate branch on main via PR + squash-merge
         id: land
         if: steps.promote.outputs.land == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
         run: |
           if ! git ls-remote --exit-code --heads origin "$CANDIDATE_BRANCH" > /dev/null; then
             echo "No candidate branch pushed (nothing to promote) -- skipping."
@@ -1212,6 +1218,7 @@ jobs:
       - name: Tag the real post-merge commit
         if: steps.promote.outputs.land == 'true' && steps.land.outputs.candidate_pushed == 'true'
         env:
+          GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
           MERGE_SHA: ${{ steps.merged.outputs.merge_sha }}
         run: |
           git fetch origin main
