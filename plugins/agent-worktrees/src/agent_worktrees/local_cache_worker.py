@@ -53,6 +53,8 @@ def _read(path: Path) -> dict | None:
 
 
 def _write(path: Path, text: str) -> None:
+    from . import tracking
+
     descriptor, name = tempfile.mkstemp(prefix=".guidance-", dir=path.parent)
     staged = Path(name)
     try:
@@ -60,7 +62,7 @@ def _write(path: Path, text: str) -> None:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(staged, path)
+        tracking._replace_with_retry(str(staged), str(path), attempts=5, delay=0.02)
     finally:
         staged.unlink(missing_ok=True)
 

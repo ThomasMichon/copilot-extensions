@@ -127,6 +127,60 @@ def test_latest_result_is_a_bounded_utf8_snapshot(tmp_path):
     assert path.read_text() == "new result\n"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows readers deny file replacement while open")
+@pytest.mark.parametrize("filename", ["request.json", "refresh.log"])
+def test_snapshot_publication_waits_for_a_transient_reader(tmp_path, monkeypatch, filename):
+    path = tmp_path / filename
+    path.write_text("old")
+    opened = threading.Event()
+    release = threading.Event()
+
+    def reader():
+        with path.open("rb"):
+            opened.set()
+            assert release.wait(5)
+
+    thread = threading.Thread(target=reader)
+    thread.start()
+    replace = os.replace
+    attempts = []
+
+    def observed_replace(source, destination):
+        attempts.append(True)
+        try:
+            return replace(source, destination)
+        finally:
+            release.set()
+
+    monkeypatch.setattr(worker.os, "replace", observed_replace)
+    try:
+        assert opened.wait(5)
+        worker._write(path, "new")
+    finally:
+        release.set()
+        thread.join(5)
+    assert path.read_text() == "new"
+    assert len(attempts) >= 2
+
+
+def test_snapshot_publication_surfaces_persistent_denial(tmp_path, monkeypatch):
+    path = tmp_path / "request.json"
+    path.write_text("old")
+    calls = []
+
+    def denied(source, destination):
+        calls.append(True)
+        raise PermissionError("persistent denial")
+
+    monkeypatch.setattr(worker.os, "replace", denied)
+    monkeypatch.setattr(worker.time, "sleep", lambda delay: None)
+    with pytest.raises(PermissionError, match="persistent denial"):
+        worker._write(path, "new")
+    assert len(calls) == 5
+    assert path.read_text() == "old"
+    assert list(tmp_path.iterdir()) == [path]
+
+
 def test_queued_worker_protects_finalize_and_cleanup(tmp_path, monkeypatch):
     from agent_worktrees import __main__ as main, finalize
 
