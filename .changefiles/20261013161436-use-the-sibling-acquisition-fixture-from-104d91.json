@@ -1,0 +1,9 @@
+{
+  "comment": "Use the sibling acquisition fixture from repository-root workspace coverage collection",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

@@ -19,7 +19,7 @@ from agent_bridge.client import BridgeClient, BridgeClientError
 from agent_bridge.models import SessionStatus
 from agent_bridge.session_manager import Session
 from agent_bridge.transport import SpawnTarget
-from tests.test_acquisition_runtime import rig as _connected_rig
+from test_acquisition_runtime import rig as _connected_rig
 
 rig = _connected_rig
 
