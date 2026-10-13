@@ -125,6 +125,8 @@ repair it.
 Binding adds an immutable `identity` JSON object and changes phase to `bound`.
 Recovery and identity are opaque to agent-worktrees; do not include credentials.
 Opaque JSON is bounded to 32 nesting levels and 16,384 encoded input bytes.
+CLI ingress reads at most that byte limit plus one overflow byte before strict
+UTF-8 decoding; multibyte text cannot expand the read budget.
 The complete callback ref is limited to 4,096 ASCII bytes, so recovery and identity
 must be small enough that their combined encoded envelope fits.
 

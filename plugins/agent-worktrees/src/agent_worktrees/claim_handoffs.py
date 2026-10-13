@@ -71,7 +71,7 @@ class ClaimBundle:
             "state": self.state,
             "source": self.source,
             "consumer": self.consumer,
-            "claims": [dict(claim) for claim in self.claims],
+            "claims": [copy.deepcopy(claim) for claim in self.claims],
             "offered_at": self.offered_at,
             "updated_at": self.updated_at,
         }

@@ -393,7 +393,7 @@ def test_capabilities_and_exact_stdin_cli(owner, monkeypatch, capsys):
     # Input errors must be rejected before config/ledger resolution.
     args.operation = "reserve"
     for raw in ("[]", "{} {}", '{"kind":"a","kind":"b"}', "{}\nnull"):
-        monkeypatch.setattr(cli.sys, "stdin", io.StringIO(raw))
+        monkeypatch.setattr(cli.sys, "stdin", io.TextIOWrapper(io.BytesIO(raw.encode("utf-8"))))
         assert cli.cmd_resource_producer(args) == 1
         assert emitted.pop()["error"]
     assert "resource_producer" in tracking_write.registered_verbs()
@@ -413,11 +413,11 @@ def test_real_main_capabilities_and_reserve_use_owning_project_without_cluster(o
     )
     assert main.main(["resource-producer", "capabilities", "--json"]) == 0
     assert emitted.pop()["schema"] == producer.SCHEMA
-    monkeypatch.setattr(cli.sys, "stdin", io.StringIO('{"kind":"container","namespace":"raw-resource","recovery":{}}'))
+    monkeypatch.setattr(cli.sys, "stdin", io.TextIOWrapper(io.BytesIO(b'{"kind":"container","namespace":"raw-resource","recovery":{}}')))
     assert main.main(["resource-producer", "reserve", "--json", "--owner-ref", "m/p/owner"]) == 0
     result = emitted.pop()
     assert result["phase"] == "pending" and tracking.load_record(path).resources[0].is_unsettled
-    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(json.dumps({"token": result["token"]})))
+    monkeypatch.setattr(cli.sys, "stdin", io.TextIOWrapper(io.BytesIO(json.dumps({"token": result["token"]}).encode("utf-8"))))
     assert main.main(["resource-producer", "inspect", "--json"]) == 0
     assert emitted.pop()["token"] == result["token"]
 

@@ -29,9 +29,10 @@ def cmd_resource_producer(args) -> int:
                 "max_ref_bytes": producer.MAX_REF_BYTES, "max_input_bytes": producer.MAX_INPUT_BYTES,
             })
             return 0
-        raw = sys.stdin.read(producer.MAX_INPUT_BYTES + 1)
-        if len(raw.encode("utf-8")) > producer.MAX_INPUT_BYTES:
+        raw_bytes = sys.stdin.buffer.read(producer.MAX_INPUT_BYTES + 1)
+        if len(raw_bytes) > producer.MAX_INPUT_BYTES:
             raise ValueError("producer stdin exceeds size limit")
+        raw = raw_bytes.decode("utf-8", errors="strict")
         def unique(pairs):
             result = {}
             for key, value in pairs:
