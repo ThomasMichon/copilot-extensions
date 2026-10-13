@@ -663,3 +663,19 @@ credential changes, broad policy weakening or unreviewed releases.
   Default-main producer proof precedes removal of main-PR CI; source staging
   is not live cutover. The full worktrees release failure retains its existing
   repair owner rather than being bypassed or repaired by a competing PR.
+
+### 2026-10-13 - Scanner staging native CI blocker repaired
+
+- #6577 received current-head approval with no findings, but required CI
+  exposed #6532's real-helper read-only fixture on Windows: the first hosted
+  helper call exceeded its unchanged fifteen-second boundary.
+- The contained native reproduction independently found host-generated
+  `PowerShell/telemetry.uuid` in both full-home snapshots. #6581 owns this
+  bounded fixture repair: opt out of PowerShell telemetry only in the test
+  environment, retaining the real helper calls, production deadline and
+  byte/mtime assertions. Both native cases now pass locally.
+- No production resolver behavior changed. Hosted current-head validation
+  remains mandatory; local telemetry proof alone is not claimed to explain
+  or clear every hosted timeout. Review and required CI must run again after
+  this correction. No gate is bypassed and no competing installation work
+  is taken over.

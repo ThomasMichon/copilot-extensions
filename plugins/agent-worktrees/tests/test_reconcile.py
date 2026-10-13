@@ -38,14 +38,14 @@ def test_runtime_resolution_real_helper_read_only(env, monkeypatch, pointer_exis
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: env.home))
     assert Path.home() == env.home
     if os.name == "nt":
-        # PowerShell's .NET host otherwise records startup JIT profiles even
-        # with -NoProfile. Prepare its empty cache and disable recording only
-        # in the test process; keep the entire fixture home in the snapshot.
+        # Isolate PowerShell's own JIT/telemetry startup writes, not helper
+        # effects; keep the entire fixture home in the byte/mtime snapshot.
         (env.home / "AppData" / "Local" / "Microsoft" / "PowerShell").mkdir(
             parents=True,
         )
         monkeypatch.setenv("DOTNET_MultiCoreJitNoProfileGather", "1")
         monkeypatch.setenv("COMPlus_MultiCoreJitNoProfileGather", "1")
+        monkeypatch.setenv("POWERSHELL_TELEMETRY_OPTOUT", "1")
     legacy = env.home / ".agent-worktrees"
     legacy.mkdir()
     (legacy / "retained-state.json").write_text('{"retained":true}\n', encoding="utf-8")
