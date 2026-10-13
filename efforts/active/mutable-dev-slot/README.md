@@ -242,10 +242,12 @@ reported zero open findings after both high-severity claim-evidence findings
 were fixed, and every required PR check passed. The shared primitive and all
 13 exact vendor copies now provide descriptor-owned shared retention,
 matching-content admission under retention, and exclusive cleanup/selector
-rechecks. Construction hands a completed candidate to retention before release;
-candidate and rollback owners retain it through their actual cutover/drain or
-rollback lifetime. GC, incomplete sweeping, and explicit slot cleanup respect
-those owners. Selected incomplete numbered identities refuse ordinary rebuild
+rechecks. The primitive supports transferring a completed candidate to retention
+before construction release; native fixtures exercise that handoff and retained
+candidate/rollback lifetimes. Real adopting entrypoints must still hold those
+descriptors through their actual cutover/drain or rollback outcome. Canonical
+GC, incomplete sweeping, and explicit slot cleanup respect holders of these
+leases. Selected incomplete numbered identities refuse ordinary rebuild
 with distinct-generation repair guidance; the mutable dev exception remains.
 
 Claim mutation and cleanup read dev ownership and rollback evidence strictly:
