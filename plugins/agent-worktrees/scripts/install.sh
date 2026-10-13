@@ -1566,7 +1566,10 @@ _versioned_mark_complete() {
     else
         local -a pipeline_status=("${PIPESTATUS[@]}")
         rc="${pipeline_status[0]}"
-        if [[ "$rc" -eq 0 ]]; then rc="${pipeline_status[1]}"; fi
+        if [[ "${pipeline_status[1]}" -ne 0 ]]; then
+            rc="${pipeline_status[1]}"
+            err "Completion output formatter failed (exit $rc; publisher exit ${pipeline_status[0]}) -- refusing activation"
+        fi
     fi
     if [[ "$rc" -ne 0 ]]; then
         err "Completion publication failed for versions/$SRC_VERSION -- refusing activation"

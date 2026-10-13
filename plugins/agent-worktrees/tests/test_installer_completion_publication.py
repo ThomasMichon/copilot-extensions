@@ -47,7 +47,8 @@ def _run(shell: str, executable: str, script: str, tmp_path: Path):
         else [executable, "-NoProfile", "-File", str(path)]
     )
     return subprocess.run(
-        args, capture_output=True, text=True, encoding="utf-8", timeout=20,
+        args, capture_output=True, text=True, encoding="utf-8",
+        timeout=20 if shell == "bash" else 60,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
@@ -159,7 +160,10 @@ echo UNEXPECTED
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash unavailable")
-def test_posix_publication_refuses_formatter_failure(tmp_path: Path):
+@pytest.mark.parametrize("formatter_status,consume_output", [(9, True), (127, False)])
+def test_posix_publication_refuses_formatter_failure(
+    tmp_path: Path, formatter_status: int, consume_output: bool,
+):
     shutil.copyfile(SCRIPTS / "versioned_runtime.py", tmp_path / "versioned_runtime.py")
     function = _function_body(
         (SCRIPTS / "install.sh").read_text(encoding="utf-8"),
@@ -174,7 +178,7 @@ LINK_DIR="$INSTALL_DIR/.venv"
 SRC_VERSION=1.2.3
 VERSIONED_RUNTIME=1
 err() {{ echo "$*" >&2; }}
-sed() {{ command sed "$@"; return 9; }}
+sed() {{ {'command sed "$@";' if consume_output else ''} return {formatter_status}; }}
 _bootstrap_python() {{ printf '%s' {shlex.quote(_bash_path(Path(sys.executable)))}; }}
 _payload_hash() {{ printf '%s' {shlex.quote(DIGEST)}; }}
 {function}
@@ -182,9 +186,11 @@ if _versioned_mark_complete; then echo UNEXPECTED; else echo RESULT=$?; fi
 """
     result = _run("bash", _BASH, script, tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "RESULT=9" in result.stdout
+    assert f"RESULT={formatter_status}" in result.stdout
+    assert f"Completion output formatter failed (exit {formatter_status};" in result.stderr
     assert "Completion publication failed" in result.stderr
-    assert (root / "versions" / "1.2.3" / ".install-complete.json").is_file()
+    if consume_output:
+        assert (root / "versions" / "1.2.3" / ".install-complete.json").is_file()
 
 
 @pytest.mark.guard
