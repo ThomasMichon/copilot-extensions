@@ -1236,7 +1236,7 @@ def read_marker(root: Path, version: str) -> dict | None:
     """Parse completion evidence; absent/malformed is None, storage errors raise."""
     try:
         data = _load_unique_json(marker_path(root, version))
-    except (FileNotFoundError, ValueError, UnicodeError):
+    except (FileNotFoundError, ValueError):
         return None
     return validate_marker(data, version)
 
@@ -1280,6 +1280,8 @@ def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
         payload["payload_hash"] = payload_hash
     if validate_marker(payload, version) is None:
         raise ValueError("invalid completion publication fields")
+    if version.casefold() == DEV_VERSION and version != DEV_VERSION:
+        raise ValueError("mutable dev version must be named 'dev'")
     vdir = version_dir(root, version)
     dest = marker_path(root, version)
     with _kernel_lease(root, version, kind="retention", shared=True):
@@ -2077,7 +2079,8 @@ def check_admission(root: Path, version: str, *, payload_hash: str | None) -> st
                 return ADMIT_HEALTH_REPAIR_REQUIRED
             try:
                 marker_fd = os.open(
-                    COMPLETE_MARKER, os.O_RDONLY | nofollow, dir_fd=vdir_fd
+                    COMPLETE_MARKER, os.O_RDONLY | nofollow | os.O_NONBLOCK,
+                    dir_fd=vdir_fd,
                 )
             except FileNotFoundError:
                 return ADMIT_CONSTRUCT
@@ -2141,7 +2144,7 @@ def check_admission(root: Path, version: str, *, payload_hash: str | None) -> st
 
     try:
         raw = json.loads(marker_bytes, object_pairs_hook=_unique_object_pairs_hook)
-    except (ValueError, UnicodeError):
+    except ValueError:
         # Malformed JSON, including invalid UTF-8/other encoding errors --
         # ambiguous evidence, never "never built".
         return ADMIT_HEALTH_REPAIR_REQUIRED

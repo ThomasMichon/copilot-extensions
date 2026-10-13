@@ -51,6 +51,19 @@ def test_numbered_completion_preserves_malformed_evidence(tmp_path, evidence):
     assert marker.read_bytes() == evidence
 
 
+@pytest.mark.guard
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="requires a POSIX FIFO")
+@pytest.mark.timeout(5)
+def test_publication_refuses_fifo_evidence_without_blocking(tmp_path):
+    marker = vr.marker_path(tmp_path, "1.0")
+    marker.parent.mkdir(parents=True)
+    os.mkfifo(marker)
+    before = marker.stat().st_ino
+    with pytest.raises(RuntimeError, match="health-repair-required"):
+        vr.mark_complete(tmp_path, "1.0", payload_hash="same")
+    assert marker.stat().st_ino == before
+
+
 @pytest.mark.parametrize("fields", [
     {"pid": True}, {"pid": -1}, {"pid": "one"}, {"payload_hash": 7},
 ])
@@ -58,6 +71,14 @@ def test_invalid_publication_does_not_create_state(tmp_path, fields):
     root = tmp_path / "not-created"
     with pytest.raises(ValueError, match="invalid completion"):
         vr.mark_complete(root, "1.0", **fields)
+    assert not root.exists()
+
+
+@pytest.mark.parametrize("version", ["DEV", "Dev", "dEv"])
+def test_dev_case_alias_cannot_bypass_explicit_claim(tmp_path, version):
+    root = tmp_path / "not-created"
+    with pytest.raises(ValueError, match="must be named 'dev'"):
+        vr.mark_complete(root, version, payload_hash="same")
     assert not root.exists()
 
 
