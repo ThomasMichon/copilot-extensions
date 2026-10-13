@@ -59,7 +59,7 @@ try {
     if ($stream) { $stream.Dispose() }
 }
 
-if ($Receipt -and $stream) {
+if ($Receipt) {
     $receiptTemp = "$Receipt.$([Guid]::NewGuid().ToString('N')).tmp"
     try {
         $receiptJson = ConvertTo-Json -InputObject @{

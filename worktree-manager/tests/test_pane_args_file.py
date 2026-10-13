@@ -144,6 +144,20 @@ def test_missing_manifest_fails_loudly(tmp_path):
     assert "Could not consume pane argument handoff" in result.stderr
 
 
+def test_missing_manifest_publishes_a_sanitized_rejection_receipt(tmp_path):
+    manifest = tmp_path / "missing.json"
+    receipt = Path(str(manifest) + ".receipt.json")
+    result = _run(manifest, _test_env(tmp_path), receipt=receipt)
+    assert result.returncode == 3
+    acknowledged = json.loads(receipt.read_text("utf-8"))
+    assert acknowledged == {
+        "version": 1, "manifest": manifest.name, "status": "rejected",
+        "stage": "manifest-open", "pid": acknowledged["pid"],
+    }
+    assert acknowledged["pid"] > 0
+    assert str(tmp_path) not in result.stderr + receipt.read_text("utf-8")
+
+
 @pytest.mark.parametrize("content,stage", [
     ("{", "manifest-json"),
     ('{"version":1,"wrapper":"missing","argv":["private-argument"]}', "wrapper-path"),
