@@ -261,6 +261,11 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 LINK_PYTHON="$VENV_PYTHON"
 VENV_BIN="$VENV_DIR/bin/agent-codespaces"
 
+_codespaces_runtime_healthy() {
+    local py="$1"
+    [[ -x "$py" ]] && "$py" -I -m agent_codespaces --help >/dev/null 2>&1
+}
+
 _versioned_activate() {
     # CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
     # symlink onto it (first migration moves a legacy real `.venv` aside), then gc
@@ -273,8 +278,8 @@ _versioned_activate() {
         _fail "Fresh runtime slot has no interpreter (versions/$SRC_VERSION)"
         return 1
     fi
-    if ! "$py" -c 'import agent_codespaces' 2>/dev/null; then
-        _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
+    if ! _codespaces_runtime_healthy "$py"; then
+        _fail "Fresh runtime slot failed its module launch health gate (versions/$SRC_VERSION) -- not activating"
         return 1
     fi
     _versioned_mark_complete || return 1
@@ -595,6 +600,10 @@ _ensure_uv_index() {
 }
 
 deploy_venv() {
+    if [[ -e "$VENV_DIR/.install-complete.json" ]] && ! _codespaces_runtime_healthy "$VENV_PYTHON"; then
+        _fail "Completed runtime slot failed its module launch health gate (versions/$SRC_VERSION). Refusing an in-place rebuild; use distinct-generation repair or a new released version."
+        return 1
+    fi
     _assert_uv || return 1
     _ensure_uv_index
     mkdir -p "$VENV_DIR"
@@ -720,10 +729,8 @@ do_dev() {
     # mode falls back to the plain importlib-derived __version__, which is
     # enough for dev-mode diagnostics.
 
-    local check
-    check="$("$dev_python" -c 'import agent_codespaces; print("OK")' 2>/dev/null || true)"
-    if [[ "$check" != "OK" ]]; then
-        _fail "dev slot failed its health gate (import agent_codespaces) -- not activating"
+    if ! _codespaces_runtime_healthy "$dev_python"; then
+        _fail "dev slot failed its module launch health gate -- not activating"
         return 1
     fi
 
@@ -993,13 +1000,10 @@ do_install() {
     # Write manifest
     _write_codespaces_deploy_manifest
 
-    # Verify (import from the venv -- no PYTHONPATH)
-    local check
-    check="$("$LINK_PYTHON" -c 'import agent_codespaces; print("OK")' 2>/dev/null || true)"
-    if [[ "$check" == "OK" ]]; then
-        _ok "Verification: module imports successfully"
+    if _codespaces_runtime_healthy "$LINK_PYTHON"; then
+        _ok "Verification: module launches successfully"
     else
-        _fail "Verification: module import failed"
+        _fail "Verification: module launch failed"
         return 1
     fi
 
@@ -1227,12 +1231,10 @@ do_provision() {
     PYTHONUTF8=1 "$VENV_PYTHON" -m agent_codespaces config-migrate 2>&1 \
         | sed 's/^/  /' || _warn "Config migration skipped"
     _write_codespaces_deploy_manifest
-    local check
-    check="$("$LINK_PYTHON" -c 'import agent_codespaces; print("OK")' 2>/dev/null || true)"
-    if [[ "$check" == "OK" ]]; then
-        _ok "Verification: module imports successfully"
+    if _codespaces_runtime_healthy "$LINK_PYTHON"; then
+        _ok "Verification: module launches successfully"
     else
-        _fail "Verification: module import failed"
+        _fail "Verification: module launch failed"
         return 1
     fi
     # Connection Owner daemon (config-gated; default on unless opted out).

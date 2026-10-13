@@ -1,0 +1,26 @@
+{
+  "name": "agent-codespaces-launch-health",
+  "description": "Exact-candidate fresh provisioning and completed-slot launch-health refusal, without credentials or a live CodeSpace.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": {
+    "present": ["python3", "uv", "bash"],
+    "provisioned_by_flow": []
+  },
+  "auth": { "copilot": "none", "gh": "none", "ado": "none" },
+  "config": {
+    "CR_HARNESS_MOUNT": "required exact candidate checkout",
+    "CR_UV_INDEX": "optional explicit package index"
+  },
+  "expected_artifacts": [
+    "~/.agent-codespaces/versions/<candidate-version>/.install-complete.json",
+    "~/.agent-codespaces/current-version"
+  ],
+  "stages": [
+    { "n": 0, "title": "fresh environment and exact candidate" },
+    { "n": 1, "title": "fresh real runtime provisioning" },
+    { "n": 2, "title": "namespace package is not a launchable runtime" },
+    { "n": 3, "title": "forced update refuses before rewriting completion or selection" }
+  ]
+}

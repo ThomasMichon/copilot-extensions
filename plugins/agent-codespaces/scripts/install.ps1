@@ -295,6 +295,20 @@ if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VER
     }
 }
 
+function Test-CodespacesRuntime {
+    param([Parameter(Mandatory)][string]$Python)
+    if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) { return $false }
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $global:LASTEXITCODE = 1
+        & $Python -I -m agent_codespaces --help 2>&1 | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+}
+
 function Invoke-VersionedActivate {
     <# CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
        junction onto it (first migration moves a legacy real `.venv` aside), then
@@ -307,12 +321,8 @@ function Invoke-VersionedActivate {
         Write-ServiceErr "Fresh runtime slot has no interpreter (versions/$SrcVersion)"
         return $false
     }
-    $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    & $VenvPython -c 'import agent_codespaces' 2>$null
-    $slotOk = ($LASTEXITCODE -eq 0)
-    $ErrorActionPreference = $prevEAP
-    if (-not $slotOk) {
-        Write-ServiceErr "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
+    if (-not (Test-CodespacesRuntime -Python $py)) {
+        Write-ServiceErr "Fresh runtime slot failed its module launch health gate (versions/$SrcVersion) -- not activating"
         return $false
     }
     if (-not (Invoke-VersionedMarkComplete)) { return $false }
@@ -818,13 +828,8 @@ function Invoke-Dev {
     # mode falls back to the plain importlib-derived __version__, which is
     # enough for dev-mode diagnostics.
 
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    & $devPython -c 'import agent_codespaces' 2>$null
-    $healthOk = ($LASTEXITCODE -eq 0)
-    $ErrorActionPreference = $prevEAP
-    if (-not $healthOk) {
-        Write-ServiceErr 'dev slot failed its health gate (import agent_codespaces) -- not activating'
+    if (-not (Test-CodespacesRuntime -Python $devPython)) {
+        Write-ServiceErr 'dev slot failed its module launch health gate -- not activating'
         return $false
     }
 
@@ -851,6 +856,11 @@ function Invoke-Dev {
 function Deploy-Venv {
     <# Create the Python venv via uv. Deps come from pyproject at package
        install time -- no ad-hoc pyyaml here. #>
+    if ((Test-Path -LiteralPath (Join-Path $VenvDir '.install-complete.json')) -and
+        -not (Test-CodespacesRuntime -Python $VenvPython)) {
+        Write-ServiceErr "Completed runtime slot failed its module launch health gate (versions/$SrcVersion). Refusing an in-place rebuild; use distinct-generation repair or a new released version."
+        return $false
+    }
     Assert-Uv
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -1205,21 +1215,17 @@ function Invoke-Install {
     # Write manifest
     Write-CodespacesDeployManifest
 
-    # Verify the package imports from the venv (no PYTHONPATH). Retry briefly
+    # Verify the module launch from the venv. Retry briefly
     # for transient AV file locks.
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $importOk = $false
+    $launchOk = $false
     for ($i = 0; $i -lt 3; $i++) {
-        & $LinkPython -c 'import agent_codespaces' 2>$null
-        if ($LASTEXITCODE -eq 0) { $importOk = $true; break }
+        if (Test-CodespacesRuntime -Python $LinkPython) { $launchOk = $true; break }
         Start-Sleep -Seconds 1
     }
-    $ErrorActionPreference = $prevEAP
-    if ($importOk) {
-        Write-ServiceOk 'Verification: module imports successfully'
+    if ($launchOk) {
+        Write-ServiceOk 'Verification: module launches successfully'
     } else {
-        Write-ServiceErr 'Verification: module import failed'
+        Write-ServiceErr 'Verification: module launch failed'
         throw 'Runtime verification failed'
     }
 
@@ -1375,15 +1381,10 @@ function Invoke-Status {
     # the (intentionally absent) Scripts\agent-codespaces.exe -- checking the
     # stripped exe here reported a bogus "Console script missing" error and made
     # a healthy deploy look broken (#49).
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    & $VenvPython -m agent_codespaces --help 2>&1 | Out-Null
-    $launchRc = $LASTEXITCODE
-    $ErrorActionPreference = $prevEAP
-    if ($launchRc -eq 0) {
+    if (Test-CodespacesRuntime -Python $VenvPython) {
         Write-ServiceOk "Launch path: python -m agent_codespaces"
     } else {
-        Write-ServiceErr "Launch path failed: python -m agent_codespaces (exit $launchRc)"
+        Write-ServiceErr "Launch path failed: python -m agent_codespaces"
     }
 
     # Binstub

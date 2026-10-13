@@ -1,0 +1,9 @@
+{
+  "comment": "Health-gate the isolated module launch and refuse rebuilding completed unlaunchable runtime slots",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

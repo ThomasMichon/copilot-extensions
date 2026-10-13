@@ -100,6 +100,15 @@ User-root redirection alone does not isolate executable discovery or scheduled
 tasks. The signed-venv health/exit-code matrix uses simulated signatures on both
 platforms; native signature-policy behavior still requires Windows validation.
 
+The Codespaces module-launch matrix is an opt-in T3 contract:
+`python tools/run-plugin-tests.py agent-codespaces --allow-explicit-tiers -k activation_requires_installed_module_launch`.
+A focused completed-namespace pre-construction refusal remains in the ordinary
+installer suite. For exact-candidate Linux provisioning and forced-update
+refusal on a disposable fresh machine, run
+`tools/clean-room/run.ps1 -Scenario agent-codespaces-launch-health -HarnessMount <candidate> -NameSuffix <unique> -Then down`.
+This agent-free scenario requires no credentials or live CodeSpace and tests
+the actual installed `python -I -m agent_codespaces --help` entrypoint.
+
 Agent SSH's cold first-use snapshot provisioning restores real network
 dependencies and is an explicit T3 check, not a default fast unit case.
 Its pytest item budget remains 30 seconds; an unavailable budget is a failed
