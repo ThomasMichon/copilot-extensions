@@ -104,7 +104,8 @@ it does not cancel the native task or claim that its process has exited.
 
 CLI namespace enumeration has provider-local wall-overrun admission: two
 consecutive native execution timeouts open a 60-second cooldown. Suppressed
-requests use the existing in-process fallback or report namespace incomplete.
+requests use the existing in-process fallback. Without fallback, an installed
+provider reports namespace incomplete.
 An uninstalled provider remains legitimate empty absence: when no fallback
 exists and its executable is missing, suppression returns an empty list
 without launching work or claiming successful native recovery.

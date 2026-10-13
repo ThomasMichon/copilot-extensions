@@ -9,8 +9,9 @@ probe. Existing execution timeouts remain unchanged.
 
 - Key admission by the provider instance and its namespace enumeration role.
   Join an existing exact holder before considering circuit state.
-- Count actual native execution timeout, not an outer caller wait timeout,
-  cancellation, missing executable, or a generic failure, as a wall overrun.
+- Only an actual native execution timeout counts as a wall overrun.
+  Caller wait timeout, caller cancellation, missing executable and generic
+  failure do not count as wall overruns.
 - Two consecutive native overruns open admission. While open, suppress new
   native launches; preserve the in-process fallback or report namespace
   incomplete when none exists. A missing provider executable remains legitimate
