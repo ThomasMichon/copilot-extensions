@@ -122,6 +122,12 @@ and negative controls before implementation.
 - [ ] Public content contains no adopter-private identifiers, paths or rationale.
       Activation/rollout claims name verified evidence, not installed markers.
 
+## Proposal
+
+The [operational contract proposal](design.md) defines the activation,
+authority-readiness and Windows process boundaries for review before
+implementation.
+
 ## Journal
 
 ### 2026-10-12 - Proposal
