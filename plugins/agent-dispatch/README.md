@@ -2157,6 +2157,11 @@ HTTP protocol 33 and the retained native UUID, refusing a dead or replaced
 conversation without auto-resume/recreation. Retained or ambiguous reservations
 consume supervisor capacity even when startup fails. Bridge-created worktrees remain Bridge-owned rather than being stamped
 as Dispatch-created allocations with Dispatch cleanup authority.
+The reservation's `ordinary-bridge` driver stays stable across this lifecycle;
+created provenance lives in `agent_info`. One-shot `create --spawn` exits
+nonzero when startup/publication fails, while preserving the task and any
+ambiguous created identity. Inspect that reservation instead of assuming the
+task was never created or allocating a replacement after an error.
 The first ordinary message includes the assigned task's prompt before the
 generic worker lifecycle seed, so task-specific identity/rubric bootstrap
 instructions arrive before claim/start. Local headless workers claim through

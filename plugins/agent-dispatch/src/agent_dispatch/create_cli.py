@@ -275,9 +275,11 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
         # task queued than risk a second autonomous worker).
         print(
             f"agent-dispatch: --spawn skipped (could not reserve spawn: {exc}); "
-            f"task {task_id} left queued for any worker to claim",
+            f"task {task_id} remains durable; reservation admission is unproven",
             file=sys.stderr,
         )
+        if getattr(args, "spawn_backend", "bridge") == "bridge":
+            raise SystemExit(1) from exc
         return
     if not resp.get("reserved"):
         res = resp.get("reservation", {})
@@ -503,31 +505,41 @@ def _spawn_route(args: argparse.Namespace) -> str:
 def _spawn_ordinary_worker(args, task, reservation, client, *, route: str) -> None:
     from . import bridge, ordinary_bridge
     key = reservation["key"]
+    published = False
     try:
         spawned = _core()._do_spawn(
             args, {**task, "spawn_reservation_key": key, "_spawn_client": client}, route=route,
         )
         if spawned is None:
             client.fail_spawn(key, detail="ordinary bridge unavailable before creation")
-            return
+            print(f"agent-dispatch: ordinary spawn unavailable; reservation {key} failed", file=sys.stderr)
+            raise SystemExit(1)
         result, _, handle = spawned
         if handle.get("retained"):
             print(f"agent-dispatch: reservation {key} retained for explicit repair: {result.stderr}", file=sys.stderr)
         elif handle.get("deferred"):
             client.defer_spawn(key, detail=result.stderr)
+            print(f"agent-dispatch: ordinary send deferred; reservation {key}: {result.stderr}", file=sys.stderr)
         elif result.returncode:
             client.fail_spawn(key, detail=result.stderr)
+            print(f"agent-dispatch: ordinary spawn failed; reservation {key}: {result.stderr}", file=sys.stderr)
         else:
             client.record_spawn(key, session_handle=handle["session"], worktree=handle["worktree"],
                                 session_info=handle["session_info"])
+            published = True
             if not args.run_async:
                 observation = ordinary_bridge.observe(handle)
                 if observation.returncode:
                     print(f"agent-dispatch: prompt accepted; observation failed: {observation.stderr}", file=sys.stderr)
+                    raise SystemExit(observation.returncode or 1)
                 elif observation.stdout:
                     print(observation.stdout, end="")
+        if result.returncode:
+            raise SystemExit(result.returncode)
     except (DispatchError, ordinary_bridge.CreatedAgentUnrecorded, bridge.BridgeUnavailable) as exc:
-        print(f"agent-dispatch: ordinary spawn bookkeeping failed; reservation {key} retained: {exc}", file=sys.stderr)
+        stage = "prompt accepted; observation failed" if published else "ordinary spawn bookkeeping failed"
+        print(f"agent-dispatch: {stage}; reservation {key} retained: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 
 
 def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):

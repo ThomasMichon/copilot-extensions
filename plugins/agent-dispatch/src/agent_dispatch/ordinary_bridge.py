@@ -105,7 +105,7 @@ def record_created_agent(
             raise TaskError("created-agent worktree has another active owner or cleanup")
         conn.execute(
             "UPDATE spawn_reservations SET worktree=?,session_handle=?,agent_info=?,"
-            "worktree_ownership='targeted',driver='agent-bridge',updated_at=? WHERE key=?",
+            "worktree_ownership='targeted',driver='ordinary-bridge',updated_at=? WHERE key=?",
             (worktree, handle, encoded, queue._now(None), key),
         )
         result = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
@@ -148,9 +148,7 @@ def record_session_info(queue: Any, key: str, session_info: dict) -> SpawnReserv
 
 def legacy_bound(queue: Any, task_id: str, worktree: str | None) -> bool:
     """An old acquisition marker is not implicitly ordinary start authority."""
-    from .acquisition_receipts import ensure
     with queue._connect() as conn:
-        ensure(conn)
         return conn.execute(
             "SELECT 1 FROM acquisition_markers m JOIN spawn_reservations s "
             "ON s.key=m.reservation_key WHERE s.task_id=? OR s.worktree=? LIMIT 1",
@@ -300,8 +298,15 @@ def start(
         sent = run(["--json", "send", session_id, "--expected-native-session-id",
                     info["connection"]["native_session_id"], "--prompt-file", "-", "--no-wait"],
                    prompt_input=prompt)
-        response = _json_result(sent)
-        if (sent.returncode or response.get("session_id") != session_id
+        if sent.returncode:
+            detail = sent.stderr.strip() or sent.stdout.strip() or "no error detail"
+            raise BridgeCarriedSessionBusy(f"ordinary bridge send exited {sent.returncode}: {detail}")
+        try:
+            response = _json_result(sent)
+        except BridgeCarriedSessionBusy as exc:
+            detail = sent.stderr.strip() or sent.stdout.strip() or "empty response"
+            raise BridgeCarriedSessionBusy(f"ordinary send response is malformed: {detail}") from exc
+        if (response.get("session_id") != session_id
                 or response.get("native_session_id") != info["connection"]["native_session_id"]
                 or response.get("outcome") != "delivered"):
             raise BridgeCarriedSessionBusy(sent.stderr or "ordinary bridge send outcome is unproven")

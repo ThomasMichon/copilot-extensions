@@ -696,3 +696,5 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_registrations_kind ON registrations(kind)"
     )
+    from .acquisition_receipts import ensure
+    ensure(conn)

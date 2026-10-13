@@ -82,6 +82,7 @@ def test_create_store_send_order_and_readable_identity(startup):
     assert [call[0] for call in calls] == ["create", "store", "store", "send"]
     stored = asdict(queue.get_reservation(task["spawn_reservation_key"]))
     assert stored["agent_info"]["session_id"] == "bridge-a"
+    assert stored["driver"] == "ordinary-bridge"
     assert queue.get(task["id"]).status == "queued"
 
 
@@ -369,7 +370,7 @@ def test_supervisor_poll_reserves_creates_stores_sends_and_records(startup, monk
     assert [call[0] for call in calls] == ["create", "store", "store", "send", "record"]
     res = queue.latest_reservation(task["id"])
     assert res.agent_info["last_send"]["outcome"] == "delivered"
-    assert res.worktree_ownership == "targeted" and res.driver == "agent-bridge"
+    assert res.worktree_ownership == "targeted" and res.driver == "ordinary-bridge"
 
 
 def test_retained_idle_agent_sends_without_invalid_strict_resume(startup, monkeypatch) -> None:
@@ -451,3 +452,95 @@ def test_retained_failure_consumes_same_poll_capacity(startup, monkeypatch, fail
     assert len(queue.list_reservations(state="reserving")) == 1
     untouched = second.id if attempts[0] == task["id"] else task["id"]
     assert queue.latest_reservation(untouched) is None or queue.latest_reservation(untouched).state == "failed"
+
+
+@pytest.mark.parametrize("exit_code", [0, 69])
+def test_send_diagnostics_preserve_literal_failure(startup, monkeypatch, exit_code) -> None:
+    queue, task, client, calls = startup
+    original = ordinary_bridge.subprocess.run
+
+    def fail_send(argv, **kwargs):
+        if argv[2] == "send":
+            return subprocess.CompletedProcess(argv, exit_code, "not-json", "fixture native admission refused")
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", fail_send)
+    with pytest.raises(bridge.BridgeCarriedSessionBusy, match="fixture native admission refused"):
+        ordinary_bridge.start(task, client=client, agent="local", project="example",
+                              charter="reviewer", prompt="assigned task")
+    assert queue.get_reservation(task["spawn_reservation_key"]).agent_info["session_id"] == "bridge-a"
+
+
+def test_legacy_bound_is_read_only_after_queue_migration(startup, monkeypatch) -> None:
+    from contextlib import contextmanager
+    queue, task, _, _ = startup
+    original = queue._connect
+
+    @contextmanager
+    def read_only():
+        with original() as conn:
+            conn.execute("PRAGMA query_only=ON")
+            yield conn
+
+    monkeypatch.setattr(queue, "_connect", read_only)
+    assert ordinary_bridge.legacy_bound(queue, task["id"], None) is False
+
+
+@pytest.mark.parametrize("failure", ["bookkeeping", "retained", "deferred", "unavailable"])
+def test_one_shot_spawn_failure_exits_nonzero_without_success_emission(
+    startup, monkeypatch, capsys, failure,
+) -> None:
+    import argparse
+    from agent_dispatch import __main__ as core, create_cli
+    from agent_dispatch.client import DispatchError
+    queue, task, client, _ = startup
+    args = argparse.Namespace(run_async=True)
+    reservation = {"key": task["spawn_reservation_key"]}
+
+    def fail_record(*a, **kw):
+        raise DispatchError(503, "fixture coordinator refused spawn publication")
+
+    client.record_spawn = fail_record
+    client.fail_spawn = queue.fail_spawn
+    client.defer_spawn = queue.defer_spawn
+    if failure == "unavailable":
+        spawned = None
+    elif failure in ("retained", "deferred"):
+        spawned = (subprocess.CompletedProcess([], 1, "", "fixture spawn unavailable"),
+                   "agent-bridge", {failure: True})
+    else:
+        handle = ordinary_bridge.start(task, client=client, agent="local", project="example",
+                                       charter="reviewer", prompt="assigned task")
+        spawned = (subprocess.CompletedProcess([], 0, "", ""), "agent-bridge", handle)
+    monkeypatch.setattr(core, "_do_spawn", lambda *a, **kw: spawned)
+    with pytest.raises(SystemExit) as raised:
+        create_cli._spawn_ordinary_worker(args, task, reservation, client, route="")
+    assert raised.value.code != 0
+    output = capsys.readouterr()
+    assert not output.out
+    assert "reservation" in output.err
+    retained = queue.get_reservation(task["spawn_reservation_key"])
+    expected = {"deferred": "deferred", "unavailable": "failed"}.get(failure, "reserving")
+    assert retained.state == expected
+    if failure == "bookkeeping":
+        assert retained.agent_info["session_id"] == "bridge-a"
+
+
+def test_one_shot_reservation_failure_is_nonzero_and_does_not_spawn(startup, monkeypatch) -> None:
+    import argparse
+    from contextlib import nullcontext
+    from agent_dispatch import __main__ as core, create_cli
+    from agent_dispatch.client import DispatchError
+    queue, task, client, _ = startup
+
+    def fail_reserve(*a, **kw):
+        raise DispatchError(503, "fixture reservation unavailable")
+
+    client.reserve_spawn = fail_reserve
+    monkeypatch.setattr(core, "_spawn_route", lambda _: "")
+    monkeypatch.setattr(core, "_client", lambda _: nullcontext(client))
+    monkeypatch.setattr(core, "_do_spawn", lambda *a, **kw: pytest.fail("no admitted reservation"))
+    with pytest.raises(SystemExit) as raised:
+        create_cli._spawn_worker_for(argparse.Namespace(spawn_backend="bridge"), task)
+    assert raised.value.code == 1
+    assert queue.get(task["id"]).status == "queued"
