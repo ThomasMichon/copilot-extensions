@@ -43,6 +43,8 @@ def checks_payload(
 
 def print_check_failures(payload: dict, *, stream: TextIO, prefix: str) -> None:
     """Render diagnostic names and links on the human watch/status surfaces."""
+    if payload.get("checks_complete") is False:
+        print(f"{prefix}  check evidence is incomplete", file=stream)
     failures = payload.get("check_failures") or []
     if not failures:
         if payload.get("checks_state") == "failure":
@@ -60,5 +62,3 @@ def print_check_failures(payload: dict, *, stream: TextIO, prefix: str) -> None:
             print(f"{prefix}    {failure['url']}", file=stream)
     if payload.get("check_failures_omitted"):
         print(f"{prefix}  {payload['check_failures_omitted']} more failures omitted", file=stream)
-    if payload.get("checks_complete") is False:
-        print(f"{prefix}  check evidence is incomplete", file=stream)

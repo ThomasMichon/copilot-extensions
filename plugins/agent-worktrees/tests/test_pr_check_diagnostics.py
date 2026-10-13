@@ -270,6 +270,21 @@ def test_check_diagnostics_unsupported_provider_reports_unavailable() -> None:
     assert "named diagnostics unavailable" in output.getvalue()
 
 
+@pytest.mark.guard
+@pytest.mark.parametrize("state", ["", "pending", "success", "failure"])
+@pytest.mark.parametrize("complete", [False, True, None])
+def test_check_diagnostics_human_incomplete_without_named_failures(
+    state: str, complete: bool | None,
+) -> None:
+    output = io.StringIO()
+    print_check_failures(
+        checks_payload(state, (), complete=complete), stream=output, prefix="watch: ",
+    )
+    text = output.getvalue()
+    assert ("check evidence is incomplete" in text) is (complete is False)
+    assert ("named diagnostics unavailable" in text) is (state == "failure")
+
+
 def test_check_diagnostics_cli_status_heading_precedes_details(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
