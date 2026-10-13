@@ -323,6 +323,14 @@ below-altitude evidence/tooling documentation, with no new rollout claim.
   discovered tests and `F,E9` checks pass. The old addressed findings are not
   being patched a second time; review-thread state is reconciled to the actual
   corrections and independent evidence.
+- The next Lite review recognized those seventeen resolved threads and
+  identified direct raw-stream CLI parsing plus an exit-code type contract.
+  Export, analysis and `recovery-events` now share the same validated parser;
+  invalid raw streams and malformed/non-object checkpoint stdin emit structured
+  nonzero results. Present execution exit codes require genuine integers
+  rather than floating-point aliases. All forty-four discovered tests and
+  `F,E9` checks pass; the six diagnostic tests also pass in an unpaid Linux
+  container. No historical packet or native verdict was changed.
 - The corrections affect source evidence validation only. All four historical
   independent FAIL verdicts and their original packets remain unchanged.
   No paid trial, native deployment claim or runtime change is authorized by

@@ -131,6 +131,45 @@ def result_text(completion):
     return result.get("content") if isinstance(result, dict) else None
 
 
+def event_stream(path):
+    errors, events = [], []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return [], [{"source": "events", "error": "event stream unavailable or unreadable"}]
+    if not lines:
+        errors.append({"source": "events", "error": "event stream is empty; no run evidence"})
+    for number, line in enumerate(lines, 1):
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            errors.append({"source": "events", "line": number, "error": "invalid event JSON"})
+            continue
+        if (not isinstance(event, dict) or not isinstance(event.get("data"), dict)
+                or any(not isinstance(event.get(key), str) or not event[key].strip()
+                       for key in ("id", "type", "timestamp"))):
+            errors.append({"source": "events", "line": number, "error": "invalid event object"})
+            continue
+        if event["type"] in ("tool.execution_start", "tool.execution_complete"):
+            data = event["data"]
+            if (not isinstance(data.get("toolCallId"), str) or not data["toolCallId"].strip()
+                    or (event["type"] == "tool.execution_start" and (
+                        not isinstance(data.get("toolName"), str) or not data["toolName"].strip()
+                        or not isinstance(data.get("arguments"), dict)))):
+                errors.append({"source": "events", "line": number, "error": "invalid tool event metadata"})
+                continue
+        if event["type"] == "user.message" and not isinstance(event["data"].get("content"), str):
+            errors.append({"source": "events", "line": number, "error": "invalid user message content"})
+            continue
+        if event["type"] == "skill.context_delivered_ref" and any(
+                not isinstance(event["data"].get(key), str) or not event["data"][key].strip()
+                for key in ("source", "prefix", "interactionId")):
+            errors.append({"source": "events", "line": number, "error": "invalid skill delivery metadata"})
+            continue
+        events.append(event)
+    return events, errors
+
+
 def execution_status(completion):
     invalid = {"success": False, "shell_exit_code": None}
     if not isinstance(completion, dict) or not isinstance(completion.get("data"), dict):
@@ -145,7 +184,7 @@ def execution_status(completion):
         return dict(invalid, error="invalid optional toolTelemetry.metrics metadata")
     metrics = telemetry.get("metrics", {})
     for container, key in ((shell, "exitCode"), (metrics, "exit_code")):
-        if key in container and type(container[key]) not in (int, float):
+        if key in container and type(container[key]) is not int:
             return dict(invalid, error=f"invalid optional {key} value")
     exit_code, telemetry_code = shell.get("exitCode"), metrics.get("exit_code")
     good = data.get("success") is True and exit_code in (None, 0) and telemetry_code in (None, 0)
@@ -828,14 +867,22 @@ if __name__ == "__main__":
     if kind == "recovery-events":
         if len(extra) != 2:
             raise SystemExit("recovery-events requires events.jsonl, workspace and trusted seed baseline")
-        observations = recovery_event_errors([json.loads(line) for line in Path(root_arg).read_text().splitlines()],
-                                             Path(extra[0]).resolve(), baseline=Path(extra[1]))
+        events, stream_errors = event_stream(Path(root_arg))
+        observations = [{"clear_event": None, "errors": stream_errors}] if stream_errors else \
+            recovery_event_errors(events, Path(extra[0]).resolve(), baseline=Path(extra[1]))
         print(json.dumps({"valid": all(not row["errors"] for row in observations), "observations": observations}))
         sys.exit(any(row["errors"] for row in observations))
     root = Path(root_arg).resolve()
     if len(extra) != 1:
         raise SystemExit("checkpoint/witness validation requires a trusted seed baseline")
-    document = json.load(sys.stdin)
+    try:
+        document = json.load(sys.stdin)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        print(json.dumps({"valid": False, "errors": ["checkpoint/witness content is not valid JSON"]}))
+        sys.exit(1)
+    if not isinstance(document, dict):
+        print(json.dumps({"valid": False, "errors": ["checkpoint/witness content must be an object"]}))
+        sys.exit(1)
     validate = {"checkpoint": checkpoint_errors, "witness": witness_errors}[kind]
     errors = validate(document, root, baseline=Path(extra[0]))
     print(json.dumps({"valid": not errors, "errors": errors}))

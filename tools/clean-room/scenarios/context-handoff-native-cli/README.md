@@ -171,12 +171,17 @@ results are retained as structured error observations, excluded from affirmative
 measurement/artifact lists, and still produce an observed-evidence/judge packet.
 Optional execution/telemetry objects may be absent; explicit null/nonobject
 metadata or invalid exit-code values are structured negative evidence, never
-success or an analyzer crash.
+success or an analyzer crash. Present exit codes must be genuine integers;
+floating-point and boolean aliases are not normalized into success.
 Export likewise records missing, unreadable, empty or malformed event streams
 in `export-errors.json`, keeps valid rows only as explicitly diagnostic/partial
 evidence, and writes a judge packet with `INVALID_EXPORT` status. Its CLI exits
 nonzero after preserving diagnostics; it never invents an empty valid run.
-Event row validation is shared with analysis. Seal setup refuses a missing or
+Event row validation is shared by export, analysis and the direct
+`recovery-events` CLI. Invalid raw streams return structured observations and
+nonzero status, without crediting partial rows. Checkpoint/witness stdin must
+be a JSON object; malformed JSON or other JSON shapes produce structured
+failure results rather than tracebacks. Seal setup refuses a missing or
 unreadable known sudo grant with an actionable error before any policy/binary
 mutation. Validator APIs have no task override argument: only the trusted seed
 defines expected task values.

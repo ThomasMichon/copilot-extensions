@@ -11,7 +11,7 @@ import sys
 import time
 import uuid
 from validation import (
-    checkpoint_errors, checkpoint_readback_errors, execution_status, measurement_result, object_result,
+    checkpoint_errors, checkpoint_readback_errors, event_stream, execution_status, measurement_result, object_result,
     pressure_events, recovery_event_errors, root_event, seed_baseline, workspace_seed_errors, witness_errors,
 )
 
@@ -45,45 +45,6 @@ def metadata(path, label, errors):
         errors.append({"source": label, "error": "metadata is not an object"})
         return None
     return value
-
-
-def event_stream(path):
-    errors, events = [], []
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeError):
-        return [], [{"source": "events", "error": "event stream unavailable or unreadable"}]
-    if not lines:
-        errors.append({"source": "events", "error": "event stream is empty; no run evidence"})
-    for number, line in enumerate(lines, 1):
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            errors.append({"source": "events", "line": number, "error": "invalid event JSON"})
-            continue
-        if (not isinstance(event, dict) or not isinstance(event.get("data"), dict)
-                or any(not isinstance(event.get(key), str) or not event[key].strip()
-                       for key in ("id", "type", "timestamp"))):
-            errors.append({"source": "events", "line": number, "error": "invalid event object"})
-            continue
-        if event["type"] in ("tool.execution_start", "tool.execution_complete"):
-            data = event.get("data", {})
-            if (not isinstance(data.get("toolCallId"), str) or not data["toolCallId"].strip()
-                    or (event["type"] == "tool.execution_start" and (
-                        not isinstance(data.get("toolName"), str) or not data["toolName"].strip()
-                        or not isinstance(data.get("arguments"), dict)))):
-                errors.append({"source": "events", "line": number, "error": "invalid tool event metadata"})
-                continue
-        if event["type"] == "user.message" and not isinstance(event["data"].get("content"), str):
-            errors.append({"source": "events", "line": number, "error": "invalid user message content"})
-            continue
-        if event["type"] == "skill.context_delivered_ref" and any(
-                not isinstance(event["data"].get(key), str) or not event["data"][key].strip()
-                for key in ("source", "prefix", "interactionId")):
-            errors.append({"source": "events", "line": number, "error": "invalid skill delivery metadata"})
-            continue
-        events.append(event)
-    return events, errors
 
 
 def require_venue_seal():
