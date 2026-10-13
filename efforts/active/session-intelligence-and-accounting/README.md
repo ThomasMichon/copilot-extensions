@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Vision:** [agent-logger session intelligence](../../../visions/plugins/agent-logger/session-intelligence/README.md)
 - **Umbrella issue:** #5665
-- **Sub-issues:** #5676 (evidence preservation) · #5677 (catalog and accounting) · #5678 (aggregation and adoption)
+- **Sub-issues:** #5676 (evidence preservation) · #5677 (catalog and accounting) · #5678 (aggregation and adoption) · #6439 (session-local usage evidence and historical estimation)
 
 ## Guiding Intent
 
@@ -104,6 +104,11 @@ Follow-up: effort slug confirmed as `session-intelligence-and-accounting`.
 > zip-archives logs on a schedule. I don't think it does that right now, as my
 > work machines don't show logs/ under the [configured tracking folder].
 
+Follow-up, 2026-10-12:
+
+> We can update agent-logger's session-sync daemon to pull and store the additional information we need, for example selections from the session_store db associated with the sessions as we sync them. This will ensure we always have it; it's possible for the session_store.db to get corrupted and rebuilt, leaving only the session-state folders.
+> We'll need a way to estimate tokens from events.jsonl transcripts, which I think are really the only durable artifacts we can count in for every session. There are probably "back-of-the-envelope" relationships we can dervice from the newer per-session metrics and their associated transcripts. That should give us the ability to produce a historical estimate.
+
 ## Plan
 
 ### Phase 0 - Reviewed intent and contracts
@@ -112,6 +117,9 @@ Follow-up: effort slug confirmed as `session-intelligence-and-accounting`.
   accounting, catalog, daily-output, and consumer compatibility contracts.
 
 ### Phase 1 - Complete evidence preservation
+- [ ] Preserve bounded, content-free session-local accounting observations before
+  sync and compaction; retain prior evidence after store rebuild or corruption
+  (#6439; [slice contract](usage-evidence-and-estimation.md)).
 - [ ] Extend configured sync to preserve process logs alongside session-state.
 - [x] Add canonical local target identity admission and kernel-owned publication
   claims under a lock spanning payload writes (#5808).
@@ -131,6 +139,10 @@ Follow-up: effort slug confirmed as `session-intelligence-and-accounting`.
   without hiding genuine identity conflicts or missing telemetry.
 
 ### Phase 3 - Accounting and chart-complete query backend
+- [ ] Add separately labeled transcript-only historical token estimates calibrated
+  against measured sessions, with held-out error, applicability and explicit
+  abstention when the available evidence does not support an estimate
+  (#6439; [slice contract](usage-evidence-and-estimation.md)).
 - [ ] Extract reusable event parsing, exact accounting, token composition,
   lifecycle, elapsed-rate, subagent, dispatch, and bridge/provenance joins.
 - [ ] Offer versioned query/export and vendorable library contracts reproducing
@@ -157,6 +169,11 @@ Follow-up: effort slug confirmed as `session-intelligence-and-accounting`.
   before marking Done and archiving this effort.
 
 ## Validation Plan
+
+- [ ] Session-local usage evidence and transcript estimates meet the bounded
+  preservation, privacy, replay, archive, calibration and uncertainty checks in
+  the [slice contract](usage-evidence-and-estimation.md); unsupported historical
+  cohorts remain visibly unestimated.
 
 - [ ] Source preservation: synchronized live and zipped process logs retain
   provider-metered telemetry and survive active append, rotation, resume, partial
