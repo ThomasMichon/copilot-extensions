@@ -503,3 +503,8 @@ The full Windows procutil suite passed 103 tests after this correction, and the
 focused reader/admission/telemetry/vendoring selection passed 42. The previous
 full nine-sub-suite Windows and Linux runs are baseline evidence only; fresh
 exact-head review and code CI remain required before landing the correction.
+
+The existing consumer native fixture now also verifies the actual sampling-thread
+counter delta in exported telemetry, ensuring canonical Linux CI exercises that
+direct witness without another subprocess fixture. Its focused Windows
+reader/admission/telemetry/vendoring selection passed 42 tests.
