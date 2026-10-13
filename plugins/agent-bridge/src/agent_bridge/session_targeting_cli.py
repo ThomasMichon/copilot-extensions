@@ -387,7 +387,11 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
     print(f"    receipt: {receipt.get('stage') or 'unavailable (delivery evidence unavailable)'}")
     if result.get("receipt_error"):
         print(f"    receipt evidence unavailable: {result['receipt_error']}", file=sys.stderr)
-    print(f"    observe: agent-bridge read {session_id} --message-id {mid} --json")
+    if receipt.get("stage"):
+        print(f"    observe: agent-bridge read {session_id} --message-id {mid} --json")
+    else:
+        print(f"    observe: agent-bridge read {session_id} --json")
+        print("    (message receipt observation requires daemon protocol 33 or newer)")
     if reply_to:
         print(f"    reply-to: {reply_to}")
     else:

@@ -558,6 +558,23 @@ def test_cli_missing_receipt_stage_does_not_invent_admission(monkeypatch, capsys
     else:
         assert "receipt: unavailable (delivery evidence unavailable)" in output
         assert "receipt: admitted" not in output
+        assert "observe: agent-bridge read live-1 --json" in output
+        assert "--message-id" not in output
+        assert "receipt observation requires daemon protocol 33 or newer" in output
+
+
+@pytest.mark.parametrize("stage", ["admitted", "sdk_accepted", "consumed"])
+def test_cli_observation_hint_uses_message_id_when_receipt_stage_is_available(monkeypatch, capsys, stage):
+    class Client:
+        def send_live_message(self, sid, **kwargs):
+            return {"message_id": 7, "session_id": sid, "receipt": {"stage": stage}}
+
+    monkeypatch.setattr(cli, "_live_sender_label", lambda _args: "peer")
+    monkeypatch.setattr(cli, "_live_reply_to", lambda _args: None)
+    _deliver_to_live_session(Client(), argparse.Namespace(json=False, no_wait=False), "live-1", "update")
+    output = capsys.readouterr().out
+    assert "observe: agent-bridge read live-1 --message-id 7 --json" in output
+    assert "receipt observation requires" not in output
 
 
 @pytest.mark.parametrize("duplicate", [False, True])
