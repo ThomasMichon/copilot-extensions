@@ -174,6 +174,28 @@ async def test_sample_completing_after_join_budget_is_exported_at_command_exit(
 
 
 @pytest.mark.asyncio
+async def test_distinct_asyncio_timeout_remains_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class LegacyAsyncioTimeout(Exception):
+        pass
+
+    async def timeout(awaitable: object, *, timeout: float) -> None:
+        raise LegacyAsyncioTimeout()
+
+    monkeypatch.setattr(reader_observation.asyncio, "TimeoutError", LegacyAsyncioTimeout)
+    monkeypatch.setattr(reader_observation.asyncio, "wait_for", timeout)
+    root = ProcessIdentity(123, None)
+    observer = reader_observation.ReaderCpuObservation("test")
+    sampler = OwnedProcessCpuSampler(root)
+    observation, issue = await observer._sample(sampler, root, None)
+    assert observation is None
+    assert issue is not None and issue.reason == "sample_pending"
+    assert observer._sample_holder is not None
+    await observer._sample_holder
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("replace_provider", [False, True])
 async def test_stuck_sample_retained_after_command_and_provider_replacement(
     monkeypatch: pytest.MonkeyPatch,

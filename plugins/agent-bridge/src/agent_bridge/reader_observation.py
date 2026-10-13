@@ -63,7 +63,7 @@ class ReaderCpuObservation:
                 asyncio.shield(holder),
                 timeout=_SAMPLE_JOIN_SECONDS,
             )
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             return previous, CpuIssue(root.pid, "sample_pending")
         except Exception:
             log.warning("Namespace reader CPU observation failed", exc_info=True)

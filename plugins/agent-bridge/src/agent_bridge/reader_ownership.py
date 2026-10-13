@@ -51,7 +51,7 @@ class ProviderReaderOwnership:
             return_exceptions=True,
         )
         for result in native_results:
-            if isinstance(result, TimeoutError):
+            if isinstance(result, (TimeoutError, asyncio.TimeoutError)):
                 log.warning(
                     "Agent roster cache: native provider read still running at shutdown; "
                     "retaining ownership until its execution timeout or completion",
@@ -67,7 +67,7 @@ class ProviderReaderOwnership:
             return_exceptions=True,
         )
         for result in sample_results:
-            if isinstance(result, TimeoutError):
+            if isinstance(result, (TimeoutError, asyncio.TimeoutError)):
                 log.warning(
                     "Agent roster cache: native CPU sample still running at shutdown; "
                     "retaining ownership until completion",

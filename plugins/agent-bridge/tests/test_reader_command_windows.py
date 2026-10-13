@@ -77,12 +77,13 @@ def test_owned_reader_is_invisible_from_windowless_parent(tmp_path: Path) -> Non
             except psutil.NoSuchProcess:
                 pass
             windows = visible_windows()
-            visible_owned.update(hwnd for hwnd, pid in windows.items() if pid in pids)
-            new_windows.update(windows.keys() - baseline.keys())
+            owned_windows = {hwnd for hwnd, pid in windows.items() if pid in pids}
+            visible_owned.update(owned_windows)
+            new_windows.update(owned_windows - baseline.keys())
             current = user32.GetForegroundWindow()
-            if current != foreground:
+            if current != foreground and windows.get(current) in pids:
                 focus_transitions += 1
-                foreground = current
+            foreground = current
             time.sleep(0.01)
         stdout, stderr = parent.communicate(timeout=2)
         assert parent.returncode == 0, (stdout, stderr)

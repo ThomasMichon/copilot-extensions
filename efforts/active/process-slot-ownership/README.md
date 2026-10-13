@@ -415,3 +415,10 @@ retains its shielded delivery waiter and consumes the completed observation
 at the bounded final join, without confusing waiter lifetime with the
 separately retained raw future. A deterministic delayed-sample regression
 and the complete focused Windows selection pass (134 tests).
+
+Review identified Python 3.10's distinct asyncio timeout class and unrelated
+desktop activity in the native launch regression. Observation and shutdown
+now classify both timeout classes consistently; a distinct-class regression
+proves ordinary join exhaustion remains pending rather than sampling failure.
+Windows visibility/focus counters are scoped to the owned parent/descendant
+PID set, not other applications. The focused selection passes 135 tests.
