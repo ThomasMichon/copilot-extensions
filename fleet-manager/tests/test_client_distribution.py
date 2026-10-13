@@ -127,8 +127,13 @@ def test_nested_service_directory_uses_same_canonical_resource(tmp_path):
 
 @pytest.mark.client_distribution_full
 @pytest.mark.parametrize("resource", ["versioned_runtime.py", "standalone_build.py"])
-def test_missing_build_resource_is_not_a_successful_partial_wheel(tmp_path, resource):
+@pytest.mark.parametrize("included_copy", [False, True])
+def test_missing_build_resource_is_not_a_successful_partial_wheel(tmp_path, resource, included_copy):
     project, library = project_at(tmp_path)
+    if included_copy:
+        included = (project / "src" / "fleet_manager" / "_versioned_runtime.py"
+                    if resource == "versioned_runtime.py" else project / "_standalone_runtime_build.py")
+        shutil.copy2(library / resource, included)
     (library / resource).unlink()
     result = build(project, tmp_path / "artifacts")
     assert result.returncode != 0
@@ -193,7 +198,7 @@ def test_real_client_install_doctor_and_package_manager_removal_preserve_config(
                   "--no-deps", "--link-mode", "copy", str(artifact)], env=clean)
     assert result.returncode == 0, result.stderr
 
-    def client(*args):
+    def client(*args, target=environment):
         # -S excludes the runner's installed fleet package; only this target is evidence.
         return run([
             sys.executable, "-I", "-S", "-B", "-c",
@@ -202,7 +207,7 @@ def test_real_client_install_doctor_and_package_manager_removal_preserve_config(
             "entry = next(e for e in distribution('fleet-manager').entry_points "
             "if e.group == 'console_scripts' and e.name == 'fleet-manager'); "
             "raise SystemExit(entry.load()())",
-            str(environment), *args,
+            str(target), *args,
         ], env=clean)
 
     before = sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*"))
@@ -219,6 +224,22 @@ def test_real_client_install_doctor_and_package_manager_removal_preserve_config(
     for role in ("gateway", "node"):
         result = client("doctor", "--role", role)
         assert result.returncode == 1
+    linked = tmp_path / "linked-client-runtime"
+    if os.name == "nt":
+        result = run([os.environ["COMSPEC"], "/d", "/c", "mklink", "/J",
+                      str(linked), str(environment)])
+        assert result.returncode == 0, result.stderr
+    else:
+        linked.symlink_to(environment, target_is_directory=True)
+    try:
+        result = client("doctor", target=linked)
+        assert result.returncode == 1
+        assert "must not be linked" in result.stderr
+    finally:
+        if os.name == "nt":
+            os.rmdir(linked)
+        else:
+            linked.unlink()
     package = environment / "fleet_manager"
     primitive = package / "_versioned_runtime.py"
     original = primitive.read_bytes()

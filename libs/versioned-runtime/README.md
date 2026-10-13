@@ -37,8 +37,11 @@ copy the canonical file into wheel build output; each sdist carries the same
 primitive and helper bytes so a subsequent wheel build needs no repository
 checkout. The source bootstrap supports root-level and nested service project
 directories, rejects ambiguous/linked helper selection, and refuses conflicting
-included resources rather than preferring stale copies. Wheel/sdist
-byte-equality tests and wheel RECORD bind the generated resource to the package
+included resources rather than preferring stale copies.
+Required inputs are explicit: a detected canonical library directory requires
+both canonical files, even when included copies exist. Those copies are optional
+byte-equality comparisons in a checkout; outside it, both sdist files are required.
+Wheel/sdist byte-equality tests and wheel RECORD bind the generated resource to the package
 artifact. Existing plugin bootstrap scripts remain self-contained and unchanged.
 The index staging adapter uses only its own installed resource, never a
 repository/plugin/PATH fallback; editable/source-only installation is not an

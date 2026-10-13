@@ -28,12 +28,19 @@ def ordinary_file(path):
     return True
 
 
-def select_bytes(paths, label):
-    candidates = [path.read_bytes() for path in paths if ordinary_file(path)]
+def select_bytes(paths, label, *, optional_paths=()):
+    candidates = []
+    for path in paths:
+        if not ordinary_file(path):
+            raise RuntimeError(
+                f"{label} is missing; build from the full release checkout or its complete sdist"
+            )
+        candidates.append(path.read_bytes())
     if not candidates:
         raise RuntimeError(
             f"{label} is missing; build from the full release checkout or its complete sdist"
         )
+    candidates.extend(path.read_bytes() for path in optional_paths if ordinary_file(path))
     if any(data != candidates[0] for data in candidates[1:]):
         raise RuntimeError(f"included {label} differs from the canonical source")
     return candidates[0]
@@ -48,12 +55,16 @@ def commands(project, package, canonical_directory=None):
     def inputs():
         primitive_paths = [project / resource]
         helper_paths = [project / HELPER_NAME]
+        optional_primitives = []
+        optional_helpers = []
         if canonical_directory is not None:
-            primitive_paths.insert(0, canonical_directory / "versioned_runtime.py")
-            helper_paths.insert(0, canonical_directory / "standalone_build.py")
+            optional_primitives = primitive_paths
+            optional_helpers = helper_paths
+            primitive_paths = [canonical_directory / "versioned_runtime.py"]
+            helper_paths = [canonical_directory / "standalone_build.py"]
         return (
-            select_bytes(primitive_paths, "runtime primitive"),
-            select_bytes(helper_paths, "runtime build helper"),
+            select_bytes(primitive_paths, "runtime primitive", optional_paths=optional_primitives),
+            select_bytes(helper_paths, "runtime build helper", optional_paths=optional_helpers),
         )
 
     class BuildPy(build_py):

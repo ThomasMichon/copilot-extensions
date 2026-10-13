@@ -84,7 +84,10 @@ Docker, Copilot, marketplace or private-provider dependency.
 byte-identical canonical `versioned-runtime` primitive as a package resource;
 the sdist also carries that primitive and the same build helper, so rebuilding
 outside the repository does not depend on a plugin or sibling checkout.
-Missing or conflicting resource inputs fail the build. The helper is shared
+Canonical checkout resources are required when the shared library directory is
+present; included sdist copies are optional comparison inputs in that case,
+never a fallback for a missing canonical file. Outside a checkout, both included
+sdist resources are required. Missing or conflicting inputs fail the build. The helper is shared
 with `agent-index-service`, not a second maintained primitive or installer.
 
 ```text
@@ -96,7 +99,8 @@ fleet-manager doctor --role client
 and the package initializer/runtime resource against their SHA-256 wheel RECORD
 entries. It returns local installed-resource evidence, not a trusted release
 attestation, whole-package integrity proof or controller/service health. A
-missing, unreadable, linked, oversized or mismatched resource is an error;
+missing, unreadable, linked, oversized or mismatched resource is an error,
+including linked or non-directory ancestors;
 there is no source-checkout, plugin or PATH fallback. No remote endpoint is
 queried, no credentials are acquired and no hosting role is accepted.
 Exit 0 means that local resource evidence passed; exit 1 means invalid or

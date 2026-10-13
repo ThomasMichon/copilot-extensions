@@ -1,6 +1,7 @@
 import base64
 import hashlib
 from pathlib import Path
+import stat
 from types import SimpleNamespace
 
 import pytest
@@ -124,3 +125,30 @@ def test_resource_read_error_is_nonsecret(installed, monkeypatch):
     with pytest.raises(PlanError, match="resource could not be read") as exc:
         client_diagnostics.diagnose_client()
     assert "private input value" not in str(exc.value)
+
+
+@pytest.mark.parametrize("level", [0, 1, 2])
+@pytest.mark.parametrize("kind", ["symlink", "reparse-point", "file"])
+def test_linked_or_invalid_resource_ancestors_fail_before_reading(installed, monkeypatch, level, kind):
+    _, package = installed
+    ancestor = (package, package.parent, package.parent.parent)[level]
+    original = Path.lstat
+
+    def altered(path, *args, **kwargs):
+        if path == ancestor:
+            return SimpleNamespace(
+                st_mode=stat.S_IFLNK if kind == "symlink" else (
+                    stat.S_IFREG if kind == "file" else stat.S_IFDIR
+                ),
+                st_file_attributes=0x400 if kind == "reparse-point" else 0,
+            )
+        return original(path, *args, **kwargs)
+
+    def unread(path, *args, **kwargs):
+        pytest.fail("resource bytes must not be read through an invalid ancestor")
+
+    monkeypatch.setattr(Path, "lstat", altered)
+    monkeypatch.setattr(Path, "open", unread)
+    monkeypatch.setattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400, raising=False)
+    with pytest.raises(PlanError, match="must not be linked|ancestor must be a directory"):
+        client_diagnostics.diagnose_client()

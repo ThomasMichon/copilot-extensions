@@ -408,3 +408,24 @@ not to the vision. This effort does not acquire or migrate live capacity.
   activation is required or inferred by this artifact prerequisite.
 - Managed install/update/rollback/receipt-owned uninstall execution, live config,
   useful service roles and migration remain open. This effort stays Active.
+
+### 2026-10-13 - Client prerequisite review corrections
+- #6432's existing index wheel fixtures now supply the shared helper. Further
+  review corrections reject linked/non-directory resource ancestors before
+  diagnostics read bytes and distinguish required canonical build inputs from
+  optional included comparison copies. A missing canonical file cannot fall
+  back to an included copy; a standalone sdist requires both included resources.
+- Native installed-client proof also refuses a real linked target ancestor.
+  The exact required 120-second local selection passed 363 tests in 63 seconds;
+  the full changed client artifact/diagnostic selection passed 37, and the
+  shared index artifact portfolio passed 8. Earlier overlapping native runs
+  exhausted their aggregate budgets; sequential measurements confirmed the
+  unchanged deadline, without weakening containment or child limits.
+- The previous published head's actual Linux/Windows test-runner jobs exercised
+  the client portfolio (354 each), not merely the separate index-service jobs.
+  The corrected head still needs its own review and CI. The independent Windows
+  console-root failure is the exact existing #6266/#6274 owned blocker; no
+  competing repair, assertion relaxation or CI bypass is proposed.
+- #6437's role-selected artifact preflight is merged and can be consumed by the
+  subsequent managed-client slice. No lifecycle activation, release rollout or
+  private migration gate is claimed complete here.

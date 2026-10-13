@@ -37,13 +37,15 @@ def diagnose_client():
         if selected != package / name:
             raise PlanError("fleet client resource does not belong to the imported package")
         try:
-            for path in (package, selected):
+            for path in (*reversed(selected.parents), selected):
                 info = path.lstat()
                 if stat.S_ISLNK(info.st_mode) or (
                     getattr(info, "st_file_attributes", 0)
                     & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
                 ):
                     raise PlanError("fleet client resource must not be linked")
+                if path != selected and not stat.S_ISDIR(info.st_mode):
+                    raise PlanError("fleet client resource ancestor must be a directory")
             if not stat.S_ISREG(info.st_mode):
                 raise PlanError("fleet client resource must be a regular file")
             with selected.open("rb") as stream:
