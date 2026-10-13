@@ -148,6 +148,9 @@ Publish a drain deadline with named residual owners and escalation. Do not kill
 live work merely because the deadline elapsed. Unresolved adoption/retirement
 requires explicit permission and leaves migration blocked, not falsely complete.
 Compatibility shims call V2 only and have a published support window.
+The [source inventory and migration gates](v1-migration.md) refine the required
+owner-approved snapshot, identity, receipt and transfer evidence; they do not
+authorize or establish a live cutover.
 
 Routing #5789, Linux role deployment #6030, named reconciliation #5861,
 observation #5862 and standalone client PR #6133 keep their existing scopes.

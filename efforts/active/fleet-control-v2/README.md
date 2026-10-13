@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; pinned-key verifier prepared, review and GitHub proof next
+- **Status:** Active; pinned-key verifier landed, role lifecycle next; GitHub proof deferred
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts;
@@ -142,12 +142,13 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [ ] Define a fleet-manager release manifest for thin client, Gateway and node
   roles; reuse existing lifecycle code rather than implementing parallel installers.
   Declaration and offline snapshot inspection landed in #6285; actual product
-  assembly, signature verification and lifecycle activation remain pending.
+  assembly and lifecycle activation remain pending.
   Role-selected actual artifact integrity preflight landed in #6437 as a prerequisite;
   client packaging/diagnostics/managed installation remain owned by #6424.
   The [both-method release authentication plan](release-authentication.md)
-  landed in #6451; verifier implementation is next, without live trust-root
-  or signing authority.
+  landed in #6451 and pinned-key manifest verification in #6475.
+  GitHub-positive proof is deferred under the operator's authentication constraint;
+  no live trust-root, signing or activation authority follows from verification.
 - [ ] Prove independent setup/update/doctor/recovery and bounded activation,
   with no installation or update from Copilot hooks.
 - [ ] Prove thin client installation has no controller/container-manager effects;
@@ -187,6 +188,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
 ### Phase 3 - Transfer authority without duplicate writers
 - [ ] Inventory V1 authorities, state schemas, live hosts, receipts and obligations;
   coordinate imports with their current owners.
+  The [bounded source inventory and migration gates](v1-migration.md) document
+  inspected storage seams and unresolved owner/live-evidence prerequisites;
+  source reports and selected existing tests do not complete this inventory.
 - [ ] Implement restartable import/reconciliation, explicit admission freeze,
   and verified adoption or drain without dual authoritative writes.
 - [ ] Establish per-domain drain deadline and owner/escalation decisions; do not
@@ -651,3 +655,52 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   in 40.83 seconds. Focused import/metadata review regressions also passed
   (61 selected tests). Publication and fresh current-head review/required CI
   remain the next gate; no parent completion item was closed.
+
+### 2026-10-13 - Pinned-key verification landed; remaining authority gates retained
+- #6475 merged at `2026-10-13T10:02:24Z`, commit
+  `dcd46884f223892ec36d8e43170a5c9e11793545`, after actual current-head
+  Copilot APPROVED review with zero findings (Balanced effort), all three
+  threads resolved and every required CI check passed. The Windows/Linux
+  installed fleet test steps actually ran and succeeded; aggregate status alone
+  was not used as evidence of those consumer tests. No CI gate was bypassed.
+- An author thread-reply COMMENTED review was not mistaken for Copilot approval;
+  the older dismissed approval on the prior head also did not satisfy the gate.
+  The reviewed import/metadata/input-handle fixes and final 452-pass native
+  suite are retained. Verified #6236 and #6240 remain open after merge.
+- Re-read the full parent Plan/Validation, including #6443's assigned Gateway/
+  index slice. No complete Phase 1-4/full validation item is closed by the
+  verifier. Product assembly, current publisher proof, owned immutable staging,
+  lifecycle activation, authenticated runtime, V1 migration and adoption remain
+  open. GitHub-positive proof stays deferred, not silently replaced by fixtures.
+- Prepared a bounded, source-only V1 authority inventory through three
+  read-only evidence tracks: agency records/Git leases, dispatch task/audit/
+  wake/reservation storage, and bridge sessions/delivery/acquisition/host custody.
+  Independently exercised their existing contained contracts: worktrees
+  69 passed, dispatch 246 passed, bridge 67 passed with one platform skip.
+  This proves selected local contracts, not live-host inventory, general absence
+  of migration APIs, external fencing or safe import/authority transfer.
+- Next Phase 1 stretch coordinates the shared verified-staging/admission seam
+  with #6424 and the release/assembly owners before implementation; it must
+  reuse approved release identities and existing lifecycle primitives, not
+  introduce another publisher or installer. #6443 owns resident Gateway/index
+  integration. No deployment, trust enrollment or retirement was performed.
+
+### 2026-10-13 - Shared staging owner confirmed; migration evidence bounded
+- #6424's owner confirmed the common role-selected authenticated staging seam:
+  retain the manifest/scope/policy binding and immutable selected bytes,
+  re-authenticate current policy/freshness and re-hash before construction or
+  activation. Sequence and slot ownership remain lifecycle checks, not grants
+  from a serialized verification report. Gateway/node assembly can consume the
+  reviewed common contract later; no competing staging/installer was started.
+- Coordinated this distinct source-only Phase 3 proposal under #6236.
+  The [V1 migration record](v1-migration.md) preserves the bounded three-domain
+  inventory and selected contract evidence, distinguishes source generations/
+  delivery ACKs from effect fences/settlement, and names owner-approved
+  snapshot, freeze, responsibility-conservation, adoption/drain and retirement
+  gates. Existing #6076/#6419 acquisition/layout work retains its ownership.
+- No live state was imported, writer frozen, host adopted or registration
+  retired. All Phase 1-4/full validation items remain open. This documentation
+  slice adds no runtime behavior; unit/E2E/clean-room/live implementation tiers
+  are not claimed. Next is proposal review and current-owner interface agreement
+  before migration adapters; role lifecycle and Gateway/index work continue
+  with their assigned owners.
