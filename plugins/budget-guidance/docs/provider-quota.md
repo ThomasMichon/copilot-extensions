@@ -99,8 +99,10 @@ authority or enable derived posture calculations. The caller can inspect
 reported facts, but the helper does not authenticate arbitrary capture files.
 
 Malformed capture JSON produces a generic parse diagnostic that does not echo
-opaque metadata. Filesystem failures preserve their operating-system cause,
-such as permission denial, instead of being mislabeled as invalid JSON.
+opaque metadata. Filesystem lookup and read failures preserve their
+operating-system cause, such as a missing path or permission denial, instead of
+being mislabeled as invalid JSON. Existing directories and other nonregular
+paths are rejected before reading.
 
 Raw legacy account-authentication resets, measured trailing-rate history,
 launch guidance, and routing integration remain later slices of

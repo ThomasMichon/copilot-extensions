@@ -35,6 +35,29 @@ def test_quota_capture_filesystem_failures_keep_diagnostics(
     assert str(capture) not in result["error"]
 
 
+def test_quota_capture_missing_path_keeps_lookup_failure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    capture = tmp_path / "missing.json"
+    assert main([
+        "quota", "--capture", str(capture), "--session-id", "session-example", "--json",
+    ]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["error"].startswith("cannot read quota capture: ")
+    assert "regular file" not in result["error"]
+    assert str(capture) not in result["error"]
+
+
+def test_quota_capture_directory_is_still_rejected_as_nonregular(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main([
+        "quota", "--capture", str(tmp_path), "--session-id", "session-example", "--json",
+    ]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["error"] == "quota capture must be a regular file"
+
+
 def test_version_subcommand_exits_zero_and_prints_version(capsys):
     rc = main(["version"])
 
