@@ -1560,7 +1560,8 @@ def _cmd_update_steps(rest: list[str], run) -> int:
         rc = ec.run_engine_passthrough(project, ["update", "--no-manager", *forwarded])
     except ec.EngineError as e:
         print(f"  ✗ {e}")
-        run.record_engine_error(str(e), missing=bool(getattr(e, "install_hint", False)))
+        run.record_engine_error(str(e), missing=bool(getattr(e, "install_hint", False)),
+                                cause=e.__cause__)
         if getattr(e, "install_hint", False):
             print("    Run `worktree-manager setup --apply` to install the engine first.")
         return 1

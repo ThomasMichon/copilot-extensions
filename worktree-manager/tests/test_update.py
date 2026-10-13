@@ -842,3 +842,33 @@ def test_engine_error_is_recorded(monkeypatch, update_home, install_hint, expect
     status = _telemetry_status(update_home)
     assert status["run"]["outcome"] == outcome
     assert status["last_failure"]["summary"].startswith(f"engine: {outcome}")
+
+
+def _sharing_violation() -> OSError:
+    exc = OSError(13, "The process cannot access the file")
+    exc.winerror = 32
+    return exc
+
+
+@pytest.mark.parametrize(("cause", "expected", "outcome", "code"), [
+    (_sharing_violation(), 5, "blocked_by_lock", "sharing_violation"),
+    (PermissionError(13, "Access is denied"), 1, "command_failed", "permission_denied"),
+    (OSError(5, "Input/output error"), 1, "command_failed", "io_error"),
+])
+def test_engine_launch_error_is_classified_by_its_cause(
+        monkeypatch, update_home, cause, expected, outcome, code):
+    from worktree_manager.self_install import SelfUpdateResult
+    monkeypatch.setattr(self_install, "self_update",
+                        lambda **kw: SelfUpdateResult(action="already-current", version="1"))
+
+    def boom(project, args, **kw):
+        raise ec.EngineError("could not start the engine") from cause
+
+    monkeypatch.setattr(ec, "run_engine_passthrough", boom)
+    with redirect_stdout(io.StringIO()):
+        assert wm._cmd_update([]) == expected
+    status = _telemetry_status(update_home)
+    assert status["run"]["outcome"] == outcome
+    events = Path(status["run"]["events_path"]).read_text(encoding="utf-8").splitlines()
+    engine = [json.loads(e) for e in events if '"component":"engine"' in e.replace(" ", "")]
+    assert [e["error"]["code"] for e in engine] == [code]

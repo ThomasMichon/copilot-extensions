@@ -43,14 +43,24 @@ class UpdateRun:
         self._run.target("manager_self_update", "manager", outcome, required=required,
                          changed=action == "updated", detail=detail, error=error)
 
-    def record_engine_error(self, message: str, *, missing: bool) -> None:
-        """The engine could not be run at all (absent, or failed to start)."""
+    def record_engine_error(self, message: str, *, missing: bool,
+                            cause: BaseException | None = None) -> None:
+        """The engine could not be run at all (absent, or failed to start).
+
+        A launch failure is classified by its underlying ``OSError`` cause, so
+        a sharing violation stays ``blocked_by_lock`` and permission or I/O
+        errors keep their own codes.
+        """
         if self._run is None:
             return
-        outcome = _ut.CONFIGURATION_LIMITATION if missing else _ut.COMMAND_FAILED
-        code = "engine_missing" if missing else "engine_error"
-        self._run.target("runtime_reconcile", "engine", outcome, detail=message,
-                         error={"code": code, "message": message})
+        if missing:
+            outcome, error = _ut.CONFIGURATION_LIMITATION, {"code": "engine_missing"}
+        elif isinstance(cause, OSError):
+            outcome, error = _ut.classify_exception(cause, op="engine_launch")
+        else:
+            outcome, error = _ut.COMMAND_FAILED, {"code": "engine_error"}
+        error["message"] = message
+        self._run.target("runtime_reconcile", "engine", outcome, detail=message, error=error)
 
     def finish(self, rc: int) -> int:
         """Close the run; ``rc`` is mapped through the shared exit-code table.
