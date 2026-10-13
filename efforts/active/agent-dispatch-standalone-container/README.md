@@ -229,6 +229,15 @@ for review before any implementation.
 - [ ] Once validated, remove `install.ps1`/`install.sh` from the plugin's
   own payload entirely (thin trigger only) -- the actual "drop the
   fallback" step named above.
+- [ ] **Naming/layout note (2026-10-12):** `agent-dispatch-service/` is
+  slated to move to `services/dispatch/` under the new
+  `docs/patterns/standalone-service-layout.md` convention (`agent-<topic>`
+  reserved for plugins; standalone packages live at `services/<topic>`).
+  Tracked separately in
+  [#6419](https://github.com/ThomasMichon/copilot-extensions/issues/6419),
+  which also covers updating the hardcoded upstream-installer URL this
+  phase just added. Do not hardcode further references to the current
+  `agent-dispatch-service/` path without checking that issue first.
 
 ## Validation Plan
 
