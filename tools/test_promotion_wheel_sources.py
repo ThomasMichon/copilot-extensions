@@ -270,6 +270,8 @@ def test_promotion_actions_never_receive_or_persist_the_release_pat():
         (root / ".github" / "workflows" / "validate-and-promote.yml").read_text(),
     )["jobs"]["promote"]
     assert job["env"]["GH_TOKEN"] == "${{ github.token }}"
+    for scope in ("pull-requests", "checks", "statuses"):
+        assert job["permissions"][scope] == "read"
     allowed = {
         "Promote (push a candidate branch; report-only if push=false)",
         "Publish coverage baselines as a GitHub Release (durable evidence for this dev commit)",
@@ -287,6 +289,9 @@ def test_promotion_actions_never_receive_or_persist_the_release_pat():
     assert writers == allowed
     identity = next(step for step in job["steps"] if step.get("name") == "Configure git identity for the generated commit")
     assert "gh auth setup-git --hostname github.com" in identity["run"]
+    wait = next(step for step in job["steps"] if step.get("id") == "merged")
+    assert "APERTURE_RELEASE_TOKEN" not in json.dumps(wait)
+    assert '"pr", "view"' in wait["run"] and '"pr", "checks"' in wait["run"]
 
 
 def test_git_helper_uses_each_steps_token_without_storing_it(tmp_path):

@@ -729,6 +729,9 @@ jobs:
       contents: read
       actions: read
       attestations: read
+      pull-requests: read
+      checks: read
+      statuses: read
     timeout-minutes: 330
     outputs:
       merge_sha: ${{ steps.merged.outputs.merge_sha }}

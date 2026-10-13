@@ -90,6 +90,8 @@ and the release PAT is scoped only to the trusted push, coverage publication,
 PR landing and tagging shell steps. Git uses the `gh` credential helper, which
 reads each step's scoped token rather than storing the PAT on disk; artifact
 downloads, action setup, validation and merge-wait reads receive no PAT.
+The read-only job token includes pull-request, check and commit-status reads
+so merge polling can observe both the exact PR and its required gates.
 
 The transfer index binds the exact validated dev SHA, pinned main parent,
 composed content-tree SHA, complete project/version set, and bundle digests.
