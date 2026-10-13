@@ -474,7 +474,8 @@ def test_provider_selection_does_not_collide_with_machine_id4():
     opened = []
     screen._open_cleanup = lambda *, ids=None: opened.append(ids)
     screen._run_maint_action("Cleanup", screen.wt_sel.ids)
-    assert opened == [set()]
+    assert not opened
+    assert screen.debug == "no eligible worktrees for cleanup"
 
 
 def test_maintenance_eliminated_from_nav():

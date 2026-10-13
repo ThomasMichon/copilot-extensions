@@ -121,7 +121,12 @@ def _wait_ready(rt, machine, timeout=8.0):
 def test_streaming_paints_rows_and_summary(tmp_path):
     rt = tasks.RegisteredPivotRuntime(_make_pivot(tmp_path, "ndjson"))
     rt.ensure(None)
-    state, rows, _err = _wait_ready(rt, None)
+    state, rows, _err = _wait(
+        rt, None,
+        lambda s, r, e: s == "error" or (
+            s == "ready" and len(r) == 2 and rt.get_summary(None) == {"total": "2"}
+        ),
+    )
     assert state == "ready"
     assert [r["id"] for r in rows] == ["a", "b"]
     assert rt.get_summary(None) == {"total": "2"}
@@ -130,7 +135,12 @@ def test_streaming_paints_rows_and_summary(tmp_path):
 def test_streaming_delta_and_removed_update_in_place(tmp_path):
     rt = tasks.RegisteredPivotRuntime(_make_pivot(tmp_path, "delta"))
     rt.ensure(None)
-    state, rows, _err = _wait_ready(rt, None)
+    state, rows, _err = _wait(
+        rt, None,
+        lambda s, r, e: s == "error" or (
+            s == "ready" and [(row["id"], row["title"]) for row in r] == [("a", "A2")]
+        ),
+    )
     assert state == "ready"
     # 'a' upgraded in place via delta; 'b' removed.
     assert [(r["id"], r["title"]) for r in rows] == [("a", "A2")]
@@ -559,4 +569,3 @@ def test_run_action_stream_cancellation(tmp_path):
     assert ok is False
     assert msg == "cancelled"
     assert rt._procs == []  # child killed + untracked
-
