@@ -558,8 +558,10 @@ jobs:
         # not a mocked transport) -- both are already runtime dependencies of
         # the `agent-index` plugin that adapter proves itself against, so
         # installing them here adds no new supply-chain surface.
+        # Procutil's optional metrics fixture must execute in this lane;
+        # install its backend explicitly without changing default consumers.
         run: >-
-          python -m pip install pytest-asyncio fastapi uvicorn &&
+          python -m pip install pytest-asyncio fastapi uvicorn "psutil>=7.0" &&
           python -m pytest -q libs/work-coalescing-singleton/tests &&
           python -m pytest -q libs/lazy-cli-dispatch/tests &&
           python -m pytest -q libs/credential-relay/tests &&

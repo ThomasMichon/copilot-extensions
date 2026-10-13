@@ -354,10 +354,16 @@ asyncio task as proof that the observation thread ended. A loop-shutdown
 regression proves a later loop joins the original holder without another
 native sample. No new resident process or termination surface is introduced.
 
-The default shared-library CI lane does not install optional metrics. Native
+The initial shared-library CI setup did not install optional metrics. Native
 CPU validation explicitly requires that extra; ordinary imports and the
 stdlib-only test lane remain runnable without it. The fixture passes its
 checkout source path to child interpreters, so bare pytest and editable-package
 validation exercise the same source. Cold default validation passed 77 tests
 with one explicitly skipped native-metrics fixture; metrics-enabled validation
 passed all 78. This does not substitute for the outstanding Linux native proof.
+
+The shared-library CI setup now explicitly installs the metrics backend so
+its native fixture executes rather than skips in the canonical Linux lane.
+Stdlib-only collection still reports the optional test as skipped when that
+backend is absent; production default consumers do not gain a runtime dependency.
+Linux execution evidence will be recorded only after the current CI run passes.
