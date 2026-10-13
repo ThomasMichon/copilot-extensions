@@ -1,0 +1,9 @@
+{
+  "comment": "Prepare verified offline non-root Linux index service image contexts",
+  "changes": [
+    {
+      "plugin": "agent-index-service",
+      "type": "patch"
+    }
+  ]
+}

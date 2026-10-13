@@ -34,7 +34,7 @@ that pattern to this repository.
 | [Machine Fleet Routing Foundation](active/machine-fleet-routing-foundation/README.md) | Active; contract implementation | #5789 |
 | [Mutable dev slot](active/mutable-dev-slot/README.md) | Active | #5472 |
 | [Machine Transport Convergence](active/machine-transport-convergence/README.md) | Active | #5737, #5738, #5740, #5741, #5972, #5973, #5974, #6039 |
-| [agent-index Standalone Service](active/agent-index-standalone-service/README.md) | Active; fleet integration amendment in review | #5768, #5769, #6383 |
+| [agent-index Standalone Service](active/agent-index-standalone-service/README.md) | Active; fleet integration reviewed, container image slice | #5768, #5769, #6383 |
 | [agent-dispatch Standalone + Container](active/agent-dispatch-standalone-container/README.md) | Active; Phase 1 landed | #6177 |
 | [Dispatch Task Lifecycle and Conversations](active/agent-dispatch-monitor-and-confirmed-state/README.md) | Active; submission/output/delivery amendment proposed | #3681 |
 | [Dispatch Tasks-Pane UX](active/agent-dispatch-tasks-pane-ux-overhaul/README.md) | Active; review/history/follow-up amendment proposed | #3681 (backend dependency) |

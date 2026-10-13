@@ -29,13 +29,14 @@ deployment or destructive migration of durable data.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Coordinator | Integration, implementation and canary rollout | Managed upstream worktree |
-| Service implementer | Bounded independently packaged service slices | Separate managed worktree when delegated |
+| Service implementer | Bounded independently packaged service slices | Exclusive package edit scope; Coordinator owns git and publication |
 
 ## Coordination
 
 - **Topology:** independent per-slice PRs.
 - **Host (owns PRs):** Coordinator.
-- **Delegates:** bounded read-only packaging and vision evidence; no delegated git changes.
+- **Delegates:** bounded packaging evidence and implementation with exclusive
+  file ownership; no delegated git, fleet enrollment or production changes.
 - **Fleet integration:** #6383 owns the index service image, source-credential
   consumption and index-client adapter. #5789 owns Gateway routing/auth,
   #6030 owns fleet deployment/client lifecycle, and #6236 owns integrated
@@ -179,8 +180,10 @@ and rollback gates; legacy backfill is not a blocker for cold creation.
   immutable executable slots make data rollback safe. _(agent-recommended)_
 
 ### Phase 3 - Deployment adapters and release reconciliation
-- [ ] Review the [fleet integration contract](fleet-integration.md) and agree
-  non-overlapping interfaces with the existing fleet campaign owners (#6383).
+- [x] Review the [fleet integration contract](fleet-integration.md) (#6385).
+- [ ] Agree non-overlapping Gateway and subscribed-controller credential
+  interfaces with the existing fleet campaign owners (#6383); independent image
+  preparation consumes only the existing standalone host contract.
 - [ ] Package the standalone indexer for an independently configured Linux
   container, preserving one local corpus/task writer and ordinary native use.
 - [ ] Consume source/account-scoped, refreshable credentials requested through
@@ -233,7 +236,9 @@ unsupported existing layouts fail explicitly without mutation.
   with explicit protocol/config schema expectations.
 - [ ] Queued full/incremental sequencing, worker adoption and corpus preservation
   through update, failed activation and supported rollback.
-- [ ] Optional container restart, persistent volumes and graceful termination.
+- [x] Optional container restart, persistent volumes and graceful termination:
+  isolated Linux candidate image, independent synthetic Git corpus and mock
+  embedding RPC. Production model/credentials/Gateway integration remains open.
 - [ ] Actual CLI -> authenticated Gateway -> container retrieval and distinct
   container -> Gateway -> subscribed-controller credential acquisition; prove
   refresh, expiry, controller disconnect and unauthorized/cross-source denial.
@@ -325,6 +330,53 @@ boundaries from implementation decisions and deployment-specific policy.
   tools/run-standalone-tests.py services/index --prepare --smoke` -- 371
   passed, 2 skipped) in the `agent-dispatch-standalone-container` effort's
   own Journal entry for this date.
+
+### 2026-10-12 - Offline image candidate and clean first-touch proof
+- Implemented verified offline context preparation and the generic non-root
+  image contract. The normal installed-package suite passes 416 tests with three
+  platform/opt-in skips; no source-path import override masks wheel behavior.
+- Actual governed native acquisition exposed a 176 MB compiled store member
+  exceeding the first-party 64 MiB budget. Added a bounded native-only 256 MiB
+  member profile while retaining first-party limits, aggregate/metadata limits
+  and full RECORD/hash checks; exact-boundary and aggregate regressions pass.
+- Built the actual Linux image entirely offline after approved digest-pinned
+  base and governed wheel acquisition. Same-source test wheels model the frozen
+  development versions only; this is not a released or production artifact.
+- A clean empty-volume repeat, without recovery or store seeding, enqueued a
+  real full Git ingestion task and produced two chunks/two vectors. The existing
+  client retrieved both fixture hits; restart retained the same completed task,
+  corpus and vectors. Both direct container stops exited zero. Only model
+  inference was mocked; package installation, API, queue, workers and persistence
+  were real.
+- Corrected proof-fixture task-status, runner-settlement and indexed-source-family
+  expectations before the clean repeat. Removed the exact owned test container
+  and state volume; retained the candidate image for publication follow-up.
+- No native database copy, native engine restart, existing Gateway change or
+  new-Gateway/token integration occurred. Publication and remaining fleet
+  interfaces continue under #6383.
+- Review corrections bind Dockerfile and ignore-file hashes to an independently
+  pinned contract and add trusted pre-Docker bounded tar capture. The actual
+  installed SDK built a new offline image from that snapshot; a tampered recipe
+  was rejected before even resolving a builder. The corrected image passed
+  another clean empty-volume ingestion/query/restart/exit-zero proof. Full
+  installed validation now passes 446 tests with three platform/opt-in skips.
+  Cleanup retains primary failures, hashed lock records are typed, and ARM
+  manylinux admission matches its 2.17 minimum policy.
+
+### 2026-10-12 - Fleet integration intent reviewed; image slice started
+- #6385 squash-merged into `dev` at `2026-10-13T00:37:08Z`, commit
+  `b688933b1df0c27c8327f39bfa4d3410dd8f86e8`, after current-head Copilot
+  APPROVED and actual passing required PR gate. Fixed corpus/source query and
+  status metadata authorization requirements; the stale index finding was
+  already fixed and resolved with its exact anchor.
+- Operator selected the new fleet-manager Gateway; existing adopter Gateways
+  remain untouched. No runtime or data cutover follows from reviewed intent.
+- Re-read the merged Plan. Started the independent container image/preparation
+  slice using the existing standalone host contract. Gateway/credential
+  interface agreement and real subscribed-controller routing remain open.
+- Assigned exclusive package edits to the Service implementer; Coordinator owns
+  integration, git, publication and live-venue validation. Image work does not
+  modify fleet-owned resident routing, credentials or deployment authority.
 
 ### 2026-10-12 - Candidate staging merged; fleet integration prioritized
 - Immutable native candidate staging #6074 merged into `dev` at
