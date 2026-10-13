@@ -31,7 +31,7 @@ class BoundedInput(io.BytesIO):
     b"x" * (producer.MAX_INPUT_BYTES + 100),
     ("😀" * producer.MAX_INPUT_BYTES).encode("utf-8"),
     b'{"key":"\xff"}',
-])
+], ids=["ascii-overflow", "utf8-overflow", "invalid-utf8"])
 def test_cli_rejects_oversize_bytes_or_invalid_utf8_before_authority(
     monkeypatch: pytest.MonkeyPatch, raw: bytes,
 ) -> None:
@@ -53,7 +53,7 @@ def test_cli_rejects_oversize_bytes_or_invalid_utf8_before_authority(
         assert error["message"] == "producer stdin exceeds size limit"
 
 
-@pytest.mark.parametrize("character", ["a", "é", "😀"])
+@pytest.mark.parametrize("character", ["a", "é", "😀"], ids=["ascii", "two-byte", "four-byte"])
 def test_exact_byte_limit_decodes_before_owner_resolution(
     monkeypatch: pytest.MonkeyPatch, character: str,
 ) -> None:
