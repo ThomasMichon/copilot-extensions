@@ -652,7 +652,7 @@ non-zero for every failure:
 | 3 | A configuration problem must be fixed first (for example a missing PowerShell, installer or engine, an invalid installer deadline, or an invalid installation context) |
 | 4 | Authentication is required |
 | 5 | Blocked by contention: a lock that timed out, a file another process holds open (Windows sharing/lock violation), or an installer exit of 75 (the cutover did not complete and the previous generation is still serving). Plain permission or I/O errors are exit 1 (`permission_denied` / `io_error`) |
-| 6 | A runtime installer timed out. A timeout is never reported as success, even if a completed slot for the target version exists |
+| 6 | An update step timed out: the agent-worktrees or a registered plugin's payload refresh, or a runtime or module installer. A timeout is always reported as a timeout, never as success |
 | 130 | Interrupted |
 
 `--force-runtime NAME` re-deploys just that runtime (repeatable); it is

@@ -12,17 +12,29 @@ RUN_COMPONENT = "run"
 MAX_DETAIL = 300
 
 
+def _severity(outcome) -> int:
+    return oc.SEVERITY.get(outcome, -1)
+
+
 def _merge_target(entry: dict, event: dict) -> None:
+    """Accumulate one ``end`` event; :func:`_finish_target` resolves the entry.
+
+    Required and advisory events are kept apart so an advisory failure never
+    becomes the outcome of a component that also has a required result, and
+    the detail is the one from the event that set each pool's worst outcome.
+    """
     details = event.get("details") if isinstance(event.get("details"), dict) else {}
-    required = details.get("required", True) is not False
-    entry["required"] = entry.get("required", False) or required
-    seen = [entry.get("outcome"), event.get("outcome")]
-    entry["outcome"] = oc.worst(seen) if any(o in oc.SEVERITY for o in seen) else oc.SKIPPED
+    pool = entry["_pools"]["required" if details.get("required", True) is not False
+                           else "advisory"]
+    outcome = event.get("outcome")
+    pool["outcomes"].append(outcome)
+    detail = details.get("detail") or (event.get("error") or {}).get("message")
+    if _severity(outcome) >= pool["severity"]:
+        pool["severity"] = _severity(outcome)
+        if detail:
+            pool["detail"] = str(detail)[:MAX_DETAIL]
     if event.get("changed") is not None:
         entry["changed"] = bool(entry.get("changed")) or bool(event["changed"])
-    detail = details.get("detail") or (event.get("error") or {}).get("message")
-    if detail:
-        entry["detail"] = str(detail)[:MAX_DETAIL]
     code = (event.get("error") or {}).get("code")
     if code:
         entry.setdefault("notes", []).append(code)
@@ -32,6 +44,25 @@ def _merge_target(entry: dict, event: dict) -> None:
         durations[phase] = durations.get(phase, 0) + event["duration_ms"]
 
 
+def _pool_outcome(pool: dict) -> str:
+    known = [o for o in pool["outcomes"] if o in oc.SEVERITY]
+    return oc.worst(known) if known else oc.SKIPPED
+
+
+def _finish_target(entry: dict) -> dict:
+    pools = entry.pop("_pools")
+    required, advisory = pools["required"], pools["advisory"]
+    chosen = required if required["outcomes"] else advisory
+    entry["required"] = bool(required["outcomes"])
+    entry["outcome"] = _pool_outcome(chosen)
+    if chosen.get("detail"):
+        entry["detail"] = chosen["detail"]
+    if required["outcomes"] and oc.is_failure(_pool_outcome(advisory)):
+        entry["advisory_outcome"] = _pool_outcome(advisory)
+        entry["advisory_detail"] = advisory.get("detail") or entry["advisory_outcome"]
+    return entry
+
+
 def fold_targets(events: Iterable[dict]) -> dict[str, dict]:
     """Merge every target ``end`` event (component other than ``run``)."""
     targets: dict[str, dict] = {}
@@ -39,8 +70,13 @@ def fold_targets(events: Iterable[dict]) -> dict[str, dict]:
         component = event.get("component")
         if event.get("event") != "end" or not component or component == RUN_COMPONENT:
             continue
-        _merge_target(targets.setdefault(str(component), {"changed": False}), event)
-    return targets
+        entry = targets.setdefault(str(component), {
+            "changed": False,
+            "_pools": {name: {"outcomes": [], "severity": -2}
+                       for name in ("required", "advisory")},
+        })
+        _merge_target(entry, event)
+    return {name: _finish_target(entry) for name, entry in targets.items()}
 
 
 def fold_phases(events: Iterable[dict]) -> list[dict]:
@@ -138,6 +174,10 @@ def fold(
         }
         for name, t in sorted(targets.items())
         if not t.get("required", True) and oc.is_failure(t.get("outcome"))
+    ] + [
+        {"component": name, "outcome": t["advisory_outcome"], "summary": t["advisory_detail"]}
+        for name, t in sorted(targets.items())
+        if t.get("advisory_outcome")
     ]
     return {
         "schema": STATUS_SCHEMA,

@@ -9,6 +9,7 @@ return value.
 
 from __future__ import annotations
 
+import os
 import re
 import time
 
@@ -32,13 +33,39 @@ def enter(phase: str) -> None:
         _run.enter(phase)
 
 
-def _win_error(low: str, code: int) -> bool:
-    """The locale-independent ``[WinError N]`` / ``(os error N)`` marker."""
-    return re.search(rf"\b(?:winerror|os error) {code}\b", low) is not None
+_WINDOWS = os.name == "nt"
+
+# Statuses this update produces itself for a configuration problem (anchored, so
+# arbitrary tool output that merely contains "not found" is not reclassified).
+_CONFIGURATION = re.compile(
+    r"(?:installer|powershell|source dir) not found|--force-runtime target not found"
+    r"|installation context invalid|invalid installer deadline|invalid runtimescope"
+    r"|forced namespaced runtime reconciliation is unsupported"
+    r"|plugin update failed: 'copilot' cli not found"
+)
+_EXITED = re.compile(r"(?:installer|install) exited (-?\d+)\b")
+
+
+_WINERROR, _ERRNO, _OSERROR = r"\bwinerror", r"\[errno", r"\bos error"
+
+
+def _marker(low: str, kind: str, code: int) -> bool:
+    """A locale-independent ``[WinError N]`` / ``[Errno N]`` / ``(os error N)`` marker."""
+    return re.search(rf"{kind} {code}\b", low) is not None
+
+
+def _os_error(low: str, *, windows: tuple[int, ...] = (), posix: tuple[int, ...] = ()) -> bool:
+    """``os error N`` carries the host's own error numbering (Windows vs errno)."""
+    return any(_marker(low, _OSERROR, c) for c in (windows if _WINDOWS else posix))
 
 
 def classify_status(status: str) -> tuple[str, str | None]:
-    """Map an update status string to ``(outcome, error_code)``."""
+    """Map an update status string to ``(outcome, error_code)``.
+
+    Error classes are matched on stable numeric markers (``[WinError N]``,
+    ``[Errno N]``, ``os error N``) before English phrases, so localized OS
+    messages keep their codes.
+    """
     text = str(status).strip()
     low = text.lower()
     if text.startswith("OK"):
@@ -47,20 +74,25 @@ def classify_status(status: str) -> tuple[str, str | None]:
         return _ut.VERIFIED_CURRENT, None
     if text.startswith("SKIPPED") or text == "payload-only":
         return _ut.SKIPPED, None
-    if "timed out" in low:
+    if low.startswith("timed out"):
         return _ut.TIMEOUT, "timeout"
-    exited = re.search(r"exit(?:ed)?(?: with code)? (-?\d+)", low)
+    exited = _EXITED.match(low)
     if exited:
         return _ut.outcome_for_installer_exit(int(exited.group(1)))
-    if "input/output error" in low or "i/o error" in low:
+    if (_marker(low, _ERRNO, 5) or _os_error(low, posix=(5,))
+            or "input/output error" in low or "i/o error" in low):
         return _ut.COMMAND_FAILED, _ut.IO_ERROR
-    if _win_error(low, 33) or "locked a portion of the file" in low:
+    if (_marker(low, _WINERROR, 33) or _os_error(low, windows=(33,))
+            or "locked a portion of the file" in low):
         return _ut.BLOCKED_BY_LOCK, "lock_violation"
-    if _win_error(low, 32) or "used by another process" in low:
+    if (_marker(low, _WINERROR, 32) or _os_error(low, windows=(32,))
+            or "used by another process" in low):
         return _ut.BLOCKED_BY_LOCK, _ut.SHARING_VIOLATION
-    if _win_error(low, 5) or "access is denied" in low or "permission denied" in low:
+    if (_marker(low, _WINERROR, 5) or _os_error(low, windows=(5,), posix=(1, 13))
+            or _marker(low, _ERRNO, 1) or _marker(low, _ERRNO, 13)
+            or "access is denied" in low or "permission denied" in low):
         return _ut.COMMAND_FAILED, _ut.PERMISSION_DENIED
-    if any(k in low for k in ("not found", "context invalid", "unsupported", "deadline")):
+    if _CONFIGURATION.match(low):
         return _ut.CONFIGURATION_LIMITATION, "configuration"
     return _ut.COMMAND_FAILED, None
 

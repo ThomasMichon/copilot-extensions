@@ -921,8 +921,10 @@ def _update_modules(
             results.append((name, str(exc)))
 
     for name, status in results:
+        target = targets.get(name) if targets is not None else None
         update_events.record("module_update", f"{name}@copilot-extensions", status,
-                             changed=status.startswith("OK"))
+                             changed=status.startswith("OK"),
+                             required=targets is None or (target is not None and target.required))
     if results:
         output.header("Module Update Summary")
         for name, status in results:

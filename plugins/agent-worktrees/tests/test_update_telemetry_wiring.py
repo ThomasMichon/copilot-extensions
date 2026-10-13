@@ -271,8 +271,54 @@ def test_module_installer_timeout_is_timeout_whatever_the_slot(
     ("plugin update failed: [WinError 50] Anfrage nicht unterstuetzt", (ut.COMMAND_FAILED, None)),
     ("plugin update failed: (os error 330)", (ut.COMMAND_FAILED, None)),
 ])
-def test_status_classification_needs_contention_evidence(status, expected):
+def test_status_classification_needs_contention_evidence(monkeypatch, status, expected):
+    monkeypatch.setattr(update_events, "_WINDOWS", True)  # Windows-shaped messages
     assert update_events.classify_status(status) == expected
+
+
+@pytest.mark.parametrize(("status", "windows", "expected"), [
+    ("plugin update failed: [Errno 13] Zugriff verweigert", False,
+     (ut.COMMAND_FAILED, ut.PERMISSION_DENIED)),
+    ("plugin update failed: [Errno 1] Vorgang nicht zulaessig", False,
+     (ut.COMMAND_FAILED, ut.PERMISSION_DENIED)),
+    ("plugin update failed: [Errno 5] Ein-/Ausgabefehler", False,
+     (ut.COMMAND_FAILED, ut.IO_ERROR)),
+    ("plugin update failed: [Errno 130] Andere", False, (ut.COMMAND_FAILED, None)),
+    ("plugin update failed: Fehler (os error 5)", False, (ut.COMMAND_FAILED, ut.IO_ERROR)),
+    ("plugin update failed: Fehler (os error 5)", True,
+     (ut.COMMAND_FAILED, ut.PERMISSION_DENIED)),
+    ("plugin update failed: Fehler (os error 13)", False,
+     (ut.COMMAND_FAILED, ut.PERMISSION_DENIED)),
+    ("plugin update failed: Fehler (os error 33)", False, (ut.COMMAND_FAILED, None)),
+    ("plugin update failed: child process exited 75", False, (ut.COMMAND_FAILED, None)),
+    ("plugin update failed: rpc deadline exceeded", False, (ut.COMMAND_FAILED, None)),
+    ("plugin update failed: package not found", False, (ut.COMMAND_FAILED, None)),
+    ("plugin update failed: 'copilot' CLI not found on PATH (x)", False,
+     (ut.CONFIGURATION_LIMITATION, "configuration")),
+])
+def test_status_classification_is_locale_and_host_aware(monkeypatch, status, windows, expected):
+    monkeypatch.setattr(update_events, "_WINDOWS", windows)
+    assert update_events.classify_status(status) == expected
+
+
+def test_inactive_module_stays_advisory(tmp_path, monkeypatch, _update_home):
+    plugin = tmp_path / "agent-worktrees"
+    plugin.mkdir()
+    (plugin / "modules.json").write_text(json.dumps(
+        {"modules": [{"name": "agent-example", "source": "agent-example"}]}))
+    inactive = runtime._RegisteredPluginTarget(None, runtime._PluginActivation.INACTIVE)
+    update_events.start("engine")
+    update_events.enter("payload_refresh")
+    update_events.record("payload_refresh", "agent-example@copilot-extensions",
+                         "plugin state error: boom", required=False)
+    update_events.enter("module_update")
+    assert runtime._update_modules(plugin, "linux", None, targets={"agent-example": inactive})
+    assert update_events.finish(0) == 0
+    status = _status(_update_home)
+    assert status["run"]["outcome"] == ut.VERIFIED_CURRENT
+    entry = status["plugins"]["agent-example@copilot-extensions"]
+    assert entry["required"] is False
+    assert [a["component"] for a in status["advisories"]] == ["agent-example@copilot-extensions"]
 
 
 def _phase_outcomes(home: Path) -> dict[str, str]:

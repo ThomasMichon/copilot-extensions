@@ -567,3 +567,29 @@ def test_older_completion_never_replaces_a_later_one():
     mine = {"run": {"id": "A"}, "last_failure": None,
             "last_success": {"run_id": "A", "ended_at": "2026-01-01T00:00:05.000Z"}}
     assert run_mod._merge_completion(previous, mine, "now") is None
+
+
+def test_fold_keeps_the_detail_of_the_worst_event():
+    worse = _target("a@m", ut.TIMEOUT)
+    worse["details"]["detail"] = "installer timed out"
+    later = _target("a@m", ut.VERIFIED_CURRENT, phase="payload_refresh")
+    later["details"]["detail"] = "payload refreshed"
+    same = _target("a@m", ut.TIMEOUT)
+    same["details"]["detail"] = "timed out again"
+    assert ut.fold_targets([worse, later])["a@m"]["detail"] == "installer timed out"
+    assert ut.fold_targets([worse, later, same])["a@m"]["detail"] == "timed out again"
+
+
+def test_fold_never_promotes_an_advisory_failure_to_required():
+    required = _target("a@m", ut.VERIFIED_CURRENT)
+    advisory = _target("a@m", ut.COMMAND_FAILED, required=False, phase="payload_refresh")
+    advisory["details"]["detail"] = "inventory refresh failed"
+    entry = ut.fold_targets([advisory, required])["a@m"]
+    assert entry["required"] is True and entry["outcome"] == ut.VERIFIED_CURRENT
+    assert entry["advisory_outcome"] == ut.COMMAND_FAILED
+    status = ut.fold([advisory, required], run={"id": "r", "owner": "engine:1"},
+                     updated_at="2026-01-01T00:00:00.000Z")
+    assert status["run"]["outcome"] == ut.VERIFIED_CURRENT
+    assert status["advisories"] == [{"component": "a@m", "outcome": ut.COMMAND_FAILED,
+                                     "summary": "inventory refresh failed"}]
+    assert _validate(status, _schema("update-status")) == []

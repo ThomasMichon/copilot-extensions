@@ -94,7 +94,9 @@
           "live_generation": {"type": ["object", "null"]},
           "cutover": {"type": ["object", "null"]},
           "durations_ms": {"type": "object"},
-          "notes": {"type": "array", "items": {"type": "string"}}
+          "notes": {"type": "array", "items": {"type": "string"}},
+          "advisory_outcome": {"type": "string"},
+          "advisory_detail": {"type": "string"}
         }
       }
     }
