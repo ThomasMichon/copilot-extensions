@@ -1008,7 +1008,9 @@ _CONTRACT_OWNED_FLAGS = {
 
 
 @pytest.mark.parametrize("console_children", [False, True], ids=["detached", "console-children"])
-@pytest.mark.parametrize("flag", list(_CONTRACT_OWNED_FLAGS.values()), ids=list(_CONTRACT_OWNED_FLAGS))
+@pytest.mark.parametrize(
+    "flag", list(_CONTRACT_OWNED_FLAGS.values()), ids=list(_CONTRACT_OWNED_FLAGS),
+)
 def test_spawn_daemon_rejects_contract_owned_creationflags(
     tmp_path, monkeypatch, fake_popen, flag, console_children
 ):
