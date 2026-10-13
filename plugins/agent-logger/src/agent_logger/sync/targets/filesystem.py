@@ -24,11 +24,12 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import BinaryIO
 
-from agent_logger import process_logs as _process_logs
 from agent_logger import sessions
 from agent_logger.process_logs import is_process_log_candidate
 from agent_logger.sessions import SessionRef
-from agent_logger.sync.archive_directory import ArchiveRootChangedError, archive_directory
+from agent_logger.sync.archive_directory import (
+    ArchiveDirectory, ArchiveRootChangedError, archive_directory,
+)
 from agent_logger.sync.detritus import (
     DetritusSummary,
     discover_session_detritus,
@@ -412,11 +413,11 @@ def _copy_process_logs(
             source_identity.st_dev, source_identity.st_ino,
         ) != (opened.st_dev, opened.st_ino):
             raise _SourceChangedDuringCopy("process-log source root changed before opening")
-        return _copy_process_logs_pinned(directory.path, dest, opened)
+        return _copy_process_logs_pinned(directory, dest, opened)
 
 
 def _copy_process_logs_pinned(
-    source: Path, dest: Path, source_identity: os.stat_result,
+    directory: ArchiveDirectory, dest: Path, source_identity: os.stat_result,
 ) -> tuple[int, int, list[Path]]:
     """Flat, non-recursive incremental copy of process-log evidence.
 
@@ -442,7 +443,7 @@ def _copy_process_logs_pinned(
     open descriptor's own identity before and after the byte copy, which a
     rename can never change (the descriptor still refers to the original
     inode throughout). The directory ENTRY's current identity is instead
-    re-stat'd by name (via the pinned ``root_fd``, never by path) and
+    re-stat'd by name (via the pinned directory descriptor, never by path) and
     compared against the identity observed before the copy started, via a
     ``revalidate`` callback :func:`_copy_stream_replace` calls strictly
     *before* committing the replace (see that function's own docstring) --
@@ -453,7 +454,7 @@ def _copy_process_logs_pinned(
     copied = 0
     nbytes = 0
     locked: list[Path] = []
-    source_identity = source_identity or _lstat(source)
+    source = directory.path
 
     def _revalidate_root(before: os.stat_result) -> None:
         after = _lstat(source)
@@ -481,67 +482,47 @@ def _copy_process_logs_pinned(
         except OSError:
             return None
 
-    if _process_logs.supports_dir_fd():
+    if directory.fd is not None:
         try:
-            with _process_logs.open_root_dir(source) as root_fd:
-                opened_root = os.fstat(root_fd)
-                if (source_identity.st_dev, source_identity.st_ino) != (
-                    opened_root.st_dev, opened_root.st_ino,
-                ):
-                    raise _SourceChangedDuringCopy(
-                        "process-log source root changed before opening",
-                    )
-                entries = sorted(os.scandir(root_fd), key=lambda entry: entry.name)
-                for entry in entries:
-                    name = entry.name
-                    if not is_process_log_candidate(name):
-                        continue
+            _revalidate_root(source_identity)
+            for name in directory.names():
+                if not is_process_log_candidate(name):
+                    continue
+                try:
+                    before = directory.stat(name)
+                except FileNotFoundError:
+                    continue
+                if not stat.S_ISREG(before.st_mode):
+                    continue
+                dst_path = dest / name
+                if not _needs_copy_from_stat(before, dst_path):
+                    continue
+
+                def _same_entry_identity(
+                    name: str = name, before: os.stat_result = before,
+                ) -> bool:
+                    # A renamed inode keeps its fd identity; revalidate the
+                    # directory entry before landing any destination bytes.
                     try:
-                        before = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+                        after = directory.stat(name)
                     except FileNotFoundError:
-                        continue
-                    if not stat.S_ISREG(before.st_mode):
-                        continue
-                    dst_path = dest / name
-                    if not _needs_copy_from_stat(before, dst_path):
-                        continue
+                        return False
+                    return (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
 
-                    def _same_entry_identity(
-                        name: str = name, before: os.stat_result = before,
-                    ) -> bool:
-                        # Revalidate the DIRECTORY ENTRY's identity against
-                        # `before`, not just the open descriptor's own fstat
-                        # (which `_copy_stream_replace` already checked): a
-                        # rename-based rotation (writer renames the old file
-                        # aside and creates a fresh one under the same name)
-                        # never changes our already-open descriptor's
-                        # identity -- it still refers to the OLD inode
-                        # throughout the copy -- so the fd-only check in
-                        # `_copy_stream_replace` cannot observe it. Only
-                        # re-stat`ing the NAME (via the pinned `root_fd`,
-                        # never by path) can. Called before dst is touched,
-                        # so a rejection never destroys an existing, still-
-                        # good destination copy.
-                        try:
-                            after = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
-                        except FileNotFoundError:
-                            return False
-                        return (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
-
-                    try:
-                        with _process_logs.open_regular_at(root_fd, name) as stream:
-                            size = _land(stream, dst_path, revalidate=_same_entry_identity)
-                    except (FileNotFoundError, ValueError):
-                        # Vanished or changed identity between the stat above
-                        # and this open (rotation/deletion racing the copy) --
-                        # an ordinary skip, never a failure.
-                        continue
-                    if size is None:
-                        locked.append(source / name)
-                        continue
-                    copied += 1
-                    nbytes += size
-                _revalidate_root(opened_root)
+                try:
+                    with directory.open(name) as stream:
+                        opened = os.fstat(stream.fileno())
+                        if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+                            raise ValueError(f"process-log evidence changed while opening: {name}")
+                        size = _land(stream, dst_path, revalidate=_same_entry_identity)
+                except (FileNotFoundError, ValueError):
+                    continue
+                if size is None:
+                    locked.append(source / name)
+                    continue
+                copied += 1
+                nbytes += size
+            _revalidate_root(source_identity)
         except FileNotFoundError as exc:
             raise OSError("process-log copy path vanished during transfer") from exc
         return copied, nbytes, locked
@@ -1914,13 +1895,14 @@ class FilesystemTarget(Target):
                 source_identity = _lstat(log_root)
             except FileNotFoundError:
                 source_identity = None
+            redirected = source_identity is not None and is_link_or_reparse(
+                log_root, source_identity.st_mode,
+            )
             if source_identity is not None and (
                 not stat.S_ISDIR(source_identity.st_mode)
-                or is_link_or_reparse(log_root, source_identity.st_mode)
+                or redirected
             ):
-                reason = "symlink/reparse" if is_link_or_reparse(
-                    log_root, source_identity.st_mode,
-                ) else "not a directory"
+                reason = "symlink/reparse" if redirected else "not a directory"
                 raise OSError(f"process-log source must be a real directory: {log_root} ({reason})")
         except OSError as exc:
             self._record_process_log_health(machine, "partial", reason="unsafe process-log source")

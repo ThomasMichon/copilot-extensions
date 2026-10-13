@@ -60,6 +60,10 @@ collects ZIP member observations under the same pinned directory boundary as
 the listing, then releases all native handles before yielding any reference.
 Pausing or abandoning that iterator does not prevent source directory or
 archive renames. Directory-fd read APIs explicitly reject Windows callers.
+POSIX enumeration yields references incrementally without collecting all archive
+observations before the first yield. POSIX transfers reuse the already-pinned
+directory for listing, entry validation and reads; they do not reopen its pathname.
+Source-root changes still report a partial transfer rather than clearing health.
 
 The configured final root must be a real directory, not an alias. Pinning lasts
 for the operation, not across separate enumeration and read calls: references

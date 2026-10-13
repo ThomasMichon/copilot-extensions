@@ -149,6 +149,110 @@ def test_process_log_copy_preserves_consumer_error(
         filesystem._copy_process_logs(tmp_path, tmp_path / "destination")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="real POSIX directory-fd rename/symlink race")
+def test_process_log_copy_uses_pinned_directory_after_root_swap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger import process_logs
+    from agent_logger.sync.archive_directory import ArchiveDirectory
+    from agent_logger.sync.targets import filesystem
+
+    root = tmp_path / "logs"
+    _evidence(root, "raw", PAYLOAD)
+    outside = tmp_path / "outside"
+    _evidence(outside, "raw", b"outside evidence\n")
+    dest = tmp_path / "destination"
+    dest.mkdir()
+    original_names = ArchiveDirectory.names
+    swapped = False
+
+    def names(directory: ArchiveDirectory) -> list[str]:
+        nonlocal swapped
+        found = original_names(directory)
+        assert directory.fd is not None
+        root.rename(tmp_path / "retained")
+        root.symlink_to(outside, target_is_directory=True)
+        swapped = True
+        return found
+
+    def forbidden_reopen(path: Path) -> None:
+        pytest.fail("pinned process-log copy reopened the source directory")
+
+    monkeypatch.setattr(ArchiveDirectory, "names", names)
+    monkeypatch.setattr(process_logs, "open_root_dir", forbidden_reopen)
+    with pytest.raises(filesystem._SourceChangedDuringCopy, match="root changed during copy"):
+        filesystem._copy_process_logs(root, dest)
+    assert swapped
+    assert (dest / NAME).read_bytes() == PAYLOAD
+    assert (outside / NAME).read_bytes() == b"outside evidence\n"
+
+
+def test_process_log_copy_hands_off_same_live_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger.sync.targets import filesystem
+
+    original_directory = filesystem.archive_directory
+    boundaries: list[filesystem.ArchiveDirectory] = []
+    live = False
+
+    @contextmanager
+    def observed_directory(path: Path) -> Iterator[filesystem.ArchiveDirectory]:
+        nonlocal live
+        with original_directory(path) as directory:
+            boundaries.append(directory)
+            live = True
+            try:
+                yield directory
+            finally:
+                live = False
+
+    def observed_copy(
+        directory: filesystem.ArchiveDirectory, dest: Path, before: os.stat_result,
+    ) -> tuple[int, int, list[Path]]:
+        assert live
+        assert directory is boundaries[0]
+        assert (before.st_dev, before.st_ino) == (tmp_path.stat().st_dev, tmp_path.stat().st_ino)
+        return 0, 0, []
+
+    monkeypatch.setattr(filesystem, "archive_directory", observed_directory)
+    monkeypatch.setattr(filesystem, "_copy_process_logs_pinned", observed_copy)
+    assert filesystem._copy_process_logs(tmp_path, tmp_path / "destination") == (0, 0, [])
+    assert not live
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX incremental enumeration contract")
+@pytest.mark.parametrize("codec", ["raw", "zip"])
+def test_process_log_posix_enumeration_yields_before_later_archive_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codec: str,
+) -> None:
+    from agent_logger import process_logs
+
+    root = tmp_path / "logs"
+    first = _evidence(root, codec, PAYLOAD)
+    if codec == "zip":
+        first.path.rename(root / "a.zip")
+        first = ProcessLogRef(root / "a.zip", NAME)
+    (root / "z.zip").write_bytes(b"corrupt later archive")
+    created: list[ProcessLogRef] = []
+    original_ref = process_logs.ProcessLogRef
+
+    def observed_ref(*args: object, **kwargs: object) -> ProcessLogRef:
+        ref = original_ref(*args, **kwargs)
+        created.append(ref)
+        return ref
+
+    monkeypatch.setattr(process_logs, "ProcessLogRef", observed_ref)
+    iterator = iter_process_log_refs(root)
+    try:
+        assert next(iterator) == first
+        assert created == [first]
+        with pytest.raises(zipfile.BadZipFile):
+            next(iterator)
+    finally:
+        iterator.close()
+
+
 @pytest.mark.parametrize("operation", ["read", "copy"])
 def test_process_log_root_identity_error_preserves_reason_and_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
