@@ -515,8 +515,14 @@ win grows with build complexity.
   Automatic promotion run `38474138013`, started at
   `2026-10-13T21:55:19Z`, is the next native-evidence candidate; it runs the
   trusted workflow at `9c4d6acade6468e8220692194a62009e1b5ef4e4`.
-  Its initial gate and full-tree guards passed, but signing and publication
-  are not yet proved.
+  Its initial gate and full-tree guards passed, but the completed Worktrees
+  job `115562509623` failed at `2026-10-13T22:06:06Z`: four
+  `test_obligation_settlement.py` fixtures omit `record.machine` before the
+  execution-space mutation fence. That group reports four failures, 422
+  passes and five skips. The earlier six-case group is no longer the reported
+  blocker; these separate parent-settlement fixtures now block native
+  signing/publication proof. Deduplication and ownership coordination precede
+  any test-only fix-forward, with the production fence unchanged.
 - Consumer entry-point review confirms that the shared installer engine
   currently supplies resilient uv/venv and deployment helpers, not a
   dependency-admission path. Existing governed-feed trust discovery and
