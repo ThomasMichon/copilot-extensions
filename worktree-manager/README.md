@@ -249,8 +249,14 @@ allocated worktree and staged intent without submitting another prompt.
 Resume that existing worktree only when its state is `staged`; an incomplete
 creation or unconfirmed handoff requires explicit inspection.
 
-Prompted requests require `--stage-launch-seed` support; ordinary seedless
-launches retain older-engine compatibility. Uninstrumented legacy/custom
+Prompted requests require `--stage-launch-seed --require-native-seed` support;
+ordinary seedless launches retain older-engine compatibility. The engine
+serializes native prompt staging and hosted-provider activation under the same
+worktree record lock. A provider that wins first refuses staging; a staged seed
+that wins first blocks provider activation until its native handoff finishes.
+The Manager's early execution-leg read is only a preflight, not that fence.
+Accepted recovery history survives either refusal and does not itself reserve
+an execution leg. Uninstrumented legacy/custom
 prompt launchers refuse without consuming the seed; use normalized setup or
 adopt the engine's documented launch-seed invocation boundary.
 The `gh copilot` intermediary cannot acknowledge actual Copilot startup;

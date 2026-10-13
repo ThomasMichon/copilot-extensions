@@ -639,7 +639,7 @@ def resolve_launch_plan(
     args = ["resolve", "--json"]
     require_staging = bool(seed) or bool(defer_new_seed)
     if require_staging:
-        args.append("--stage-launch-seed")
+        args += ["--stage-launch-seed", "--require-native-seed"]
     if base:
         args.append("--base")
     elif new:
@@ -669,9 +669,12 @@ def resolve_launch_plan(
         )
     except EngineError as e:
         detail = _engine_error_detail(e)
-        if require_staging and "unrecognized arguments" in detail and "--stage-launch-seed" in detail:
+        if require_staging and "unrecognized arguments" in detail and any(
+            flag in detail for flag in ("--stage-launch-seed", "--require-native-seed")
+        ):
             raise EngineFeatureUnavailable(
-                "the installed engine predates staged launch-prompt ownership; "
+                "the installed engine predates staged launch-prompt ownership "
+                "with an atomic native-transport fence; "
                 "update agent-worktrees before launching this prompt"
             ) from e
         if (

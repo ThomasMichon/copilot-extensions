@@ -127,6 +127,7 @@ markers = [
     "guard: fast structural/contract guard tests (marketplace + picker integrity) run automatically in the pre-push hook; the full suite runs in CI",
     "real_installer_processes: run installers as real process trees (no subprocess.run adapter)",
     "installer_receipts: judge faked installers by their receipt, not exit 0 alone",
+    "contract(name): behavioral contract attribution",
 ]
 
 [tool.ruff]

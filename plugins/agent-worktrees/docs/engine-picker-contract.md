@@ -367,7 +367,24 @@ An empty registry is cheap and does not trigger historical session discovery;
 explicit recovery and the resident reconciliation cursor own registry repair.
 Thus unrelated session history cannot multiply the cost of a resume check.
 
-The Manager requests `resolve --stage-launch-seed` for prompted requests.
+The Manager requests `resolve --stage-launch-seed --require-native-seed` for
+prompted requests. The latter is a capability handshake: engines without the
+native execution-leg fence reject it before allocation or staging. The fence
+itself is unconditional in current engines, including direct stage callers.
+Launch-seed stage/take mutation protocol version 3 excludes older resident
+handlers that lack that fence, using the existing same-code fallback.
+
+Staging validates the actual execution leg while holding the same strict
+per-record lock that publishes the intent. Active, unknown, or opaque hosted
+bindings refuse staging without replacing pending intent. Execution-leg
+reservation and active/unknown publication acquire that same lock and refuse
+while a typed or legacy launch prompt is pending. Thus a concurrent native seed
+and hosted-provider activation have one winner, not two separately valid
+preflights. Seed handoff also validates the leg in its record transaction.
+Finishing the native handoff releases the pending-intent fence. An incompatible
+activation never silently consumes or discards the seed; recovery history is
+separate and does not reserve an execution leg.
+
 `launch.seed_pending: true`, `launch.seed_id` and `launch.seed_kind` identify
 the saved intent. The second resolve selects it with `--seed-id`, preserving
 New/Resume provenance without restaging text or inferring configured argv.

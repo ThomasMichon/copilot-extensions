@@ -1,0 +1,13 @@
+{
+  "comment": "Serialize native launch prompt staging with hosted execution-leg activation and require fenced staging capability",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

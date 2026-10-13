@@ -1592,14 +1592,8 @@ def cmd_execution_leg(args) -> int:
             try:
                 if not yaml_path.exists():
                     raise ValueError(f"worktree record disappeared: {worktree_id}")
-                with tracking._RecordLock(yaml_path):
-                    latest = tracking.load_record(yaml_path)
-                    if latest.execution_leg_opaque:
-                        raise ValueError("worktree uses a newer unsupported execution_leg schema")
-                    if latest.session_backend_opaque:
-                        raise ValueError(
-                            "worktree uses a newer unsupported session_backend schema"
-                        )
+                from .launch_seed_state import execution_leg_mutation
+                with execution_leg_mutation(yaml_path, args.action, args.state) as latest:
                     current = tracking.derive_execution_leg(latest)
                     current_revision = (current.binding_revision if current is not None else 0)
                     reservation = (
