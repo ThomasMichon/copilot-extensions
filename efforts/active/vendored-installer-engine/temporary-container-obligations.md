@@ -163,11 +163,13 @@ to bypass its invariants or the live cleanup confirmation gate.
 
 ## Validation plan
 
-- [ ] Verify begin/close serialization, in-progress refusal, generation-fenced
+- [x] Source ledger ABI: verify begin/close serialization, in-progress refusal, generation-fenced
       completion/binding, stale absence through ABA, lost-fence quiescence
-      recovery and interruption retention before enabling integrated producers.
-- [ ] Verify accepted retry after source reaping, recipient/incoming token
-      uniqueness and preservation of already closed/transferred recipients.
+      recovery and interruption retention in isolated regression fixtures.
+      Integrated producer enablement remains gated by the Docker/live items below.
+- [x] Source ledger ABI: verify accepted retry after source reaping, recipient/incoming token
+      uniqueness and preservation of already closed/transferred recipients in
+      isolated regression fixtures.
 - [ ] Prove the real finalize entrypoint refuses an initially empty owner after
       reservation but before allocation; prove its final locked check rejects a
       concurrent producer or the producer refuses an already-finalizing owner.

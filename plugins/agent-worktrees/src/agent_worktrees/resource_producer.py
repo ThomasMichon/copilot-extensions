@@ -161,6 +161,13 @@ def verified_absence(result: object, ref: str) -> bool:
     )
 
 
+def wire_metadata(value: object) -> dict:
+    """Expose invalid raw YAML as an explicit error, never as wire authority."""
+    if isinstance(value, dict) and valid_metadata(value):
+        return copy.deepcopy(value)
+    return {"error": "invalid-producer-metadata"}
+
+
 def unsettled(claim) -> bool:
     """A producer's phase, never its generic state, controls finalization."""
     value = claim.producer

@@ -597,6 +597,15 @@ installs, no service-specific config needed for this class of plugin.
 
 ### 2026-10-12 — Generic disposable producer ledger implemented and validated
 
+- A subsequent review found malformed raw YAML could break JSON claim/status
+  projections. The source correction exposes an explicit invalid-metadata
+  sentinel without changing the raw ledger or its unsettled ownership.
+  The source-only fence and accepted-retry validation checkboxes now match the
+  completed regressions; Docker integration and live validation remain open.
+  The earlier close-replay snapshot
+  `99875b31cfec2257acda3f59658b3f420fbdd902` passed 167 contained focused tests,
+  530 structural guards with 13 intentional skips and 32 exact-snapshot native
+  Windows replay regressions with verified supervisor cleanup.
 - Further review identified pending-close allocation races, per-owner token
   ambiguity and accepted-retry dependence on a source that may already be
   reaped. The operator accepted the review-directed allocation-fence amendment

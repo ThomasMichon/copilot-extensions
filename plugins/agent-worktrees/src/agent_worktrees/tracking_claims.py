@@ -280,7 +280,8 @@ class ResourceClaim:
             "state": self.state, "note": self.note, "handoff_bundle": self.handoff_bundle,
         }
         if self.has_producer:
-            result["producer"] = self.producer
+            from .resource_producer import wire_metadata
+            result["producer"] = wire_metadata(self.producer)
         return result
 
     def to_public_dict(self) -> dict[str, object]:
@@ -292,7 +293,8 @@ class ResourceClaim:
         if self.note:
             result["note"] = self.note
         if self.has_producer:
-            result["producer"] = self.producer
+            from .resource_producer import wire_metadata
+            result["producer"] = wire_metadata(self.producer)
         return result
 
     @property

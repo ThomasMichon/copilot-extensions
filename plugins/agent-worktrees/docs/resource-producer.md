@@ -113,6 +113,14 @@ Optional `producer` metadata on `ResourceClaim` contains:
 }
 ```
 
+Claim and status JSON projections preserve valid metadata and emit
+`"producer":{"error":"invalid-producer-metadata"}` for invalid metadata.
+This includes preserved YAML values such as timestamps, binary data, sets,
+non-string keys, non-finite numbers and recursive aliases that cannot travel
+as protocol JSON. The exact raw YAML remains in the ledger and remains an
+unsettled obligation; the display sentinel is not authority to settle or
+repair it.
+
 Binding adds an immutable `identity` JSON object and changes phase to `bound`.
 Recovery and identity are opaque to agent-worktrees; do not include credentials.
 Opaque JSON is bounded to 32 nesting levels and 16,384 encoded input bytes.
