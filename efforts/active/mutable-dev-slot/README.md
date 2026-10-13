@@ -234,6 +234,34 @@ operator directive to remove the explicit claimed-dev exception.
 
 ## Journal
 
+### 2026-10-13 - Finite-provider deadline prerequisite delivered
+
+The finite-profile probe correction #6404 merged as
+`c6e35fdd` and cleared normal release promotion #6453, whose generated
+`main` snapshot is `8db6b8dc`. The authorized unified update selected and
+activated agent-bridge `0.9.55`. Three native deadline regressions passed
+using that installed generation's interpreter, with import origins asserted
+against installed site-packages rather than the source checkout. Serving
+health reports readiness, topology readiness and credential-relay readiness;
+the actual cutover reports successful relay adoption. This closes #6399's
+provider deadline and live acceptance obligation.
+
+The same whole updater finished with explicit exit `1`, not successful
+convergence: agent-dispatch `0.17.1` required FastAPI `>=0.143.0`, while the
+configured package index exposed only versions through `0.142.2`. The
+separately owned #6454 compatibility correction merged in #6458, but its
+normal promotion, unified update and selected/running coordinator proof remain
+with that submitting worker. No index override, dependency-floor override,
+runtime hotpatch or additional updater retry is implied by the provider proof.
+
+The existing shared-core and first-adopter owner retains construction/
+retention descriptor integration and the Python-owned runtime lifecycle in
+the existing installer-engine home. Explicit dev/release,
+distinct-generation repair, generation propagation, complete installer
+adoption on both entrypoints, and portfolio validation remain open. No Plan
+or Validation Plan checkbox is completed by this prerequisite; this effort
+remains Active.
+
 ### 2026-10-13 — Canonical candidate and rollback retention merged
 
 #6381 merged into `dev` as
