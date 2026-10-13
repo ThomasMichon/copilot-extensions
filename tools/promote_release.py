@@ -352,13 +352,22 @@ def consume_pending_changes(
         else:
             sys.modules.pop("changefile", None)
 
-    return {
+    from promotion_control import ControlPreservationError, preserve_control
+
+    try:
+        control = preserve_control(scratch, main_head=main_head, repo=repo)
+    except ControlPreservationError as exc:
+        raise PromotionError(f"control preservation refused: {exc}") from exc
+    summary = {
         "bumps": {p: computed[p] for p in applied},
         "changefiles_consumed": changefile_names,
         "changefiles_newly_applied": newly_applied_names,
         "projections_synced": projections_synced,
         "materialize_log": materialize_log,
     }
+    if control is not None:
+        summary["control_preserved"] = control
+    return summary
 
 
 def _read_pipeline_state(main_head: str, *, repo: Path) -> dict:
@@ -550,9 +559,13 @@ def _remove_pycache(root: Path) -> None:
             _shutil.rmtree(cache_dir, ignore_errors=True)
 
 
-def build_promotion_tree(scratch: Path) -> str:
+def build_promotion_tree(scratch: Path, *, control: dict | None = None) -> str:
     _remove_pycache(scratch)
     _git(["add", "-A"], cwd=scratch)
+    if control is not None:
+        # Stage pinned blobs after checkout filters and core.filemode handling.
+        for path, blob in control["files"].items():
+            _git(["update-index", "--add", "--cacheinfo", f"100644,{blob},{path}"], cwd=scratch)
     return _git(["write-tree"], cwd=scratch)
 
 
@@ -736,7 +749,7 @@ def promote(
             repo=repo,
             trusted_source=REPO,
         )
-        content_tree = build_promotion_tree(scratch)
+        content_tree = build_promotion_tree(scratch, control=summary.get("control_preserved"))
         main_content_tree = _tree_excluding_state(main_tree, repo=repo)
 
         if content_tree == main_content_tree:
@@ -773,12 +786,14 @@ def promote(
             "tag": tag_stem,
             "promoted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
+        if "control_preserved" in summary:
+            new_state["last_promotion"]["control_preserved"] = summary["control_preserved"]
         _write_pipeline_state_into_scratch(scratch, new_state)
         _seed_coverage_baselines_from_main(scratch, main_head, repo=repo)
         baselines_written = _write_coverage_baselines_into_scratch(
             scratch, coverage_baselines_dir, dev_head=dev_head
         )
-        new_tree = build_promotion_tree(scratch)
+        new_tree = build_promotion_tree(scratch, control=summary.get("control_preserved"))
 
         commit = _git(
             ["commit-tree", new_tree, "-p", main_head, "-m", message], cwd=scratch

@@ -558,6 +558,30 @@ ever polls `main`. The promotion pipeline
 schedule** — there is a real wait between a merge landing on `dev` and a
 promotion actually shipping it to `main`, not an instant release.
 
+### Inert main-control preservation support
+
+The composer and trusted artifact recomposition share
+`tools/promotion_control.py`. With no control manifest on either input, existing
+composition is unchanged. No manifest is enabled by this implementation.
+
+A future owner-reviewed `.github/promotion-control.json` on pinned `main` uses
+schema `copilot-extensions.promotion-control`, integer `version: 1`, and a
+nonempty `files` array of exact lowercase `.github/workflows/<name>.yml` or
+`.yaml` paths (at most 64). The manifest itself is preserved automatically.
+Only non-executable regular Git blobs are admitted; duplicate keys/paths,
+case aliases, traversal, unsafe candidate destinations and missing declared
+files fail closed. Source, helper, test and documentation paths are not allowed.
+`dev` cannot introduce or redefine the declaration. Preserved bytes come from
+the pinned main commit, after ordinary versioning and materialization, and
+their blob IDs appear in the promotion summary and pipeline provenance.
+
+Removing a workflow from the trusted declaration returns it to normal dev
+composition; its actual retirement must be reviewed explicitly. This mechanism
+does not establish admission authorization, atomic merge freshness, wrapper/helper
+compatibility or control-preserving rollback. Those contracts and their live
+rejection/recovery proof are prerequisites to activating a manifest; existing
+validation and candidate gates remain required.
+
 ### A red `dev` build ships nothing
 
 The pipeline is a hard chain: the `gate` job only proceeds once the

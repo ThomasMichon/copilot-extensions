@@ -738,13 +738,15 @@ def validate_candidate_artifacts(
     scratch = promotion.add_scratch_worktree(dev_head, repo=repo)
     try:
         state = promotion._read_pipeline_state(main_before, repo=repo)
-        promotion.consume_pending_changes(
+        summary = promotion.consume_pending_changes(
             scratch, main_head=main_before, repo=repo,
             last_dev_head=(state.get("last_promotion") or {}).get("dev_head"),
             trusted_source=Path(__file__).resolve().parent.parent,
         )
         return validate_artifacts(
-            directory, content_tree=promotion.build_promotion_tree(scratch),
+            directory, content_tree=promotion.build_promotion_tree(
+                scratch, control=summary.get("control_preserved"),
+            ),
             dev_head=dev_head, main_before=main_before, projects=candidate_projects(scratch),
             candidate_root=scratch,
             source_policy=source_policy, min_age_days=min_age_days,
