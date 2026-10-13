@@ -434,6 +434,10 @@ def _module_names(plugin_dir: Path) -> set[str]:
 MACHINE_GATED_SKIP = "SKIPPED (not allowed on this machine)"
 
 
+class MachineDetectionError(Exception):
+    """Repository-aware machine detection failed, so the gate can't be decided."""
+
+
 def _machine_gate_blocks(name: str, scope: str, context: Path | None) -> bool:
     """Whether the machine gate forbids reconciling *name*'s runtime here.
 
@@ -458,8 +462,11 @@ def _machine_gate_blocks(name: str, scope: str, context: Path | None) -> bool:
         repo_dir = Path.cwd()
     try:
         machine = cfg.detect_machine(repo_dir)
-    except Exception:
-        machine = cfg.detect_machine()
+    except Exception as error:
+        # Never fall back to a bare hostname: detection raises on purpose when
+        # an explicit execution space is required or the machine registry is
+        # invalid, and launch-time reconcile refuses in that case too.
+        raise MachineDetectionError(str(error)) from error
     gate = reconcile.load_runtime_gate(repo_dir)
     gate_present = reconcile.gate_manifest_present(repo_dir)
     return not reconcile.runtime_allowed(
@@ -546,8 +553,11 @@ def _reconcile_one_runtime(
     scope = reconcile.manifest_runtime_scope(pdir) or "none"
     if scope == "none":
         return "payload-only"
-    if _machine_gate_blocks(name, scope, gate_context):
-        return MACHINE_GATED_SKIP
+    try:
+        if _machine_gate_blocks(name, scope, gate_context):
+            return MACHINE_GATED_SKIP
+    except MachineDetectionError as error:
+        return f"machine detection failed: {error}"
 
     pver = reconcile.payload_version(pdir)
     try:
@@ -784,9 +794,15 @@ def _update_modules(
         from . import reconcile as _reconcile
 
         module_scope = _reconcile.manifest_runtime_scope(module_dir) or "none"
-        if _machine_gate_blocks(
-            name, module_scope, target.context if target is not None else None
-        ):
+        try:
+            gate_blocks = _machine_gate_blocks(
+                name, module_scope, target.context if target is not None else None
+            )
+        except MachineDetectionError as error:
+            output.warn(f"{name}: machine detection failed: {error}")
+            results.append((name, "machine detection failed"))
+            continue
+        if gate_blocks:
             output.info(f"Skipping module runtime not allowed on this machine: {name}")
             results.append((name, MACHINE_GATED_SKIP))
             continue

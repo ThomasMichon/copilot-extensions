@@ -924,6 +924,31 @@ def test_gated_runtime_not_allowed_is_skipped_with_clear_status(monkeypatch):
     assert calls == []
 
 
+def test_machine_detection_failure_blocks_instead_of_using_the_hostname(monkeypatch):
+    """Repository-aware detection raises on purpose (explicit execution space
+    required, invalid registry); update must not fall back to a raw hostname
+    the gate might allow."""
+    _gated_codespaces(monkeypatch)
+    _gate(monkeypatch, allowed={"agent-codespaces": {"raw-host"}}, present=True)
+
+    def detect(repo_dir=None):
+        if repo_dir is not None:
+            raise RuntimeError("explicit execution space required")
+        return "raw-host"
+
+    monkeypatch.setattr(cfg, "detect_machine", detect)
+    calls = _capture_installers(monkeypatch)
+
+    status = m._reconcile_one_runtime(
+        "agent-codespaces", "linux", force=False, gate_context=Path("/repo/anchor")
+    )
+
+    assert status.startswith("machine detection failed")
+    assert calls == []
+    assert not m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=False)
+    assert calls == []
+
+
 def test_gated_skip_is_reported_and_not_a_failure(monkeypatch, capsys):
     _gated_codespaces(monkeypatch)
     _gate(monkeypatch, allowed={"agent-codespaces": {"other-box"}}, present=True)
