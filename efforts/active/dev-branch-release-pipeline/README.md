@@ -49,6 +49,7 @@ time.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Operator + driving agent | Design, build tooling, drive phases | `copilot-extensions` worktree on this machine |
+| Baseline prevention driver | Phase 8 source changes and regression evidence; not live candidate recovery | Issue #3336 and the Phase 8 PR |
 
 _Expand this table if/when work is split across additional participants
 (e.g. a dedicated worktree for the CI pipeline vs. one for CONTRIBUTING/AGENTS.md
@@ -677,6 +678,19 @@ Full design (Request, Context, Plan, Design points, Validation Plan):
       post-generation promotion invariant. See the sibling doc for the full
       checklist, design decisions, and validation matrix.
 
+### Phase 8 - Dev-owned module-size baseline updates
+
+Design and validation contract:
+[phase-8-dev-owned-module-baselines.md](phase-8-dev-owned-module-baselines.md).
+
+- [ ] Review the bounded baseline-authority correction before implementation.
+- [ ] Make trusted post-merge baseline maintenance propose reviewed changes to
+      `dev`, never independently publish baseline changes to `main`.
+- [ ] Preserve trusted-main execution, hard-cap enforcement, and generated-tree
+      correctness; reject unsafe or stale maintenance inputs visibly.
+- [ ] Prove the baseline-update/promotion race cannot advance `main` through
+      the baseline-maintenance path, then coordinate the normal control rollout.
+
 ## Validation Plan
 
 - [x] Generator run against current (pre-split) `main` reproduces the
@@ -800,6 +814,12 @@ Full design (Request, Context, Plan, Design points, Validation Plan):
 
 Full validation matrix:
 [phase-7-vendorable-changefiles.md](phase-7-vendorable-changefiles.md#validation-plan).
+
+### Phase 8 validation
+
+The prevention driver owns the bounded matrix in
+[phase-8-dev-owned-module-baselines.md](phase-8-dev-owned-module-baselines.md#validation-plan).
+Existing release gates and other participants' phase ownership remain unchanged.
 
 ## Proposal
 
@@ -2645,7 +2665,6 @@ than fully pre-solved in the plan — operator direction: land the plan now
 and resolve those with tests during implementation.
 
 Phase 7 implementation can now begin.
-
 
 
 
