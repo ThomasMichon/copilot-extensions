@@ -1546,8 +1546,11 @@ When that logical location is already a safe workspace, only the native CWD is
 updated; the caller's workspace is preserved rather than replaced by HOME.
 Only FileSystem-provider locations qualify as native directory candidates;
 registry or other provider containers use the validated project/HOME fallback.
-The path-gated `Payload CWD contract` workflow runs a focused Linux/Windows smoke
-on relevant PRs; its scheduled/manual lane runs the full inherited-flag matrix.
+Relevant dev PRs run the same focused Linux/Windows smoke inside CI's existing
+native runner jobs, so their outcomes feed the required PR aggregate without
+another workflow or check. Changed-path reads use the real PR head and fail on
+Git errors. The path-gated `Payload CWD contract` workflow retains non-dev PR
+coverage; its scheduled/manual lane runs the full inherited-flag matrix.
 
 ### Watchdog — a stalled install self-terminates (fixes stall-outs)
 
