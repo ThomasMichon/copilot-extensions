@@ -1461,7 +1461,7 @@ class TestLayeredConfig:
         assert conf.default_repo.knowledge_only is False
         assert cfg.active_project() == "provider"
 
-    def test_load_project_config_authority_only_skips_repository_policy_layers(
+    def test_load_project_config_authority_only_skips_unrelated_policy_layers(
         self,
         tmp_path: Path,
         monkeypatch,
@@ -1499,10 +1499,11 @@ class TestLayeredConfig:
             encoding="utf-8",
         )
         monkeypatch.setattr(cfg, "global_config_path", lambda: global_config)
+        inrepo_reads = []
         monkeypatch.setattr(
             cfg,
             "_load_inrepo_config",
-            lambda _anchor: pytest.fail("authority load must not read repo policy"),
+            lambda resolved_anchor: inrepo_reads.append(resolved_anchor) or {},
         )
         monkeypatch.setattr(
             cfg,
@@ -1525,6 +1526,89 @@ class TestLayeredConfig:
         assert conf.platform == "windows"
         assert conf.default_repo.anchor == str(anchor)
         assert cfg.active_project() == "provider"
+        assert inrepo_reads == [str(anchor)]
+
+    def test_authority_only_preserves_knowledge_backed_machine_fencing(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        from types import SimpleNamespace
+
+        from agent_worktrees import execution_spaces
+        from agent_worktrees import repos as repos_mod
+
+        harness = tmp_path / "harness"
+        knowledge = tmp_path / "knowledge"
+        cfg.inrepo_config_path(harness).parent.mkdir(parents=True)
+        cfg.inrepo_config_path(harness).write_text(
+            "stateless: true\nrequires_external_state_root: true\n",
+            encoding="utf-8",
+        )
+        (knowledge / ".agent-worktrees").mkdir(parents=True)
+        (knowledge / ".agent-worktrees" / "machines.yaml").write_text(
+            "machines:\n"
+            "  workstation-windows:\n"
+            "    execution_platform: windows\n"
+            "    physical_host: workstation\n"
+            "  workstation-wsl:\n"
+            "    execution_platform: wsl\n"
+            "    physical_host: workstation\n",
+            encoding="utf-8",
+        )
+        registry = repos_mod.ReposRegistry(
+            repos={
+                name: repos_mod.RepoEntry(
+                    name=name,
+                    repo_class="worktree",
+                    paths={
+                        "windows": str(anchor),
+                        "wsl": str(anchor),
+                        "linux": str(anchor),
+                    },
+                )
+                for name, anchor in (
+                    ("harness", harness),
+                    ("knowledge", knowledge),
+                )
+            }
+        )
+        monkeypatch.setattr(repos_mod, "read_registry", lambda: registry)
+        project_root = tmp_path / ".harness"
+        project_root.mkdir()
+        (project_root / "config.yaml").write_text(
+            "machine: workstation-windows\n"
+            "platform: windows\n"
+            "knowledge_repo: knowledge\n"
+            f"repos:\n  harness:\n    anchor: {harness}\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            cfg,
+            "project_dir",
+            lambda name=None: project_root,
+        )
+
+        conf = cfg.load_project_config("harness", authority_only=True)
+
+        assert conf.knowledge_repo == "knowledge"
+        assert conf.default_repo.stateless is True
+        assert conf.default_repo.requires_external_state_root is True
+        entries = cfg.load_machines_yaml(harness, config=conf)
+        assert set(entries) == {"workstation-windows", "workstation-wsl"}
+        with pytest.raises(
+            execution_spaces.ExecutionSpaceError,
+            match="different execution space",
+        ):
+            execution_spaces.require_record_mutation(
+                SimpleNamespace(
+                    machine="workstation-wsl",
+                    platform="wsl",
+                    worktree_id="foreign",
+                    owner_ref=None,
+                ),
+                conf,
+            )
 
     def test_knowledge_only_defaults_false_and_parses_true(
         self, tmp_path: Path, monkeypatch

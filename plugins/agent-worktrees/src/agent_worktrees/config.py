@@ -1200,11 +1200,10 @@ def _load_project_authority_config(
 ) -> Config:
     """Load only the machine identity and anchor needed for authority checks.
 
-    Execution-space fencing does not depend on repository policy, knowledge
-    overlays, profiles, or committed in-repo configuration. Avoid resolving
-    those layers on short resident-daemon write paths, while preserving the
-    same machine-local/global precedence and registered-anchor authority used
-    by the full loader.
+    Execution-space fencing does not depend on repository policy, profiles, or
+    control-plane overlays. Avoid resolving those layers on short resident-
+    daemon write paths, while retaining the committed state-root gating facts
+    needed to locate a stateless harness's knowledge-backed machine registry.
     """
     path = path or project_dir(name) / "config.yaml"
     global_raw = config_migrations.migrate_loaded(
@@ -1245,6 +1244,17 @@ def _load_project_authority_config(
             f"No repo could be resolved for project {name!r} from "
             f"{path} or the repos registry"
         )
+    inrepo_authority = _load_inrepo_config(str(anchor))
+    stateless = bool(
+        machine_repo.get("stateless", inrepo_authority.get("stateless", False))
+    )
+    requires_external_state_root = bool(
+        machine_repo.get(
+            "requires_external_state_root",
+            inrepo_authority.get("requires_external_state_root", False),
+        )
+        or stateless
+    )
     worktree_root = machine_repo.get("worktree_root") or derive_worktree_root(
         anchor
     )
@@ -1253,10 +1263,17 @@ def _load_project_authority_config(
         machine=machine,
         platform=platform_name,
         repo_name=name,
+        knowledge_repo=(
+            machine_raw.get("knowledge_repo")
+            or global_raw.get("knowledge_repo")
+            or ""
+        ),
         repos={
             name: RepoConfig(
                 anchor=str(anchor),
                 worktree_root=str(worktree_root),
+                stateless=stateless,
+                requires_external_state_root=requires_external_state_root,
             ),
         },
     )
