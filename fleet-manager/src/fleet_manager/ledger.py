@@ -4,6 +4,8 @@ from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 
+from .allocation import (RELEASE_INDEX, check_released_generation, create_release_history,
+                         verify_release_index)
 from .operations import AllocationRelease, OperationIntent, TargetReceipt
 from .planning import PlanError, identifier, integer
 
@@ -69,11 +71,7 @@ class OperationLedger:
                 )
                 version = 3
             if version == 3:
-                connection.execute(
-                    "CREATE TABLE allocation_releases("
-                    "operation_id INTEGER PRIMARY KEY REFERENCES operations(id),"
-                    "resource TEXT NOT NULL,proof BLOB NOT NULL)"
-                )
+                create_release_history(connection)
                 connection.execute("PRAGMA user_version=4")
 
     @staticmethod
@@ -90,11 +88,15 @@ class OperationLedger:
         if version >= 3:
             columns["allocation_claims"] = ("resource", "operation_id")
         if version >= 4:
-            columns["allocation_releases"] = ("operation_id", "resource", "proof")
+            columns["allocation_releases"] = ("operation_id", "resource", "generation", "proof")
         objects = connection.execute(
             "SELECT type,name FROM sqlite_master WHERE name NOT GLOB 'sqlite_*'"
         ).fetchall()
-        if set(objects) != {("table", name) for name in columns}:
+        expected_objects = {("table", name) for name in columns}
+        if version >= 4:
+            expected_objects.add(("index", RELEASE_INDEX))
+            verify_release_index(connection)
+        if set(objects) != expected_objects:
             raise PlanError("unrecognized operation ledger schema")
         for name, expected in columns.items():
             actual = tuple((row[1], row[6]) for row in
@@ -120,6 +122,7 @@ class OperationLedger:
                 identity = connection.execute("SELECT authority,installation FROM identity").fetchall()
                 if identity != [(self.authority, self.installation)]:
                     raise PlanError("operation ledger identity mismatch")
+                verify_release_index(connection)
             yield connection
             connection.commit()
         finally:
@@ -191,11 +194,7 @@ class OperationLedger:
                 "SELECT 1 FROM allocation_claims WHERE resource=?", (resource,),
             ).fetchone():
                 raise PlanError("allocation resource is already claimed")
-            for (proof,) in connection.execute(
-                "SELECT proof FROM allocation_releases WHERE resource=?", (resource,),
-            ):
-                if value["generation"] <= AllocationRelease(bytes(proof)).to_dict()["generation"]:
-                    raise PlanError("allocation generation must exceed released generations")
+            check_released_generation(connection, value["generation"], resource)
             operation_id = self._admit(connection, value, intent)
             connection.execute(
                 "INSERT INTO allocation_claims VALUES(?,?)", (resource, operation_id),
@@ -227,8 +226,8 @@ class OperationLedger:
             ).fetchone() != (operation_id,):
                 raise PlanError("operation does not hold the allocation claim")
             connection.execute(
-                "INSERT INTO allocation_releases VALUES(?,?,?)",
-                (operation_id, resource, proof.encoded),
+                "INSERT INTO allocation_releases VALUES(?,?,?,?)",
+                (operation_id, resource, value["generation"], proof.encoded),
             )
             connection.execute(
                 "DELETE FROM allocation_claims WHERE resource=? AND operation_id=?",

@@ -387,3 +387,16 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   select the authenticated vertical-slice integration boundary with existing
   routing owners; full baseline/lifecycle/runtime/migration/adoption gates remain
   open and no parent Plan/Validation checkbox is closed by this primitive.
+
+### 2026-10-13 - Release review follow-through
+- #6418 review identified possible callback mutation of earlier permanent
+  tombstones and unindexed history scans in both admission paths. Protected
+  journal DML/schema/index/trigger changes are now refused by the cooperative
+  authorizer, including generic effects; effect tables remain writable.
+- Both journals now store released generations with a verified descending
+  resource/generation index. Admission performs one maximum lookup rather than
+  scanning/decoding proofs. Missing/foreign index definitions fail explicitly.
+  New regressions attempt prior-tombstone/core-state mutation through both
+  callbacks and bound the actual lookup under 5,000 retained releases.
+- Installed contained suite: 333 passed; lint passed. These are fixes to the
+  current unmerged release slice, not a new runtime/adoption milestone.

@@ -9,6 +9,7 @@ import sys
 import pytest
 
 from fleet_manager.ledger import OperationLedger
+from fleet_manager.allocation import check_released_generation
 from fleet_manager.node_journal import NodeJournal
 from fleet_manager.operations import AllocationRelease, OperationIntent
 from fleet_manager.planning import PlanError
@@ -383,3 +384,93 @@ def test_release_upgrade_refuses_reserved_table_collision_without_mutation(tmp_p
     with closing(sqlite3.connect(store.path)) as connection:
         assert connection.execute("SELECT type,name,sql FROM sqlite_master").fetchall() == before
         assert connection.execute("PRAGMA user_version").fetchone()[0] == old
+
+
+@pytest.mark.parametrize("action", ["effect", "retire", "generic-effect"])
+@pytest.mark.parametrize("sql", [
+    "DELETE FROM allocation_releases",
+    "UPDATE allocation_releases SET generation=0",
+    "INSERT INTO allocation_releases SELECT * FROM allocation_releases",
+    "DROP TABLE allocation_releases",
+    "ALTER TABLE allocation_releases RENAME TO discarded",
+    "DROP INDEX allocation_release_generations",
+    "CREATE INDEX extra ON allocation_releases(resource)",
+    "CREATE TRIGGER destructive AFTER INSERT ON allocation_releases BEGIN SELECT 1; END",
+    "CREATE TEMP VIEW allocation_releases AS SELECT 1 AS proof",
+    "UPDATE identity SET installation='other'",
+    "DELETE FROM operations",
+    "DELETE FROM receipts",
+    "DELETE FROM allocation_owners",
+])
+def test_callbacks_cannot_mutate_older_tombstones_or_core_state(tmp_path, action, sql):
+    n, g, first = prepared(tmp_path)
+    proof = n.release_cooperative(first, retire, resource="workspace-1")
+    release(g, first, proof)
+    successor = request(operation="second", generation=7)
+    n.accept_allocation(successor, resource="workspace-1")
+    current = successor
+    if action == "generic-effect":
+        current = request(operation="generic", command="task.submit",
+                          parameters={"objective": "objective-1"})
+        n.accept(current)
+    before = n.inspect(current)
+    def invalid(connection):
+        effect(connection)
+        connection.execute(sql)
+        return None if action == "retire" else "result-2"
+    with pytest.raises(sqlite3.DatabaseError, match="not authorized|prohibited"):
+        if action == "retire":
+            n.release_cooperative(current, invalid, resource="workspace-1")
+        else:
+            n.commit_cooperative(current, invalid,
+                                 **({} if action == "generic-effect"
+                                    else {"resource": "workspace-1"}))
+    assert n.allocation_release(first) == proof
+    assert n.allocation_owner(resource="workspace-1") == successor
+    assert n.allocation_release(successor) is None
+    assert n.inspect(current) == before
+    assert active(n.path) == 0
+
+
+@pytest.mark.parametrize("kind", ["node", "gateway"])
+def test_indexed_generation_lookup_is_bounded_with_large_permanent_history(tmp_path, kind):
+    n, g, _ = prepared(tmp_path)
+    store = n if kind == "node" else g
+    with closing(sqlite3.connect(store.path)) as connection:
+        # Only the generation lookup is exercised here; proof parsing is deliberately absent.
+        connection.executemany(
+            "INSERT INTO allocation_releases VALUES(?,?,?,?)",
+            ((i + 100, f"resource-{i % 20}", i + 1, b"unused") for i in range(5000)))
+        connection.commit()
+        plan = connection.execute(
+            "EXPLAIN QUERY PLAN SELECT generation FROM allocation_releases WHERE resource=? "
+            "ORDER BY generation DESC LIMIT 1", ("resource-3",),
+        ).fetchall()
+        assert any("COVERING INDEX allocation_release_generations" in row[3] for row in plan)
+        # A historical scan/decoding loop cannot fit this VM instruction budget.
+        connection.set_progress_handler(lambda: 1, 100)
+        with pytest.raises(PlanError, match="generation"):
+            check_released_generation(connection, 4000, "resource-3")
+        check_released_generation(connection, 5000, "resource-3")
+        check_released_generation(connection, 1, "fresh")
+        connection.set_progress_handler(None, 0)
+
+
+@pytest.mark.parametrize("kind", ["node", "gateway"])
+@pytest.mark.parametrize("index", [
+    "", "CREATE INDEX allocation_release_generations ON allocation_releases(resource)",
+    "CREATE INDEX allocation_release_generations ON allocation_releases(resource,generation)",
+    "CREATE INDEX allocation_release_generations ON allocation_releases(resource,generation DESC)"
+    " WHERE generation>1",
+])
+def test_open_refuses_missing_or_incompatible_generation_index(tmp_path, kind, index):
+    n, g, _ = prepared(tmp_path)
+    store = n if kind == "node" else g
+    with closing(sqlite3.connect(store.path)) as connection:
+        connection.execute("DROP INDEX allocation_release_generations")
+        if index:
+            connection.execute(index)
+    with pytest.raises(PlanError, match="release index"):
+        (node if kind == "node" else gateway)(store.path)
+    with pytest.raises(PlanError, match="release index"):
+        store.inspect(request())

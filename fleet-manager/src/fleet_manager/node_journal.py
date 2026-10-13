@@ -4,6 +4,8 @@ from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 
+from .allocation import (RELEASE_INDEX, check_released_generation, create_release_history,
+                         verify_release_index)
 from .operations import AllocationRelease, OperationIntent, TargetReceipt
 from .planning import PlanError, identifier, integer
 
@@ -58,13 +60,10 @@ class NodeJournal:
             if version == 2:
                 if connection.execute(
                     "SELECT 1 FROM sqlite_master WHERE name='allocation_releases' COLLATE NOCASE"
+                    " OR name=? COLLATE NOCASE", (RELEASE_INDEX,),
                 ).fetchone():
                     raise PlanError("unrecognized node release schema")
-                connection.execute(
-                    "CREATE TABLE allocation_releases("
-                    "operation_id INTEGER PRIMARY KEY REFERENCES operations(id),"
-                    "resource TEXT NOT NULL,proof BLOB NOT NULL)"
-                )
+                create_release_history(connection)
                 connection.execute("PRAGMA user_version=3")
 
     def _verify(self, connection, *, version=3):
@@ -80,7 +79,8 @@ class NodeJournal:
         if version >= 2:
             columns["allocation_owners"] = ("resource", "operation_id")
         if version >= 3:
-            columns["allocation_releases"] = ("operation_id", "resource", "proof")
+            columns["allocation_releases"] = ("operation_id", "resource", "generation", "proof")
+            verify_release_index(connection)
         for name, expected in columns.items():
             kind = connection.execute(
                 "SELECT type FROM sqlite_master WHERE name=?", (name,),
@@ -198,7 +198,7 @@ class NodeJournal:
                 "SELECT 1 FROM allocation_owners WHERE resource=?", (resource,),
             ).fetchone():
                 raise PlanError("node allocation resource is already owned")
-            self._check_generation(connection, value, resource)
+            check_released_generation(connection, value["generation"], resource)
             accepted = self._accept(connection, value, intent)
             operation_id = self._find(connection, value)[0]
             connection.execute(
@@ -212,14 +212,6 @@ class NodeJournal:
             "SELECT proof FROM allocation_releases WHERE operation_id=?", (operation_id,),
         ).fetchone()
         return AllocationRelease(bytes(row[0])) if row else None
-
-    @staticmethod
-    def _check_generation(connection, value, resource):
-        for (proof,) in connection.execute(
-            "SELECT proof FROM allocation_releases WHERE resource=?", (resource,),
-        ):
-            if value["generation"] <= AllocationRelease(bytes(proof)).to_dict()["generation"]:
-                raise PlanError("allocation generation must exceed released generations")
 
     def _allocation_scope(self, intent, resource):
         identifier(resource, "node allocation resource")
@@ -254,12 +246,34 @@ class NodeJournal:
 
     @contextmanager
     def _cooperative(self, connection):
-        connection.set_authorizer(
-            lambda action, *_: sqlite3.SQLITE_DENY if action in (
+        owned = {"identity", "operations", "receipts", "allocation_owners", "allocation_releases"}
+        def authorize(action, first, second, *_):
+            if action in (
                 sqlite3.SQLITE_TRANSACTION, sqlite3.SQLITE_SAVEPOINT,
                 sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH, sqlite3.SQLITE_PRAGMA,
-            ) else sqlite3.SQLITE_OK
-        )
+            ):
+                return sqlite3.SQLITE_DENY
+            table = None
+            if action in (
+                sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE,
+                sqlite3.SQLITE_CREATE_TABLE, sqlite3.SQLITE_DROP_TABLE,
+                sqlite3.SQLITE_CREATE_TEMP_TABLE, sqlite3.SQLITE_DROP_TEMP_TABLE,
+                sqlite3.SQLITE_CREATE_VIEW, sqlite3.SQLITE_DROP_VIEW,
+                sqlite3.SQLITE_CREATE_TEMP_VIEW, sqlite3.SQLITE_DROP_TEMP_VIEW,
+                sqlite3.SQLITE_CREATE_VTABLE, sqlite3.SQLITE_DROP_VTABLE,
+            ):
+                table = first
+            elif action in (
+                sqlite3.SQLITE_ALTER_TABLE, sqlite3.SQLITE_CREATE_INDEX, sqlite3.SQLITE_DROP_INDEX,
+                sqlite3.SQLITE_CREATE_TEMP_INDEX, sqlite3.SQLITE_DROP_TEMP_INDEX,
+                sqlite3.SQLITE_CREATE_TRIGGER, sqlite3.SQLITE_DROP_TRIGGER,
+                sqlite3.SQLITE_CREATE_TEMP_TRIGGER, sqlite3.SQLITE_DROP_TEMP_TRIGGER,
+            ):
+                table = second
+            elif action == sqlite3.SQLITE_REINDEX and first == RELEASE_INDEX:
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_DENY if table and table.lower() in owned else sqlite3.SQLITE_OK
+        connection.set_authorizer(authorize)
         try:
             yield
         finally:
@@ -287,8 +301,8 @@ class NodeJournal:
                          installation=self.installation)
             proof = AllocationRelease.from_dict(value)
             connection.execute(
-                "INSERT INTO allocation_releases VALUES(?,?,?)",
-                (operation_id, resource, proof.encoded),
+                "INSERT INTO allocation_releases VALUES(?,?,?,?)",
+                (operation_id, resource, value["generation"], proof.encoded),
             )
             connection.execute(
                 "DELETE FROM allocation_owners WHERE resource=? AND operation_id=?",

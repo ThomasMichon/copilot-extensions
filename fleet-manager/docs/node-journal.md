@@ -33,6 +33,10 @@ effects. Those cannot roll back with SQLite. Do not expose arbitrary callback
 selection or SQL through a remote protocol. This is an internal cooperative
 effect-owner seam, not a general remote-code executor. The connection authorizer
 refuses callback transaction/savepoint, attach/detach and PRAGMA operations.
+It also refuses writes and schema/index/trigger changes to journal-owned
+identity, operations, receipts, allocation ownership and permanent release
+history, while allowing ordinary SQLite effect-table writes and creation.
+This protects earlier tombstones as well as the callback's current binding.
 Callbacks remain trusted local code, not a security sandbox; they must not alter
 the journal's own schema/state or invoke privileged connection methods.
 The callback's effect table and result reference must contain no secrets.
@@ -90,6 +94,11 @@ acceptance repeats still return the original receipt, **not new ownership**.
 Old effects fail held-owner checks even after a successor is accepted.
 New operations on that resource require an allocation generation strictly higher
 than every recorded released generation, across principal/account identities.
+The release table stores the generation separately with a verified
+resource/generation-descending index; admission reads one indexed maximum,
+not every historical proof. Index integrity is checked when opening and
+within operation transactions. Permanent history need not be scanned or decoded
+to admit a new generation.
 The generation is resource-specific, not a connector/installation epoch.
 Old proofs cannot retire successors. There is no TTL, automatic release or
 proof garbage collection; storage retention remains a separate contract.
@@ -165,3 +174,6 @@ cross-host fencing, revocable delegated grants or live Gateway/node readiness.
 Release tests add installed node/Gateway precommit crashes and postcommit lost
 replies, concurrent retirement exactly once, competing successors and a stale
 effect after reassignment. Permanent proof replay never removes successor ownership.
+Callback-corruption regressions exercise both allocation and generic effect paths.
+The generation lookup uses a verified covering index and stays below a fixed
+SQLite instruction budget with 5,000 retained releases.

@@ -183,7 +183,7 @@ def test_callback_owner_mutation_is_rolled_back_with_effect(tmp_path):
         effect(connection)
         connection.execute("DELETE FROM allocation_owners")
         return "result-1"
-    with pytest.raises(PlanError, match="does not own"):
+    with pytest.raises(sqlite3.DatabaseError, match="not authorized"):
         store.commit_cooperative(intent, invalid, resource="workspace-1")
     assert effect_count(store.path) == 0
     assert store.allocation_owner(resource="workspace-1") == intent

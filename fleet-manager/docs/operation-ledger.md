@@ -71,6 +71,11 @@ proof fails. Original allocation-admission repeats return the original operation
 without recreating its claim. A new allocation must carry a generation strictly
 higher than all recorded releases for that resource, regardless of target,
 principal or account. This is an allocation generation, not a connector epoch.
+Release rows store the generation separately with a verified
+resource/generation-descending index; admission reads one indexed maximum,
+not historical proof bytes. Missing or incompatible index definitions fail
+on construction and inside operation transactions. A 5,000-release regression
+checks the covering-index query plan and a fixed SQLite instruction budget.
 No tombstone cleanup, automatic retirement, external/provider release or
 distributed resource fence is supplied. A correctly implemented trusted
 SQLite-only node retirement adapter is the sole producer this contract covers;
