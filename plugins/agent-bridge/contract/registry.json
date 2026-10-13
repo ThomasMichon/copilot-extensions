@@ -124,7 +124,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
-          "sha256": "09af274b901b27bef70bc5f7cff71d8b6ca397ba7c0f9c7c889c617c48306078",
+          "sha256": "30267995c4a18cf81cb2b829547eb4a90981977ff6c36f3d29c7255e48eacff7",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -180,7 +180,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-33.json",
-          "sha256": "d984a3c06c2fca0941eec8a251f9bf12455b00c3f7d7e26f7889d85f58abb761",
+          "sha256": "47cfe23ba66d04848f1d53a3e11ffef5826951ee3135b2c27a97b595aeb6ca8f",
           "role": "remote peer request and actual reply receipt from the two-isolated-bridge round trip",
           "generation": 33
         },
@@ -465,11 +465,11 @@
           "capture_method": "Re-attest byte-identical agent-roster source and representative response alongside the additive peer reply contract."
         },
         {
-          "commit": "c44adf312cbd932b6a8cd42a177983fea6e15dc4",
+          "commit": "edd673dc6775ac835df81865be0b6a2add0364f3",
           "plugin_version": "0.4.1-dev3",
           "generation": 33,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
-          "source_git_blob": "726d0e34422b670c73852140e20fe7ef598dc54d",
+          "source_git_blob": "ace1b7833075af56acd936c8c0707f8d6c75b65d",
           "capture_method": "Capture the independent remote peer request and receipt exercised by test_two_bridge_call_and_reverse_reply_preserve_addresses."
         },
         {
@@ -1420,7 +1420,7 @@
         },
         {
           "path": "plugins/agent-bridge/tests/test_session_host.py",
-          "sha256": "2e883e25a6538f9dfdaa41b94c9c9c7bd16e660664302bd31089c47749f9b59b",
+          "sha256": "d3237815587ca1fab3d7aff43590781fadc34fb18c1f14754ea86826e8d68577",
           "semantic": false,
           "non_semantic_reason": "This test suite consumes the protocol but does not produce its wire shape."
         }
