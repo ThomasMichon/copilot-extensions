@@ -302,3 +302,10 @@ native recovery probe. Deterministic tests cover consecutive streaks,
 suppression, failed probes restarting cooldown, and native-only recovery.
 Existing process-backed holder and roster contracts remain in the targeted
 selection. CPU measurement and process-tree cleanup are still separate gates.
+
+Review caught an absence-contract edge: an open circuit must not turn a
+provider's missing executable into namespace incompleteness. Suppressed
+no-fallback requests now re-check executable presence and retain legitimate
+empty absence without launching work or treating it as native recovery.
+Both binstub and explicit-command absence regressions pass; the combined
+selection now passes 117 tests, one skipped.

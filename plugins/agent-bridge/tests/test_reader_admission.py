@@ -178,3 +178,23 @@ async def test_native_failure_and_success_reset_provider_streak(
         await provider.list(timeout=3)
     assert provider._list_admission.retry_at is not None
     assert run.call_count == 6
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("explicit_command", [False, True])
+async def test_missing_provider_preserves_legitimate_absence_during_cooldown(
+    monkeypatch: pytest.MonkeyPatch, explicit_command: bool,
+) -> None:
+    monkeypatch.setenv("AGENT_BRIDGE_NAMESPACE_LIST_TTL", "0")
+    monkeypatch.setattr(namespace, "time", SimpleNamespace(monotonic=lambda: 10.0))
+    monkeypatch.setattr(namespace.shutil, "which", lambda name: None)
+    run = Mock()
+    monkeypatch.setattr(namespace.subprocess, "run", run)
+    provider = CliNamespaceResolver(
+        "test", "missing-provider",
+        command=["missing-executable", "--provider"] if explicit_command else None,
+    )
+    provider._list_admission.retry_at = 60
+    assert await provider.list() == []
+    assert provider._list_admission.retry_at == 60
+    run.assert_not_called()

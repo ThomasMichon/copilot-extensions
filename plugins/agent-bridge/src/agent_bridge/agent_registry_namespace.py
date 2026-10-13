@@ -219,6 +219,13 @@ class CliNamespaceResolver(NamespaceResolver):
         if not self._list_admission.admit(time.monotonic()):
             log.debug("Namespace '%s:' native enumeration admission suppressed", self._prefix)
             if self._fallback is None:
+                executable = self._command[0] if self._command else self._binstub
+                if shutil.which(executable) is None:
+                    log.debug(
+                        "Namespace '%s:' provider unavailable while admission is suppressed",
+                        self._prefix,
+                    )
+                    return []
                 raise NamespaceListIncomplete(
                     f"{self._binstub} namespace-list admission circuit is open",
                 )
