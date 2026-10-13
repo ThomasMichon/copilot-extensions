@@ -59,6 +59,12 @@ and hashes selected frozen artifacts again. It does not trust a saved report,
 original mutable source, or the stage's first verification. Changed bytes,
 expired proof/policy, revoked keys, raised sequence floors and lost ownership
 refuse. There is no persistent high-water mark or rollback permission here.
+Re-verification and context shutdown share one operation lock. Shutdown waits
+for an in-flight verification and report serialization before marking the
+handle closed and releasing retention; a later verifier refuses. This gives
+each operation a consistent in-context observation, not a retention grant
+that survives context exit. A consuming assembly owner must keep the context
+open throughout its separately admitted use and coordinate that lifetime.
 
 On normal exit or interruption, retention is released, the handle is closed,
 and cleanup binds traversal to the admitted directory identity, not a prior

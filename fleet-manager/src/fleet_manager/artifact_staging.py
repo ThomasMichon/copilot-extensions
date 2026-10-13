@@ -177,6 +177,9 @@ class StagedArtifacts:
     _proof_bytes: bytes = field(repr=False)
     _artifacts: tuple[tuple[str, Path], ...] = field(repr=False)
     _closed: threading.Event = field(repr=False, compare=False)
+    _operation_lock: threading.RLock = field(
+        default_factory=threading.RLock, repr=False, compare=False,
+    )
 
     @property
     def artifacts(self) -> Mapping[str, Path]:
@@ -184,6 +187,14 @@ class StagedArtifacts:
 
     def reverify(self, policy: object, *, clock: Callable[[], int] = _clock) -> dict:
         """Re-authenticate exact frozen bytes under supplied current trusted policy."""
+        with self._operation_lock:
+            return self._reverify(policy, clock=clock)
+
+    def _close(self) -> None:
+        with self._operation_lock:
+            self._closed.set()
+
+    def _reverify(self, policy: object, *, clock: Callable[[], int]) -> dict:
         if self._closed.is_set():
             raise PlanError("artifact staging retention has ended")
         if _directory(self._root) != self._root_identity:
@@ -287,10 +298,10 @@ def stage_authenticated_artifacts(
                 try:
                     yield staged
                 finally:
-                    staged._closed.set()
+                    staged._close()
         finally:
             if staged is not None:
-                staged._closed.set()
+                staged._close()
             if root is not None:
                 if root_identity is None or _directory(root) != root_identity:
                     raise PlanError("artifact stage cleanup ownership is unconfirmed")

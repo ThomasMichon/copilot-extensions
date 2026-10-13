@@ -10,6 +10,7 @@ import shutil
 from pathlib import Path
 import socket
 import sys
+import threading
 
 import pytest
 
@@ -103,6 +104,71 @@ def test_original_mutation_cannot_replace_frozen_selected_bytes(tmp_path, primit
         original.write_bytes(b"new untrusted source bytes")
         assert frozen.reverify(trusted, clock=lambda: 151)["artifact_integrity_verified"]
         assert next(iter(frozen.artifacts.values())).read_bytes() != original.read_bytes()
+
+
+def test_context_shutdown_waits_for_inflight_reverification(tmp_path, primitive, monkeypatch):
+    fixture = artifact_fixture(tmp_path)
+    parent = tmp_path / "private-stage"
+    parent.mkdir()
+    entered = threading.Event()
+    release = threading.Event()
+    shutdown = threading.Event()
+    failures = []
+    results = []
+    original_canonical = staging.canonical
+    original_close = staging.StagedArtifacts._close
+
+    def serialization(value):
+        if isinstance(value, dict) and value.get("schema") == "fleet-manager.staged-artifacts":
+            if threading.current_thread().name == "stage-verification-fixture":
+                entered.set()
+                assert release.wait(5), "verification fixture was not released"
+        return original_canonical(value)
+
+    def close(value):
+        shutdown.set()
+        original_close(value)
+
+    monkeypatch.setattr(staging, "canonical", serialization)
+    monkeypatch.setattr(staging.StagedArtifacts, "_close", close)
+    context, trusted = stage(fixture, parent)
+    frozen = context.__enter__()
+    shutdown.clear()
+
+    def verify():
+        try:
+            results.append(frozen.reverify(trusted, clock=lambda: 151))
+        except BaseException as error:
+            failures.append(error)
+
+    def allow_completion():
+        try:
+            assert shutdown.wait(5), "context owner did not start shutdown"
+            assert not frozen._closed.is_set()
+            assert frozen.slot.is_dir()
+        except BaseException as error:
+            failures.append(error)
+        finally:
+            release.set()
+
+    worker = threading.Thread(target=verify, name="stage-verification-fixture")
+    controller = threading.Thread(target=allow_completion)
+    worker.start()
+    try:
+        assert entered.wait(5), "verification did not reach result serialization"
+        controller.start()
+        context.__exit__(None, None, None)
+    finally:
+        release.set()
+        worker.join(5)
+        if controller.ident is not None:
+            controller.join(5)
+    assert not failures
+    assert not worker.is_alive() and not controller.is_alive()
+    assert len(results) == 1 and results[0]["retention_held"]
+    assert frozen._closed.is_set() and not frozen.slot.exists()
+    with pytest.raises(PlanError, match="retention has ended"):
+        frozen.reverify(trusted, clock=lambda: 152)
 
 
 @pytest.mark.parametrize("change", ["artifact", "manifest", "revoke", "floor", "expiry"])
