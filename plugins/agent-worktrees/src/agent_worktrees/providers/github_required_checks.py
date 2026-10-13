@@ -116,14 +116,29 @@ def verified_merge_head(
         raise RequiredChecksError("branch protection could not be read completely")
     ref = obj(obj(obj(policy.get("data"), "policy data").get("repository"), "repository")
               .get("ref"), "base branch")
-    expected: set[str] = set()
+    expected: set[tuple[str, int | None]] = set()
 
-    def add_contexts(contexts: object) -> None:
+    def context_names(contexts: object) -> set[str]:
         if not isinstance(contexts, list) or any(
             not isinstance(name, str) or not name.strip() for name in contexts
         ):
             raise RequiredChecksError("required context declarations are unavailable or invalid")
-        expected.update(contexts)
+        return set(contexts)
+
+    def add_checks(checks: object, app_key: str) -> set[str]:
+        if not isinstance(checks, list):
+            raise RequiredChecksError("required-check declarations are unavailable or invalid")
+        names: set[str] = set()
+        for check in checks:
+            check = obj(check, "required-check declaration")
+            name = check.get("context")
+            context_names([name])
+            app = check.get(app_key)
+            if app is not None and (type(app) is not int or app != -1 and app <= 0):
+                raise RequiredChecksError("required-check integration identity is invalid")
+            expected.add((name, None if app == -1 else app))
+            names.add(name)
+        return names
 
     if "branchProtectionRule" not in ref:
         raise RequiredChecksError("branch protection declaration is unavailable")
@@ -134,7 +149,20 @@ def verified_merge_head(
         if not isinstance(required, bool):
             raise RequiredChecksError("branch protection status-check policy is invalid")
         if required:
-            add_contexts(protection.get("requiredStatusCheckContexts"))
+            declared = context_names(protection.get("requiredStatusCheckContexts"))
+            classic = obj(read_json([
+                "api", f"/repos/{repo}/branches/{quote(base, safe='')}/protection/required_status_checks",
+            ]), "classic required checks")
+            checks = classic.get("checks")
+            if not isinstance(checks, list) or any(
+                not isinstance(check, dict) or "app_id" not in check for check in checks
+            ):
+                raise RequiredChecksError("classic required-check integrations are unavailable")
+            if (
+                context_names(classic.get("contexts")) != declared
+                or add_checks(checks, "app_id") != declared
+            ):
+                raise RequiredChecksError("classic required-check declarations changed or are incomplete")
 
     pages = read_json([
         "api", f"/repos/{repo}/rules/branches/{quote(base, safe='')}",
@@ -150,9 +178,7 @@ def verified_merge_head(
             if rule.get("type") != "required_status_checks":
                 continue
             checks = obj(rule.get("parameters"), "required-check rule").get("required_status_checks")
-            if not isinstance(checks, list):
-                raise RequiredChecksError("required-check rule declarations are unavailable or invalid")
-            add_contexts([obj(check, "required-check declaration").get("context") for check in checks])
+            add_checks(checks, "integration_id")
 
     if expected:
         checks = read_json([
@@ -172,12 +198,50 @@ def verified_merge_head(
                 passed.add(name)
             else:
                 unsuccessful.add(name)
-        missing = sorted(expected - passed)
+        missing = {name for name, _ in expected} - passed
         if missing or unsuccessful:
             raise RequiredChecksError(
                 "required checks are missing, pending or unsuccessful: "
-                + ", ".join(sorted(set(missing) | unsuccessful))
+                + ", ".join(sorted(missing | unsuccessful))
             )
+        bound = {(name, app) for name, app in expected if app is not None}
+        if bound:
+            pages = read_json([
+                "api", f"/repos/{repo}/commits/{head}/check-runs",
+                "--paginate", "--slurp",
+            ])
+            if not isinstance(pages, list) or not pages:
+                raise RequiredChecksError("check-run pages are unavailable or invalid")
+            observed: set[tuple[str, int]] = set()
+            count = 0
+            for page in pages:
+                page = obj(page, "check-run page")
+                runs = page.get("check_runs")
+                total = page.get("total_count")
+                if (
+                    not isinstance(runs, list) or type(total) is not int or total < 0
+                    or total != pages[0].get("total_count")
+                ):
+                    raise RequiredChecksError("check-run page is incomplete")
+                count += len(runs)
+                for run in runs:
+                    run = obj(run, "check run")
+                    app = obj(run.get("app"), "check-run integration").get("id")
+                    if type(app) is not int or app <= 0 or run.get("head_sha") != head:
+                        raise RequiredChecksError("check-run source identity is unavailable or invalid")
+                    name = run.get("name")
+                    context_names([name])
+                    identity_key = (name, app)
+                    if identity_key not in bound:
+                        continue
+                    if run.get("status") != "completed" or run.get("conclusion") != "success":
+                        raise RequiredChecksError(f"required check from integration {app} has not passed")
+                    observed.add(identity_key)
+            if count != pages[0]["total_count"] or bound - observed:
+                raise RequiredChecksError(
+                    "required integration-bound checks are missing or incomplete: "
+                    + ", ".join(f"{name} (app {app})" for name, app in sorted(bound - observed))
+                )
     if identity() != (head, base):
         raise RequiredChecksError("PR head/base changed during check verification; revalidate before merging")
     return head

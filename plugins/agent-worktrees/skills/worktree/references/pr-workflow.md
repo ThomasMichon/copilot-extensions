@@ -158,7 +158,10 @@ concepts distinct in any guidance you write or give.
 
 **GitHub direct admin merges verify required CI before bypassing review.**
 The provider enumerates the target branch's classic protection and effective
-ruleset status contexts, then requires every declared context to report a pass.
+ruleset status contexts across all pages, then requires every declared context
+and configured integration to report a pass. Integration-bound checks need
+exact-head check-run evidence from that app; an unverifiable legacy status
+cannot substitute for a bound check run.
 Absent, pending, unsuccessful or unreadable evidence refuses the merge even if
 all *reported* checks look green. Optional checks do not become required.
 The verified PR head is pinned with `--match-head-commit`, and a head/base change

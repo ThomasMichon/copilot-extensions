@@ -21,11 +21,20 @@ class GitHubFixture:
             "requiresStatusChecks": True,
             "requiredStatusCheckContexts": ["PR gate"],
         }
+        self.classic = {
+            "contexts": ["PR gate"],
+            "checks": [{"context": "PR gate", "app_id": 15368}],
+        }
         self.rules = [{
             "type": "required_status_checks",
             "parameters": {"required_status_checks": [{"context": "policy"}]},
         }]
         self.later_pages = []
+        self.runs = [{
+            "name": "PR gate", "app": {"id": 15368}, "head_sha": HEAD,
+            "status": "completed", "conclusion": "success",
+        }]
+        self.run_pages = None
         self.checks = [
             {"name": "PR gate", "bucket": "pass"},
             {"name": "policy", "bucket": "pass"},
@@ -57,6 +66,14 @@ class GitHubFixture:
             assert "--paginate" in argv
             assert "--slurp" in argv
             kind, data = "rules", [self.rules, *self.later_pages]
+        elif argv[2].endswith("/protection/required_status_checks"):
+            kind, data = "classic", self.classic
+        elif argv[2].endswith("/check-runs"):
+            assert "--paginate" in argv
+            assert "--slurp" in argv
+            kind, data = "runs", self.run_pages if self.run_pages is not None else [{
+                "total_count": len(self.runs), "check_runs": self.runs,
+            }]
         else:
             raise AssertionError(f"Unexpected command: {argv}")
         if kind == self.fail:
@@ -133,7 +150,7 @@ def test_duplicate_failed_required_result_cannot_be_hidden_by_a_pass():
         fixture.verify()
 
 
-@pytest.mark.parametrize("boundary", ["pr", "policy", "rules", "checks"])
+@pytest.mark.parametrize("boundary", ["pr", "policy", "classic", "rules", "checks", "runs"])
 def test_unreadable_required_evidence_never_authorizes_merge(boundary):
     fixture = GitHubFixture()
     fixture.fail = boundary
@@ -147,6 +164,9 @@ def test_unreadable_required_evidence_never_authorizes_merge(boundary):
     ("rules", None),
     ("rules", [{"type": "required_status_checks", "parameters": {}}]),
     ("checks", [{"name": {}, "bucket": "pass"}]),
+    ("classic", {"contexts": ["PR gate"], "checks": []}),
+    ("classic", {"contexts": ["PR gate"], "checks": [{"context": "PR gate"}]}),
+    ("classic", {"contexts": ["PR gate"], "checks": [{"context": "PR gate", "app_id": True}]}),
 ])
 def test_malformed_required_policy_or_results_fail_closed(attribute, value):
     fixture = GitHubFixture()
@@ -198,6 +218,55 @@ def test_no_required_checks_does_not_promote_optional_failures_to_a_gate():
     fixture.checks = [{"name": "optional", "bucket": "fail"}]
     assert fixture.verify() == HEAD
     assert not any(argv[:3] == ["gh", "pr", "checks"] for argv in fixture.calls)
+
+
+@pytest.mark.parametrize("passed", [False, True])
+def test_same_context_from_distinct_required_integrations_needs_both(passed):
+    fixture = GitHubFixture()
+    fixture.rules.append({
+        "type": "required_status_checks",
+        "parameters": {"required_status_checks": [{"context": "PR gate", "integration_id": 77}]},
+    })
+    if passed:
+        fixture.runs.append({**fixture.runs[0], "app": {"id": 77}})
+        assert fixture.verify() == HEAD
+    else:
+        with pytest.raises(RequiredChecksError, match=r"PR gate \(app 77\)"):
+            fixture.verify()
+
+
+@pytest.mark.parametrize("mutation", [
+    {"app": {"id": 77}}, {"head_sha": "b" * 40}, {"status": "queued"},
+    {"conclusion": "failure"}, {"app": {"id": True}}, {"name": {}},
+])
+def test_wrong_or_unsuccessful_integration_bound_result_refuses(mutation):
+    fixture = GitHubFixture()
+    fixture.runs[0].update(mutation)
+    with pytest.raises(RequiredChecksError):
+        fixture.verify()
+
+
+def test_any_integration_legacy_context_needs_no_check_run_identity():
+    fixture = GitHubFixture()
+    fixture.classic["checks"][0]["app_id"] = -1
+    assert fixture.verify() == HEAD
+    assert not any(argv[2].endswith("/check-runs") for argv in fixture.calls)
+
+
+def test_integration_bound_results_on_later_pages_are_validated():
+    fixture = GitHubFixture()
+    fixture.run_pages = [
+        {"total_count": 1, "check_runs": []},
+        {"total_count": 1, "check_runs": fixture.runs},
+    ]
+    assert fixture.verify() == HEAD
+
+
+def test_partial_check_run_pages_cannot_authorize_merge():
+    fixture = GitHubFixture()
+    fixture.run_pages = [{"total_count": 2, "check_runs": fixture.runs}]
+    with pytest.raises(RequiredChecksError, match="missing or incomplete"):
+        fixture.verify()
 
 
 def test_enterprise_authority_and_escaped_branch_are_preserved():

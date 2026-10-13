@@ -378,3 +378,33 @@ credential changes, broad policy weakening or unreviewed releases.
 - This changes no first-provision behavior, so a clean-room install lane is
   not applicable. Live required PR checks and a fresh review remain pending;
   no review or CI bypass is authorized by this local evidence.
+
+### 2026-10-13 - Integration identity and measured first-wave reduction
+
+- The next #6402 review correctly found that context names alone cannot
+  distinguish two required integrations. Classic numeric app declarations and
+  ruleset integration declarations are now preserved; bound contexts require
+  successful, complete, paginated exact-head check-run evidence from each app.
+  Unknown integration identity fails closed. Same-app deliberate spoofing
+  remains outside this preflight's documented assurance boundary.
+- The contained provider/guard selection passed 178 cases; focused lint and
+  changed-module limits passed. The actual read-only provider boundary refused
+  #6402 while its required PR aggregate was still absent. Fresh current-head
+  review and CI remain necessary; no mutation was attempted by that probe.
+- Complete, equally sized three-hour Actions windows show 60 paired PR events
+  producing 120 guard/reviewer runs and 52 CI completions producing 104
+  identifier/filter runs before cutover. After cutover, 100 and 109 comparable
+  events produced 100 and 109 combined runs: 50% fewer invocations per event in
+  each consolidated family, or 209 removed invocations in that latter window
+  compared with the former layout at the same event volume.
+- Windows were `2026-10-12T18:00:00Z..21:00:00Z` (367 total runs) and
+  `2026-10-12T21:05:00Z..2026-10-13T00:05:00Z` (495 total runs), with API
+  reported counts matching complete pagination. Higher later traffic prevents
+  comparing raw totals as throughput. The later window had 79 successful
+  Copilot review runs; this does not establish a causal quota improvement.
+  Distinct job coverage and required-check counts were not removed by that wave.
+- #6409 owns the next independent reduction: migrate the exact dev-PR
+  payload-CWD smoke into existing native CI jobs, retaining standalone
+  main-target, weekly and manual coverage. The unchanged Windows selection
+  passed 10 cases in 51 seconds before migration; candidate/promotion files
+  remain with #6332's owner.
