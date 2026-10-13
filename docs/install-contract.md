@@ -1238,9 +1238,16 @@ A plugin declares whether — and where — its runtime should be reconciled via
 
 | `runtimeScope` | Meaning |
 |----------------|---------|
-| `none` | The reconciler never touches the runtime. Use for skills/agents/hooks-only plugins, **plugin-contributed extensions** whose payload *is* the runtime (e.g. `context-handoff`), **and** plugins whose runtime is managed out-of-band (per-machine, by hand). |
-| `universal` | Reconcile the runtime on **every** machine (a non-Python runtime that every machine needs and that deploys outside the plugin payload). |
+| `none` | The reconciler never touches the runtime. Use for skills/agents/hooks-only plugins **and** plugin-contributed extensions whose payload *is* the runtime (e.g. `context-handoff`). A plugin that ships a runtime installer (`scripts/install.*` or `scripts/init.*`) must not declare `none` -- `tools/check-install-contract.py` rejects it, because neither the launch-time reconcile nor `update` would ever rebuild that runtime. |
+| `universal` | Reconcile the runtime on **every** machine that enables the plugin (e.g. `agent-worktrees`, `agent-ssh`). |
 | `machine-gated` | Reconcile the runtime only on machines in the plugin's allowed set (e.g. `agent-bridge`, `agent-codespaces`, `agent-containers`, `agent-mcp`). |
+
+The same scope governs the unified `update` flow: `update` rebuilds a
+`machine-gated` runtime only where the machine gate described below permits it
+(the same `runtime_allowed` decision), resolving the gate from the repository
+that enables the plugin, and
+reports any other machine as `SKIPPED (not allowed on this machine)` -- even
+under `--force`, which re-deploys only runtimes this machine may run.
 
 The reusable installer/readiness contract for `machine-gated` plugins is defined
 by [`patterns/installer-readiness-modules.md`](patterns/installer-readiness-modules.md)
@@ -1714,6 +1721,28 @@ and the markerless corpse is tossed + rebuilt on the next run (automatic retry).
 > hazard (there, a Windows `PermissionError` from
 > `shutil.rmtree`/`shutil.copytree` hitting a slot still held open by
 > another process) for this one standalone installer.
+
+### Install-transaction lock — mutating runs never interleave, never run unlocked
+
+Several callers can start the same plugin's installer at once: the launch-time
+reconcile, `update`, a session-start bootstrap, and a binstub's first-use
+`provision`. An adopting installer (`agent-pull-requests`, `agent-logger`,
+`agent-vault`, `agent-mcp`, `agent-containers`, `agent-ssh`) therefore holds one exclusive
+lock on `<install-dir>/.install.lock` for every mutating action
+(`stamp`/`install`/`update`/`provision`) across its whole
+build + publish transaction (Windows: a `FileShare.None` handle; POSIX: `flock` on
+fd 8, or an atomic pid symlink `<install-dir>/.install.lock.pid` whose dead owner
+is reaped where `flock` is unavailable). It is acquired **after** the self-stage
+re-exec (the staging parent never holds it) and released in `finally` / an `EXIT`
+trap; the OS releases it if the process dies.
+
+The lock is **fail-closed**: a run that cannot acquire it within its timeout
+(300s; overridable for `agent-vault`, `agent-mcp`, `agent-containers`, and `agent-ssh` via
+`COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC`) reports that it could not acquire the
+install transaction lock and exits non-zero — it never proceeds unlocked.
+Read-only actions (`status`), service controls, and `uninstall` do not take it.
+It is distinct from the binstub's `.provision.lock`, which only single-flights
+first-use provisioning around the installer call.
 
 ### Update-in-progress marker — installer self-reports a live transition (#5066)
 
@@ -2327,6 +2356,9 @@ runtime entrypoint (`install.*` if present, else `init.*`):
   new runtime plugins must comply, not be added to that set.
 - every plugin PowerShell script routes persistent User/Machine environment
   access through the shared contained-test adapter; direct access is rejected.
+- every plugin's declared `runtimeScope` is one the reconciler accepts, and a
+  plugin that ships a runtime installer declares `universal` or `machine-gated`
+  (see [Automatic reconciliation at launch](#automatic-reconciliation-at-launch-runtimescope)).
 
 Wire it as a `pre-push` hook (see `tools/hooks/pre-push`, which also runs
 `tools/check-no-internal-identifiers.py` — a repo-wide guard that fails the push

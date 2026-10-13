@@ -1,0 +1,9 @@
+{
+  "comment": "Installer takes a fail-closed install-transaction lock for stamp/install/update/provision",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "dev"
+    }
+  ]
+}

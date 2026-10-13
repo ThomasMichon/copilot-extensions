@@ -354,6 +354,81 @@ STUBEOF
     chmod +x "$LOCAL_BIN/agent-mcp"
     _ok "Binstub: $LOCAL_BIN/agent-mcp (self-provisioning)"
 }
+# === install-transaction lock (fail-closed) ===
+# Serializes every mutating action of this runtime (stamp/install/update/
+# provision): an exclusive lock on $INSTALL_DIR/.install.lock (flock on fd 8, or
+# a pid-symlink fallback where flock is unavailable) held for the whole build +
+# publish transaction. A concurrent run waits up to the timeout
+# (COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC, default 300s) and then FAILS -- it
+# never proceeds unlocked. The OS drops the flock if this process dies; a dead
+# owner's pid symlink is reaped.
+__install_lock_link=""
+__install_lock_fd=""
+
+_install_lock_timeout() {
+    local __t="${COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC:-}"
+    case "$__t" in
+        ''|*[!0-9]*) __t=300 ;;
+    esac
+    [[ "$__t" -gt 0 ]] 2>/dev/null || __t=300
+    printf '%s' "$__t"
+}
+
+_exit_install_lock() {
+    if [[ -n "$__install_lock_link" ]]; then
+        local __owner
+        __owner="$(readlink "$__install_lock_link" 2>/dev/null || true)"
+        [[ "$__owner" == "$$" ]] && rm -f "$__install_lock_link"
+        __install_lock_link=""
+    elif [[ -n "$__install_lock_fd" ]]; then
+        flock -u "$__install_lock_fd" 2>/dev/null || true
+        eval "exec $__install_lock_fd>&-"
+        __install_lock_fd=""
+    fi
+}
+
+_enter_install_lock() {
+    local __timeout="${1:-$(_install_lock_timeout)}"
+    mkdir -p "$INSTALL_DIR" 2>/dev/null || return 1
+    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
+        exec 8>"$INSTALL_DIR/.install.lock" 2>/dev/null || return 1
+        if ! flock -w "$__timeout" 8; then
+            exec 8>&-
+            return 1
+        fi
+        __install_lock_fd=8
+        return 0
+    fi
+    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live
+    __deadline=$(( $(date +%s) + __timeout ))
+    until ln -s "$$" "$__link" 2>/dev/null; do
+        if [[ "$(date +%s)" -ge "$__deadline" ]]; then
+            return 1
+        fi
+        __owner="$(readlink "$__link" 2>/dev/null || true)"
+        case "$__owner" in
+            *[!0-9]*|"") __live=0 ;;
+            *) if kill -0 "$__owner" 2>/dev/null; then __live=1; else __live=0; fi ;;
+        esac
+        if [[ "$__live" == 0 && "$(readlink "$__link" 2>/dev/null || true)" == "$__owner" ]]; then
+            rm -f "$__link"
+        else
+            sleep 1
+        fi
+    done
+    __install_lock_link="$__link"
+    return 0
+}
+# === end install-transaction lock ===
+
+if ! _enter_install_lock; then
+    _fail "Could not acquire the install transaction lock ($INSTALL_DIR/.install.lock) within $(_install_lock_timeout)s -- another install is still running; refusing to proceed unlocked"
+    exit 1
+fi
+trap '_exit_install_lock' EXIT
+trap '_exit_install_lock; exit 130' INT
+trap '_exit_install_lock; exit 143' TERM
+
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 if [[ "$ACTION" == "stamp" ]]; then

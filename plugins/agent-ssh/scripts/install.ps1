@@ -807,6 +807,80 @@ function Invoke-Stamp {
     }
 }
 
+# === install-transaction lock (fail-closed) ===
+# Serializes every mutating action of this runtime (stamp/install/update/
+# provision): one exclusive, OS-held handle on $InstallDir\.install.lock for the
+# whole build + publish transaction. A concurrent run waits up to the timeout
+# (COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC, default 300s) and then FAILS -- it
+# never proceeds unlocked. The OS drops the handle if this process dies.
+$script:InstallLockHandle = $null
+
+function Get-InstallLockTimeoutSec {
+    $value = 0
+    $raw = [string]$env:COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC
+    if ($raw -and [int]::TryParse($raw, [ref]$value) -and $value -gt 0) { return $value }
+    return 300
+}
+
+function Enter-InstallLock {
+    param([int]$TimeoutSec = (Get-InstallLockTimeoutSec))
+    try {
+        if (-not (Test-Path -LiteralPath $InstallDir)) { New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null }
+    } catch {
+        Write-Fail "Install-lock error: $($_.Exception.Message)"
+        return $false
+    }
+    $lockPath = Join-Path $InstallDir '.install.lock'
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ($true) {
+        try {
+            $fs = [System.IO.File]::Open(
+                $lockPath,
+                [System.IO.FileMode]::OpenOrCreate,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None
+            )
+            try {
+                $stamp = [System.Text.Encoding]::UTF8.GetBytes("pid=$PID at=$((Get-Date).ToUniversalTime().ToString('o'))")
+                $fs.SetLength(0)
+                $fs.Write($stamp, 0, $stamp.Length)
+                $fs.Flush()
+            } catch { }
+            $script:InstallLockHandle = $fs
+            return $true
+        } catch [System.IO.IOException] {
+            # Win32 sharing/lock violation, or (non-Windows) the advisory lock
+            # .NET takes for FileShare.None: another install holds the lock.
+            $win32 = $_.Exception.HResult -band 0xFFFF
+            if ($win32 -eq 32 -or $win32 -eq 33 -or $env:OS -ne 'Windows_NT') {
+                if ((Get-Date) -ge $deadline) { return $false }
+                Start-Sleep -Milliseconds 750
+            } else {
+                Write-Fail "Install-lock IO error: $($_.Exception.Message)"
+                return $false
+            }
+        } catch {
+            Write-Fail "Install-lock error: $($_.Exception.Message)"
+            return $false
+        }
+    }
+}
+
+function Exit-InstallLock {
+    if ($script:InstallLockHandle) {
+        try { $script:InstallLockHandle.Close(); $script:InstallLockHandle.Dispose() } catch { }
+        $script:InstallLockHandle = $null
+    }
+}
+# === end install-transaction lock ===
+
+$needsInstallLock = $Action -in @('install', 'update', 'stamp', 'provision')
+if ($needsInstallLock -and -not (Enter-InstallLock)) {
+    Write-Fail "Could not acquire the install transaction lock ($(Join-Path $InstallDir '.install.lock')) within $(Get-InstallLockTimeoutSec)s -- another install is still running; refusing to proceed unlocked"
+    exit 1
+}
+
+try {
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
 if ($Action -eq 'status') {
@@ -1014,3 +1088,6 @@ Write-Host ''
 Write-Host '=== agent-ssh install complete ===' -ForegroundColor Cyan
 Write-Host '  Try: agent-ssh version' -ForegroundColor DarkGray
 exit 0
+} finally {
+    Exit-InstallLock
+}

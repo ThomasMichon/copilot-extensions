@@ -1,0 +1,9 @@
+{
+  "comment": "Declare runtimeScope 'universal' so launch-time reconcile and update keep the agent-ssh runtime current",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

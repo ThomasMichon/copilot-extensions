@@ -101,8 +101,9 @@ Choose `runtimeScope` deliberately:
 
 - `universal` when every adopting machine needs the runtime;
 - `machine-gated` when control-harness policy chooses eligible machines;
-- `none` only when reconciliation is genuinely out-of-band or there is no
-  installer-owned runtime.
+- `none` only when there is no installer-owned runtime (a plugin shipping
+  `scripts/install.*` or `scripts/init.*` must declare one of the other two;
+  `tools/check-install-contract.py` enforces this).
 
 `pyproject.toml`, `plugin.json`, and the marketplace entry carry the same plugin
 version. Changing anything inside the plugin payload advances all applicable

@@ -715,6 +715,85 @@ _deploy_binstub() {
         "$SCRIPT_DIR/resolve-runtime.sh"
 }
 
+# === install-transaction lock (fail-closed) ===
+# Serializes every mutating action of this runtime (stamp/install/update/
+# provision): an exclusive lock on $INSTALL_DIR/.install.lock (flock on fd 7,
+# since fd 8 is the stamp-publication lock, or a pid-symlink fallback where flock is unavailable) held for the whole build +
+# publish transaction. A concurrent run waits up to the timeout
+# (COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC, default 300s) and then FAILS -- it
+# never proceeds unlocked. The OS drops the flock if this process dies; a dead
+# owner's pid symlink is reaped.
+__install_lock_link=""
+__install_lock_fd=""
+
+_install_lock_timeout() {
+    local __t="${COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC:-}"
+    case "$__t" in
+        ''|*[!0-9]*) __t=300 ;;
+    esac
+    [[ "$__t" -gt 0 ]] 2>/dev/null || __t=300
+    printf '%s' "$__t"
+}
+
+_exit_install_lock() {
+    if [[ -n "$__install_lock_link" ]]; then
+        local __owner
+        __owner="$(readlink "$__install_lock_link" 2>/dev/null || true)"
+        [[ "$__owner" == "$$" ]] && rm -f "$__install_lock_link"
+        __install_lock_link=""
+    elif [[ -n "$__install_lock_fd" ]]; then
+        flock -u "$__install_lock_fd" 2>/dev/null || true
+        eval "exec $__install_lock_fd>&-"
+        __install_lock_fd=""
+    fi
+}
+
+_enter_install_lock() {
+    local __timeout="${1:-$(_install_lock_timeout)}"
+    mkdir -p "$INSTALL_DIR" 2>/dev/null || return 1
+    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
+        exec 7>"$INSTALL_DIR/.install.lock" 2>/dev/null || return 1
+        if ! flock -w "$__timeout" 7; then
+            exec 7>&-
+            return 1
+        fi
+        __install_lock_fd=7
+        return 0
+    fi
+    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live
+    __deadline=$(( $(date +%s) + __timeout ))
+    until ln -s "$$" "$__link" 2>/dev/null; do
+        if [[ "$(date +%s)" -ge "$__deadline" ]]; then
+            return 1
+        fi
+        __owner="$(readlink "$__link" 2>/dev/null || true)"
+        case "$__owner" in
+            *[!0-9]*|"") __live=0 ;;
+            *) if kill -0 "$__owner" 2>/dev/null; then __live=1; else __live=0; fi ;;
+        esac
+        if [[ "$__live" == 0 && "$(readlink "$__link" 2>/dev/null || true)" == "$__owner" ]]; then
+            rm -f "$__link"
+        else
+            sleep 1
+        fi
+    done
+    __install_lock_link="$__link"
+    return 0
+}
+# === end install-transaction lock ===
+
+case "$ACTION" in
+    install|update|stamp|provision)
+        if ! _enter_install_lock; then
+            _fail "Could not acquire the install transaction lock ($INSTALL_DIR/.install.lock) within $(_install_lock_timeout)s -- another install is still running; refusing to proceed unlocked"
+            exit 1
+        fi
+        trap '_exit_install_lock' EXIT
+        trap '_exit_install_lock; exit 130' INT
+        trap '_exit_install_lock; exit 143' TERM
+        ;;
+esac
+
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 if [[ "$ACTION" == "stamp" ]]; then
@@ -722,7 +801,7 @@ if [[ "$ACTION" == "stamp" ]]; then
     SOURCE_PATH="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
     SOURCE_KIND="$(_source_kind "$SOURCE_PATH")"
     _acquire_stamp_publication_lock || exit 1
-    trap '_release_stamp_publication_lock' EXIT
+    trap '_release_stamp_publication_lock; _exit_install_lock' EXIT
     CURRENT_SNAPSHOT="$(_current_snapshot)"
     if _published_snapshot_is_newer "$CURRENT_SNAPSHOT" "$SOURCE_PATH" "$SRC_VERSION"; then
         _skip "Published snapshot $CURRENT_SNAPSHOT is newer than $SRC_VERSION; leaving payload-dir unchanged"

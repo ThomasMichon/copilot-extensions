@@ -1,0 +1,9 @@
+{
+  "comment": "Installer takes a fail-closed install-transaction lock for every mutating action",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
