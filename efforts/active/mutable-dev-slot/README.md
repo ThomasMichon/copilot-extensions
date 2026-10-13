@@ -38,6 +38,15 @@ are read-only; implementation slices receive exclusive file ownership, and the
 coordinator integrates and publishes the combined change. Phased adopters do
 not imply that the portfolio or another concurrently owned effort is complete.
 
+The operator authorized the coordinator to take over the remaining first-adopter
+lifecycle on 2026-10-13. Preserve existing implementation and open pull requests;
+the transfer does not supersede adjacent dependency/identity or other adopter
+work. Construction and the complete runtime lifecycle belong in the existing
+installer-engine home, with Python owning actual construction/retention
+descriptors and its subprocess tree through publication, promotion/drain or
+rollback settlement. Native pre-Python bootstrap and OS integration remain
+initially. This changes ownership, not the full-adopter completion gate.
+
 ## Context
 
 This repo's runtime is deliberately **immutable and versioned**
@@ -72,6 +81,19 @@ Operator follow-on, verbatim (2026-10-08):
 The runtime-admission/coalescing execution detail below is agent-recommended
 under that request and the existing immutability contract; it is not a new
 operator directive to remove the explicit claimed-dev exception.
+
+Operator follow-on, verbatim (2026-10-13):
+> Focus on driving phase 3
+
+When asked to choose between retaining the previous reservation and taking
+ownership of the remaining first-adopter lifecycle, the operator selected,
+verbatim:
+> take-over
+
+The selected option was "Authorize takeover of the remaining first-adopter
+lifecycle"; the coordination prompt explicitly retained existing implementation
+and open pull requests. The implementation sequence remains the reviewed
+Phase 3 contract, not a new parallel lifecycle framework.
 
 ## Plan
 
@@ -161,9 +183,9 @@ operator directive to remove the explicit claimed-dev exception.
       publication, without importing the source-checkout implementation.
       The 2026-10-12 revised-legacy delivery journal below records that proof.
 
-- [ ] Review the shared
+- [ ] Finish executing the shared, reviewed
       [runtime-admission/build-coalescing slice](phase-3-runtime-admission.md)
-      before per-plugin code changes, then execute it through the shared core
+      through the shared core
       and phased adopter changes. This closes published-slot overwrite and
       transient first-builder contention at their owning seams, while preserving
       the full per-plugin guard/dev/distinct-generation repair gate below.
@@ -280,6 +302,13 @@ generation propagation remain open. The Python-owned installer-engine lifecycle
 and existing bridge refusal slice retain their current owners. The next stretch
 is complete first-adopter integration and its actual lifecycle validation;
 all full-adopter Plan/Validation checkboxes and the parent Status remain Active.
+
+The operator subsequently authorized takeover of the remaining first-adopter
+lifecycle after supported attribution lookups did not resolve its live owner.
+The coordinator now retains that remaining implementation and validation
+obligation directly, while preserving existing code, open PRs and adjacent
+adopter ownership. This is not permission to overwrite another contributor's
+active expression or declare the Phase 3 gate complete.
 
 ### 2026-10-13 - Finite-provider deadline prerequisite delivered
 
