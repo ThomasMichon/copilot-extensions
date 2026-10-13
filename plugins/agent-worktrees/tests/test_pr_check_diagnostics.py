@@ -132,6 +132,30 @@ def test_check_diagnostics_legacy_pending_prevents_inconsistent_green_rollup() -
     assert report.state == "pending" and report.complete
 
 
+@pytest.mark.guard
+@pytest.mark.parametrize("total", [1, -1, None, True, "0"])
+@pytest.mark.parametrize("runs", [[], [_run("build", "success")]])
+def test_check_diagnostics_empty_status_page_with_invalid_count_is_incomplete(
+    total: object, runs: list,
+) -> None:
+    report = CheckFixture(runs, status={"statuses": [], "total_count": total}).read()
+    assert report.state == "" and not report.complete
+
+
+def test_check_diagnostics_confirmed_empty_status_count_is_complete() -> None:
+    report = CheckFixture(status={"statuses": [], "total_count": 0}).read()
+    assert report.state == "none" and report.complete
+
+
+def test_check_diagnostics_incomplete_legacy_count_retains_named_failure() -> None:
+    report = CheckFixture(status={
+        "state": "failure", "statuses": [{"context": "lint", "state": "error"}],
+        "total_count": 2,
+    }).read()
+    assert report.state == "failure" and not report.complete
+    assert report.failures[0].name == "lint"
+
+
 @pytest.mark.parametrize("invalid", [None, "", "unknown"])
 def test_check_diagnostics_invalid_run_status_is_incomplete(invalid: object) -> None:
     run = _run("build", "success")

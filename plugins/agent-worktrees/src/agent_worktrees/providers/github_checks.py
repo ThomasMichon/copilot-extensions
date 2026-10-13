@@ -73,6 +73,10 @@ def read_checks(
             statuses = data.get("statuses")
             if isinstance(statuses, list):
                 status_readable = True
+                if "total_count" in data:
+                    total = data["total_count"]
+                    if type(total) is not int or total != len(statuses):
+                        status_readable = False
             if isinstance(statuses, list) and statuses:
                 any_signal = True
                 raw = str(data.get("state", "")).strip().lower()
@@ -109,10 +113,6 @@ def read_checks(
                         "combined commit status", raw, "commit-status",
                         description="Provider aggregate failed without an identified failing status.",
                     ))
-                total = data.get("total_count")
-                if type(total) is int and total > len(statuses):
-                    status_readable = False
-
     proc = invoke([
         "gh", "api", "--paginate", "--hostname", host,
         f"/repos/{repo}/commits/{sha}/check-runs",
