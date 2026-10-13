@@ -18,7 +18,10 @@ from plugin_test_containment import ContainmentError, Limits, isolated_environme
 from standalone_consumers import STANDALONE_CONSUMERS
 
 REPO = Path(__file__).resolve().parent.parent
-COMPONENT_ALIASES = {"agent-index-service": "services/index"}
+COMPONENT_ALIASES = {
+    "agent-index-service": "services/index",
+    "agent-dispatch-service": "services/dispatch",
+}
 
 
 def extended_windows_path(path: str) -> str:

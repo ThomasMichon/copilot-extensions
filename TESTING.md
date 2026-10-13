@@ -522,7 +522,16 @@ containment.
 
 The standalone runner (`tools/run-standalone-tests.py`) uses the same
 environment lease protocol for managed venvs and custom `--python`
-interpreters. Standard venv roots are discovered from the canonical containing
+interpreters. Its canonical service components are `services/index` and
+`services/dispatch`; the former `agent-index-service` and
+`agent-dispatch-service` CLI names remain compatibility aliases. They normalize
+before option validation, environment selection, admission, preparation and
+test containment, so aliases share the canonical environment and lease rather
+than creating a second cache. This also lets an older trusted-main promotion
+workflow validate a dev checkout after a service-path rename, before that
+workflow itself can be promoted.
+
+Standard venv roots are discovered from the canonical containing
 `bin`/`Scripts` directory **with `pyvenv.cfg`** or a known managed target,
 without executing candidate code. Directory names alone are not proof of a
 venv: an opaque wrapper can also live in `bin` or `Scripts`. Known managed
