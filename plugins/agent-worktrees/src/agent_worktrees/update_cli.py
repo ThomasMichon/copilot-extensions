@@ -274,10 +274,9 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
             output.warn(f"Plugin update returned non-zero:\n{detail}")
             payloads_ok, payload_status = False, f"plugin update failed: {detail[-200:]}"
     except OSError as exc:
-        output.warn(
-            f"{_describe_copilot_spawn_error(exc, cwd=update_context)} -- skipping plugin update"
-        )
-        payloads_ok, payload_status = False, f"plugin update failed: {exc}"
+        message = _describe_copilot_spawn_error(exc, cwd=update_context)
+        output.warn(f"{message} -- skipping plugin update")
+        payloads_ok, payload_status = False, f"plugin update failed: {message}"
     except subprocess.TimeoutExpired:
         output.warn("Plugin update timed out -- continuing with installed version")
         payloads_ok, payload_status = False, "timed out"

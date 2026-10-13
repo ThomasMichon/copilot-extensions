@@ -508,3 +508,18 @@ def test_payload_install_retry_timeout_is_a_timeout(monkeypatch):
     assert update_events.classify_status(status) == (ut.TIMEOUT, "timeout")
 
 
+
+def test_missing_copilot_cli_is_configuration_exit_3(wired, monkeypatch, _update_home):
+    real_run = subprocess.run
+
+    def run(argv, *a, **k):
+        if "plugin" in map(str, argv):
+            raise FileNotFoundError(2, "No such file or directory", str(argv[0]))
+        return real_run(argv, *a, **k)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert m.cmd_update(_args()) == 3
+    status = _status(_update_home)
+    assert status["run"]["outcome"] == ut.CONFIGURATION_LIMITATION
+    assert _phase_outcomes(_update_home)["payload_refresh"] == ut.CONFIGURATION_LIMITATION
+    assert "not found" in status["plugins"]["agent-worktrees@copilot-extensions"]["detail"]
