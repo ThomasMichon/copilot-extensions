@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; node receipts landed, durable receiver replay next
+- **Status:** Active; durable receiver replay landed, allocation/fencing next
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts. Existing dependencies #5789, #6030, #5861, #5862 retain ownership.
@@ -115,8 +115,8 @@ All detailed slices are **agent-recommended** and remain subject to review.
   transactional intent/claims/audit/outbox and target-side receipt reconciliation.
   Intent/receipt contracts and local admission/outbox/audit persistence landed
   in #6357/#6360; explicit node acceptance/effect receipts landed in #6388.
-  Durable receiver cursors, allocation claims and authenticated runtime integration
-  remain open.
+  Durable receiver cursors landed in #6395. Allocation claims and authenticated
+  runtime integration remain open.
 - [ ] Prove objective -> workspace -> host -> prompt -> outcome -> settlement
   locally, then through one Gateway and two separate nodes.
 - [ ] Persist scope/generation fences at cooperative effect owners; define
@@ -267,3 +267,43 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   stale acceptance over a later outcome. Allocation/authorization/effect-owner
   fencing and real local/two-node runtime proof follow. Existing routing/auth
   and deployment ownership remains intact; no fleet was enrolled or deployed.
+
+### 2026-10-13 - Durable receiver replay landed
+- #6395 merged at `2026-10-13T00:06:21Z`, commit
+  `d0a64764aadd61ac16fb4507f8a570cf219b2cd5`, after fresh rebased-head Copilot
+  APPROVED with zero findings and every required/ordinary check green.
+  Installed contained suite: 196 passed.
+- Receiver cursor, correlated receipts, outbox and audit commit together.
+  Separate receiver processes prove page rollback before cursor commit and
+  restart from the durable position after a committed but lost reply.
+- Known schema-1 journals upgrade transactionally to schema 2; foreign
+  inventory and ordinary/virtual/stored generated columns are refused without
+  mutation. Kept the effort index aligned, preserved a concurrent effort owner's
+  updated row during rebase, and reran the installed suite afterward.
+- Re-read the full Plan; none of its broader runtime or lifecycle gates is
+  complete from these local primitives. The next bounded seam is transactional
+  allocation claims and cooperative effect-owner fencing, coordinated with
+  existing routing/auth owners before any runtime interface is changed.
+  Live enrollment, deployment, authority migration and retirement remain gated.
+
+### 2026-10-13 - Allocation claim slice prepared
+- Under #6241, added combined identified allocation admission/claim/outbox/audit,
+  exact intent/resource retry and exclusive resource ownership across targets,
+  principals and accounts in one explicit local ledger. No receipt status releases
+  a claim, and there is no expiry, release or reassignment API.
+- Schema 1/2 upgrade adds an empty claim table without inventing historical
+  ownership. Legacy unclaimed admissions cannot acquire claims retroactively.
+- Installed contained suite: 224 passed. Separate-process crash/lost-reply and
+  four-process distinct/duplicate contention exercise the real installed package.
+  Fixed the migration fixture's missing explicit commit and reran the suite.
+- Validation tiers: unit and local installed-package E2E exercised; fresh local
+  database creation exercised, but full first-machine clean-room omitted because
+  this slice has no installer/bootstrap changes. Live external-venue validation
+  omitted: no integrated Gateway/node service or authorized fleet is available.
+- Documentation describes local claim evidence, canonical resource resolution,
+  migration and lack of effect-side exclusion. This closes only the storage seam
+  of machine-fleet `unified-coordination-product`; reviewed architecture and
+  independence/effect-owner-fencing invariants remain unchanged.
+- Next after review/merge is cooperative effect-owner resource fencing and explicit
+  release evidence, not TTL-based reassignment. The full Plan and Validation Plan
+  remain open; routing/auth and deployment owners retain their scopes.

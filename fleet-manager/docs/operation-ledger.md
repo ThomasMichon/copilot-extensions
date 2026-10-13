@@ -36,6 +36,36 @@ primitive has no dispatcher, automatic retry, lease timer or reassignment API.
 `inspect(intent)` returns persisted state or null for an unadmitted identity;
 it never probes a remote target.
 
+## Transactional allocation claims
+
+`admit_allocation(intent, resource=...)` admits a `workspace.allocate` intent
+and holds one identified resource in the same transaction as its outbox and
+audit. Resource IDs use the existing bounded identifier shape (1-128 ASCII
+letters/digits/dot/underscore/hyphen, starting with a letter or digit).
+The caller must resolve a canonical resource identity and authorize the
+intent/resource binding before calling. An arbitrary caller-supplied alias
+cannot establish exclusivity over the underlying workspace.
+
+A resource is exclusive across all operations, principals, accounts, targets
+and generations in this authority/installation's ledger, not scoped by target.
+An operation can claim only one resource. Repeating identical intent and resource
+returns the original operation without new audit; changing either fails.
+Resource contention fails without admitting an orphan intent/outbox/audit.
+Claims never expire, and accepted, UNKNOWN, failed or succeeded receipts never
+release them. There is deliberately no release, reassignment or TTL API yet:
+verified effect-owner release/retirement/fencing evidence remains a later gate.
+
+`inspect_allocation(resource=...)` reads local held-claim evidence (resource,
+operation row ID and immutable intent), or null. Neither presence nor absence
+is a signed grant, authentication, remote resource fence or permission to execute.
+The existing `admit` API remains a generic journal primitive and does **not**
+claim resources, even for a legacy allocation intent. Such an already-admitted
+unclaimed operation cannot acquire a claim retroactively through
+`admit_allocation`: it might already have dispatched. Safe allocation adapters
+must use the combined admission API, never generic admission followed by a claim.
+Migrating old unclaimed admissions requires separate explicit reconciliation;
+schema upgrade invents no ownership from historical intent.
+
 ## Durable node result reconciliation
 
 `result_cursor(target=..., installation=...)` reads the durable receiver
@@ -69,9 +99,10 @@ changing the supplied identity cannot make an old receipt fresh.
 Schema and authority/installation identity are checked when opening and inside
 every operation transaction. Unsupported versions and unrecognized databases
 are refused. Construction transactionally upgrades this journal's known schema 1
-to schema 2 by adding result cursors; intent, outbox, receipts and audit stay
-unchanged. Foreign table/object inventories (including a node journal) cannot be
-adopted as schema 1. A live old-schema reader/writer refuses the upgraded version
+or 2 to schema 3, adding result cursors where missing and an empty allocation
+claim table; intent, outbox, receipts, audit and existing cursors stay unchanged.
+Foreign table/object inventories (including a node journal) cannot be
+adopted as an earlier schema. A live old-schema reader/writer refuses the upgraded version
 rather than continuing as a second compatible writer. There is no downgrade,
 backup restore, authority relocation or distributed writer migration.
 Only explicit construction may create a database; subsequent verified
@@ -85,7 +116,7 @@ The separate explicit [node journal](node-journal.md) now owns local acceptance,
 cooperative effect receipts and a result spool; it does not share this database.
 
 **Not yet delivered:** target authentication,
-allocation claims and their effect-owner fences, bounded queue/audit retention,
+claim release/reassignment and effect-owner fences, bounded queue/audit retention,
 authoritative generation transfer, subscriptions, authenticated Gateway/node protocol,
 installer readiness or high availability. The current journal is a local
 building block in one product, not a second deployed queue beside V1.
@@ -98,3 +129,8 @@ commit, plus atomic page rollback, two independent node spools and exact
 scope/generation/digest denial. They do not
 prove power-loss durability, arbitrary Git/SSH/prompt exactly-once, multi-machine
 partitions, credential security or live service cutover.
+Allocation tests additionally cover separate-process competing and duplicate
+admissions, abrupt exit before claim commit, lost replies after commit, rollback
+of either audit failure, known-schema upgrades and retained claims after every
+receipt status. These are installed-package, local SQLite proofs, not distributed
+resource exclusion or provider fencing.

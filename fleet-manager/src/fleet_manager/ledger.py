@@ -18,7 +18,7 @@ class OperationLedger:
         self.authority, self.installation = authority, installation
         with self._transaction(verify=False) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2):
+            if version not in (0, 1, 2, 3):
                 raise PlanError("unsupported operation ledger schema")
             if version == 0:
                 existing = connection.execute(
@@ -60,7 +60,14 @@ class OperationLedger:
                     "target TEXT NOT NULL,installation TEXT NOT NULL,cursor INTEGER NOT NULL,"
                     "PRIMARY KEY(target,installation))"
                 )
-                connection.execute("PRAGMA user_version=2")
+                version = 2
+            if version == 2:
+                connection.execute(
+                    "CREATE TABLE allocation_claims("
+                    "resource TEXT PRIMARY KEY NOT NULL,"
+                    "operation_id INTEGER NOT NULL UNIQUE REFERENCES operations(id))"
+                )
+                connection.execute("PRAGMA user_version=3")
 
     @staticmethod
     def _check_tables(connection, version):
@@ -71,8 +78,10 @@ class OperationLedger:
             "receipts": ("operation_id", "sequence", "receipt", "status"),
             "audit": ("id", "operation_id", "event"),
         }
-        if version == 2:
+        if version >= 2:
             columns["result_streams"] = ("target", "installation", "cursor")
+        if version >= 3:
+            columns["allocation_claims"] = ("resource", "operation_id")
         objects = connection.execute(
             "SELECT type,name FROM sqlite_master WHERE name NOT GLOB 'sqlite_*'"
         ).fetchall()
@@ -97,7 +106,7 @@ class OperationLedger:
                 connection.execute("PRAGMA query_only=ON")
             connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             if verify:
-                if connection.execute("PRAGMA user_version").fetchone()[0] != 2:
+                if connection.execute("PRAGMA user_version").fetchone()[0] != 3:
                     raise PlanError("unsupported operation ledger schema")
                 identity = connection.execute("SELECT authority,installation FROM identity").fetchall()
                 if identity != [(self.authority, self.installation)]:
@@ -131,18 +140,61 @@ class OperationLedger:
         """Caller must already authorize scope. This method performs no effects."""
         value = self._scope(intent)
         with self._transaction() as connection:
+            return self._admit(connection, value, intent)
+
+    def _admit(self, connection, value, intent):
+        prior = self._find(connection, value)
+        if prior:
+            OperationIntent(bytes(prior[1])).check_repeat(intent)
+            return prior[0]
+        cursor = connection.execute(
+            "INSERT INTO operations(principal,account,operation,intent) VALUES(?,?,?,?)",
+            (value["principal"], value["account"], value["operation"], intent.encoded),
+        )
+        operation_id = cursor.lastrowid
+        connection.execute("INSERT INTO outbox VALUES(?,?)", (operation_id, "pending"))
+        self._event(connection, operation_id, "admitted")
+        return operation_id
+
+    def admit_allocation(self, intent, *, resource):
+        """Claim one caller-resolved resource with admission; no grant or effect fence."""
+        identifier(resource, "allocation resource")
+        value = self._scope(intent)
+        if value["command"] != "workspace.allocate":
+            raise PlanError("allocation claim requires workspace.allocate")
+        with self._transaction() as connection:
             prior = self._find(connection, value)
             if prior:
                 OperationIntent(bytes(prior[1])).check_repeat(intent)
+                claim = connection.execute(
+                    "SELECT resource FROM allocation_claims WHERE operation_id=?", (prior[0],),
+                ).fetchone()
+                if claim is None:
+                    raise PlanError("previous admission has no allocation claim")
+                if claim[0] != resource:
+                    raise PlanError("operation already claims a different resource")
                 return prior[0]
-            cursor = connection.execute(
-                "INSERT INTO operations(principal,account,operation,intent) VALUES(?,?,?,?)",
-                (value["principal"], value["account"], value["operation"], intent.encoded),
+            if connection.execute(
+                "SELECT 1 FROM allocation_claims WHERE resource=?", (resource,),
+            ).fetchone():
+                raise PlanError("allocation resource is already claimed")
+            operation_id = self._admit(connection, value, intent)
+            connection.execute(
+                "INSERT INTO allocation_claims VALUES(?,?)", (resource, operation_id),
             )
-            operation_id = cursor.lastrowid
-            connection.execute("INSERT INTO outbox VALUES(?,?)", (operation_id, "pending"))
-            self._event(connection, operation_id, "admitted")
+            self._event(connection, operation_id, "allocation-claimed")
             return operation_id
+
+    def inspect_allocation(self, *, resource):
+        """Return local held-claim evidence; absence is not permission to allocate."""
+        identifier(resource, "allocation resource")
+        with self._transaction(write=False) as connection:
+            row = connection.execute(
+                "SELECT o.id,o.intent FROM allocation_claims c"
+                " JOIN operations o ON o.id=c.operation_id WHERE c.resource=?", (resource,),
+            ).fetchone()
+            return ({"resource": resource, "operation_id": row[0],
+                     "intent": OperationIntent(bytes(row[1])).to_dict()} if row else None)
 
     def record_receipt(self, intent, receipt):
         """Persist correlated target assertions; sequence alone is not authentication."""

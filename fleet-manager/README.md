@@ -159,8 +159,12 @@ by `agent-fleet-contracts`.
 
 An explicit Python [local operation journal](docs/operation-ledger.md) now
 persists admission/outbox/audit and correlated receipt updates transactionally.
-It is not automatically installed or activated and supplies no executor,
-authentication, allocation claims or resource fencing.
+Its combined allocation-admission API also persists one exclusive identified
+resource claim with intent/outbox/audit. Claims survive every receipt outcome;
+no release, expiry or reassignment API exists. This is local storage evidence,
+not authentication, a signed grant or an effect-owner fence.
+The journal is not automatically installed or activated and supplies no executor
+or resource fencing. Generic admission does not claim allocations.
 The offline CLI remains non-mutating.
 Its explicit result-reconciliation API commits a node spool's receiver cursor
 with receipt/outbox/audit updates, avoiding stale history replay after a lost

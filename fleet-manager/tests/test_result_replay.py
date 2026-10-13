@@ -178,6 +178,7 @@ def test_schema_one_transactional_upgrade_preserves_admissions_and_receipts(tmp_
     accepted = node(tmp_path / "node.db").accept(intent)
     store.record_receipt(intent, accepted)
     with closing(sqlite3.connect(path)) as connection:
+        connection.execute("DROP TABLE allocation_claims")
         connection.execute("DROP TABLE result_streams")
         connection.execute("PRAGMA user_version=1")
     with pytest.raises(PlanError, match="schema"):
@@ -186,7 +187,7 @@ def test_schema_one_transactional_upgrade_preserves_admissions_and_receipts(tmp_
     assert upgraded.inspect(intent)["receipt"] == accepted.to_dict()
     assert cursor(upgraded) == 0
     with closing(sqlite3.connect(path)) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
 
 
 def test_schema_upgrade_refuses_foreign_node_state_without_mutation(tmp_path):
@@ -212,9 +213,10 @@ def test_schema_upgrade_preserves_unknown_inventory_or_columns(tmp_path, sql, ve
     path = tmp_path / "gateway.db"
     gateway(path)
     with closing(sqlite3.connect(path)) as connection:
+        connection.execute("DROP TABLE allocation_claims")
         if version == 1:
             connection.execute("DROP TABLE result_streams")
-            connection.execute("PRAGMA user_version=1")
+        connection.execute(f"PRAGMA user_version={version}")
         connection.execute(sql)
         before = connection.execute("SELECT type,name,sql FROM sqlite_master").fetchall()
     with pytest.raises(PlanError, match="unrecognized"):
