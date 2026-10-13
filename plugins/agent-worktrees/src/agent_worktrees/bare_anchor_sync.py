@@ -8,9 +8,20 @@ detected to be bare.
 
 from __future__ import annotations
 
+import os
+import shlex
 import uuid
 
 from . import bare_anchor_files, git_ops
+
+
+def _display_command(argv: list[str]) -> str:
+    """A copy-paste command for the operator's shell: PowerShell literal
+    quoting on Windows, POSIX quoting elsewhere, so ``$``, backticks and
+    quotes in a path or ref are never reinterpreted."""
+    if os.name == "nt":
+        return " ".join([argv[0], *("'" + a.replace("'", "''") + "'" for a in argv[1:])])
+    return shlex.join(argv)
 
 
 def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
@@ -64,8 +75,10 @@ def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
         return (
             "skipped",
             f"HEAD is on '{current}', not declared default '{target}' "
-            "(bare anchor: switch it explicitly, e.g. `git -C "
-            f"\"{path}\" symbolic-ref HEAD refs/heads/{target}`)",
+            "(bare anchor); switch it explicitly with: "
+            + _display_command(
+                ["git", "-C", str(path), "symbolic-ref", "HEAD", f"refs/heads/{target}"]
+            ),
         )
     old_sha = _git("rev-parse", "--verify", f"refs/heads/{target}").stdout.strip()
     if not old_sha:

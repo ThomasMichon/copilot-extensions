@@ -447,21 +447,23 @@ def test_documented_recovery_command_works_from_any_directory(
 
 
 def test_branch_switch_hint_works_from_any_directory(upstream: Path, tmp_path: Path) -> None:
-    """The suggested `symbolic-ref` command names the anchor, so it does not
-    depend on the operator's current directory."""
-    anchor = _make_anchor(upstream, tmp_path / "anchor")
-    _git(anchor, "branch", "release")
+    """The suggested `symbolic-ref` command names the anchor and is quoted for
+    the platform shell, so it works from any directory even when the path and
+    branch contain shell metacharacters."""
+    anchor = _make_anchor(upstream, tmp_path / "an$HOME'`chor")
+    branch = "rel$HOME`x"
+    _git(anchor, "branch", branch)
 
-    state, detail = bare_anchor_sync.sync_bare_anchor(str(anchor), "release")
+    state, detail = bare_anchor_sync.sync_bare_anchor(str(anchor), branch)
 
     assert state == "skipped"
-    command = re.search(r"e\.g\. `(git [^`]+)`", detail).group(1)
+    command = detail.split("switch it explicitly with: ", 1)[1]
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
     env["GIT_CEILING_DIRECTORIES"] = str(tmp_path)
-    ran = subprocess.run(
-        shlex.split(command), cwd=elsewhere, env=env, capture_output=True, text=True
-    )
+    shell = (["powershell", "-NoProfile", "-NonInteractive", "-Command", command]
+             if os.name == "nt" else ["sh", "-c", command])
+    ran = subprocess.run(shell, cwd=elsewhere, env=env, capture_output=True, text=True)
     assert ran.returncode == 0, ran.stderr
-    assert _git(anchor, "symbolic-ref", "HEAD") == "refs/heads/release"
+    assert _git(anchor, "symbolic-ref", "HEAD") == f"refs/heads/{branch}"
