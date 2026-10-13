@@ -149,9 +149,15 @@ def test_legacy_dispatch_name_uses_canonical_preparation_lease_and_tests(tmp_pat
 
 def fixture_python(environment):
     venv.EnvBuilder(with_pip=False).create(environment)
-    site = Path(sysconfig.get_path(
-        "purelib", vars={"base": str(environment), "platbase": str(environment)},
-    ))
+    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    result = subprocess.run(
+        [str(python), "-I", "-c",
+         "import json, sysconfig; print(json.dumps(sysconfig.get_path('purelib')))"],
+        capture_output=True, text=True, check=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    site = Path(json.loads(result.stdout))
+    assert site.is_absolute() and site.is_relative_to(environment.resolve()) and site.is_dir()
     dependency_paths = list(dict.fromkeys([
         str(Path(pytest.__file__).resolve().parent.parent),
         sysconfig.get_path("purelib"), sysconfig.get_path("platlib"),
@@ -159,7 +165,25 @@ def fixture_python(environment):
     (site / "test-harness.pth").write_text(
         "\n".join(dependency_paths) + "\n", encoding="utf-8",
     )
-    return environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    return python
+
+
+def test_fixture_python_uses_child_install_scheme(tmp_path, monkeypatch):
+    real_get_path = sysconfig.get_path
+
+    def parent_get_path(name, *args, **kwargs):
+        if name == "purelib" and kwargs.get("vars") and not kwargs.get("scheme"):
+            return str(tmp_path / "parent-only-install-scheme")
+        return real_get_path(name, *args, **kwargs)
+
+    monkeypatch.setattr(sysconfig, "get_path", parent_get_path)
+    python = fixture_python(tmp_path / "child")
+    result = subprocess.run(
+        [str(python), "-I", "-c", "import pytest; print(pytest.__file__)"],
+        capture_output=True, text=True, check=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert Path(result.stdout.strip()).resolve() == Path(pytest.__file__).resolve()
 
 
 def exercise_native_legacy_service_cli(tmp_path):
