@@ -84,6 +84,8 @@ def _write_supervisor_runtime_status(scope: str, summary: Any) -> None:
         "updated_at": time.time(),
         "cycle_started_at": (previous or {}).get("cycle_started_at"),
         "cycle_id": (previous or {}).get("cycle_id"),
+        "generation": (previous or {}).get("generation"),
+        "progress": getattr(summary, "progress", None),
         "running": summary.running,
         "backing_off": summary.backing_off,
         "dead": getattr(summary, "dead", []),
@@ -112,6 +114,24 @@ def _write_supervisor_cycle_start(scope: str, cycle_id: int, started_at: float) 
     payload = dict(previous or {})
     payload["cycle_started_at"] = started_at
     payload["cycle_id"] = cycle_id
+    from .companion import process_start_token
+
+    payload["generation"] = {
+        "pid": os.getpid(), "start_token": process_start_token(os.getpid()),
+    }
+    payload["progress"] = {"phase": "starting", "observed_at": started_at, "cycle_id": cycle_id}
+    temporary = path.with_suffix(f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(temporary, path)
+
+def _write_supervisor_progress(scope: str, progress: dict) -> None:
+    path = _supervisor_runtime_status_path(scope)
+    payload, error = _read_supervisor_runtime_status(scope)
+    if error is not None or payload is None:
+        raise RuntimeError("supervisor progress snapshot is unavailable")
+    if payload.get("cycle_id") != progress.get("cycle_id"):
+        raise RuntimeError("supervisor progress cycle is superseded")
+    payload["progress"] = progress
     temporary = path.with_suffix(f".{os.getpid()}.tmp")
     temporary.write_text(json.dumps(payload), encoding="utf-8")
     os.replace(temporary, path)
@@ -513,6 +533,9 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
             single_instance=not getattr(args, "no_single_instance", False),
             on_cycle=_on_cycle,
             on_cycle_start=_on_cycle_start,
+            on_progress=lambda progress: _write_supervisor_progress(
+                supervisor_lease_scope(machine, env), progress,
+            ),
         )
 
 

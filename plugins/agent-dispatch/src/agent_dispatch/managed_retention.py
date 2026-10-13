@@ -10,8 +10,7 @@ import stat
 import sys
 import time
 import uuid
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -42,6 +41,7 @@ from .managed_runtime import (
     managed_runtime_root,
 )
 from .registrations import RegistrationError, validate_registration
+from .managed_withdrawal import SelectionWithdrawal
 from .windows_replace_retry import replace_with_retry
 
 if TYPE_CHECKING:
@@ -156,7 +156,9 @@ def _cell_owner(root: Path, cell: Path) -> Path:
     return cell.parent
 
 
-def _inspect_cell(root: Path, cell: Path, authority: dict | None = None) -> dict:
+def _inspect_cell(
+    root: Path, cell: Path, authority: dict | None = None, *, deadline: float | None = None
+) -> dict:
     _cell_owner(root, cell)
     receipt = _read_metadata(root, cell / RECEIPT_NAME)
     schema = receipt.get("schema_version")
@@ -311,12 +313,12 @@ def _inspect_cell(root: Path, cell: Path, authority: dict | None = None) -> dict
             != receipt["content_digest"]
         ):
             raise ManagedRuntimeError("managed retention snapshot authority is inconsistent")
-    if _tree_digest(cell, excluded=frozenset({RECEIPT_NAME})) != receipt["cell_digest"]:
+    if _tree_digest(cell, excluded=frozenset({RECEIPT_NAME}), deadline=deadline) != receipt["cell_digest"]:
         raise ManagedRuntimeError("managed retention cell contents changed")
     return receipt
 
 
-class ManagedRuntimeRetention:
+class ManagedRuntimeRetention(SelectionWithdrawal):
     """Share leases and durable selected/rollback pins through one physical root."""
 
     def __init__(
@@ -395,7 +397,7 @@ class ManagedRuntimeRetention:
         _assert_safe_descendant(self.root, path, description="managed retention record")
         write_json_object_atomic(path, record)
 
-    def _check_reference(self, reference: object) -> set[Path]:
+    def _check_reference(self, reference: object, *, deadline: float | None = None) -> set[Path]:
         if (
             not isinstance(reference, dict)
             or set(reference)
@@ -420,11 +422,11 @@ class ManagedRuntimeRetention:
             ):
                 raise ManagedRuntimeError("managed retention cell reference is malformed")
             cell = Path(item["cell"])
-            receipt = _inspect_cell(self.root, cell, reference["authority"])
+            receipt = _inspect_cell(self.root, cell, reference["authority"], deadline=deadline)
             if (
                 cell in cells
                 or receipt["name"] in names
-                or _hash_regular_file(cell / RECEIPT_NAME, description="leased receipt")
+                or _hash_regular_file(cell / RECEIPT_NAME, description="leased receipt", deadline=deadline)
                 != item["receipt_digest"]
             ):
                 raise ManagedRuntimeError("managed retention receipt reference is mismatched")
@@ -435,7 +437,7 @@ class ManagedRuntimeRetention:
         return cells
 
     def _check_record(
-        self, path: Path, kind: str, *, check_references: bool = True
+        self, path: Path, kind: str, *, check_references: bool = True, deadline: float | None = None
     ) -> tuple[dict, set[Path]]:
         record = _read_metadata(self.root, path)
         keys = (
@@ -493,7 +495,7 @@ class ManagedRuntimeRetention:
         cells: set[Path] = set()
         if check_references:
             for reference in references:
-                cells.update(self._check_reference(reference))
+                cells.update(self._check_reference(reference, deadline=deadline))
                 if reference["registration_id"] != scope["registration_id"]:
                     raise ManagedRuntimeError("managed retention registration scope is mismatched")
         return record, cells
@@ -606,26 +608,6 @@ class ManagedRuntimeRetention:
         """Withdraw only this supervisor environment's persistent selection."""
         with self.withdraw_selection(registration_id, receipt_dir):
             pass
-
-    @contextmanager
-    def withdraw_selection(self, registration_id: str, receipt_dir: Path) -> Iterator[None]:
-        """Fence external selection withdrawal and remove its root pin only afterward."""
-        if not self.root.exists():
-            _reject_link(self.root, description="managed retention root")
-            yield
-            return
-        root = _ensure_safe_root(self.root)
-        with _RootLock(root):
-            scope = self._scope(receipt_dir, registration_id)
-            path = self._path("selections", scope)
-            present = path.exists() or path.is_symlink()
-            if present:
-                record, _ = self._check_record(path, "selections")
-                if record["scope"] != scope:
-                    raise ManagedRuntimeError("cannot withdraw a foreign managed selection")
-            yield
-            if present:
-                path.unlink()
 
     def _stale(self, record: dict, domain: str) -> bool:
         holder = record["holder"]
@@ -1015,4 +997,3 @@ class ManagedRuntimeRetention:
                 deleted.append(cell)
                 _remove_deletion_staging(root, staging)
         return CleanupResult(tuple(deleted), tuple(sorted(protected)), removed_stale)
-

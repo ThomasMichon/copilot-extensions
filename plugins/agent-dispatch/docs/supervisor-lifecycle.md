@@ -5,6 +5,42 @@ The existing installer, runtime handoff, and retirement seams append structured
 zdd lifecycle writer and its bounded rotation. This is observability, not a
 watchdog or a claim that an earlier outage's requester has been identified.
 
+## Bounded reconciliation and progress
+
+The master establishes its shared wait budget before declaration discovery,
+registration reads and companion provider resolution. Pending reads retain the
+last confirmed desired state; unfinished providers cannot supply new launch
+authority. Receipt integrity runs in a separate two-worker pool, so a contended
+root lock or slow tree hash cannot occupy every health/runtime worker.
+
+Each withdrawn receipt has one durable `*.reconcile-operation.json` record tied
+to its exact process receipt and selected launch generation. `pending`, `timeout`
+and `unknown` retain authority. Immutable state milestones in `reconcile-history`
+preserve prior operation generations; this slice does not prune that history.
+A new supervisor reads back the same generation;
+it never repeats an unconfirmed retirement or withdrawal. Completion requires
+absent receipts **and** confirmed retirement of the recorded process generation.
+Changed receipts are superseded rather than retired. The existing crash-safe OS
+lock primitive serializes the exact receipt operation. No new reservation store,
+force-release policy or automatic recovery scheduler is introduced.
+
+Selection integrity is verified while its durable root pin remains published,
+outside the root-wide bookkeeping lock. Before withdrawal the same scope and
+metadata are revalidated under that lock. Full content checks remain mandatory,
+including runtime caches; an expired integrity deadline does not accept a
+partial digest. Unknown outcomes are not authorization to delete caches or pins.
+Captured command execution and post-timeout pipe draining both have deadlines.
+
+Runtime status records the master's PID/start token, cycle, phase and receipt
+operation states. `supervisor_health.supervisor_progress_observation` is a
+read-only seam for an **independently invoked existing lifecycle owner**; stale
+progress and process existence are different observations. Its results never
+authorize replacement, restart or withdrawal. Independent watchdog invocation,
+custody/recovery and native platform proof remain integration gates of the
+existing #5301/#5655 owners. This slice neither implements a second watchdog nor
+claims that same-loop status writing proves independent recovery. The inner-lane
+conclusion boundary in #6185 is unchanged.
+
 ## Record contract
 
 The outer record contains UTC `ts`, emitting `pid`, source hostname `node`, `service`, `version` when

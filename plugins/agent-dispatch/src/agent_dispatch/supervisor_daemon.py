@@ -70,6 +70,7 @@ from .managed_runtime import (
 from .loop_governance import LoopGovernance
 from .registrations import RegistrationKind
 from .supervisor_lifecycle import Invocation, daemon_audit
+from .supervisor_reconcile import BoundedReconciliation
 from .supervisor_native_lifecycle import NativeOwnershipUnconfirmed, native_restart_unit, request_native_restart
 from .supervisor_registration import (  # noqa: F401 -- re-exported below
     DesiredRegistrationSet,
@@ -112,7 +113,7 @@ def _remaining(deadline: float) -> float:
     """
     return max(0.0, deadline - time.monotonic())
 
-class SupervisorDaemon:
+class SupervisorDaemon(BoundedReconciliation):
     """The one-per-host master that reconciles the registry into subprocesses.
 
     Drive :meth:`reconcile_once` on a cadence (or call :meth:`serve` to loop).
@@ -165,14 +166,8 @@ class SupervisorDaemon:
         self.clock = clock
         self.sleep = sleep
         self.poll_interval = max(0.5, float(poll_interval))
-        #: Bounded per-call wait for an off-thread health/validate probe (see
-        #: _poll_managed_health/_poll_managed_validate/_poll_unmanaged_health)
-        #: before deferring its result to a later tick. Keeps the common,
-        #: fast case (a healthy companion, an uncontended lock) behaving
-        #: exactly as a synchronous call would -- starting/reviving a unit
-        #: within the same reconcile_once() -- while still bounding how long
-        #: one stuck/contended companion can hold up reconciling every other
-        #: one, in the rare case its own check doesn't finish in time.
+        #: Shared discovery/provider/health wait budget, established before discovery.
+        #: Receipt integrity uses its own tracked pool; timeouts retain authority.
         self._reconcile_call_budget = max(0.0, float(reconcile_call_budget))
         #: Monotonic count of reconcile cycles started this process lifetime --
         #: the correlation id the serve-loop heartbeat log lines share, so a
@@ -182,6 +177,7 @@ class SupervisorDaemon:
         #: call) is visible by tailing the log alone, without needing a stale
         #: heartbeat file to first go unnoticed.
         self._cycle_count = 0
+        self._init_bounded_reconciliation()
         #: Quiet window before a crashed unit is restarted (a crash-loop damper).
         self.restart_backoff = max(0.0, float(restart_backoff))
         #: Cap on automatic restarts of a crash-looping unit (None = unbounded).
@@ -348,8 +344,6 @@ class SupervisorDaemon:
     def _recheck_governance(self, checkpoint: str) -> dict[str, Any] | None:
         return self._governance.recheck(checkpoint)
 
-    # -- registry view -------------------------------------------------------
-
     def _declared(self) -> list[dict]:
         """The declared profile set for this (machine, env), as registrations.
 
@@ -365,7 +359,10 @@ class SupervisorDaemon:
         from .supervisor_daemon_registration_publish import publish_declared_registrations
 
         try:
-            decls = list(self.declared_source())
+            decls = self._bounded_read("declarations", lambda: list(self.declared_source()))
+        except _FUTURE_TIMEOUT:
+            log.warning("declaration discovery remains pending; retaining confirmed declarations")
+            return self._last_declared
         except Exception:  # pragma: no cover - discovery is environment-dependent
             log.exception("failed to read declared profile set; keeping the last known set")
             return self._last_declared
@@ -413,9 +410,15 @@ class SupervisorDaemon:
         Behavior *overrides-take-precedence*). A dropped id is then wound down by the
         reconcile's stop-not-desired step."""
         declared = self._declared()
-        regs = self.client.list_registrations(
-            machine=self.machine, env=self.env, include_paused=False
-        )
+        try:
+            regs = self._bounded_read("registrations", lambda: self.client.list_registrations(
+                machine=self.machine, env=self.env, include_paused=False
+            ))
+        except _FUTURE_TIMEOUT:
+            log.warning("registration discovery remains pending; retaining confirmed registrations")
+            regs = self._last_store_registrations
+        else:
+            self._last_store_registrations = copy.deepcopy(regs)
         regs = [r for r in regs if r.get("id") not in self._published_declared_ids]
         merged = merge_registration_sources(regs, declared)
         diagnostics = (tuple(merged.deduplicated), tuple(merged.conflicts))
@@ -469,9 +472,7 @@ class SupervisorDaemon:
             registration = desired[rid]
             authority = companion_authority_fingerprint(registration)
             try:
-                resolution = self._companion().resolve(
-                    copy.deepcopy(registration), machine=self.machine, env=self.env
-                )
+                resolution = self._resolve_companion(rid, registration, authority)
                 if (
                     resolution is not None
                     and companion_authority_fingerprint(resolution.registration) != authority
@@ -540,10 +541,10 @@ class SupervisorDaemon:
             for rid, unit in self._units.items()
             if unit.kind == RegistrationKind.PLUGIN_COMPANION
         }
+        self._phase("receipts")
         try:
-            self._companion().reconcile_receipts(
-                set(current) | managed_companions | self._managed_uncertain
-            )
+            adopted = set(current) | managed_companions | self._managed_uncertain
+            self._reconcile_companion_receipts(adopted)
         except (CompanionError, CompanionIndeterminate, OSError) as exc:
             log.warning("companion receipt reconciliation is incomplete: %s", exc)
         self._companion_resolutions = current
@@ -1674,18 +1675,13 @@ class SupervisorDaemon:
         start newly-registered units. Returns a summary of what changed.
         """
         summary = ReconcileSummary()
+        reconcile_deadline = time.monotonic() + self._reconcile_call_budget
+        self._reconcile_deadline = reconcile_deadline
+        self._phase("discovery")
         desired = self._desired()
+        self._phase("units")
         summary.deduplicated = list(self._deduplicated)
         summary.conflicts = list(self._conflicts)
-        # One shared deadline for every off-thread health/validate probe this
-        # whole tick submits -- both the managed-companion phase below and
-        # the unmanaged-companion crash-revival phase further down -- so a
-        # slow companion in one phase can't add its own separate budget on
-        # top of a slow companion in the other, doubling the tick's worst
-        # case. See _reconcile_managed's own docstring for the per-call
-        # sharing rationale this extends across phases.
-        reconcile_deadline = time.monotonic() + self._reconcile_call_budget
-
         # 1. stop units no longer desired (removed or paused)
         for rid in list(self._units):
             if rid not in desired:
@@ -1701,6 +1697,7 @@ class SupervisorDaemon:
 
         # 2. restart units whose definition changed
         grouped = self._reconcile_transition_groups(desired, summary, deadline=reconcile_deadline)
+        self._phase("managed")
         managed = self._reconcile_managed(desired, summary, skip=grouped, deadline=reconcile_deadline)
         self._cleanup_managed_runtimes()
         for rid, reg in desired.items():
@@ -1715,12 +1712,9 @@ class SupervisorDaemon:
 
         # 3. revive crashed units (backoff-gated, cap-bounded)
         now = self.clock()
-        # Shared deadline for this pass -- the SAME one computed at the top
-        # of reconcile_once(), not a fresh one: see that deadline's own
-        # comment for why a separate budget per phase would let one slow
-        # companion here compound with one slow companion in the managed
-        # phase above, doubling this tick's worst case.
+        # Health shares the discovery/receipt/managed phase deadline.
         health_deadline = reconcile_deadline
+        self._phase("health")
         for rid, reg in desired.items():
             if rid in managed or rid in grouped:
                 continue
@@ -1812,6 +1806,9 @@ class SupervisorDaemon:
             rid for rid, u in self._units.items() if not u.dead and not _alive(u)
         )
         summary.dead = sorted(rid for rid, u in self._units.items() if u.dead)
+        self._phase("complete")
+        summary.progress = self.progress_snapshot()
+        self._reconcile_deadline = None
         return summary
 
     # -- serve loop ----------------------------------------------------------
@@ -1944,6 +1941,9 @@ class SupervisorDaemon:
             self._retired_runtime_executors.clear()
         if self._runtime_executor is not None and self._owns_runtime_executor:
             self._runtime_executor.shutdown(wait=False, cancel_futures=True)
+            if self._shutdown_drained:
+                self._runtime_executor = None
+        self._shutdown_bounded_pools(self._shutdown_drained)
         return self._shutdown_drained
 
     def _maybe_self_update(self) -> bool:
@@ -2084,6 +2084,7 @@ class SupervisorDaemon:
         single_instance: bool = True,
         on_cycle: Callable[[ReconcileSummary], None] | None = None,
         on_cycle_start: Callable[[int, float], None] | None = None,
+        on_progress: Callable[[dict], None] | None = None,
     ) -> int:
         """Run the daemon: reconcile each tick until interrupted.
 
@@ -2103,6 +2104,7 @@ class SupervisorDaemon:
         caller (the CLI) persist the cycle-start timestamp somewhere queryable
         (e.g. the runtime-status file) for programmatic staleness checks.
         """
+        self._progress_callback = on_progress
         if single_instance and not self.acquire_singleton():
             daemon_audit(self, "selection", "singleton-held-by-peer", outcome="skipped")
             log.info(
