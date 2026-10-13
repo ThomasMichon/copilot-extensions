@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import importlib.machinery
 import json
 import os
 import shutil
@@ -148,7 +149,8 @@ def test_declared_flat_python_modules_bind_to_root_source(tmp_path, monkeypatch)
 
 @pytest.mark.parametrize("hook", [
     "custom-backend", "backend-path", "setup.py", "setup.cfg", "cmdclass",
-    "setuptools", "setuptools.py", "sitecustomize.py", "json.py",
+    "setuptools", "setuptools.py", "setuptools.pyc", "sitecustomize.py", "json.py",
+    "setuptools" + importlib.machinery.EXTENSION_SUFFIXES[0],
 ])
 def test_unvalidated_build_hooks_fail_before_toolchain_resolution(tmp_path, monkeypatch, hook):
     import build_toolchain_lock

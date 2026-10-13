@@ -6,6 +6,7 @@ import base64
 import csv
 import configparser
 import hashlib
+import importlib.machinery
 import io
 import json
 import os
@@ -397,8 +398,12 @@ def validate_static_build(source_dir: Path) -> dict:
         if (source_dir / name).exists() or (source_dir / name).is_symlink():
             raise PromotionArtifactError(f"unsupported executable or alternate build configuration: {name}")
     reserved = sys.stdlib_module_names | {"setuptools", "wheel", "packaging", "sitecustomize", "usercustomize"}
+    suffixes = ["", *importlib.machinery.all_suffixes()]
     for name in sorted(reserved):
-        if any(path.exists() or path.is_symlink() for path in (source_dir / name, source_dir / (name + ".py"))):
+        if any(
+            path.exists() or path.is_symlink()
+            for path in (source_dir / (name + suffix) for suffix in suffixes)
+        ):
             raise PromotionArtifactError(f"candidate source shadows trusted build tooling: {name}")
     tool = data.get("tool", {})
     settings = tool.get("setuptools", {}) if isinstance(tool, dict) else None
