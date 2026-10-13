@@ -35,7 +35,7 @@ dependencies = [
     "agent-single-instance-lease",
     "agent-config-migrate",
     "agent-plugin-resolve",
-    "agent-procutil",
+    "agent-procutil[metrics]",
     "agent-dropin-registry",
     "agent-plugin-activation",
     "agent-remote-login-shell",

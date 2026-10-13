@@ -93,6 +93,28 @@ restart. Bad entries warn but do not block valid peers. `agent-bridge doctor`
 lists every provider finding with the exact entry, target, and cleanup or
 re-registration remedy.
 
+### Namespace reader observations
+
+Only CLI `namespace-list` reads use optional procutil CPU metrics. Agent Bridge
+opts into the metrics backend; other procutil consumers remain stdlib-only.
+Each native read captures its owned PID and creation identity before waiting or
+reaping. Sampling is provider-local, off-loop, at most once per second, with a
+100ms best-effort join. A pending native sample prevents overlapping sampling
+on later reads, independently of command completion or caller cancellation.
+The roster cache retains those exact futures across provider replacement and
+bounded shutdown.
+
+The existing configured telemetry sink receives `reader_cpu_observation`
+events: plugin, `namespace-list` role, bounded namespace key, root PID/creation
+time, native wall duration, `observed_cpu_seconds`, `coverage`, `truncated` and
+bounded PID/reason `issues`. No arguments, output or paths are emitted.
+CPU values are observed lower bounds, not exhaustive tree totals; unavailable,
+failed or rate-limited measurements remain `null` with explicit uncertainty.
+Measurement failure does not discard valid enumeration. Resolve, ensure-ready
+and target-repo calls are not instrumented. No CPU admission policy, process
+registry or new termination behavior is implied; existing execution deadlines
+and fallback/completeness semantics remain unchanged.
+
 ## Streaming & the delivery cursor
 
 When a host agent delegates work with `send`, it gets a **continuous, low-noise

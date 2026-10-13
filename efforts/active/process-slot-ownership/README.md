@@ -379,3 +379,30 @@ The optional shared-library observation boundary is complete, not the wider
 CPU budget or process-tree contract. The next slice connects owned CLI spawn
 receipts and the existing telemetry seam while keeping sampling holders
 accounted for independently from command completion.
+
+### 2026-10-13 - CLI reader CPU lifecycle prepared
+
+The reviewed wiring contract landed in #6514. Agent Bridge now opts into the
+metrics extra and observes only native namespace enumeration. The owned
+command adapter captures identity before communicate/reap, preserving direct
+child execution deadlines and output/fallback semantics. Native Windows
+FILETIME receipts match the metrics backend exactly, including a virtual
+environment launcher's distinct interpreter descendant.
+
+Sampling is provider-local, one-second completion-based cadence with 100ms
+joins. Native sampling futures remain owned across command completion,
+cancelled scan awaiters and provider replacement; bounded cache shutdown
+observes them without cancellation. A stuck sample suppresses later sampling
+instead of multiplying threads. Existing telemetry exports bounded lower-bound
+CPU observations and explicit uncertainty without arguments, output or paths.
+
+The focused Windows selection passed 133 tests, including native CPU export
+and two console-child cycles from a windowless parent with zero new visible
+windows or foreground transitions. The initial native fixture incorrectly
+equated a virtual environment launcher with its interpreter; the corrected
+fixture pins the owned root independently and verifies the observed descendant.
+A cadence regression also showed that starting the next bridge interval at
+sample admission could hit procutil's completion-based cache; cadence now
+starts at sample completion. Linux native proof remains pending the PR's
+canonical CI run. Numeric CPU limits, cumulative role accounting, sampler
+overhead and process-tree reclamation remain separate open items.
