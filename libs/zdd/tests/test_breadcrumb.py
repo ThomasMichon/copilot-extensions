@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
+import time
 
 import pytest
 
@@ -78,6 +80,36 @@ def test_reap_abandoned_passive_no_breadcrumb_is_noop(tmp_path: Path):
         tmp_path, pid_alive=lambda pid: True, terminate=lambda pid: True,
     )
     assert result == {"reaped": False, "reason": "no stale cutover breadcrumb", "pid": None}
+
+
+def test_reap_returns_refusal_when_routing_lock_is_contended(tmp_path):
+    _write_aged_breadcrumb(tmp_path, new_pid=202, age_s=3600)
+    before = breadcrumb.breadcrumb_path(tmp_path).read_bytes()
+    ready = threading.Event()
+    release = threading.Event()
+
+    def hold_routing_lock():
+        with routing.routing_lock(tmp_path, deadline=time.monotonic() + 2):
+            ready.set()
+            release.wait(timeout=5)
+
+    holder = threading.Thread(target=hold_routing_lock)
+    holder.start()
+    try:
+        assert ready.wait(timeout=2)
+        result = breadcrumb.reap_abandoned_passive(
+            tmp_path, pid_alive=lambda _: True,
+            terminate=lambda _: pytest.fail("termination attempted without routing custody"),
+            grace_seconds=0,
+        )
+    finally:
+        release.set()
+        holder.join(timeout=2)
+    assert not holder.is_alive()
+    assert issubclass(routing.RoutingLockTimeout, OSError)
+    assert result["reaped"] is False and result["refused"] is True
+    assert "RoutingLockTimeout" in result["reason"]
+    assert breadcrumb.breadcrumb_path(tmp_path).read_bytes() == before
 
 
 def test_reap_abandoned_passive_terminal_breadcrumb_is_noop(tmp_path: Path):
