@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-08
+- **Last revised:** 2026-10-12
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -117,6 +117,20 @@ delegation-layer counterpart of the ground layer's *outbound* resource claims.
 Both halves are derived from their owning layer, never merged into a third
 store, and each answers the reverse lookup (which worktree holds this?) on its
 own.
+
+### Execution workspace continuity
+
+A producer or registrar can select an execution repository different from the
+task's producing queue lane. The selected execution repository and allocated
+worktree form one workspace identity for allocation, session acquisition,
+recovery, and reclamation. Queue routing and code-target metadata never
+independently redirect a later stage to another repository.
+
+Retries retain that workspace's logical creation identity even before its
+first session exists. The delegation layer records and carries the result
+from the workspace owner; it does not reconstruct a second target from task
+metadata. A new logical revision may deliberately authorize replacement,
+but a timeout, ambiguous outcome, or ordinary retry cannot.
 
 ### Producers — the four ways tasks are created
 The coordinator only owns the queue; anything that *creates* a task is a
@@ -888,6 +902,17 @@ doing — the one sanctioned exception to *status-through-tool-calls-not-prose*,
 because there is no command left to make. This is the worker-side half of the
 crash-recovery contract; the layer's own honest acknowledgment of a
 control-plane death it caused is the coordinator-side half.
+
+### bounded-acquisition-failure-with-retained-allocation
+
+A proven pre-launch refusal is not a busy session or an unknown launch.
+Deterministic target or capability failures follow the bounded failure and
+visible repair path. Truly unknown outcomes retain their exact allocation
+and reconcile against the owning workspace/session authorities. Neither case
+can create an unbounded succession of worktrees by escaping the failure budget
+as a harmless deferral. A retained sessionless workspace keeps the positive
+creation history needed for its first conversation; missing historical proof
+never becomes permission to discard or recreate a conversation.
 
 ### declared-safety-exceptions-not-improvised
 A task likely to run into a safety boundary its worker's normal

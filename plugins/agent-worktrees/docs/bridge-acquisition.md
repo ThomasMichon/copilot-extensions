@@ -1,5 +1,14 @@
 # Exact bridge-owned CLI launch
 
+Worktree creation allocates execution space without a session. Bridge creation
+can compose that allocation with the launch below, or receive an existing
+sessionless worktree. Both retain one owner-resolved execution project,
+worktree, and path; a task's queue lane never independently redirects the
+launch. See the shared
+[workspace allocation and session acquisition contract](../../../docs/patterns/workspace-allocation-and-session-acquisition.md).
+Its cross-attempt creation-key API remains proposal work until implemented;
+it is distinct from the current exact-launch and native-head interfaces.
+
 `embody --worktree-id <id> --bridge-acquisition <native-id|fresh> --json`
 is an unseeded launch primitive used beneath agent-bridge acquisition.
 It requires an explicit worktree and rejects a simultaneous seed, unchecked

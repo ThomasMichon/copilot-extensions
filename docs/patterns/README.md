@@ -88,6 +88,13 @@ Invariants are **must-always-hold contracts between a vision and the code** — 
 narrow set of properties a change may never quietly break. They are the enforceable
 core of the principles above; a reviewer checks a change against these.
 
+- **Allocation and embodiment retain one execution workspace.** The ground
+  layer allocates space without a session; bridge composes that allocation
+  with embodiment or accepts an existing sessionless workspace. Queue lanes
+  and code targets do not replace its selected execution repository. Logical
+  creation identity survives retries separately from prompt-delivery identity.
+  See [workspace allocation and session acquisition](workspace-allocation-and-session-acquisition.md).
+
 - **No shared-infrastructure dependency by default.** A plugin service is
   installable and reachable using only what its *own* installer deployed. It
   must never *require* an external reverse proxy, tunnel, mesh, load balancer,

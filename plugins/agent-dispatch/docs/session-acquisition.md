@@ -88,6 +88,16 @@ it never authorizes created-worktree teardown as a pre-effect failure.
 
 ## Explicit operator fresh-conversation recovery
 
+The cross-layer
+[workspace allocation and session acquisition contract](../../../docs/patterns/workspace-allocation-and-session-acquisition.md)
+distinguishes queue lane, selected execution project, and code target. The
+workspace owner-returned execution identity must be preserved across
+preparation, bridge acquisition, recovery, and cleanup. The
+[workspace continuity effort](../../../efforts/active/workspace-acquisition-continuity/README.md)
+tracks correction of independent project derivation and adds stable creation
+identity across attempts. This is not authorization to weaken the historical
+first-conversation or fresh-recovery checks below.
+
 When historical initial-launch evidence is missing, no automated absence
 inference is permitted. After independently verifying that the exact worktree
 has no active or unknown native holder, an operator may authorize a new

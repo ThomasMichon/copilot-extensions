@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; cooperative local ownership landed, release evidence next
+- **Status:** Active; offline baseline captured, role artifact preflight in progress
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts. Existing dependencies #5789, #6030, #5861, #5862 retain ownership.
@@ -97,14 +97,17 @@ All detailed slices are **agent-recommended** and remain subject to review.
   integrated-product vision/pattern amendments through actual PR review.
 - [x] Re-read the merged plan; coordinate existing campaign owners and assign
   non-overlapping sub-issues before any runtime implementation.
-- [ ] Capture actual launch/update/recovery baseline and select first vertical
-  slice acceptance criteria; do not invent performance targets from package counts.
+- [x] Capture actual launch/update/recovery baseline and select first vertical
+  slice acceptance criteria in [the baseline/gate record](baseline-and-vertical-slice.md);
+  unsupported product lifecycle is explicit, not invented performance.
 
 ### Phase 1 - One release and role-selective lifecycle
 - [ ] Define a fleet-manager release manifest for thin client, Gateway and node
   roles; reuse existing lifecycle code rather than implementing parallel installers.
   Declaration and offline snapshot inspection landed in #6285; actual product
   assembly, signature verification and lifecycle activation remain pending.
+  Role-selected actual artifact integrity preflight is a separate prerequisite;
+  client packaging/diagnostics/managed installation remain owned by #6424.
 - [ ] Prove independent setup/update/doctor/recovery and bounded activation,
   with no installation or update from Copilot hooks.
 - [ ] Prove thin client installation has no controller/container-manager effects;
@@ -116,8 +119,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
   Intent/receipt contracts and local admission/outbox/audit persistence landed
   in #6357/#6360; explicit node acceptance/effect receipts landed in #6388.
   Durable receiver cursors landed in #6395 and local allocation claims in #6403.
-  Cooperative SQLite effect-owner checks landed in #6411. Verified release,
-  external effect-owner fencing and authenticated runtime integration remain open.
+  Cooperative SQLite effect-owner checks landed in #6411 and explicit local
+  retirement/release/generation transfer in #6418. External effect-owner fencing
+  and authenticated runtime integration remain open.
 - [ ] Prove objective -> workspace -> host -> prompt -> outcome -> settlement
   locally, then through one Gateway and two separate nodes.
 - [ ] Persist scope/generation fences at cooperative effect owners; define
@@ -400,3 +404,58 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   callbacks and bound the actual lookup under 5,000 retained releases.
 - Installed contained suite: 333 passed; lint passed. These are fixes to the
   current unmerged release slice, not a new runtime/adoption milestone.
+
+### 2026-10-13 - Cooperative release and generation transfer landed
+- #6418 merged at `2026-10-13T02:24:11Z`, commit
+  `a27d57dc2ddc83fc1a8e92a0a026e5f64b5cb7b2`. Actual current-head Copilot APPROVED
+  with zero findings after all three initial findings were fixed; every review
+  thread resolved and all 24 checks succeeded or legitimately skipped before
+  merge. Required CI was queued for an extended period; no gate was bypassed.
+  Installed contained suite: 333 passed.
+- Managed sync encountered the already-published squash-history conflict and
+  aborted safely. Verified a clean worktree, only the two published commits,
+  and exact equality of every owned changed file with upstream; retained both
+  managed recovery and a backup branch before moving onto the verified merge.
+  No unpublished work or peer rows were dropped.
+- Re-read every parent Plan/Validation item. No complete item is closed by
+  local SQLite release primitives: live authentication, external fencing,
+  full vertical operation, lifecycle, migration and adoption remain unresolved.
+- Next stretch captures the actual launch/update/recovery baseline and precise
+  first vertical-slice acceptance criteria under Phase 0, then advances the
+  independently owned release/product lifecycle portion of #6240. Before
+  resident Gateway/node integration, agree the unpublished JWT/JWKS and
+  connector-proof attribution interface with #5789; do not add a competing
+  authentication implementation. No live rollout is authorized.
+
+### 2026-10-13 - Actual baseline and artifact preflight prerequisite
+- Captured installed, isolated native Windows client launch/help and explicit
+  setup/update/recover refusals in the [baseline/gate record](baseline-and-vertical-slice.md).
+  Only one observation per command; no product service exists to measure
+  successful activation/recovery, and no performance target is invented.
+- Recorded source-level V1 version-slot/cutover/recovery reuse seams and precise
+  full local objective-to-settlement/lifecycle gates. No live V1 update or
+  replacement was performed; generic ZDD routing is not writer fencing.
+- Reconciled the new #6424 client packaging/diagnostics/owned lifecycle owner.
+  The Contract implementer transitions back to Phase 1 for this bounded
+  artifact preflight and retained product lifecycle gate.
+  The distinct #6240 prerequisite reads bounded actual role-selected artifact
+  streams using the existing release schema and explicit source paths. It
+  preserves the thin client dependency boundary and does not touch the client's
+  existing parser, package assembly, installer or routing/auth files.
+- Integrity output explicitly denies authenticity, activation permission and
+  readiness. Signed trust, owned immutable staging, actual Gateway/node
+  assembly, first-touch lifecycle and every later parent gate remain open.
+  No live deployment, enrollment, credential or capacity authority was changed.
+- Unit and simple installed E2E exercised role isolation, real artifact bytes,
+  the actual 64 MiB boundary, bounded reads, native links, observed file races,
+  tamper refusal and path-free diagnostics. Fresh fixture roots and installed
+  execution outside the checkout cover first-touch input behavior; full
+  machine clean-room is skipped because no installer/bootstrap changes.
+  No live external lane exists for this unassembled product and none was
+  enrolled. Documentation impact covers the product README, artifact contract
+  and canonical baseline/vertical gates. The full effort remains Active.
+- Native Windows CI exposed false change refusals from comparing path and
+  handle timestamps. Identity/size correlation remains across the open;
+  content-change stamps now compare the same handle before/after streaming.
+  The regression models timestamp disagreement while real mutation/tamper
+  checks remain required. No retry or CI bypass hides the failure.

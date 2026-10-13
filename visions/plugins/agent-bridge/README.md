@@ -6,14 +6,15 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-09
+- **Last revised:** 2026-10-12
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
 ## Purpose & Intent
 
-The fabric's ground layer gives an agent an isolated worktree and a local
-session body. The delegation layer gives work a durable task record when an
+The fabric's ground layer gives an agent an isolated worktree and durable
+workspace identity. A hosting provider supplies its session body. The
+delegation layer gives work a durable task record when an
 agent should let go of it. Between those sits **agent-bridge**: the live
 coordination layer that lets a participant **call another agent**, inspect what
 is happening now, deliver an attributed message to an existing session, and keep
@@ -90,6 +91,22 @@ The **bridge CLI** is the agent-facing and operator-facing headless console for
 the mesh. It lets a caller start, send to, wait on, inspect, interrupt, stop,
 resume, and observe sessions without choosing a different tool for each venue or
 transport.
+
+### workspace allocation and session embodiment
+
+For a worktree-capable repository, creating a bridge session composes the
+ground layer's canonical workspace allocation with session embodiment in that
+same workspace. Creating only a worktree leaves it sessionless. A caller can
+also supply an existing sessionless worktree and embody its first session
+without a takeover or artificial freshness exception.
+
+The selected execution repository and worktree remain one identity throughout
+this composition. A queue's producing repository, a code-change target, or a
+caller context cannot substitute for that selected workspace. Replay of a
+logical creation request recovers the same workspace and session outcome
+rather than creating another hidden agent. An existing conversation or
+uncertain prior launch still requires its ordinary continuity and ownership
+proof; sessionless is authoritative history, not an absence guess.
 
 ### delegation control and attention boundary
 

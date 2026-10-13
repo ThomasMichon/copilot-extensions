@@ -11,6 +11,16 @@ fleet acquisition remains outstanding.
 
 ## Request and result
 
+The [workspace allocation and session acquisition contract](../../../docs/patterns/workspace-allocation-and-session-acquisition.md)
+qualifies every allocation/acquisition by the selected execution project, not
+the producing task lane. Bridge creation for a worktree-capable project
+composes the ground layer's allocation with embodiment in that same workspace.
+An existing workspace with authoritative sessionless history may receive its
+first conversation through the ordinary admission path; no takeover is implied.
+Stable cross-attempt creation keys are proposed separately by the
+[workspace continuity effort](../../../efforts/active/workspace-acquisition-continuity/README.md);
+the delivery-ID journal described below is not that allocation-key API.
+
 `acquisition_contract.AcquisitionRequest` version 1 carries explicit `cli` or
 `acp` mode, target, task ID and generation, worktree ID, allocation provenance
 (`created`, `reused`, or `targeted`), tri-state conversation retirement,
