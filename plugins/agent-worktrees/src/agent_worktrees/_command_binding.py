@@ -166,16 +166,14 @@ def write_legacy_manifest(
         try:
             receipt = publish_legacy_binding(primitive, **arguments)
         except SourceProvenanceUnavailable as error:
-            if lease is not None:
-                manifest["commandLifecycle"] = {
-                    "version": 1, "state": "complete", "owner": lease.owner,
-                }
-            elif (root / "deploy-manifest.json").exists():
+            if lease is None and (root / "deploy-manifest.json").exists():
                 incumbent = primitive.read_json(root / "deploy-manifest.json")
                 if "commandLifecycle" in incumbent:
                     owner = lifecycle._owner(_rules(), primitive, arguments)
                     lifecycle._reservation(_rules(), primitive, root, owner)
                     manifest["commandLifecycle"] = incumbent["commandLifecycle"]
+            # A successful unattributed lifecycle has no normalized owner to
+            # persist. Only an unfinished operation retains its reservation.
             result = {"status": "unresolved", "reason": str(error)}
         else:
             manifest = {**manifest, "commandBinding": receipt}

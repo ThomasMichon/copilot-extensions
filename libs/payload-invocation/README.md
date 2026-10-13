@@ -78,8 +78,11 @@ unfinished runtime build nor publishes new selectable ownership. First-use
 An unavailable source on an unowned legacy installation is reported without
 breaking its existing command. An explicit install can still use the canonical
 legacy probe's missing-policy/default-false admission, under the same lock,
-but records only an unattributed mutation reservation and emits no selectable
-source binding. An explicit policy, conflicting source, or invalid incumbent
+but records only a pending unattributed mutation reservation and emits no
+selectable source binding. Successful unattributed publication clears that
+temporary reservation rather than creating a path-only durable owner that
+would block a later authorized update or source qualification.
+An explicit policy, conflicting source, or invalid incumbent
 cannot use that compatibility path. Namespaced native installers retain their
 separate schema-3 manifest writer; they never publish legacy ownership.
 

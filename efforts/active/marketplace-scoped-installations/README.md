@@ -519,7 +519,11 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 - Legacy compatibility remains explicit: the canonical probe can admit an
   unowned, unattributed install only under its established missing-policy
   default-false rule. That flow remains serialized but never claims
-  source-qualified catalog selection. Classic Windows PowerShell host-cache
+  source-qualified catalog selection. Its reservation persists on failure
+  only; successful unattributed publication removes it so a later authorized
+  update can qualify the installation from real source evidence rather than
+  becoming permanently pinned to an unproven payload path.
+  Classic Windows PowerShell host-cache
   preparation includes a host-only control and preserves whole-profile
   byte/directory/mtime comparisons; native provider confirmation remains open.
 - No effort checkbox, release, rollout, or persistent-host permission is

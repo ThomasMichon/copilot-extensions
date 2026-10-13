@@ -83,9 +83,58 @@ def test_command_binding_unattributed_default_preserves_legacy_without_selection
         assert result["status"] == "unresolved"
     manifest = json.loads((binding_fixture["legacy"] / "deploy-manifest.json").read_text())
     assert "commandBinding" not in manifest
-    assert manifest["commandLifecycle"]["owner"]["unattributed"] is True
+    assert "commandLifecycle" not in manifest
     assert _resolve(binding_fixture)["status"] == "unresolved"
     assert "command ownership remains unresolved" in capsys.readouterr().err
+
+
+def test_command_binding_completed_unattributed_install_can_be_qualified_by_update(
+    binding_fixture: dict,
+) -> None:
+    binding = binding_fixture["binding"]
+    primitive = binding_fixture["primitive"]
+    lifecycle = binding._load_lifecycle()
+    _write(binding_fixture["home"] / ".copilot/settings.json", {})
+    for _ in range(2):
+        with lifecycle.legacy_lifecycle(binding, primitive, **binding_fixture["arguments"]):
+            binding.write_legacy_manifest(
+                primitive, {"schema_version": 3, "service": PLUGIN_ID},
+                **binding_fixture["arguments"],
+            )
+    _write(binding_fixture["home"] / ".copilot/settings.json", {
+        "extraKnownMarketplaces": {
+            "example": {"source": {"source": "github", "repo": "Example/Plugins"}}
+        },
+    })
+    assert _resolve(binding_fixture)["status"] == "unresolved"
+    with lifecycle.legacy_lifecycle(binding, primitive, **binding_fixture["arguments"]):
+        assert _resolve(binding_fixture)["status"] == "blocked"
+        (binding_fixture["legacy"] / "runtime-slot").write_text("qualified", encoding="utf-8")
+        binding.write_legacy_manifest(
+            primitive, {"schema_version": 3, "service": PLUGIN_ID},
+            **binding_fixture["arguments"],
+        )
+    assert _resolve(binding_fixture)["status"] == "selected"
+
+
+def test_command_binding_failed_unattributed_install_keeps_its_reservation(binding_fixture: dict) -> None:
+    binding = binding_fixture["binding"]
+    primitive = binding_fixture["primitive"]
+    lifecycle = binding._load_lifecycle()
+    _write(binding_fixture["home"] / ".copilot/settings.json", {})
+    with pytest.raises(RuntimeError, match="partial"):
+        with lifecycle.legacy_lifecycle(binding, primitive, **binding_fixture["arguments"]):
+            raise RuntimeError("partial")
+    manifest = binding_fixture["legacy"] / "deploy-manifest.json"
+    before = manifest.read_bytes()
+    other = binding_fixture["home"] / ".copilot/installed-plugins/other" / PLUGIN_ID
+    other.mkdir(parents=True)
+    with pytest.raises(binding.CommandOwnershipConflict, match="reservation"):
+        with lifecycle.legacy_lifecycle(
+            binding, primitive, **{**binding_fixture["arguments"], "payload_root": other},
+        ):
+            pytest.fail("Foreign unattributed lifecycle reached runtime mutation")
+    assert manifest.read_bytes() == before
 
 
 def test_command_binding_unattributed_explicit_policy_never_admits_mutation(binding_fixture: dict) -> None:
@@ -264,7 +313,10 @@ def test_command_binding_native_stamp_defers_without_stuck_reservation(
     assert installed.returncode == 0, installed.stdout + installed.stderr
     assert (runtime / "current-version").read_text() == "example"
     manifest = json.loads((runtime / "deploy-manifest.json").read_text())
-    assert manifest["commandLifecycle"]["state"] == "complete"
+    if "commandBinding" in manifest:
+        assert manifest["commandLifecycle"]["state"] == "complete"
+    else:
+        assert "commandLifecycle" not in manifest
     assert not (runtime / ".command-binding-publication.lock").exists()
 
 
