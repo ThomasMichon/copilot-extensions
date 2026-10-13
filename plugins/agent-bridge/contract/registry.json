@@ -124,7 +124,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
-          "sha256": "30267995c4a18cf81cb2b829547eb4a90981977ff6c36f3d29c7255e48eacff7",
+          "sha256": "c4d734a1a77f314d1ac6644e5d76136d74a91f6205bda9fc4da2025513908513",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -180,7 +180,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-33.json",
-          "sha256": "47cfe23ba66d04848f1d53a3e11ffef5826951ee3135b2c27a97b595aeb6ca8f",
+          "sha256": "3f20014a227ce5e11658eb00a9aaa1373d18bd4dc2253fcbca42e11aaf820dae",
           "role": "remote peer request and actual reply receipt from the two-isolated-bridge round trip",
           "generation": 33
         },
@@ -465,11 +465,11 @@
           "capture_method": "Re-attest byte-identical agent-roster source and representative response alongside the additive peer reply contract."
         },
         {
-          "commit": "edd673dc6775ac835df81865be0b6a2add0364f3",
+          "commit": "1128a4a3c677aa01cab5742e8b789ef59bba7d2d",
           "plugin_version": "0.4.1-dev3",
           "generation": 33,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
-          "source_git_blob": "ace1b7833075af56acd936c8c0707f8d6c75b65d",
+          "source_git_blob": "496a0dfadb80c1d9eddd55ba2ec7a62bb282fa05",
           "capture_method": "Capture the independent remote peer request and receipt exercised by test_two_bridge_call_and_reverse_reply_preserve_addresses."
         },
         {
