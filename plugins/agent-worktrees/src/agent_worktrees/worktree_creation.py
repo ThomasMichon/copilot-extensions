@@ -45,6 +45,7 @@ from . import (
     tracking,
 )
 from . import config as cfg
+from .launch_progress import step
 
 
 class LaunchSeedStagingFailure(RuntimeError):
@@ -461,6 +462,7 @@ def _journal_owner_reciprocal_claim(
         return False
 
 
+@step("Synchronizing repository source")
 def _prepare_worktree_source(
     anchor: str | Path,
     *,
@@ -830,9 +832,10 @@ def _create_worktree_core(
     try:
         staged_seed = None
         if pending_seed:
-            staged_seed = launch_seed_state.stage(
-                record.yaml_path, kind="new", text=pending_seed, seed_id=seed_id,
-            )
+            with step("Staging launch prompt"):
+                staged_seed = launch_seed_state.stage(
+                    record.yaml_path, kind="new", text=pending_seed, seed_id=seed_id,
+                )
         if permissions.clone_permissions(repo.anchor, worktree_path):
             print("Copied Copilot permissions to worktree path.", file=sys.stderr)
         activity.log_event("worktree_created", worktree_id=worktree_id, branch=branch)
@@ -840,7 +843,7 @@ def _create_worktree_core(
             print("Added worktree path to trustedFolders.", file=sys.stderr)
         if permissions.ensure_extension_permission_approvals(worktree_path):
             print("Pre-approved facility extension permissions for worktree path.", file=sys.stderr)
-        local_cache_refresh.refresh_local_cache(worktree_path)
+        local_cache_refresh.prepare_for_launch(worktree_path)
         if kind == "session" and not no_pair:
             try:
                 pair_stamp = core._carve_paired_knowledge(

@@ -133,6 +133,35 @@ def repo(tmp_path: Path) -> Path:
     return r
 
 
+def test_packaged_canonical_change_requires_consumer_bump(repo: Path):
+    helper = SCRIPT.parent / "launch_wrapper_assets_ref.py"
+    (repo / "tools" / helper.name).write_bytes(helper.read_bytes())
+    source = "plugins/alpha/src/alpha/__init__.py"
+    _write(repo, "plugins/beta/packaged-assets.json", json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 1,
+        "canonicalDir": "plugins/alpha/src/alpha",
+        "payloadDir": "scripts/engine", "files": ["__init__.py"],
+    }))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "declare packaged engine")
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", head)
+    _write(repo, source, "x = 2\n")
+    _set_plugin_version(repo, "alpha", "1.0.0-dev2")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "change canonical engine")
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "beta" in result.stdout + result.stderr
+    _set_plugin_version(repo, "beta", "2.0.0-dev2")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "bump packaged consumer")
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_library_change_does_not_charge_retired_artifact_only_consumer(repo: Path):
     _write(repo, ".gitignore", ".ruff_cache/\n*.egg-info/\n")
     _git(repo, "add", ".gitignore")

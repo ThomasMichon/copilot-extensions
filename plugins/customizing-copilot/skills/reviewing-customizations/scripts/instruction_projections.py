@@ -15,13 +15,11 @@ never a checked-in file.
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 import os
 import re
 import stat
 import subprocess
-import sys
 import tempfile
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -2403,20 +2401,12 @@ def discover_enabled_sources(
     require_trust: bool = False,
     agent_worktrees_command: str | None = None,
 ) -> list[object]:
-    """Reuse the customization scanner's existing settings/source resolver."""
+    """Reuse the settings/source resolver without importing the full scanner."""
     if not require_trust:
         validate_committed_settings(repo_root)
-    scanner_path = Path(__file__).with_name("scan-customizations.py")
-    module_name = "_instruction_projection_scanner_support"
-    scanner = sys.modules.get(module_name)
-    if scanner is None:
-        spec = importlib.util.spec_from_file_location(module_name, scanner_path)
-        if spec is None or spec.loader is None:
-            raise RuntimeError("cannot load customization scanner")
-        scanner = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = scanner
-        spec.loader.exec_module(scanner)
-    return scanner.assemble_enabled_plugins(
+    from scan_plugin_sources import assemble_enabled_plugins
+
+    return assemble_enabled_plugins(
         repo_root,
         installed_root=installed_root, home=home, require_trust=require_trust,
         include_user=False, include_local=False,

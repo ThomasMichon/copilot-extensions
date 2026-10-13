@@ -42,7 +42,7 @@ def record_path(tmp_tracking_dir: Path, monkeypatch) -> Path:
             anchor=str(tmp_tracking_dir), worktree_root=str(tmp_tracking_dir / "trees"),
         )},
     )
-    monkeypatch.setattr(cfg, "load_project_config", lambda name: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda name, **kwargs: config)
     path = tmp_tracking_dir / "wt-reg.yaml"
     rec = WorktreeRecord(
         worktree_id="wt-reg", branch="worktree/wt-reg", worktree_path="/tmp/wt-reg",
@@ -145,7 +145,7 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
             anchor=str(tmp_tracking_dir), worktree_root=str(tmp_tracking_dir / "trees"),
         )},
     )
-    monkeypatch.setattr(cfg, "load_project_config", lambda name: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda name, **kwargs: config)
     path = tmp_tracking_dir / "wt-terminal.yaml"
     rec = WorktreeRecord(
         worktree_id="wt-terminal", branch="worktree/wt-terminal",

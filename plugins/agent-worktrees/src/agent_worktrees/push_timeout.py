@@ -81,7 +81,7 @@ def _kill_tree(proc: subprocess.Popen) -> None:
 
 
 def run_bounded(
-    cmd: list[str], *, cwd: str | os.PathLike | None, env: dict, timeout: float,
+    cmd: list[str], *, cwd: str | os.PathLike | None, env: dict, timeout: float | None,
 ) -> subprocess.CompletedProcess[str]:
     """Run *cmd*, capturing output; on a stall past *timeout*, kill its
     ENTIRE process tree (see module docstring) before re-raising
@@ -113,6 +113,10 @@ def run_bounded(
             exc.stdout, exc.stderr = stdout, stderr
             raise
         return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+    except BaseException:
+        if job is None:
+            _kill_tree(proc)
+        raise
     finally:
         if job is not None:
             job.close()

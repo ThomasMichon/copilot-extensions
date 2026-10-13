@@ -182,7 +182,9 @@ def require_project_record_mutation(record: Any) -> None:
 
     try:
         with _project_config_lock:
-            config = cfg.load_project_config(record.repo)
+            config = cfg.load_project_config(
+                record.repo, include_control_plane_related_pr=False,
+            )
         if record.repo not in config.repos:
             raise ValueError("requested project is not registered in receiving-side configuration")
         config = replace(config, repo_name=record.repo)

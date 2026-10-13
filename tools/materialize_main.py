@@ -29,6 +29,11 @@ under `worktree-manager/bin/`; promotion copies the files listed in
 `plugins/agent-worktrees/bin/` so a shipped payload never depends on a sibling
 `worktree-manager/` checkout being present.
 
+The same packaged-asset machinery expands `packaged-assets.json` declarations.
+Agent-worktrees uses this for the projection engine shared with customizing-
+copilot: one canonical dev source becomes a complete, byte-identical engine
+inside its own released payload, with no sibling-plugin discovery at runtime.
+
 Usage::
 
     python tools/materialize_main.py --dest /path/to/main-snapshot

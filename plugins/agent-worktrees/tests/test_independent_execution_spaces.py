@@ -55,7 +55,7 @@ def scoped_config(tmp_path, monkeypatch):
             anchor=str(tmp_path), worktree_root=str(tmp_path / "children"),
         )},
     )
-    monkeypatch.setattr(cfg, "load_project_config", lambda project: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda project, **kwargs: config)
     return config
 
 
@@ -225,7 +225,8 @@ def test_project_record_mutation_holds_a_lock_around_active_project_mutation(
 
     from agent_worktrees import config as _cfg
 
-    def fake_load_project_config(name, **_kwargs):
+    def fake_load_project_config(name, *, include_control_plane_related_pr):
+        assert include_control_plane_related_pr is False
         time.sleep(0.1)
         return _cfg.Config(
             machine="m", platform="wsl", repo_name=name,
@@ -656,7 +657,7 @@ def test_source_accept_rejects_foreign_record_before_registry_transition(
 
 
 def test_project_authority_failure_is_an_explicit_rejection(scoped_config, monkeypatch):
-    def unavailable(project):
+    def unavailable(project, **kwargs):
         raise ValueError("project is not registered")
 
     monkeypatch.setattr(cfg, "load_project_config", unavailable)
@@ -672,7 +673,7 @@ def test_project_authority_rejects_unrelated_sole_repo(scoped, tmp_path, monkeyp
         repo_name="missing", repos={"unrelated": unrelated},
     )
     assert config.default_repo is unrelated
-    monkeypatch.setattr(cfg, "load_project_config", lambda project: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda project, **kwargs: config)
     entries = {"workstation-windows": MachineEntry(
         key="workstation-windows", display_name="Windows",
         execution_platform="windows" if scoped else "",
@@ -699,7 +700,7 @@ def test_project_authority_uses_requested_repo_anchor(scoped_config, tmp_path, m
         anchor=unrelated_anchor, worktree_root=str(tmp_path / "other-children"),
     )
     scoped_config = replace(scoped_config, repo_name="unrelated")
-    monkeypatch.setattr(cfg, "load_project_config", lambda project: scoped_config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda project, **kwargs: scoped_config)
     anchors = []
 
     def registry(anchor):

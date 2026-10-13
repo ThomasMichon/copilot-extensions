@@ -29,7 +29,7 @@ def _wire_dirs(monkeypatch, tracking_dir: Path, state_dir: Path) -> None:
             anchor=str(tracking_dir.parent), worktree_root=str(tracking_dir),
         )},
     )
-    monkeypatch.setattr(m.cfg, "load_project_config", lambda project: config)
+    monkeypatch.setattr(m.cfg, "load_project_config", lambda project, **kwargs: config)
     monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda anchor: {})
 
 

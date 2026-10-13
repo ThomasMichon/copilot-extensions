@@ -14,6 +14,7 @@ from .launch_trace import append_launch_event
 from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
 from .launch_seed_exec import deferred_command
 from .worktree_creation import LaunchSeedStagingFailure
+from .launch_progress import step
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
 
 
@@ -181,7 +182,8 @@ class ResolveCommandState:
 
     def load_config(self) -> cfg.Config:
         if self.config is None:
-            self.config = cfg.load_config()
+            with step("Resolving launch configuration", enabled=not self.ordinary_picker):
+                self.config = cfg.load_config()
         return self.config
 
     def _resolve_codename_selector(self) -> None:
@@ -684,7 +686,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     except ExecutionSpaceError as exc:
         return output._json_error(str(exc), exit_code=3)
     try:
-        staged_seed = seed_for_attempt(yaml_path, record, state.args)
+        with step("Preparing launch prompt"):
+            staged_seed = seed_for_attempt(yaml_path, record, state.args)
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
         return output._json_error(f"Could not stage launch prompt: {exc}", exit_code=3)
     launch_preflight = _preflight_launch(config, state.args, record.worktree_path)

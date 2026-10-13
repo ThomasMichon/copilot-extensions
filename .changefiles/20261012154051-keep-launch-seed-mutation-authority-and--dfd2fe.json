@@ -1,0 +1,9 @@
+{
+  "comment": "Ship an owned projection engine and visible completion-based worktree preparation; keep mutation authority independent of unrelated PR discovery",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

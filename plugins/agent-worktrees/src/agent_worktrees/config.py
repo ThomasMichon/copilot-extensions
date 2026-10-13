@@ -622,7 +622,7 @@ def _overlay_machines_yaml_path(repo_dir: str | Path) -> Path | None:
     """
     try:
         from . import state_root
-        config = load_config()
+        config = load_config(include_control_plane_related_pr=False)
         try:
             default_anchor = config.default_repo.anchor
         except KeyError:

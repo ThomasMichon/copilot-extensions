@@ -111,7 +111,7 @@ def test_owned_create_rejects_unready_before_source_or_worktree_side_effects(
             )
         },
     )
-    monkeypatch.setattr(cfg, "load_project_config", lambda name: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda name, **kwargs: config)
     root = state_root.StateRoot(
         None,
         "knowledge_repo",

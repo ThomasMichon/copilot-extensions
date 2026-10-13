@@ -219,7 +219,7 @@ def _seed(tmp_path, monkeypatch, *, owner_ref=None, resources=None):
                         lambda *a, **k: types.SimpleNamespace(machine="anomalous-potato"))
     monkeypatch.setattr(
         cfg, "load_project_config",
-        lambda name: cfg.Config(
+        lambda name, **kwargs: cfg.Config(
             srcroot=str(tmp_path), machine="anomalous-potato", platform="wsl", repo_name=name,
             repos={"test-chamber": cfg.RepoConfig(
                 anchor=str(wdir), worktree_root=str(tmp_path / "trees"),
@@ -836,7 +836,7 @@ def _seed_ownerref(tmp_path, monkeypatch, *, machine="anomalous-potato"):
                         lambda *a, **k: types.SimpleNamespace(machine=machine))
     monkeypatch.setattr(
         "agent_worktrees.config.load_project_config",
-        lambda name: cfg.Config(
+        lambda name, **kwargs: cfg.Config(
             srcroot=str(tmp_path), machine=machine, platform="wsl", repo_name=name,
             repos={"example-web": cfg.RepoConfig(
                 anchor=str(wdir), worktree_root=str(tmp_path / "trees"),
@@ -931,7 +931,7 @@ def test_claims_add_owner_ref_uses_owner_project_readiness(
     })()
     monkeypatch.setattr(m.cfg, "load_config", lambda: ambient_config)
     monkeypatch.setattr(
-        m.cfg, "load_project_config", lambda name: owner_config
+        m.cfg, "load_project_config", lambda name, **kwargs: owner_config
     )
     monkeypatch.setattr(
         m.state_root_mod,

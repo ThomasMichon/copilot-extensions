@@ -144,6 +144,23 @@ existing `tracking_write` authority. The same-code logged fallback follows
 that authority's established no-request-sent/version-skew rules; ambiguous
 sent writes are never silently retried.
 
+Receiving-side mutation checks load the named project's execution-space
+configuration without control-plane PR grafts. Machine-registry overlay
+resolution likewise excludes PR discovery: neither authority path needs to
+verify unrelated repositories' plugin activation. PR commands still load their
+normal layered policy. This keeps prompt staging within the existing write
+deadline without weakening project, machine, platform, or ownership fences.
+
+Foreground New/Resume planning has no fixed aggregate deadline. The Manager
+streams engine stderr while retaining stdout as the JSON plan and preserving
+stderr error detail for version-skew handling. Configuration discovery,
+repository synchronization, prompt staging and projection preparation report
+start/end and elapsed-time heartbeats. Projection discovery/render waits for
+completion at this boundary; sessionStart queues its separate bounded backup.
+Individual Git, transport and mutation failure bounds remain in force, and
+bounded automation may explicitly set a plan timeout. Slow preparation is not
+a reason to abandon a successfully created checkout or skip projection work.
+
 The Manager requests `resolve --stage-launch-seed` for prompted requests.
 `launch.seed_pending: true`, `launch.seed_id` and `launch.seed_kind` identify
 the saved intent. The second resolve selects it with `--seed-id`, preserving

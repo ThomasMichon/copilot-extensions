@@ -269,7 +269,22 @@ def _plugins_needing_bump(changed: list[str], consumers: dict[str, list[str]]) -
     this guard and `check-changefile-presence.py`/`compute_from_diff()`,
     which both depend on this same map (PR #4514 review)."""
     needing: dict[str, set[str]] = {}
+    packaged_sources: dict[str, set[str]] = {}
+    manifests = list(PLUGINS_DIR.glob("*/packaged-assets.json"))
+    if manifests:
+        import launch_wrapper_assets_ref as assets
+
+    for manifest_path in manifests:
+        manifest = assets.load_manifest(
+            manifest_path.parent, manifest_name=assets.PACKAGED_MANIFEST_NAME,
+        )
+        assert manifest is not None
+        for name in manifest.files:
+            source = f"{manifest.canonical_dir_raw}/{name}"
+            packaged_sources.setdefault(source, set()).add(manifest_path.parent.name)
     for path in changed:
+        for consumer in packaged_sources.get(path, ()):
+            needing.setdefault(consumer, set()).add(f"packaged source {path}")
         parts = tuple(path.split("/"))
         if len(parts) < 2:
             continue

@@ -21,7 +21,7 @@ def _seed_owner(tmp_path, monkeypatch):
         lambda *a, **k: types.SimpleNamespace(machine="m", repo_name="p"))
     monkeypatch.setattr(
         cfg, "load_project_config",
-        lambda name: cfg.Config(
+        lambda name, **kwargs: cfg.Config(
             srcroot=str(tmp_path), machine="m", platform="windows", repo_name=name,
             repos={"p": cfg.RepoConfig(
                 anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"),
@@ -231,7 +231,7 @@ def test_owner_config_resolution_failure_is_structured_readiness(
     monkeypatch.setattr(
         cfg,
         "load_project_config",
-        lambda name: (_ for _ in ()).throw(
+        lambda name, **kwargs: (_ for _ in ()).throw(
             ValueError("No repo could be resolved")
         ),
     )

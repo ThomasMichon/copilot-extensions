@@ -30,7 +30,7 @@ def registered_project(tmp_tracking_dir, monkeypatch):
             anchor=str(tmp_tracking_dir), worktree_root=str(tmp_tracking_dir / "trees"),
         )},
     )
-    monkeypatch.setattr(cfg, "load_project_config", lambda name: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda name, **kwargs: config)
 
 
 def _terminal_bridge_record(tmp_tracking_dir: Path, *, worktree_path: str) -> WorktreeRecord:

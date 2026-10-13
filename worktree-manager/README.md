@@ -66,6 +66,19 @@ be verified at all (git itself unavailable or the probe timed out) is
 reported separately under `repo_registration.unknown` — visible, but never
 treated as confirmed drift.
 
+## Launch preparation
+
+New and Resume wait for the engine to finish repository synchronization,
+prompt staging and instruction projection rather than imposing a fixed
+aggregate plan timeout. Preparation stages and elapsed-time heartbeats stream
+to the launch terminal; the final plan remains JSON on stdout. Individual
+engine operations keep their own failure bounds, and automation can explicitly
+request a bounded plan call.
+
+Instruction projection is shipped inside agent-worktrees itself. It does not
+require customizing-copilot to be installed or globally enabled: promotion
+vendors the shared canonical engine into the owning worktree payload.
+
 ## Resume prompt
 
 The initial loading tab is labelled `Local` with its environment until the

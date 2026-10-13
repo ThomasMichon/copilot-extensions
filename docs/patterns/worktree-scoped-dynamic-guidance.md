@@ -263,45 +263,37 @@ so the harness's own directory scan (if it reads live files rather than a git
 index) may pick it up with zero reliance on the catch-all at all. This
 mirrors the existing manual "an anchor-repo user restarts to pick up a
 freshly-synced set" behavior, made automatic and moved earlier. **Landed**:
-`agent_worktrees.local_cache_refresh.refresh_local_cache()` locates
-`customizing-copilot`'s installed, declared `render-local-cache` CLI
-operation (`manage-instruction-projections.py`) and invokes it as a
-bounded-timeout subprocess (via `push_timeout.run_bounded`, which kills the
-invoked CLI's whole process tree on a stall, not just its direct child) --
-never importing that plugin's Python package directly, per
-[`a-la-carte-independence.md`](a-la-carte-independence.md)'s "no
-cross-plugin reach-around" rule. The sibling's root is resolved through
-`plugin_activation.resolve_active_plugins(include_projects=False, project_root=repo_root)` -- the same identity-verified
-active-plugin evidence `claim_providers.py` uses for its own sibling
-callbacks -- rather than trusting a directory merely because it
-self-declares the expected name in a `plugin.json`, per
-[`marketplace-installation-cells.md`](marketplace-installation-cells.md)'s
-"plugin name alone never selects a runtime" invariant. The explicit
-**current-checkout** scope is preferred, falling back to **global** activation.
-Repository-only enablement works without promoting activation to user settings;
-another registered project's local override is never inspected or executed.
-An explicit directory renderer in the current checkout additionally requires
-Copilot's existing repository-trust proof; an exact installed payload does not
-require promoting repository activation to global settings.
-Only the renderer's plugin name is resolved, with all matching marketplace
-identities retained for ambiguity checks, and
-missing or ambiguous provenance (zero, or more than one, matching active
-plugin) fails closed. This resolution step itself runs in its own
-bounded subprocess (`python -m agent_worktrees.local_cache_refresh
-<home> [repo_root]`) rather than in-process or on a bare thread, since the resolver
-performs bounded current-checkout/global identity discovery without visiting unrelated registered
-projects. Process-tree containment still protects its filesystem I/O.
-Discovery and rendering share the caller's overall refresh deadline (120 seconds
-by default for launch preparation and the asynchronous backup worker).
-Discovery has no shorter fixed deadline that could reject a healthy cold
-interpreter start while budget remains; rendering receives only the time left
-after discovery. An exhausted budget never starts the renderer.
+`agent_worktrees.local_cache_refresh.refresh_local_cache()` invokes
+`render-local-cache` from **agent-worktrees' own payload**, across a
+process boundary. On `dev`, the canonical projection engine remains in
+customizing-copilot's scripts directory; `agent-worktrees/packaged-assets.json`
+declares its complete seven-file runtime closure. Promotion and release preview
+vendor those files byte-identically into agent-worktrees' own
+`scripts/instruction-projections/` directory. Canonical changes charge both
+the authoring plugin and packaged consumers in the release/changefile guards.
+There is one authoring source, not a maintained fork.
+
+A shipped standalone agent-worktrees installation never discovers, imports,
+or executes a sibling customizing-copilot payload. Its own installation
+identity selects its own engine. Only a verified monorepo-shaped development
+checkout may resolve the declared canonical source before materialization.
+The engine discovers the selected repository's instruction sources directly,
+without importing the full customization scanner or enumerating unrelated
+registered repositories just to find the renderer.
+
+Foreground create/resume waits for projection preparation to complete, with
+start/end, elapsed-time heartbeats and the actual delivery outcome. The
+Manager streams stderr rather than hiding it behind an aggregate plan timeout;
+stdout remains the machine-readable plan. The renderer process remains owned
+through cancellation. The asynchronous sessionStart backup worker retains
+its 120-second process-tree budget; the hook queues that worker without waiting
+for delivery. Explicitly bounded callers retain their requested timeout.
 `worktree_creation._create_worktree_core` and
 `resolve_launch_cli._resolve_resume_context` (skipped on `--dry-run`) both
 call it at exactly the point described above. `resolve_cli._resolve_json_mode`
 also prepares the selected local base/worktree before returning its launch
-command. Dry-run plans never render. Fully best-effort: customizing-
-copilot not being installed, the repo not yet being trusted, a subprocess
+command. Dry-run plans never render. Best-effort degradation for
+the repo not yet being trusted, an explicitly bounded subprocess
 timeout, or any other render failure never gate create/resume itself, but
 return attributable outcomes and log degradation rather than disappear.
 Outcomes distinguish ready (installed/unchanged), partial safe delivery,
