@@ -23,7 +23,7 @@ class CliModeClientMixin(_Base):
         from .protocol import QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
 
         if qualified_peer and not self.daemon_supports(QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
-            raise BridgeClientError(426, "qualified peer addressing requires HTTP protocol 34")
+            raise BridgeClientError(426, f"qualified peer addressing requires HTTP protocol {QUALIFIED_LIVE_PEER_PROTOCOL_VERSION}")
         try:
             return self._request(
                 "GET", "/api/v1/live-sessions/resolve",
@@ -32,7 +32,7 @@ class CliModeClientMixin(_Base):
         except BridgeClientError as exc:
             if exc.status == 404:
                 if handle.startswith("live:") and not self.daemon_supports(QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
-                    raise BridgeClientError(426, "qualified peer addressing requires HTTP protocol 34") from exc
+                    raise BridgeClientError(426, f"qualified peer addressing requires HTTP protocol {QUALIFIED_LIVE_PEER_PROTOCOL_VERSION}") from exc
                 return {}
             raise
 
@@ -61,7 +61,7 @@ class CliModeClientMixin(_Base):
 
         self._require_remote_operations()
         if qualified_peer and not self.daemon_supports(QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
-            raise BridgeClientError(426, "remote qualified peer resolution requires HTTP protocol 34")
+            raise BridgeClientError(426, f"remote qualified peer resolution requires HTTP protocol {QUALIFIED_LIVE_PEER_PROTOCOL_VERSION}")
         return self._request(
             "GET", self._remote_path(host, "/live-sessions/" + urllib.parse.quote(target, safe="")),
             **({"params": {"qualified_peer": True}} if qualified_peer else {}),

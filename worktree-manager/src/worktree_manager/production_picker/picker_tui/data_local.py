@@ -98,6 +98,8 @@ def is_local(machine: str, env: str) -> bool:
             )
         except ValueError:
             return False
+        if target is None and local is None:
+            return matches_raw_local
         return target is not None and target is local
     if matches_raw_local:
         return True

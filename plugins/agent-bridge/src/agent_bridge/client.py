@@ -1487,7 +1487,7 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
         timeout = peer_operation_timeout(timeout, wait=wait, wait_timeout=wait_timeout)
         if (qualified_peer or reply_to is not None or wait):
             if not self.daemon_supports(QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
-                raise BridgeClientError(426, "remote peer replies require HTTP protocol 34")
+                raise BridgeClientError(426, f"remote peer replies require HTTP protocol {QUALIFIED_LIVE_PEER_PROTOCOL_VERSION}")
         return self._request(
             "POST",
             self._remote_path(

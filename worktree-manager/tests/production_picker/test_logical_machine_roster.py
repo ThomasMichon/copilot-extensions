@@ -149,6 +149,32 @@ def test_raw_hostname_cannot_bypass_an_explicit_logical_platform(monkeypatch, tm
     assert data_local.is_local("ubuntu", "WSL")
 
 
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("machine", ["", "unregistered-host"])
+def test_remote_only_registry_preserves_raw_local_source(
+    monkeypatch, tmp_path, platform, machine,
+):
+    _install(monkeypatch, tmp_path, {
+        "remote": {
+            "hostname": "remote-host",
+            "ssh": {"environments": [
+                {"name": "windows", "alias": "remote-win"},
+                {"name": "wsl", "alias": "remote-wsl"},
+            ]},
+        },
+    }, platform=platform, machine=machine)
+    sources = data_ssh._build_sources()
+    local = [source for source in sources if source.local]
+    assert len(local) == 1
+    assert local[0].key == data_local.LOCAL
+    assert local[0].ready
+    assert data_local.is_local(*local[0].key)
+    assert not data_local.is_local("unregistered-other", data_local.LOCAL[1])
+    for source in sources:
+        if not source.local:
+            assert not data_local.is_local(*source.key)
+
+
 @pytest.mark.parametrize("platform", ["windows", "linux"])
 @pytest.mark.parametrize("explicit", [False, True])
 def test_standalone_native_machine_has_no_generated_sibling(

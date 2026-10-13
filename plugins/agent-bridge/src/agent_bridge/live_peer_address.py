@@ -198,7 +198,7 @@ async def require_peer_reply_protocol(client: BridgeClient) -> None:
     from .remote_errors import RemoteBridgeError
     if not await asyncio.to_thread(client.daemon_supports, QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
         raise RemoteBridgeError(
-            426, "unsupported_version", "the hosting Bridge requires HTTP protocol 34 for peer replies",
+            426, "unsupported_version", f"the hosting Bridge requires HTTP protocol {QUALIFIED_LIVE_PEER_PROTOCOL_VERSION} for peer replies",
         )
 
 

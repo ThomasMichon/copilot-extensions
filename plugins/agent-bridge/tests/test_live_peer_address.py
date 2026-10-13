@@ -273,6 +273,7 @@ def test_old_hosting_bridge_rejects_reply_contract_before_delivery():
     ))
     assert response.type is EnvelopeType.ERROR
     assert response.payload["code"] == "unsupported_version"
+    assert "HTTP protocol 35" in response.payload["message"]
 
 
 def test_old_local_bridge_refuses_qualified_lookup_before_http():
@@ -282,6 +283,7 @@ def test_old_local_bridge_refuses_qualified_lookup_before_http():
     with pytest.raises(BridgeClientError) as refused:
         client.resolve_live_session("live:host-a:project-a:wt-a", qualified_peer=True)
     assert refused.value.status == 426
+    assert "HTTP protocol 35" in str(refused.value)
 
 
 @pytest.mark.parametrize("handle", ["live:host", "live:host:project:wt", "live:host:project:wt:extra"])
@@ -305,6 +307,28 @@ def test_missing_live_handle_checks_old_http_capability_only_after_404():
     with pytest.raises(BridgeClientError) as refused:
         client.resolve_live_session("live:host:project:wt")
     assert refused.value.status == 426 and queried == [True]
+    assert "HTTP protocol 35" in str(refused.value)
+
+
+@pytest.mark.parametrize("operation", ["resolve", "send"])
+def test_remote_peer_capability_diagnostic_matches_current_floor(operation):
+    client = BridgeClient.__new__(BridgeClient)
+    client._require_remote_operations = lambda: None
+    client._require_remote_commands = lambda: None
+    client.daemon_supports = lambda _: False
+    client._request = lambda *_a, **_k: pytest.fail("HTTP must not be reached")
+    with pytest.raises(BridgeClientError) as refused:
+        if operation == "resolve":
+            client.resolve_remote_live_session(
+                "host", "live:host:project:wt", qualified_peer=True,
+            )
+        else:
+            client.send_remote_live_message(
+                "host", "live:host:project:wt", sender="caller",
+                message="hello", qualified_peer=True,
+            )
+    assert refused.value.status == 426
+    assert "HTTP protocol 35" in str(refused.value)
 
 
 def _route_through_versioned_carrier(app, hosting_client, carrier_version):
