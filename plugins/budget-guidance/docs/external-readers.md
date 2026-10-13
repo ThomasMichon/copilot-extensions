@@ -101,6 +101,16 @@ execution, rather than silently falling back to unbounded spawning.
 | Linux | The capability-gated group host is implemented; contained native regressions exercise timeout, output bounds, and descendant termination after root exit. |
 | macOS | The same group host is conditional on the complete Python/OS capability gate, including non-reaping `waitid`. Missing capabilities explicitly refuse reader execution; native macOS lifecycle validation is not yet recorded. No Linux `/proc` witness is claimed as macOS proof. |
 
+The focused native Windows witness is opt-in and excluded from the ordinary
+Linux/fast guard lane. From an interactive Windows desktop, set
+`BUDGET_GUIDANCE_WINDOWS_NATIVE=1` for the test process and run the bounded
+plugin runner with `-k native_windowless_parent_two_cycles_and_timeout_cleanup`.
+It launches the real acquisition path from `pythonw.exe`, observes two console
+reader/descendant cycles plus timeout, pins process creation identities, checks
+window/foreground and Default Terminal acquisitions, and verifies every owned
+root/descendant handle is signaled after cleanup. A noninteractive window station
+is a failure when this lane is requested, not a headlessness pass.
+
 Empty/malformed/duplicate-key JSON, nonzero exit, oversized output, timeout,
 source mismatch, future capture, launch/containment failure, and unconfirmed
 cleanup produce an explicit error reading with no numeric values. Missing
