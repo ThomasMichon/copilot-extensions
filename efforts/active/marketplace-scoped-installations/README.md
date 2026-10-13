@@ -517,6 +517,23 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   promotion and managed rollout remain separate completion obligations.
   Continue with uncovered wrapper acceptance before the source-qualified
   session-catalog and consumer migration slices.
+- Extended the same acceptance slice with actual execution of all 20
+  inventory-derived Python primitives and the canonical peer-governance
+  wrapper plus its eight packaged copies. Legacy/active and refused/allowed
+  fixtures cover absent and retained foreign pointers, lifecycle tripwires,
+  and byte/directory/modification-time snapshots.
+- The first peer selection correctly reported deactivation-required because
+  its active receipt had no desired-mode policy. Fixed the fixture to write
+  its authoritative policy, rather than accepting the wrong reason code.
+  The corrected consumer selection passed 116 tests; the exact native CI
+  diagnostic selection passed 151 tests locally.
+- Native Windows CI now selects these dependency-light consumer tests and
+  a separate two-case Manager selection through the existing contained
+  standalone runner. Both are path-gated in the existing Windows lane; its
+  five-minute job budget and two-minute step bounds remain unchanged.
+- The publication guard requires a Manager changefile even for test-only
+  changes. Added that required patch changefile; no runtime behavior or
+  version files were hand-edited.
 
 ### 2026-10-13 — Diagnostic correction merged; native evidence is step-specific
 

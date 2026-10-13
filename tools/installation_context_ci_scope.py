@@ -15,13 +15,18 @@ def needs_installation_context_smoke(paths: Iterable[str]) -> bool:
             "tools/sync-installation-context.py",
             "tools/installation_context_ci_scope.py",
             "tools/test_installation_context_ci_scope.py",
-        } or path.startswith("libs/installation-context/"):
+            "worktree-manager/src/worktree_manager/agent_plugin_runtime.py",
+            "worktree-manager/tests/test_agent_plugin_runtime.py",
+            "worktree-manager/tests/_installation_context_fixtures.py",
+        } or path.startswith(("libs/installation-context/", "libs/peer-launch/")):
             return True
         if path.startswith("plugins/") and "/scripts/installation-context/" in path:
             return True
         if path.startswith(("plugins/", "worktree-manager/src/")):
             name = path.rsplit("/", 1)[-1]
             if name.startswith("_installation_context") and name.endswith(".py"):
+                return True
+            if name in {"_peer_launch.py", "peer_launch.py"}:
                 return True
     return False
 

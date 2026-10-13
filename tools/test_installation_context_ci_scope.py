@@ -27,6 +27,12 @@ SPEC.loader.exec_module(MODULE)
         "plugins/agent-ssh/scripts/installation-context/installation-context.sh",
         "plugins/agent-bridge/src/agent_bridge/_installation_context_files.py",
         "worktree-manager/src/worktree_manager/_installation_context.py",
+        "worktree-manager/src/worktree_manager/agent_plugin_runtime.py",
+        "worktree-manager/tests/test_agent_plugin_runtime.py",
+        "worktree-manager/tests/_installation_context_fixtures.py",
+        "libs/peer-launch/peer_launch.py",
+        "plugins/agent-bridge/src/agent_bridge/_peer_launch.py",
+        "plugins/agent-dispatch/src/agent_dispatch/peer_launch.py",
         "tools/sync-installation-context.py",
         ".github/workflows/ci.yml",
         "tools/installation_context_ci_scope.py",
@@ -91,3 +97,14 @@ def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     assert "status_and_probe_cli_parity_and_read_only" in smoke["run"]
     assert "diagnostic_api_never_enters_mutation" in smoke["run"]
     assert "active_namespaced_cli_is_visible_and_probe_refuses" in smoke["run"]
+    assert "test_diagnostic_consumers.py" in smoke["run"]
+    assert "derived_diagnostic_api_read_only" in smoke["run"]
+    assert "peer_governance_wrapper_read_only" in smoke["run"]
+    manager = next(
+        step for step in steps if step.get("name") == "Manager read-only wrapper (Windows)"
+    )
+    assert manager["if"] == smoke["if"]
+    assert manager["timeout-minutes"] <= 2
+    assert "runtime_inspection_uses_real_read_only_primitive" in manager["env"]["PYTEST_ADDOPTS"]
+    assert "run-standalone-tests.py worktree-manager --prepare" in manager["run"]
+    assert "--timeout 120" in manager["run"]

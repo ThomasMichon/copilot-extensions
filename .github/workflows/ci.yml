@@ -1082,7 +1082,16 @@ jobs:
           uv run --with pytest --with pyyaml python -m pytest -q
           tools/test_installation_context_ci_scope.py
           libs/installation-context/tests/test_installation_mode_governance.py
-          -k "installation_context_ci_scope or status_and_probe_cli_parity_and_read_only or diagnostic_api_never_enters_mutation or active_namespaced_cli_is_visible_and_probe_refuses or explicit_powershell"
+          libs/installation-context/tests/test_diagnostic_consumers.py
+          -k "installation_context_ci_scope or status_and_probe_cli_parity_and_read_only or diagnostic_api_never_enters_mutation or active_namespaced_cli_is_visible_and_probe_refuses or explicit_powershell or derived_diagnostic_api_read_only or peer_governance_wrapper_read_only"
+      - name: Manager read-only wrapper (Windows)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        env:
+          PYTEST_ADDOPTS: -k runtime_inspection_uses_real_read_only_primitive
+        run: >-
+          python tools/run-standalone-tests.py worktree-manager --prepare
+          --admission-wait 60 --timeout 120
       - id: runner-contracts
         name: Detect runner contract changes
         shell: bash
