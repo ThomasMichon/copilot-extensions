@@ -10,6 +10,12 @@ not a capability delivered by this first cryptographic slice.
 
 This is an API, not an installer, signing tool, key enrollment command or CLI
 activation path. The default planner/import paths remain standard-library-only.
+It consumes proof from the selected release authority; it does not publish a
+parallel provenance identity, rename artifacts or replace promotion attestations.
+Product assembly must reuse the existing release lock/artifact identities and
+the [artifact-admission boundary](../../visions/plugin-services/runtime-assembly/README.md).
+Independent fixture signatures prove this consumer's cryptographic behavior,
+not that a production release publisher currently supplies that proof format.
 The maintained `cryptography` implementation is imported lazily after selecting
 pinned-key verification. Missing support explicitly raises `PlanError`.
 The explicit `release-verification` package extra supplies

@@ -642,3 +642,12 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   consume an already-authenticated manifest bundle, but an unrelated wheel
   cannot satisfy the canonical manifest chain. The GitHub-positive gate remains
   deferred; no claim that both methods are implemented follows from pinned keys.
+- Preserved #6443's independently assigned Gateway/index ownership while
+  resolving the effort-index conflict; its participant and plan amendments
+  remain intact. Reconciled the newly merged #6435 artifact-admission vision:
+  this consumer adds no publisher or parallel provenance/identity and does not
+  claim production signing support from test signatures.
+- Rebased installed contained suite: 452 passed, one native FIFO platform skip,
+  in 40.83 seconds. Focused import/metadata review regressions also passed
+  (61 selected tests). Publication and fresh current-head review/required CI
+  remain the next gate; no parent completion item was closed.
