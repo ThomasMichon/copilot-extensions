@@ -469,9 +469,9 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         print(f"  repo:     {result.get('repo')}")
     if isinstance(live_block, dict):
         from .pr_checks import print_check_failures
-        print_check_failures(live, stream=sys.stdout, prefix="    ")
         verdict = live.get("verdict") or "(none)"
         print("  live:")
+        print_check_failures(live, stream=sys.stdout, prefix="    ")
         print(f"    verdict:     {verdict}")
         print(f"    merge state: {live.get('merge_state')}")
         if live.get("conflict"):

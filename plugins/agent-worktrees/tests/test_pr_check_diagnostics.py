@@ -15,6 +15,7 @@ from agent_worktrees.pr_checks import checks_payload, print_check_failures
 from agent_worktrees.providers import github
 from agent_worktrees.providers.github_checks import (
     FAILED_CONCLUSIONS, MAX_FAILURES, MAX_TEXT_CHARS, read_checks,
+    _text,
 )
 
 
@@ -114,6 +115,15 @@ def test_check_diagnostics_bounded_sanitized_output() -> None:
     assert report.failures[0].name == "bad check"
     assert report.failures[0].url == ""
     assert report.failures[0].description.endswith("[truncated]")
+    assert len(report.failures[0].description) == MAX_TEXT_CHARS
+
+
+@pytest.mark.parametrize("size", [MAX_TEXT_CHARS - 1, MAX_TEXT_CHARS, MAX_TEXT_CHARS + 1])
+@pytest.mark.guard
+def test_check_diagnostics_text_cap_includes_marker(size: int) -> None:
+    text = _text("x" * size)
+    assert len(text) <= MAX_TEXT_CHARS
+    assert text.endswith("[truncated]") == (size > MAX_TEXT_CHARS)
 
 
 def test_check_diagnostics_aggregate_without_named_status_is_explicit() -> None:
@@ -203,3 +213,24 @@ def test_check_diagnostics_unsupported_provider_reports_unavailable() -> None:
     output = io.StringIO()
     print_check_failures(payload, stream=output, prefix="")
     assert "named diagnostics unavailable" in output.getvalue()
+
+
+def test_check_diagnostics_cli_status_heading_precedes_details(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from agent_worktrees import pr_state_cli, context_cli, worktree_identity
+
+    cfg = SimpleNamespace(default_repo=SimpleNamespace(pr=config.PRConfig()))
+    report = CheckFixture([_run()]).read()
+    result = {"has_pr": True, "state": "open", "live": checks_payload(
+        report.state, report.failures, complete=report.complete,
+    )}
+    monkeypatch.setattr(config, "load_config", lambda *args: cfg)
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda *args: "worktree")
+    monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda *args: "worktree")
+    monkeypatch.setattr(pr_ops, "pr_status", lambda *args, **kwargs: result)
+    monkeypatch.setattr(context_cli, "_pr_reminder_for", lambda *args, **kwargs: None)
+    args = SimpleNamespace(json=False, config=None, worktree_id="worktree", no_live=True)
+    assert pr_state_cli.cmd_pr_status(args) == 0
+    output = capsys.readouterr().out
+    assert output.index("  live:") < output.index("optional-reviewer: failure")

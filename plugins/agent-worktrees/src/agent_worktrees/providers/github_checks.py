@@ -20,8 +20,10 @@ FAILED_CONCLUSIONS = frozenset({
 def _text(value: object, limit: int = MAX_TEXT_CHARS) -> str:
     if not isinstance(value, str):
         return ""
-    clean = "".join(char if char.isprintable() else " " for char in value[:limit])
-    return clean.strip() + (" ... [truncated]" if len(value) > limit else "")
+    suffix = " ... [truncated]"[:limit] if len(value) > limit else ""
+    budget = max(0, limit - len(suffix))
+    clean = "".join(char if char.isprintable() else " " for char in value[:budget])
+    return clean.strip() + suffix
 
 
 def _url(value: object) -> str:
