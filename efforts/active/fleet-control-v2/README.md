@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; offline baseline captured, role artifact preflight in progress
+- **Status:** Active; artifact preflight landed, both-method release trust plan next
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts. Existing dependencies #5789, #6030, #5861, #5862 retain ownership.
@@ -79,6 +79,12 @@ Operator direction, captured verbatim:
 
 > "Sounds good. Continue driving."
 
+Later, asked whether release authentication should support offline pinned signing
+keys, GitHub Actions identity/artifact attestations, or both with an explicitly
+selected policy per installation, the operator selected verbatim:
+
+> both
+
 The operator confirmed the slug `fleet-control-v2`. Personal artifact delivery
 is handled outside this public repository. The architecture details, phase
 breakdown and validation below are **agent-recommended** elaborations of the
@@ -106,8 +112,10 @@ All detailed slices are **agent-recommended** and remain subject to review.
   roles; reuse existing lifecycle code rather than implementing parallel installers.
   Declaration and offline snapshot inspection landed in #6285; actual product
   assembly, signature verification and lifecycle activation remain pending.
-  Role-selected actual artifact integrity preflight is a separate prerequisite;
+  Role-selected actual artifact integrity preflight landed in #6437 as a prerequisite;
   client packaging/diagnostics/managed installation remain owned by #6424.
+  The [both-method release authentication plan](release-authentication.md) is
+  the next reviewed slice; it grants no live trust-root or signing authority.
 - [ ] Prove independent setup/update/doctor/recovery and bounded activation,
   with no installation or update from Copilot hooks.
 - [ ] Prove thin client installation has no controller/container-manager effects;
@@ -459,3 +467,24 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   content-change stamps now compare the same handle before/after streaming.
   The regression models timestamp disagreement while real mutation/tamper
   checks remain required. No retry or CI bypass hides the failure.
+
+### 2026-10-13 - Artifact preflight landed; release trust decision captured
+- #6437 merged at `2026-10-13T04:20:54Z`, commit
+  `5b6d18f14727e9756b364f73f90c769633a0043b`, after actual current-head Copilot
+  APPROVED with zero findings, a resolved title thread, successful Windows/Linux
+  native lanes and all required CI. A redundant review-request automation job
+  was still queued; it was not an outstanding test or required merge check.
+  No CI gate was bypassed. Final local installed contained suite: 365 passed,
+  one native FIFO platform skip.
+- Re-read the full parent Plan and Validation Plan. Phase 0's explicit offline
+  baseline/gate record is resolved; no Phase 1-4 or full validation item is
+  closed by unsigned integrity preflight. Retain the worktree and full effort.
+- Captured the operator's literal `both` release-trust selection in Request
+  and the [next authentication plan](release-authentication.md). The plan
+  recommends independently selected pinned-key or GitHub-attestation policy,
+  with no automatic fallback, no inferred root and real cryptographic/offline
+  evidence before integration. These elaborations remain agent-recommended.
+- Next is review of that plan, then the non-overlapping #6240 verifier
+  implementation with package ownership agreed before shared metadata changes.
+  #6424 owns the client lifecycle and #5789 principal/connector authentication.
+  No signing key, live trust root, workflow/token or deployment was changed.
