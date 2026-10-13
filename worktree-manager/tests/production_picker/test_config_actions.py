@@ -346,7 +346,7 @@ def test_workers_picker_real_override_round_trip(tmp_path, monkeypatch):
                 state = json.loads(overrides.read_text(encoding="utf-8"))
                 listed = subprocess.run(
                     prefix + ["supervise", "override", "list"],
-                    capture_output=True, text=True, timeout=10, check=True,
+                    capture_output=True, text=True, timeout=tasks.ACTION_TIMEOUT, check=True,
                     env=tasks._child_process_env(), creationflags=no_window_flags(),
                 )
                 effective = json.loads(listed.stdout)["overridden_off"]

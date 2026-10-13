@@ -251,3 +251,26 @@ configuration, arbitrary source editing, or automatic maintenance dispatch.
   shaped reviewer draft, and selected-row preservation while the reload is
   deliberately blocked and subsequently reordered. Current-head review and
   required CI are still release gates, followed by installed proof.
+
+### 2026-10-12 - Explicit Configuration targeting
+
+- A fresh GitHub review confirmed the three previous corrections and identified
+  one remaining generic contribution-boundary gap: machine-scoped configuration
+  pivots could inherit a hidden operational target after removal of Machines
+  navigation. Parsing now requires explicit account/global scope for config
+  placement; ordinary pivots keep their prior default machine scope.
+- Configuration row actions no longer inherit the previously selected machine.
+  Legacy section compatibility receives the local identity instead. Updated
+  the contribution contract and added parser/context regressions; Workers'
+  own global CLI-local contract is unchanged.
+- The changed Configuration/compatibility selection produced 96 passes and one
+  auxiliary real-CLI verification startup timeout on the shared Windows host.
+  That verification now uses the existing product action deadline rather than
+  a shorter test-only deadline; the real override round-trip and both new scope
+  regressions passed on the focused rerun.
+- A broader local `manifest` selector also reached unchanged pane-launch and
+  self-install fixtures: one PowerShell startup timeout and three missing
+  fallback provider-reference fixtures in the non-editable cached test package.
+  Their implementation/test files match the publication base; this is not a
+  claim that the broader suite passed. Required CI remains authoritative, with
+  no failed gate waived.

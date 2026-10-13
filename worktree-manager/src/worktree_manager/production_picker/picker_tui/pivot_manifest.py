@@ -566,6 +566,8 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
     placement = data.get("placement", "left")
     if placement not in ("left", "config"):
         raise ManifestError("`placement` must be one of left/config")
+    if placement == "config" and scope == "machine":
+        raise ManifestError("Configuration `placement` requires `scope` account/global, not machine")
 
     stream = data.get("stream", False)
     if not isinstance(stream, bool):

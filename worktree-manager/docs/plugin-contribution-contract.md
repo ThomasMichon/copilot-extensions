@@ -134,6 +134,11 @@ navigation and loading content mount before any provider command completes;
 failed reads remain visible and retryable. Machine-local sections declare
 `"scope": "global"` and resolve their local target in their own CLI, never from
 the previously selected operational machine.
+Configuration placement requires explicit `"scope": "account"` or `"global"`;
+omitted/default machine scope is rejected because there is no Machines band.
+Its row-action `{machine}` context is empty rather than inheriting a hidden
+operational target. Legacy `config_sections` receive the local identity in
+their compatibility context; they never inherit a previously selected peer.
 
 Configuration row forms use the existing `kind: "form"`, `fields_from`,
 `title_from`, `body_from`, `{field.<name>}` and `{fields}` contract. The selected

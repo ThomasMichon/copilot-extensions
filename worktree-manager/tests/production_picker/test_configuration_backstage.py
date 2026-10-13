@@ -62,6 +62,17 @@ def test_configuration_placement_is_additive_and_strict():
     )
     assert ordinary.placement == "left"
     assert config.placement == "config" and config.account_scoped
+    account = pivots.parse_manifest(
+        {**base, "placement": "config", "scope": "account"},
+        name="account", source_path="fixture.json",
+    )
+    assert account.account_scoped
+    for extra in ({}, {"scope": "machine"}):
+        with pytest.raises(pivots.ManifestError, match="account/global"):
+            pivots.parse_manifest(
+                {**base, "placement": "config", **extra},
+                name="hidden-target", source_path="fixture.json",
+            )
     for value in ([], "dialog", None):
         with pytest.raises(pivots.ManifestError, match="placement"):
             pivots.parse_manifest(
@@ -211,7 +222,7 @@ def test_configuration_receipt_preserves_real_child_output_even_on_partial_failu
     })
     script = f"import sys; print({receipt!r}); print('provider diagnostic', file=sys.stderr); sys.exit({returncode})"
     reg = pivots.parse_manifest(
-        {"label": "Fixture", "placement": "config", "list": ["fixture"]},
+        {"label": "Fixture", "placement": "config", "scope": "global", "list": ["fixture"]},
         name="fixture", source_path="fixture.json",
     )
     runtime = tasks.RegisteredPivotRuntime(reg)
@@ -237,6 +248,19 @@ def test_configuration_receipt_preserves_real_child_output_even_on_partial_failu
                 assert "exit 1" in text
 
     asyncio.run(run())
+
+
+def test_configuration_context_never_inherits_the_operational_machine():
+    reg = pivots.parse_manifest(
+        {"label": "Fixture", "placement": "config", "scope": "global", "list": ["fixture"]},
+        name="fixture", source_path="fixture.json",
+    )
+    scr = PickerScreen(_fixture_source(), live=False)
+    scr._source_local = ("fixture-local", "Win")
+    scr._pivot_machine_id = lambda: "previously-selected-remote"
+    ctx = scr._task_action_ctx(reg, {"id": "entry", "title": "Entry"})
+    assert ctx["machine"] == ""
+    assert scr._config_section_ctx()["machine"] == "fixture-local"
 
 
 def test_post_submit_refresh_keeps_rows_and_selected_identity_until_swap(monkeypatch):

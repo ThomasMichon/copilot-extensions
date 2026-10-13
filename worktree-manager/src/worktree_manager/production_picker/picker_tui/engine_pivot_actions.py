@@ -45,10 +45,10 @@ class PickerScreenPivotActionsMixin:
         self.call_after_refresh(self._load_current_config_section)
     def _config_section_ctx(self) -> dict:
         """Placeholder context for a contributed config section's argv template:
-        the current machine identity and the picker's repo (config sections are
+        the local machine identity and the picker's repo (config sections are
         global -- there is no per-worktree context)."""
         return {
-            "machine": self._pivot_machine_id() or "",
+            "machine": self._source_local[0] or "",
             "repo": getattr(self.src, "REPO", "") or "",
         }
     def _run_config_section(self, section) -> None:
@@ -168,7 +168,7 @@ class PickerScreenPivotActionsMixin:
         ctx["title"] = rec.get(reg.title_field)
         wt = rec.get(reg.worktree_field) if reg.worktree_field else None
         ctx["worktree"] = wt or ""
-        ctx["machine"] = self._pivot_machine_id() or ""
+        ctx["machine"] = "" if reg.placement == "config" else self._pivot_machine_id() or ""
         # picker-venue-pivots Phase 3: the pivot's own `list` argv[0] is the
         # provider binstub name (e.g. "agent-codespaces"/"agent-containers"),
         # reused verbatim by the "open-venue" internal action so it never
