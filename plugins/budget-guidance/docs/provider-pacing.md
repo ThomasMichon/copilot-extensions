@@ -27,6 +27,8 @@ Missing starts are not inferred from calendar months, reset dates, or a previous
 period. Independent counters or reset dates that disagree withhold the estimate
 without replacing the valid account balance. Unsupported, missing, stale, or
 conflicting rate evidence remains explicitly unavailable, never a zero rate.
+Absent or null monthly state, scope, and unit fields are unknown evidence that
+withholds only the rate, not the otherwise valid account posture.
 Malformed values produce modeled errors rather than arithmetic.
 
 ## Calculation and labels

@@ -41,16 +41,19 @@ def estimate_provider_rate(
         ("unit", {"ai_credits", "requests", "tokens", "unknown"}),
     ):
         value = monthly.get(field)
+        if value is None:
+            evidence[field] = "unknown"
+            continue
         if not isinstance(value, str) or value not in choices:
             raise ModelError(f"provider monthlyUsage.{field} is unsupported")
         evidence[field] = value
-    if monthly["state"] != "available":
+    if evidence["state"] != "available":
         unavailable("provider-monthly-usage-not-available")
         return None
-    if monthly["scope"] != "user":
+    if evidence["scope"] != "user":
         unavailable("provider-monthly-usage-account-scope-unknown")
         return None
-    if monthly["unit"] != "ai_credits":
+    if evidence["unit"] != "ai_credits":
         unavailable("provider-monthly-usage-unit-mismatch")
         return None
     if any(monthly.get(field) is None for field in (

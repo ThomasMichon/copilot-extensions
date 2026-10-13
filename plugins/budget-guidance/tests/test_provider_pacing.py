@@ -145,6 +145,39 @@ def test_missing_monthly_surface_preserves_existing_no_rate_behavior() -> None:
     assert result["advice"]["operator_launch_blocked"] is False
 
 
+@pytest.mark.parametrize("field", ["state", "scope", "unit"])
+@pytest.mark.parametrize("explicit_null", [False, True])
+def test_missing_monthly_enums_only_withhold_rate(
+    field: str, explicit_null: bool,
+) -> None:
+    raw = projection()
+    monthly = raw["providerQuotas"][0]["monthlyUsage"]
+    if explicit_null:
+        monthly[field] = None
+    else:
+        del monthly[field]
+    result = normalize(raw)
+    assert result["availability"] == "available"
+    assert result["remaining"] == "500"
+    assert result["rate_evidence"][field] == "unknown"
+    assert result["rate_evidence"]["availability"] == "unavailable"
+    assert result["calculated"]["projection_rate"] is None
+    assert result["calculated"]["warning_band"] == "no-rate"
+    assert result["advice"]["autonomous_recommendation"] == "unavailable"
+
+
+def test_empty_monthly_evidence_only_withholds_rate() -> None:
+    raw = projection()
+    raw["providerQuotas"][0]["monthlyUsage"] = {}
+    result = normalize(raw)
+    assert result["availability"] == "available"
+    assert result["remaining"] == "500"
+    assert result["rate_evidence"]["state"] == "unknown"
+    assert result["rate_evidence"]["scope"] == "unknown"
+    assert result["rate_evidence"]["unit"] == "unknown"
+    assert result["calculated"]["projected_consumption"] is None
+
+
 def test_exact_rate_freshness_boundary_and_distinct_observation_times() -> None:
     raw = projection()
     raw["providerQuotas"][0]["monthlyUsage"]["queriedAt"] = (AT - timedelta(seconds=300)).isoformat()
