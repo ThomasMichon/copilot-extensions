@@ -44,6 +44,14 @@ Replay also checks the stored fingerprint and prompt kind against the request,
 and Resume must retain its requested worktree identity, including after the
 locked receipt reload.
 A target without the request capability rejects before mutation.
+## Fresh list snapshots
+
+Ordinary unscoped `list --json` requests consult their exact fresh result
+snapshot before enumerating tracking records or booting the monitor. A hit
+still records demand for resident refresh. `--fresh`, exact worktree/codename
+reads, refresh, streaming, glance and `--cache-only` retain their dedicated
+paths; this fast-hit contract does not imply those paths are database-backed.
+Missing or expired snapshots retain the existing live-scan behavior.
 
 ## Provider-backed source registry
 

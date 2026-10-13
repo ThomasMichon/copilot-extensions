@@ -182,6 +182,27 @@ def test_non_dict_payload_is_a_miss(_cache_home):
 
 # --- integration: cmd_list coalesces repeated calls --------------------------
 
+def test_cmd_list_cache_hit_precedes_roster_and_monitor(_cache_home, monkeypatch):
+    from agent_worktrees import __main__ as core, list_cli
+
+    args = _args(json=True, cache_only=False, stream=False, glance=False,
+                 fresh=False, tracking_status="all")
+    monkeypatch.setattr(cfg, "project_name", lambda: "testproj")
+    payload = {"worktrees": [{"id": f"worktree-{i}"} for i in range(1100)]}
+    key = lc.cache_key(args, project="testproj", tracking_status="all")
+    lc.write(key, payload)
+    monkeypatch.setattr(core, "_list_records_for_args",
+                        lambda *_: pytest.fail("cache hit enumerated tracking records"))
+    monkeypatch.setattr(core, "_ensure_status_monitor",
+                        lambda: pytest.fail("cache hit booted monitor"))
+    outputs = []
+    monkeypatch.setattr(output, "_json_output", outputs.append)
+
+    assert list_cli.cmd_list(args) == 0
+    assert outputs == [payload]
+    assert lc.recent_demands("testproj")[0]["key"] == key
+
+
 def test_cmd_list_json_coalesces_scans(_cache_home, monkeypatch):
     """A second `list --json` within the TTL reuses the cache and skips the
     expensive scan; `--fresh` forces a re-scan. This is the CPU-churn fix."""

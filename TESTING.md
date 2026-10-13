@@ -144,6 +144,21 @@ The stalled descendant/captured-pipe case lives separately in
 `test_first_install_bootstrap_watchdog.py` and runs only in the full suite,
 not the required guard lane.
 
+Worktree Manager's native viewport regression uses 1,100 synthetic worktrees,
+with 40 visible by default. It checks Show Hidden through the real Textual
+compositor, bounds row formatting by the viewport, retains one-line option
+geometry and exercises focus/scroll continuity. Native rows defer formatting
+and Rich-to-Textual conversion until painted; the deterministic capture seam
+resolves only its selected window and retains Rich styles.
+The ordinary regression enforces access counts rather than host-speed timing.
+For an explicit local 200 ms rebuild-to-painted check:
+
+```powershell
+$env:PYTEST_ADDOPTS = '-k native_viewport -s'
+$env:WORKTREE_MANAGER_RENDER_BUDGET = '1'
+python tools\run-standalone-tests.py worktree-manager --prepare
+```
+
 FINAL stamp regressions use one immutable real-Git template and isolated
 per-test copies. The changed-plugin guard lane runs four smoke cases:
 serialized stamp/poll persistence, a tracked edit invalidating the stamp,

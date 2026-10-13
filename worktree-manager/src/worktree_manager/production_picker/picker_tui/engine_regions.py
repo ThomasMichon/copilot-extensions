@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from rich.text import Text
 from textual.widget import Widget
+from textual.visual import Visual
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
@@ -302,7 +303,7 @@ class _PickerNativeData(OptionList):
             opts = []
             for vr in data:
                 stop = getattr(vr, "stop", None)
-                text = vr.text if isinstance(vr.text, Text) else Text(str(vr.text))
+                text = vr.text if isinstance(vr.text, (Text, Visual)) else Text(str(vr.text))
                 kind = getattr(vr, "kind", None)
                 ps = getattr(vr, "pin_section", None)
                 cur_label = ps[0] if ps else cur_label

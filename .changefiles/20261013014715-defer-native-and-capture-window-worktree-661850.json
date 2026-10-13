@@ -1,0 +1,9 @@
+{
+  "comment": "Defer native and capture-window worktree row formatting to the viewport.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

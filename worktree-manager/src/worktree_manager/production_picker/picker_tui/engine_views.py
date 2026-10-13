@@ -2,9 +2,12 @@
 """List/body picker views extracted from ``engine.py``."""
 from __future__ import annotations
 
+from functools import partial
+
 from rich.text import Text
 
 from . import derive
+from .deferred_row import DeferredRow
 from .engine_helpers import (
     C_DIM,
     C_ENV,
@@ -265,7 +268,7 @@ class WorktreesView:
                 stop=("BTN", 0))
             add(Text(""))  # breathing room below the buttons
 
-    def build_data(self, add, width, sel):
+    def build_data(self, add, width, sel, *, deferred=False):
         eng = self._eng
         btn_focus = sel == ("BTN", 0)
         cols, sections = eng.current_list_visible()
@@ -298,10 +301,12 @@ class WorktreesView:
                 # raw line), so a multi-line row's title + detail/worker
                 # lines all read as one visual unit against their neighbor.
                 alt = bool(i % 2)
-                add(self._row_text(rec, li, sel, width, lcols,
-                                   preview, preview_ids, alt=alt),
+                render_row = partial(self._row_text, rec, li, sel, width, lcols,
+                                     preview, preview_ids, alt=alt)
+                render_detail = partial(self._detail_line, rec, width, alt=alt)
+                add(DeferredRow(render_row) if deferred else render_row(),
                     stop=("L", li), data=rec)
-                add(self._detail_line(rec, width, alt=alt))
+                add(DeferredRow(render_detail) if deferred else render_detail())
                 for worker_line in self._worker_lines(rec, width, alt=alt):
                     add(worker_line)
                 li += 1
