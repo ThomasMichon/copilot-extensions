@@ -163,28 +163,9 @@ def create_worktree(
         env=agent_worktrees_environment(),
         **no_window_kwargs(),
     )
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        raise EmbodyUnavailable(detail or f"agent-worktrees create exited {result.returncode}")
-    handle = parse_handle(result)
-    try:
-        data = json.loads(result.stdout or "{}")
-    except (ValueError, TypeError):
-        data = {}
-    worktree = data.get("worktree") if isinstance(data, dict) else {}
-    if isinstance(worktree, dict):
-        handle["worktree"] = handle.get("worktree") or worktree.get("id")
-        handle["path"] = worktree.get("path")
-        handle["project"] = worktree.get("repo")
-    if creation_key is not None:
-        from .workspace_binding import hold
+    from .workspace_binding import parse_created_workspace
 
-        creation = data.get("creation") if isinstance(data, dict) else None
-        if not isinstance(creation, dict) or creation.get("version") != 1 or creation.get("status") != "complete":
-            hold("ground owner did not prove replay-safe creation; retain the original request")
-    if not handle.get("worktree"):
-        raise EmbodyUnavailable("agent-worktrees create returned no worktree id")
-    return handle
+    return parse_created_workspace(result, creation_key=creation_key)
 
 
 def resolve_worktree(

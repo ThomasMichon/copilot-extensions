@@ -80,6 +80,61 @@ def record_prepared(
         hold(f"workspace {worktree} owner returned conflicting path; retained for repair")
 
 
+def retain_pending_creation(result: subprocess.CompletedProcess) -> None:
+    """Keep the ground owner's typed pending outcome outside the failure budget."""
+    if result.returncode != 3:
+        return
+    try:
+        data = json.loads(result.stdout)
+    except (ValueError, TypeError):
+        return
+    creation = data.get("creation") if isinstance(data, dict) else None
+    if isinstance(creation, dict) and creation.get("version") == 1 and creation.get("status") == "pending":
+        from .spawn_factories import SpawnPreparationPending
+
+        raise SpawnPreparationPending(data.get("error") or "ground creation is pending; replay the same key")
+
+def defer_pending_creation(client, key: str, error: RuntimeError) -> bool:
+    from .spawn_factories import SpawnPreparationPending
+    import logging
+
+    if not isinstance(error, SpawnPreparationPending):
+        return False
+    try:
+        client.defer_spawn(key, detail=str(error))
+    except DispatchError:
+        logging.getLogger(__name__).exception("pending allocation bookkeeping failed; reservation %s retained", key)
+        return False
+    return True
+
+
+def parse_created_workspace(result: subprocess.CompletedProcess, *, creation_key: str | None) -> dict:
+    from .embody import EmbodyUnavailable
+
+    if result.returncode != 0:
+        if creation_key is not None:
+            retain_pending_creation(result)
+        detail = (result.stderr or result.stdout or "").strip()
+        raise EmbodyUnavailable(detail or f"agent-worktrees create exited {result.returncode}")
+    handle = parse_handle(result)
+    try:
+        data = json.loads(result.stdout or "{}")
+    except (ValueError, TypeError):
+        data = {}
+    worktree = data.get("worktree") if isinstance(data, dict) else {}
+    if isinstance(worktree, dict):
+        handle["worktree"] = handle.get("worktree") or worktree.get("id")
+        handle["path"] = worktree.get("path")
+        handle["project"] = worktree.get("repo")
+    if creation_key is not None:
+        creation = data.get("creation") if isinstance(data, dict) else None
+        if not isinstance(creation, dict) or creation.get("version") != 1 or creation.get("status") != "complete":
+            hold("ground owner did not prove replay-safe creation; retain the original request")
+    if not handle.get("worktree"):
+        raise EmbodyUnavailable("agent-worktrees create returned no worktree id")
+    return handle
+
+
 def parse_handle(result: subprocess.CompletedProcess) -> dict[str, str | None]:
     """Best-effort extract the session/worktree handle from ``embody --json``.
 

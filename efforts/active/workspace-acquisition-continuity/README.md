@@ -353,3 +353,23 @@ takeover, blanket freshness authorization, or parallel session owner is proposed
 - Connected bridge/keyed/registry/readiness/preference selection passed
   115/one platform skip; module-size guard remains green. The required keyed
   endpoint still refuses missing keys before effects.
+
+### 2026-10-13 - Preserve pending allocation outcomes through adapters
+
+- The next current-head review identified a High-severity adapter gap: ground
+  keyed creation correctly reported exit-3 pending, but dispatch preparation
+  classified every nonzero exit as unavailable and spent its failed budget.
+- Preserved that typed pending outcome through the ground result decoder,
+  supervisor and one-shot CLI. Both defer the original creation key; positive
+  conflicts/terminal errors and malformed responses retain their own behavior.
+  Bridge's ground-owner adapter likewise reports pending owner operation,
+  rather than disguising the same response as a deterministic refusal.
+- Real SQLite/supervisor and one-shot regressions each replay six pending
+  attempts against a three-attempt failure budget, assert zero failed budget,
+  one unchanged creation key and no premature spawn; the supervisor then
+  admits exactly one worker when that same allocation completes.
+- Extracted cohesive ground-result decoding into existing workspace binding
+  helpers to retain shrink-only module ceilings. Dispatch affected selection:
+  32 passed. Bridge owner/creation selection: 42 passed, three opt-in/platform
+  skips. Lint and module-size guards are green; updated-head review and required
+  CI remain publication gates.

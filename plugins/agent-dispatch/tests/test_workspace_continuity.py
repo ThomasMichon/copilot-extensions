@@ -10,7 +10,7 @@ import pytest
 from agent_dispatch import embody, session_acquisition, spawn_factories
 from agent_dispatch.queue import TaskQueue, TaskError
 from agent_dispatch.supervisor import Supervisor
-from agent_dispatch.spawn_factories import SpawnPreparationRetained
+from agent_dispatch.spawn_factories import SpawnPreparationRetained, SpawnPreparationPending
 from agent_dispatch.workspace_binding import record_prepared
 from tests.test_supervisor import QueueBackedClient
 
@@ -190,6 +190,90 @@ def test_old_coordinator_cannot_authorize_another_unrecordable_create(monkeypatc
         embody.prepare_reusable_worktree(
             {"id": "task-a", "repo": "queue-repo"}, {"key": "reservation-a", "attempt": 1},
             project="execution-repo", interface="acp", driver="agent-dispatch", supervisor="host-a",
+        )
+
+def test_pending_ground_creation_defers_supervisor_beyond_failure_budget(tmp_path, monkeypatch):
+    queue = TaskQueue(tmp_path / "queue.db")
+    clock = [1000.0]
+    monkeypatch.setattr(queue, "_now", lambda now: clock[0] if now is None else now)
+    task = queue.create(title="work", repo="queue-repo")
+    client = QueueBackedClient(queue)
+    requests = []
+    spawned = []
+    pending = [True]
+    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: ["worktrees"])
+
+    def run(argv, **_kwargs):
+        requests.append(argv)
+        if pending[0]:
+            return subprocess.CompletedProcess(argv, 3, json.dumps({
+                "error": "original allocation still pending",
+                "creation": {"version": 1, "status": "pending", "repeat_new": False},
+            }), "")
+        return subprocess.CompletedProcess(argv, 0, json.dumps({
+            "creation": {"version": 1, "status": "complete", "replayed": True},
+            "worktree": {"id": "workspace-a", "path": "workspace-path", "repo": "execution-repo"},
+        }), "")
+
+    def spawn(snapshot):
+        spawned.append(snapshot)
+        return True, {"session": "cli-session", "worktree": snapshot["spawn_worktree"]}
+
+    spawn.requires_reusable_worktree = True
+    spawn.allocation_project = "execution-repo"
+    spawn.allocation_interface = "cli"
+    monkeypatch.setattr(embody.subprocess, "run", run)
+    supervisor = Supervisor(client, spawn_fn=spawn, repo=task.repo, machine="host-a", max_attempts=3)
+    for _ in range(6):
+        assert supervisor.poll_once(now=clock[0]) == []
+        assert supervisor._failed_spawn_counts().get(task.id, 0) == 0
+        clock[0] += 120
+    assert len(requests) == 6 and not spawned
+    keys = {argv[argv.index("--creation-key") + 1] for argv in requests}
+    assert len(keys) == 1
+    assert not supervisor._is_dead_lettered(asdict(task), supervisor._failed_spawn_counts())
+    pending[0] = False
+    assert supervisor.poll_once(now=clock[0]) == [task.id]
+    assert len(spawned) == 1
+    assert spawned[0]["spawn_worktree"] == "workspace-a"
+    assert requests[-1][requests[-1].index("--creation-key") + 1] in keys
+
+
+def test_pending_ground_creation_defers_one_shot_without_spawning(tmp_path, monkeypatch):
+    from agent_dispatch import create_cli
+    queue = TaskQueue(tmp_path / "queue.db")
+    task = queue.create(title="work", repo="queue-repo")
+    client = QueueBackedClient(queue)
+    monkeypatch.setattr(create_cli._core(), "_client", lambda _args: client)
+    monkeypatch.setattr(create_cli._core(), "_do_spawn", lambda *_a, **_kw: pytest.fail("pending must not spawn"))
+    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: ["worktrees"])
+    requests = []
+    monkeypatch.setattr(embody.subprocess, "run", lambda argv, **_kwargs:
+        requests.append(argv) or subprocess.CompletedProcess(argv, 3, json.dumps({
+            "error": "original allocation still pending",
+            "creation": {"version": 1, "status": "pending", "repeat_new": False},
+        }), ""))
+    args = argparse.Namespace(spawn_backend="embody", url=None, shared=False)
+    for _ in range(6):
+        create_cli._spawn_worker_for(args, asdict(task))
+    assert len(requests) == 6
+    assert len({argv[argv.index("--creation-key") + 1] for argv in requests}) == 1
+    supervisor = Supervisor(client, spawn_fn=lambda _task: pytest.fail("must not spawn"), repo=task.repo, machine="host-a")
+    assert supervisor._failed_spawn_counts().get(task.id, 0) == 0
+
+
+@pytest.mark.parametrize("status", ["pending", "conflict", "terminal"])
+def test_only_typed_pending_creation_is_deferred(monkeypatch, status):
+    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: ["worktrees"])
+    monkeypatch.setattr(embody.subprocess, "run", lambda argv, **_kwargs:
+        subprocess.CompletedProcess(argv, 3, json.dumps({
+            "creation": {"version": 1, "status": status},
+        }), ""))
+    failure = SpawnPreparationPending if status == "pending" else embody.EmbodyUnavailable
+    with pytest.raises(failure):
+        embody.create_worktree(
+            project="execution-repo", task_id="task-a", reservation_key="reservation-a",
+            attempt=1, driver="agent-dispatch", supervisor="host-a", creation_key="logical-work",
         )
 
 

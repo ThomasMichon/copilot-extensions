@@ -85,6 +85,10 @@ the current request and spend the bounded failure budget. Unavailable-owner,
 busy, pending, prior native identity and historical launch outcomes retain
 reconciliation. A local acquisition failure preserves its allocation rather
 than concluding and recreating it as a retry strategy.
+The ground owner's typed exit-3 `creation.status=pending` outcome is deferred
+under the same creation key, including one-shot and supervised CLI preparation.
+It does not spend the failed-spawn budget. Conflict, terminal and malformed
+responses are not silently reclassified as pending.
 
 Prompt/delivery identity is stable per reservation, not a random worker ID on
 each retry. Bridge—not dispatch—selects reuse/resume/create. A task generation

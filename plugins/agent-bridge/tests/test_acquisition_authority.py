@@ -9,6 +9,24 @@ from agent_bridge.acquisition_contract import AcquisitionRefused, AcquisitionReq
 
 pytestmark = pytest.mark.contract("agent_bridge.acquisition.worktree_owner")
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["pending", "conflict", "terminal"])
+async def test_ground_keyed_creation_preserves_only_typed_pending(monkeypatch, status):
+    import json
+    from types import SimpleNamespace
+
+    process = SimpleNamespace(
+        returncode=3, communicate=AsyncMock(return_value=(
+            json.dumps({"creation": {"version": 1, "status": status}}).encode(), b"",
+        )),
+    )
+    monkeypatch.setattr(authority, "_agent_worktrees_launch_prefix", lambda: ["worktrees"])
+    monkeypatch.setattr(authority, "_agent_worktrees_environment", lambda: {})
+    monkeypatch.setattr(authority.asyncio, "create_subprocess_exec", AsyncMock(return_value=process))
+    with pytest.raises(AcquisitionRefused) as refused:
+        await authority.worktree_command(["create", "--creation-key", "logical-work", "--json"], "project-a")
+    assert refused.value.code == ("owner_operation_pending" if status == "pending" else "owner_refused")
+
 
 @pytest.fixture
 def acquisition_request():

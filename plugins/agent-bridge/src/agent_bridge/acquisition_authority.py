@@ -33,6 +33,14 @@ async def worktree_command(args: list[str], project: str | None) -> dict[str, An
         # The owner may still be launching. Never terminate it or retry a launch.
         raise AcquisitionRefused("owner_operation_pending", "worktree owner operation timed out") from exc
     if proc.returncode:
+        if proc.returncode == 3 and args[0] == "create" and "--creation-key" in args:
+            try:
+                failure = json.loads(stdout)
+            except (ValueError, TypeError):
+                failure = None
+            creation = failure.get("creation") if isinstance(failure, dict) else None
+            if isinstance(creation, dict) and creation.get("version") == 1 and creation.get("status") == "pending":
+                raise AcquisitionRefused("owner_operation_pending", "original keyed workspace allocation is pending")
         raise AcquisitionRefused(
             "owner_refused", stderr.decode(errors="replace").strip() or stdout.decode(errors="replace"),
         )

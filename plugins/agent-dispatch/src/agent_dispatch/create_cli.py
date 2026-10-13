@@ -334,7 +334,15 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
             task, reservation, worktree, prepared, ownership, bool(prepared.get("replaced")),
         )
     except SpawnPreparationRetained as exc:
-        print(f"agent-dispatch: workspace retained for repair: {exc}", file=sys.stderr)
+        from .workspace_binding import defer_pending_creation
+        from .spawn_factories import SpawnPreparationPending
+
+        deferred = False
+        if isinstance(exc, SpawnPreparationPending):
+            with _core()._client(args) as c:
+                deferred = defer_pending_creation(c, key, exc)
+        action = "allocation pending; replay retained creation key" if deferred else "workspace retained for repair"
+        print(f"agent-dispatch: {action}: {exc}", file=sys.stderr)
         return
     except (DispatchError, embody.EmbodyUnavailable, bridge.BridgeUnavailable) as exc:
         if prepared is None or ownership != "created":

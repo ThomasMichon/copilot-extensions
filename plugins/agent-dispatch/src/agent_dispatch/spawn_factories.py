@@ -36,6 +36,9 @@ from .spawn_script_body import (  # noqa: F401 -- re-exported for existing call 
 class SpawnPreparationRetained(RuntimeError):
     """Workspace provenance is unproven or incompatible; retain the reservation fence."""
 
+class SpawnPreparationPending(SpawnPreparationRetained):
+    """The ground owner requires replay of the same pending creation identity."""
+
 
 #: A spawn function: given a task snapshot, launch a worker and report
 #: ``(ok, handle)`` where ``handle`` carries ``session``/``worktree`` (on

@@ -3695,6 +3695,10 @@ class Supervisor:
             try:
                 spawn_task = self._prepare_spawn_task(task, reservation)
             except SpawnPreparationRetained as exc:
+                from .workspace_binding import defer_pending_creation
+
+                if defer_pending_creation(self.client, key, exc):
+                    active -= 1
                 log.error(
                     "spawn preparation retained reservation %s for task %s: %s",
                     key,
