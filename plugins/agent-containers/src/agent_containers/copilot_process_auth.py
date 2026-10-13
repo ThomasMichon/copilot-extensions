@@ -105,11 +105,12 @@ def wait_for_consumption(
 ) -> None:
     if not auth_env:
         return
-    path = shlex.quote(auth_env)
+    path = shlex.quote(launcher_directory(auth_env) + "/consumed")
     attempts = max(1, min(int(timeout), 600))
     result = transport._run([
         "docker", "exec", "-u", user, container, "sh", "-c",
-        f"attempt=0; while test \"$attempt\" -lt {attempts}; do if test ! -e {path}; then "
+        f"attempt=0; while test \"$attempt\" -lt {attempts}; do if test -f {path} "
+        f'&& test "$(cat {path})" = 1; then '
         "echo COPILOT_AUTH_CONSUMED; exit 0; fi; "
         "attempt=$((attempt + 1)); sleep 1; done; exit 1",
     ], timeout=attempts + 5)
@@ -176,6 +177,7 @@ def prepare_acp_launch(config, fleet, container, user, command, remote_env):
 
 def launcher_script(native: str, auth_env: str) -> str:
     """Help/version remain credential-free; the real child consumes one token."""
+    directory = launcher_directory(auth_env)
     return (
         "#!/bin/sh\nset -eu\n"
         f"PATH=${{PATH#{shlex.quote(launcher_directory(auth_env))}:}}\nexport PATH\n"
@@ -185,11 +187,17 @@ def launcher_script(native: str, auth_env: str) -> str:
         'for arg do case "$arg" in --secret-env-vars*|--) '
         "echo 'Copilot launch cannot override required secret-env isolation' >&2; "
         "exit 1;; esac; done\n"
+        "umask 077\n"
+        "start=$(sed 's/.*) //' /proc/$$/stat | awk '{print $20}')\n"
+        "test -n \"$start\" || exit 1\n"
+        f'printf "%s %s\\n" "$$" "$start" > {shlex.quote(directory + "/active.pid.tmp")}\n'
+        f"mv -- {shlex.quote(directory + '/active.pid.tmp')} {shlex.quote(directory + '/active.pid')}\n"
         f"test -r {shlex.quote(auth_env)} || {{ "
         "echo 'Copilot launch credential has already been consumed' >&2; exit 1; }\n"
         f". {shlex.quote(auth_env)}\n"
-        f"rm -f -- {shlex.quote(auth_env)}\n"
         f'test -n "${{{TOKEN_VARIABLE}:-}}" || exit 1\n'
+        f"rm -f -- {shlex.quote(auth_env)}\n"
+        f"printf '1\\n' > {shlex.quote(directory + '/consumed')}\n"
         f"exec {shlex.quote(native)} "
         f'--secret-env-vars={TOKEN_VARIABLE} "$@"\n'
     )

@@ -274,6 +274,11 @@ The attended CLI writes that nonsecret result before attaching.
 Session Host authentication lives in the existing launch handle's companion
 directory, so the original `session-host-cleanup --remote-env` call removes it
 even when an older bridge knows no additional authentication response fields.
+Consumption has its own explicit receipt; token-file absence alone is not
+success. Abandoned UUID-scoped inputs and companion directories are reaped
+after a conservative one-hour staging lease, while fresh inputs and matching
+active PID/start-time bindings are preserved. Unknown names and symlinked
+scopes are not swept.
 Copilot receives `--secret-env-vars=COPILOT_GITHUB_TOKEN`, which strips that
 value from its normal shell and MCP child environments. Existing `GH_TOKEN`,
 `GITHUB_TOKEN`, Git credential helpers, and relay identities are independent

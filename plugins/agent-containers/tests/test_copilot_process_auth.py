@@ -334,5 +334,6 @@ def test_native_launcher_consumes_token_restores_path_and_keeps_git_identity(tmp
                             capture_output=True, timeout=10)
     assert result.returncode == 0, result.stderr
     assert not (tmp_path / "auth.env").exists()
+    assert (directory / "consumed").read_text().strip() == "1"
     assert subprocess.run([str(shell), posix(launcher)], env=environment, capture_output=True,
                           timeout=10).returncode != 0
