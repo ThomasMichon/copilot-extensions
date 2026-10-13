@@ -357,11 +357,11 @@ STUBEOF
 # === install-transaction lock (fail-closed) ===
 # Serializes every mutating action of this runtime (stamp/install/update/
 # provision): an exclusive lock on $INSTALL_DIR/.install.lock (flock on fd 8, or
-# a pid-symlink fallback where flock is unavailable) held for the whole build +
+# an exact-path PID receipt fallback where flock is unavailable) held for the whole build +
 # publish transaction. A concurrent run waits up to the timeout
 # (COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC, default 300s) and then FAILS -- it
 # never proceeds unlocked. The OS drops the flock if this process dies; a dead
-# owner's pid symlink is reaped.
+# owner's receipt is reclaimed; legacy dangling PID symlinks remain readable.
 __install_lock_link=""
 __install_lock_fd=""
 
@@ -374,10 +374,58 @@ _install_lock_timeout() {
     printf '%s' "$__t"
 }
 
+_create_install_lock_owner() {
+    local __path="$1" __private __result=1
+    __private="$(mktemp -d "$INSTALL_DIR/.install-lock-create.XXXXXX")" || return 1
+    # link(1), unlike ln(1), creates exactly the named entry, never a child
+    # beneath an existing directory or directory symlink (also on BSD/macOS).
+    if printf 'copilot-extensions.install-lock-pid:v1:%s\n' "$$" > "$__private/owner" &&
+       link "$__private/owner" "$__path" 2>/dev/null; then
+        __result=0
+    fi
+    rm -f "$__private/owner" || __result=1
+    rmdir "$__private" || __result=1
+    return "$__result"
+}
+
+_read_install_lock_owner() {
+    local __path="$1" __private __record="" __extra="" __owner="" __result=1
+    if [[ -L "$__path" ]]; then
+        # Legacy PID symlinks represent IDs, not references to existing filesystem nodes.
+        [[ ! -e "$__path" ]] || return 1
+        readlink "$__path"
+        return
+    fi
+    [[ -f "$__path" ]] || return 1
+    __private="$(mktemp -d "$INSTALL_DIR/.install-lock-read.XXXXXX")" || return 1
+    # Capture the inode before opening it. A raced FIFO/device/link remains
+    # non-regular in this private snapshot and cannot cause a blocking open.
+    if link "$__path" "$__private/owner" 2>/dev/null &&
+       [[ -f "$__private/owner" && ! -L "$__private/owner" && ! -L "$__path" &&
+          "$__private/owner" -ef "$__path" ]]; then
+        if { IFS= read -r -n 64 __record &&
+             ! IFS= read -r -n 1 __extra && [[ -z "$__extra" ]]; } < "$__private/owner"; then
+            case "$__record" in
+                copilot-extensions.install-lock-pid:v1:*)
+                    __owner="${__record#copilot-extensions.install-lock-pid:v1:}"
+                    case "$__owner" in
+                        *[!0-9]*|"") ;;
+                        *) __result=0 ;;
+                    esac
+                    ;;
+            esac
+        fi
+    fi
+    rm -f "$__private/owner" || __result=1
+    rmdir "$__private" || __result=1
+    [[ "$__result" != 0 ]] || printf '%s\n' "$__owner"
+    return "$__result"
+}
+
 _exit_install_lock() {
     if [[ -n "$__install_lock_link" ]]; then
         local __owner
-        __owner="$(readlink "$__install_lock_link" 2>/dev/null || true)"
+        __owner="$(_read_install_lock_owner "$__install_lock_link" 2>/dev/null || true)"
         [[ "$__owner" == "$$" ]] && rm -f "$__install_lock_link"
         __install_lock_link=""
     elif [[ -n "$__install_lock_fd" ]]; then
@@ -399,56 +447,47 @@ _enter_install_lock() {
         __install_lock_fd=8
         return 0
     fi
-    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live __now
+    if ! command -v link >/dev/null 2>&1 || ! command -v mktemp >/dev/null 2>&1; then
+        _fail "PID-fallback install admission requires link(1) and mktemp; refusing to proceed unlocked"
+        return 1
+    fi
+    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live __acquired
     __deadline=$(( $(date +%s) + __timeout ))
-    until ln -s "$$" "$__link" 2>/dev/null; do
-        if [[ "$(date +%s)" -ge "$__deadline" ]]; then
-            return 1
-        fi
-        __owner="$(readlink "$__link" 2>/dev/null || true)"
-        if [[ -z "$__owner" ]]; then
-            # The link vanished after the failed `ln -s` (its holder released
-            # it or a reaper removed it), or the path is not a symlink this
-            # lock can attribute. Never unlink here: lock creators are not
-            # serialized by the reap mutex, so an unlink could delete a live
-            # lock taken meanwhile. Retry; an unattributable path fails
-            # closed at the deadline.
-            sleep 0.1
-            continue
-        fi
-        case "$__owner" in
-            *[!0-9]*) __live=0 ;;
-            *) if kill -0 "$__owner" 2>/dev/null; then __live=1; else __live=0; fi ;;
-        esac
-        if [[ "$__live" == 1 ]]; then
-            sleep 1
-        elif ln -s "$$" "$__link.reap" 2>/dev/null; then
-            # Serialize stale-owner recovery: without this PID-bearing reap
-            # mutex, two contenders could both see the same stale owner, and
-            # one's `rm -f` could delete the live lock the other just took.
-            # Unlink only if the link still holds the owner judged stale above
-            # and that owner is still not live: a dead owner cannot release its
-            # own link and only serialized reapers remove a stale one, so that
-            # value is stable under this mutex. An absent link, or one naming a
-            # different (possibly just-released) holder, is never removed.
-            __now="$(readlink "$__link" 2>/dev/null || true)"
-            if [[ -n "$__now" && "$__now" == "$__owner" ]]; then
-                case "$__now" in
-                    *[!0-9]*) rm -f "$__link" ;;
-                    *) kill -0 "$__now" 2>/dev/null || rm -f "$__link" ;;
+    while [[ "$(date +%s)" -lt "$__deadline" ]]; do
+        __live=0
+        if _create_install_lock_owner "$__link.reap"; then
+            # Admission and stale cleanup share this mutex; no acquirer may
+            # replace the owner between a reaper's read and unlink.
+            __acquired=0
+            if _create_install_lock_owner "$__link"; then
+                __acquired=1
+            else
+                __owner="$(_read_install_lock_owner "$__link" 2>/dev/null || true)"
+                case "$__owner" in
+                    *[!0-9]*|"") ;; # Missing or malformed evidence never authorizes deletion.
+                    *)
+                        if kill -0 "$__owner" 2>/dev/null; then
+                            __live=1
+                        elif [[ "$(_read_install_lock_owner "$__link" 2>/dev/null || true)" == "$__owner" ]] &&
+                             rm -f "$__link" && _create_install_lock_owner "$__link"; then
+                            __acquired=1
+                        fi
+                        ;;
                 esac
             fi
-            rm -f "$__link.reap"
-        else
-            # Another contender is reaping. A reap mutex whose owner died
-            # mid-reap is deliberately never reclaimed automatically (that
-            # would reintroduce the check-then-unlink race); the run fails
-            # closed at its deadline until the stale .reap link is removed.
-            sleep 0.1
+            if [[ "$__acquired" == 1 ]]; then
+                __install_lock_link="$__link"
+            fi
+            if ! rm -f "$__link.reap"; then
+                _exit_install_lock
+                return 1
+            fi
+            [[ "$__acquired" != 1 ]] || return 0
         fi
+        # A dead admission-mutex owner requires explicit repair, never another reaper.
+        if [[ "$__live" == 1 ]]; then sleep 1; else sleep 0.1; fi
     done
-    __install_lock_link="$__link"
-    return 0
+    return 1
 }
 # === end install-transaction lock ===
 
