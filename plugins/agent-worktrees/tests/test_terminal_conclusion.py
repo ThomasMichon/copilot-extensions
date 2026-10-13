@@ -1481,6 +1481,75 @@ class TestReciprocalDisposal:
         assert sibling_record.status == "complete"
         assert not sibling_record.is_paired
 
+    @pytest.mark.parametrize("blocker", [None, "dirty", "live", "receipt", "record", "open-pr", "effort"])
+    def test_pair_progress_recovers_crash_after_sibling_unlink(self, tmp_path, monkeypatch, blocker):
+        sibling, sibling_path, sibling_worktree = _pair_sibling(
+            tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
+            harness_project="demo", harness_worktree_id="worker-20260901-abcd",
+        )
+        repo, record_path, _ = self._harness(
+            tmp_path, monkeypatch,
+            pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
+        )
+        original = tracking.save_record
+
+        def crash_before_primary_unlink(record, path=None, **kwargs):
+            if path == record_path and not record.is_paired:
+                raise RuntimeError("injected crash after sibling publication")
+            return original(record, path, **kwargs)
+
+        monkeypatch.setattr(tracking, "save_record", crash_before_primary_unlink)
+        with pytest.raises(RuntimeError, match="injected crash"):
+            _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                      reservation_key="dispatch-task:task-1:1")
+        assert not tracking.load_record(sibling_path).is_paired
+        assert tracking.load_record(record_path).is_paired
+        monkeypatch.setattr(tracking, "save_record", original)
+        if blocker == "dirty":
+            (sibling_worktree / "valuable.txt").write_text("keep", encoding="utf-8")
+        elif blocker == "live":
+            monkeypatch.setattr(sessions, "has_mux_session", lambda identity: identity == sibling.worktree_id)
+        elif blocker == "receipt":
+            sibling_path.with_suffix(".terminal-pair.json").write_text("{}", encoding="utf-8")
+        elif blocker in {"record", "open-pr", "effort"}:
+            changed = tracking.load_record(sibling_path)
+            if blocker == "record":
+                changed.branch = "worktree/another-allocation"
+            elif blocker == "open-pr":
+                changed.pr = tracking.PRRecord(state="open", number=7, branch="feature/example")
+            else:
+                changed.follow_up = True
+            original(changed, sibling_path)
+        result = _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                           reservation_key="dispatch-task:task-1:1")
+        assert result["managed_gc_eligible"] is (blocker is None)
+        assert tracking.load_record(record_path).is_paired is (blocker is not None)
+
+    def test_pair_progress_interrupted_receipt_publication_keeps_reciprocity(self, tmp_path, monkeypatch):
+        sibling, sibling_path, _ = _pair_sibling(
+            tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
+            harness_project="demo", harness_worktree_id="worker-20260901-abcd",
+        )
+        repo, record_path, _ = self._harness(
+            tmp_path, monkeypatch,
+            pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
+        )
+        original = tc.terminal_pair_progress.publish
+
+        def crash(*args):
+            raise RuntimeError("injected receipt publication failure")
+
+        monkeypatch.setattr(tc.terminal_pair_progress, "publish", crash)
+        with pytest.raises(RuntimeError, match="injected receipt"):
+            _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                      reservation_key="dispatch-task:task-1:1")
+        assert tracking.load_record(sibling_path).is_paired
+        assert tracking.load_record(record_path).is_paired
+        monkeypatch.setattr(tc.terminal_pair_progress, "publish", original)
+        result = _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                           reservation_key="dispatch-task:task-1:1")
+        assert result["managed_gc_eligible"] is True
+
     def test_blocks_on_sibling_with_unpushed_commits(self, tmp_path, monkeypatch):
         """A sibling with no porcelain dirtiness but local-only commits ahead
         of its own upstream must still block -- exactly like the harness

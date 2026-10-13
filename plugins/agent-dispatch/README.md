@@ -13,6 +13,10 @@ control of an agent, or the decision to delegate a bounded subtask. Use
 agent-bridge for live cross-boundary conversation and steering, and
 `delegation-guidance:delegating-work` for runtime task decomposition.
 
+Held housekeeping on a completed task has a separate preview-first
+[`reservations retry-cleanup` recovery flow](docs/cleanup-recovery.md).
+It preserves failure and attachment history and never rearms completed work.
+
 Internal coordinator deployment accepts optional `conditional`/`routing_dir`
 keyword arguments using the shared
 [conditional cutover contract](../../libs/zdd/README.md#conditional-owner-operation-partial-lifecycle-support).

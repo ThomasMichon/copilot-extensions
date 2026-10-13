@@ -11,6 +11,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 import httpx
+from .client_cleanup_recovery import CleanupRecoveryClientMixin
 from .client_completion_review import CompletionReviewMixin
 from .client_categories import CategoryClientMixin
 from .client_errors import DispatchError, DispatchUpgradeRequired  # noqa: F401 -- public re-exports
@@ -25,7 +26,9 @@ from .client_suspend import SuspendClientMixin
 from .client_transport import ConnectRetryClient
 from .client_verification import VerificationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
-class DispatchClient(CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
+
+
+class DispatchClient(CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(

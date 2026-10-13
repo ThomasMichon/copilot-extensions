@@ -15,6 +15,7 @@ from typing import Any
 
 from . import config as cfg
 from . import finalize, git_ops, sessions, tracking
+from . import terminal_pair_progress
 
 DISPOSABLE_CLI_POLICY = "disposable-cli"
 DISPATCH_ATTEMPT_POLICY = "dispatch-attempt"
@@ -290,9 +291,16 @@ def _resolve_pair_sibling(
         sibling = tracking.load_record(path)
     except Exception:
         return None
-    if not _reciprocal_pair_valid(record, sibling, path):
+    if not _pair_progress_valid(record, sibling, path):
         return None
     return sibling, path
+
+
+def _pair_progress_valid(record, sibling, path) -> bool:
+    if _reciprocal_pair_valid(record, sibling, path):
+        return True
+    snapshot = terminal_pair_progress.reciprocal_snapshot(record, sibling, path)
+    return snapshot is not None and _reciprocal_pair_valid(record, snapshot, path)
 
 
 def _sibling_ancestry_reason(sibling: tracking.WorktreeRecord) -> str | None:
@@ -478,7 +486,7 @@ def _conclude_pair_sibling(record: tracking.WorktreeRecord) -> dict[str, Any]:
     try:
         with tracking._RecordLock(sibling_path, timeout=3, require_sidecar=True):
             sibling = tracking.load_record(sibling_path)
-            if not _reciprocal_pair_valid(record, sibling, sibling_path):
+            if not _pair_progress_valid(record, sibling, sibling_path):
                 return {"action": "skipped", "reason": "pair-sibling-identity-mismatch"}
             if live_reason := _session_is_live(sibling):
                 return {"action": "skipped", "reason": live_reason}
@@ -490,10 +498,14 @@ def _conclude_pair_sibling(record: tracking.WorktreeRecord) -> dict[str, Any]:
                 sibling.kind in tracking.MANAGED_KINDS
                 and sibling.status in {"complete", "finalized"}
             )
+            if already_primed and not sibling.is_paired:
+                return {"action": "already-primed", "worktree_id": sibling.worktree_id}
             sibling.kind = "bridge"
             sibling.owner = record.owner
             sibling.origin = "delegate"
             tracking.update_status(sibling, "complete", save=False)
+            tracking.save_record(sibling, sibling_path)
+            terminal_pair_progress.publish(record, sibling, sibling_path)
             # Discharge the pairing link -- see the docstring above.
             sibling.pair_id = None
             sibling.pair_role = None

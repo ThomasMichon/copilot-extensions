@@ -141,6 +141,8 @@ def register_spawn_routes(
     def rejected(event: str, detail: dict[str, object]) -> None:
         logging.getLogger("agent-dispatch").warning("%s: %s", event, detail)
     control_auth = _make_control_auth(control_token, rejected)
+    from .coordinator_cleanup_recovery import register as register_cleanup_recovery
+    register_cleanup_recovery(app, queue, bus, control_auth)
 
     @app.post(
         "/spawn-reservations/tasks/{task_id}/authorize-fresh",

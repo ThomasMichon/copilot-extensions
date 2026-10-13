@@ -392,3 +392,28 @@ requested contract.
 - Adjacent loop, resource, declaration and registrar contracts pass 350 tests.
   This is source evidence, not release or deployment; adoption remains gated on
   the reviewed promoted contract and actual consumer readiness.
+
+### 2026-10-13 - Held housekeeping implementation slice (#6471)
+
+- Reconciled to `agent-dispatch`'s existing **terminal-worktree-reclamation**
+  intent: failed cleanup remains retryable and the ground layer retains disposal
+  authority. This closes existing intent rather than extending the vision.
+- Reproduced missing exact held recovery, incorrect completion of explicitly
+  incomplete priming, and the crash window between sibling and primary unlink.
+- Added preview-first control-authorized recovery, transactional request replay
+  and retained prior failure envelopes, exact generation/provenance/allocation
+  fences, and consumption through existing cleanup leases. Business task state,
+  results, timestamps, logs and attachment history remain unchanged.
+- Added atomic reciprocal progress receipts before sibling unlink. Receipt
+  recovery requires exact current provenance and unchanged terminal sibling
+  evidence; ordinary liveness/Git/PR/effort/claim guards still apply.
+- Contained targeted dispatch validation exercised actual native CLI subprocesses
+  against a loopback fixture coordinator and a fresh database, including
+  preview/apply/lost-response replay/history. No production records were changed.
+- Installer/bootstrap clean-room and external deployment validation are not
+  claimed: this slice changes neither installers nor provisioning, and no live
+  deployment venue is allocated to its implementation worker. Fresh-fixture
+  first-touch integration is covered; release, authorized rollout and real
+  adopter recovery remain coordinator-owned gates after implementation review.
+- Implementation is not the effort's completion. Scalar repair stays with its
+  existing owner; category, supervision and registry slices retain their owners.

@@ -110,6 +110,13 @@ def test_conclusion_state_primed_and_removed_actions_are_complete():
     assert _conclusion_state({"action": "already-removed"}) == "complete"
 
 
+def test_explicitly_incomplete_priming_remains_retryable():
+    assert _conclusion_state({
+        "action": "primed", "managed_gc_eligible": False,
+        "pair_sibling": {"action": "skipped", "reason": "pair-sibling-lock-timeout"},
+    }) == "pending"
+
+
 def test_conclusion_state_transient_reasons_are_pending():
     assert _conclusion_state({"action": "failed"}) == "pending"
     assert _conclusion_state({"reason": "live-mux"}) == "pending"

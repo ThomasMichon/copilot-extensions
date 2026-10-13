@@ -153,6 +153,8 @@ def _conclusion_state(outcome: dict) -> str:
         "removed",
         "already-removed",
     }:
+        if action in {"primed", "already-primed"} and outcome.get("managed_gc_eligible") is False:
+            return _CONCLUSION_PENDING
         return _CONCLUSION_COMPLETE
     if action == "failed" or reason in _TRANSIENT_CONCLUSION_REASONS:
         return _CONCLUSION_PENDING
