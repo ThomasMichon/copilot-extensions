@@ -656,10 +656,10 @@ async def test_native_cpu_receipt_and_telemetry(
     assert collector["failed"] == 0
     assert collector["wall_known"] == collector["thread_cpu_known"] == sample["sequence"]
     assert collector["wall_unknown"] == collector["thread_cpu_unknown"] == 0
-    assert collector["thread_cpu_seconds"] == sum(
+    assert collector["thread_cpu_seconds"] == pytest.approx(sum(
         thread_reads[index + 1][1] - thread_reads[index][1]
         for index in range(0, len(thread_reads), 2)
-    )
+    ), rel=1e-12, abs=1e-12)
     assert collector["wall_seconds"] >= sample["wall_seconds"]
     assert collector["issues"] == ()
     assert event["observation_sample"] == {

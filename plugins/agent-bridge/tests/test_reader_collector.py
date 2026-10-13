@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import math
 import threading
 import weakref
 from dataclasses import FrozenInstanceError
@@ -57,6 +58,25 @@ def test_completed_attempts_mixed_costs_and_old_cached_reuse() -> None:
     assert snapshot.thread_cpu_known == snapshot.thread_cpu_unknown == 2
     assert snapshot.issues == ()
     assert old.completed == 1
+
+
+def test_streaming_float_costs_match_compensated_sum_without_losing_contributions() -> None:
+    ledger = CollectorLedger()
+    source = ledger.source()
+    instance = uuid4().hex
+    costs = (0.1, 0.2, 0.3)
+    for sequence, cost in enumerate(costs, 1):
+        source.complete(SampleAccounting(
+            instance, sequence, "succeeded", thread_cpu_seconds=cost,
+        ))
+    actual = ledger.snapshot.thread_cpu_seconds
+    expected = math.fsum(costs)
+    assert actual != expected
+    assert actual == pytest.approx(expected, rel=1e-12, abs=1e-12)
+    assert actual != pytest.approx(math.fsum(costs[:-1]), rel=1e-12, abs=1e-12)
+    assert ledger.snapshot.completed == ledger.snapshot.thread_cpu_known == len(costs)
+    assert ledger.snapshot.thread_cpu_unknown == 0
+    assert ledger.snapshot.issues == ()
 
 
 def test_zero_is_known_and_invalid_costs_are_unknown(caplog: pytest.LogCaptureFixture) -> None:
