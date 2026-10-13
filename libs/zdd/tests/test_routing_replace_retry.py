@@ -3,12 +3,18 @@
 import json
 import os
 import stat
+import sys
 import pytest
 
 from zdd import routing
 
 
-@pytest.mark.parametrize("platform,directory_flushes", [("linux", 1), ("darwin", 0)])
+@pytest.mark.parametrize("platform,directory_flushes", [
+    pytest.param("linux", 1, marks=pytest.mark.skipif(
+        sys.platform != "linux", reason="native Linux directory fsync",
+    )),
+    ("darwin", 0),
+])
 def test_directory_barrier_matches_supported_platform(
     tmp_path, monkeypatch, platform, directory_flushes,
 ):
@@ -35,9 +41,15 @@ def test_directory_barrier_matches_supported_platform(
 
 @pytest.mark.parametrize("winerror", [5, 32, 33])
 def test_transient_windows_sharing_conflict_retries(tmp_path, monkeypatch, winerror):
+    from zdd import routing_persistence
+
     path = tmp_path / "active.json"
     path.write_text('{"active":"old"}', encoding="utf-8")
-    real_replace = routing.os.replace
+    replacement = "windows_replace" if sys.platform == "win32" else "os.replace"
+    real_replace = (
+        routing_persistence.windows_replace if sys.platform == "win32"
+        else routing_persistence.os.replace
+    )
     calls = []
     sleeps = []
 
@@ -49,7 +61,7 @@ def test_transient_windows_sharing_conflict_retries(tmp_path, monkeypatch, winer
             raise error
         real_replace(source, target)
 
-    monkeypatch.setattr(routing.os, "replace", replace)
+    monkeypatch.setattr(f"zdd.routing_persistence.{replacement}", replace)
     monkeypatch.setattr(routing.time, "sleep", sleeps.append)
     routing._atomic_write(path, {"active": "new"})
     assert len(calls) == 3
@@ -73,7 +85,8 @@ def test_permanent_failure_propagates_and_preserves_old_route(
         calls.append(target)
         raise error
 
-    monkeypatch.setattr(routing.os, "replace", replace)
+    replacement = "windows_replace" if sys.platform == "win32" else "os.replace"
+    monkeypatch.setattr(f"zdd.routing_persistence.{replacement}", replace)
     monkeypatch.setattr(routing.time, "sleep", lambda _: None)
     with pytest.raises(PermissionError, match="permanent failure"):
         routing._atomic_write(path, {"active": "new"})

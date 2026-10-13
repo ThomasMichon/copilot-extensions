@@ -245,6 +245,57 @@ Explicit unconditional cutover remains supported. Linux lock behavior is
 directly tested; Windows uses bounded native byte-lock retries but still needs
 real Windows process-boundary validation. macOS uses flock; native process
 identity availability remains required and unverified identity refuses.
+#### Stateful pre-adoption drain and caller-held authority
+
+Stateful adopters may opt into `drain_before_publish=True`. The predecessor
+then drains before the publication adapter promotes the passive and publishes
+its route; forced incomplete drains are refused. That adapter still owns
+exact-instance promotion, final-state adoption, and selection reconciliation.
+On rollback, the orchestrator confirms the successor's exit before restoring
+and undraining the predecessor. If exit cannot be confirmed, it does not resume
+a drained predecessor or change an undrained one's state; the actual unresolved
+phase remains in the breadcrumb.
+Every opt-in breadcrumb carries `requires_writer_reconciliation: true`, including
+the pre-drain phase. Legacy stale-cutover recovery refuses these records without
+undraining or rewriting them, and another cutover cannot overwrite an unresolved
+record. The installation owner must reconcile exact process identity, successor
+exit, route ownership and predecessor writer authority under the same guard;
+this library does not supply that adopter-specific recovery adapter. Predecessor
+retirement is unresolved even for a `committed` record left after a crash or
+post-commit error; legacy repair, passive reaping and cutover reentry refuse it.
+The opt-in owner's shutdown adapter must confirm exact predecessor retirement
+with `{"retired": true}` before a clean cutover clears its breadcrumb. A shutdown
+request alone is not confirmation. Commit-forward availability does not clear
+unresolved stateful retirement evidence.
+Route restoration and explicit undrain confirmation must both succeed before rollback
+is terminal. A publication refusal must not reopen a displaced predecessor.
+The opt-in path requires CAS-guarded successor publication even without a
+refusal callback. It retains the returned endpoint's full identity for guarded
+rollback and commit-forward; a republished port/PID with a different process
+start token, version or generation is not that transaction's successor.
+An opt-in routing adapter must return that exact `Endpoint`, either directly
+or as the first item of the canonical `(active, previous)` tuple. An unknown
+result is an uncertain publication, never permission to infer ownership from
+a new read, reopen a predecessor or clear reconciliation evidence.
+Before spawning or draining, it checks that the resolved predecessor agrees
+with the routing snapshot used for publication CAS and that the snapshot has
+not changed. A racing selection (including an ABA route change) is refused
+without touching either writer's admission.
+
+An installation transaction that must serialize selection or recovery outside
+the cutover itself can acquire `zdd.cutover_lock.CutoverLock(config_dir)` and
+pass it as `run(held_lock=lease)`. The orchestrator accepts only a held canonical
+lock for its own routing directory and does not release the caller's lease.
+Borrowing is bound to the acquiring PID and `Thread` object identity, not a
+recyclable numeric thread identifier.
+Only its acquiring process and thread may lend that guard, and overlapping or
+nested borrowers and release during a borrow are refused.
+Hold that same guard across the entire transaction, including cold selection,
+rollback, commit-forward, and every mutating repair path.
+The conditional and pre-publication drain opt-ins cannot be combined: conditional
+receiver-bound drain requires an already-published successor, while stateful
+pre-adoption drain requires the predecessor to quiesce before publication.
+Both owned and caller-held authority enforce the same recovery refusals.
 
 ### `zdd.diagnostics` -- daemon-health audit + repair
 

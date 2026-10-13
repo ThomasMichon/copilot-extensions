@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 from dataclasses import replace
@@ -318,6 +319,7 @@ def test_saturated_history_does_not_block_verified_owner_handoff(case, monkeypat
     assert routing.read_table(root)[publication_history.KEY]["saturated"]
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="native Linux directory fsync")
 def test_post_rename_fsync_failure_retains_routable_successor(case, monkeypatch):
     from zdd import routing_persistence
     import stat
@@ -350,6 +352,46 @@ def test_post_rename_fsync_failure_retains_routable_successor(case, monkeypatch)
     assert result.to_dict()["publication_uncertain"] is True
     refused = orch.run()
     assert not refused.ok and "owner-led recovery" in refused.error
+
+
+def test_conditional_pre_adoption_combination_refuses_before_mutation(case):
+    root, _, events, _, _, request, orch = case
+    before = (root / "active.json").read_bytes()
+    orch.drain_before_publish = True
+    result = orch.run(conditional=request)
+    assert not result.ok and result.conditional
+    assert "pre-publication drain" in result.error
+    assert events == [] and breadcrumb.read_breadcrumb(root) is None
+    assert (root / "active.json").read_bytes() == before
+
+
+def test_conditional_can_borrow_caller_guard_without_bypassing_capture(case):
+    root, _, events, _, _, request, orch = case
+    with CutoverLock(root) as lease:
+        result = orch.run(conditional=request, held_lock=lease)
+        assert result.ok and result.retirement_confirmed
+        assert lease.held
+        assert events == ["spawn", "drain", "shutdown"]
+    assert breadcrumb.read_breadcrumb(root) is None
+
+
+@pytest.mark.parametrize("conditional_request", [False, True])
+def test_borrowed_guard_refuses_corrupt_recovery_before_any_capture(
+    case, conditional_request,
+):
+    root, _, events, _, _, request, orch = case
+    path = root / "cutover.json"
+    path.write_text("broken", encoding="utf-8")
+    before = (root / "active.json").read_bytes()
+    with CutoverLock(root) as lease:
+        result = orch.run(
+            conditional=request if conditional_request else None,
+            held_lock=lease,
+        )
+        assert lease.held
+    assert not result.ok and "owner-led recovery" in result.error
+    assert events == [] and path.read_text() == "broken"
+    assert (root / "active.json").read_bytes() == before
 
 
 @pytest.mark.parametrize("after_flip", [False, True])

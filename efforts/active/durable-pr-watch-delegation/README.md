@@ -91,7 +91,7 @@ contract or authorize a stop/start exemption.
 
 _Agent-recommended design and validation, explicitly selected for review._
 
-- [ ] Review and merge the [watch-owner lifecycle plan](watch-owner-cutover.md) before implementing the service transaction.
+- [x] Review and merge the [watch-owner lifecycle plan](watch-owner-cutover.md) before implementing the service transaction (confirmed by #6291).
 - [ ] Adopt canonical graceful-cutover primitives with installer-driven activation, passive health, exact-instance promotion and retirement, and crash-consistent marker/manifest/route recovery.
 - [ ] Define and enforce one installation-scoped watch-state writer across predecessor drain and successor subscription/delivery adoption; preserve event and registration identities without overlapping live-generation delivery.
 - [ ] Prove rollback, commit-forward, governance refusal, crash recovery, callback drain, and first upgrade from a lease-only owner on Windows and Linux before landing the cutover prerequisite.
@@ -173,6 +173,23 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-12 - Governed lifecycle intent approved
+
+- The next current-head review identified numeric thread-ID recycling in the borrowed-guard boundary. Ownership now retains the acquiring `Thread` object alongside its PID and compares object identity; an unrelated execution with the same numeric identifier cannot borrow the guard. A deterministic regression preserves the original execution's borrow and native contender exclusion. Adoption remains gated on this shared slice's current-head review and CI.
+- Current-head review confirmed the four publication/guard findings resolved but identified a committed-record crash window before predecessor retirement. Stateful committed records now remain fenced against reentry and both legacy recovery helpers. Post-commit errors and availability-only commit-forward preserve that evidence; only an owner's explicit exact-retirement confirmation permits normal breadcrumb cleanup. Crash, lost-response, unconfirmed-retirement and commit-forward regressions pass in the canonical Windows suite (266 tests, 15 platform skips); current-head review and CI remain required.
+- The next review ran in degraded Lite mode after runner startup timed out. Its four findings are addressed: opt-in publication accepts a direct exact endpoint or the canonical tuple and documents uncertain-result refusal; an externally closed guard is neither borrowable nor reported held; the logical-clock fixture preserves all other time-module attributes without altering the process-global clock. Three new regressions cover direct results, unknown-result evidence, and closed guards. Canonical Windows validation passes 262 tests with 15 platform skips; current-head review and CI remain required.
+- The next current-head review identified a predecessor-selection race between the CAS snapshot and resolved endpoint. The opt-in path now refuses before spawn or drain unless the selected predecessor agrees with that snapshot and a fresh table read is unchanged. Added changed-route, ABA-selection and stable previous-only regressions; the canonical suite passes 259 tests with 15 Windows platform skips, and the actual vendored suite passes 113 with four platform skips. Adoption remains gated on current-head review and CI.
+- Shared-seam review identified a legacy repair hazard: an unresolved pre-adoption breadcrumb could reopen the predecessor without proving successor exit. Opt-in breadcrumbs now require installation-owner reconciliation under the shared guard; legacy repair and cutover reentry refuse to overwrite that evidence. Guarded route restoration and explicit undrain confirmation must both succeed before rollback is terminal. The adapter remains a required adoption item, not an implemented shared-library capability.
+- The preceding shared-seam head passed native Linux and Windows CI (run 38330331103). Added regression coverage for recovery refusal, displaced ownership, failed restoration/undrain, inconsistent probes and nonterminal double failure; the revised head still requires fresh review and CI before merge.
+- Fresh review confirmed those ten findings resolved and identified two additional publication-identity gaps. Pre-adoption publication now requires CAS even without a refusal callback; rollback and commit-forward retain the published successor's full endpoint identity. The revised canonical suite passes 256 tests with 15 Windows platform skips, including changed start-token/version/generation, route displacement during drain and displaced commit-forward regressions. Native Linux/Windows shared-library lanes passed on the preceding recovery head; the final CAS revision still needs current-head review and required CI.
+
+- #6291 merged at `612d71cd39f75c9684f492a7bd7f24ae3373483d` after a current-head approving review with zero findings and successful required CI.
+- The reviewed plan includes full-transaction serialization shared with mutating recovery and on-demand startup, explicit cold runtime selection without daemon activation, dedicated identity and owner termination tests, and an explicit macOS fail-closed contract and validation lane.
+- Pulled the adoption worktree forward after proving the squash-merged effort files match the reviewed branch; preserved the pre-sync recovery reference instead of replaying landed plan commits.
+- Beginning canonical graceful-cutover and installation-cell implementation. Adoption, release/rollout, saved dispatch integration, remaining validation, archive, and finalization stay open.
+- The first implementation slice adds opt-in pre-publication drain and reuse of a caller-held canonical cutover guard. Default cutover ordering stays unchanged; stateful rollback never resumes the predecessor before confirming successor exit. The PR owner does not opt in or change activation yet.
+- Shared-library validation on Windows passes, including held/unheld/foreign guard, forced or unclean drain refusal, confirmed/unconfirmed successor cleanup, and durable unresolved-phase cases. Corrected a controlled Linux-cleanup test fixture to supply Linux signal constants on non-Linux test hosts; no production process-signaling behavior changed. Native Linux validation remains the existing CI shared-library lane.
 
 ### 2026-10-12 - Adoption service-boundary investigation
 

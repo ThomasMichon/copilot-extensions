@@ -134,7 +134,10 @@ def test_custody_is_durable_before_new_route_is_visible(tmp_path, monkeypatch):
     _publish(tmp_path, 101, 61001)
     from zdd import routing_persistence
 
-    original = routing_persistence.os.replace
+    windows = routing_persistence.sys.platform == "win32"
+    original = (
+        routing_persistence.windows_replace if windows else routing_persistence.os.replace
+    )
     observed = []
     synchronized = []
     real_fsync = routing_persistence.os.fsync
@@ -143,7 +146,8 @@ def test_custody_is_durable_before_new_route_is_visible(tmp_path, monkeypatch):
         data = json.loads(source.read_text())
         observed.append(data)
         if data["active"]["pid"] == 202:
-            assert len(synchronized) >= 3  # custody file, custody directory, route file
+            barriers = 3 if routing_persistence.sys.platform == "linux" else 2
+            assert len(synchronized) >= barriers
             assert routing.read_table(tmp_path)["active"]["pid"] == 101
             assert any(
                 entry["pid"] == 202
@@ -155,7 +159,10 @@ def test_custody_is_durable_before_new_route_is_visible(tmp_path, monkeypatch):
         synchronized.append(descriptor)
         real_fsync(descriptor)
 
-    monkeypatch.setattr(routing_persistence.os, "replace", replace)
+    if windows:
+        monkeypatch.setattr(routing_persistence, "windows_replace", replace)
+    else:
+        monkeypatch.setattr(routing_persistence.os, "replace", replace)
     monkeypatch.setattr(routing_persistence.os, "fsync", fsync)
     _publish(tmp_path, 202, 61002)
     assert [data["active"]["pid"] for data in observed] == [101, 202]

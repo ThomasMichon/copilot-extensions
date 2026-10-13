@@ -1,0 +1,45 @@
+{
+  "comment": "Add opt-in pre-adoption drain and caller-held transaction guards to shared cutover, retaining default ordering and refusing predecessor resumption before confirmed successor exit.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
