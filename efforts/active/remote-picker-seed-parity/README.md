@@ -400,3 +400,17 @@ hiding the problem or silently dropping text.
   engine portfolio passes all ten cases, including real rendering without a
   sibling plugin. This narrow test repair does not establish promotion or
   delivered Picker behavior; those gates remain open.
+- **2026-10-13** -- The packaged-resolver test repair merged as #6508 after
+  an Approved review with zero findings and successful current-head CI and
+  workflow guard. Shared the result with the existing service-alias driver.
+  Its #6506 is still open with failing test-runner checks, so promotion and
+  the authorized installed rollout remain blocked; no deployed behavior is
+  claimed.
+- **2026-10-13** -- The next full release gate exposed #6520: an older test
+  expected the parser itself to default deferred ownership to True. Structured
+  admission now needs an unset value to distinguish explicit non-protocol
+  options; ordinary Resolve still normalizes that value to True before
+  constructing command state. Updated coverage proves both option-presence
+  semantics and the real handler default. The complete contained New-seed and
+  launch-request portfolio passes 166 cases with one native POSIX skip.
+  No production default, protocol refusal or containment limit changed.

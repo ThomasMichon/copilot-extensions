@@ -38,11 +38,34 @@ def registered_demo_project(tmp_path):
     }), encoding="utf-8")
 
 
-def test_resolve_parser_defaults_to_deferred_new_ownership():
+@pytest.mark.parametrize("explicit", [False, True])
+def test_resolve_parser_preserves_deferred_option_presence(explicit):
     parser = argparse.ArgumentParser()
     resolve_cli.add_parsers(parser.add_subparsers())
-    args = parser.parse_args(["resolve", "--json", "--worktree-id", "wt-a"])
-    assert args.defer_new_seed is True
+    argv = ["resolve", "--json", "--worktree-id", "wt-a"]
+    if explicit:
+        argv.append("--defer-new-seed")
+    args = parser.parse_args(argv)
+    assert args.defer_new_seed is (True if explicit else None)
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_ordinary_resolve_defaults_to_deferred_new_ownership(monkeypatch, explicit):
+    parser = argparse.ArgumentParser()
+    resolve_cli.add_parsers(parser.add_subparsers())
+    argv = ["resolve", "--json", "--worktree-id", "wt-a"]
+    if explicit:
+        argv.append("--defer-new-seed")
+    args = parser.parse_args(argv)
+    observed = []
+
+    def capture_state(parsed):
+        observed.append(parsed.defer_new_seed)
+        raise resolve_cli._ResolveEarlyExit(0)
+
+    monkeypatch.setattr(resolve_cli.ResolveCommandState, "from_args", capture_state)
+    assert resolve_cli.cmd_resolve(args) == 0
+    assert observed == [True]
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell unavailable")
