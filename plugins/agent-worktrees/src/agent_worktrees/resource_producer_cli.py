@@ -22,7 +22,7 @@ def cmd_resource_producer(args) -> int:
     try:
         if args.operation == "capabilities":
             output._json_output({
-                "schema": producer.SCHEMA, "version": 1,
+                "schema": producer.SCHEMA, "version": producer.VERSION,
                 "operations": ["reserve", "begin", "complete", "bind", "inspect", "close"],
                 "allocation_fencing": 1,
                 "lifetime": "disposable-owned", "ref_encoding": "namespace:r1.base64url",
@@ -61,11 +61,11 @@ def cmd_resource_producer(args) -> int:
         # registered direct RMW authority, not the daemon's 8-second deadline.
         from . import tracking_write
         result = tracking_write.run_direct("resource_producer", {
-            "schema": producer.SCHEMA, "version": 1, "operation": args.operation,
+            "schema": producer.SCHEMA, "version": producer.VERSION, "operation": args.operation,
             "input": payload, "owner_ref": owner_ref, "yaml_path": str(path),
         }, reason="producer uses bounded direct registered RMW; no monitor bootstrap")
         output._json_output(result)
         return 1 if result.get("error") else 0
     except (ValueError, TypeError, OSError, RuntimeError) as exc:
-        output._json_output({"schema": producer.SCHEMA, "version": 1, "error": "rejected", "message": str(exc)})
+        output._json_output({"schema": producer.SCHEMA, "version": producer.VERSION, "error": "rejected", "message": str(exc)})
         return 1

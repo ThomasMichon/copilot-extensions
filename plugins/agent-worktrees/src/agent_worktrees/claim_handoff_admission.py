@@ -24,8 +24,14 @@ def validate_producer_uniqueness(
     refs: dict[str, bool] = {}
     tokens: set[str] = set()
     for claim in claims:
-        ref = claim["ref"]
+        if not isinstance(claim, dict):
+            raise error_type("claim bundle entry must be a mapping")
+        ref = claim.get("ref")
+        if not isinstance(ref, str) or not ref.strip():
+            raise error_type("claim bundle entry requires a nonempty string ref")
         present = "producer" in claim
+        if present and not isinstance(claim["producer"], dict):
+            raise error_type(f"claim bundle producer metadata must be a mapping: {ref}")
         if ref in refs and (refs[ref] or present):
             raise error_type("ambiguous duplicate producer reference")
         refs[ref] = refs.get(ref, False) or present

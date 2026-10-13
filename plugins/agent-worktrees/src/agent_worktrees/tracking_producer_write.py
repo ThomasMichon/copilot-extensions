@@ -101,7 +101,7 @@ def apply_resource_producer(args: dict) -> dict:
     try:
         if not isinstance(args, dict):
             raise ValueError("resource-producer request must be an object")
-        if args.get("schema") != producer.SCHEMA or type(args.get("version")) is not int or args["version"] != 1:
+        if args.get("schema") != producer.SCHEMA or type(args.get("version")) is not int or args["version"] != producer.VERSION:
             raise ValueError("unsupported resource-producer schema/version")
         for field in ("operation", "input", "yaml_path", "owner_ref"):
             if field not in args:
@@ -143,7 +143,7 @@ def apply_resource_producer(args: dict) -> dict:
             record, owner = _owned_record(args, path, mutable=operation not in {"inspect", "close"})
             if operation == "reserve":
                 metadata = {
-                    "version": 1, "lifetime": "disposable-owned",
+                    "version": producer.VERSION, "lifetime": "disposable-owned",
                     "token": secrets.token_urlsafe(32), "namespace": payload["namespace"],
                     "phase": "pending", "creator": owner.canonical(),
                     "recovery": copy.deepcopy(payload["recovery"]),
@@ -226,7 +226,7 @@ def apply_resource_producer(args: dict) -> dict:
         return response
     except (ValueError, TypeError, KeyError, OSError, ExecutionSpaceError, yaml.YAMLError, RecursionError) as exc:
         logging.getLogger(__name__).warning("Resource producer transaction refused: %s", exc)
-        return {"schema": producer.SCHEMA, "version": 1, "error": "rejected", "message": str(exc)}
+        return {"schema": producer.SCHEMA, "version": producer.VERSION, "error": "rejected", "message": str(exc)}
 
 
 tracking_write.register_verb("resource_producer", apply_resource_producer)
