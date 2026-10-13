@@ -434,6 +434,22 @@ takeover, blanket freshness authorization, or parallel session owner is proposed
   bridge creation/drain selection: 28 passed/one platform skip. Lint, module-size
   and patch guards remain green.
 
+### 2026-10-13 - Full holder revalidation before keyed native start
+
+- Current-head CI passed, but the next review requested the complete holder
+  proof after awaited owner revalidation. Reused one sessionless predicate for
+  both admission checks, retaining ground history, live sessions, DB ownership,
+  and in-process sessions before synchronous local-start registration.
+- Connected tests show the existing SQLite gate already rejects ordinary
+  bridge/live-session inserts during that await. No second ordinary native
+  start was reproduced through those real registration paths. Added explicit
+  fence regressions plus late in-process/ownership-holder refusal regressions,
+  without weakening or bypassing the gate to manufacture a race.
+- Bridge creation/acquisition selection: 143 passed, three opt-in/platform
+  skips. Native-owner coverage from the prior milestone remains applicable:
+  this correction changes neither owner subprocess nor installation behavior.
+  Current-head review and actual merge remain open; no rollout is authorized.
+
 ### 2026-10-13 - Runtime implementation merged
 
 - Runtime PR #6517 merged to `dev` as
@@ -461,19 +477,3 @@ takeover, blanket freshness authorization, or parallel session owner is proposed
   not replace that owner or bypass a failed gate. It closes with the tested
   dev implementation merged and main publication explicitly unconfirmed.
   Host rollout is outside this completed effort and remains unauthorized.
-
-### 2026-10-13 - Full holder revalidation before keyed native start
-
-- Current-head CI passed, but the next review requested the complete holder
-  proof after awaited owner revalidation. Reused one sessionless predicate for
-  both admission checks, retaining ground history, live sessions, DB ownership,
-  and in-process sessions before synchronous local-start registration.
-- Connected tests show the existing SQLite gate already rejects ordinary
-  bridge/live-session inserts during that await. No second ordinary native
-  start was reproduced through those real registration paths. Added explicit
-  fence regressions plus late in-process/ownership-holder refusal regressions,
-  without weakening or bypassing the gate to manufacture a race.
-- Bridge creation/acquisition selection: 143 passed, three opt-in/platform
-  skips. Native-owner coverage from the prior milestone remains applicable:
-  this correction changes neither owner subprocess nor installation behavior.
-  Current-head review and actual merge remain open; no rollout is authorized.
