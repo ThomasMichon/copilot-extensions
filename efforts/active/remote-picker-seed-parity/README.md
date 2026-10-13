@@ -354,3 +354,15 @@ hiding the problem or silently dropping text.
   The fallback import finding is incorrect: machine_transport is the declared
   top-level shared distribution, not an agent_worktrees sibling, and the
   actual SSH/PowerShell process checks exercise that existing dependency.
+- **2026-10-13** -- Implementation-head CI and the workflow guard passed.
+  Documented and resolved fallback findings contradicted by the existing
+  default-launch router, OSError handling and shared unsupported-verb recovery.
+  The operator authorized further rebases of this same PR. Reconciled the next
+  base advance with upstream foreground progress streaming and its unbounded
+  preparation default, preserving both instead of applying a fixed limit to
+  every launch. Explicitly bounded remote prompts retain the admission timeout
+  floor; default None remains unbounded. The 102-case contained Manager client
+  and harness-state portfolio passes, including the expanded timeout matrix.
+  Retained the upstream parameterized WSL fixture rather than replaying an
+  obsolete registry rewrite. Current rebased-head CI/review, promotion,
+  installed rollout and normal-source Picker conversation proof remain open.

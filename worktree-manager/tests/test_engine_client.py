@@ -904,6 +904,9 @@ def test_resolve_without_seed_omits_seed_flag(monkeypatch):
 @pytest.mark.parametrize("target,seed,timeout,expected", [
     ("target", "task", 30, 240),
     ("target", "task", 500, 500),
+    ("target", "task", None, None),
+    (None, "task", None, None),
+    ("target", None, None, None),
     (None, "task", 30, 30),
     ("target", None, 30, 30),
     ("target", "", 30, 30),
@@ -912,7 +915,8 @@ def test_resolve_without_seed_omits_seed_flag(monkeypatch):
 def test_resolve_remote_prompt_timeout_floor(new, target, seed, timeout, expected, monkeypatch):
     seen = []
 
-    def run_json(project, args, *, timeout):
+    def run_json(project, args, *, timeout, stream_progress):
+        assert stream_progress is True
         seen.append(timeout)
         return {
             **_RESUME_PLAN, "seed_pending": bool(seed),

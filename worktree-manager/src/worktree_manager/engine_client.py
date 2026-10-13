@@ -605,8 +605,8 @@ def resolve_launch_plan(
     must refuse the capability flag before mutation, rather than silently
     dropping preservation. Ordinary seedless launches retain version-skew
     compatibility.
-    Remote prompted requests have a minimum timeout of 240 seconds: the outer
-    engine must outlive its bounded 180-second SSH admission and startup.
+    Explicitly bounded remote prompted requests allow at least 240 seconds:
+    the outer engine must outlive its 180-second SSH admission and startup.
 
     Version-skew tolerant: an older engine that does not know ``--bare-resume`` is
     retried as a plain resume (degrade the feature, don't fail) -- the same contract
@@ -646,7 +646,10 @@ def resolve_launch_plan(
     try:
         obj = run_json(
             project, args,
-            timeout=max(timeout, _REMOTE_ADMISSION_TIMEOUT) if target_machine and seed else timeout,
+            timeout=(
+                max(timeout, _REMOTE_ADMISSION_TIMEOUT)
+                if target_machine and seed and timeout is not None else timeout
+            ),
             stream_progress=True,
         )
     except EngineError as e:
