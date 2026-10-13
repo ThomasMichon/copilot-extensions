@@ -5,11 +5,10 @@ from __future__ import annotations
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import OptionList, SelectionList, Static
 
-from . import derive
 from .engine_focus import FocusGroup, _ScopeSelectionList
 from .engine_helpers import (
     ACTION_DESC,
