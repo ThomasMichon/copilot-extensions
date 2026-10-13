@@ -175,6 +175,37 @@ last-good rows until a complete replacement arrives. Explicit peer timeout,
 authentication, malformed-protocol and incompatible-capability refusals remain
 terminal; none authorizes a polling fallback or a daemon restart.
 
+Supported local-native New and cold-Resume composers save each nonempty accepted
+prompt to the Manager's local `seed-history/history.sqlite3` **before** requesting
+an engine launch plan. A timeout or failed launch therefore does not erase the submitted
+paste buffer. Reopen the composer and press **Up/Down** to recall older/newer
+seeds; multiline cursor movement remains available until the first/last text
+line, and **Ctrl+Up/Down** recalls history from anywhere. Browsing back past the
+newest entry restores the current unsent draft, including edits made while
+browsing.
+
+History is per project, survives Manager restarts and runtime updates, and
+retains exact submitted text locally under `WORKTREE_MANAGER_ROOT` (or the
+normal `~/.worktree-manager` root). It is not synced, logged, or automatically
+executed. Consecutive identical submissions do not create duplicates; entries
+are not automatically expired. Treat this database as private prompt content.
+The history directory and database are owner-only on POSIX; Windows uses a
+protected owner/SYSTEM ACL, including inherited protection for SQLite journals.
+Existing history permissions are repaired before access; failure blocks submission.
+Blank or cancelled prompts are not recorded. If saving fails, the composer
+stays open with its text and an error rather than launching an unprotected
+request. This recovery history is separate from the engine's pending launch
+intent and never retries an allocation automatically.
+
+Nonempty prompts with Anchor, Bare, AHP, or Local model selected refuse
+confirmation visibly and keep the draft open without recording it. Clear the
+prompt or change the options to continue. Remote and cross-environment
+(including Windows-to-WSL) creation does not offer a prompt composer; programmatic
+prompt requests for those transports, Bare resume, or active/uncertain execution
+legs refuse before engine staging. Seedless launches are unchanged. No Mux is a
+supported prompt launch modifier. History retains the exact paste buffer;
+launch submission retains the composer's existing surrounding-whitespace trimming.
+
 Sessionless workspaces retained by another controller appear separately under
 **Owned**, not as ordinary resumable conversations. Use **Go to controller**
 when its exact target is loaded, or **Refresh** / **View details** to diagnose

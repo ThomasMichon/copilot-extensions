@@ -649,8 +649,9 @@ class ScopeDlgScreen(ModalScreen[bool]):
         self._show_prompt = show_prompt
         self.seed_prompt = ""            # set on Confirm when show_prompt is True
         if show_prompt:
-            self._prompt_widgets, self._prompt_rec = compose_field(
-                {"name": "prompt", "type": "textarea"}, 0)
+            from .seed_prompt_field import compose_seed_prompt
+
+            self._prompt_widgets, self._prompt_rec = compose_seed_prompt()
         else:
             self._prompt_widgets, self._prompt_rec = (), None
 
@@ -676,7 +677,8 @@ class ScopeDlgScreen(ModalScreen[bool]):
             if self._show_prompt:
                 yield Static(
                     "Prompt (optional, gets queued as this session's first "
-                    "interactive turn once Copilot is ready):",
+                    "interactive turn once Copilot is ready):\n"
+                    "Up/Down: seed history at text boundaries; Ctrl+Up/Down: anywhere.",
                     id="scope-seed-hint",
                 )
                 yield from self._prompt_widgets
@@ -759,6 +761,9 @@ class ScopeDlgScreen(ModalScreen[bool]):
     def on_focus_group_activated(self, event: FocusGroup.Activated) -> None:
         confirmed = event.value == "confirm"
         if confirmed and self._show_prompt:
+            options = [o["label"] for o in self._dlg["opts"] if o["on"]]
+            if not self._prompt_rec["primary"].remember(options=options):
+                return
             self.seed_prompt = self._collect_prompt()
         self.dismiss(confirmed)
 

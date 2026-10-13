@@ -25,10 +25,15 @@ def open_resume_prompt(screen, rec, *, no_mux=False, ahp=False) -> None:
 
     if not _eligible():
         return
+    leg = rec.get("execution_leg") or (rec.get("raw") or {}).get("execution_leg")
+    supported = not ahp and not (
+        isinstance(leg, dict) and leg.get("state", "unknown") in {"active", "unknown"}
+    )
     title = rec.get("title") or rec.get("id4") or "this worktree"
     scr = PromptDlgScreen(
         f"Resume prompt · {title}",
         "Prompt (optional; saved for retry until Copilot takes this cold resume):",
+        seed_supported=supported,
     )
 
     def _after(confirmed):

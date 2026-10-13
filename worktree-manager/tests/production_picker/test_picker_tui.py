@@ -4735,15 +4735,8 @@ def test_new_worktree_dialog_focus_stops_prompt_list_buttons():
     asyncio.run(run())
 
 
-def test_new_worktree_bare_drops_seed_prompt(monkeypatch):
-    """#4778-ish (picker-new-session-prompt-and-composer Phase A item 3): a
-    Bare worktree gets no Copilot bootstrap at all -- nothing to seed -- so
-    confirming Create with Bare checked must silently drop whatever was
-    typed into the SAME dialog's prompt box, never forwarding it toward a
-    launch that could never deliver it. ``_SEED_PROMPT_ENABLED`` is on by
-    default now that both delivery seams (engine_client's --seed forward +
-    launch-session.{ps1,sh}'s post-create `embody` call) are closed; this
-    monkeypatch is now a no-op defensive pin, not a feature-gate override."""
+def test_new_worktree_bare_refuses_prompt_but_allows_blank_launch(monkeypatch):
+    """Bare has no prompt handoff; refuse without discarding the draft."""
     from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
     from worktree_manager.production_picker.picker_tui.field_widgets import (
         _AutoExpandTextArea,
@@ -4771,6 +4764,14 @@ def test_new_worktree_bare_drops_seed_prompt(monkeypatch):
             await pilot.press("space")          # toggle Bare on
             await pilot.press("tab")            # options -> buttons
             await pilot.press("enter")          # confirm Create
+            await pilot.pause()
+            assert app.screen is dlg and app.result is None
+            field = dlg.query_one("#q-0", _AutoExpandTextArea)
+            assert field.text == "fix the flaky test"
+            field.load_text("")
+            from worktree_manager.production_picker.picker_tui.engine_focus import FocusGroup
+            dlg.on_focus_group_activated(
+                FocusGroup.Activated(dlg.query_one(FocusGroup), 0, "confirm"))
             await pilot.pause()
         assert app.result is not None
         assert app.result["action"] == "new"
