@@ -187,7 +187,7 @@ async def remote_session_status(
         _raise(exc)
 
 
-@router.get("/{host}/live-sessions/{session_id}")
+@router.get("/{host}/live-sessions/{session_id:path}")
 async def remote_live_session(
     host: str, session_id: str, request: Request
 ) -> dict[str, Any]:
@@ -254,7 +254,7 @@ async def remote_end_session(
         _raise(exc)
 
 
-@router.post("/{host}/live-sessions/{target}/messages")
+@router.post("/{host}/live-sessions/{target:path}/messages")
 async def remote_send_live_message(
     host: str,
     target: str,

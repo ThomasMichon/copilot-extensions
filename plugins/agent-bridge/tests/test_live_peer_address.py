@@ -53,27 +53,31 @@ def _register(db, sid, machine, project="project-a", worktree="wt-a", *, now=Non
     ) == "live"
 
 
-def test_qualified_handle_survives_turnover_and_database_reopen(tmp_path):
+@pytest.mark.parametrize("project", ["project-a", "owner/repo"])
+def test_qualified_handle_survives_turnover_and_database_reopen(tmp_path, project):
     path = tmp_path / "bridge.db"
     db = Database(path)
     try:
-        _register(db, "old", "host-a")
-        _register(db, "new", "host-a", now=time.time() + 1)
+        _register(db, "old", "host-a", project=project)
+        _register(db, "new", "host-a", project=project, now=time.time() + 1)
         _register(db, "other-project", "host-a", project="project-b", now=time.time() + 2)
-        _register(db, "other-machine", "host-b", now=time.time() + 3)
-        assert db.resolve_live_session("live:host-a:project-a:wt-a", now=time.time())["session_id"] == "new"
+        _register(db, "other-machine", "host-b", project=project, now=time.time() + 3)
+        assert db.resolve_live_session(f"live:host-a:{project}:wt-a", now=time.time())["session_id"] == "new"
     finally:
         db.close()
     db = Database(path)
     try:
-        assert db.resolve_live_session("live:host-a:project-a:wt-a", now=time.time())["session_id"] == "new"
+        assert db.resolve_live_session(f"live:host-a:{project}:wt-a", now=time.time())["session_id"] == "new"
         assert db.resolve_live_session("live:host-a:missing:wt-a", now=time.time()) is None
-        assert db.resolve_live_session("live:host-a:project-a:wt-a", now=time.time() + 3600) is None
+        assert db.resolve_live_session(f"live:host-a:{project}:wt-a", now=time.time() + 3600) is None
     finally:
         db.close()
 
 
-@pytest.mark.parametrize("handle", ["live:", "live:a:b", "live:a:b:c:d", "live:a:b:../c"])
+@pytest.mark.parametrize("handle", [
+    "live:", "live:a:b", "live:a:b:c:d", "live:a:b:../c", "live:a/b:c:d",
+    "live:a:b:c/d", "live:a:/b:c", "live:a:b/:c", "live:a:b//c:d", "live:a:b/../c:d",
+])
 def test_invalid_explicit_address_never_spawns(monkeypatch, capsys, handle):
     monkeypatch.setattr(cli, "_get_client", lambda: SimpleNamespace())
     monkeypatch.setattr(cli, "_resolve_target", lambda *_a, **_k: pytest.fail("agent fallback"))
@@ -99,13 +103,16 @@ def test_unavailable_explicit_address_never_spawns(monkeypatch):
 
 
 @pytest.mark.parametrize("idempotency_key", [pytest.param(None, marks=pytest.mark.guard), "peer-call-1"])
-def test_two_bridge_call_and_reverse_reply_preserve_addresses(tmp_path, monkeypatch, capsys, idempotency_key):
+@pytest.mark.parametrize("project", ["project-a", "owner/repo"])
+def test_two_bridge_call_and_reverse_reply_preserve_addresses(
+    tmp_path, monkeypatch, capsys, idempotency_key, project,
+):
     a_db, b_db = Database(tmp_path / "a.db"), Database(tmp_path / "b.db")
     try:
         a_app, a_client = _bridge(a_db)
         b_app, b_client = _bridge(b_db)
-        _register(a_db, "a-old", "host-a")
-        _register(b_db, "b-current", "host-b", worktree="wt-b")
+        _register(a_db, "a-old", "host-a", project=project)
+        _register(b_db, "b-current", "host-b", project=project, worktree="wt-b")
 
         class Carrier:
             def __init__(self, client):
@@ -144,9 +151,10 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(tmp_path, monkeypa
         monkeypatch.setattr(cli, "_worktrees_get", lambda _: "/fixture/wt-a")
         monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "a-old")
         args = argparse.Namespace(
-            target="live:host-b:project-a:wt-b", prompt="call", json=True,
+            target=f"live:host-b:{project}:wt-b", prompt="call", json=True,
             no_wait=False, reply_timeout=2.0, idempotency_key=idempotency_key,
         )
+        assert a_client.resolve_remote_live_session("host-b", args.target)["session_id"] == "b-current"
         cli._cmd_send(args)
         output = capsys.readouterr().out
         assert '"replied": true' in output and '"reply": "peer response"' in output
@@ -156,8 +164,8 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(tmp_path, monkeypa
         observed = json.loads(output)
         assert {key: observed[key] for key in expected} == expected
         received = b_db.list_pending_live_messages("b-current")
-        assert received[0]["reply_to"] == "live:host-a:project-a:wt-a"
-        _register(a_db, "a-new", "host-a", now=time.time() + 1)
+        assert received[0]["reply_to"] == f"live:host-a:{project}:wt-a"
+        _register(a_db, "a-new", "host-a", project=project, now=time.time() + 1)
         monkeypatch.setattr(cli, "_get_client", lambda: b_client)
         monkeypatch.setattr(cli, "_live_sender_label", lambda _: "wt-b")
         monkeypatch.setattr(cli, "_worktrees_get", lambda _: "/fixture/wt-b")

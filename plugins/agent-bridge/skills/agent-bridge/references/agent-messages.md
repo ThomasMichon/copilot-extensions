@@ -25,6 +25,8 @@ A delivered message looks like this (a marker in the same family as the runtime'
   advertise `live:<machine>:<project>:<worktree>`, not a conversation id. The
   address selects the hosting bridge and its current fresh session for that
   exact project/worktree, so it survives session turnover and bridge restart.
+  The project may be slash-separated (for example `owner/repo`); machine and
+  worktree remain single identity components.
   Legacy local worktree handles and exact session ids remain supported. It may
   be absent when the sender cannot receive a live-session reply.
 - `msg-id` — the sender's message id, useful as a correlation reference.

@@ -31,7 +31,9 @@ class LivePeerAddress:
             return None
         parts = handle.split(":")
         if (len(parts) != 4 or len(handle) > 256
-                or any(_PART.fullmatch(part) is None for part in parts[1:])):
+                or _PART.fullmatch(parts[1]) is None
+                or any(_PART.fullmatch(segment) is None for segment in parts[2].split("/"))
+                or _PART.fullmatch(parts[3]) is None):
             raise ValueError("peer address must be live:<machine>:<project>:<worktree>")
         return cls(*parts[1:])
 
@@ -41,6 +43,19 @@ class LivePeerAddress:
         if any(not isinstance(part, str) or not part for part in parts):
             return None
         return cls.parse("live:" + ":".join(str(part) for part in parts))
+
+
+def validate_live_handle(value: Any, *, field: str) -> str:
+    from .remote_errors import RemoteBridgeError
+    from .remote_operations import validate_session_id
+
+    if isinstance(value, str) and value.startswith("live:"):
+        try:
+            LivePeerAddress.parse(value)
+        except ValueError as exc:
+            raise RemoteBridgeError(400, "invalid_request", f"{field}: {exc}") from exc
+        return value
+    return validate_session_id(value, field=field)
 
 
 def send_remote_peer(client: BridgeClient, args: Namespace, address: LivePeerAddress, *, sender: str,
@@ -110,7 +125,7 @@ async def deliver_remote_peer(client: BridgeClient, payload: dict[str, Any]) -> 
 
     if peer_reply_requested(payload):
         await require_peer_reply_protocol(client)
-    target = validate_session_id(payload.get("target"), field="target")
+    target = validate_live_handle(payload.get("target"), field="target")
     sender = validate_caller_id(payload.get("sender"), field="sender")
     message = validate_message(payload.get("message"), field="message")
     idempotency_key = validate_optional_id(
@@ -119,7 +134,9 @@ async def deliver_remote_peer(client: BridgeClient, payload: dict[str, Any]) -> 
     expected_session_id = validate_optional_id(
         payload.get("expected_session_id"), field="expected_session_id", maximum=MAX_SESSION_ID_LENGTH,
     )
-    reply_to = validate_optional_id(payload.get("reply_to"), field="reply_to", maximum=MAX_SESSION_ID_LENGTH)
+    reply_to = payload.get("reply_to")
+    if reply_to is not None:
+        reply_to = validate_live_handle(reply_to, field="reply_to")
     wait = validate_optional_bool(payload, "wait")
     reply_options: dict[str, Any] = {}
     if reply_to is not None:

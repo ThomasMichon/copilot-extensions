@@ -34,6 +34,7 @@ from .live_peer_address import (
     peer_reply_requested as _peer_reply_requested,
     peer_wait_timeout as _peer_wait_timeout,
     require_peer_reply_protocol as _require_peer_reply_protocol,
+    validate_live_handle as _validate_live_handle,
 )
 
 REMOTE_OPERATION_VERSION = 4
@@ -421,13 +422,10 @@ class CarrierRequestRouter:
                     EnvelopeType.RESPONSE,
                     payload={"result": result},
                 )
-            session_id = validate_session_id(
-                payload.get("session_id"),
-                field=(
-                    "target"
-                    if operation == "live_session.resolve"
-                    else "session_id"
-                ),
+            session_id = (
+                _validate_live_handle(payload.get("session_id"), field="target")
+                if operation == "live_session.resolve"
+                else validate_session_id(payload.get("session_id"))
             )
             if operation == "session.stop":
                 force = validate_optional_bool(payload, "force")
@@ -989,7 +987,7 @@ class RemoteOperationService:
             host,
             {
                 "operation": "live_session.resolve",
-                "session_id": validate_session_id(target, field="target"),
+                "session_id": _validate_live_handle(target, field="target"),
             },
         )
         result = response.get("result")
@@ -1081,7 +1079,7 @@ class RemoteOperationService:
             host,
             {
                 "operation": "live_session.send",
-                "target": validate_session_id(target, field="target"),
+                "target": _validate_live_handle(target, field="target"),
                 "sender": validate_caller_id(sender, field="sender"),
                 "message": validate_message(message, field="message"),
                 "kind": kind,
@@ -1096,9 +1094,7 @@ class RemoteOperationService:
                     field="idempotency_key",
                     maximum=MAX_IDEMPOTENCY_KEY_LENGTH,
                 ),
-                "reply_to": validate_optional_id(
-                    reply_to, field="reply_to", maximum=MAX_SESSION_ID_LENGTH,
-                ),
+                "reply_to": _validate_live_handle(reply_to, field="reply_to") if reply_to is not None else None,
                 "wait": wait,
                 "wait_timeout": _peer_wait_timeout(wait_timeout),
             },
