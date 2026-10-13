@@ -38,6 +38,43 @@ the journal's own schema/state or invoke privileged connection methods.
 The callback's effect table and result reference must contain no secrets.
 No transaction lock is held across an external effect.
 
+## Owned cooperative allocations
+
+`accept_allocation(intent, resource=...)` binds a `workspace.allocate` intent to
+one canonical local resource, committing its held ownership and acceptance/spool
+together. The caller must authenticate/authorize the operation and resolve the
+real resource identity; aliases must not name the same resource as independent
+ones. Resource identifiers use the existing 1-128-character bounded ASCII shape.
+One operation owns at most one resource, and another operation cannot accept
+that resource, even with a higher generation, different account or principal.
+Exact repeats return the original latest receipt. Historical unbound acceptance
+cannot acquire ownership retroactively.
+
+For allocations, `commit_cooperative(intent, apply, resource=...)` requires
+exact held ownership in the **same transaction that executes the SQLite effect**.
+Immutable accepted intent binds authority, target, principal/account, request
+content and generation. Wrong ownership/resource/content fails before invoking
+the callback. Ownership and accepted content are rechecked after the trusted
+callback; a changed binding rolls back its effect. Terminal retries still require
+the original binding and do not execute again. Generic cooperative calls without
+a resource cannot bypass allocation ownership, and nonallocation operations
+cannot supply a resource binding.
+
+This is effect exclusion only for a correctly implemented trusted SQLite-only
+adapter whose resource lives in this journal's local transaction. It does not
+fence a filesystem workspace, process, provider or resource shared with another
+node/database. Two node journals do not jointly exclude a shared external
+resource. `begin_external` explicitly refuses allocations: the existing UNKNOWN
+attempt marker is not a substitute for an actual external effect-owner fence.
+Generic `accept` remains available for legacy journal records, not permission
+to execute an unbound allocation.
+
+`allocation_owner(resource=...)` returns the immutable owning intent, or null,
+as local evidence only. There is no TTL, release or generation-transfer API.
+Succeeded or failed outcomes do not relinquish ownership; competing generations
+remain blocked after an outcome or controller disconnection. Verified retirement
+and release evidence are the next contract, not inferred from elapsed time.
+
 ## Noncooperative effects and uncertainty
 
 `begin_external(intent)` atomically persists UNKNOWN before external execution.
@@ -80,7 +117,13 @@ synchronous commits and local serialized writers. Every transaction verifies
 schema and exact authority/installation/target identity. Only construction can
 create storage; operations fail without recreating a removed database.
 Unsupported/foreign databases are refused, and storage errors propagate.
-It is not a migration mechanism, hostile-client isolation, network-share
+Construction upgrades known schema 1 to schema 2 transactionally, preserving
+existing acceptance, receipt history and cooperative effect tables while adding
+empty resource ownership. It refuses incompatible core columns or a preexisting
+reserved ownership-table/view name. No ownership is invented for old operations.
+Old schema writers/readers fail closed after upgrade; no downgrade or stale
+backup restore is supplied.
+It is not a V1 authority-migration mechanism, hostile-client isolation, network-share
 database, multi-host fence, power-loss durability proof or HA implementation.
 
 Tests exercise installed code across real process boundaries: concurrent
@@ -88,3 +131,8 @@ duplicate effects, abrupt pre-commit exit, post-commit lost reply followed by
 Gateway reconciliation without effect duplication, and external-attempt crash
 that remains UNKNOWN. No live deployment, service enrollment or authorization
 change is required or performed by these tests.
+Owned allocation tests additionally exercise four installed node processes,
+competing identities/generations, effect crash rollback with retained ownership,
+lost postcommit replies with one effect, atomic spool rollback and legacy schema
+upgrade without historical ownership. These local proofs do not establish
+cross-host fencing, revocable delegated grants or live Gateway/node readiness.

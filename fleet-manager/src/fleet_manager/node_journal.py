@@ -41,11 +41,40 @@ class NodeJournal:
                     "UNIQUE(operation_id,sequence))"
                 )
                 connection.execute("PRAGMA user_version=1")
-            self._verify(connection)
+                version = 1
+            self._verify(connection, version=version)
+            if version == 1:
+                if connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name='allocation_owners' COLLATE NOCASE"
+                ).fetchone():
+                    raise PlanError("unrecognized node allocation schema")
+                connection.execute(
+                    "CREATE TABLE allocation_owners("
+                    "resource TEXT PRIMARY KEY NOT NULL,"
+                    "operation_id INTEGER NOT NULL UNIQUE REFERENCES operations(id))"
+                )
+                connection.execute("PRAGMA user_version=2")
 
-    def _verify(self, connection):
-        if connection.execute("PRAGMA user_version").fetchone()[0] != 1:
+    def _verify(self, connection, *, version=2):
+        if version not in (1, 2) or connection.execute(
+            "PRAGMA user_version"
+        ).fetchone()[0] != version:
             raise PlanError("unsupported node journal schema")
+        columns = {
+            "identity": ("authority", "installation", "target"),
+            "operations": ("id", "principal", "account", "operation", "intent"),
+            "receipts": ("cursor", "operation_id", "sequence", "receipt"),
+        }
+        if version == 2:
+            columns["allocation_owners"] = ("resource", "operation_id")
+        for name, expected in columns.items():
+            kind = connection.execute(
+                "SELECT type FROM sqlite_master WHERE name=?", (name,),
+            ).fetchone()
+            actual = tuple((row[1], row[6]) for row in
+                           connection.execute(f"PRAGMA table_xinfo({name})"))
+            if kind != ("table",) or actual != tuple((column, 0) for column in expected):
+                raise PlanError("unrecognized node journal schema")
         identity = connection.execute(
             "SELECT authority,installation,target FROM identity"
         ).fetchall()
@@ -123,27 +152,81 @@ class NodeJournal:
         """Caller authenticates and authorizes first; duplicate delivery does no effect."""
         value = self._scope(intent)
         with self._transaction() as connection:
+            return self._accept(connection, value, intent)
+
+    def _accept(self, connection, value, intent):
+        prior = self._find(connection, value)
+        if prior:
+            OperationIntent(bytes(prior[1])).check_repeat(intent)
+            return self._latest(connection, prior[0])
+        cursor = connection.execute(
+            "INSERT INTO operations(principal,account,operation,intent) VALUES(?,?,?,?)",
+            (value["principal"], value["account"], value["operation"], intent.encoded),
+        )
+        receipt = self._receipt(intent, "accepted", 1)
+        self._append(connection, cursor.lastrowid, receipt)
+        return receipt
+
+    def accept_allocation(self, intent, *, resource):
+        """Own a canonical local SQLite resource with acceptance; never an external fence."""
+        value = self._allocation_scope(intent, resource)
+        with self._transaction() as connection:
             prior = self._find(connection, value)
             if prior:
                 OperationIntent(bytes(prior[1])).check_repeat(intent)
+                self._check_owner(connection, prior[0], resource)
                 return self._latest(connection, prior[0])
-            cursor = connection.execute(
-                "INSERT INTO operations(principal,account,operation,intent) VALUES(?,?,?,?)",
-                (value["principal"], value["account"], value["operation"], intent.encoded),
+            if connection.execute(
+                "SELECT 1 FROM allocation_owners WHERE resource=?", (resource,),
+            ).fetchone():
+                raise PlanError("node allocation resource is already owned")
+            accepted = self._accept(connection, value, intent)
+            operation_id = self._find(connection, value)[0]
+            connection.execute(
+                "INSERT INTO allocation_owners VALUES(?,?)", (resource, operation_id),
             )
-            receipt = self._receipt(intent, "accepted", 1)
-            self._append(connection, cursor.lastrowid, receipt)
-            return receipt
+            return accepted
 
-    def commit_cooperative(self, intent, apply):
+    def _allocation_scope(self, intent, resource):
+        identifier(resource, "node allocation resource")
+        value = self._scope(intent)
+        if value["command"] != "workspace.allocate":
+            raise PlanError("node allocation requires workspace.allocate")
+        return value
+
+    @staticmethod
+    def _check_owner(connection, operation_id, resource):
+        row = connection.execute(
+            "SELECT operation_id FROM allocation_owners WHERE resource=?", (resource,),
+        ).fetchone()
+        if row != (operation_id,):
+            raise PlanError("operation does not own the node allocation resource")
+
+    def allocation_owner(self, *, resource):
+        """Read held local ownership, not an execution grant or release acknowledgment."""
+        identifier(resource, "node allocation resource")
+        with self._transaction(write=False) as connection:
+            row = connection.execute(
+                "SELECT o.intent FROM allocation_owners a"
+                " JOIN operations o ON o.id=a.operation_id WHERE a.resource=?", (resource,),
+            ).fetchone()
+            return OperationIntent(bytes(row[0])) if row else None
+
+    def commit_cooperative(self, intent, apply, *, resource=None):
         """Trusted short SQLite-only callback returns a succeeded result reference.
 
         The callback must use this connection without committing, and perform no
         external effects. Its local effect and receipt commit or roll back together.
         """
-        self._scope(intent)
+        value = self._scope(intent)
+        if value["command"] == "workspace.allocate":
+            self._allocation_scope(intent, resource)
+        elif resource is not None:
+            raise PlanError("resource binding requires workspace.allocate")
         with self._transaction() as connection:
             operation_id, prior = self._accepted(connection, intent)
+            if value["command"] == "workspace.allocate":
+                self._check_owner(connection, operation_id, resource)
             status = prior.to_dict()["status"]
             if status in ("succeeded", "failed"):
                 return prior
@@ -160,6 +243,9 @@ class NodeJournal:
             finally:
                 connection.set_authorizer(None)
             self._verify(connection)
+            if value["command"] == "workspace.allocate":
+                self._accepted(connection, intent)
+                self._check_owner(connection, operation_id, resource)
             receipt = self._receipt(intent, "succeeded",
                                     prior.to_dict()["sequence"] + 1, result_ref)
             self._append(connection, operation_id, receipt)
@@ -171,7 +257,8 @@ class NodeJournal:
         A true return licenses only this caller's already-authorized attempt.
         A crash before or after the effect leaves UNKNOWN and forbids blind retry.
         """
-        self._scope(intent)
+        if self._scope(intent)["command"] == "workspace.allocate":
+            raise PlanError("external allocation requires an effect-owner fence")
         with self._transaction() as connection:
             operation_id, prior = self._accepted(connection, intent)
             if prior.to_dict()["status"] != "accepted":

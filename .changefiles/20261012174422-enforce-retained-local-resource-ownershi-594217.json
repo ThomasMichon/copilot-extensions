@@ -1,0 +1,9 @@
+{
+  "comment": "Enforce retained local resource ownership inside cooperative allocation effect transactions",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

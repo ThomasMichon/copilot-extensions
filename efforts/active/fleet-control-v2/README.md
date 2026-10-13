@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; durable receiver replay landed, allocation/fencing next
+- **Status:** Active; allocation claims landed, cooperative effect fencing next
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts. Existing dependencies #5789, #6030, #5861, #5862 retain ownership.
@@ -115,8 +115,8 @@ All detailed slices are **agent-recommended** and remain subject to review.
   transactional intent/claims/audit/outbox and target-side receipt reconciliation.
   Intent/receipt contracts and local admission/outbox/audit persistence landed
   in #6357/#6360; explicit node acceptance/effect receipts landed in #6388.
-  Durable receiver cursors landed in #6395. Allocation claims and authenticated
-  runtime integration remain open.
+  Durable receiver cursors landed in #6395 and local allocation claims in #6403.
+  Effect-owner fencing and authenticated runtime integration remain open.
 - [ ] Prove objective -> workspace -> host -> prompt -> outcome -> settlement
   locally, then through one Gateway and two separate nodes.
 - [ ] Persist scope/generation fences at cooperative effect owners; define
@@ -307,3 +307,40 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 - Next after review/merge is cooperative effect-owner resource fencing and explicit
   release evidence, not TTL-based reassignment. The full Plan and Validation Plan
   remain open; routing/auth and deployment owners retain their scopes.
+
+### 2026-10-13 - Allocation claims landed; effect-owner seam started
+- #6403 merged at `2026-10-13T00:40:17Z`, commit
+  `a8a7e0636e86b80d1534be0b7242eca430e46788`, after current-head Copilot APPROVED
+  with zero findings and green required and ordinary CI. Final installed suite:
+  224 passed. Pulled forward the verified merge with managed sync.
+- Re-read the parent Plan and Validation Plan. Local storage joins are now present;
+  authenticated runtime integration, effect exclusion and lifecycle/adoption proof
+  remain open. This is not complete Phase 2 or objective settlement.
+- Next bounded #6241 slice persists a cooperative local SQLite resource owner at
+  node acceptance and checks exact owner/intent/generation in the effect
+  transaction. Retained ownership blocks competing generations; no expiry or
+  external-resource fencing is inferred. Explicit verified release evidence follows.
+
+### 2026-10-13 - Cooperative allocation owner slice prepared
+- Added node-local held ownership with acceptance/spool, and exact
+  resource/intent/generation checks inside the cooperative SQLite effect
+  transaction. Callback effects and outcomes still commit or roll back together.
+  Rechecks reject a callback that mutates its own binding.
+- Generic unbound allocation effects and external allocation attempts fail
+  explicitly. Node-local SQLite ownership is not a fence for a filesystem,
+  provider, running process or resource shared across nodes/databases.
+- Known schema-1 upgrade preserves accepted work, result spool and effect tables,
+  adds no historical ownership, and refuses reserved-name/core-column collisions.
+  No claim release, TTL or generation reassignment was introduced.
+- Unit and simple installed-package local E2E: 247 passed, including four real
+  competing/duplicate node clients, acceptance and effect precommit crashes,
+  postcommit lost replies, resource storage failure, receipt rollback and
+  Gateway result reconciliation. Lint, install contract and version consistency
+  passed. Full machine clean-room omitted: no installer/bootstrap seam changed.
+  Live external-venue omitted: no adopted integrated Gateway/node runtime exists.
+- Documentation states the exact cooperative boundary and changed failure paths.
+  This realizes part of the reviewed machine-fleet effect-owner intent without
+  changing standalone lifecycle/defaults or existing routing/auth ownership.
+  Next after review/merge is explicit verified release evidence and safe local
+  generation transfer, not expiration-based reassignment. Full runtime, partition,
+  host-survival, installation and adoption gates remain open.

@@ -116,10 +116,13 @@ The separate explicit [node journal](node-journal.md) now owns local acceptance,
 cooperative effect receipts and a result spool; it does not share this database.
 
 **Not yet delivered:** target authentication,
-claim release/reassignment and effect-owner fences, bounded queue/audit retention,
+claim release/reassignment and external effect-owner fences, bounded queue/audit retention,
 authoritative generation transfer, subscriptions, authenticated Gateway/node protocol,
 installer readiness or high availability. The current journal is a local
 building block in one product, not a second deployed queue beside V1.
+The node journal additionally enforces held ownership for its cooperative
+SQLite-only allocation effects; this does not fence an external workspace
+or authorize Gateway-side release.
 
 Tests prove real separate-process committed admission, abrupt process exit with
 an uncommitted transaction, concurrent duplicate clients, admission/receipt audit

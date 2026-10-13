@@ -174,6 +174,11 @@ the caller's responsibility.
 An explicit [node journal](docs/node-journal.md) now persists local acceptance,
 cooperative SQLite effects and correlated receipts with an append-only result
 spool. External attempts conservatively persist UNKNOWN before execution and
-cannot be retried blindly. This Python API is not a node service, remote
+cannot be retried blindly. Allocations instead require identified held ownership
+at acceptance and within the cooperative SQLite effect transaction; generic
+unbound effects and external allocation attempts are refused. Ownership survives
+outcomes and has no release/expiry API. This protects correctly implemented
+local SQLite adapters, not external workspaces or resources shared across nodes.
+This Python API is not a node service, remote
 executor, authenticated reconnect protocol or distributed fence; no role is
 installed or activated automatically.
