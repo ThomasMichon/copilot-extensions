@@ -5,17 +5,20 @@ import subprocess
 import sys
 from pathlib import Path
 
-import psutil
+import pytest
 
 from agent_procutil import no_window_kwargs
 from agent_procutil.metrics import OwnedProcessCpuSampler, ProcessIdentity
 
+SOURCE = Path(__file__).resolve().parents[1] / "src"
+
 
 def test_default_and_metrics_imports_do_not_load_optional_backend() -> None:
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 - interpreter and source path are fixture-owned
         [sys.executable, "-c",
-         "import sys,agent_procutil,agent_procutil.metrics; "
-         "print('psutil' in sys.modules)"],
+         "import sys; sys.path.insert(0,sys.argv[1]); "
+         "import agent_procutil,agent_procutil.metrics; "
+         "print('psutil' in sys.modules)", str(SOURCE)],
         capture_output=True, text=True, timeout=10, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
@@ -23,6 +26,7 @@ def test_default_and_metrics_imports_do_not_load_optional_backend() -> None:
 
 
 def test_native_owned_child_cpu_increases(tmp_path: Path) -> None:
+    psutil = pytest.importorskip("psutil", reason="native CPU observation needs the metrics extra")
     release = tmp_path / "release"
     child_code = (
         "import pathlib,sys,time;"
@@ -34,6 +38,7 @@ def test_native_owned_child_cpu_increases(tmp_path: Path) -> None:
     )
     root_code = (
         "import pathlib,subprocess,sys,time;"
+        "sys.path.insert(0,sys.argv[3]);"
         "from agent_procutil import no_window_kwargs;"
         "release=pathlib.Path(sys.argv[1]);"
         "child=subprocess.Popen([sys.executable,'-c',sys.argv[2],str(release)],"
@@ -42,7 +47,7 @@ def test_native_owned_child_cpu_increases(tmp_path: Path) -> None:
         "\nchild.wait(timeout=10)"
     )
     process = subprocess.Popen(  # noqa: S603 - interpreter and scripts are fixture-owned
-        [sys.executable, "-c", root_code, str(release), child_code],
+        [sys.executable, "-c", root_code, str(release), child_code, str(SOURCE)],
         **no_window_kwargs(),
     )
     try:

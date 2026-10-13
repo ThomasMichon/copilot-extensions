@@ -353,3 +353,11 @@ Sampling uses a running native future rather than treating a cancelled
 asyncio task as proof that the observation thread ended. A loop-shutdown
 regression proves a later loop joins the original holder without another
 native sample. No new resident process or termination surface is introduced.
+
+The default shared-library CI lane does not install optional metrics. Native
+CPU validation explicitly requires that extra; ordinary imports and the
+stdlib-only test lane remain runnable without it. The fixture passes its
+checkout source path to child interpreters, so bare pytest and editable-package
+validation exercise the same source. Cold default validation passed 77 tests
+with one explicitly skipped native-metrics fixture; metrics-enabled validation
+passed all 78. This does not substitute for the outstanding Linux native proof.
