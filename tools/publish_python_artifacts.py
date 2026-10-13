@@ -35,6 +35,13 @@ def _check(result: subprocess.CompletedProcess) -> str:
     return result.stdout
 
 
+def _is_not_found(result: subprocess.CompletedProcess) -> bool:
+    return result.returncode != 0 and re.fullmatch(
+        r"(?:gh:\s+[^\r\n]*\(HTTP[ \t]+404\)|\(HTTP[ \t]+404\)|(?:gh:[ \t]+)?HTTP[ \t]+404(?::[^\r\n]*)?)",
+        result.stderr.strip(),
+    ) is not None
+
+
 def verify_attestations(
     directory: Path, *, repository: str, signer_digest: str, source_digest: str,
     source_ref: str,
@@ -66,7 +73,7 @@ def verify_attestations(
 def _tag_commit(repository: str, tag: str) -> str | None:
     result = _gh(["api", f"repos/{repository}/git/ref/tags/{tag}"])
     if result.returncode:
-        if "(HTTP 404)" in result.stderr:
+        if _is_not_found(result):
             return None
         _check(result)
     seen = set()
@@ -143,7 +150,7 @@ def publish_artifacts(
         result = _gh(["api", f"repos/{repository}/releases/tags/{tag}"])
         absent = False
         if result.returncode:
-            if "(HTTP 404)" not in result.stderr:
+            if not _is_not_found(result):
                 _check(result)
             absent = True
         release = None if absent else _release(result, tag)

@@ -173,6 +173,8 @@ when GitHub's reported SHA-256
 digest matches. Draft or malformed releases are rejected, not treated as
 consumer-visible publication. The publisher resolves lightweight/annotated
 tags and validates their source binding before accepting or uploading assets.
+Only an explicit HTTP 404 in a supported GitHub CLI error format means a
+missing tag or release; permission errors and ambiguous diagnostics stay fatal.
 A new tag must resolve to the exact merged commit after release creation;
 asset upload is separate and happens only after that recheck. An existing
 version tag may point to an older shipped ancestor only when its exact

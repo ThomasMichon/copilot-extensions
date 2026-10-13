@@ -860,7 +860,12 @@ def _publish_fixture(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("status", ["absent", "exists", "same", "different", "unauthorized", "draft"])
-def test_release_publication_never_clobbers_and_only_treats_404_as_absence(tmp_path, monkeypatch, status):
+@pytest.mark.parametrize("not_found", [
+    "gh: Not Found (HTTP 404)", "HTTP 404: Not Found", "gh: HTTP 404: Not Found",
+])
+def test_release_publication_never_clobbers_and_only_treats_404_as_absence(
+    tmp_path, monkeypatch, status, not_found,
+):
     directory, entry = _publish_fixture(tmp_path, monkeypatch)
     calls = []
     created = False
@@ -874,13 +879,13 @@ def test_release_publication_never_clobbers_and_only_treats_404_as_absence(tmp_p
             return subprocess.CompletedProcess(argv, 0, "", "")
         if "/git/ref/tags/" in argv[1]:
             if status == "absent" and not created:
-                return subprocess.CompletedProcess(argv, 1, "", "gh: Not Found (HTTP 404)")
+                return subprocess.CompletedProcess(argv, 1, "", not_found)
             return subprocess.CompletedProcess(
                 argv, 0, json.dumps({"object": {"type": "commit", "sha": TREE}}), "",
             )
         if (status == "absent" and not created) or status == "unauthorized":
             return subprocess.CompletedProcess(
-                argv, 1, "", "gh: Not Found (HTTP 404)" if status == "absent" else "HTTP 403",
+                argv, 1, "", not_found if status == "absent" else "HTTP 403",
             )
         assets = [] if status in ("exists", "absent", "draft") else [{
             "name": entry["filename"],
@@ -908,6 +913,22 @@ def test_release_publication_never_clobbers_and_only_treats_404_as_absence(tmp_p
                 assert writes[0][:2] == ["release", "create"]
                 assert writes[0][writes[0].index("--target") + 1] == TREE
                 assert str(directory / entry["filename"]) not in writes[0]
+
+
+@pytest.mark.parametrize("code,error,expected", [
+    (1, "gh: Not Found (HTTP 404)\n", True),
+    (1, "(HTTP 404)", True),
+    (1, "HTTP 404: Not Found (https://api.github.com/endpoint)", True),
+    (1, "gh: HTTP 404: Not Found", True),
+    (1, "gh: Forbidden (HTTP 403); see docs for HTTP 404", False),
+    (1, "HTTP 403: Forbidden; see docs for HTTP 404", False),
+    (1, "HTTP 4040: invalid", False),
+    (1, "request failed: HTTP 404", False),
+    (1, "HTTP 404: Not Found\nHTTP 403: Forbidden", False),
+    (0, "HTTP 404: Not Found", False),
+])
+def test_only_explicit_unambiguous_http_404_status_is_absence(code, error, expected):
+    assert publisher._is_not_found(subprocess.CompletedProcess(["gh"], code, "", error)) is expected
 
 
 @pytest.mark.parametrize("tag_state", ["current", "same-ancestor", "wrong-ancestor", "unshipped", "missing"])
