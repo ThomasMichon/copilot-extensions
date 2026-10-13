@@ -17,6 +17,8 @@ initial choice so a reflexive Enter never submits by accident.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -28,7 +30,7 @@ from .field_questions import FieldQuestionsMixin
 from .field_widgets import compose_field, field_label
 
 
-class CreateActionScreen(FieldQuestionsMixin, ModalScreen[dict | None]):
+class CreateActionFormMixin(FieldQuestionsMixin):
     """Collects a pivot-level create action's fields. See module docstring."""
 
     CSS = """
@@ -47,7 +49,7 @@ class CreateActionScreen(FieldQuestionsMixin, ModalScreen[dict | None]):
     CreateActionScreen FocusGroup { height: 1; margin: 0 0 1 0; padding: 0; }
     CreateActionScreen #create-confirm-prompt { height: auto; padding: 1 0; }
     """
-    BINDINGS = [
+    BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "cancel", show=False),
         Binding("ctrl+right", "next_tab", show=False),
         Binding("ctrl+left", "prev_tab", show=False),
@@ -188,3 +190,10 @@ class CreateActionScreen(FieldQuestionsMixin, ModalScreen[dict | None]):
             self._cancel_confirm_prompt()
             return
         self.dismiss(None)
+
+
+class CreateActionScreen(CreateActionFormMixin, ModalScreen[dict | None]):
+    """Modal creation flow for ordinary operational pivots."""
+
+    CSS = CreateActionFormMixin.CSS
+    BINDINGS = CreateActionFormMixin.BINDINGS

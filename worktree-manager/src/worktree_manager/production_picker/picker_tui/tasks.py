@@ -773,14 +773,17 @@ class RegisteredPivotRuntime:
         in the status line."""
         return self.run_resolved(format_template(action.run, ctx))
 
-    def run_resolved(self, argv: Sequence[str]) -> tuple[bool, str]:
+    def run_resolved(
+        self, argv: Sequence[str], *, preserve_output: bool = False,
+    ) -> tuple[bool, str]:
         """Run an **already-substituted** argv (A5 form path + the shared sync
         run path). Resolves ``argv[0]`` on ``PATH`` and executes, returning
         ``(ok, message)`` and never raising. No placeholder substitution happens
         here -- the caller has already resolved every token (a form's
         ``{field.<name>}`` + entry tokens in one safe pass via
         :func:`format_form_template`, or a plain template via
-        :func:`format_template`)."""
+        :func:`format_template`). ``preserve_output`` retains full receipts on
+        both success and failure for full-content Configuration results."""
         argv = list(argv)
         if argv:
             resolved = shutil.which(argv[0])
@@ -797,6 +800,13 @@ class RegisteredPivotRuntime:
             return (False, f"{argv[0]} not found on PATH")
         except (OSError, subprocess.SubprocessError) as exc:
             return (False, str(exc)[:200])
+        if preserve_output:
+            parts = [(proc.stdout or "").strip()]
+            if proc.stderr:
+                parts.append("stderr:\n" + proc.stderr.strip())
+            if proc.returncode:
+                parts.append(f"exit {proc.returncode}")
+            return (proc.returncode == 0, "\n\n".join(part for part in parts if part))
         if proc.returncode != 0:
             detail = (proc.stderr or "").strip().splitlines()
             return (False, (detail[-1] if detail else f"exit {proc.returncode}")[:200])

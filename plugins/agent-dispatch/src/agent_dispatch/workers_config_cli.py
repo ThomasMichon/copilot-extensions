@@ -107,6 +107,7 @@ def pool_status_line(
     declaration: "ProfileDeclaration | None" = None,
     overridden: bool = False,
     override_reason: str | None = None,
+    effective_only: bool = False,
 ) -> str:
     """Render a ≤200-char status line for one pool.
 
@@ -118,7 +119,9 @@ def pool_status_line(
     else:
         lanes = declaration.concurrency
         unit = "lane" if lanes == 1 else "lanes"
-        state = "overridden off" if overridden else "active"
+        state = "overridden off" if overridden else (
+            "enabled (running unknown)" if effective_only else "active"
+        )
         if overridden and override_reason:
             state = f"{state} ({override_reason})"
         line = f"{name}: {lanes} {unit} declared -- {state}"
@@ -210,6 +213,18 @@ def _cmd_workers_config_section(args: argparse.Namespace) -> int:
 
     name = getattr(args, "name", None)
     path = overrides_path()
+    clear_all_masks = getattr(args, "clear_all_masks", False)
+    if clear_all_masks and (
+        getattr(args, "toggle", None) != "enable"
+        or not getattr(args, "require_declared", False)
+        or name is None
+    ):
+        print(
+            "agent-dispatch workers config-section: --clear-all-masks requires "
+            "a named pool, --toggle enable and --require-declared",
+            file=sys.stderr,
+        )
+        return 2
 
     if name is None:
         if getattr(args, "toggle", None) is not None:
@@ -267,7 +282,15 @@ def _cmd_workers_config_section(args: argparse.Namespace) -> int:
     if toggle == "disable":
         set_override(path, token, disabled=True, reason=getattr(args, "reason", None))
     elif toggle == "enable":
-        clear_override(path, token)
+        if clear_all_masks:
+            from .registrar_reconcile import declaration_to_registration
+            from .supervisor_registration import registration_override_ids
+
+            tokens = registration_override_ids(declaration_to_registration(declaration, machine=None))
+            for override_id in tokens:
+                clear_override(path, override_id)
+        else:
+            clear_override(path, token)
 
     overrides = load_overrides(path)
     overridden = token in overridden_off_ids(overrides)
@@ -295,6 +318,7 @@ def _cmd_workers_config_section(args: argparse.Namespace) -> int:
             declaration=declaration,
             overridden=overridden,
             override_reason=reason,
+            effective_only=clear_all_masks,
         )
     )
     return 0 if declaration is not None else 1
@@ -309,6 +333,9 @@ def register_workers_commands(sub) -> None:
         ),
     )
     workers_sub = p.add_subparsers(dest="workers_command", required=True)
+    from .workers_catalog import register_commands
+
+    register_commands(workers_sub)
     options = workers_sub.add_parser(
         "pool-options", help="print the JSON choices for declared local worker pools"
     )
@@ -349,6 +376,10 @@ def register_workers_commands(sub) -> None:
     cs.add_argument(
         "--require-declared", action="store_true",
         help="refuse absent or ambiguous declarations before changing a local override",
+    )
+    cs.add_argument(
+        "--clear-all-masks", action="store_true",
+        help="with a declared enable target, clear its concrete and logical disable masks",
     )
     cs.add_argument(
         "--json", action="store_true", help="emit full JSON instead of the compact status line"

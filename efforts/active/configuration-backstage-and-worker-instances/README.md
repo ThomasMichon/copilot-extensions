@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Planning PR, then dependency-ordered Manager and worker lifecycle PRs
 - **Created:** 2026-10-12
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Configuration Workbench](../../../visions/installer/configurator/README.md): plugin-owned backstage panels, templates-and-presets, navigation-before-content, explicit-target-and-consent; [Picker](../../../visions/picker/README.md): decision-support-before-cost, consequential-vs-browsing-clarity
 - **Umbrella issue:** #6379
 - **Sub-issues:** Carve bounded implementation slices after proposal review
@@ -82,35 +82,35 @@ Operator-selected design choices:
 
 ### Phase 1 - Review the workspace and lifecycle contract
 
-- [ ] Land this proposal and its standing Configuration Workbench intent before runtime implementation.
-- [ ] Specify the generic section contribution and list/action contract by extending existing Manager vocabulary. _(agent-recommended)_
-- [ ] Define exact provider-owned states and effects for catalog, template prerequisites, local instance identity, edit, save, and activation; preserve source provenance and read-only boundaries. _(agent-recommended)_
+- [x] Land this proposal and its standing Configuration Workbench intent before runtime implementation.
+- [x] Specify the generic section contribution and list/action contract by extending existing Manager vocabulary. _(agent-recommended)_
+- [x] Define exact provider-owned states and effects for catalog, template prerequisites, local instance identity, edit, save, and activation; preserve source provenance and read-only boundaries. _(agent-recommended)_
 
 ### Phase 2 - Immediately rendered Configuration backstage
 
-- [ ] Enter a full-content Configuration workspace immediately; horizontal section navigation occupies the band ordinarily used for Machines.
-- [ ] Mount a section's content and loading state before starting provider discovery; retain responsive navigation during slow or failed reads.
-- [ ] Render plugin sections as full-content pivots, including list/detail/edit states, rather than using a dialog as their configuration home.
-- [ ] Keep Profiles reachable, preserve its existing semantics, and adapt existing configuration contributions without breaking valid peers. _(agent-recommended)_
-- [ ] Fence late provider results against changed section/project context, preserve list selection across refreshes, and show explicit retryable errors. _(agent-recommended)_
+- [x] Enter a full-content Configuration workspace immediately; horizontal section navigation occupies the band ordinarily used for Machines.
+- [x] Mount a section's content and loading state before starting provider discovery; retain responsive navigation during slow or failed reads.
+- [x] Render plugin sections as full-content pivots, including list/detail/edit states, rather than using a dialog as their configuration home.
+- [x] Keep Profiles reachable, preserve its existing semantics, and adapt existing configuration contributions without breaking valid peers. _(agent-recommended)_
+- [x] Fence late provider results against changed section/project context, preserve list selection across refreshes, and show explicit retryable errors. _(agent-recommended)_
 
 ### Phase 3 - Workers resources and local instances
 
-- [ ] Initially list configured worker instances and available templates, with descriptions, status, statistics, provenance, and contextual action lists.
-- [ ] Separate template availability, declaration validity, effective enable/disable state, and observed running activity; unknown activity is not "active". _(agent-recommended)_
-- [ ] Offer Edit for existing user-local configurations and template instantiation into a new user-local configuration.
-- [ ] Show source-owned configurations read-only, with supported local controls and a distinct local customization or source-change request where supported; never silently rewrite repositories or installed templates. _(agent-recommended)_
-- [ ] Discover offered registrar recipes through the owning provider, expose required fields and unmet prerequisites, and reuse declaration validation instead of treating every recipe fragment as immediately runnable. _(agent-recommended)_
-- [ ] Persist local instances with stable, collision-safe identity and source attribution; use existing discovery/reconciliation owners for effective configuration and activation. _(agent-recommended)_
-- [ ] Offer Save and Activate with explicit confirmation. Display target, configuration write, activation effects, and any agentic tasks or agents it may create before submission.
-- [ ] Preserve a separate Save-only choice, cancel-without-write behavior, truthful partial-failure results, and retry-safe mutation/activation receipts. _(agent-recommended)_
+- [x] Initially list configured worker instances and available templates, with descriptions, status, statistics, provenance, and contextual action lists.
+- [x] Separate template availability, declaration validity, effective enable/disable state, and observed running activity; unknown activity is not "active". _(agent-recommended)_
+- [x] Offer Edit for existing user-local configurations and template instantiation into a new user-local configuration.
+- [x] Show source-owned configurations read-only, with supported local controls and a distinct local customization or source-change request where supported; never silently rewrite repositories or installed templates. _(agent-recommended)_
+- [x] Discover offered registrar recipes through the owning provider, expose required fields and unmet prerequisites, and reuse declaration validation instead of treating every recipe fragment as immediately runnable. _(agent-recommended)_
+- [x] Persist local instances with stable, collision-safe identity and source attribution; use existing discovery/reconciliation owners for effective configuration and activation. _(agent-recommended)_
+- [x] Offer Save and Activate with explicit confirmation. Display target, configuration write, activation effects, and any agentic tasks or agents it may create before submission.
+- [x] Preserve a separate Save-only choice, cancel-without-write behavior, truthful partial-failure results, and retry-safe mutation/activation receipts. _(agent-recommended)_
 
 ### Phase 4 - Illustrated setup guidance
 
-- [ ] Publish a task-oriented guide to the shipped built-in configuration sections, with render screenshots for each meaningful setup step.
-- [ ] Cover Configuration entry, Profiles, configured Workers, template instantiation, editing, effect preview, Save and Activate, and resulting status.
-- [ ] Reuse the existing production Textual compositor and SVG-to-PNG renderer with identifier-neutral fixtures, captions, alt text, and reproducible generation instructions. _(agent-recommended)_
-- [ ] Link the guide from the adopter path and configuration ownership page; keep exact schemas and lifecycle commands in provider-owned references. _(agent-recommended)_
+- [x] Publish a task-oriented guide to the shipped built-in configuration sections, with render screenshots for each meaningful setup step.
+- [x] Cover Configuration entry, Profiles, configured Workers, template instantiation, editing, effect preview, Save and Activate, and resulting status.
+- [x] Reuse the existing production Textual compositor and SVG-to-PNG renderer with identifier-neutral fixtures, captions, alt text, and reproducible generation instructions. _(agent-recommended)_
+- [x] Link the guide from the adopter path and configuration ownership page; keep exact schemas and lifecycle commands in provider-owned references. _(agent-recommended)_
 
 ### Phase 5 - Release and local outcome
 
@@ -120,16 +120,16 @@ Operator-selected design choices:
 
 ## Validation Plan
 
-- [ ] With a deliberately blocked provider, Config/section chrome and loading content render before the provider returns; section switching and returning to the prior operational pivot remain responsive.
-- [ ] Full-content sections use the horizontal section band, not Machines navigation or a plugin configuration modal; Profiles remains reachable.
-- [ ] Provider failure, empty catalog, unsupported section, rapid section switching, and stale late responses have explicit, correctly scoped outcomes. _(agent-recommended)_
-- [ ] Workers renders configured instances and available templates with accurate status/statistics/descriptions and the correct per-row actions.
-- [ ] An isolated template-to-instance round-trip persists a distinct local instance; editing it changes the same identity; templates and repository/plugin declarations remain byte-for-byte unchanged.
-- [ ] Missing recipe inputs, unavailable evaluators/fleets, duplicate identities, stale edit baselines, invalid fields, and ambiguous provenance fail before unauthorized effects. _(agent-recommended)_
-- [ ] Save-only creates no tasks or agents. Save and Activate requires a reviewed effects preview, produces the provider's acknowledged outcome, and reports activation failure separately from any persisted configuration.
-- [ ] Cancel performs no configuration write, activation, task creation, or agent launch; repeated submission/retry cannot create duplicate instances or work. _(agent-recommended)_
-- [ ] Desired enablement, observed live state, and task/agent outcomes remain independently visible; Enable never claims a running pool merely because a disable override was cleared.
-- [ ] Reproducible renders cover the walkthrough steps, loading, populated tables, edit/instantiate, effect confirmation, success, and failure, including a compact terminal size. _(agent-recommended)_
+- [x] With a deliberately blocked provider, Config/section chrome and loading content render before the provider returns; section switching and returning to the prior operational pivot remain responsive.
+- [x] Full-content sections use the horizontal section band, not Machines navigation or a plugin configuration modal; Profiles remains reachable.
+- [x] Provider failure, empty catalog, unsupported section, rapid section switching, and stale late responses have explicit, correctly scoped outcomes. _(agent-recommended)_
+- [x] Workers renders configured instances and available templates with accurate status/statistics/descriptions and the correct per-row actions.
+- [x] An isolated template-to-instance round-trip persists a distinct local instance; editing it changes the same identity; templates and repository/plugin declarations remain byte-for-byte unchanged.
+- [x] Missing recipe inputs, unavailable evaluators/fleet transport, duplicate identities, stale edit baselines, invalid fields, and ambiguous provenance fail before unauthorized effects. Sleeping fleet hosts retain FleetSpawner's existing defer-without-reservation behavior rather than becoming invalid configurations. _(agent-recommended)_
+- [x] Save-only creates no tasks or agents. Save and Activate requires a reviewed effects preview, produces the provider's acknowledged outcome, and reports activation failure separately from any persisted configuration.
+- [x] Cancel performs no configuration write, activation, task creation, or agent launch; repeated submission/retry cannot create duplicate instances or work. _(agent-recommended)_
+- [x] Desired enablement, observed live state, and task/agent outcomes remain independently visible; Enable never claims a running pool merely because a disable override was cleared.
+- [x] Reproducible renders cover the walkthrough steps, loading, populated tables, edit/instantiate, effect confirmation, success, and failure, including a compact terminal size. _(agent-recommended)_
 - [ ] Targeted tests and real consumer-boundary integration exercise the combined Manager/provider path; record Windows and Linux coverage and the reason for any skipped clean-room or live-venue lane. _(agent-recommended)_
 - [ ] Documentation navigation/assets pass existing guards, and the final installed local surface matches the promoted source.
 
@@ -157,3 +157,70 @@ configuration, arbitrary source editing, or automatic maintenance dispatch.
 - Inventory found existing declaration/recipe/override primitives but no complete worker instance edit/instantiate API.
 - Existing remote-machine follow-up #6283 remains separately owned.
 - Proposal drafted; runtime implementation has not started.
+
+### 2026-10-12 - Proposal reviewed
+
+- Planning PR #6382 merged after current-head approval with zero findings and required CI success.
+- Synced the implementation worktree onto the reviewed dev state.
+- Begin the shared section/list/action contract and provider lifecycle specification; no runtime behavior has changed yet.
+
+### 2026-10-12 - Implementation and consumer-boundary checks
+
+- Implementation is in managed worktrees, **not yet published**. The Manager
+  adds additive `placement: config` list contributions, immediate Configuration
+  entry, horizontal sections, full-content detail/editor/receipt screens, and
+  inert browsing of legacy one-shot contributions.
+- Workers now separates templates, source-owned declarations, and user-local
+  drafts. Save-only leaves the published version untouched; explicit activation
+  publishes through the existing registrar and reports pending or partial failure
+  separately from persistence. No second supervisor or task-steering draft path
+  is introduced.
+- Recovered the backend worker's staged implementation after its runtime reported
+  failure; independently corrected evaluator-reference lookup and visible
+  discovery errors, then committed and integrated it as `e8de5b077`.
+- Provider checks: 187 selected catalog/instance/registrar/override tests and 274
+  loop-expansion consumer tests passed. These include first-touch CLI save,
+  existing-supervisor reconciliation, stable retries, stale edits, missing
+  evaluators, failed publication, and unchanged source bytes.
+- Manager checks: the broader pivot/Profiles/region selection passed, followed
+  by 51 focused checks with the actual provider interpreter. The real
+  list-to-form-to-CLI round-trip proves Cancel, Save-only, Edit, explicit Save
+  and Activate, and a pending receipt in isolated state. Standard-width fitting
+  explicitly retains status, activity, lane statistics, provenance, and
+  descriptions at 118 columns; blocked-provider tests cover 118x40 and 80x24.
+- The standalone test runner installs non-editable code and uses Python `-I`;
+  `--prepare` is required after source changes. The earlier apparent Escape
+  regression was stale installed test code, not a reason to change keyboard
+  semantics.
+- Remaining: finish recipe prerequisite coverage, illustrated guide and renders,
+  review/CI/promotion, unified local update and installed-surface proof, then
+  reconcile the full Validation Plan and archive/finalize.
+
+### 2026-10-12 - Guide, prerequisites, and pre-submit review
+
+- Added the linked Configuration workbench walkthrough with 13 identifier-neutral
+  PNG renders: Profiles/Apply, Workers loading/catalog/actions/details,
+  instantiate/declaration/edit, effect confirmation, pending receipt, failure,
+  and compact 80x24. The existing production compositor and Fira Code rasterizer
+  generate all steps with one command; screenshots are fixtures, not live claims.
+- Catalog details now expose missing dependencies. A fleet requires SSH
+  transport before saving, but browsing/saving never probes remote hosts.
+  FleetSpawner still owns liveness admission and defers sleeping hosts without
+  reserving tasks. There is no separate local fleet-alias registry to invent.
+- A cohesive pre-submit code review identified three correctness gaps, all fixed:
+  full Configuration stdout/stderr survives successful and failed commands;
+  other instances' still-published declaration names remain reserved after
+  Save-only edits; and Enable clears the exact target's logical and concrete
+  masks while reporting running state unknown. Ordinary action status-line
+  behavior and permissive legacy toggle semantics remain unchanged.
+- Windows checks: 294 provider instance/CLI/fleet/recipe/discovery tests and
+  95 Manager Configuration/forms/Profiles/region tests passed. The latter
+  includes all 13 reproducible guide scenarios, real provider round-trips,
+  and real subprocess receipts longer than 200 characters on success and
+  partial failure. Documentation navigation/assets pass the existing guard.
+- Validation tiers: unit and lightweight real CLI/Manager consumer checks
+  exercised; fresh isolated first-touch roots exercised without changing
+  operator configuration. Linux coverage awaits required CI. A live remote
+  venue is not applicable to this local-only configuration surface; remote
+  configuration remains #6283's separately owned work. Installed local proof
+  follows normal promotion and the unified update; it is still pending.

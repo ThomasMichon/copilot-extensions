@@ -11,7 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Workspace Acquisition Continuity](active/workspace-acquisition-continuity/README.md) | Draft; one execution workspace and replay-safe creation proposal | #6440 |
-| [Configuration Backstage and Worker Instances](active/configuration-backstage-and-worker-instances/README.md) | Draft; horizontal sections, list-first resources, explicit activation outcomes | #6379 |
+| [Configuration Backstage and Worker Instances](active/configuration-backstage-and-worker-instances/README.md) | Active; proposal reviewed, section and instance contracts | #6379 |
 | [Main-Owned Workflow Control](active/main-owned-workflow-control/README.md) | Active; first wave live, validation consolidation open | #6237; run/check consolidation primary, ownership enabling |
 | [Fleet Control V2](active/fleet-control-v2/README.md) | Active; offline baseline captured, role artifact preflight in progress | #6236, #6240, #6241; existing #5789/#6030/#6424 owners retained |
 | [Lean Runtime Dependencies](active/lean-runtime-dependencies/README.md) | Active; proposal reviewed, dependency reduction | #6234 |

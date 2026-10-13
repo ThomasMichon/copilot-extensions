@@ -356,6 +356,16 @@ class PickerScreenMaintenanceActionsMixin:
         if zone == "V":
             self.sel = ("PR", 0) if self._kind() == "profiles" else ("M", 0)
         elif zone == "M":
+            if self._kind() == "config_section":
+                self.sel = ("BTN", 0)
+                return
+            if self._kind() == "registered":
+                rows = self._task_rows()
+                self.sel = ("T", 0) if rows else ("M", 0)
+                return
+            if self._kind() == "profiles":
+                self.sel = self._pr_head()
+                return
             buttons = self.button_set()
             records = self._wt_visible_records()
             if buttons:
@@ -367,7 +377,9 @@ class PickerScreenMaintenanceActionsMixin:
             self.sel = ("BTN", 0)
         elif zone == "BTN":
             btn = self.active_button()
-            if btn == "N":
+            if btn == "ConfigEdit":
+                self._activate_config_section()
+            elif btn == "N":
                 # New worktree… opens the options dialog directly (#1346).
                 self._open_optmenu()
             elif btn == "NC":

@@ -4,6 +4,9 @@ Read [installation](installation.md) for payload/runtime readiness and
 [adoption](adoption.md) for integration choices. This page maps ownership and
 locations; it is not a second schema or command reference.
 
+For the interactive setup flow, read the illustrated
+[Configuration workbench walkthrough](configuration-workbench.md).
+
 Every piece of configuration in this suite lives in one of two homes, and picking
 the right one is the whole game:
 

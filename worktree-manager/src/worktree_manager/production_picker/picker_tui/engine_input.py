@@ -148,6 +148,12 @@ class PickerScreenInputMixin:
             elif zone == "BTN":
                 self._activate()
         elif key == "r":
+            if self._in_configuration():
+                if self._kind() == "config_section":
+                    self._load_current_config_section(force=True)
+                elif self._reg_pivot() is not None:
+                    self._pivot_runtime(self._reg_pivot()).repoll(self._pivot_scope_key())
+                return
             # Real reload: rebuild the data source (live mode re-fetches every
             # machine on its loader threads; fixture mode re-reads src.load()).
             self._start_setup_reload_worker()
@@ -155,6 +161,9 @@ class PickerScreenInputMixin:
             self.sel = self.default_sel()
             self.debug = "refreshed · reloaded worktrees"
         elif key in ("q", "escape"):
+            if key == "escape" and self._in_configuration():
+                self._leave_configuration()
+                return
             # Esc: filter clear, then selection collapse (#2258 P3-5), then
             # quit-confirm (#1429) -- only when all three are already clear.
             if key == "escape" and self.list_view.query:
@@ -205,6 +214,9 @@ class PickerScreenInputMixin:
                 self.app.exit()
         self.app.push_screen(QuitConfirmScreen(), _after)
     def _rotate_machine(self, d):
+        if self._in_configuration():
+            self._rotate_config_section(d)
+            return
         was_in_table = self.sel[0] == "L"
         prev_key = self._current_tab_key()
         prev_was_all = self.is_all()

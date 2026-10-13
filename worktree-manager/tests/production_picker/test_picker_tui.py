@@ -2721,8 +2721,7 @@ def test_profiles_hosted_under_configuration():
 
 
 def test_configuration_menu_opens_profiles():
-    """Enter on the Configuration entry opens its menu; choosing Profiles
-    switches to that pivot and focuses its body (#1426)."""
+    """Configuration immediately enters Profiles with a horizontal section band."""
     src = _profiles_source()
 
     async def run():
@@ -2732,10 +2731,13 @@ def test_configuration_menu_opens_profiles():
             await pilot.pause()
             assert scr._kind() == "worktrees"
             scr.sel = ("CFG", 0)
-            scr._activate()                 # opens the Configuration ModalScreen
+            scr._activate()
             await pilot.pause()
-            assert _cfg_menu_open(scr)
-            await pilot.press("enter")      # selects Profiles (only item)
+            assert not _cfg_menu_open(scr)
+            assert scr._kind() == "profiles"
+            assert scr.sel == ("M", 0)
+            assert "Sections" in scr.tab_bar(118, True).plain
+            await pilot.press("enter")
             await pilot.pause()
             assert not _cfg_menu_open(scr)
             assert scr._kind() == "profiles"
@@ -10647,36 +10649,29 @@ def test_contributed_config_section_in_cfgmenu_and_runs(tmp_path, monkeypatch):
             await pilot.pause()
             assert scr.config_sections, "config sections discovered"
 
-            # Open the Configuration ModalScreen from its top-row stop.
             scr.sel = ("CFG", 0)
             scr._activate()
             await pilot.pause()
-            menu = _cfg_menu(scr)
-            assert menu is not None
-            labels = [it["label"] for it in menu._items]
-            # Built-in Profiles first, contributed sections after it.
+            assert not _cfg_menu_open(scr)
+            labels = [scr.htabs[index] for index in scr._config_pivots()]
             assert labels[0] == "Profiles"
             assert labels[1:] == ["SSH", "MCP"]
 
-            # Enter on a contributed section runs it (never switches pivot) with
-            # a substituted global context; the menu closes. Navigate to SSH
-            # (index 1) through the real pipeline, then select it.
-            for _ in range(labels.index("SSH")):
-                await pilot.press("down")
-            await pilot.press("enter")
+            await pilot.press("right")
             await pilot.pause()
-            assert not _cfg_menu_open(scr)
-            assert scr._kind() == "worktrees"          # Profiles NOT selected
+            assert scr._kind() == "config_section"
+            assert not captured             # browsing a one-shot section is inert
+            scr._activate_config_section()
+            for _ in range(50):
+                await pilot.pause()
+                if captured:
+                    break
             assert captured["label"] == "SSH"
             assert captured["source"] == "net"
             assert "machine" in captured["ctx"]
 
-            # Selecting Profiles still switches to that pivot (built-in intact).
-            scr.sel = ("CFG", 0)
-            scr._activate()
-            await pilot.pause()
-            assert _cfg_menu_open(scr)
-            await pilot.press("enter")                  # Profiles (idx 0)
+            scr.sel = ("M", 0)
+            await pilot.press("left")
             await pilot.pause()
             assert not _cfg_menu_open(scr)
             assert scr._kind() == "profiles"
@@ -10719,12 +10714,10 @@ def test_contributed_config_section_confirm_gate(tmp_path, monkeypatch):
             scr.sel = ("CFG", 0)
             scr._activate()
             await pilot.pause()
-            menu = _cfg_menu(scr)
-            assert menu is not None
-            labels = [it["label"] for it in menu._items]
-            for _ in range(labels.index("SSH")):
-                await pilot.press("down")
-            await pilot.press("enter")
+            while scr.htabs[scr.htab] != "SSH":
+                scr._rotate_machine(1)
+                await pilot.pause()
+            scr._activate_config_section()
             await _wait_for_confirm_screen(app, pilot)
             # confirm:true -- SSH must NOT have run yet; the cfg menu is gone,
             # replaced by the confirm gate.
@@ -10740,14 +10733,8 @@ def test_contributed_config_section_confirm_gate(tmp_path, monkeypatch):
             assert not isinstance(app.screen, ActionConfirmScreen)
             assert ran == []
 
-            # Re-open and this time confirm -- it runs.
-            scr.sel = ("CFG", 0)
-            scr._activate()
-            await pilot.pause()
-            menu = _cfg_menu(scr)
-            for _ in range(labels.index("SSH")):
-                await pilot.press("down")
-            await pilot.press("enter")
+            # This time confirm the section's explicit action.
+            scr._activate_config_section()
             await _wait_for_confirm_screen(app, pilot)
             assert isinstance(app.screen, ActionConfirmScreen)
             await pilot.press("left")        # Cancel -> Confirm

@@ -260,6 +260,13 @@ class _PickerNativeData(OptionList):
             fp = tuple((r.get("id"), r.get("title"), r.get("state"),
                         r.get("age_secs"), r.get("sess"))
                        for r in rows)
+            if scr._in_configuration():
+                if kind == "registered":
+                    fp = tuple(repr(row) for row in rows)
+                elif kind == "config_section":
+                    fp = (repr(getattr(scr, "_config_section_states", {}).get(
+                        scr._config_section_key(), {},
+                    )),)
         except Exception:
             nrows, fp = -1, ()
         return (kind, scr.htab, scr.machine_idx, nrows, wt,

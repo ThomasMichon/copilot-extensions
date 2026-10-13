@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "label": "Workers",
+  "placement": "config",
+  "scope": "global",
+  "list": ["agent-dispatch", "workers", "catalog"],
+  "summary": "{configured} configured / {source_declarations} source-owned / {templates} templates",
+  "entry": {
+    "id": "id",
+    "title": "title",
+    "subtitle": "description",
+    "group": "group",
+    "badges": ["validity", "enabled", "activity"]
+  },
+  "columns": [
+    {"key": "title", "header": "WORKER / TEMPLATE", "width": 22, "priority": 1},
+    {"key": "enabled", "header": "ENABLED", "width": 14, "priority": 2},
+    {"key": "activity", "header": "ACTIVITY", "width": 18, "priority": 3},
+    {"key": "lanes", "header": "LANES", "width": 5, "align": "r", "priority": 1},
+    {"key": "provenance", "header": "SOURCE", "width": 16, "priority": 4},
+    {"key": "description", "header": "DESCRIPTION", "width": 26, "priority": 5}
+  ],
+  "group_field": "group",
+  "empty_hint": "No local worker configuration or available templates.",
+  "actions": [
+    {
+      "key": "disable",
+      "label": "Disable pool — local override",
+      "when": {"pool_toggleable": "true", "enabled": "enabled"},
+      "confirm": true,
+      "description": "Masks this declared pool on the invoking local machine; the existing supervisor winds it down. Source configuration is unchanged.",
+      "run": ["agent-dispatch", "workers", "config-section", "{pool_name}", "--owner", "{owner}", "--toggle", "disable", "--reason", "disabled from Workers configuration", "--require-declared"]
+    },
+    {
+      "key": "enable",
+      "label": "Enable pool — clear local override",
+      "when": {"pool_toggleable": "true", "enabled": "disabled"},
+      "confirm": true,
+      "description": "Removes this pool's concrete and logical local disable masks. Does not start a daemon or prove the pool is running.",
+      "run": ["agent-dispatch", "workers", "config-section", "{pool_name}", "--owner", "{owner}", "--toggle", "enable", "--require-declared", "--clear-all-masks"]
+    },
+    {
+      "key": "details",
+      "label": "Details / prerequisites / effects",
+      "kind": "card",
+      "title_from": "card.title",
+      "body_from": "card.body",
+      "description": "Read-only resource details. Browsing does not save, activate or create work."
+    },
+    {
+      "key": "edit-save",
+      "label": "Edit — Save only",
+      "kind": "form",
+      "fields_from": "fields",
+      "title_from": "save_card.title",
+      "body_from": "save_card.body",
+      "when": {"editable": "true"},
+      "confirm": true,
+      "run": ["agent-dispatch", "workers", "save", "{id}", "--revision", "{revision}", "{fields}"]
+    },
+    {
+      "key": "edit-activate",
+      "label": "Edit — Save and Activate",
+      "kind": "form",
+      "fields_from": "fields",
+      "title_from": "activate_card.title",
+      "body_from": "activate_card.body",
+      "when": {"editable": "true"},
+      "confirm": true,
+      "run": ["agent-dispatch", "workers", "save", "{id}", "--revision", "{revision}", "{fields}", "--activate", "--consent", "activate-local-worker"]
+    },
+    {
+      "key": "instantiate-save",
+      "label": "Instantiate — Save only",
+      "kind": "form",
+      "fields_from": "fields",
+      "title_from": "save_card.title",
+      "body_from": "save_card.body",
+      "when": {"instantiable": "true"},
+      "confirm": true,
+      "run": ["agent-dispatch", "workers", "save", "{id}", "--revision", "{revision}", "{fields}"]
+    },
+    {
+      "key": "instantiate-activate",
+      "label": "Instantiate — Save and Activate",
+      "kind": "form",
+      "fields_from": "fields",
+      "title_from": "activate_card.title",
+      "body_from": "activate_card.body",
+      "when": {"instantiable": "true"},
+      "confirm": true,
+      "run": ["agent-dispatch", "workers", "save", "{id}", "--revision", "{revision}", "{fields}", "--activate", "--consent", "activate-local-worker"]
+    }
+  ]
+}

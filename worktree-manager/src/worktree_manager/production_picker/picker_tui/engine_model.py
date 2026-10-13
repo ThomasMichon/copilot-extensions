@@ -10,6 +10,8 @@ from .engine_helpers import ACTIVE_SPECS, BUTTON_SETS, DISPO_MARK, LIST_SPECS, S
 class PickerScreenModelMixin:
     def button_set(self):
         kind = self._kind()
+        if kind == "config_section":
+            return ["ConfigEdit"]
         if kind == "profiles":
             return ["PA", "PReset"] if self.grid_dirty() else ["PA"]
         if kind == "worktrees":
@@ -122,7 +124,21 @@ class PickerScreenModelMixin:
         """The flat, selectable list of task entries (dicts) for the current
         registered pivot -- the ('T', i) stops index into this."""
         rows = self._task_state()[1]
-        return rows if isinstance(rows, list) else []
+        rows = rows if isinstance(rows, list) else []
+        reg = self._reg_pivot()
+        if reg is not None and reg.placement == "config":
+            cache = getattr(self, "_config_row_ids", None)
+            if cache is None:
+                cache = self._config_row_ids = {}
+            key = (reg.name, self._pivot_scope_key())
+            ids = tuple(row.get(reg.id_field) for row in rows)
+            previous = cache.get(key, ())
+            if previous != ids and self.sel and self.sel[0] == "T":
+                index = self.sel[1]
+                identity = previous[index] if index < len(previous) else None
+                self.sel = ("T", ids.index(identity)) if identity in ids else ("M", 0)
+            cache[key] = ids
+        return rows
     def _task_summary(self):
         """The current registered pivot's summary dict (D1) for the current
         machine -- the substitution source for its ``summary`` header line.
@@ -432,6 +448,8 @@ class PickerScreenModelMixin:
         """Vertical Up/Down flow. ("UPD",0)=update refresh icon (only when an
         update is staged), ("V",0)=View pivot row, ("M",0)=machine picker,
         ("BTN",0)=button row, then the table/grid rows."""
+        if self._kind() == "config_section":
+            return [*self._v_stops(), ("M", 0), ("BTN", 0)]
         if self._kind() == "worktrees":
             out = [*self._v_stops(), ("M", 0)]
             if self.button_set():
@@ -460,7 +478,7 @@ class PickerScreenModelMixin:
             for i in range(len(self._task_rows())):
                 out.append(("T", i))
         else:
-            out = [*self._v_stops()]
+            out = [*self._v_stops(), ("M", 0)]
             for i in range(len(self.targets)):
                 out.append(("PR", i))
             out.append(("BTN", 0))   # Apply/Reset at the bottom
@@ -483,6 +501,8 @@ class PickerScreenModelMixin:
         The View pivot row is one region; the ⚙ Configuration entry rides its
         horizontal ◀▶ nav, so Tab lands on the pivots and ◀▶ reaches Config."""
         v = [("V", 0)]
+        if self._kind() == "config_section":
+            return [*v, ("M", 0), ("BTN", 0)]
         if self._kind() == "worktrees":
             heads = [*v, ("M", 0)]
             if self.button_set():
@@ -500,7 +520,7 @@ class PickerScreenModelMixin:
             if self._task_rows():
                 heads.append(("T", 0))
         else:
-            heads = [*v, self._pr_head(), ("BTN", 0)]
+            heads = [*v, ("M", 0), self._pr_head(), ("BTN", 0)]
         return heads
     def default_sel(self):
         kind = self._kind()

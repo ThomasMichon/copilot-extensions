@@ -725,13 +725,28 @@ Naming this machine itself (or omitting `--machine`) is unaffected and edits
 the local store directly, no SSH involved. `supervise override list` has no
 `--machine` -- it always reports this machine's own store.
 
-### Worktree Manager Picker glue (`agent-dispatch workers config-section`)
+### Workers configuration and local instances
 
-A Worktree Manager Picker ⚙ **Configuration** menu entry named "Workers"
-(`plugins/agent-dispatch/pivots/agent-dispatch.json`'s own `config_sections`
-contribution) reports the status of every declared `supervised-lane` worker
-pool this machine discovers, without requiring the operator to know any
-`agent-dispatch` CLI invocation:
+The Manager's **Configuration → Workers** table
+(`pivots/workers-config.json`, `placement: config`, `scope: global`) lists
+configured user-local instances, read-only repository/plugin source declarations,
+and available templates. Descriptions, provenance, capacity, effective disable
+masks, and observed activity are separate facts; absent/stale supervisor receipts
+mean unknown activity, never active.
+
+Select an existing local instance to **Edit**, or a template to **Instantiate**
+a distinct local configuration. Both expose separate **Save only** and
+**Save and Activate** actions with explicit values/effects confirmation.
+Save-only drafts do not affect discovery or running workers. Activation publishes
+to the existing supervisor's registrar authority and can produce agentic work;
+the receipt distinguishes persistence from pending or failed activation.
+Cancel performs no provider mutation. This always targets the invoking CLI's
+local machine, independently of the Manager's operational machine selection.
+
+See [Workers catalog and instance lifecycle](docs/worker-instances.md) for inputs,
+prerequisites, effects, storage/revision semantics and CLI examples.
+
+The earlier status/override CLI remains compatible:
 
 ```bash
 agent-dispatch workers config-section            # summary: every declared pool
@@ -739,9 +754,7 @@ agent-dispatch workers config-section my-pool     # one named pool's status
 agent-dispatch workers config-section my-pool --toggle disable --reason "noisy"
 ```
 
-With no pool name (the Picker's own invocation, since a plugin-shipped
-manifest's `run` argv is static and cannot know which pool name a particular
-consuming repo chose), it prints one joined ≤200-char line across every
+With no pool name, it prints one joined ≤200-char line across every
 `kind: supervised-lane` declaration `registrar discover` finds -- e.g.
 `"my-pool: 2 lanes declared -- active; other-pool: 1 lane declared --
 overridden off (noisy)"` -- collapsing into a trailing `"+N more"` marker
@@ -752,15 +765,8 @@ the existing `supervise override` local kill-switch) that one pool only;
 `--json` emits full structured detail instead of the compact line, for either
 shape. See `workers_config_cli.py` for the full contract.
 
-**Local controls from the Picker.** After loading that status, Workers opens a
-pool/action form with an optional disable reason. **Apply** shows the selected
-pool and action in a confirmation that initially selects Cancel. Neither
-opening nor cancelling changes state. The controls always affect the invoking
-machine, even when another machine is selected in the Picker; remote controls
-are not part of this entry.
-
 `workers pool-options` is a read-only JSON list of declared local pool names.
-The form uses `workers config-section <name> --toggle enable|disable
+`workers config-section <name> --toggle enable|disable
 --require-declared`, which rechecks discovery and rejects absent or ambiguous
 declarations before changing the override store. Empty/error choices stop the
 form rather than permitting an arbitrary target. Existing terminal invocations

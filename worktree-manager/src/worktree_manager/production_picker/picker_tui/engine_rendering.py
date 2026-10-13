@@ -36,10 +36,15 @@ class PickerScreenRenderingMixin:
             self.maintenance_view.build(add, width, sel)
         elif self._kind() == "registered":
             self.tasks_view.build(add, width, sel)
+        elif self._kind() == "config_section":
+            self._current_view().build(add, width, sel)
         else:
             self.profiles_view.build(add, width, sel)
         return vrows
     def _current_view(self):
+        if self._kind() == "config_section":
+            from .engine_configuration import ConfigurationSectionView
+            return ConfigurationSectionView(self)
         return {
             "worktrees": self.worktrees_view,
             "maintenance": self.maintenance_view,
@@ -336,6 +341,8 @@ class PickerScreenRenderingMixin:
         t.append(" ")
         return t
     def tab_bar(self, width, focused):
+        if self._in_configuration():
+            return self._configuration_tabs(width, focused)
         # Group consecutive flat entries by machine (the 'All' entry stands
         # alone) so a multi-env machine renders its name once.
         groups = []
@@ -383,6 +390,8 @@ class PickerScreenRenderingMixin:
         return t
     def status_text(self, compact=False):
         t = Text()
+        if self._kind() == "config_section":
+            return Text("Configuration", style=C_LABEL)
         if self._kind() == "worktrees":
             secs = dict((lbl, len(rows)) for lbl, rows in self.current_list()[1])
             a = secs.get("Active", 0)
@@ -677,7 +686,8 @@ class PickerScreenRenderingMixin:
     def _stats_row(self, W):
         """Left: the region's sub-pivot hint (◀ machine ▶ etc). Right: the
         section counts (with a glyph-compact fallback when narrow)."""
-        hint = "Host  ◀▶" if self._kind() == "profiles" else "Machine  Ctrl ◀▶"
+        hint = ("Section  Ctrl ◀▶" if self._in_configuration()
+                else "Machine  Ctrl ◀▶")
         use = self.status_text(False)
         if 1 + len(hint) + 3 + use.cell_len + 1 > W:
             use = self.status_text(True)
@@ -851,6 +861,8 @@ class PickerScreenRenderingMixin:
             return ("◀▶ back to pivots · Enter: open Configuration"
                     " · ↑↓ move · Tab region")
         if zone == "M":
+            if self._in_configuration():
+                return "◀▶ section · Enter: focus content · Esc: return to previous view"
             m, e, _ = self.cur_machine()
             scope = "All machines" if self.is_all() else f"{m} {e}"
             return (f"◀▶ switch machine (on {scope}) · Enter: focus actions"

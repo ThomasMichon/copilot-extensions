@@ -284,6 +284,7 @@ class ProfilesView:
                     self.applied[(ti, hi)] = self.grid.get((ti, hi), False)
 
     def build_chrome(self, add, width, sel):
+        add(self._eng.tab_bar(width, sel == ("M", 0)), stop=("M", 0))
         # Profiles lives under Configuration with its own host-column axes -- no
         # machine-scope row and no top button region, so its chrome is empty
         # (the Apply/Reset buttons ride the bottom of the data). Uniform with the

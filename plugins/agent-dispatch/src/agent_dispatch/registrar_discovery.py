@@ -23,10 +23,12 @@ over it.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 import logging
 import os
 import stat
 import tempfile
+import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -37,7 +39,8 @@ from plugin_activation import ActivationReport
 
 from . import repo_config
 from .install_paths import install_dir as dispatch_install_dir
-from .registrar import ProfileDeclaration, RegistrarError, load_declaration
+from .registrar import ProfileDeclaration, RegistrarError
+from .registrar_document import expand_declaration_document  # noqa: F401 -- public validation seam
 from .registrar_lane_aliases import (  # noqa: F401 -- re-exported for existing call sites/tests
     ENFORCE_REGISTERED_REPOS_ENV,
     _derive_git_remote_alias,
@@ -257,7 +260,51 @@ def save_pointers(pointers: Iterable[Pointer], base: Path | None = None) -> Path
 _UNSET: Any = object()
 
 
+@contextmanager
+def _pointer_transaction(base: Path | None = None):
+    from .single_instance import SingleInstance
+
+    lock = SingleInstance(pointers_file(base).with_suffix(".lock"))
+    deadline = time.monotonic() + 5
+    while not lock.acquire():
+        if time.monotonic() >= deadline:
+            raise RegistrarError("pointer registry is being changed; retry")
+        time.sleep(0.05)
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+def ensure_pointer(pointer: Pointer, base: Path | None = None) -> Pointer:
+    """Add an exact pointer without retargeting an existing source; retry-safe."""
+    Pointer.from_dict(pointer.to_dict())
+    with _pointer_transaction(base):
+        pointers = load_pointers(base)
+        existing = [p for p in pointers if p.name == pointer.name]
+        if existing:
+            if existing != [pointer]:
+                raise RegistrarError(f"pointer {pointer.name!r} collides with another source")
+        else:
+            save_pointers([*pointers, pointer], base)
+        return pointer
+
+
 def add_pointer(
+    name: str,
+    location: str | Path,
+    *,
+    kind: str = "dir",
+    owner: str | Any | None = _UNSET,
+    aliases: Iterable[str] | None = None,
+    base: Path | None = None,
+) -> Pointer:
+    """Serialize a pointer read-modify-write, preserving unrelated sources."""
+    with _pointer_transaction(base):
+        return _add_pointer(name, location, kind=kind, owner=owner, aliases=aliases, base=base)
+
+
+def _add_pointer(
     name: str,
     location: str | Path,
     *,
@@ -335,12 +382,13 @@ def add_pointer(
 
 def remove_pointer(name: str, base: Path | None = None) -> bool:
     """Remove a pointer by ``name``. Returns True if one was removed."""
-    pointers = load_pointers(base)
-    kept = [p for p in pointers if p.name != name]
-    if len(kept) == len(pointers):
-        return False
-    save_pointers(kept, base)
-    return True
+    with _pointer_transaction(base):
+        pointers = load_pointers(base)
+        kept = [p for p in pointers if p.name != name]
+        if len(kept) == len(pointers):
+            return False
+        save_pointers(kept, base)
+        return True
 
 
 # -- reading declaration documents -------------------------------------------
@@ -474,76 +522,17 @@ def read_declaration_file_set(
             f"{p}: declaration could not be read: {exc}"
         ) from exc
     data = dict(_decode(text, p.suffix, where=str(p)))
-    extends_present = "extends" in data
-    leaf_forge = data.get("forge")
-    leaf_forge = leaf_forge if isinstance(leaf_forge, Mapping) else {}
-    # Only meaningful when `extends_present`: a field *absent* from the
-    # leaf file's own raw `forge` mapping but present after merging below
-    # must have come from a base this file `extends:` -- possibly a
-    # different repository entirely. Threaded through so
-    # `expand_repository_issue_loop` can refuse a relative inherited
-    # `forge.command`/`forge.cwd` instead of silently resolving it against
-    # this (wrong) leaf repo root -- see "Resolve inherited script paths
-    # relative to their declaring repository". Checked **per field**,
-    # following each field's own nearest-defining hop (not just whether
-    # *some* hop anywhere in the chain is cross-repo): a chain such as
-    # `leaf (repo A) -> mid (repo A, defines forge.command) -> base (repo
-    # B)` must NOT reject `forge.command`, since the hop that actually
-    # supplies it is same-repo -- `base`'s unrelated repo never enters
-    # into that field at all.
-    this_repo_root = (
-        Path(repo_root).expanduser() if repo_root is not None else p.parent
-    )
-    inherited_script_fields = set()
-    if extends_present:
-        try:
-            this_repo_root = this_repo_root.resolve()
-            for field in ("command", "cwd"):
-                if field in leaf_forge:
-                    continue
-                if _field_defining_hop_is_cross_repo(
-                    field,
-                    data.get("extends"),
-                    base_dir=this_repo_root,
-                    repo_root=this_repo_root,
-                ):
-                    inherited_script_fields.add(field)
-        except (OSError, RuntimeError, ValueError, RegistrarError):
-            # Can't prove every hop shares this repo root -- treat every
-            # field the leaf doesn't declare itself as cross-repo (the
-            # safer default) rather than silently assuming same-repo.
-            inherited_script_fields = {
-                field for field in ("command", "cwd") if field not in leaf_forge
-            }
-    inherited_script_fields = frozenset(inherited_script_fields)
-    if "extends" in data:
-        from .registrar_recipes import resolve_extends
+    if data.get("kind") == "user-worker-instance":
+        from .worker_instances import active_dir, validate_configuration
 
-        base_dir = Path(repo_root).expanduser() if repo_root is not None else p.parent
-        data = resolve_extends(data, base_dir=base_dir)
-    if data.get("kind") == "reviewer-loop":
-        from .reviewer_loops import expand_reviewer_loop
-
-        declarations = expand_reviewer_loop(data)
-    elif data.get("kind") == "repository-issue-loop":
-        from .repository_issue_loops import expand_repository_issue_loop
-
-        declarations = expand_repository_issue_loop(
-            data, repo_root=repo_root, inherited_script_fields=inherited_script_fields
-        )
-    elif data.get("kind") == "effort-driver-loop":
-        from .effort_driver_loops import expand_effort_driver_loop
-
-        declarations = expand_effort_driver_loop(data, repo_root=repo_root)
-    else:
-        declarations = (
-            load_declaration(
-                data, allow_plugin_companion=allow_plugin_companion
-            ),
-        )
-    return tuple(
-        _resolve_declaration_paths(declaration, p.parent)
-        for declaration in declarations
+        if p.parent.resolve() != active_dir().resolve():
+            raise RegistrarError(f"{p}: local instance envelope outside its user-local directory")
+        return validate_configuration(
+            p.stem, data.get("configuration"), data.get("repo_root", "")
+        )[1]
+    return expand_declaration_document(
+        data, directory=p.parent, repo_root=repo_root,
+        allow_plugin_companion=allow_plugin_companion,
     )
 
 
