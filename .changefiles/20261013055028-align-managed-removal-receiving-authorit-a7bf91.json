@@ -1,0 +1,9 @@
+{
+  "comment": "Align managed-removal receiving-authority fixture with scoped config loading.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

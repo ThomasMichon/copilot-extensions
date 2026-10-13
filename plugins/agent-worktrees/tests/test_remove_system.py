@@ -18,8 +18,16 @@ from agent_worktrees import tracking
 @pytest.fixture(autouse=True)
 def receiving_project_authority(monkeypatch, tmp_path):
     config = _config(tmp_path / "receiving")
-    monkeypatch.setattr(cli.cfg, "load_config", lambda: config)
-    monkeypatch.setattr(cli.cfg, "load_project_config", lambda project: cli.cfg.load_config())
+    monkeypatch.setattr(
+        cli.cfg, "load_config",
+        lambda *, include_control_plane_related_pr=True: config,
+    )
+    monkeypatch.setattr(
+        cli.cfg, "load_project_config",
+        lambda project, *, include_control_plane_related_pr=True: cli.cfg.load_config(
+            include_control_plane_related_pr=include_control_plane_related_pr,
+        ),
+    )
     monkeypatch.setattr(cli.cfg, "load_machines_yaml", lambda anchor: {})
 
 

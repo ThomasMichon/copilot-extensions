@@ -414,3 +414,18 @@ hiding the problem or silently dropping text.
   semantics and the real handler default. The complete contained New-seed and
   launch-request portfolio passes 166 cases with one native POSIX skip.
   No production default, protocol refusal or containment limit changed.
+- **2026-10-13** -- The deferred-ownership test repair merged as #6523 after
+  its corrected head received an Approved review with zero findings, green
+  CI and the required workflow guard. Both parser and handler contracts now
+  carry the fast guard marker; a contained guard-only run selects and passes
+  all four cases. The independent service-alias repair #6506 remains open
+  under its existing owner, so release, rollout and delivered observation
+  are still pending.
+- **2026-10-13** -- Release progressed to managed-removal coverage and exposed
+  #6528: its shared receiving-authority fixture rejected the config loader's
+  scoped related-PR keyword. Both fixture loader signatures now accept and
+  forward that keyword; production receiving authority and removal checks
+  are unchanged. Updating only the ordinary loader was insufficient because
+  cleanup uses the project loader. The final complete contained removal,
+  launch-seed state and authority-budget portfolio passes all 63 cases.
+  Promotion and delivered validation remain open.
