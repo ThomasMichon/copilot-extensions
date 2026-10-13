@@ -119,7 +119,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
-          "sha256": "2017c67ef231a3540c423564f4287176ce6bde764955088d990b3c285a0bece1",
+          "sha256": "03bbc897a991d68c0e862e7d87b802d9b2d5a058647ce7117385cb5f1de60509",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -295,7 +295,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/live-message-receipt.json",
-          "sha256": "70a491081481c414ef424999849717f4c645fafde7466ce82dbb3ca08e73be53",
+          "sha256": "521d3680fab55d533435431160dd29f846cced6b0d88852e3000773fb40ad58e",
           "role": "current receipt capability and typed live-message admission request/response",
           "generation": 33
         },
@@ -968,6 +968,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
           "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
           "capture_method": "Freeze the opt-in registration payload from the actual owning model; independent serialization/default assertions and HTTP clearing, retention and recovery assertions exercise it with matching incarnation identity."
+        },
+        {
+          "commit": "b97c27a3bf7b9594c22beefe5a3f40eedeac2123",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 33,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
+          "source_git_blob": "b24f0c1b2b53d2cb9dcf92ae63a44d65f8052ba8",
+          "capture_method": "Re-attest unchanged typed admission request/response serialization after sharing finite reply-wait limits with pre-transport client and CLI validation; bounded regression tests cover invalid inputs, exact limits and transport margins."
         },
         {
           "commit": "0138427b73ae03b902dbe5b6e8c221c651cd1a55",
