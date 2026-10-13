@@ -258,6 +258,10 @@ promotion authority, task queue, or dashboard.
 
 ### 2026-10-12 - Same-period cycle-average pacing
 
+- PR #6417 merged as `8b21c9788bab1fa492a678239b66c9bae4da34a2` after
+  current-head Copilot approval with zero open findings and successful required
+  checks. The implemented pacing slice is landed; the effort remains Active
+  and release, authorized rollout, and live-account proof are not claimed.
 - Qualified the selected provider's user-scoped AI-credit monthly usage against
   its authoritative account consumption, reset, observation ordering, and
   freshness. Missing cycle starts and incompatible evidence withhold the rate;
@@ -268,9 +272,15 @@ promotion authority, task queue, or dashboard.
   from account totals, change workers, or block operator work.
 - Preserved filesystem error causes for quota captures while retaining opaque
   JSON-parse diagnostic redaction.
+- Added missing/null monthly-enum regressions so absent rate evidence preserves
+  valid account balances, plus a real missing-capture-path regression that
+  preserves lookup causes while retaining regular-file rejection.
 - Live provider acquisition and independent selected-account proof, raw legacy
   reset reconciliation, provider/external adapters, launch delivery, routing,
   cross-platform validation, and release/rollout remain open.
+- Next: resume Phase 2 through a bounded external-reader contract. Keep
+  invocation authority operator-owned, deadlines and output bounded, and
+  missing/unauthorized/error evidence distinct from numeric success.
 
 ### 2026-10-12 - Provider observation and reset evidence
 

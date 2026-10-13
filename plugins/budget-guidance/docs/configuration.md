@@ -4,6 +4,9 @@ The configuration schema is
 `copilot-extensions.budget-guidance-config`, version `1`. Unknown keys,
 unsupported versions, duplicate keys, unsupported adapter types, naive
 timestamps, negative values, and non-finite values are errors.
+Supported adapter types are `static` and `external-command`. External entries
+are inert references; the [external-reader contract](external-readers.md) owns
+explicit operator grants, command bounds, attribution, and failure semantics.
 
 Allowance, consumption, daily ceilings, trailing rates, and trailing-window
 lengths are bounded to `1000000000000000000` (`1e18`). This provider-neutral

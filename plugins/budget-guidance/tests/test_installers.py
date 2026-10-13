@@ -20,6 +20,14 @@ VERSION = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))
 pytestmark = pytest.mark.guard
 
 
+def _copy_payload(target: Path) -> None:
+    shutil.copytree(PLUGIN, target)
+    shutil.copytree(
+        PLUGIN.parents[1] / "libs" / "agent-procutil",
+        target / "libs" / "agent-procutil",
+    )
+
+
 def test_installers_recommend_supported_version_flag():
     posix = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     powershell = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
@@ -65,6 +73,12 @@ if args[:2] == ["pip", "install"]:
     shutil.copytree(
         plugin / "src" / "budget_guidance",
         Path(site_dir) / "budget_guidance",
+        dirs_exist_ok=True,
+    )
+    procutil = next(Path(arg) for arg in args if Path(arg).name == "agent-procutil")
+    shutil.copytree(
+        procutil / "src" / "agent_procutil",
+        Path(site_dir) / "agent_procutil",
         dirs_exist_ok=True,
     )
     raise SystemExit(0)
@@ -133,7 +147,7 @@ def test_powershell_self_stage_preserves_spaced_paths_and_force(tmp_path: Path):
         / "market with spaces"
         / "budget-guidance"
     )
-    shutil.copytree(PLUGIN, installed)
+    _copy_payload(installed)
     custom_root = tmp_path / "custom runtime with spaces"
     venv_log = tmp_path / "powershell uv venv.log"
     env["TEST_UV_VENV_LOG"] = str(venv_log)
@@ -265,6 +279,8 @@ def test_posix_stamp_uses_owned_versioned_snapshot_without_marketplace_fallback(
     assert snapshot == install_dir / "snapshots" / VERSION
     assert snapshot != PLUGIN
     assert (snapshot / "scripts" / "install.sh").is_file()
+    assert (snapshot / "libs" / "agent-procutil" / "pyproject.toml").is_file()
+    assert (snapshot / "pyproject.toml").read_bytes() == (PLUGIN / "pyproject.toml").read_bytes()
     assert (snapshot / ".payload-source").read_text(encoding="utf-8").strip() == str(
         PLUGIN
     )
@@ -296,7 +312,7 @@ def test_posix_self_stage_forwards_custom_root_and_force(tmp_path: Path):
         / "example"
         / "budget-guidance"
     )
-    shutil.copytree(PLUGIN, installed)
+    _copy_payload(installed)
     custom_root = tmp_path / "custom-runtime"
     venv_log = tmp_path / "uv-venv.log"
     env["TEST_UV_VENV_LOG"] = str(venv_log)

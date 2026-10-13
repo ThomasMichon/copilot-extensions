@@ -305,7 +305,7 @@ function Install-BudgetGuidancePackage {
     if ($uvCommand) {
         $uvResult = 1
         try {
-            & $uvCommand.Source pip install --python $Python $Source --quiet 2>&1 | Out-Null
+            & $uvCommand.Source pip install --python $Python @Dependencies $Source --quiet 2>&1 | Out-Null
             $uvResult = $LASTEXITCODE
         } catch {
             Write-Step 'uv package install could not start -- falling back to python -m pip'
@@ -657,6 +657,18 @@ function Invoke-Stamp {
     Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
     }
+    $procutil = Join-Path $PluginDir 'libs/agent-procutil'
+    if (-not (Test-Path (Join-Path $procutil 'pyproject.toml'))) {
+        $procutil = Join-Path $PluginDir '../../libs/agent-procutil'
+    }
+    if (-not (Test-Path (Join-Path $procutil 'pyproject.toml'))) {
+        Write-Fail 'Owning agent-procutil source is missing'; exit 1
+    }
+    $snapshotLib = Join-Path $snapTmp 'libs/agent-procutil'
+    if (-not (Test-Path $snapshotLib)) {
+        New-Item -ItemType Directory -Path (Join-Path $snapTmp 'libs') -Force | Out-Null
+        Copy-Item -LiteralPath $procutil -Destination $snapshotLib -Recurse -Force
+    }
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
@@ -800,7 +812,14 @@ if ($Force -or -not (Test-Path $VenvPython)) {
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 Remove-ConsoleTrampolines -VenvDir $VenvDir
-$vendoredDependencies = @()
+$procutil = Join-Path $PluginDir 'libs/agent-procutil'
+if (-not (Test-Path (Join-Path $procutil 'pyproject.toml'))) {
+    $procutil = Join-Path $PluginDir '../../libs/agent-procutil'
+}
+if (-not (Test-Path (Join-Path $procutil 'pyproject.toml'))) {
+    Write-Fail 'Owning agent-procutil source is missing'; exit 1
+}
+$vendoredDependencies = @($procutil)
 $pkgInstalled = Install-BudgetGuidancePackage `
     -Python $VenvPython `
     -Source $PluginDir `

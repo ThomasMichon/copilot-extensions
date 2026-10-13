@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from .models import BudgetConfig, READING_FIELDS, StaticAdapter, instant_text
+from .models import (
+    BudgetConfig, ModelError, READING_FIELDS, StaticAdapter, instant_text,
+)
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,8 @@ def resolve(config: BudgetConfig, at: datetime) -> Resolution:
     candidates: dict[str, list[FieldCandidate]] = {field: [] for field in READING_FIELDS}
     adapter_states: list[dict[str, Any]] = []
     for adapter in config.adapters:
+        if not isinstance(adapter, StaticAdapter):
+            raise ModelError("external adapters must be acquired before pure resolution")
         reading = adapter.reading
         freshness = _freshness(adapter, at)
         adapter_states.append(
