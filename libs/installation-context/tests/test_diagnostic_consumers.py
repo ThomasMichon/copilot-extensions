@@ -130,6 +130,9 @@ def test_peer_governance_wrapper_read_only(
     )
     primitive = _load(primitive_path, "diagnostic_peer_primitive", monkeypatch)
     layout, profile, _legacy = _fixture(tmp_path, activated, pointer_exists)
+    monkeypatch.setenv("HOME", str(profile))
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    assert peer.Path.home() == profile
     environment = {
         "HOME": str(profile),
         "USERPROFILE": str(profile),

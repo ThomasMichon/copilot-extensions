@@ -534,6 +534,13 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 - The publication guard requires a Manager changefile even for test-only
   changes. Added that required patch changefile; no runtime behavior or
   version files were hand-edited.
+- Review identified one additional fixture boundary: peer governance derives
+  its legacy root from process `Path.home()`, independently of the supplied
+  environment mapping. Redirected both process `HOME` and `USERPROFILE`
+  before the snapshot and asserted the wrapper's real home is the fixture
+  profile. The corrected consumer/scope selection passed 139 tests locally.
+  Native acceptance still requires the corrected head, not the earlier
+  head's successful Windows steps.
 
 ### 2026-10-13 — Diagnostic correction merged; native evidence is step-specific
 
