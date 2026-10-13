@@ -136,17 +136,23 @@ def verified_merge_head(
         if required:
             add_contexts(protection.get("requiredStatusCheckContexts"))
 
-    rules = read_json(["api", f"/repos/{repo}/rules/branches/{quote(base, safe='')}"])
-    if not isinstance(rules, list):
+    pages = read_json([
+        "api", f"/repos/{repo}/rules/branches/{quote(base, safe='')}",
+        "--paginate", "--slurp",
+    ])
+    if not isinstance(pages, list) or not pages:
         raise RequiredChecksError("effective branch rules are unavailable or invalid")
-    for rule in rules:
-        rule = obj(rule, "branch rule")
-        if rule.get("type") != "required_status_checks":
-            continue
-        checks = obj(rule.get("parameters"), "required-check rule").get("required_status_checks")
-        if not isinstance(checks, list):
-            raise RequiredChecksError("required-check rule declarations are unavailable or invalid")
-        add_contexts([obj(check, "required-check declaration").get("context") for check in checks])
+    for rules in pages:
+        if not isinstance(rules, list):
+            raise RequiredChecksError("effective branch rules page is unavailable or invalid")
+        for rule in rules:
+            rule = obj(rule, "branch rule")
+            if rule.get("type") != "required_status_checks":
+                continue
+            checks = obj(rule.get("parameters"), "required-check rule").get("required_status_checks")
+            if not isinstance(checks, list):
+                raise RequiredChecksError("required-check rule declarations are unavailable or invalid")
+            add_contexts([obj(check, "required-check declaration").get("context") for check in checks])
 
     if expected:
         checks = read_json([

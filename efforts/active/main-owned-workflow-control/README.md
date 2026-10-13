@@ -364,3 +364,17 @@ credential changes, broad policy weakening or unreviewed releases.
   not a competing receipt framework. Its builder/signing/publication files
   remain with their existing owner. Main duplicate validation cannot be pruned
   until that final-tree assurance and required admission gate are proven.
+
+### 2026-10-13 - Required-rule pagination review fix
+
+- #6402's review found that later effective-rule pages could add required
+  contexts omitted by the initial preflight. The merge boundary now consumes
+  all pages with `gh api --paginate --slurp`, validates every page and refuses
+  partial output on a pagination error.
+- The contained provider/guard selection passed 162 cases, including missing
+  and passing later-page contexts, malformed pages and a later-page read
+  failure. Focused Python lint and the 13-plugin install contract passed.
+  A read-only native API invocation confirmed the outer-page response shape.
+- This changes no first-provision behavior, so a clean-room install lane is
+  not applicable. Live required PR checks and a fresh review remain pending;
+  no review or CI bypass is authorized by this local evidence.

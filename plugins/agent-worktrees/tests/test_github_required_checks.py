@@ -25,6 +25,7 @@ class GitHubFixture:
             "type": "required_status_checks",
             "parameters": {"required_status_checks": [{"context": "policy"}]},
         }]
+        self.later_pages = []
         self.checks = [
             {"name": "PR gate", "bucket": "pass"},
             {"name": "policy", "bucket": "pass"},
@@ -53,7 +54,9 @@ class GitHubFixture:
                 "data": {"repository": {"ref": {"branchProtectionRule": self.protection}}},
             }
         elif "/rules/branches/" in argv[2]:
-            kind, data = "rules", self.rules
+            assert "--paginate" in argv
+            assert "--slurp" in argv
+            kind, data = "rules", [self.rules, *self.later_pages]
         else:
             raise AssertionError(f"Unexpected command: {argv}")
         if kind == self.fail:
@@ -70,6 +73,44 @@ def test_classic_and_ruleset_contexts_must_both_report_success():
     fixture = GitHubFixture()
     assert fixture.verify(expected_head_sha=HEAD) == HEAD
     assert fixture.pr_reads == 2
+
+
+@pytest.mark.parametrize("passed", [False, True])
+def test_required_context_on_later_page_must_report_success(passed):
+    fixture = GitHubFixture()
+    fixture.rules = [{"type": "pull_request"}] * 30
+    fixture.later_pages = [[{
+        "type": "required_status_checks",
+        "parameters": {"required_status_checks": [{"context": "late CI"}]},
+    }]]
+    if passed:
+        fixture.checks.append({"name": "late CI", "bucket": "pass"})
+        assert fixture.verify() == HEAD
+    else:
+        with pytest.raises(RequiredChecksError, match="late CI"):
+            fixture.verify()
+
+
+def test_malformed_later_page_fails_closed():
+    fixture = GitHubFixture()
+    fixture.later_pages = [None]
+    with pytest.raises(RequiredChecksError, match="branch rules page"):
+        fixture.verify()
+
+
+def test_later_page_request_failure_cannot_authorize_merge():
+    fixture = GitHubFixture()
+    invoke = fixture.invoke
+
+    def failed_page(argv):
+        if "/rules/branches/" in argv[2]:
+            assert "--paginate" in argv
+            return subprocess.CompletedProcess(argv, 1, json.dumps([fixture.rules]), "page 2 denied")
+        return invoke(argv)
+
+    fixture.invoke = failed_page
+    with pytest.raises(RequiredChecksError, match="page 2 denied"):
+        fixture.verify()
 
 
 @pytest.mark.parametrize("checks", [
