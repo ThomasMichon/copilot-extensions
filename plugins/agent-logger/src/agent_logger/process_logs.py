@@ -266,7 +266,7 @@ def iter_process_log_refs(log_root: Path) -> Iterator[ProcessLogRef]:
             if _is_log_name(name.removesuffix(".gz")):
                 refs.append(ProcessLogRef(path))
             elif path.suffix == ".zip":
-                with directory.open(name) as raw, zipfile.ZipFile(raw) as archive:
+                with _open_regular(path) as raw, zipfile.ZipFile(raw) as archive:
                     refs.extend(
                         ProcessLogRef(path, info.filename) for info in _zip_logs(archive)
                     )

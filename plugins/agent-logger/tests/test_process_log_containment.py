@@ -252,6 +252,34 @@ def test_process_log_source_roots_native_enumeration_yield_releases_handles(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows listing-to-ZIP boundary")
+def test_process_log_zip_replacement_between_validation_and_open_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger.sync.archive_directory import ArchiveDirectory
+
+    root = tmp_path / "logs"
+    original = _evidence(root, "zip", PAYLOAD)
+    replacement = _evidence(tmp_path / "replacement", "zip", b"replacement\n")
+    original_open = ArchiveDirectory.open
+    replaced = False
+
+    def opened(
+        directory: ArchiveDirectory, name: str, *, protected: bool = False,
+    ) -> BinaryIO:
+        nonlocal replaced
+        if directory.path == root.resolve() and name == original.path.name and not replaced:
+            original.path.rename(root / "retained.zip")
+            replacement.path.rename(original.path)
+            replaced = True
+        return original_open(directory, name, protected=protected)
+
+    monkeypatch.setattr(ArchiveDirectory, "open", opened)
+    with pytest.raises(ValueError, match="changed while opening"):
+        list(iter_process_log_refs(root))
+    assert replaced
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows listing-to-ZIP boundary")
 def test_process_log_source_roots_native_zip_scan_remains_pinned(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
