@@ -425,7 +425,7 @@ def task_write(start):
         command = args.get("command", "")
         if not isinstance(command, str):
             return True
-        if re.search(r">|write_text|json\.dump|[$`]", command):
+        if re.search(r">|<\(|write_text|json\.dump|[$`]", command):
             return True
         try:
             lexer = shlex.shlex(command.replace("\n", ";"), posix=True, punctuation_chars=";&|")

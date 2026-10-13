@@ -8,6 +8,9 @@ import os
 from pathlib import Path
 import shlex
 import shutil
+import signal
+import select
+import stat
 import subprocess
 import sys
 import time
@@ -47,6 +50,76 @@ def worker(argv, *, check=True):
 def nnp(pid):
     values = (Path("/proc") / str(pid) / "status").read_text().splitlines()
     return next((int(line.split(":", 1)[1].strip()) for line in values if line.startswith("NoNewPrivs:")), None)
+
+
+def server_identity(socket, session):
+    """Bind the queried server to process generation, owner and exact socket."""
+    try:
+        response = worker(["tmux", "-S", socket, "display-message", "-p", "-t", session, "#{pid}"], check=False)
+        if response.returncode or not response.stdout.strip().isdecimal():
+            return None
+        pid = int(response.stdout.strip())
+        actual_socket = worker(["tmux", "-S", socket, "display-message", "-p", "-t", session,
+                                "#{socket_path}"], check=False)
+        if actual_socket.returncode or actual_socket.stdout.strip() != socket:
+            return None
+        status = (Path("/proc") / str(pid) / "status").read_text().splitlines()
+        uids = next([int(value) for value in line.split(":", 1)[1].split()]
+                    for line in status if line.startswith("Uid:"))
+        fields = (Path("/proc") / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()
+        start_ticks = int(fields[19])  # Field 22; the tail starts at field 3.
+        info = Path(socket).lstat()
+        if not stat.S_ISSOCK(info.st_mode):
+            return None
+        return {"pid": pid, "uid": uids[1], "uids": uids, "start_ticks": start_ticks,
+                "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+                "socket": socket, "socket_dev": info.st_dev, "socket_ino": info.st_ino,
+                "socket_uid": info.st_uid, "session": session}
+    except (OSError, ValueError, IndexError, StopIteration, RuntimeError, subprocess.TimeoutExpired):
+        return None
+
+
+def valid_owned_identity(identity, expected_uid):
+    return (isinstance(identity, dict) and type(expected_uid) is int and expected_uid > 0
+            and all(type(identity.get(key)) is int and identity[key] > 0
+                    for key in ("pid", "start_ticks", "socket_ino"))
+            and type(identity.get("socket_dev")) is int and identity["socket_dev"] >= 0
+            and type(identity.get("uid")) is int and identity["uid"] == expected_uid
+            and type(identity.get("socket_uid")) is int and identity["socket_uid"] == expected_uid
+            and isinstance(identity.get("uids"), list) and len(identity["uids"]) == 4
+            and all(type(uid) is int and uid == expected_uid for uid in identity["uids"])
+            and all(isinstance(identity.get(key), str) and identity[key].strip()
+                    for key in ("boot_id", "socket", "session")))
+
+
+def capture_owned_server(socket, pid, session, expected_uid):
+    identity = server_identity(socket, session)
+    if not valid_owned_identity(identity, expected_uid) or identity["pid"] != pid:
+        raise RuntimeError("owned server identity/generation could not be captured")
+    return identity
+
+
+def retire_owned_server(captured, expected_uid):
+    """No name-based kill: revalidate immediately, then signal the pinned process."""
+    if not valid_owned_identity(captured, expected_uid):
+        return {"retired": False, "reason": "captured identity missing or wrong owner"}
+    if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+        return {"retired": False, "reason": "pidfd unavailable; no generic kill fallback"}
+    descriptor = None
+    try:
+        descriptor = os.pidfd_open(captured["pid"], 0)
+        current = server_identity(captured["socket"], captured["session"])
+        if not valid_owned_identity(current, expected_uid) or current != captured:
+            return {"retired": False, "reason": "server identity stale/reused/changed"}
+        signal.pidfd_send_signal(descriptor, signal.SIGTERM, None, 0)
+        ready, _, _ = select.select([descriptor], [], [], 3)
+        return {"retired": bool(ready), "signal_sent": True,
+                "reason": "owned server exited" if ready else "owned server exit timed out"}
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
+        return {"retired": False, "reason": "owned server cleanup identity/signal unavailable"}
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
 
 
 def file_hashes(directory):
@@ -170,7 +243,7 @@ def run_smoke(results):
         default_socket = worker(["tmux", "display-message", "-p", "-t", DEFAULT_SESSION, "#{socket_path}"]).stdout.strip()
         if not default_pid.isdecimal() or not default_socket or nnp(int(default_pid)) != 0:
             raise RuntimeError("could not establish the genuine unrestricted default server lane")
-        servers.append((default_socket, int(default_pid), DEFAULT_SESSION))
+        servers.append(capture_owned_server(default_socket, int(default_pid), DEFAULT_SESSION, account.pw_uid))
         validation.capture_baseline(WORKSPACE, validation.BASELINE_DIR, str(uuid.uuid4()))
         validation.seal_disposable_venue(WORKSPACE, validation.BASELINE_DIR)
         expected_hashes = file_hashes(validation.BASELINE_DIR)
@@ -198,7 +271,8 @@ def run_smoke(results):
                                 "-p", "-t", controller.TMUX, "#{pid}"]).stdout.strip()
         if not dedicated_pid.isdecimal() or nnp(int(dedicated_pid)) != 1:
             raise RuntimeError("new dedicated server does not actually have NNP")
-        servers.append((str(controller.TMUX_SOCKET), int(dedicated_pid), controller.TMUX))
+        servers.append(capture_owned_server(str(controller.TMUX_SOCKET), int(dedicated_pid),
+                                            controller.TMUX, account.pw_uid))
         probe = shlex.join(["python3", str(SOURCE), "--probe", str(results / "dedicated-server.json"),
                            "--lane", "dedicated-server"])
         # Unrestricted client; actual pane inherits the dedicated server's NNP.
@@ -213,15 +287,12 @@ def run_smoke(results):
         report["errors"].append(str(error))
     finally:
         # Only identity-matching servers created by this probe are retired.
-        for socket, pid, session in reversed(servers):
-            try:
-                current = worker(["tmux", "-S", socket, "display-message", "-p", "-t", session, "#{pid}"], check=False)
-                if current.returncode == 0 and current.stdout.strip() == str(pid):
-                    cleanup = worker(["tmux", "-S", socket, "kill-server"], check=False)
-                    if cleanup.returncode:
-                        report["errors"].append(f"owned server cleanup failed: {session}")
-            except (OSError, RuntimeError, subprocess.TimeoutExpired):
-                report["errors"].append(f"owned server cleanup unavailable: {session}")
+        report["server_cleanup"] = []
+        for identity in reversed(servers):
+            cleanup = retire_owned_server(identity, account.pw_uid)
+            report["server_cleanup"].append({"captured_identity": identity, "result": cleanup})
+            if not cleanup["retired"]:
+                report["errors"].append(f"owned server cleanup refused/failed: {identity['session']}")
         report["passed"] = not report["errors"]
         (results / "os-permission-report.json").write_text(json.dumps(report, indent=2) + "\n")
     return report

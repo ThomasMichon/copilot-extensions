@@ -450,6 +450,12 @@ def analyze():
     events, evidence_errors = event_stream(EVAL / "session/events.jsonl")
     child_activity = [event for event in events if not root_event(event)]
     quarantined = []
+    parser_errors = list(evidence_errors)
+    if parser_errors:
+        quarantined.extend(events)
+        events = []
+        evidence_errors.append({"source": "events",
+                                "error": "parser-invalid event stream excluded from all affirmative evidence"})
     export_path = EVAL / "export-errors.json"
     if export_path.exists():
         export_note = metadata(export_path, "export diagnostics", evidence_errors)
@@ -462,7 +468,7 @@ def analyze():
             if isinstance(export_errors, list):
                 evidence_errors.extend({"source": "export diagnostics", "observation": error}
                                        for error in export_errors)
-            quarantined = events
+            quarantined.extend(events)
             events = []
     events = [event for event in events if root_event(event)]
     starts = {event["data"]["toolCallId"]: event for event in events
@@ -612,6 +618,8 @@ def analyze():
         "evidence_errors": evidence_errors,
         "non_root_activity": child_activity,
         "quarantined_event_snapshot": quarantined,
+        "event_parser_errors": parser_errors,
+        "raw_event_stream": "session/events.jsonl",
         "root_clear_events": clears,
         "context_measurements": contexts,
         "native_artifact_and_terminal_calls": artifacts,

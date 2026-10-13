@@ -193,6 +193,12 @@ quarantines an unreliable exported event snapshot, including a pre-existing
 destination left after a failed copy. Quarantined rows remain inspectable but
 cannot supply root clears, tools, measurements or acceptance evidence; valid
 captured snapshots retain their normal path.
+The same quarantine applies to **any** event-parser error in direct analysis,
+even without an export receipt. Partial valid rows remain inspection-only;
+the unchanged raw stream and row diagnostics preserve invalid rows, and no
+clear/measurement/artifact or semantic-recovery credit is computed from it.
+Process substitutions (`<(...)` and `>(...)`) remain potential substantive
+mutations, including nested writers hidden behind an otherwise read-only command.
 One shared root-ownership predicate applies to clears and supporting calls;
 child-agent activity is quarantined under `non_root_activity` and cannot supply
 root windows, measurements, artifacts or refresh. Source regressions cover each
@@ -254,7 +260,14 @@ workspace task changes must succeed and be reported against the seed.
 
 Each probe has bounded command/file waits. Results include per-lane JSON and
 `os-permission-report.json` under the specified rig artifact directory. Cleanup
-retires only PID/socket-matching servers created by the smoke. It deliberately
+retires only identity-matching servers created by the smoke. Capture binds PID,
+all real/effective/saved/filesystem UIDs, kernel start ticks and boot ID, exact
+socket/session, and socket owner/device/inode. Cleanup opens a pidfd, immediately
+revalidates that full identity, and signals only the pinned process generation;
+there is no generic/default/name-based kill or fallback when identity/pidfd
+evidence is missing. A bounded wait confirms exit and cleanup refusals are
+reported. These cleanup changes require the parent's real OS smoke rerun;
+mocked source tests do not prove Linux pidfd behavior. It deliberately
 does not restore sudo policy, remove the immutable capsule or reuse the venue;
 the parent owns container retirement and any root Docker-exec inspection.
 Source test success is not a claim that this OS smoke or native acceptance ran.

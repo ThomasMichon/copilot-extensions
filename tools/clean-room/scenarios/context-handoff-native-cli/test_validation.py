@@ -40,6 +40,101 @@ def recovery_event_errors(events, root):
 
 
 class ValidationTests(unittest.TestCase):
+    def test_direct_analyze_parser_error_quarantines_all_supporting_rows(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evaluation, state, events = self.analyzer_fixture(Path(temp))
+            measurement = self.full_measurement(1)
+            events[1:1] = [
+                {"type": "tool.execution_start", "id": "measurement", "timestamp": "0-0a",
+                 "data": {"toolCallId": "measurement", "toolName": "get_context_remaining", "arguments": {}}},
+                {"type": "tool.execution_complete", "id": "measurement-complete", "timestamp": "0-0b",
+                 "data": {"toolCallId": "measurement", "success": True, "result": {"content": json.dumps(measurement)}}},
+            ]
+            raw = "".join(json.dumps(event) + "\n" for event in events) + "not-json\n"
+            stream = evaluation / "session/events.jsonl"
+            stream.write_text(raw)
+            with patch.object(controller, "EVAL", evaluation), patch.object(controller, "STATE", state), \
+                    patch.object(controller, "BASELINE", TEST_SEEDS[str(evaluation / "workspace")]), \
+                    redirect_stdout(io.StringIO()):
+                controller.analyze()
+            report = json.loads((evaluation / "observed-evidence.json").read_text())
+            self.assertTrue(report["evidence_errors"])
+            self.assertEqual(report["root_clear_events"], [])
+            self.assertEqual(report["context_measurements"], [])
+            self.assertEqual(report["native_artifact_and_terminal_calls"], [])
+            self.assertTrue(report["quarantined_event_snapshot"])
+            self.assertEqual(stream.read_text(), raw)
+            positive = self.run_analyzer(evaluation, state, events)
+            self.assertEqual(len(positive["root_clear_events"]), 2)
+            self.assertEqual(len(positive["context_measurements"]), 1)
+            self.assertTrue(positive["native_artifact_and_terminal_calls"])
+            self.assertEqual(positive["quarantined_event_snapshot"], [])
+
+    def test_process_substitution_is_early_substantive_invalid_work(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for command in (f"cat <(touch '{root / 'witness.json'}')",
+                            f"cat >({root / 'unknown-writer'})"):
+                events = self.semantic_events(root)
+                events[3:3] = [
+                    {"type": "tool.execution_start", "id": "process-substitution", "timestamp": "1-0a",
+                     "data": {"toolCallId": "process-substitution", "toolName": "bash", "arguments": {"command": command}}},
+                    {"type": "tool.execution_complete", "id": "process-substitution-complete", "timestamp": "1-0b",
+                     "data": {"toolCallId": "process-substitution", "success": True, "result": {"content": ""}}},
+                ]
+                report = recovery_event_errors(events, root)[0]
+                self.assertTrue(report["errors"])
+                self.assertEqual(report["first_substantive_work"], "process-substitution")
+
+    def test_owned_server_cleanup_is_directly_testable(self):
+        self.assertTrue(callable(getattr(os_permission_smoke, "retire_owned_server", None)),
+                        "inline PID-only cleanup lacks a direct identity-gated test surface")
+
+    def test_server_cleanup_signals_only_matching_live_generation(self):
+        captured = {"pid": 123, "uid": 1000, "uids": [1000] * 4, "start_ticks": 456,
+                    "boot_id": "boot-fixture", "socket": "/tmp/owned-fixture.sock", "socket_dev": 1,
+                    "socket_ino": 789, "socket_uid": 1000, "session": "owned-fixture"}
+        with patch.object(os_permission_smoke.os, "pidfd_open", return_value=99, create=True) as opened, \
+                patch.object(os_permission_smoke.signal, "pidfd_send_signal", create=True) as signaled, \
+                patch.object(os_permission_smoke.os, "close") as closed, \
+                patch.object(os_permission_smoke.select, "select", return_value=([99], [], [])), \
+                patch.object(os_permission_smoke, "server_identity", return_value=captured) as identity, \
+                patch.object(os_permission_smoke, "worker") as worker:
+            result = os_permission_smoke.retire_owned_server(captured, 1000)
+            self.assertTrue(result["retired"])
+            opened.assert_called_once_with(123, 0)
+            identity.assert_called_once_with(captured["socket"], captured["session"])
+            signaled.assert_called_once_with(99, os_permission_smoke.signal.SIGTERM, None, 0)
+            closed.assert_called_once_with(99)
+            worker.assert_not_called()  # No generic/default/name-based kill.
+
+    def test_server_cleanup_refuses_stale_reused_wrong_or_missing_identity(self):
+        captured = {"pid": 123, "uid": 1000, "uids": [1000] * 4, "start_ticks": 456,
+                    "boot_id": "boot-fixture", "socket": "/tmp/owned-fixture.sock", "socket_dev": 1,
+                    "socket_ino": 789, "socket_uid": 1000, "session": "owned-fixture"}
+        changes = [None, dict(captured, start_ticks=457), dict(captured, boot_id="other-boot"),
+                   dict(captured, uid=1001, uids=[1001] * 4), dict(captured, socket_ino=790),
+                   dict(captured, socket="/tmp/other.sock"), dict(captured, session="other-session"),
+                   dict(captured, socket_uid=0)]
+        for current in changes:
+            with patch.object(os_permission_smoke.os, "pidfd_open", return_value=99, create=True), \
+                    patch.object(os_permission_smoke.signal, "pidfd_send_signal", create=True) as signal, \
+                    patch.object(os_permission_smoke.os, "close") as close, \
+                    patch.object(os_permission_smoke, "server_identity", return_value=current), \
+                    patch.object(os_permission_smoke, "worker") as worker:
+                result = os_permission_smoke.retire_owned_server(captured, 1000)
+                self.assertFalse(result["retired"], current)
+                signal.assert_not_called()
+                worker.assert_not_called()
+                close.assert_called_once_with(99)
+        for invalid in (None, {}, dict(captured, uid=0), dict(captured, start_ticks=None),
+                        dict(captured, socket_uid=0), dict(captured, session="")):
+            with patch.object(os_permission_smoke.os, "pidfd_open", create=True) as opened, \
+                    patch.object(os_permission_smoke.signal, "pidfd_send_signal", create=True) as signal:
+                self.assertFalse(os_permission_smoke.retire_owned_server(invalid, 1000)["retired"])
+                opened.assert_not_called()
+                signal.assert_not_called()
+
     def test_incomplete_event_rows_preserve_analysis_and_export_packet(self):
         incomplete = [
             {"type": "user.message", "id": "bad-user", "timestamp": "0-0"},

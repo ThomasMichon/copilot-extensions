@@ -318,8 +318,8 @@ below-altitude evidence/tooling documentation, with no new rollout claim.
   carried earlier corrected threads. Its six new comments describe three
   diagnostic issues, each duplicated: controller usage, missing Linux account
   lookup support and unstable malformed-corpus cursor errors. Added explicit
-  guards and stable field/binding diagnostics, with focused tests in a separate
-  module rather than growing the existing near-budget test file. All forty-one
+  guards and stable field/binding diagnostics, with focused CLI-behavior tests
+  in a separate module. All forty-one
   discovered tests and `F,E9` checks pass. The old addressed findings are not
   being patched a second time; review-thread state is reconciled to the actual
   corrections and independent evidence.
@@ -331,6 +331,21 @@ below-altitude evidence/tooling documentation, with no new rollout claim.
   rather than floating-point aliases. All forty-four discovered tests and
   `F,E9` checks pass; the six diagnostic tests also pass in an unpaid Linux
   container. No historical packet or native verdict was changed.
+- A successful full Balanced review then identified direct analysis of a
+  malformed stream without an export receipt, a process-substitution ordering
+  gap and missing direct identity-gated cleanup tests. Parser errors now
+  quarantine all partial rows before affirmative evidence, and process
+  substitutions remain substantive invalid work. Cleanup binds the live server
+  to PID, all four UIDs, start ticks, boot identity, socket identity and session,
+  revalidates immediately and signals the pinned Linux pidfd without a generic
+  kill fallback. Direct tests prove matching retirement and mismatch/refusal.
+  All forty-nine source tests and `F,E9` checks pass.
+- Reran the unpaid real-container OS probe after that cleanup change: all three
+  permission lanes passed, baseline hashes stayed equal and both identity-bound
+  servers actually retired through pidfds. The container was removed. This is
+  fixture safety/cleanup proof, not another Copilot trial, native acceptance or
+  a historical verdict change. Required CI and current-head review still gate
+  publication.
 - The corrections affect source evidence validation only. All four historical
   independent FAIL verdicts and their original packets remain unchanged.
   No paid trial, native deployment claim or runtime change is authorized by
