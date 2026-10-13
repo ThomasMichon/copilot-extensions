@@ -6,6 +6,10 @@ import os
 from pathlib import Path
 
 
+DACL_SECURITY_INFORMATION = 0x00000004
+PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000
+
+
 def reject_links(path: Path) -> None:
     """Inspect directory entries, including dangling links, before creating state."""
     import stat
@@ -46,7 +50,8 @@ def protect(path: Path, *, directory: bool = False) -> None:
     if not convert(sddl, 1, ctypes.byref(descriptor), None):
         raise ctypes.WinError(ctypes.get_last_error())
     try:
-        if not apply(str(path), 0x80000004, descriptor):
+        security_information = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION
+        if not apply(str(path), security_information, descriptor):
             raise ctypes.WinError(ctypes.get_last_error())
     finally:
         kernel.LocalFree(descriptor)

@@ -1,5 +1,5 @@
 {
-  "comment": "Report actual resume refusal causes and harden composer context, ACL shell selection, and lock/transaction regression coverage",
+  "comment": "Report actual resume refusal causes and harden composer context, named ACL flags, shell selection, and lock/transaction regression coverage",
   "changes": [
     {
       "plugin": "worktree-manager",
