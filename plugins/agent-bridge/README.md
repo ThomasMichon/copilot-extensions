@@ -108,8 +108,9 @@ The existing configured telemetry sink receives `reader_cpu_observation`
 events: plugin, `namespace-list` role, bounded namespace key, root PID/creation
 time, native wall duration, `observed_cpu_seconds`, `coverage`, `truncated` and
 bounded PID/reason `issues`. No arguments, output or paths are emitted.
-CPU values are observed lower bounds, not exhaustive tree totals; unavailable,
-failed or rate-limited measurements remain `null` with explicit uncertainty.
+CPU values are observed lower bounds, not exhaustive tree totals. Unavailable,
+failed or rate-limited measurements retain an earlier valid lower bound when
+one exists; otherwise they remain `null`. Uncertainty is always explicit.
 Wall duration remains `null` until the native command finishes; a cancelled
 asyncio task does not establish thread/process completion.
 Measurement failure does not discard valid enumeration. Resolve, ensure-ready

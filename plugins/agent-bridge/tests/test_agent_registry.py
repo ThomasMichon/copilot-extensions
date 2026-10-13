@@ -889,14 +889,8 @@ class TestNamespaceResolvers:
     async def test_list_agents_async_forwards_timeout_into_cli_resolver_subprocess(
         self, monkeypatch
     ):
-        # Integration coverage: AgentResolver.list_agents_async() must not
-        # just bound a wedged CliNamespaceResolver by cancellation (which
-        # cannot stop a subprocess.run already running in a worker thread --
-        # see test_list_threads_timeout_into_subprocess_run in
-        # test_cli_namespace_resolver.py for the unit-level proof). It must
-        # actually detect that this resolver's list() accepts a ``timeout``
-        # keyword and pass the configured bound through, so the underlying
-        # subprocess.run(..., timeout=...) is what kills the child process.
+        # The configured deadline reaches the owned command adapter, not
+        # merely the worker's cancellable awaiter.
         import shutil
         from unittest.mock import patch
 
@@ -909,7 +903,7 @@ class TestNamespaceResolvers:
 
         with patch.object(shutil, "which", return_value="/usr/bin/agent-codespaces"), \
              patch(
-                 "subprocess.run",
+                 "agent_bridge.reader_command.OwnedReaderCommand.run",
                  return_value=subprocess.CompletedProcess([], 0, "[]", ""),
              ) as mock_run:
             await resolver.list_agents_async()
@@ -993,7 +987,7 @@ class TestNamespaceResolvers:
         resolver.register_namespace_resolver(cli_resolver)
         resolver.register_namespace_resolver(_MockResolver("ok"))
         with patch("shutil.which", return_value="/usr/bin/agent-codespaces"), patch(
-            "subprocess.run",
+            "agent_bridge.reader_command.OwnedReaderCommand.run",
             return_value=subprocess.CompletedProcess([], 1, "", "boom"),
         ):
             agents = await resolver.list_agents_async()

@@ -439,3 +439,14 @@ not the asyncio task's done state. A cancelled command task can leave its
 thread alive, so that case reports unknown duration rather than invented zero.
 The dedicated thread-backed cancellation regression and the complete focused
 selection pass (138 tests).
+
+The approved implementation's canonical CI then reached an integration
+fixture that still mocked the old subprocess seam. Both registry list-only
+fixtures now use the owned adapter, so deadline forwarding and non-zero
+failure exercise the intended boundary rather than accidental launch failure.
+The expanded namespace/provider selection passes 346 tests. The complete
+bounded Windows Agent Bridge portfolio passes all nine sub-suites: 4,239
+passed, 94 skipped. The non-blocking documentation observation was corrected
+as well: uncertainty retains an earlier valid CPU lower bound; `null` applies
+only when none was observed. Current-head review and Linux CI must pass again
+before landing this correction.
