@@ -398,7 +398,7 @@ def main() -> int:
             parser.error("--repository must name a checkout directory")
         root = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"], cwd=REPO,
-            capture_output=True, text=True,
+            capture_output=True, text=True, encoding="utf-8",
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if root.returncode != 0 or Path(root.stdout.strip()).resolve() != REPO:

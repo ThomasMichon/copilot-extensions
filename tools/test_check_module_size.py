@@ -233,6 +233,25 @@ def test_git_failure_is_a_controlled_cli_failure(repo: Path):
     assert "Traceback" not in result.stderr
 
 
+def test_unicode_target_root_uses_git_utf8_output(repo: Path):
+    _write_lines(repo, "src/small.py", 50)
+    _commit_all(repo)
+    target = repo.parent / "target-\u00e9"
+    _git(repo, "clone", "-q", str(repo), str(target))
+    driver = (
+        "import locale,runpy,sys; locale.getencoding=lambda:'cp1252'; "
+        "sys.argv=sys.argv[1:]; runpy.run_path(sys.argv[0],run_name='__main__')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-X", "utf8=0", "-I", "-c", driver,
+         str(SCRIPT), "--repository", str(target)],
+        capture_output=True, text=True, encoding="utf-8", timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[OK]" in result.stdout
+
+
 def test_an_uncapped_new_file_over_the_cap_fails(repo: Path):
     _write_lines(repo, "src/huge.py", 1001)
     _commit_all(repo)
