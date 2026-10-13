@@ -1133,7 +1133,7 @@ def test_client_gates_represented_snapshot_against_protocol_six(
 
 def test_cli_result_renders_snapshot(monkeypatch, capsys) -> None:
     class _FakeClient:
-        def daemon_supports(self, _version):
+        def daemon_supports(self, _version, **_kwargs):
             return False
 
         def resolve_live_result_target(self, _session_ref):

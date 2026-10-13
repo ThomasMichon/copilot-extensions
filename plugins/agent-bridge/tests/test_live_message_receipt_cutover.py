@@ -348,3 +348,63 @@ def test_supported_result_retry_invalidates_cached_capabilities_before_discovery
     assert client.daemon_protocol()[0] == successor
     assert resources == [f"{base}/api/v1/live-sessions/live-1/result" for base in (old_base, new_base)]
     assert len(healths) == 4
+
+
+@pytest.mark.parametrize("surface,floor", [
+    ("receipt", LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION),
+    ("wait", LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION),
+    ("snapshot", REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION),
+    ("detail", REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION),
+    ("resolver", REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION),
+    ("read", REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION),
+    ("result", REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION),
+])
+@pytest.mark.parametrize("cached", ["unversioned", "previous"])
+def test_cached_negative_capability_is_refreshed_before_rejecting_an_upgrade(
+    monkeypatch: pytest.MonkeyPatch, surface: str, floor: int, cached: str,
+) -> None:
+    from agent_bridge import __main__ as cli
+
+    client = BridgeClient("http://127.0.0.1:57585", "test")
+    current = [0 if cached == "unversioned" else floor - 1]
+    resources: list[str] = []
+    healths: list[int] = []
+
+    def transport(req: urllib.request.Request, timeout: float | None = None) -> _Response:
+        path = req.full_url.split("?")[0]
+        if path.endswith("/health"):
+            healths.append(current[0])
+            return _Response({"protocol_version": current[0]})
+        resources.append(path)
+        assert current[0] >= floor
+        if path.endswith("/result-target"):
+            return _Response({"session_id": "live-1"})
+        if path.endswith("/messages"):
+            assert json.loads(req.data)["wait"] is True
+            return _Response({"message_id": 7})
+        return _Response({"message_id": 7, "identity": {"snapshot_session_id": "live-1"}})
+
+    monkeypatch.setattr("agent_bridge.client.urllib.request.urlopen", transport)
+    monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: client)
+    monkeypatch.setattr(cli, "_caller_id_for", lambda _args: "peer")
+    monkeypatch.setattr(cli, "_resolve_read_target", lambda *_args: pytest.fail("no ACP read fallback"))
+    monkeypatch.setattr(client, "get_result_snapshot", lambda *_args, **_kwargs: pytest.fail("no ACP result fallback"))
+    assert client.daemon_supports(floor) is False
+    current[0] = floor
+    actions = {
+        "receipt": lambda: client.get_live_message_receipt("live-1", 7),
+        "wait": lambda: client.send_live_message("live-1", sender="peer", body="continue",
+                                               wait=True, wait_timeout=0),
+        "snapshot": lambda: client.get_live_result_snapshot("live-1"),
+        "detail": lambda: client.expand_live_result_ref("live-1", "opaque"),
+        "resolver": lambda: client.resolve_live_result_target("live-1"),
+        "read": lambda: cli._cmd_read(argparse.Namespace(session_id="live-1", json=True)),
+        "result": lambda: cli._cmd_result(argparse.Namespace(
+            session_ref="live-1", expand=None, position=None,
+            max_items=None, max_text_chars=None, json=True,
+        )),
+    }
+    actions[surface]()
+    assert resources
+    assert client.daemon_protocol()[0] == floor
+    assert healths[0] < floor and all(value == floor for value in healths[1:])

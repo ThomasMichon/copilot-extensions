@@ -14,7 +14,7 @@ from .protocol import (
 class LiveResultsClientMixin:
     def _require_live_message_receipts(self) -> None:
         from .client import BridgeClientError
-        if not self.daemon_supports(LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION):
+        if not self.daemon_supports(LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION, refresh=True):
             raise BridgeClientError(
                 426,
                 "live-message receipts and post-consumption reply waits require daemon "
@@ -29,7 +29,7 @@ class LiveResultsClientMixin:
 
     def _require_represented_result_snapshots(self) -> None:
         from .client import BridgeClientError
-        if not self.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION):
+        if not self.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION, refresh=True):
             version, _minimum = self.daemon_protocol()
             raise BridgeClientError(
                 426,

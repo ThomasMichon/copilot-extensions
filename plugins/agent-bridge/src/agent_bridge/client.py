@@ -583,7 +583,7 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
                 self._daemon_proto = (UNVERSIONED, UNVERSIONED)
         return self._daemon_proto
 
-    def daemon_supports(self, min_version: int) -> bool:
+    def daemon_supports(self, min_version: int, *, refresh: bool = False) -> bool:
         """Whether the live daemon speaks at least HTTP protocol ``min_version``.
 
         The capability gate for a client **newer** than the daemon it calls:
@@ -591,8 +591,11 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
         and fall back gracefully when it is ``False``, instead of blind-sending a
         request an older daemon will ignore or reject (dotfiles #632). An
         unreachable or unversioned daemon reports version ``0`` → ``False``.
+        ``refresh`` rechecks a possibly replaced daemon before rejecting a feature.
         """
-        version, _min_supported = self.daemon_protocol()
+        version, _min_supported = (
+            self.daemon_protocol(refresh=True) if refresh else self.daemon_protocol()
+        )
         return version >= min_version
 
     def assert_client_supported(self) -> None:

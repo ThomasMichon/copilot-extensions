@@ -409,7 +409,10 @@ def _cmd_read(args: argparse.Namespace) -> None:
     target = args.session_id
     from .protocol import REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION
 
-    if getattr(client, "resolve_live_result_target", None) is not None and client.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION):
+    if getattr(client, "resolve_live_result_target", None) is not None and (
+        client.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION)
+        or client.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION, refresh=True)
+    ):
         represented = client.resolve_live_result_target(target)
         if represented:
             if getattr(args, "range", None) or getattr(args, "event", None) is not None or getattr(args, "since", None) is not None:
@@ -521,7 +524,10 @@ def _cmd_result(args: argparse.Namespace) -> None:
     core = _core()
     client = core._get_client(ensure=False)
     try:
-        represented = client.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION) and bool(
+        represented = (
+            client.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION)
+            or client.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION, refresh=True)
+        ) and bool(
             client.resolve_live_result_target(args.session_ref)
         )
         if args.expand:

@@ -62,8 +62,12 @@ receipt evidence. Explicit reply waiting refuses before submitting a message
 (`refused_unavailable`, reason `unsupported_protocol`, exit 69), rather than
 reporting an unrelated completed turn as a reply.
 Versioned receipt, reply-wait and represented-result requests re-probe their
-protocol floor before every attempt, including cutover retries. A synthetic
-admission receipt whose evidence is no longer current does not advertise a
+protocol floor before every attempt, including cutover retries. Capability
+preflight refreshes memoized protocol evidence before rejecting an
+upgraded daemon. Represented read/result dispatch rechecks a negative capability
+gate before selecting the legacy hosted surface; a cached positive still enters
+the fresh resolver guard, so downgrade refusal does not become an ACP fallback.
+A synthetic admission receipt whose evidence is no longer current does not advertise a
 message-specific receipt read; the CLI instead offers session-state inspection.
 
 Represented-message consumption removes the input from delivery polling even

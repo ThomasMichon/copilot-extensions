@@ -449,7 +449,7 @@ def test_client_invalid_reply_wait_makes_no_transport_request(monkeypatch, timeo
 @pytest.mark.parametrize("timeout,effective", [(None, 120.0), (0.0, 0.0), (600.0, 600.0)])
 def test_client_reply_wait_uses_validated_bound_plus_transport_margin(monkeypatch, timeout, effective):
     client = BridgeClient("http://127.0.0.1:1", "test")
-    monkeypatch.setattr(client, "daemon_supports", lambda version: version == LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION)
+    monkeypatch.setattr(client, "daemon_supports", lambda version, **_kwargs: version == LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION)
     calls = []
 
     def request(*args, **kwargs):
@@ -627,7 +627,7 @@ def test_cli_wait_output_distinguishes_duplicate_and_uses_current_identity(
     duplicate: bool, as_json: bool,
 ) -> None:
     client = BridgeClient("http://127.0.0.1:1", "test")
-    monkeypatch.setattr(client, "daemon_supports", lambda version: version == LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION)
+    monkeypatch.setattr(client, "daemon_supports", lambda version, **_kwargs: version == LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION)
     monkeypatch.setattr(client, "_request", lambda method, path, *_args, **_kwargs: (
         {"protocol_version": LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION} if (method, path) == ("GET", "/health") else {
             "message_id": 7, "session_id": "live-renamed", "duplicate": duplicate,
@@ -689,7 +689,7 @@ def test_live_read_bounds_are_refused_not_silently_replaced(api, name, value):
 
 def test_receipt_client_refuses_unsupported_daemon_without_request(monkeypatch):
     client = BridgeClient("http://127.0.0.1:1", "test")
-    monkeypatch.setattr(client, "daemon_supports", lambda _version: False)
+    monkeypatch.setattr(client, "daemon_supports", lambda _version, **_kwargs: False)
     monkeypatch.setattr(client, "_request", lambda *_args, **_kwargs: pytest.fail("must not request"))
     with pytest.raises(BridgeClientError, match=f"protocol {LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION}"):
         client.get_live_message_receipt("live-1", 7)
