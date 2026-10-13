@@ -238,7 +238,10 @@ def cmd_copilot(
                         if not git_token:
                             raise RuntimeError("forward_gh_token requires the independent gh login")
                         values["GH_TOKEN"] = git_token
-                    remote_env = auth.stage_env(args.name, user, values, write_remote_env)
+                    remote_env = auth.stage_env(
+                        args.name, user, values, write_remote_env,
+                        config=config, fleet=target.fleet,
+                    )
                     remote_command = auth.wrap_manager_shell(remote_command, auth_env, remote_env)
                 spawn_cmd = build_ssh_command(
                     ssh_config, remote_command,

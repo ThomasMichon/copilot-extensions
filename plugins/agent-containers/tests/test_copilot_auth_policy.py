@@ -30,6 +30,29 @@ def test_shipped_starter_selects_host_copilot_without_legacy_migration(monkeypat
 
 
 @pytest.mark.guard
+@pytest.mark.parametrize(
+    ("mode", "profile", "preserved"),
+    [
+        ("legacy", "trusted", True),
+        ("host-copilot", "trusted", False),
+        ("legacy", "restricted", False),
+    ],
+)
+def test_staging_preserves_only_explicit_trusted_legacy_auth(mode, profile, preserved):
+    staged = []
+    values = {"COPILOT_GITHUB_TOKEN": "fake-container-login", "GH_TOKEN": "fake-repository"}
+    auth.stage_env(
+        "example-1", "vscode", values,
+        lambda name, user, environment: staged.append(environment),
+        config=ContainersConfig(copilot_auth_mode=mode),
+        fleet=FleetConfig(security_profile=profile),
+    )
+    assert ("COPILOT_GITHUB_TOKEN" in staged[0]) is preserved
+    assert staged[0]["GH_TOKEN"] == "fake-repository"
+    assert values["COPILOT_GITHUB_TOKEN"] == "fake-container-login"
+
+
+@pytest.mark.guard
 def test_unset_account_does_not_consult_gh_or_ambient_inference(monkeypatch):
     monkeypatch.setenv("GH_TOKEN", "repository-only")
     monkeypatch.setenv("GITHUB_TOKEN", "other-repository")

@@ -498,7 +498,7 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
         )
 
     remote_env = process_auth.stage_env(projection_target, user, launch_env, write_remote_env,
-                                        require_owner=True)
+                                        require_owner=True, config=config, fleet=fleet)
     _, acp_command = process_auth.prepare_acp_launch(
         config, fleet, projection_target, user, acp_command, remote_env,
     )
@@ -1105,7 +1105,9 @@ def _launch_container_agent(
         for name in relay_env
         if name in env
     })
-    remote_env = process_auth.stage_env(args.name, user, launch_env, write_remote_env)
+    remote_env = process_auth.stage_env(
+        args.name, user, launch_env, write_remote_env, config=config, fleet=fleet,
+    )
     env = process_auth.without_inference_token(env)
     copilot_auth_env = None
     try:

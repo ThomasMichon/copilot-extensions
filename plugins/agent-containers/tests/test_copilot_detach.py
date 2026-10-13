@@ -262,6 +262,21 @@ def test_detach_ssh_excludes_inference_token_but_preserves_repository_auth(seams
     assert environment["GH_TOKEN"] == "fake-repository-token"
 
 
+def test_detach_explicit_legacy_preserves_existing_container_login(seams, monkeypatch):
+    import agent_containers.ssh_transport as transport
+
+    monkeypatch.setattr(
+        transport, "container_environment",
+        lambda name, user: {"PATH": "/bin", "COPILOT_GITHUB_TOKEN": "fake-container-login"},
+    )
+    assert detach.cmd_detach(
+        _args(),
+        require_live_relay_port=lambda: 61234,
+        relay_healthy=lambda port: True,
+    ) == 0
+    assert seams.remote_env[0]["COPILOT_GITHUB_TOKEN"] == "fake-container-login"
+
+
 def test_detach_forwards_the_host_github_token_when_enabled(seams, monkeypatch, capsys):
     import agent_containers.resolver as resolver_mod
 

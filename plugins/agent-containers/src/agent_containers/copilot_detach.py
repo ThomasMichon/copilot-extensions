@@ -205,10 +205,12 @@ def _prepare_remote_env(
 
     launch_env = container_environment(args.name, target.user)
     launch_env.update(values)
-    from .copilot_process_auth import without_inference_token
+    from .copilot_process_auth import stage_env
 
-    launch_env = without_inference_token(launch_env)
-    return write_remote_env(args.name, target.user, launch_env)
+    return stage_env(
+        args.name, target.user, launch_env, write_remote_env,
+        config=target.config, fleet=target.fleet,
+    )
 
 
 def _resolve_target(args: argparse.Namespace) -> Any:

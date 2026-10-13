@@ -22,8 +22,13 @@ def launcher_directory(auth_env: str) -> str:
     return auth_env + ".d"
 
 
-def stage_env(container, user, values, writer, *, require_owner=False):
-    values = without_inference_token(values)
+def stage_env(container, user, values, writer, *, require_owner=False, config=None, fleet=None):
+    preserve_legacy = (
+        config is not None
+        and getattr(fleet, "security_profile", "trusted") != "restricted"
+        and trusted_auth_mode(config, fleet) == LEGACY
+    )
+    values = dict(values) if preserve_legacy else without_inference_token(values)
     if require_owner and not values:
         values = {"AGENT_CONTAINERS_LAUNCH_INPUTS": "1"}
     return writer(container, user, values)
