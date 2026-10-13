@@ -62,6 +62,9 @@ when its separate SDK acknowledgement is lost; it never fabricates that
 acknowledgement. Idle-only acquisition treats unconsumed prompts as pending work,
 including SDK-accepted inputs. A delayed acknowledgement records SDK acceptance
 but cannot overwrite an idle boundary already observed after consumption.
+Migration retains historical SDK-acceptance evidence without inventing
+consumption or classifying old acknowledged history as newly pending work.
+Newly admitted inputs carry explicit consumption-tracking provenance.
 
 Source anchors:
 

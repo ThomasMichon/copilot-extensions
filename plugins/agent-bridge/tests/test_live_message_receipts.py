@@ -226,6 +226,53 @@ def test_receipt_survives_database_reopen_and_v25_migration(tmp_path):
         db.close()
 
 
+@pytest.mark.parametrize("old_version", [25, 26])
+def test_migration_preserves_legacy_acceptance_without_inventing_pending_consumption(tmp_path, old_version):
+    path = tmp_path / "legacy.db"
+    db = Database(path)
+    now = time.time()
+    db.register_live_session(
+        "live-1", machine=None, cwd=None, worktree_id="wt-1", repo=None,
+        branch=None, pid=None, role=None, now=now,
+    )
+    legacy = db.enqueue_live_message("live-1", "peer", "old input", now)
+    db.ack_live_messages("live-1", [legacy], now)
+    db.close()
+    with sqlite3.connect(path) as conn:
+        conn.execute("ALTER TABLE live_messages DROP COLUMN consumption_tracked")
+        if old_version == 25:
+            conn.execute("ALTER TABLE live_messages DROP COLUMN consumed_at")
+        conn.execute("UPDATE schema_version SET version=?", (old_version,))
+    db = Database(path)
+    try:
+        before = db.live_message_receipt("live-1", legacy)
+        assert before["stage"] == "sdk_accepted" and before["consumed_at"] is None
+        assert before["sdk_accepted_at"] == now
+        assert db.inspect_live_inbox("live-1", 10) == []
+        db.update_live_turn_state("live-1", turn_state="idle", last_activity_at=now)
+        current, reason = db.enqueue_live_message_if_fresh(
+            "live-1", sender="peer", body="tracked input", now=now, require_idle=True,
+        )
+        assert current is not None and reason is None
+        db.ack_live_messages("live-1", [current], now)
+        assert [row["message_id"] for row in db.inspect_live_inbox("live-1", 10)] == [current]
+        competing, reason = db.enqueue_live_message_if_fresh(
+            "live-1", sender="peer", body="competing", now=now, require_idle=True,
+        )
+        assert competing is None and reason == "session_busy"
+        assert db.live_message_receipt("live-1", legacy) == before
+        assert db.consume_live_message("live-1", current, now) == 1
+        assert db.inspect_live_inbox("live-1", 10) == []
+    finally:
+        db.close()
+    db = Database(path)
+    try:
+        assert db.live_message_receipt("live-1", legacy) == before
+        assert db.live_message_receipt("live-1", current)["stage"] == "consumed"
+    finally:
+        db.close()
+
+
 @pytest.mark.asyncio
 async def test_reply_wait_ignores_unrelated_completion_nested_text_and_empty_tool_turn():
     log = EventLog()

@@ -735,8 +735,8 @@ class _LiveSessionsMixin:
         delivery = _validate_live_message_delivery(delivery)
         cur = self.execute_write(
             "INSERT INTO live_messages (session_id, sender, body, reply_to, "
-            "kind, delivery, idempotency_key, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "kind, delivery, idempotency_key, created_at, consumption_tracked) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)",
             (session_id, sender, body, reply_to, kind, delivery, idempotency_key, now),
         )
         return int(cur.lastrowid or 0)
@@ -787,8 +787,8 @@ class _LiveSessionsMixin:
         cur = self.execute_write(
             "INSERT OR IGNORE INTO live_messages "
             "(session_id, sender, body, reply_to, kind, delivery, "
-            "idempotency_key, created_at) "
-            f"SELECT {_CANON}, ?, ?, ?, ?, ?, ?, ? "
+            "idempotency_key, created_at, consumption_tracked) "
+            f"SELECT {_CANON}, ?, ?, ?, ?, ?, ?, ?, 1 "
             "WHERE EXISTS ("
             "  SELECT 1 FROM live_sessions ls "
             f"  WHERE ls.session_id = {_CANON} AND ls.status = 'live' "
@@ -807,6 +807,7 @@ class _LiveSessionsMixin:
             "    AND (? = 0 OR (ls.turn_state IN ('idle','completed') "
             "      AND NOT EXISTS (SELECT 1 FROM live_messages pending "
             "        WHERE pending.session_id=ls.session_id AND pending.consumed_at IS NULL "
+            "        AND (pending.delivered_at IS NULL OR pending.consumption_tracked=1) "
             "        AND pending.kind NOT LIKE 'control:%')))"
             ")",
             (

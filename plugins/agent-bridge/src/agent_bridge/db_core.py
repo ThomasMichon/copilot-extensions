@@ -243,6 +243,7 @@ CREATE TABLE IF NOT EXISTS live_messages (
     created_at REAL NOT NULL,
     delivered_at REAL,
     consumed_at REAL,
+    consumption_tracked INTEGER NOT NULL DEFAULT 0,
     claimed_at REAL,
     outcome TEXT
 );

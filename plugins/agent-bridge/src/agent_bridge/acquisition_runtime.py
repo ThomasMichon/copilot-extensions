@@ -324,7 +324,8 @@ class AcquisitionRuntime:
                         or bool(self.db.execute_read(
                             "SELECT id FROM live_messages WHERE session_id=? "
                             "AND consumed_at IS NULL "
-                            "AND (delivered_at IS NULL OR kind NOT LIKE 'control:%') LIMIT 1",
+                            "AND (delivered_at IS NULL OR "
+                            "(kind NOT LIKE 'control:%' AND consumption_tracked=1)) LIMIT 1",
                             (native,),
                         ))
                     ),

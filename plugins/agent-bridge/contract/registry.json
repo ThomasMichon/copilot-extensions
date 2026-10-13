@@ -3001,7 +3001,7 @@
       "tracked_issue": "https://github.com/ThomasMichon/copilot-extensions/issues/1448",
       "reason": "The delegation effort owns lifecycle vocabulary and product semantics; the compatibility registry must not redefine them.",
       "reference_path": "plugins/agent-bridge/docs/delegation-contract.md",
-      "reference_sha256": "a1e79be683a4d8f16a7baaba113d4e5139f0973d07aaecbc80579a27d9c20699"
+      "reference_sha256": "c7c9b002b13d670b3ddc9714021ef03b7113a2dcf81177fe0d25a01a05588271"
     },
     {
       "id": "agent-bridge.event-history-identity",

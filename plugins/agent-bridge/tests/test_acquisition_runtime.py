@@ -729,14 +729,19 @@ async def test_reconciliation_after_delivery_does_not_redeliver(rig):
 
 
 @pytest.mark.asyncio
-async def test_cli_busy_evidence_does_not_retain_consumed_unacked_input(rig):
+@pytest.mark.parametrize("tracked", [False, True])
+async def test_cli_busy_evidence_does_not_retain_consumed_input_or_legacy_history(rig, tracked):
     request = req(mode="cli")
     result = await rig.runtime.acquire(request)
     native = result.native_session_id
     message = rig.db.list_pending_live_messages(native)[0]
+    if not tracked:
+        rig.db.execute_write(
+            "UPDATE live_messages SET consumption_tracked=0 WHERE id=?", (message["id"],),
+        )
     assert rig.runtime._evidence(request, rig.source, native).conversations[0].busy
     assert rig.db.ack_live_messages(native, [message["id"]], time.time()) == 1
-    assert rig.runtime._evidence(request, rig.source, native).conversations[0].busy
+    assert rig.runtime._evidence(request, rig.source, native).conversations[0].busy is tracked
     assert rig.db.consume_live_message(native, message["id"], time.time()) == 1
     evidence = rig.runtime._evidence(request, rig.source, native)
     assert not evidence.conversations[0].busy
