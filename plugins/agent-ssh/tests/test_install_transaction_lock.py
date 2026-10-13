@@ -320,6 +320,346 @@ def _dead_pid() -> int:
     return dead.pid
 
 
+def _wait_fixture(path: Path, processes: list[subprocess.Popen[str]]) -> None:
+    deadline = time.monotonic() + 8
+    while not path.exists():
+        assert time.monotonic() < deadline, f"fixture phase not reached: {path.name}"
+        assert all(proc.poll() is None for proc in processes), "fixture child exited before synchronization"
+        time.sleep(0.005)
+
+
+def test_posix_pid_fallback_empty_owner_interval_never_overlaps(tmp_path: Path) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    prefix = (
+        "set -euo pipefail\n_fail() { printf 'FAIL:%s\\n' \"$1\"; }\n"
+        f"INSTALL_DIR='{install_dir}'\n" + _block(SH_SCRIPT) + "\n"
+    )
+    # Schedule real owner reads; retain the legacy shim for pre-repair reproduction.
+    shim = """
+_fixture_owner_probe() {
+    local count=0 value
+    [[ ! -f "$FIXTURE/count" ]] || count=$(cat "$FIXTURE/count")
+    count=$((count + 1)); echo "$count" > "$FIXTURE/count"
+    if [[ "$count" == 1 ]]; then
+        touch "$FIXTURE/first-read"
+        while [[ ! -f "$FIXTURE/resume-first" ]]; do sleep 0.005; done
+    fi
+    value=$("$@" 2>/dev/null || true)
+    if [[ "$count" == 2 && -z "$value" ]]; then
+        touch "$FIXTURE/empty-comparison"
+        while [[ ! -f "$FIXTURE/resume-comparison" ]]; do sleep 0.005; done
+    fi
+    printf '%s\\n' "$value"
+}
+if declare -F _read_install_lock_owner >/dev/null; then
+    eval "$(declare -f _read_install_lock_owner | sed '1s/_read_install_lock_owner/_fixture_original_owner/')"
+    _read_install_lock_owner() { _fixture_owner_probe _fixture_original_owner "$@"; }
+else
+    readlink() { _fixture_owner_probe command readlink "$@"; }
+fi
+"""
+    env = {**_isolated_env(tmp_path), "COPILOT_EXT_NO_FLOCK": "1", "FIXTURE": str(tmp_path)}
+    processes: list[subprocess.Popen[str]] = []
+
+    def spawn(body: str, instrument: bool = False) -> subprocess.Popen[str]:
+        proc = subprocess.Popen(
+            [bash, "-c", prefix + (shim if instrument else "") + body],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
+        )
+        processes.append(proc)
+        return proc
+
+    def transaction(label: str) -> str:
+        return (
+            "_enter_install_lock 10 || exit 3\n"
+            f'echo start >> "$FIXTURE/log"; touch "$FIXTURE/{label}-entered"\n'
+            f'while [[ ! -f "$FIXTURE/release-{label}" ]]; do sleep 0.005; done\n'
+            'echo end >> "$FIXTURE/log"\n_exit_install_lock\n'
+        )
+
+    try:
+        original = spawn(
+            '_enter_install_lock 10 || exit 3\ntouch "$FIXTURE/original-entered"\n'
+            'while [[ ! -f "$FIXTURE/release-original" ]]; do sleep 0.005; done\n_exit_install_lock\n'
+        )
+        _wait_fixture(tmp_path / "original-entered", [original])
+        checker = spawn(transaction("checker"), instrument=True)
+        _wait_fixture(tmp_path / "first-read", [original, checker])
+        (tmp_path / "release-original").touch()
+        out, err = original.communicate(timeout=8)
+        assert original.returncode == 0, out + err
+        (tmp_path / "resume-first").touch()
+        deadline = time.monotonic() + 8
+        while not any((tmp_path / name).exists() for name in ("empty-comparison", "checker-entered")):
+            assert time.monotonic() < deadline
+            assert checker.poll() is None
+            time.sleep(0.005)
+        contender = spawn(transaction("contender"))
+        if (tmp_path / "empty-comparison").exists():
+            # The old code lets this holder enter while its empty comparison is paused.
+            _wait_fixture(tmp_path / "contender-entered", [checker, contender])
+            (tmp_path / "resume-comparison").touch()
+        _wait_fixture(tmp_path / "checker-entered", [checker])
+        (tmp_path / "release-checker").touch()
+        out, err = checker.communicate(timeout=8)
+        assert checker.returncode == 0, out + err
+        _wait_fixture(tmp_path / "contender-entered", [contender])
+        (tmp_path / "release-contender").touch()
+        out, err = contender.communicate(timeout=8)
+        assert contender.returncode == 0, out + err
+        assert (tmp_path / "log").read_text().split() == ["start", "end"] * 2
+        assert not os.path.lexists(install_dir / ".install.lock.pid")
+        assert not os.path.lexists(install_dir / ".install.lock.pid.reap")
+    finally:
+        for name in ("release-original", "resume-first", "resume-comparison",
+                     "release-checker", "release-contender"):
+            (tmp_path / name).touch()
+        for proc in processes:
+            if proc.poll() is None:
+                os.killpg(proc.pid, 9)
+            proc.wait(timeout=5)
+
+
+@pytest.mark.parametrize("leaf", [".install.lock.pid", ".install.lock.pid.reap"])
+@pytest.mark.parametrize("shape", ["directory", "directory-symlink", "numeric-directory-symlink"])
+def test_posix_pid_fallback_directory_nodes_never_admit_or_mutate(
+    tmp_path: Path, leaf: str, shape: str,
+) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    node = install_dir / leaf
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "sentinel").write_text("outside unchanged")
+    if shape == "directory":
+        node.mkdir()
+        contents = node
+    else:
+        contents = outside
+        target = str(outside)
+        if shape == "numeric-directory-symlink":
+            target = str(_dead_pid())
+            contents = install_dir / target
+            contents.mkdir()
+        node.symlink_to(target, target_is_directory=True)
+    (contents / "sentinel").write_text("unchanged")
+    identity = node.lstat()
+    target = os.readlink(node) if node.is_symlink() else None
+    log = tmp_path / "log"
+    script = (
+        "set -euo pipefail\n_fail() { printf 'FAIL:%s\\n' \"$1\"; }\n"
+        f"INSTALL_DIR='{install_dir}'\n" + _block(SH_SCRIPT) + "\n"
+        "if _enter_install_lock 1; then\n"
+        f" echo start >> '{log}'; sleep 0.2; echo end >> '{log}'\n"
+        " _exit_install_lock; echo entered\nelse echo refused\nfi\n"
+    )
+    procs = [
+        subprocess.Popen(
+            [bash, "-c", script], env={**_isolated_env(tmp_path), "COPILOT_EXT_NO_FLOCK": "1"},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
+        )
+        for _ in range(2)
+    ]
+    try:
+        outputs = [proc.communicate(timeout=8) for proc in procs]
+        assert all(proc.returncode == 0 for proc in procs), outputs
+        assert [out.strip() for out, _ in outputs] == ["refused"] * 2, (
+            outputs, log.read_text() if log.exists() else "no transactions"
+        )
+        assert not log.exists()
+        assert (node.lstat().st_dev, node.lstat().st_ino) == (identity.st_dev, identity.st_ino)
+        if target is not None:
+            assert os.readlink(node) == target
+        assert sorted(path.name for path in contents.iterdir()) == ["sentinel"]
+        assert (contents / "sentinel").read_text() == "unchanged"
+        assert sorted(path.name for path in outside.iterdir()) == ["sentinel"]
+        assert (outside / "sentinel").read_text() == (
+            "unchanged" if contents == outside else "outside unchanged"
+        )
+    finally:
+        for proc in procs:
+            if proc.poll() is None:
+                os.killpg(proc.pid, 9)
+            proc.wait(timeout=5)
+
+
+@pytest.mark.parametrize("leaf", [".install.lock.pid", ".install.lock.pid.reap"])
+def test_posix_pid_fallback_creation_race_does_not_follow_new_directory(tmp_path: Path, leaf: str) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    node = install_dir / leaf
+    injected = tmp_path / "injected"
+    shim = f"""
+_inject_directory() {{
+    if [[ "$1" == "{node}" && ! -f "{injected}" ]]; then
+        mkdir "{node}"
+        echo unchanged > "{node}/sentinel"
+        touch "{injected}"
+    fi
+}}
+ln() {{ _inject_directory "${{@: -1}}"; command ln "$@"; }}
+link() {{ _inject_directory "${{@: -1}}"; command link "$@"; }}
+"""
+    result = _run_sh_block(
+        bash, install_dir, shim + "\nif _enter_install_lock 1; then echo entered; else echo refused; fi",
+        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "refused"
+    assert injected.exists()
+    assert node.is_dir() and not node.is_symlink()
+    assert sorted(path.name for path in node.iterdir()) == ["sentinel"]
+    assert (node / "sentinel").read_text().strip() == "unchanged"
+
+
+@pytest.mark.parametrize("record", ["", "123\n", "copilot-extensions.install-lock-pid:v1:not-a-pid\n",
+                                    "copilot-extensions.install-lock-pid:v1:123\nextra\n",
+                                    "copilot-extensions.install-lock-pid:v1:" + "1" * 100 + "\n"])
+def test_posix_pid_fallback_record_reader_refuses_unknown_content(tmp_path: Path, record: str) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    path = install_dir / ".install.lock.pid"
+    path.write_text(record)
+    result = _run_sh_block(
+        bash, install_dir,
+        f'if _read_install_lock_owner "{path}"; then echo trusted; else echo refused; fi',
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "refused"
+    assert path.read_text() == record
+    assert sorted(path.name for path in install_dir.iterdir()) == [".install.lock.pid"]
+
+
+def test_posix_pid_fallback_record_snapshot_refuses_raced_fifo_without_opening(tmp_path: Path) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    path = install_dir / ".install.lock.pid"
+    body = f"""
+_create_install_lock_owner "{path}" || exit 3
+link() {{
+    if [[ "$1" == "{path}" ]]; then
+        command rm -f "{path}"
+        mkfifo "{path}"
+    fi
+    command link "$@"
+}}
+if _read_install_lock_owner "{path}"; then echo trusted; else echo refused; fi
+"""
+    result = _run_sh_block(bash, install_dir, body)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "refused"
+    assert path.is_fifo()
+    assert sorted(path.name for path in install_dir.iterdir()) == [".install.lock.pid"]
+
+
+def test_posix_pid_fallback_fresh_reacquisition_and_exit_ownership(tmp_path: Path) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    link = tmp_path / "rt/.install.lock.pid"
+    result = _run_sh_block(
+        bash, link.parent,
+        '_enter_install_lock 1 && _exit_install_lock && _enter_install_lock 1 || exit 3\n'
+        f'rm -f "{link}"; ln -s "{os.getpid()}" "{link}"\n_exit_install_lock\necho ok',
+        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
+    assert os.readlink(link) == str(os.getpid())
+
+
+@pytest.mark.parametrize("owner", ["", "not-a-pid"])
+def test_posix_pid_fallback_unknown_owner_never_authorizes_deletion(tmp_path: Path, owner: str) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    link = install_dir / ".install.lock.pid"
+    if owner:
+        link.symlink_to(owner)
+    else:
+        link.write_text("")
+    result = _run_sh_block(
+        bash, install_dir, "if _enter_install_lock 1; then echo acquired; else echo refused; fi",
+        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "refused"
+    if owner:
+        assert os.readlink(link) == owner
+    else:
+        assert link.read_text() == ""
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_posix_pid_fallback_exit_trap_releases_its_owner(tmp_path: Path, exit_code: int) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    result = _run_sh_block(
+        bash, install_dir,
+        f"_enter_install_lock 1 || exit 3\ntrap '_exit_install_lock' EXIT\nexit {exit_code}",
+        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.returncode == exit_code, result.stderr
+    assert not os.path.lexists(install_dir / ".install.lock.pid")
+    assert not os.path.lexists(install_dir / ".install.lock.pid.reap")
+
+
+def test_posix_pid_fallback_mutex_release_failure_never_admits(tmp_path: Path) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    result = _run_sh_block(
+        bash, install_dir,
+        'rm() { if [[ "${@: -1}" == *.reap ]]; then return 1; fi; command rm "$@"; }\n'
+        "if _enter_install_lock 1; then echo acquired; else echo refused; fi",
+        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "refused"
+    assert not os.path.lexists(install_dir / ".install.lock.pid")
+    assert os.path.lexists(install_dir / ".install.lock.pid.reap")
+
+
+def test_posix_pid_fallback_dead_admission_mutex_blocks_fresh_acquisition(tmp_path: Path) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    mutex = install_dir / ".install.lock.pid.reap"
+    owner = str(_dead_pid())
+    mutex.symlink_to(owner)
+    result = _run_sh_block(
+        bash, install_dir, "if _enter_install_lock 1; then echo acquired; else echo refused; fi",
+        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "refused"
+    assert os.readlink(mutex) == owner
+    assert not os.path.lexists(install_dir / ".install.lock.pid")
+
+
 def test_posix_pid_fallback_serializes_simultaneous_stale_recovery(tmp_path: Path) -> None:
     bash = _posix_bash()
     if bash is None:

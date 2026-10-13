@@ -1715,16 +1715,49 @@ reconcile, `update`, a session-start bootstrap, and a binstub's first-use
 lock on `<install-dir>/.install.lock` for every mutating action
 (`stamp`/`install`/`update`/`provision`) across its whole
 build + publish transaction (Windows: a `FileShare.None` handle; POSIX: `flock` on
-fd 8 (fd 7 for `agent-ssh`), or an atomic pid symlink
-`<install-dir>/.install.lock.pid` where `flock` is unavailable, whose dead owner is
-reaped under a pid-bearing `.install.lock.pid.reap` mutex so two contenders can
-never both reap and then delete each other's live lock. A `.reap` link left by a
-reaper that died mid-reap is deliberately never reclaimed automatically (that
-would reintroduce the same race); runs fail closed at their deadline until it is
-removed by hand). It is
+fd 8 (fd 7 for `agent-ssh`), or a PID-bearing fallback entry
+`<install-dir>/.install.lock.pid` where `flock` is unavailable). In the matching
+agent-vault, agent-mcp, agent-containers and agent-ssh fallback blocks, every
+acquisition and stale-owner cleanup holds the short, PID-bearing
+`.install.lock.pid.reap` admission mutex. The owner is read and checked while
+that mutex is held, and a confirmed stale link is removed and replaced before
+admission is released. An empty or malformed owner read never authorizes
+deletion; an absent link is retried as acquisition, not erased by path.
+This prevents a delayed reaper from removing a newly admitted live owner.
+A `.reap` link left by a process that died during admission is deliberately
+never reclaimed automatically, even when the main PID link is absent: runs
+fail closed at their deadline until the stale mutex is explicitly repaired.
+The four matching fallback bodies retain one identical protocol. Creation uses
+the POSIX `link` utility with a privately staged regular receipt, never bare
+`ln -s` at either shared lock pathname. `link` calls `link(2)` for the exact
+destination: an existing directory or directory symlink fails rather than
+receiving a child link. This remains atomic when the destination appears
+immediately before creation; a check-then-`ln` sequence is not sufficient.
+The receipt is one bounded line, `copilot-extensions.install-lock-pid:v1:<pid>`.
+Owner reads capture a private hard-link snapshot and reject non-regular or
+malformed records before opening them, including a raced FIFO. Older dangling
+numeric PID symlinks remain readable; symlinks resolving to filesystem nodes
+are refused, not erased as stale PID evidence.
+
+The fallback requires Bash, `mktemp` and the standard `link` utility and
+same-filesystem hard-link support; missing utilities fail closed before
+admission. It adds no runtime library/interpreter or GNU-only `ln -T` option.
+The exact-path utility contract is defined by
+[POSIX link(1)](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/link.html)
+and is also documented by the
+[macOS ln/link manual](https://keith.github.io/xcode-man-pages/ln.1.html) and
+[FreeBSD ln/link manual](https://man.freebsd.org/cgi/man.cgi?query=link&sektion=1&format=html).
+Regular receipts avoid the platform-dependent handling of a symbolic-link
+source by `link(2)`. Native macOS/BSD execution remains a separate validation
+lane; the Linux tests do not claim to have exercised those kernels.
+As with the admission-race correction, incompatible pre-repair installer
+processes must not be run concurrently with a repaired transaction; this
+source repair neither quiesces nor deploys host runtimes.
+The transaction lock is
 acquired **after** the self-stage
 re-exec (the staging parent never holds it) and released in `finally` / an `EXIT`
-trap; the OS releases it if the process dies.
+trap. The OS releases kernel lock handles on process death; fallback entries
+retain the dead-owner recovery and dead-admission explicit-repair rules above.
 
 The lock is **fail-closed**: a run that cannot acquire it within its timeout
 (300s; overridable for `agent-vault`, `agent-mcp`, `agent-containers`, and `agent-ssh` via
