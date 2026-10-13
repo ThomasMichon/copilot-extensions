@@ -386,6 +386,15 @@ below-altitude evidence/tooling documentation, with no new rollout claim.
   Explicit reader preprocessing is also classified as potentially mutating
   work, without mistaking disabled/quoted options for execution. All sixty-two
   source tests and `F,E9`/module-budget checks pass; no historical verdict changes.
+- The next full Balanced review resolved filter/model validation but found that
+  falsy non-null ownership markers could be counted as root events and absolute
+  reader executable paths could hide early corpus work. Root attribution now
+  requires absent/null ownership markers at both event levels, and reader
+  classification consistently uses the executable basename without widening
+  output attribution. All sixty-four discovered source tests and `F,E9`/
+  module-budget checks pass, including actual analyzer ownership fixtures and
+  valid absolute-reader commands. These source-only corrections await renewed
+  current-head review and required CI; the effort remains Active.
 - The corrections affect source evidence validation only. All four historical
   independent FAIL verdicts and their original packets remain unchanged.
   No paid trial, native deployment claim or runtime change is authorized by

@@ -41,6 +41,31 @@ def recovery_event_errors(events, root):
 
 
 class ValidationTests(unittest.TestCase):
+    def test_only_absent_or_null_ownership_markers_are_root(self):
+        for marker in ("", 0, False, [], {}):
+            self.assertFalse(validation.root_event({"agentId": marker, "data": {}}))
+            self.assertFalse(validation.root_event({"data": {"agentId": marker}}))
+        self.assertTrue(validation.root_event({"data": {}}))
+        self.assertTrue(validation.root_event({"agentId": None, "data": {"agentId": None}}))
+        with tempfile.TemporaryDirectory() as temporary:
+            evaluation, state, original = self.analyzer_fixture(Path(temporary))
+            for marker in ("", 0, False, [], {}):
+                for nested in (False, True):
+                    events = copy.deepcopy(original)
+                    for event in events:
+                        (event["data"] if nested else event)["agentId"] = marker
+                    report = self.run_analyzer(evaluation, state, events)
+                    self.assertEqual(report["root_clear_events"], [])
+                    self.assertEqual(report["context_measurements"], [])
+                    self.assertEqual(report["native_artifact_and_terminal_calls"], [])
+                    self.assertTrue(report["non_root_activity"])
+
+    def test_absolute_path_corpus_readers_are_not_hidden(self):
+        for command in ("cat {path}", "head -n 1 {path}", "tail -n 1 {path}",
+                        "sed -n '61,80p' {path}", "grep record {path}", "rg record {path}",
+                        "wc -l {path}", "stat {path}", "ls {path}"):
+            self.reader_option_observation("/usr/bin/" + command, True)
+
     def test_file_valued_filters_are_reads_without_becoming_search_patterns(self):
         for reader, option in (("rg", "--ignore-file"), ("grep", "--exclude-from")):
             self.reader_option_observation(f"{reader} {option} {{path}} record task.json", True)

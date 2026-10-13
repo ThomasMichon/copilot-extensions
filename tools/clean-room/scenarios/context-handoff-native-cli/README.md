@@ -215,6 +215,8 @@ patterns in unrelated task-contract reads are not treated as corpus file reads
 or allowed to produce read credit.
 Work-operand parsing accounts for grep/rg short-option clusters, attached or
 separate pattern/pattern-file/value arguments, long `=value` forms and `--`.
+Absolute reader executables use the same basename classification as mutation
+detection, so their corpus operands cannot bypass refresh ordering.
 File-valued `--ignore-file`/`--exclude-from` filters are input reads, not search
 patterns. Explicit reader preprocessing is substantive potentially mutating
 work; disabling it or quoting its option as a pattern does not invent execution.
@@ -222,6 +224,8 @@ Pattern files remain actual reads; regex, glob and option values are not shifted
 into file roles. This broader work classification does not expand shell-output
 attribution or permit opaque readers to earn unverified content credit.
 One shared root-ownership predicate applies to clears and supporting calls;
+only absent/null ownership markers identify root activity. Empty, numeric,
+boolean or other present markers remain quarantined rather than becoming root.
 child-agent activity is quarantined under `non_root_activity` and cannot supply
 root windows, measurements, artifacts or refresh. Source regressions cover each
 of these cases without invoking Copilot or regrading recorded paid runs.

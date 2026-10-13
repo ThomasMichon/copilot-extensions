@@ -203,7 +203,7 @@ def successful(completion):
 
 def root_event(event):
     data = event.get("data", {})
-    return not event.get("agentId") and not (isinstance(data, dict) and data.get("agentId"))
+    return event.get("agentId") is None and isinstance(data, dict) and data.get("agentId") is None
 
 
 def object_result(completion):
@@ -312,6 +312,7 @@ def resolved_read_paths(start, workspace):
     command_start = True
     while index < len(tokens):
         token = tokens[index]
+        reader = Path(token).name
         if token in (";", "&&", "||", "|"):
             command_start = True
             index += 1
@@ -319,12 +320,12 @@ def resolved_read_paths(start, workspace):
         if command_start and token == "cd" and index + 1 < len(tokens):
             operand = Path(tokens[index + 1])
             cwd = operand if operand.is_absolute() else cwd / operand
-        if command_start and token in ("cat", "head", "tail", "sed", "grep", "rg", "wc", "stat", "ls"):
+        if command_start and reader in ("cat", "head", "tail", "sed", "grep", "rg", "wc", "stat", "ls"):
             end = index + 1
             while end < len(tokens) and tokens[end] not in (";", "&&", "||", "|"):
                 end += 1
-            operands = potential_read_operands(token, tokens[index + 1:end])
-            if not operands and (token == "ls" or (token == "rg" and "--files" in tokens[index + 1:end])):
+            operands = potential_read_operands(reader, tokens[index + 1:end])
+            if not operands and (reader == "ls" or (reader == "rg" and "--files" in tokens[index + 1:end])):
                 paths.append(str(cwd))
             for operand in operands:
                 path = Path(operand)
