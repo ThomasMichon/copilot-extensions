@@ -324,6 +324,12 @@ archive-aware seam every other consumer (`collate-session`,
    destination), across every machine subtree, exactly as
    `SyncedSessionSource` does for the chronicler's settle-gated scan.
 
+The provider applies the same canonical session-ID validation as the live/archive
+reference seam before discovering any source roots. Noncanonical IDs, including
+qualified agent handles, trailing dots/spaces, and reserved Windows device names,
+return the documented not-found exit code `3` with no payload rather than raising
+an archive-path validation error.
+
 The registration side (`scripts/register-cold-store-provider.sh` /
 `.ps1`, run from `sessionStart`) drops
 `~/.agent-bridge/cold-store-providers.d/agent-logger.json` following the same

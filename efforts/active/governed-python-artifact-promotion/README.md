@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-slice (see Coordination)
 - **Created:** 2026-10-01
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** extends `visions/installer/README.md`, `visions/plugin-services/installation-cells/README.md`, and the agent-index runtime vision; this effort does not replace any of them
 - **Umbrella issue:** [#4876](https://github.com/ThomasMichon/copilot-extensions/issues/4876)
 - **Sub-issues:** _pending_
@@ -110,7 +110,7 @@ private consumer feed. Consumer-side admission still checks the actual feed.
 
 ### Phase 2 - Promotion-built, content-addressed first-party artifacts
 
-- [x] **Tool built (2026-10-02); pipeline wiring still open.**
+- [x] **Builder and promotion wiring implemented (2026-10-12).**
       `tools/build_python_artifacts.py` builds a plugin's own wheel plus
       every vendored `libs/<lib>` wheel it needs, discovering both the
       dev-branch live `editable = true` canonical-reference form and an
@@ -142,23 +142,27 @@ private consumer feed. Consumer-side admission still checks the actual feed.
       wheel's own `Generator:` is verified to match the locked toolchain
       exactly, failing closed on any drift. The manifest's `build_toolchain`
       field is now a structured lock record (`{"packages": {...},
-      "lock_id": "sha256:..."}`, schema version 2) rather than schema
+      "provenance": {...}, "lock_id": "sha256:..."}`, schema version 3) rather than schema
       version 1's ad hoc per-wheel generator list, and `lock_id` folds into
       `artifact_id`. Smoke-tested for real: building `agent-bridge` then
       `agent-worktrees` against the SAME `--toolchain-venv` produced
       identical `lock_id`s, confirming the shared-lock mechanism. **Not yet
-      done:** wiring this into the real promotion pipeline
-      (`promote_release.py`) - `build_python_artifacts.py` is still a
-      standalone, independently usable tool today, not yet invoked anywhere
-      in `validate-and-promote.yml`'s actual promotion flow. This checklist
-      item stays open until promotion actually invokes the builder.
+      done:** live release-lane proof. The `build-python-artifacts` job now
+      invokes `promote_release.py --build-python-artifacts-dir` to compose
+      the real candidate and build every first-party set in a second,
+      disposable checkout with one shared public-runner toolchain. The
+      builder remains independently usable. Actual trusted-main signing
+      and publication evidence is tracked explicitly in Validation Plan.
 - [ ] Resolve and pin a dependency closure for the third-party portion only,
       using a lag-tolerant selection policy informed by Phase 1, and record
       it in the manifest.
-- [ ] Design and implement an artifact trust/publication contract (digest
-      authentication, publication channel, credential model) - see Open
-      Design Questions below; resolve these concretely during this phase,
-      not deferred further.
+- [x] **Contract implemented (2026-10-12).** Native GitHub OIDC attestations
+      authenticate both the transfer index and first-party bundles.
+      Signing runs without release-write credentials. Verification constrains
+      the pinned hosted workflow/source identity; the writer checks exact
+      candidate composition before push and actual merge composition before
+      immutable GitHub Release publication. Live signing/release proof remains
+      a named Validation Plan gate, not an implementation gap.
 
 
 
@@ -221,9 +225,10 @@ answer against the actual repository/CI configuration:
   Sigstore's public transparency log -- not a value this repo's own commits
   or `APERTURE_RELEASE_TOKEN` can produce. Neither `id-token:` nor any
   `attest`/`sigstore`/`cosign` usage exists anywhere in `.github/workflows/`
-  today (confirmed absent in both `ci.yml` and `validate-and-promote.yml`),
-  so this is net-new infrastructure for Phase 2, not a reuse of an existing
-  mechanism.
+  at design time (confirmed absent in both `ci.yml` and
+  `validate-and-promote.yml`). Phase 2 now provides this through the
+  credential-separated `python-artifacts` job; it does not reuse repo-write
+  authority as an authentication root.
 - **Credential separation -- resolved (2026-10-01):** confirmed against the
   actual configuration (`validate-and-promote.yml` lines ~104-108 and
   ~455-510): the `promote` job's `main-promotion` environment holds both
@@ -275,10 +280,15 @@ answer against the actual repository/CI configuration:
   `ci.yml` (~line 636) already consumes a third-party dependency (`psmux`)
   via a deterministic `.../releases/download/v<version>/<fixed-filename>`
   URL. Phase 2 adopts the same shape for first-party artifacts: a
-  deterministic tag per promotion (`<plugin>-v<version>`) with fixed,
-  predictable asset filenames (one per platform/arch/ABI, plus one per
-  vendored lib wheel), requiring no separate discovery service and matching
-  a pattern this codebase already trusts.
+  deterministic tag per plugin/version (`<plugin>-v<version>`).
+  **Refined by the 2026-10-12 integration:** each asset is a ZIP named
+  `<plugin>-<version>-<artifact-id-digest>.zip`, containing the schema-3
+  manifest, plugin wheel and declared vendored-lib wheels as one verified
+  set. The signed transfer index binds the complete candidate/project set
+  and every bundle digest. Content-addressed filenames permit independent
+  rebuilds without overwriting an existing asset. Consumers discover these
+  bundles through the deterministic release tag, not fixed per-wheel assets;
+  no separate discovery service is required.
 - **Wheel-tag semantic compatibility:** an artifact set's
   python/abi/platform tag reconciliation
   (`build_python_artifacts.overall_identity_tags`) currently treats any two
@@ -311,10 +321,14 @@ answer against the actual repository/CI configuration:
   one directly. See `tools/seasoned_public_feed.py` and this Journal's
   2026-10-10 entry. The API/CLI now expose an explicit `seasoned-public`
   build-tooling mode with policy/pins/interpreter-bound reuse and manifest
-  provenance. Still open: invoking the builder in the actual promotion job.
+  provenance. The actual promotion job now invokes this mode explicitly.
 
 ## Validation Plan
 
+- [ ] Prove the trusted default-branch promotion workflow builds, signs and
+      publishes real artifact sets for the exact merged candidate. Record
+      native signer identity, bundle/manifest digest agreement and immutable
+      retry evidence; local mocks do not complete this release-lane gate.
 - [ ] A clean-cache test proves third-party resolution uses only the
       governed feed; verify the effective `uv`/`pip` configuration
       independently and never log credentials.
@@ -408,6 +422,139 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-12 - Phase 2 slice 5: composed promotion artifact integration
+
+- Slice 4 merged as #6318 (`1703cc42bf8c23182f6a9793d14bd4d56b6d4228`).
+  Its final current-head review approved with no open or previously missed
+  findings; all five threads were resolved and required CI passed.
+- Added an explicit non-pushing preparation path that exports first-party
+  bundles from the actual bumped/materialized candidate, using a second
+  disposable checkout so backend residue cannot enter the promotion tree.
+- The promotion workflow builds/signs separately from `main-promotion` and
+  its release PAT. Both the transfer index and every bundle receive native
+  GitHub provenance attestations. Verification constrains repository,
+  workflow path/digest, source ref/digest and hosted-runner identity, using
+  the read-only workflow token rather than requiring new PAT permissions.
+- The release writer validates the same dev/main/content-tree and complete
+  project set before candidate push, then rechecks the actual merged commit
+  before publishing content-addressed assets under plugin/version releases.
+  Existing assets are never clobbered. Failed transfer/signing/builds block
+  promotion and enter the existing failure reporter.
+- Local validation: 379 combined promotion/builder/resolver cases passed,
+  including real Git composition and a real candidate subprocess exporting
+  two first-party sets through one shared lock without source-tree pollution.
+  Touched lint, headless-launch and module-size guards pass.
+  Hosted fresh-toolchain/wheel-bundle smoke and actual attestation/release
+  evidence remain to be recorded. Managed-device public installation was not
+  run; consumer clean-room/install/rollback paths are unchanged and belong
+  to Phase 3. Native OIDC signing can only be proved by the trusted
+  default-branch promotion job after this workflow reaches that branch.
+- Hosted Windows CI caught a fixture-only dependency on an ambient Git
+  identity during `commit-tree`. The shared promotion fixture now sets its
+  own repository-local identity, and the new contract suite disables
+  global/system Git configuration to prove it is independently runnable.
+  Production promotion already configures its own job-local identity.
+- Hosted real-wheel smoke then caught a manifest-boundary mismatch:
+  wheel digests include the builder's `sha256:` prefix, while bundle-file
+  transfer digests are bare hex. The bundler now checks the actual wheel
+  shape, and fixtures use that same shape with a negative bare-digest case.
+- Review follow-through: mirrored the established `tomli` fallback and
+  chunked SHA-256 pattern for the Python 3.10 floor. CI exercises real
+  import/parsing/hash/export behavior on 3.10. The effort index now agrees
+  with Active status; the plan distinguishes implemented pipeline/trust
+  work from its still-open native-signing/release validation gate.
+- Fast hosted composition exposed a real two-phase tag collision:
+  preparation and validation can produce the same commit within one second.
+  Preparation now creates no tag/ref; only the subsequent ordinary promotion
+  creates its tag. The real subprocess regression checks this boundary.
+  Dependency closure/admission, shared-installer consumption, the full
+  consumer/platform matrix and durable retention remain open.
+- The final integration review found two trust-boundary defects before merge.
+  Candidate execution now runs with read-only contents permission in its own
+  build job; a fresh default-branch-only signer never imports candidate code
+  or runs build backends. Its trusted, non-extracting archive validator checks
+  schema-3 identity, the exact declared first-party wheel member set, regular
+  member types, bounded uncompressed sizes and every wheel digest before
+  signing. The same validator runs before promotion and publication, so an
+  attacker-controlled outer ZIP digest cannot conceal malformed contents.
+  Focused regressions cover archive mutations with recomputed outer digests
+  and a real validator subprocess that must not import candidate tooling.
+- A subsequent review tightened this to the complete schema-3 contract:
+  trusted validation requires payload hash, aggregate/per-wheel tags,
+  first-party source paths, generator, exact toolchain pins and canonical
+  source/interpreter provenance. It independently recomputes the lock and
+  artifact IDs using existing builder helpers without resolving a toolchain
+  or executing a candidate/backend. Fixtures now use complete manifests.
+  The publication decision above now names content-addressed bundles rather
+  than its superseded fixed per-wheel asset format.
+- Source provenance is now independently bound, not merely well-shaped:
+  the signer recomposes the exact dev/main candidate with trusted default-
+  branch versioning/materialization/projection tools, never importing the
+  candidate's own scripts. Trusted discovery checks the declared source
+  closure and each distribution/version, and rehashes the composed payload.
+  This uses the bumped/materialized candidate rather than raw dev bytes,
+  which deliberately differ. Before release writes, publication repeats the
+  check against the actual merged tree. Regressions poison candidate
+  composition modules and reject changed sources or invented library labels.
+- Required CI against the moving dev merge baseline exposed a guard-fixture
+  leak: partial-publication dispatch mocked pushes but not the newer
+  destination-snapshot Git reads, trying to run Git in the fictional
+  `fixture` directory. The in-process guard now supplies bounded synthetic
+  remote/config reads while preserving all four recovery-dispatch assertions;
+  its isolated runner passes all 21 cases. No production publication logic
+  was relaxed.
+- The same review's previously-missed Medium finding identified nondeterministic
+  ZIP headers under content-addressed filenames. Bundles now sort members and
+  manifest wheel records, use fixed timestamps/permissions, and store already-
+  compressed wheels without recompression. Identical input bytes remain
+  identical despite changed clocks, mtimes, permissions or wheel-record order,
+  avoiding a spurious immutable-asset collision on an unchanged rebuild.
+- Wheel trust now inspects actual package bytes rather than only declared
+  filenames/digests: each nested ZIP requires matching WHEEL generator/tags,
+  METADATA distribution/version, safe members and a complete verified RECORD.
+  Fixtures are real minimal wheels; opaque bytes, forged metadata, unsafe
+  members and broken RECORDs fail before signing/publication.
+- Release visibility and tag binding are explicit: draft releases fail,
+  annotated/lightweight tags resolve through a bounded reader, and a new
+  release's tag is rechecked before a separate asset upload. Existing stable
+  plugin/version tags can remain at an older shipped ancestor only when
+  their exact first-party source closure and payload still match. Requiring
+  every unchanged version tag to point to each latest global promotion would
+  contradict the chosen stable-tag/content-addressed-rebuild contract.
+- The native Python 3.10 hosted lane caught a compatibility defect in nested
+  ZIP verification: that version's SpooledTemporaryFile lacks the seekable
+  interface zipfile requires. Wheel bytes now stream into a standard
+  TemporaryFile, keeping memory bounded and preserving the real seekable
+  file contract on the supported floor.
+- The final payload-binding review separated two previously independent
+  truths: a source hash and a valid wheel can both be genuine while the
+  wheel's installed code is not from that source. Trusted signing/publication
+  now compares every payload-file hash with candidate source, requires a
+  complete Python module set and declared package data, and derives generated
+  entry points from project declarations. The static mapper covers existing
+  src packages and declared flat modules; unsupported generated/compiled
+  outputs fail closed pending a verified mapping. A separate bounded test
+  component covers exact/changed/injected/missing code/data, generated metadata,
+  and a fully self-consistent forged wheel that must fail before any release
+  API call. Linux, Windows and the native 3.10 CI selectors include it.
+- Runtime metadata is source-bound too: trusted validation derives
+  Requires-Dist, Requires-Python and normalized extras from static project
+  declarations, including optional-dependency markers. Direct URLs and
+  dynamic runtime declarations fail rather than bypassing consumer feed
+  admission. A hash-pinned, long-seasoned packaging wheel supplies the
+  standard PEP parser in isolated hosted validator venvs; provisioning runs
+  without release authority and never changes managed-device feed policy.
+  The final documentation-impact description now includes the isolated
+  agent-worktrees guard-fixture repair and its mandatory changefile.
+- The next review tightened operational failure boundaries: missing or
+  unreadable wheel inputs report structured bundling errors, and the build
+  CLI creates a missing output directory while refusing occupied/invalid
+  destinations. Publication verifies the index attestation first, reuses the
+  trusted archive validator to require its exact subject set, then verifies
+  only those referenced bundles. Extra, missing or unsafe subjects fail
+  before bundle verification. The complete artifact suite passes 159 tests;
+  native OIDC/publication evidence remains an outstanding validation gate.
 
 ### 2026-10-12 - Phase 2 slice 4: explicit public build-toolchain integration
 

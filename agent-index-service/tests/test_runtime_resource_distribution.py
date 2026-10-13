@@ -10,6 +10,8 @@ import tarfile
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from agent_procutil import no_window_kwargs
 
 
@@ -25,6 +27,10 @@ def _project(tmp_path):
     primitive = project.parent / "libs" / "versioned-runtime" / "versioned_runtime.py"
     primitive.parent.mkdir(parents=True)
     shutil.copy2(source.parent / "libs" / "versioned-runtime" / "versioned_runtime.py", primitive)
+    shutil.copy2(
+        source.parent / "libs" / "versioned-runtime" / "standalone_build.py",
+        primitive.with_name("standalone_build.py"),
+    )
     return project, primitive
 
 
@@ -83,12 +89,25 @@ def test_sdist_to_wheel_preserves_canonical_primitive_outside_repository(tmp_pat
         assert member in wheel.read(record).decode()
 
 
-def test_missing_canonical_and_sdist_resource_fails_build(tmp_path):
+@pytest.mark.parametrize("included_copy", [False, True])
+def test_missing_canonical_and_sdist_resource_fails_build(tmp_path, included_copy):
     project, primitive = _project(tmp_path)
+    if included_copy:
+        shutil.copy2(primitive, project / "src" / "agent_index_service" / "_versioned_runtime.py")
     primitive.unlink()
     result = _build(project, tmp_path / "artifacts", "build_wheel")
     assert result.returncode != 0
     assert "runtime primitive is missing" in result.stderr
+
+
+def test_missing_canonical_helper_cannot_fall_back_to_included_copy(tmp_path):
+    project, primitive = _project(tmp_path)
+    helper = primitive.with_name("standalone_build.py")
+    shutil.copy2(helper, project / "_standalone_runtime_build.py")
+    helper.unlink()
+    result = _build(project, tmp_path / "artifacts", "build_wheel")
+    assert result.returncode != 0
+    assert not list((tmp_path / "artifacts").glob("*.whl"))
 
 
 def test_conflicting_included_resource_fails_instead_of_preferring_stale_copy(tmp_path):

@@ -128,15 +128,17 @@ remains with the adopter and is not linked from public artifacts:
 
 Implementation sequencing below is **agent-recommended**:
 
-- [ ] Review [safe setup/refresh proposal](fleet-setup-reconciliation.md) and
+- [x] Review [safe setup/refresh proposal](fleet-setup-reconciliation.md) and
   amended core intent before provider/service changes.
 - [ ] Implement bounded template/adopter/live/quota planning and version-bound
   apply receipts with no implicit provisioning/cleanup.
   The initial standalone offline JSON planner produces preservation-safe
   config suggestions, aggregate capacity proposals and revision-bound digests;
   apply receipts, YAML/default harness integration and placement remain open.
-- [ ] Prove empty, existing-custom, no-quota, one-host and stale/partial states.
-- [ ] Supply harness default-template and paired-config integration downstream;
+- [x] Prove empty, existing-custom, no-quota, one-host and stale/partial states
+  in the offline planner. Live application and service deployment remain gated
+  separately below.
+- [x] Supply harness default-template and paired-config integration downstream;
   keep the portable runtime name-free and the private capacity adapter private.
 - [ ] Prove first useful index/dispatch service roles and full managed harness
   container on an explicitly admitted/leased controller host.
@@ -159,6 +161,9 @@ Implementation sequencing below is **agent-recommended**:
 - [ ] Establish standalone client/controller/connector packaging and explicit
   install/update/diagnostics/uninstall, with a client-only default and no local
   Komodo/controller activation on user machines.
+  Client artifact-contained lifecycle primitives and local resource diagnostics
+  are the first prerequisite under #6424/#6240; managed lifecycle execution and
+  controller/connector components remain open.
 - [ ] Define controller-owned live configuration validation, atomic activation,
   last-valid-state recovery and explicit restart-required outcomes.
 - [ ] Implement explicit inspect/plan/apply behavior for the chosen adapter:
@@ -351,3 +356,76 @@ not to the vision. This effort does not acquire or migrate live capacity.
 - Installed contained planner selection: 51 passed. Shared review-request
   workflow import failure is tracked in #6191; no current workflow failure or
   review finding is bypassed to land the planner.
+
+### 2026-10-11 - Offline planner merged; activation gates remain open
+- #6133 merged at `2026-10-11T22:06:38Z`, commit
+  `9aa8a7c6adace00fd2a38b9046936bf97095ca4c`, after current-head approval,
+  resolved findings, green code CI and a successful repaired review-request
+  workflow. The merge used the supported flow without bypassing review.
+- The shared workflow fixes #6219/#6225 were released through #6233; the owning
+  #6191 repair also has a real successful live request receipt. A fresh planner
+  synchronization event exercised the repaired workflow instead of replaying
+  the old failing snapshot.
+- The bounded offline planning and pure scenario proofs are delivered. The
+  mixed planning/apply item remains unchecked because apply receipts, role
+  placement and live re-admission are not implemented. This effort stays Active.
+- Next gates are actual planner release, downstream recommendation/config
+  adoption, client/controller lifecycle and useful service roles. A merged
+  planner is not a deployed fleet or authorization to acquire capacity.
+
+### 2026-10-12 - Released planner and downstream read-only adapter
+- The planner is released as `0.1.1-dev1`. Its downstream recommendation and
+  paired-workspace adapter cleared the adopter's required review/CI and merge
+  flow. Non-secret input preservation, stale/quota blockers and unsupported
+  central roles remain explicit; no live capacity or service activation occurred.
+- A local publisher partial-success/rebase bug was fixed through reviewed
+  #6288 and subsequent release fix-forwards. The installed runtime's real
+  affected-PR publication retry now succeeded with independently verified
+  remote/tracked source head and both original and recovered exact lease heads.
+- Next work remains client/controller/connector lifecycle, live configuration
+  and separately admitted useful service roles. The mixed apply-receipt and all
+  live deployment/migration gates remain unresolved; this effort stays Active.
+
+### 2026-10-12 - Client lifecycle artifact prerequisite
+- Coordinated #6424 with #6240 and the service-layout migration owner. Reused the
+  index service's canonical resource-delivery pattern as one shared build-only
+  helper instead of introducing a competing installer or maintained primitive.
+- The thin client wheel contains the unchanged versioned-runtime primitive and
+  the sdist can rebuild it outside a checkout. Nested project layouts consume
+  the same canonical helper. Linked, missing and conflicting inputs fail before
+  publishing a wheel; no hosting component is added to runtime dependencies.
+- Read-only client diagnostics bind local resource evidence to the exact imported
+  package's installed RECORD. This is neither signed release authentication nor
+  controller readiness, and it cannot select a controller/node role.
+- Real fresh native client installation, entry-point invocation, resource-tamper
+  refusal and package-manager removal preserve separate user configuration.
+  Installation uses a fresh target and isolated Python without ambient site
+  packages, not a temporary copied interpreter or a simulated uninstall.
+  Required native selection passed 268 tests in 56 seconds; the full additional
+  artifact selection passed 9 tests in 22 seconds, and resource/runner selectors
+  passed separately. Owned test sandboxes were removed without permission edits.
+  Native Linux CI remains the second OS proof; no provider capacity or host
+  activation is required or inferred by this artifact prerequisite.
+- Managed install/update/rollback/receipt-owned uninstall execution, live config,
+  useful service roles and migration remain open. This effort stays Active.
+
+### 2026-10-13 - Client prerequisite review corrections
+- #6432's existing index wheel fixtures now supply the shared helper. Further
+  review corrections reject linked/non-directory resource ancestors before
+  diagnostics read bytes and distinguish required canonical build inputs from
+  optional included comparison copies. A missing canonical file cannot fall
+  back to an included copy; a standalone sdist requires both included resources.
+- Native installed-client proof also refuses a real linked target ancestor.
+  The exact required 120-second local selection passed 363 tests in 63 seconds;
+  the full changed client artifact/diagnostic selection passed 37, and the
+  shared index artifact portfolio passed 8. Earlier overlapping native runs
+  exhausted their aggregate budgets; sequential measurements confirmed the
+  unchanged deadline, without weakening containment or child limits.
+- The previous published head's actual Linux/Windows test-runner jobs exercised
+  the client portfolio (354 each), not merely the separate index-service jobs.
+  The corrected head still needs its own review and CI. The independent Windows
+  console-root failure is the exact existing #6266/#6274 owned blocker; no
+  competing repair, assertion relaxation or CI bypass is proposed.
+- #6437's role-selected artifact preflight is merged and can be consumed by the
+  subsequent managed-client slice. No lifecycle activation, release rollout or
+  private migration gate is claimed complete here.

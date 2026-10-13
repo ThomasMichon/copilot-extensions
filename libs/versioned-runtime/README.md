@@ -30,15 +30,23 @@ cannot be a shared runtime import — it must physically exist in each plugin. S
 this canonical copy is **vendored (synced) byte-identically** into every Python
 runtime plugin's `scripts/` dir.
 
-The standalone `agent-index-service` distribution also consumes this exact
-primitive for its explicit installer, without introducing a plugin or a second
-maintained source mirror. Its standard setuptools build copies the canonical
-file into wheel build output; its sdist carries the same bytes so a subsequent
-wheel build needs no repository checkout. Wheel/sdist byte-equality tests and
-wheel RECORD bind that generated resource to the package artifact. Existing
-plugin bootstrap scripts remain self-contained and unchanged. The standalone
-installer uses only its own installed resource, never a repository/plugin/PATH
-fallback; editable/source-only installation is not an installer runtime.
+The standalone `agent-index-service` and thin `fleet-manager` distributions also
+consume this exact primitive, without introducing a plugin or a second
+maintained source mirror. The shared `standalone_build.py` setuptools hooks
+copy the canonical file into wheel build output; each sdist carries the same
+primitive and helper bytes so a subsequent wheel build needs no repository
+checkout. The source bootstrap supports root-level and nested service project
+directories, rejects ambiguous/linked helper selection, and refuses conflicting
+included resources rather than preferring stale copies.
+Required inputs are explicit: a detected canonical library directory requires
+both canonical files, even when included copies exist. Those copies are optional
+byte-equality comparisons in a checkout; outside it, both sdist files are required.
+Wheel/sdist byte-equality tests and wheel RECORD bind the generated resource to the package
+artifact. Existing plugin bootstrap scripts remain self-contained and unchanged.
+The index staging adapter uses only its own installed resource, never a
+repository/plugin/PATH fallback; editable/source-only installation is not an
+installer runtime. Fleet's artifact delivery and client resource diagnostics
+do not yet implement a managed installer or activate a runtime slot.
 
 Slot resolution is completion-marker strict: `current-version`,
 `last-known-good`, and newest-slot fallback candidates must carry a valid

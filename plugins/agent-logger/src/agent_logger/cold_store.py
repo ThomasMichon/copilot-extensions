@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import json
 import stat
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 
 from agent_logger import sessions
 from agent_logger.config import Config, load_config
@@ -146,23 +146,10 @@ def _resolve_from_synced_corpus(session_id: str, corpus_root: Path) -> SessionRe
 
 
 def _is_safe_session_id(session_id: str) -> bool:
-    """Whether ``session_id`` is a single safe path component.
-
-    ``session_id`` ultimately reaches ``Path`` composition in
-    :mod:`agent_logger.sessions` (live-dir join, archive-store join), and the
-    daemon forwards an unvalidated request-path parameter as-is (see
-    ``agent_bridge`` ``GET /api/v1/sessions/{session_id}``). A value
-    containing a path separator, ``..``, or an absolute-path anchor could
-    otherwise escape the session roots and read arbitrary files -- reject
-    anything that is not exactly one normal path segment, on either POSIX or
-    Windows syntax.
-    """
-    if not session_id or session_id in (".", ".."):
-        return False
-    normalized = session_id.replace("\\", "/")
-    if "/" in normalized:
-        return False
-    if PureWindowsPath(session_id).anchor or PurePosixPath(session_id).is_absolute():
+    """Apply the live/archive seam's canonical, cross-platform ID boundary."""
+    try:
+        sessions._validate_session_id(session_id)
+    except ValueError:
         return False
     return True
 

@@ -13,6 +13,10 @@ def test_native_fleet_checks_are_both_conditionally_scoped():
     assert len(PATTERNS) == 2
     assert PATTERNS[0] == PATTERNS[1]
     assert WORKFLOW.count("if: steps.fleet-contracts.outputs.run == 'true'") == 2
+    assert WORKFLOW.count("""'-m "not client_distribution_full"'""") == 2
+    assert WORKFLOW.count(
+        "run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 120"
+    ) == 2
 
 
 @pytest.mark.parametrize("path,selected", [
@@ -24,6 +28,8 @@ def test_native_fleet_checks_are_both_conditionally_scoped():
     ("libs/single-instance-lease/src/lease.py", True),
     ("libs/agent-procutil/src/agent_procutil/__init__.py", True),
     ("libs/agent-procutil/tests/test_no_window.py", True),
+    ("libs/versioned-runtime/versioned_runtime.py", True),
+    ("libs/versioned-runtime/standalone_build.py", True),
     (".github/workflows/ci.yml", True),
     ("plugins/agent-bridge/README.md", False),
     ("visions/machine-fleet/README.md", False),

@@ -15,6 +15,7 @@ from agent_procutil import no_window_flags
 
 from .agent_registry_common import NamespaceAgentInfo
 from .transport import PluginRef, SpawnTarget
+from .reader_admission import ReaderAdmission
 
 log = logging.getLogger("agent-bridge")
 
@@ -97,6 +98,9 @@ class CliNamespaceResolver(NamespaceResolver):
         self._command = list(command) if command else None
         self._list_cache: tuple[float, list[NamespaceAgentInfo]] | None = None
         self._list_task: asyncio.Task[list[NamespaceAgentInfo]] | None = None
+        self._list_admission = ReaderAdmission()
+        self._list_timed_out = False
+        self._list_native_success = False
 
     def invalidate_list_cache(self) -> None:
         """Drop the cached ``list()`` result so the next call re-queries live."""
@@ -141,6 +145,11 @@ class CliNamespaceResolver(NamespaceResolver):
         try:
             result = await asyncio.to_thread(_call)
             return result.returncode, result.stdout, result.stderr
+        except subprocess.TimeoutExpired:
+            if argv == ["namespace-list"]:
+                self._list_timed_out = True
+            log.warning("CLI namespace call exceeded execution timeout: %s %s", self._binstub, argv)
+            return None
         except Exception:
             log.debug(
                 "CLI namespace call failed: %s %s",
@@ -207,6 +216,43 @@ class CliNamespaceResolver(NamespaceResolver):
             if (time.monotonic() - stamped_at) <= ttl:
                 return cached
 
+        if not self._list_admission.admit(time.monotonic()):
+            log.debug("Namespace '%s:' native enumeration admission suppressed", self._prefix)
+            if self._fallback is None:
+                executable = self._command[0] if self._command else self._binstub
+                if shutil.which(executable) is None:
+                    log.debug(
+                        "Namespace '%s:' provider unavailable while admission is suppressed",
+                        self._prefix,
+                    )
+                    return []
+                raise NamespaceListIncomplete(
+                    f"{self._binstub} namespace-list admission circuit is open",
+                )
+            return await self._fallback_or_raise("list")
+        self._list_timed_out = False
+        self._list_native_success = False
+        previous_deadline = self._list_admission.retry_at
+        try:
+            return await self._enumerate_once(timeout=timeout, ttl=ttl)
+        finally:
+            self._list_admission.complete(
+                time.monotonic(), timed_out=self._list_timed_out,
+                native_success=self._list_native_success,
+            )
+            if (
+                self._list_admission.retry_at is not None
+                and self._list_admission.retry_at != previous_deadline
+            ):
+                log.warning(
+                    "Namespace '%s:' native enumeration circuit opened for 60 seconds",
+                    self._prefix,
+                )
+
+    async def _enumerate_once(
+        self, *, timeout: float | None, ttl: float,
+    ) -> list[NamespaceAgentInfo]:
+
         exe_candidate = self._command[0] if self._command else self._binstub
         binstub_present = shutil.which(exe_candidate) is not None
         run_kwargs = {} if timeout is None else {"timeout": timeout}
@@ -229,6 +275,7 @@ class CliNamespaceResolver(NamespaceResolver):
                 return await self._fallback_or_raise("list")
             if ttl > 0:
                 self._list_cache = (time.monotonic(), agents)
+            self._list_native_success = True
             return agents
 
         if not binstub_present:

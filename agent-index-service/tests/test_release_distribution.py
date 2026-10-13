@@ -38,6 +38,10 @@ def test_real_wheels_verify_and_reject_frozen_pre_seam_core(tmp_path):
             primitive = tmp_path / "libs" / "versioned-runtime" / "versioned_runtime.py"
             primitive.parent.mkdir(parents=True)
             shutil.copy2(repo / "libs" / "versioned-runtime" / "versioned_runtime.py", primitive)
+            shutil.copy2(
+                repo / "libs" / "versioned-runtime" / "standalone_build.py",
+                primitive.with_name("standalone_build.py"),
+            )
         shutil.copytree(
             source / "src", build / "src",
             ignore=shutil.ignore_patterns("__pycache__"),

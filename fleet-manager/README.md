@@ -1,8 +1,9 @@
 # fleet-manager
 
 Standalone fleet system home and thin CLI. **Current scope: offline configuration/
-capacity planning and explicit release-snapshot inspection.** No controller, provider invocation, credential
-lookup, install/uninstall, telemetry sink or resource mutation is delivered yet.
+capacity planning, explicit release-snapshot inspection and installed-client
+resource diagnostics.** No controller, provider invocation, credential
+lookup, managed install/update/uninstall, telemetry sink or resource mutation is delivered yet.
 Those remain the [canonical effort](../efforts/active/linux-role-fleet/README.md).
 
 ```text
@@ -76,6 +77,62 @@ Output hashing, saved-plan verification and CLI serialization use these output
 bounds and output-specific diagnostics, not the individual input limits.
 The package uses only the standard library and has no server,
 Docker, Copilot, marketplace or private-provider dependency.
+
+## Thin client artifacts and local diagnostics
+
+`fleet-manager` builds as a dependency-free runtime wheel. Its wheel carries the
+byte-identical canonical `versioned-runtime` primitive as a package resource;
+the sdist also carries that primitive and the same build helper, so rebuilding
+outside the repository does not depend on a plugin or sibling checkout.
+Canonical checkout resources are required when the shared library directory is
+present; included sdist copies are optional comparison inputs in that case,
+never a fallback for a missing canonical file. Outside a checkout, both included
+sdist resources are required. Missing or conflicting inputs fail the build. The helper is shared
+with `agent-index-service`, not a second maintained primitive or installer.
+
+```text
+fleet-manager doctor
+fleet-manager doctor --role client
+```
+
+`doctor` checks the imported package/version against its installed distribution
+and the package initializer/runtime resource against their SHA-256 wheel RECORD
+entries. It returns local installed-resource evidence, not a trusted release
+attestation, whole-package integrity proof or controller/service health. A
+missing, unreadable, linked, oversized or mismatched resource is an error,
+including linked or non-directory ancestors;
+there is no source-checkout, plugin or PATH fallback. No remote endpoint is
+queried, no credentials are acquired and no hosting role is accepted.
+Exit 0 means that local resource evidence passed; exit 1 means invalid or
+unavailable evidence. The command creates no configuration, service or runtime.
+
+Ordinary explicit package-manager installation/removal remains supported.
+Native first-touch tests install the built wheel into a fresh package-manager
+target without dependencies/network access, run its installed console entry point
+and diagnostics, and remove that distribution while preserving separate user
+configuration. Isolated Python excludes ambient site packages, so the runner's
+own client installation cannot supply a missing dependency or false pass.
+Using a fresh target avoids manufacturing and deleting a temporary interpreter;
+it does not stand in for a managed version-slot deployment.
+This proves client artifact isolation, **not a managed
+install/update/rollback/uninstall implementation**. Receipt-owned version-slot
+selection, configuration custody and controller/node lifecycle remain open
+under #6424/#6240. No marketplace hook installs or updates this standalone client.
+
+Required changed-path native CI keeps real wheel/RECORD, sdist-to-wheel,
+linked-helper refusal and first-touch install/removal proofs. The additional
+native build/refusal matrix is marked `client_distribution_full` and runs in
+unfiltered standalone validation and the existing manual native CI lane.
+Local full validation uses `tools/run-standalone-tests.py fleet-manager`;
+`PYTEST_ADDOPTS='-m "not client_distribution_full"'` selects the same fast
+portfolio as required PR CI without removing the real installation boundary.
+The aggregate native fleet-suite deadline is 120 seconds, inside the existing
+five-minute job budget; this includes the growing journal/claim suite and the
+real packaging boundary. Each artifact subprocess retains its 30-second limit.
+
+Vision reconciliation: this prerequisite closes part of machine-fleet
+`unified-coordination-product` and the reviewed standalone-system distribution
+boundary. It reuses immutable-runtime primitives without activating one.
 
 ## Release roles and snapshot inspection
 

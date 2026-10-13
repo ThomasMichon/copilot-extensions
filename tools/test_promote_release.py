@@ -3,6 +3,7 @@ tool (wholesale tree-replace commit, never a merge)."""
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -23,6 +24,12 @@ _REQUIRED_TOOLS = (
     "materialize_installer_engine.py",
     "materialize_launch_wrapper_assets.py",
 )
+
+
+@pytest.fixture(autouse=True)
+def no_ambient_git_identity(monkeypatch):
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
 
 
 def _git(args: list[str], cwd: Path, check: bool = True) -> str:
@@ -81,6 +88,8 @@ def repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     root.mkdir()
     _git(["init", "-q", "-b", "main"], root)
+    _git(["config", "user.name", "Test"], root)
+    _git(["config", "user.email", "test@example.com"], root)
     (root / "tools").mkdir()
     for name in _REQUIRED_TOOLS:
         shutil.copy(_TOOLS / name, root / "tools" / name)
@@ -922,6 +931,8 @@ def test_promote_syncs_instruction_projections_after_a_version_bump(tmp_path: Pa
     root = tmp_path / "repo"
     root.mkdir()
     _git(["init", "-q", "-b", "main"], root)
+    _git(["config", "user.name", "Test"], root)
+    _git(["config", "user.email", "test@example.com"], root)
     (root / "tools").mkdir()
     for name in _REQUIRED_TOOLS:
         shutil.copy(_TOOLS / name, root / "tools" / name)

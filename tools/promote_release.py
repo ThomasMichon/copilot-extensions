@@ -191,7 +191,9 @@ def _seed_versions_from_main(scratch: Path, main_head: str, *, acc, repo: Path) 
         acc.apply(seed_result)
 
 
-def _sync_instruction_projections(scratch: Path) -> list[str]:
+def _sync_instruction_projections(
+    scratch: Path, *, trusted_source: Path | None = None,
+) -> list[str]:
     """Re-render any declarative instruction-projection files (e.g.
     ``.github/instructions/efforts/completion-gate.instructions.md``) so
     they reflect the version bumps ``consume_pending_changes`` just applied.
@@ -211,11 +213,12 @@ def _sync_instruction_projections(scratch: Path) -> list[str]:
     tree at all -- this sweep is best-effort and never a hard dependency of
     promotion (a synthetic/stripped-down checkout, e.g. this module's own
     test fixtures, simply has nothing to sync)."""
-    script = (
-        scratch / "plugins" / "customizing-copilot" / "skills"
-        / "reviewing-customizations" / "scripts" / "manage-instruction-projections.py"
+    relative = (
+        Path("plugins") / "customizing-copilot" / "skills" / "reviewing-customizations"
+        / "scripts" / "manage-instruction-projections.py"
     )
-    if not script.exists():
+    script = (trusted_source or scratch) / relative
+    if not (scratch / relative).exists() or not script.exists():
         return []
     proc = subprocess.run(
         [sys.executable, str(script), "sync", str(scratch), "--json"],
@@ -239,11 +242,12 @@ def _sync_instruction_projections(scratch: Path) -> list[str]:
 
 
 def consume_pending_changes(
-    scratch: Path, *, last_dev_head: str | None = None, main_head: str, repo: Path = REPO
+    scratch: Path, *, last_dev_head: str | None = None, main_head: str, repo: Path = REPO,
+    trusted_source: Path | None = None,
 ) -> dict:
-    """Run accumulate_bumps' compute/apply against the scratch worktree's own
-    copy of the tooling, and materialize_main's pointer expansion. Returns a
-    summary dict used for the tag/commit message and tests.
+    """Compose candidate data using its tooling, or explicitly trusted tooling
+    for candidate-independent signing validation. Returns a summary used for
+    the tag/commit message and tests.
 
     ``last_dev_head`` is the ``dev`` commit the PREVIOUS promotion actually
     promoted (persisted as ``last_promotion.dev_head`` in the pipeline state
@@ -273,12 +277,20 @@ def consume_pending_changes(
     # repo's .changefiles/ entirely. Force the scratch worktree's own
     # changefile.py into sys.modules under its bare name before loading
     # accumulate_bumps, then restore whatever was there afterward.
-    changefile_mod = _load_module(scratch / "tools" / "changefile.py", "promote_changefile")
+    tool_root = (trusted_source or scratch) / "tools"
+    changefile_mod = _load_module(tool_root / "changefile.py", "promote_changefile")
+    if trusted_source is not None:
+        changefile_mod.REPO = scratch
+        changefile_mod.CHANGEFILES_DIR = scratch / ".changefiles"
     previous_changefile_mod = sys.modules.get("changefile")
     sys.modules["changefile"] = changefile_mod
     try:
-        acc = _load_module(scratch / "tools" / "accumulate_bumps.py", "promote_accumulate_bumps")
-        mm = _load_module(scratch / "tools" / "materialize_main.py", "promote_materialize_main")
+        acc = _load_module(tool_root / "accumulate_bumps.py", "promote_accumulate_bumps")
+        mm = _load_module(tool_root / "materialize_main.py", "promote_materialize_main")
+        if trusted_source is not None:
+            acc.REPO = scratch
+            acc.PLUGINS_DIR = scratch / "plugins"
+            acc.MARKETPLACE = scratch / ".github" / "plugin" / "marketplace.json"
 
         _seed_versions_from_main(scratch, main_head, acc=acc, repo=repo)
 
@@ -330,7 +342,7 @@ def consume_pending_changes(
                 "escaping pointer would otherwise ship as an unexpanded stub "
                 "in the main snapshot:\n  " + "\n  ".join(unresolved)
             )
-        projections_synced = _sync_instruction_projections(scratch)
+        projections_synced = _sync_instruction_projections(scratch, trusted_source=trusted_source)
     finally:
         if previous_changefile_mod is not None:
             sys.modules["changefile"] = previous_changefile_mod
@@ -610,6 +622,10 @@ def promote(
     tag_prefix: str = "promote",
     candidate_branch: str | None = None,
     coverage_baselines_dir: Path | None = None,
+    build_python_artifacts_dir: Path | None = None,
+    python_artifacts_dir: Path | None = None,
+    toolchain_source: str = "governed",
+    toolchain_min_age_days: int | None = None,
 ) -> dict:
     """Run one full promotion cycle. Returns a report dict; never raises for
     "nothing to promote" (reported via ``report["promoted"] is False``).
@@ -645,6 +661,10 @@ def promote(
     -- with no real `dev` content change -- never forces a vacuous
     promotion."""
     dev_head = _rev_parse(dev_ref, cwd=repo)
+    if build_python_artifacts_dir is not None and (
+        push or python_artifacts_dir is not None
+    ):
+        raise PromotionError("artifact export must be a separate, non-pushing preparation")
     if dev_head is None:
         raise PromotionError(f"cannot resolve dev ref: {dev_ref!r}")
     main_head = _rev_parse(main_ref, cwd=repo)
@@ -711,12 +731,28 @@ def promote(
             last_dev_head=last_promotion.get("dev_head"),
             main_head=main_head,
             repo=repo,
+            trusted_source=REPO,
         )
         content_tree = build_promotion_tree(scratch)
         main_content_tree = _tree_excluding_state(main_tree, repo=repo)
 
         if content_tree == main_content_tree:
             return {"promoted": False, "reason": "no content change vs. main", **summary}
+
+        from promotion_python_artifacts import (
+            PromotionArtifactError, candidate_projects, export_artifacts, validate_artifacts,
+        )
+
+        if python_artifacts_dir is not None:
+            try:
+                validate_artifacts(
+                    python_artifacts_dir, content_tree=content_tree,
+                    dev_head=dev_head, main_before=main_head,
+                    projects=candidate_projects(scratch),
+                    candidate_root=scratch,
+                )
+            except PromotionArtifactError as exc:
+                raise PromotionError(str(exc)) from exc
 
         base = _git(["merge-base", main_head, dev_head], cwd=repo, check=False) or main_head
         message = format_promotion_message(dev_range=(base, dev_head), summary=summary)
@@ -739,6 +775,16 @@ def promote(
         commit = _git(
             ["commit-tree", new_tree, "-p", main_head, "-m", message], cwd=scratch
         )
+        if build_python_artifacts_dir is not None:
+            try:
+                export_artifacts(
+                    repo=repo, commit=commit, content_tree=content_tree,
+                    dev_head=dev_head, main_before=main_head,
+                    out_dir=build_python_artifacts_dir, source_policy=toolchain_source,
+                    min_age_days=toolchain_min_age_days,
+                )
+            except PromotionArtifactError as exc:
+                raise PromotionError(str(exc)) from exc
         tag_name = f"{tag_name}-{commit[:8]}"
 
         if push and candidate_branch:
@@ -747,7 +793,8 @@ def promote(
             # actual post-merge commit, not this pre-merge candidate.
             _git(["push", "origin", f"{commit}:refs/heads/{candidate_branch}"], cwd=scratch)
         else:
-            _git(["tag", "-a", tag_name, "-m", message, commit], cwd=scratch)
+            if build_python_artifacts_dir is None:
+                _git(["tag", "-a", tag_name, "-m", message, commit], cwd=scratch)
             if push:
                 _git(["push", "origin", f"{commit}:refs/heads/main"], cwd=scratch)
                 _git(["push", "origin", tag_name], cwd=scratch)
@@ -761,6 +808,7 @@ def promote(
             "pushed": push,
             "candidate_branch": candidate_branch if (push and candidate_branch) else None,
             "coverage_baselines_written": baselines_written,
+            "python_artifacts_exported": build_python_artifacts_dir is not None,
             **summary,
         }
     finally:
@@ -792,13 +840,28 @@ def main(argv: list[str] | None = None) -> int:
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="default: do not push")
     mode.add_argument("--push", action="store_true", help="push the generated commit + tag")
+    artifacts = ap.add_mutually_exclusive_group()
+    artifacts.add_argument("--build-python-artifacts-dir", type=Path)
+    artifacts.add_argument("--python-artifacts-dir", type=Path)
+    ap.add_argument(
+        "--toolchain-source", choices=("governed", "seasoned-public"), default="governed"
+    )
+    ap.add_argument("--toolchain-min-age-days", type=int, default=None)
     args = ap.parse_args(argv)
+    if args.build_python_artifacts_dir is not None and args.push:
+        ap.error("build artifacts without --push, in a credential-separated job")
+    if args.toolchain_min_age_days is not None and args.toolchain_source != "seasoned-public":
+        ap.error("--toolchain-min-age-days requires --toolchain-source seasoned-public")
 
     try:
         report = promote(
             repo=args.repo, dev_ref=args.dev_ref, main_ref=args.main_ref,
             push=args.push, force=args.force, candidate_branch=args.candidate_branch,
             coverage_baselines_dir=args.coverage_baselines_dir,
+            build_python_artifacts_dir=args.build_python_artifacts_dir,
+            python_artifacts_dir=args.python_artifacts_dir,
+            toolchain_source=args.toolchain_source,
+            toolchain_min_age_days=args.toolchain_min_age_days,
         )
     except PromotionPaused as exc:
         # A pause is an expected, intentional operator action (part of the
@@ -843,6 +906,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  projection-synced: {path}")
     for plugin in report.get("coverage_baselines_written", []):
         print(f"  coverage-baseline-checked-in: {plugin}")
+    if report.get("python_artifacts_exported"):
+        print("  python-artifacts-exported: true")
     if report.get("candidate_branch"):
         print(f"  pushed candidate branch: {report['candidate_branch']} "
               "(land it on main via a real PR + merge; tag the actual merged commit)")

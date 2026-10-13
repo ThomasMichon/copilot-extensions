@@ -9,6 +9,8 @@ synced corpus -- both unpacked and packed), matching the
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -348,6 +350,41 @@ def test_fetch_session_json_rejects_traversal(tmp_path: Path, monkeypatch) -> No
     code, payload = cold_store.fetch_session_json("../s-real")
     assert code == cold_store.NOT_FOUND_EXIT_CODE
     assert payload == ""
+
+
+@pytest.mark.parametrize(
+    "session_id",
+    [
+        "", ".", "..", "../session", r"..\session", "/session", r"C:\session",
+        "container:example", "session:stream", "session.", "session ", "CON",
+        "nul.txt", "session?name", "session\x00name",
+    ],
+)
+def test_fetch_session_json_rejects_noncanonical_ids_before_discovery(
+    session_id: str, monkeypatch,
+) -> None:
+    def unexpected_discovery():
+        pytest.fail("noncanonical session ID reached filesystem discovery")
+
+    monkeypatch.setattr(cold_store, "_local_state_root", unexpected_discovery)
+
+    code, payload = cold_store.fetch_session_json(session_id)
+    assert code == cold_store.NOT_FOUND_EXIT_CODE
+    assert payload == ""
+
+
+@pytest.mark.parametrize("session_id", ["container:example", "session.", "CON"])
+def test_session_fetch_cli_noncanonical_id_is_not_found(session_id: str) -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "agent_logger", "session-fetch", session_id, "--json"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
+    assert result.returncode == cold_store.NOT_FOUND_EXIT_CODE, result.stderr
+    assert result.stdout == ""
+    assert result.stderr == ""
 
 
 # --- query_reviewer_sessions -----------------------------------------------
