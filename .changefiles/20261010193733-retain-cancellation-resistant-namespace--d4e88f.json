@@ -1,9 +1,0 @@
-{
-  "comment": "Retain cancellation-resistant namespace reader ownership until completion and include superseded scans in bounded shutdown.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

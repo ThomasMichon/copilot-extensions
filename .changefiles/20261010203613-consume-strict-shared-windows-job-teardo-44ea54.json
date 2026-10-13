@@ -1,9 +1,0 @@
-{
-  "comment": "Consume strict shared Windows Job teardown API for owned descendant cleanup.",
-  "changes": [
-    {
-      "plugin": "agent-vault",
-      "type": "patch"
-    }
-  ]
-}

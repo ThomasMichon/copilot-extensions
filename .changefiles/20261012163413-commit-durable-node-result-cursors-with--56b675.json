@@ -1,9 +1,0 @@
-{
-  "comment": "Commit durable node result cursors with correlated receipt outbox and audit reconciliation",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Allow generous synchronous local-guidance preparation and queue bounded, survivable session-start backups without treating dispatch as instruction delivery.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

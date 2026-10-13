@@ -1,9 +1,0 @@
-{
-  "comment": "Derive bare startup status and next steps from observed install state instead of a static Phase 2 roadmap.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

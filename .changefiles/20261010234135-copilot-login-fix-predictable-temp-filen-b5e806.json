@@ -1,9 +1,0 @@
-{
-  "comment": "copilot-login: fix predictable temp filename/write-before-chmod ordering on config.json import, and surface a warning when the in-container config restore/cleanup command exits nonzero",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}

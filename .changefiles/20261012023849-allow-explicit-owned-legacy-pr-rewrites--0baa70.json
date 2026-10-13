@@ -1,9 +1,0 @@
-{
-  "comment": "Allow explicit owned legacy PR rewrites after metadata revisions with exact live provider, destination and head revalidation",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

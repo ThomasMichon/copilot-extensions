@@ -1,9 +1,0 @@
-{
-  "comment": "Configure receiving-side project authority in cancelled-handoff reconciliation regression fixtures; preserve production session-registration fencing.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

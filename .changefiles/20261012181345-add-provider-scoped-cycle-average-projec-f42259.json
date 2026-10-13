@@ -1,9 +1,0 @@
-{
-  "comment": "Add provider-scoped cycle-average projections and advice-only autonomous pacing; preserve quota capture filesystem diagnostics",
-  "changes": [
-    {
-      "plugin": "budget-guidance",
-      "type": "patch"
-    }
-  ]
-}

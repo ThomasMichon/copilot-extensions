@@ -1,9 +1,0 @@
-{
-  "comment": "Persist node acceptance, cooperative effect receipts and conservative external-attempt uncertainty",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

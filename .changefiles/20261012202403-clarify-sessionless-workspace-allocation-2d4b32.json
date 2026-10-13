@@ -1,9 +1,0 @@
-{
-  "comment": "Clarify sessionless workspace allocation and replay-safe creation intent.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

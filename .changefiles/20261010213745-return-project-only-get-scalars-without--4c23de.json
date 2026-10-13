@@ -1,9 +1,0 @@
-{
-  "comment": "Return project-only get scalars without scanning worktree or session identity",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Fix release-promotion regression: depend on agent-dispatch via plain version, not an escaping uv.sources plugin pointer",
-  "changes": [
-    {
-      "plugin": "agent-dispatch-service",
-      "type": "patch"
-    }
-  ]
-}

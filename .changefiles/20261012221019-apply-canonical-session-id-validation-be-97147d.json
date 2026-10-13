@@ -1,9 +1,0 @@
-{
-  "comment": "Apply canonical session-ID validation before cold-store discovery so qualified handles and invalid components return not found",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

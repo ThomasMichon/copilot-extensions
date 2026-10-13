@@ -1,9 +1,0 @@
-{
-  "comment": "Document one execution workspace across allocation and session embodiment.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

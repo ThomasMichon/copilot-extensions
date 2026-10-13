@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve identity-bound fresh-generation launch receipts across reservation retries and durable delivery recovery",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

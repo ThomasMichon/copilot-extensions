@@ -1,9 +1,0 @@
-{
-  "comment": "Add default-off verified CI failure admission emitter and task-selected container execution bindings",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

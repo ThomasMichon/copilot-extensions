@@ -1,9 +1,0 @@
-{
-  "comment": "Ship a neutral restricted CI repair image and fleet template without credentials or charter",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}

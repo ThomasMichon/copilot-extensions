@@ -1,9 +1,0 @@
-{
-  "comment": "Bound acquisition owner verification to the exact current tracking record and independent native head",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Bypass Windows status-monitor venv redirectors so ordinary and passive process handles identify the runtime",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

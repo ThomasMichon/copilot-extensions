@@ -1,9 +1,0 @@
-{
-  "comment": "Document canonical agent-worktrees activation dependencies and materialized release copies",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

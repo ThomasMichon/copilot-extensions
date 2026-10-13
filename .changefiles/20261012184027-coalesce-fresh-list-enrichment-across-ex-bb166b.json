@@ -1,9 +1,0 @@
-{
-  "comment": "Coalesce fresh list enrichment across exact-compatible demanded shapes within each resident warm pass",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Remove the unused Textual runtime dependency and explicitly preserve packaging-based version ordering",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Define immutable bounded operation intent and correlated target receipt contracts",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

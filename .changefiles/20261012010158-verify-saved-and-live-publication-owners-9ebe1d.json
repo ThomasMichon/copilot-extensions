@@ -1,9 +1,0 @@
-{
-  "comment": "Verify saved and live publication ownership for attested custom PR heads during supported rebase",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

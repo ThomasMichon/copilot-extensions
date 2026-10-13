@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve identity-verified Windows coordinator launcher/server pairs during graceful cutover",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

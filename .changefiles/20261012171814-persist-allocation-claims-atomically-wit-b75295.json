@@ -1,9 +1,0 @@
-{
-  "comment": "Persist allocation claims atomically with operation admission and retain ownership across outcomes",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

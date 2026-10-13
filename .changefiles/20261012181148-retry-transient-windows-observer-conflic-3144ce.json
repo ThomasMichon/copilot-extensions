@@ -1,9 +1,0 @@
-{
-  "comment": "Retry transient Windows observer conflicts when publishing guidance worker receipts and logs.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

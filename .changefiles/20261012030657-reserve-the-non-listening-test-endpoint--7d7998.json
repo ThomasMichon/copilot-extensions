@@ -1,9 +1,0 @@
-{
-  "comment": "Reserve the non-listening test endpoint during relay discovery to prevent ephemeral-port reuse between dead and live mappings.",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

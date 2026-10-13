@@ -1,9 +1,0 @@
-{
-  "comment": "Add required request-scoped routing over a common upstream tool contract with actual-account-bound local Entra authentication and target authorization; fail closed on unbound relay identities and protect pending attaches from idle eviction.",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

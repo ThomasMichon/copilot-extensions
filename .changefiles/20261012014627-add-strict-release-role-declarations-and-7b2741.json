@@ -1,9 +1,0 @@
-{
-  "comment": "Add strict release role declarations and non-mutating snapshot inspection",
-  "changes": [
-    {
-      "plugin": "fleet-manager",
-      "type": "patch"
-    }
-  ]
-}

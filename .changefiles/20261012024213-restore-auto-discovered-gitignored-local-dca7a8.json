@@ -1,9 +1,0 @@
-{
-  "comment": "Restore auto-discovered gitignored local instruction siblings and scope renderer identity lookup within the overall launch deadline.",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Add local Workers configuration pool selection and confirmed override controls",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Batch classifier fallback tree object comparisons without per-path Git children.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Verify actual required contexts and pin the current head before a GitHub admin review-bypass merge; refuse missing, pending or unreadable CI without adding watcher polling.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

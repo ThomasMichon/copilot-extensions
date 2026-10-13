@@ -1,9 +1,0 @@
-{
-  "comment": "Propagate canonical activation library ownership documentation after dev copy retirement",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

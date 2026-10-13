@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve fresh head authority during catalog reconciliation and refuse adoption of yielded sessions.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

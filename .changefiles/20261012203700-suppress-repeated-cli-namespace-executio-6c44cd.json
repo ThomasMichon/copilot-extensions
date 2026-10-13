@@ -1,9 +1,0 @@
-{
-  "comment": "Suppress repeated CLI namespace execution overruns with a provider-local admission circuit and bounded recovery probe.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}
