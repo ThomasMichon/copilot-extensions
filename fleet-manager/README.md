@@ -84,7 +84,9 @@ it does not select a trust policy, install a service or authorize activation.
 The [retained artifact-staging API](docs/artifact-staging.md) uses that explicit
 verification capability and the existing preflight to freeze selected bytes
 in a context-owned private spool. It does not execute artifacts or publish a
-runtime selector. Default planner/doctor commands do not stage anything.
+runtime selector. Consumers obtain bounded immutable byte snapshots with current
+authentication, not reusable filesystem paths. Default planner/doctor commands
+do not stage anything.
 
 ## Thin client artifacts and local diagnostics
 

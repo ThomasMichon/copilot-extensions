@@ -1,6 +1,6 @@
 """Retained authenticated artifact bytes, never installation or activation."""
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 import hashlib
@@ -11,7 +11,7 @@ import stat
 import sys
 import threading
 import time
-from types import MappingProxyType, ModuleType
+from types import ModuleType
 from typing import BinaryIO
 import tempfile
 import uuid
@@ -170,7 +170,7 @@ class StagedArtifacts:
     role: str
     release_digest: str
     sequence: int
-    slot: Path
+    _slot: Path = field(repr=False)
     _root: Path = field(repr=False)
     _root_identity: tuple[int, int] = field(repr=False)
     _manifest_bytes: bytes = field(repr=False)
@@ -182,8 +182,35 @@ class StagedArtifacts:
     )
 
     @property
-    def artifacts(self) -> Mapping[str, Path]:
-        return MappingProxyType(dict(self._artifacts))
+    def artifacts(self) -> tuple[str, ...]:
+        """Selected component names, never reusable filesystem paths."""
+        return tuple(name for name, _ in self._artifacts)
+
+    def read_artifact(
+        self, component: str, policy: object, *, clock: Callable[[], int] = _clock,
+    ) -> bytes:
+        """Return a bounded immutable snapshot authenticated under current policy."""
+        with self._operation_lock:
+            if self._closed.is_set():
+                raise PlanError("artifact staging retention has ended")
+            if not isinstance(component, str) or component not in self.artifacts:
+                raise PlanError("artifact component is not selected by this stage")
+            if _directory(self._root) != self._root_identity:
+                raise PlanError("artifact staging ownership changed")
+            path = dict(self._artifacts)[component]
+            content = _bytes(path, MAX_ARTIFACT_BYTES)
+            evidence = self._reverify(policy, clock=clock)
+            expected = next(
+                item for item in evidence["components"] if item["component"] == component
+            )
+            if (
+                len(content) != expected["bytes"]
+                or hashlib.sha256(content).hexdigest() != expected["artifact_sha256"]
+            ):
+                raise PlanError("artifact snapshot digest mismatch")
+            if _directory(self._root) != self._root_identity:
+                raise PlanError("artifact staging ownership changed")
+            return content
 
     def reverify(self, policy: object, *, clock: Callable[[], int] = _clock) -> dict:
         """Re-authenticate exact frozen bytes under supplied current trusted policy."""
@@ -199,7 +226,7 @@ class StagedArtifacts:
             raise PlanError("artifact staging retention has ended")
         if _directory(self._root) != self._root_identity:
             raise PlanError("artifact staging ownership changed")
-        manifest = _bytes(self.slot / "release.json", MAX_BYTES)
+        manifest = _bytes(self._slot / "release.json", MAX_BYTES)
         if manifest != self._manifest_bytes:
             raise PlanError("frozen manifest identity changed")
         authenticated = authenticate_release(

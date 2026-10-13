@@ -75,22 +75,27 @@ def test_actual_signed_selected_bytes_retained_without_runtime_activation(
         assert evidence["sequence"] == 10 and evidence["verified_at"] == 151
         assert not evidence["activation_authorized"] and not evidence["live_readiness_verified"]
         assert evidence["release_digest"] == frozen.release_digest
-        for name, path in frozen.artifacts.items():
-            assert path.read_bytes() == Path(fixture["sources"]["components"][name]).read_bytes()
+        for name, path in frozen._artifacts:
+            assert frozen.read_artifact(name, trusted, clock=lambda: 151) == (
+                Path(fixture["sources"]["components"][name]).read_bytes()
+            )
             assert path.name == Path(fixture["sources"]["components"][name]).name
         assert not primitive.current_version(frozen._root)
-        assert not primitive.read_marker(frozen._root, frozen.slot.name)
-        assert not primitive.slot_python(frozen._root, frozen.slot.name)
+        assert not primitive.read_marker(frozen._root, frozen._slot.name)
+        assert not primitive.slot_python(frozen._root, frozen._slot.name)
         assert primitive.gc(frozen._root) == []
-        assert frozen.slot.is_dir()
+        assert frozen._slot.is_dir()
+        assert not hasattr(frozen, "slot")
         with pytest.raises(TypeError):
-            frozen.artifacts["unowned"] = parent / "unowned"
-    assert not frozen.slot.exists()
+            frozen.artifacts[0] = "unowned"
+    assert not frozen._slot.exists()
     assert list(parent.iterdir()) == [sentinel]
     assert sentinel.read_bytes() == b"retained custom config\n"
     assert fixture == inputs
     with pytest.raises(PlanError, match="retention has ended"):
         frozen.reverify(trusted, clock=lambda: 152)
+    with pytest.raises(PlanError, match="retention has ended"):
+        frozen.read_artifact(selected[0], trusted, clock=lambda: 152)
 
 
 def test_original_mutation_cannot_replace_frozen_selected_bytes(tmp_path, primitive):
@@ -103,10 +108,94 @@ def test_original_mutation_cannot_replace_frozen_selected_bytes(tmp_path, primit
         original = Path(fixture["sources"]["components"][selected])
         original.write_bytes(b"new untrusted source bytes")
         assert frozen.reverify(trusted, clock=lambda: 151)["artifact_integrity_verified"]
-        assert next(iter(frozen.artifacts.values())).read_bytes() != original.read_bytes()
+        assert frozen.read_artifact(selected, trusted, clock=lambda: 151) != original.read_bytes()
 
 
-def test_context_shutdown_waits_for_inflight_reverification(tmp_path, primitive, monkeypatch):
+def test_replacement_after_reverify_cannot_change_consumed_snapshot(tmp_path, primitive, monkeypatch):
+    fixture = artifact_fixture(tmp_path)
+    parent = tmp_path / "private-stage"
+    parent.mkdir()
+    context, trusted = stage(fixture, parent)
+    with context as frozen:
+        component, path = frozen._artifacts[0]
+        admitted = path.read_bytes()
+        original = staging.StagedArtifacts._reverify
+        replaced = []
+
+        def replace_after_verification(value, policy, *, clock):
+            report = original(value, policy, clock=clock)
+            path.rename(path.with_name("moved-original"))
+            path.write_bytes(b"unverified replacement bytes")
+            replaced.append(True)
+            return report
+
+        monkeypatch.setattr(staging.StagedArtifacts, "_reverify", replace_after_verification)
+        consumed = frozen.read_artifact(component, trusted, clock=lambda: 151)
+        assert replaced and type(consumed) is bytes
+        assert consumed == admitted and consumed != path.read_bytes()
+        monkeypatch.setattr(staging.StagedArtifacts, "_reverify", original)
+        with pytest.raises(PlanError, match="digest mismatch"):
+            frozen.read_artifact(component, trusted, clock=lambda: 151)
+    assert consumed == admitted
+
+
+def test_root_replacement_between_reverify_and_read_refuses(tmp_path, primitive):
+    fixture = artifact_fixture(tmp_path)
+    parent = tmp_path / "private-stage"
+    parent.mkdir()
+    context, trusted = stage(fixture, parent)
+    with context as frozen:
+        component, path = frozen._artifacts[0]
+        assert frozen.reverify(trusted, clock=lambda: 151)["artifact_integrity_verified"]
+        moved = parent / "moved-original"
+        try:
+            frozen._root.rename(moved)
+        except OSError as error:
+            assert os.name == "nt" and getattr(error, "winerror", None) in {5, 32}
+            assert frozen.read_artifact(component, trusted, clock=lambda: 151)
+            return
+        try:
+            replacement = frozen._root / path.relative_to(frozen._root)
+            replacement.parent.mkdir(parents=True)
+            replacement.write_bytes(b"unverified replacement bytes")
+            with pytest.raises(PlanError, match="ownership changed"):
+                frozen.read_artifact(component, trusted, clock=lambda: 151)
+            assert replacement.read_bytes() == b"unverified replacement bytes"
+        finally:
+            frozen._root.rename(parent / "preserved-replacement")
+            moved.rename(frozen._root)
+    assert (parent / "preserved-replacement").is_dir()
+
+
+@pytest.mark.parametrize("change", ["artifact", "revoke", "floor", "expiry", "unselected"])
+def test_snapshot_reads_require_current_trust_and_selected_authentic_bytes(
+    tmp_path, primitive, change,
+):
+    fixture = artifact_fixture(tmp_path)
+    parent = tmp_path / "private-stage"
+    parent.mkdir()
+    context, trusted = stage(fixture, parent)
+    with context as frozen:
+        component, path = frozen._artifacts[0]
+        now = 151
+        if change == "artifact":
+            path.write_bytes(b"tampered")
+        elif change == "revoke":
+            trusted["keys"][0]["revoked"] = True
+        elif change == "floor":
+            trusted["minimum_sequence"] = 11
+        elif change == "expiry":
+            now = 200
+        else:
+            component = "unselected"
+        with pytest.raises(PlanError):
+            frozen.read_artifact(component, trusted, clock=lambda: now)
+
+
+@pytest.mark.parametrize("operation", ["reverify", "read"])
+def test_context_shutdown_waits_for_inflight_reverification(
+    tmp_path, primitive, monkeypatch, operation,
+):
     fixture = artifact_fixture(tmp_path)
     parent = tmp_path / "private-stage"
     parent.mkdir()
@@ -137,7 +226,10 @@ def test_context_shutdown_waits_for_inflight_reverification(tmp_path, primitive,
 
     def verify():
         try:
-            results.append(frozen.reverify(trusted, clock=lambda: 151))
+            if operation == "reverify":
+                results.append(frozen.reverify(trusted, clock=lambda: 151))
+            else:
+                results.append(frozen.read_artifact(frozen.artifacts[0], trusted, clock=lambda: 151))
         except BaseException as error:
             failures.append(error)
 
@@ -145,7 +237,7 @@ def test_context_shutdown_waits_for_inflight_reverification(tmp_path, primitive,
         try:
             assert shutdown.wait(5), "context owner did not start shutdown"
             assert not frozen._closed.is_set()
-            assert frozen.slot.is_dir()
+            assert frozen._slot.is_dir()
         except BaseException as error:
             failures.append(error)
         finally:
@@ -165,8 +257,12 @@ def test_context_shutdown_waits_for_inflight_reverification(tmp_path, primitive,
             controller.join(5)
     assert not failures
     assert not worker.is_alive() and not controller.is_alive()
-    assert len(results) == 1 and results[0]["retention_held"]
-    assert frozen._closed.is_set() and not frozen.slot.exists()
+    assert len(results) == 1
+    if operation == "reverify":
+        assert results[0]["retention_held"]
+    else:
+        assert type(results[0]) is bytes and results[0]
+    assert frozen._closed.is_set() and not frozen._slot.exists()
     with pytest.raises(PlanError, match="retention has ended"):
         frozen.reverify(trusted, clock=lambda: 152)
 
@@ -182,9 +278,9 @@ def test_reverification_requires_current_policy_time_and_unchanged_bytes(
     with context as frozen:
         now = 151
         if change == "artifact":
-            next(iter(frozen.artifacts.values())).write_bytes(b"tampered")
+            frozen._artifacts[0][1].write_bytes(b"tampered")
         elif change == "manifest":
-            (frozen.slot / "release.json").write_bytes(b"{}")
+            (frozen._slot / "release.json").write_bytes(b"{}")
         elif change == "revoke":
             trusted["keys"][0]["revoked"] = True
         elif change == "floor":
@@ -471,8 +567,12 @@ with stage_authenticated_artifacts(
     assert result['retention_held'] and result['mutations_performed']
     assert not result['activation_authorized'] and not result['live_readiness_verified']
     assert not (stage._root/'current-version').exists()
-    assert not (stage.slot/'.install-complete.json').exists()
-    slot = stage.slot
+    assert not (stage._slot/'.install-complete.json').exists()
+    for name in stage.artifacts:
+        assert stage.read_artifact(name, value['policy'], clock=lambda:151) == (
+            pathlib.Path(value['sources']['components'][name]).read_bytes()
+        )
+    slot = stage._slot
 assert not slot.exists()
 assert list(pathlib.Path(parent).iterdir()) == [pathlib.Path(parent)/'user-config.json']
 print(json.dumps(result))

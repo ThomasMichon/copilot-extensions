@@ -14,7 +14,9 @@ with stage_authenticated_artifacts(
     staging_parent=private_stage_directory,
 ) as staged:
     current = staged.reverify(current_trusted_policy)
-    # A separate owner may now admit its own construction using staged.artifacts.
+    for component in staged.artifacts:
+        content = staged.read_artifact(component, current_trusted_policy)
+        # A separate owner admits construction from these immutable bytes.
 ```
 
 The caller supplies a protected, caller-controlled staging parent and current
@@ -52,15 +54,23 @@ current/last-known-good selector, binstub, daemon or service is created.
 Do not build, activate or run a runtime inside it. A consuming installer uses
 its own separately admitted, durable candidate and lifecycle.
 
-The context exposes read-only selected artifact paths and scoped release
-identity. Treat its files as immutable. `reverify(current_policy)` re-reads the
+The context exposes selected component names and scoped release identity, not
+reusable artifact or slot paths. `read_artifact(component, current_policy)`
+reads a bounded ordinary-file snapshot through a held descriptor, re-verifies
+current policy and staged integrity, and compares that snapshot with the
+authenticated component hash and size before returning immutable `bytes`.
+Replacing a path after verification cannot substitute what the consumer reads;
+each new read independently authenticates its own snapshot. At most one
+64 MiB component is materialized per call. Returned bytes remain an immutable
+snapshot, not a lifetime, freshness or execution grant.
+`reverify(current_policy)` re-reads the
 frozen manifest, authenticates it under the supplied current policy and clock,
 and hashes selected frozen artifacts again. It does not trust a saved report,
 original mutable source, or the stage's first verification. Changed bytes,
 expired proof/policy, revoked keys, raised sequence floors and lost ownership
 refuse. There is no persistent high-water mark or rollback permission here.
-Re-verification and context shutdown share one operation lock. Shutdown waits
-for an in-flight verification and report serialization before marking the
+Snapshot reads, re-verification and context shutdown share one operation lock.
+Shutdown waits for an in-flight read, verification and report serialization before marking the
 handle closed and releasing retention; a later verifier refuses. This gives
 each operation a consistent in-context observation, not a retention grant
 that survives context exit. A consuming assembly owner must keep the context
