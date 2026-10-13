@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -214,6 +215,10 @@ def object_result(completion):
     return payload, None
 
 
+def finite_number(value):
+    return type(value) is int or (type(value) is float and math.isfinite(value))
+
+
 def measurement_result(completion):
     payload, error = object_result(completion)
     if error:
@@ -226,9 +231,9 @@ def measurement_result(completion):
     if (type(number) is not int or number < 1
             or not isinstance(window.get("current_window_id"), str)
             or not window["current_window_id"]
-            or type(limit) not in (int, float) or limit <= 0
-            or type(left) not in (int, float) or left < 0
-            or type(fraction) not in (int, float) or not 0 <= fraction <= 1):
+            or not finite_number(limit) or limit <= 0
+            or not finite_number(left) or not 0 <= left <= limit
+            or not finite_number(fraction) or not 0 <= fraction <= 1):
         return None, "native measurement lacks valid captured window/token fields"
     return payload, None
 

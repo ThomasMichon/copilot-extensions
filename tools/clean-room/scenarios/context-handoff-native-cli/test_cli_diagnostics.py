@@ -12,6 +12,61 @@ import validation
 
 
 class CliDiagnosticsTests(unittest.TestCase):
+    def test_measurement_numbers_are_finite_and_within_prompt_capacity(self):
+        valid = {"context_window": {"number": 1, "current_window_id": "fixture:1"},
+                 "context_info": {"promptTokenLimit": 200000},
+                 "tokens_left": 70000, "fraction_remaining": .35}
+
+        def read(payload):
+            return validation.measurement_result(
+                {"data": {"success": True, "result": {"content": json.dumps(payload)}}})
+
+        self.assertEqual(read(valid), (valid, None))
+        for field in ("promptTokenLimit", "tokens_left", "fraction_remaining"):
+            for value in (float("nan"), float("inf"), -float("inf")):
+                payload = dict(valid, context_info=dict(valid["context_info"]))
+                if field == "promptTokenLimit":
+                    payload["context_info"][field] = value
+                else:
+                    payload[field] = value
+                result, error = read(payload)
+                self.assertIsNone(result, (field, value))
+                self.assertIsNotNone(error, (field, value))
+        for value in (200001, 10 ** 1000):
+            result, error = read(dict(valid, tokens_left=value))
+            self.assertIsNone(result)
+            self.assertIsNotNone(error)
+        self.assertEqual(read(dict(valid, tokens_left=0, fraction_remaining=0))[1], None)
+        self.assertEqual(read(dict(valid, tokens_left=200000, fraction_remaining=1))[1], None)
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "workspace"
+            root.mkdir()
+            task = {key: key for key in ("original_objective", "parent_gate", "current_slice",
+                                        "unresolved_user_requests", "decisions", "live_references")}
+            files = {"AGENTS.md": "fixture guidance\n", "task.json": json.dumps(task),
+                     "audit-contract.md": "fixture contract\n", "ledger.json": "{}",
+                     ".context-handoff/config.yaml": "mode: manual-only\n",
+                     "corpus/shard-000.txt": "record=0 severity=0\nrecord=1 severity=1\n"}
+            for name, content in files.items():
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content)
+            baseline = base / "seed"
+            validation.capture_baseline(root, baseline, "fixture-root")
+            checkpoint = dict(
+                task, workspace=str(root), session_id="fixture-root", transition_number=1,
+                trigger_measurements=[valid], recovery_prerequisites=validation.RECOVERY_PREREQUISITES,
+                audit_cursor={"path": "corpus/shard-000.txt", "last_line": 1, "last_record": 0,
+                              "last_severity": 0, "next_path": "corpus/shard-000.txt", "next_line": 2},
+                next_action={"operation": "read", "path": str(root / "corpus/shard-000.txt"),
+                             "view_range": [2, 2]})
+            self.assertEqual(validation.checkpoint_errors(checkpoint, root, baseline=baseline), [])
+            for value in (float("nan"), float("inf")):
+                malformed = json.loads(json.dumps(checkpoint))
+                malformed["trigger_measurements"][0]["tokens_left"] = value
+                self.assertTrue(validation.checkpoint_errors(malformed, root, baseline=baseline))
+
     def test_recovery_event_cli_preserves_invalid_stream_diagnostics(self):
         options = {"capture_output": True, "text": True}
         if sys.platform == "win32":

@@ -140,6 +140,9 @@ Checkpoint documents use only `transition_number`; witness documents use only
 Every retained trigger measurement must satisfy the same captured-field
 validation as the real native result, including tokens-left and current window
 identity; abbreviated limit/fraction/number summaries are not full measurements.
+Prompt capacity, tokens-left and fraction values must be finite; remaining tokens
+must stay within the positive prompt capacity. Non-finite JSON numeric constants
+cannot supply a valid native measurement.
 
 Evidence-integrity checks are conservative. A witness-write claim must identify
 the **first** substantive action's actual destination, not a quoted filename or

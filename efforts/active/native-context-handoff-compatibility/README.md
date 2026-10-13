@@ -346,6 +346,15 @@ below-altitude evidence/tooling documentation, with no new rollout claim.
   fixture safety/cleanup proof, not another Copilot trial, native acceptance or
   a historical verdict change. Required CI and current-head review still gate
   publication.
+- The following full Balanced review resolved malformed-stream attribution and
+  identified non-finite measurement values plus an inaccurate documentation-only
+  classification. Measurement validation now rejects NaN/infinities and
+  out-of-capacity remaining tokens before live checkpoint approval; ordinary
+  finite boundary values remain valid. The design describes the executable
+  evidence/tooling surface explicitly while preserving the narrower claim that
+  plugin runtime/payload are unchanged. All fifty source tests and `F,E9` checks
+  pass, including the live checkpoint validator path; seven diagnostic tests
+  also pass in an unpaid Linux container. Original native verdicts remain FAIL.
 - The corrections affect source evidence validation only. All four historical
   independent FAIL verdicts and their original packets remain unchanged.
   No paid trial, native deployment claim or runtime change is authorized by

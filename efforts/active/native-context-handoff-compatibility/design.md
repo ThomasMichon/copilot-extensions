@@ -312,6 +312,8 @@ judge verdicts and original contracts remain intact; the prospective semantic
 selection did not retroactively regrade earlier failures. Hard/force, denial/
 fallback/adverse recovery, ACP/subagent, real live-resource and native deployed
 acceptance remain open. Separately completed worktree-manager rollout/admission
-does not substitute for those gates. This documentation-only preparation changes
-no runtime, plugin payload, installed configuration or vision intent and runs
-no new paid trial. Managed publication/review/merge remains coordinator-owned.
+does not substitute for those gates. This evidence/tooling tranche includes
+executable scenario setup, controller, validators, permission/cleanup probe and
+tests alongside documentation. It changes no plugin runtime, payload, installed
+host configuration or vision intent and runs no new paid trial. Managed
+publication/review/merge remains coordinator-owned.
