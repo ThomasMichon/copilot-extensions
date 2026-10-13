@@ -298,3 +298,57 @@ def test_posix_installer_fails_closed_without_mutating(tmp_path: Path) -> None:
     assert LOCK_FAILURE in output
     assert sorted(p.name for p in install_dir.iterdir()) == [".install.lock"]
     assert not (home / ".local").exists()
+
+
+def _sh_contender(bash: str, install_dir: Path, log: Path) -> subprocess.Popen[str]:
+    script = (
+        "set -euo pipefail\n_fail() { printf 'FAIL:%s\\n' \"$1\"; }\n"
+        f"INSTALL_DIR='{install_dir}'\n" + _block(SH_SCRIPT) + "\n"
+        "_enter_install_lock 30 || exit 3\n"
+        f"echo start >> '{log}'; sleep 0.2; echo end >> '{log}'\n"
+        "_exit_install_lock\n"
+    )
+    return subprocess.Popen(
+        [bash, "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+
+
+def _dead_pid() -> int:
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    return dead.pid
+
+
+def test_posix_pid_fallback_serializes_simultaneous_stale_recovery(tmp_path: Path) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    os.symlink(str(_dead_pid()), install_dir / ".install.lock.pid")
+    log = tmp_path / "log"
+    contenders = [_sh_contender(bash, install_dir, log) for _ in range(6)]
+    for proc in contenders:
+        _out, err = proc.communicate(timeout=90)
+        assert proc.returncode == 0, err
+    # Every transaction ran alone: no start ever follows another start.
+    assert log.read_text().split() == ["start", "end"] * 6
+    assert not os.path.lexists(install_dir / ".install.lock.pid")
+    assert not os.path.lexists(install_dir / ".install.lock.pid.reap")
+
+
+def test_posix_pid_fallback_reclaims_a_reap_mutex_left_by_a_dead_reaper(tmp_path: Path) -> None:
+    bash = _posix_bash()
+    if bash is None:
+        pytest.skip("POSIX bash not available")
+    install_dir = tmp_path / "rt"
+    install_dir.mkdir()
+    os.symlink(str(_dead_pid()), install_dir / ".install.lock.pid")
+    os.symlink(str(_dead_pid()), install_dir / ".install.lock.pid.reap")
+    result = _run_sh_block(
+        bash, install_dir, "if _enter_install_lock 10; then echo acquired; else echo refused; fi",
+        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+    )
+    assert result.stdout.strip() == "acquired", result.stderr
+    assert not os.path.lexists(install_dir / ".install.lock.pid.reap")

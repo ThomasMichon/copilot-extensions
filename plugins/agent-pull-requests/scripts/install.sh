@@ -55,17 +55,34 @@ _enter_install_lock() {
         return 0
     fi
     __install_lock_link="$INSTALL_DIR/.install.lock.pid"
+    local __owner __live __reaper __deadline
+    __deadline=$(( $(date +%s) + 300 ))
     until ln -s "$$" "$__install_lock_link" 2>/dev/null; do
-        local __owner __live
+        if [[ "$(date +%s)" -ge "$__deadline" ]]; then
+            __install_lock_link=""
+            return 1
+        fi
         __owner="$(readlink "$__install_lock_link" 2>/dev/null || true)"
         case "$__owner" in
             *[!0-9]*|"") __live=0 ;;
             *) if kill -0 "$__owner" 2>/dev/null; then __live=1; else __live=0; fi ;;
         esac
-        if [[ "$__live" == 0 && "$(readlink "$__install_lock_link" 2>/dev/null || true)" == "$__owner" ]]; then
-            rm -f "$__install_lock_link"
-        else
+        if [[ "$__live" == 1 ]]; then
             sleep 1
+        elif ln -s "$$" "$__install_lock_link.reap" 2>/dev/null; then
+            # Serialize stale-owner recovery so two contenders can't both reap
+            # and then delete each other's live lock.
+            if [[ "$(readlink "$__install_lock_link" 2>/dev/null || true)" == "$__owner" ]]; then
+                rm -f "$__install_lock_link"
+            fi
+            rm -f "$__install_lock_link.reap"
+        else
+            __reaper="$(readlink "$__install_lock_link.reap" 2>/dev/null || true)"
+            if [[ "$__reaper" =~ ^[0-9]+$ ]] && ! kill -0 "$__reaper" 2>/dev/null; then
+                rm -f "$__install_lock_link.reap" 2>/dev/null || true
+            else
+                sleep 0.1
+            fi
         fi
     done
 }

@@ -399,7 +399,7 @@ _enter_install_lock() {
         __install_lock_fd=8
         return 0
     fi
-    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live
+    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live __reaper
     __deadline=$(( $(date +%s) + __timeout ))
     until ln -s "$$" "$__link" 2>/dev/null; do
         if [[ "$(date +%s)" -ge "$__deadline" ]]; then
@@ -410,10 +410,25 @@ _enter_install_lock() {
             *[!0-9]*|"") __live=0 ;;
             *) if kill -0 "$__owner" 2>/dev/null; then __live=1; else __live=0; fi ;;
         esac
-        if [[ "$__live" == 0 && "$(readlink "$__link" 2>/dev/null || true)" == "$__owner" ]]; then
-            rm -f "$__link"
-        else
+        if [[ "$__live" == 1 ]]; then
             sleep 1
+        elif ln -s "$$" "$__link.reap" 2>/dev/null; then
+            # Serialize stale-owner recovery: without this PID-bearing reap
+            # mutex, two contenders could both see the same stale owner, and
+            # one's `rm -f` could delete the live lock the other just took.
+            # Re-check the link still holds the stale value before removing it.
+            if [[ "$(readlink "$__link" 2>/dev/null || true)" == "$__owner" ]]; then
+                rm -f "$__link"
+            fi
+            rm -f "$__link.reap"
+        else
+            # Reclaim a reap mutex whose owner died mid-reap so it never wedges.
+            __reaper="$(readlink "$__link.reap" 2>/dev/null || true)"
+            if [[ "$__reaper" =~ ^[0-9]+$ ]] && ! kill -0 "$__reaper" 2>/dev/null; then
+                rm -f "$__link.reap" 2>/dev/null || true
+            else
+                sleep 0.1
+            fi
         fi
     done
     __install_lock_link="$__link"

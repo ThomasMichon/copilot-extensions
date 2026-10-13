@@ -1731,8 +1731,11 @@ reconcile, `update`, a session-start bootstrap, and a binstub's first-use
 lock on `<install-dir>/.install.lock` for every mutating action
 (`stamp`/`install`/`update`/`provision`) across its whole
 build + publish transaction (Windows: a `FileShare.None` handle; POSIX: `flock` on
-fd 8, or an atomic pid symlink `<install-dir>/.install.lock.pid` whose dead owner
-is reaped where `flock` is unavailable). It is acquired **after** the self-stage
+fd 8 (fd 7 for `agent-ssh`), or an atomic pid symlink
+`<install-dir>/.install.lock.pid` where `flock` is unavailable, whose dead owner is
+reaped under a self-healing pid-bearing `.install.lock.pid.reap` mutex so two
+contenders can never both reap and then delete each other's live lock). It is
+acquired **after** the self-stage
 re-exec (the staging parent never holds it) and released in `finally` / an `EXIT`
 trap; the OS releases it if the process dies.
 
@@ -1741,6 +1744,8 @@ The lock is **fail-closed**: a run that cannot acquire it within its timeout
 `COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC`) reports that it could not acquire the
 install transaction lock and exits non-zero — it never proceeds unlocked.
 Read-only actions (`status`), service controls, and `uninstall` do not take it.
+`agent-logger` differs only in also locking `uninstall` (everything except
+`status`).
 It is distinct from the binstub's `.provision.lock`, which only single-flights
 first-use provisioning around the installer call.
 
