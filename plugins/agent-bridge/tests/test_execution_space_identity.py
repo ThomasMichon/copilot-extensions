@@ -8,7 +8,7 @@ from agent_bridge import agent_registry
 from agent_bridge.agent_registry import AgentConfig, AgentResolver
 from agent_bridge.models import ServiceConfig
 from agent_bridge.topology import (
-    MachineConfig, SshEnvironment, TopologyLoadError, parse_machines_yaml,
+    MachineConfig, SshEnvironment, TopologyLoadError, load_machines_yaml, parse_machines_yaml,
 )
 
 
@@ -57,6 +57,43 @@ def test_legacy_windows_wsl_projection_selects_exact_logical_machine(platform, k
     assert (legacy_machine.key, legacy_env.alias) == ("workstation-wsl", "workstation-ubuntu")
     with pytest.raises(ValueError):
         resolver.resolve_ssh_environment("workstation-ubuntu", "windows")
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl"])
+@pytest.mark.parametrize("missing", [("wsl",), ("windows",), ("windows", "wsl")])
+def test_projected_missing_ssh_aliases_default_to_logical_keys_without_rewriting(
+    tmp_path, platform, missing,
+):
+    import yaml
+
+    profiles = [{"name": name, **({} if name in missing else {"alias": f"desk-{name}-ssh"})}
+                for name in ("windows", "wsl")]
+    path = tmp_path / "machines.yaml"
+    path.write_text(yaml.safe_dump({"machines": {"desk": {
+        "ssh": {"environments": profiles},
+    }}}), encoding="utf-8")
+    before = path.read_bytes()
+    machines = load_machines_yaml(path, strict=True)
+    assert set(machines) == {"desk", "desk-wsl"}
+    with patch.object(agent_registry, "_detect_platform", return_value=platform), \
+            patch("socket.gethostname", return_value="desk"):
+        current, detected = agent_registry._detect_local_machine(machines)
+        resolver = AgentResolver({}, machines)
+    assert current.key == ("desk-wsl" if platform == "wsl" else "desk")
+    assert detected == platform
+    for name, key in (("windows", "desk"), ("wsl", "desk-wsl")):
+        entry, profile = resolver.resolve_ssh_environment(key)
+        assert entry.key == key
+        assert profile.alias == (key if name in missing else f"desk-{name}-ssh")
+    assert path.read_bytes() == before
+
+
+def test_projected_explicit_empty_alias_is_not_replaced_by_a_default():
+    machines = parse_machines_yaml({"machines": {"desk": {
+        "ssh": {"environments": [{"name": "windows"}, {"name": "wsl", "alias": ""}]},
+    }}}, normalize=True)
+    assert machines["desk"].ssh_environments[0].alias == "desk"
+    assert machines["desk-wsl"].ssh_environments[0].alias == ""
 
 
 @pytest.mark.asyncio

@@ -131,7 +131,7 @@ def parse_machines_yaml(
     machines: dict[str, MachineConfig] = {}
     try:
         entries = parse_machine_entries(
-            data, default_ssh_alias_to_key=True, default_ssh_shell="bash",
+            data, default_ssh_alias_to_key=not normalize, default_ssh_shell="bash",
             keep_unnamed_environments=True, preserve_environment_values=True,
         )
         if normalize:
@@ -144,9 +144,15 @@ def parse_machines_yaml(
         # Shared identities are normalized; Bridge-only metadata stays at the edge.
         mdata = metadata[entry.legacy_key or key]
         ssh_block = mdata.get("ssh") or {}
+        missing_alias_names = {
+            env.get("name", "") for env in ssh_block.get("environments", []) if "alias" not in env
+        }
         ssh_envs = [
-            SshEnvironment(name=env.name, alias=env.alias, port=env.port,
-                           user=env.user, shell=env.shell)
+            SshEnvironment(
+                name=env.name,
+                alias=key if normalize and env.name in missing_alias_names else env.alias,
+                port=env.port, user=env.user, shell=env.shell,
+            )
             for env in entry.ssh_environments
         ]
 

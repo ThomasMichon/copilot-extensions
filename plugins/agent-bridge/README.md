@@ -18,6 +18,8 @@ unchanged. Anonymous health and authenticated control remain distinct contracts.
 Windows and WSL on one physical host are independent logical machines.
 The shared machine owner projects a legacy Windows/WSL roster into `host`
 and `host-wsl`, preserving their exact SSH profiles and physical association.
+Bridge applies its missing SSH-alias default only after projection, using each
+logical entry's own key. Explicit aliases (including an empty alias) are retained.
 The bridge's topology loader consumes that projection; its raw parser retains
 legacy parsing compatibility. Known-platform local detection selects a
 projected legacy sibling, while explicitly declared execution spaces still
