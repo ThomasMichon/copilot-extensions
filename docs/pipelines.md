@@ -70,6 +70,11 @@ The trusted validator requires the complete installed payload set to equal
 the candidate's Python sources plus its explicit package-data declarations,
 with matching bytes. Undeclared data, `.pth` files and script payloads fail
 closed; unsupported data-files or exclusion layouts do not receive signatures.
+Both preparation and release-authorized promotion compose candidate data
+using tools and the projection manager from the pinned workflow-source
+checkout, never Python tooling imported from the candidate scratch tree.
+The release writer checks out that same pinned source; `origin/main` remains
+the promotion parent and version/state seed, not the executable tooling root.
 
 The transfer index binds the exact validated dev SHA, pinned main parent,
 composed content-tree SHA, complete project/version set, and bundle digests.

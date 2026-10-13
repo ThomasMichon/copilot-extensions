@@ -297,6 +297,44 @@ def test_trusted_validate_cli_does_not_import_candidate_code(repo, tmp_path):
     assert result == ""
 
 
+def test_promotion_cli_never_executes_candidate_composer_with_release_authority(repo, tmp_path):
+    remote = tmp_path / "origin.git"
+    _git(["init", "--bare", str(remote)], repo)
+    _git(["remote", "add", "origin", str(remote)], repo)
+    _git(["checkout", "-q", "dev"], repo)
+    tools = repo / "tools"
+    for name in ("changefile.py", "accumulate_bumps.py", "materialize_main.py"):
+        (tools / name).write_text("raise RuntimeError('candidate accessed release authority')")
+    script = (
+        repo / "plugins" / "customizing-copilot" / "skills"
+        / "reviewing-customizations" / "scripts" / "manage-instruction-projections.py"
+    )
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("raise RuntimeError('candidate projection accessed release authority')")
+    _commit(repo, "poison candidate composition and projections")
+    result = subprocess.run(
+        [sys.executable, str(Path(promotion.__file__)), "--repo", str(repo),
+         "--dev-ref", "dev", "--main-ref", "main", "--push",
+         "--candidate-branch", "release/trusted-composition"],
+        capture_output=True, text=True, check=False,
+        env={**os.environ, "GH_TOKEN": "release-authority-sentinel"},
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "pushed candidate branch: release/trusted-composition" in result.stdout
+    assert "candidate accessed release authority" not in result.stderr
+    assert "candidate projection accessed release authority" not in result.stderr
+    workflow = yaml.safe_load(
+        (Path(promotion.__file__).resolve().parent.parent / ".github"
+         / "workflows" / "validate-and-promote.yml").read_text(),
+    )
+    checkout = next(
+        step for step in workflow["jobs"]["promote"]["steps"]
+        if step.get("uses", "").startswith("actions/checkout@")
+    )
+    assert checkout["with"]["ref"] == "${{ github.sha }}"
+
+
 def test_validator_accepts_declared_vendored_library_wheel(tmp_path):
     directory = tmp_path / "export"
     index = _index(directory)

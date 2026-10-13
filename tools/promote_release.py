@@ -213,11 +213,12 @@ def _sync_instruction_projections(
     tree at all -- this sweep is best-effort and never a hard dependency of
     promotion (a synthetic/stripped-down checkout, e.g. this module's own
     test fixtures, simply has nothing to sync)."""
-    script = (
-        (trusted_source or scratch) / "plugins" / "customizing-copilot" / "skills"
-        / "reviewing-customizations" / "scripts" / "manage-instruction-projections.py"
+    relative = (
+        Path("plugins") / "customizing-copilot" / "skills" / "reviewing-customizations"
+        / "scripts" / "manage-instruction-projections.py"
     )
-    if not script.exists():
+    script = (trusted_source or scratch) / relative
+    if not (scratch / relative).exists() or not script.exists():
         return []
     proc = subprocess.run(
         [sys.executable, str(script), "sync", str(scratch), "--json"],
@@ -730,6 +731,7 @@ def promote(
             last_dev_head=last_promotion.get("dev_head"),
             main_head=main_head,
             repo=repo,
+            trusted_source=REPO,
         )
         content_tree = build_promotion_tree(scratch)
         main_content_tree = _tree_excluding_state(main_tree, repo=repo)
