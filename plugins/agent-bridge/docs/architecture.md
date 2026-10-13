@@ -467,8 +467,13 @@ them, and the transitive `[tool.uv.sources]` path dependencies, e.g.
 own `tests/` are excluded, so building or testing never changes it. The hash is
 computed once per transaction, under the install lock and before admission,
 and that same value is published in the completion marker and the deploy
-manifest; it is never recomputed after the build, so an edit landing mid-install
-cannot be recorded as installed. Because a shared-library edit now counts as a
+manifest. Because the build reads the sources after that point, a build is
+followed by a recomputation that only verifies them: if they no longer hash to
+the admitted value (an edit landed mid-install), the install fails with a
+"sources changed during the build; re-run the install" error and publishes no
+completion marker or deploy manifest and activates nothing. `install` leaves
+the unpublished slot incomplete for the next build to clean; `update` treats it
+as a failed update and rolls back. Because a shared-library edit now counts as a
 content change, a completed slot built before this fingerprint covered shared
 libraries is refused as different content until the plugin version changes;
 the next version bump builds a fresh slot with the current fingerprint.

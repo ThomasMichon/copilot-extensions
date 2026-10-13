@@ -723,14 +723,34 @@ _payload_hash() {
     # manifest (installer-engine's write_deploy_manifest) all read. A completed
     # slot is reused only when this matches its marker, so _guard_published_slot
     # fixes it ONCE per transaction, before admission, and every later reader
-    # gets that same value -- never a recomputation after the build, when an
-    # edit landing mid-install would describe bytes that were never installed.
+    # gets that same value. After a build it is recomputed only to VERIFY the
+    # sources did not change mid-build (_payload_unchanged_since_admission); a
+    # mismatch fails the install instead of publishing either value.
     # Before it is fixed (no transaction yet), it is computed on demand.
     if [[ "${PAYLOAD_HASH_FIXED:-0}" == 1 ]]; then
         printf '%s' "${PAYLOAD_HASH:-}"
     else
         _compute_payload_hash
     fi
+}
+
+_payload_unchanged_since_admission() {
+    # Post-build check that the slot holds the bytes admission hashed: the
+    # build reads the sources AFTER PAYLOAD_HASH was fixed, so an edit landing
+    # in between would put new bytes in the slot under a marker (and deploy
+    # manifest) naming the old hash, and a later install of the old sources
+    # would wrongly reuse it. Recomputes the hash directly (bypassing the
+    # fixed _payload_hash value) and returns non-zero, after reporting it,
+    # when it differs; the caller must then fail without publishing the
+    # marker or manifest, or activating. Nothing to verify when no slot was
+    # built (reuse) or no hash was admitted.
+    [[ "${SLOT_ADMISSION:-}" != reuse ]] || return 0
+    [[ "${PAYLOAD_HASH_FIXED:-0}" == 1 && -n "${PAYLOAD_HASH:-}" ]] || return 0
+    local fresh
+    fresh="$(_compute_payload_hash)"
+    [[ "$fresh" != "$PAYLOAD_HASH" ]] || return 0
+    _fail "Install sources changed during the build (payload hash $PAYLOAD_HASH at admission, ${fresh:-unavailable} now); refusing to publish runtime slot versions/$SRC_VERSION -- re-run the install"
+    return 1
 }
 
 _versioned_slot_clean() {
@@ -775,7 +795,9 @@ _versioned_mark_complete() {
         return 1
     fi
     # The transaction's payload fingerprint fixed before admission (see
-    # _payload_hash) -- never recomputed after the build.
+    # _payload_hash) -- never recomputed here; callers that built the slot
+    # first confirm the sources still hash to it
+    # (_payload_unchanged_since_admission).
     local ph
     ph="$(_payload_hash)"
     local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
@@ -1704,6 +1726,12 @@ do_install() {
         _install_slot_build
     fi
 
+    # The build read the sources after PAYLOAD_HASH was fixed: publish nothing
+    # (marker, manifest) and activate nothing unless they still hash to it.
+    # Like a refused marker publication, the slot stays incomplete and the
+    # next build's --clean-incomplete tosses it.
+    _payload_unchanged_since_admission || exit 1
+
     # Versioned layout (#581): health-gate the freshly-built slot in isolation,
     # then swap the stable `venv` symlink onto it. Everything below resolves
     # through `venv` (the link). No-op in legacy mode.
@@ -2416,8 +2444,11 @@ do_update() {
         fi
     fi
 
-    # Run the protected update; on any failure, roll back to the snapshot.
-    if ! _update_core; then
+    # Run the protected update; on any failure, roll back to the snapshot. A
+    # build whose sources changed after PAYLOAD_HASH was fixed is a failure
+    # too: the never-published slot is discarded before marker, manifest or
+    # activation.
+    if ! _update_core || ! _payload_unchanged_since_admission; then
         _fail "Update failed"
         if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
             # The `venv` link was never swapped (activate runs only after a healthy

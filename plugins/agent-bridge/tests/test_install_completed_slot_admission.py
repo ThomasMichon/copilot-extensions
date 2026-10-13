@@ -215,6 +215,7 @@ _PS_FUNCTIONS = (
     ("Get-UvSourcePaths", True),
     ("Get-PayloadLibRoots", True),
     ("Get-PayloadHash", False),
+    ("Test-PayloadUnchangedSinceAdmission", True),
     ("Test-SlotContentCurrent", False),
     ("Get-SlotAdmission", True),
     ("Write-SlotAdmissionRefusal", True),
@@ -403,6 +404,13 @@ def test_ps1_call_sites_fail_on_refused_completion_and_guard_precedes_mutation()
         body = _extract_ps(name, text)
         refusal = body.index("exit 1", body.index("$admission = Get-SlotAdmission"))
         assert refusal < min(body.index(m) for m in mutations), name
+        # Post-build source verification precedes every publication/activation.
+        verify = body.index("Test-PayloadUnchangedSinceAdmission -AdmittedHash $payloadHash")
+        assert verify < min(
+            body.index("Invoke-VersionedMarkComplete -"),
+            body.index("Invoke-VersionedActivate"),
+            body.rindex("Write-DeployManifest -PayloadHash $payloadHash"),
+        ), name
 
 
 # --------------------------------------------------------------------------
@@ -477,25 +485,59 @@ def test_ps1_payload_hash_covers_every_shared_lib_but_not_artifacts(tmp_path: Pa
     _assert_hash_steps(_run_ps(_ps_harness(tmp_path, "absent", action)))
 
 
-@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
-def test_ps1_marker_publishes_the_pre_admission_hash(tmp_path: Path) -> None:
-    """The completion marker records the hash admission used, even when a
-    source file changes while the slot is being built."""
-    source = _ps_quote(_plugin_source(tmp_path))
-    action = (
-        "Write-Host \"PH=$ph\"\n"
-        "function Invoke-InstallSlotBuild {\n"
-        f"    Rec 'BUILT'; Add-Content -LiteralPath {source} 'VALUE = 2'\n"
-        "    Write-Host \"FRESH=$(Get-PayloadHash)\"\n"
-        "}\n"
-        "Invoke-Install\n"
-    )
-    result = _run_ps(_ps_harness(tmp_path, "incomplete", action))
-    detail = f"rc={result.returncode}\n{result.stdout}{result.stderr}"
-    assert result.returncode == 50 and "BUILT" in _events(tmp_path), detail
+_EDIT_MID_BUILD = (False, True)
+_MID_BUILD_IDS = ["sources-unchanged", "sources-edited-mid-build"]
+
+
+def _assert_mid_build_outcome(
+    tmp_path: Path, result: subprocess.CompletedProcess, *, edited: bool, update: bool
+) -> None:
+    """Unchanged sources publish the admitted hash and activate; sources
+    edited after admission but before publication refuse the install: no
+    completion marker, no deploy manifest, no activation (#5472)."""
+    events = _events(tmp_path)
+    output = result.stdout + result.stderr
+    detail = f"rc={result.returncode}\nevents={events}\n{output}"
+    assert "BUILT" in events, detail
     ph = _reported(result.stdout, "PH")
-    assert _reported(result.stdout, "FRESH") != ph, detail
-    assert _published_hash(tmp_path) == ph, detail
+    if not edited:
+        assert result.returncode == 50 and "ACTIVATED" in events, detail
+        assert _published_hash(tmp_path) == ph, detail
+        return
+    assert result.returncode == 1, detail
+    assert "changed during the build" in output and "re-run the install" in output, detail
+    assert not _slot_marker(tmp_path).exists(), detail
+    for sentinel in ("ACTIVATED", "MANIFEST"):
+        assert sentinel not in events, detail
+    slot = tmp_path / "install" / "versions" / _VERSION
+    if update:
+        # The failed-update rollback discards the never-published slot.
+        assert not slot.exists(), detail
+    else:
+        # Left incomplete, for the next build's --clean-incomplete.
+        assert slot.is_dir(), detail
+
+
+@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+@pytest.mark.parametrize("edited", _EDIT_MID_BUILD, ids=_MID_BUILD_IDS)
+@pytest.mark.parametrize("action", ["Invoke-Install", "Invoke-Update"])
+def test_ps1_marker_is_published_only_for_the_bytes_admission_hashed(
+    tmp_path: Path, action: str, edited: bool
+) -> None:
+    """A source edited after admission but while the slot is being built
+    must not be published under the admitted hash."""
+    source = _ps_quote(_plugin_source(tmp_path))
+    edit = f"; Add-Content -LiteralPath {source} 'VALUE = 2'" if edited else ""
+    build = "Invoke-InstallSlotBuild" if action == "Invoke-Install" else "Invoke-UpdateSlotBuild"
+    harness = _ps_harness(
+        tmp_path,
+        "incomplete",
+        "Write-Host \"PH=$ph\"\n"
+        f"function {build} {{ param($UseCutover) Rec 'BUILT'{edit} }}\n"
+        f"{action}\n",
+    )
+    result = _run_ps(harness)
+    _assert_mid_build_outcome(tmp_path, result, edited=edited, update=action == "Invoke-Update")
 
 
 @pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
@@ -556,6 +598,7 @@ _SH_FUNCTIONS = (
     ("_payload_tree_digests", True),
     ("_compute_payload_hash", True),
     ("_payload_hash", False),
+    ("_payload_unchanged_since_admission", True),
     ("_bootstrap_python", False),
     ("_versioned_current", False),
     ("_versioned_mark_complete", False),
@@ -737,6 +780,16 @@ def test_sh_call_sites_fail_on_refused_completion_and_guard_precedes_mutation() 
     assert guard < update.index('_update_lifecycle_drain_stop "')
     install = _extract_sh("do_install", text)
     assert install.index("if _guard_published_slot; then") < install.index("_install_slot_build\n")
+    # Post-build source verification precedes every publication/activation.
+    for body, verify in (
+        (install, "    _payload_unchanged_since_admission || exit 1\n"),
+        (update, "if ! _update_core || ! _payload_unchanged_since_admission; then\n"),
+    ):
+        assert body.index(verify) < min(
+            body.index("_versioned_mark_complete ||"),
+            body.index("_versioned_activate ||"),
+            body.rindex("_write_deploy_manifest\n"),
+        )
 
 
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
@@ -790,24 +843,30 @@ def test_sh_payload_hash_covers_every_shared_lib_but_not_artifacts(tmp_path: Pat
 
 
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
-def test_sh_marker_publishes_the_pre_admission_hash(tmp_path: Path) -> None:
-    """The completion marker records the hash admission used, even when a
-    source file changes while the slot is being built."""
+@pytest.mark.parametrize(
+    ("action", "edited"),
+    # The unchanged-sources check is shared by both entry points and a bash
+    # do_update run costs ~12s, so only install covers the unchanged case.
+    [("do_install", False), ("do_install", True), ("do_update", True)],
+    ids=["do_install-sources-unchanged", "do_install-sources-edited-mid-build", "do_update-sources-edited-mid-build"],
+)
+def test_sh_marker_is_published_only_for_the_bytes_admission_hashed(
+    tmp_path: Path, action: str, edited: bool
+) -> None:
+    """A source edited after admission but while the slot is being built
+    must not be published under the admitted (frozen) hash."""
     source = _sh_quote(_posix(_plugin_source(tmp_path)))
-    action = (
+    edit = f" echo 'VALUE = 2' >> {source};" if edited else ""
+    build = "_install_slot_build" if action == "do_install" else "_update_core"
+    harness = _sh_harness(
+        tmp_path,
+        "incomplete",
         'echo "PH=$ph"\n'
-        "_install_slot_build() {\n"
-        f"    rec BUILT; echo 'VALUE = 2' >> {source}\n"
-        '    echo "FRESH=$(_compute_payload_hash 2>/dev/null)"\n'
-        "}\n"
-        "do_install\n"
+        f"{build}() {{ rec BUILT;{edit} return 0; }}\n"
+        f"{action}\n",
     )
-    result = _run_sh(_sh_harness(tmp_path, "incomplete", action))
-    detail = f"rc={result.returncode}\n{result.stdout}{result.stderr}"
-    assert result.returncode == 50 and "BUILT" in _events(tmp_path), detail
-    ph = _reported(result.stdout, "PH")
-    assert _published_hash(tmp_path) == ph, detail
-    assert _reported(result.stdout, "FRESH") != ph, detail
+    result = _run_sh(harness)
+    _assert_mid_build_outcome(tmp_path, result, edited=edited, update=action == "do_update")
 
 
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")

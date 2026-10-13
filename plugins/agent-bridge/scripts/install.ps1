@@ -740,9 +740,10 @@ function Get-PayloadHash {
        A completed slot is reused only when this value matches its marker, so
        it is computed ONCE per transaction, before admission, and that same
        value is carried to admission, the completion marker and the deploy
-       manifest -- never recomputed after the build, when an edit landing
-       mid-install would describe bytes that were never installed. Never
-       throws -> '' on error (admission then fails closed for a completed slot). #>
+       manifest. After a build it is recomputed only to VERIFY the sources did
+       not change mid-build (Test-PayloadUnchangedSinceAdmission); a mismatch
+       fails the install instead of publishing either value. Never throws ->
+       '' on error (admission then fails closed for a completed slot). #>
     try {
         $sha = [System.Security.Cryptography.SHA256]::Create()
         $base = (Resolve-Path -LiteralPath $PluginDir).Path.TrimEnd('\', '/')
@@ -787,6 +788,24 @@ function Get-PayloadHash {
     } catch { return '' }
 }
 
+function Test-PayloadUnchangedSinceAdmission {
+    <# Post-build check that the slot holds the bytes admission hashed: the
+       build reads the sources AFTER $AdmittedHash was taken, so an edit
+       landing in between would put new bytes in the slot under a marker (and
+       deploy manifest) naming the old hash, and a later install of the old
+       sources would wrongly reuse it. Recomputes Get-PayloadHash and returns
+       $false (after reporting it) when it differs; the caller must then fail
+       without publishing the marker or manifest, or activating. Nothing to
+       verify when no slot was built ('reuse') or no hash was admitted. #>
+    param([string]$AdmittedHash = '', [string]$Admission = '')
+    if ($Admission -eq 'reuse' -or -not $AdmittedHash) { return $true }
+    $fresh = Get-PayloadHash
+    if ($fresh -eq $AdmittedHash) { return $true }
+    $now = if ($fresh) { $fresh } else { 'unavailable' }
+    Write-Fail "Install sources changed during the build (payload hash $AdmittedHash at admission, $now now); refusing to publish runtime slot versions/$SrcVersion -- re-run the install"
+    return $false
+}
+
 function Invoke-VersionedSlotClean {
     <# Ensure the target slot exists, tossing it first if a prior build left it
        INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
@@ -814,10 +833,10 @@ function Invoke-VersionedMarkComplete {
        tossable + retryable (#935). No-op in legacy mode.
 
        $PayloadHash is the value computed ONCE before admission and used to
-       build this slot -- never recomputed here: an edit landing between
-       admission and this post-build write would otherwise publish a hash for
-       bytes that were never installed, letting a later install wrongly reuse
-       the slot. #>
+       build this slot -- never recomputed here. Callers that built the slot
+       first confirm via Test-PayloadUnchangedSinceAdmission that the sources
+       still hash to it, so the marker never names bytes that were not
+       installed. #>
     param([string]$PayloadHash = '')
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $ScriptDir 'versioned_runtime.py'
@@ -2417,6 +2436,14 @@ function Invoke-Install {
         Invoke-InstallSlotBuild
     }
 
+    # The build read the sources after $payloadHash was taken: publish nothing
+    # (marker, manifest) and activate nothing unless they still hash to it.
+    # Like a refused marker publication, the slot stays incomplete and the
+    # next build's --clean-incomplete tosses it.
+    if (-not (Test-PayloadUnchangedSinceAdmission -AdmittedHash $payloadHash -Admission $admission)) {
+        throw 'Install sources changed during the build'
+    }
+
     # Versioned layout (#581): health-gate the freshly-built slot IN ISOLATION,
     # then swap the stable `venv` junction onto it. Everything below resolves
     # through `venv` (the link), so the binstubs/task/manifest never change path
@@ -3190,6 +3217,13 @@ function Invoke-Update {
         # while we can still roll back -- rather than starting a broken service.
         if (-not (Test-RuntimeHealthy $VenvPython)) {
             throw 'Post-install verification failed (agent_bridge / uvicorn / credential_relay not importable)'
+        }
+        # The build read the sources after $payloadHash was taken: if they no
+        # longer hash to it, fail through the rollback below (the never-
+        # published slot is discarded and the previous runtime restarted)
+        # before the marker, manifest or activation.
+        if (-not (Test-PayloadUnchangedSinceAdmission -AdmittedHash $payloadHash -Admission $admission)) {
+            throw 'Install sources changed during the build'
         }
         # Machine-local config schema migration (idempotent + atomic). Non-fatal.
         try {
