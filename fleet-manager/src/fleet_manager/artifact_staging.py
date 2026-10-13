@@ -7,7 +7,6 @@ import hashlib
 import os
 from pathlib import Path
 import re
-import shutil
 import stat
 import sys
 import threading
@@ -28,6 +27,7 @@ from .artifacts import (
 from .client_diagnostics import diagnose_client
 from .planning import MAX_BYTES, PlanError, canonical, decode
 from .release_auth import authenticate_release
+from .staging_cleanup import remove_owned_stage
 
 _FILENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,199}\Z")
 _DEVICES = {"CON", "PRN", "AUX", "NUL"} | {
@@ -294,4 +294,4 @@ def stage_authenticated_artifacts(
             if root is not None:
                 if root_identity is None or _directory(root) != root_identity:
                     raise PlanError("artifact stage cleanup ownership is unconfirmed")
-                shutil.rmtree(root)
+                remove_owned_stage(root, root_identity)

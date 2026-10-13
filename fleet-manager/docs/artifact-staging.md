@@ -61,8 +61,14 @@ expired proof/policy, revoked keys, raised sequence floors and lost ownership
 refuse. There is no persistent high-water mark or rollback permission here.
 
 On normal exit or interruption, retention is released, the handle is closed,
-and only the exact newly owned spool is removed. An ownership change refuses
-cleanup instead of deleting a replacement. Closed handles cannot be reused;
+and cleanup binds traversal to the admitted directory identity, not a prior
+path-only check. Windows keeps ancestor and entry handles open without delete
+sharing and deletes through those handles. POSIX traverses the held directory
+descriptor with no-follow, directory-relative operations; removal of the
+top-level name is empty-directory-only, with its identity rechecked. A moved
+root's replacement is never recursively traversed. Unsafe entry types, changed
+ownership and unavailable native cleanup support refuse rather than falling
+back to a path-based recursive deletion. Closed handles cannot be reused;
 serialized reports cannot recreate retention or authorize artifact execution.
 An abruptly terminated process may leave its uniquely named spool for explicit
 owner investigation; no automatic sweep of unrelated directories is added.

@@ -14,6 +14,7 @@ import sys
 import pytest
 
 import fleet_manager.artifact_staging as staging
+import fleet_manager.staging_cleanup as cleanup
 from fleet_manager.planning import PlanError, canonical
 from test_release_auth import artifact_fixture
 from test_client_distribution import run, wheel as shared_wheel  # noqa: F401 - pytest fixture
@@ -209,6 +210,60 @@ def test_cleanup_never_deletes_a_replacement_directory(tmp_path, primitive):
     assert moved.is_dir()
     with pytest.raises(PlanError, match="retention has ended"):
         frozen.reverify(trusted, clock=lambda: 151)
+
+
+def test_replacement_after_outer_cleanup_check_is_not_deleted(tmp_path, primitive, monkeypatch):
+    fixture = artifact_fixture(tmp_path)
+    parent = tmp_path / "private-stage"
+    parent.mkdir()
+    context, _ = stage(fixture, parent)
+    frozen = context.__enter__()
+    moved = parent / "retained-original"
+    original = staging.remove_owned_stage
+
+    def race(root, identity):
+        root.rename(moved)
+        root.mkdir()
+        (root / "foreign-content").write_bytes(b"must be preserved")
+        original(root, identity)
+
+    monkeypatch.setattr(staging, "remove_owned_stage", race)
+    with pytest.raises(PlanError, match="ownership is unconfirmed"):
+        context.__exit__(None, None, None)
+    assert (frozen._root / "foreign-content").read_bytes() == b"must be preserved"
+    assert (moved / "versions").is_dir()
+
+
+def test_cleanup_root_is_pinned_during_recursive_traversal(tmp_path, monkeypatch):
+    root = tmp_path / "owned-root"
+    root.mkdir()
+    (root / "owned-file").write_bytes(b"owned")
+    expected = staging._directory(root)
+    moved = tmp_path / "moved-original"
+    original = cleanup.os.scandir
+    attempted = []
+
+    def raced_scan(path):
+        if not attempted:
+            attempted.append(True)
+            try:
+                root.rename(moved)
+            except OSError as error:
+                assert os.name == "nt" and getattr(error, "winerror", None) in {5, 32}
+            else:
+                root.mkdir()
+                (root / "foreign-content").write_bytes(b"must be preserved")
+        return original(path)
+
+    monkeypatch.setattr(cleanup.os, "scandir", raced_scan)
+    if os.name == "nt":
+        cleanup.remove_owned_stage(root, expected)
+        assert attempted and not root.exists() and not moved.exists()
+    else:
+        with pytest.raises(PlanError, match="ownership is unconfirmed"):
+            cleanup.remove_owned_stage(root, expected)
+        assert (root / "foreign-content").read_bytes() == b"must be preserved"
+        assert list(moved.iterdir()) == []
 
 
 def test_initial_signature_refusal_creates_no_stage(tmp_path, primitive):
