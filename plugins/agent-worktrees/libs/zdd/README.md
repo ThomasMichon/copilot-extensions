@@ -284,9 +284,10 @@ generation, so the validated owner's launcher is never a target, and a
 `duplicate_resident` finding names a second *generation* (worker first, then
 launcher, each with a `role`). Reports add `generation_count`, `generations`,
 `grouping_uncertain` and `grouping_uncertain_reason`. When grouping is
-uncertain (an unreadable parent or executable, or a parent/child relation that
-fails those checks), every terminating finding is reported with
-`repairable: false` / `blocked_reason: "generation grouping uncertain"`, and
+uncertain (an unreadable parent or executable, a launcher-image candidate with
+no captured worker, or a parent/child relation that fails those checks), every
+terminating finding is reported with `repairable: false` /
+`blocked_reason: "generation grouping uncertain"`, and
 `apply_daemon_health()` refuses every termination with a `generation_grouping`
 action whenever the initial census or any fresh re-census is uncertain:
 diagnostics reports what it sees but never kills on a guess. Consumers

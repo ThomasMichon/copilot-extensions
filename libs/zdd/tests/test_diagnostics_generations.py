@@ -377,3 +377,70 @@ def test_is_venv_redirector_requires_a_venv_scripts_layout(tmp_path: Path):
     (tmp_path / "venv" / "pyvenv.cfg").unlink()
     assert not is_venv_redirector(str(scripts / "python.exe"))
     assert not is_venv_redirector(None)
+
+
+def test_single_launcher_without_captured_worker_is_uncertain_and_blocks_repair(tmp_path: Path):
+    # A readable launcher image with no captured worker: the census may have
+    # missed its worker, so the lone launcher is not a proven whole
+    # generation and must not be repaired as one.
+    state = _lone_passive_state(tmp_path, 1)
+    state["image"][303] = LAUNCHER
+
+    report = diagnostics.audit_daemon_health(_ctx(tmp_path, state))
+
+    assert report["candidate_count"] == 1
+    assert report["grouping_uncertain"] is True
+    assert "launcher candidate 303 has no captured worker" in report["grouping_uncertain_reason"]
+    (finding,) = report["findings"]
+    assert finding["kind"] == "abandoned_passive"
+    assert finding["repairable"] is False
+    assert finding["blocked_reason"] == "generation grouping uncertain"
+
+    result = diagnostics.apply_daemon_health(_ctx(tmp_path, state))
+    assert state["terminated"] == []
+    assert result["actions"][-1] == {
+        "kind": "generation_grouping", "blocked": True,
+        "reason": "generation grouping uncertain",
+    }
+
+
+def test_unpaired_launcher_beside_the_owner_blocks_duplicate_repair(tmp_path: Path):
+    # The owner is a proven launcher/worker pair; a second launcher (303)
+    # appears without its worker. It is reported, but never terminated.
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=101, version="1.0.0")
+    state = _pair_state()
+    state["live"][303] = "1003"
+    state["image"][303] = LAUNCHER
+
+    report = diagnostics.audit_daemon_health(_ctx(tmp_path, state))
+
+    assert report["generation_count"] == 2
+    assert report["grouping_uncertain"] is True
+    assert report["grouping_uncertain_reason"] == "launcher candidate 303 has no captured worker"
+    (finding,) = report["findings"]
+    assert finding["kind"] == "duplicate_resident"
+    assert finding["repairable"] is False
+    assert finding["blocked_reason"] == "generation grouping uncertain"
+
+    diagnostics.apply_daemon_health(_ctx(tmp_path, state))
+    assert state["terminated"] == []
+    assert set(state["live"]) == {101, 202, 303}
+
+
+def test_unpaired_launcher_reasons():
+    def reason(*items):
+        return group_generations(
+            {item.pid: item for item in items}, structural=True, is_launcher_image=_is_launcher,
+        )[1]
+
+    assert reason(_candidate(1, "10", 0, LAUNCHER)) == (
+        "launcher candidate 1 has no captured worker"
+    )
+    # Paired launchers stay certain; a lone worker beside them does too.
+    assert reason(_candidate(1, "10", 0, LAUNCHER), _candidate(2, "11", 1, WORKER),
+                  _candidate(5, "12", 0, WORKER)) is None
+    # A launcher whose only "parent" candidate is a worker is both a bad pair
+    # and an unpaired launcher.
+    why = reason(_candidate(1, "10", 0, WORKER), _candidate(2, "11", 1, LAUNCHER))
+    assert "not a launcher/worker pair" in why
+    assert "launcher candidate 2 has no captured worker" in why

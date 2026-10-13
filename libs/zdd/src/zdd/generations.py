@@ -78,7 +78,8 @@ class Generation:
         """Repair targets for this generation, worker first.
 
         Terminating the worker first lets the launcher exit on its own; a
-        launcher that survives it is a lone process on the next census.
+        launcher that survives it is an unpaired launcher on the next census,
+        which makes that census uncertain (no automatic repair).
         """
         if self.launcher is None:
             return [self.worker.to_dict()]
@@ -144,9 +145,10 @@ def group_generations(
     it, a candidate C and its parent P form one generation only when P is a
     launcher image, C is not, P parents no other candidate, neither belongs
     to a longer candidate chain, and C provably started after P. Any
-    candidate whose parent or executable is unreadable, or any parent/child
-    relation that fails those checks, makes the grouping uncertain (the
-    returned reason).
+    candidate whose parent or executable is unreadable, any launcher-image
+    candidate with no captured worker (its worker may be the half the census
+    missed), or any parent/child relation that fails those checks, makes the
+    grouping uncertain (the returned reason).
     """
     ordered = [candidate for _, candidate in sorted(candidates.items())]
     # Only a disabled grouping or an empty census skips the structural checks:
@@ -180,8 +182,13 @@ def group_generations(
             continue
         if candidate.pid in worker_of:
             generations.append(Generation(worker=worker_of[candidate.pid], launcher=candidate))
-        else:
-            generations.append(Generation(worker=candidate))
+            continue
+        if candidate.image and classify(candidate.image) and candidate.pid not in children:
+            # A launcher whose worker the census did not capture: the
+            # generation boundary is unproven, so never repair it as if it
+            # were a whole single-process generation.
+            problems.append(f"launcher candidate {candidate.pid} has no captured worker")
+        generations.append(Generation(worker=candidate))
     return generations, "; ".join(dict.fromkeys(problems)) or None
 
 
