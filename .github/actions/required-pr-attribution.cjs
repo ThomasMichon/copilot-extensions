@@ -62,7 +62,7 @@ function mapVisibleLines(body, visible, hidden = () => null) {
       fence = { delimiter: open[1], quotes, indent };
       return hidden(line);
     }
-    return quotes ? hidden(line) : visible(line);
+    return quotes || /^(?: {4}|\t)/.test(line) ? hidden(line) : visible(line);
   }).filter((line) => line !== null).join("\n");
 }
 

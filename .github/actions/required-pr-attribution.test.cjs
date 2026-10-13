@@ -123,10 +123,11 @@ test("indented or container-prefixed fence content cannot close another fence", 
   assert.equal(gate.validate("    ```not a fence\n\n" + marker), null);
 });
 
-test("blockquote examples neither satisfy nor conflict with standalone metadata", () => {
+test("quoted and indented examples neither satisfy nor conflict with standalone metadata", () => {
   const native = "<!-- gh-aw-workflow-id: maintenance -->";
   for (const example of [
     "> " + marker, "> > " + marker, "   > " + native,
+    "    " + marker, "\t" + native,
     "> Example\n>\n> " + marker + "\n> " + native,
   ]) {
     assert.ok(gate.validate(example));
