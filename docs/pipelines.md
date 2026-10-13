@@ -12,7 +12,7 @@ of — link here rather than restating any of it.
 ## Python artifact-builder toolchain policy
 
 `tools/build_python_artifacts.py` can run standalone and is also invoked by
-promotion's credential-separated `python-artifacts` job. Its default
+promotion's credential-separated `build-python-artifacts` job. Its default
 `--toolchain-source governed` requires an
 affirmatively trusted governed feed. There is no automatic public fallback.
 Public promotion runners may explicitly choose
@@ -20,6 +20,10 @@ Public promotion runners may explicitly choose
 is the default). This exception applies only to the build toolchain:
 `setuptools`, `wheel`, and `packaging`, never managed-device runtime
 dependency resolution or published third-party wheels.
+
+Hosted validator provisioning also hash-pins `packaging`; its binary-only,
+no-dependency install accepts `ARTIFACT_VALIDATION_INDEX_URL` as an explicit
+feed override, defaulting to the public tooling index on public runners.
 
 Public mode selects exact non-yanked stable pins from PyPI metadata, measures
 age from the newest file, and installs binary distributions only from one
@@ -62,6 +66,10 @@ This candidate-executing job has only `contents: read`, no OIDC or attestation
 permissions, and no persisted checkout credentials. Every Python plugin
 shares one toolchain venv; every bundle contains only its
 own wheel, required first-party library wheels and schema-3 manifest.
+The trusted validator requires the complete installed payload set to equal
+the candidate's Python sources plus its explicit package-data declarations,
+with matching bytes. Undeclared data, `.pth` files and script payloads fail
+closed; unsupported data-files or exclusion layouts do not receive signatures.
 
 The transfer index binds the exact validated dev SHA, pinned main parent,
 composed content-tree SHA, complete project/version set, and bundle digests.

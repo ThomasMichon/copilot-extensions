@@ -419,8 +419,9 @@ def validate_wheel_sources(
             ):
                 raise PromotionArtifactError(f"{name}: wheel payload differs from candidate source")
         package_data = settings.get("package-data", {})
-        if not isinstance(package_data, dict):
+        if not isinstance(package_data, dict) or settings.get("exclude-package-data") or settings.get("data-files"):
             raise PromotionArtifactError("invalid wheel package-data configuration")
+        required_data: set[str] = set()
         for package, patterns in package_data.items():
             if not isinstance(package, str) or not isinstance(patterns, list) or any(
                 not isinstance(pattern, str) or "\\" in pattern or pattern.startswith("/")
@@ -433,12 +434,12 @@ def validate_wheel_sources(
                 roots = {base.joinpath(*package.split("."))}
             else:
                 raise PromotionArtifactError("invalid wheel package-data package")
-            required_data = {
+            required_data.update({
                 path.relative_to(base).as_posix()
                 for root in roots for pattern in patterns for path in root.glob(pattern) if path.is_file()
-            }
-            if not required_data.issubset(payload):
-                raise PromotionArtifactError("wheel omits declared candidate package data")
+            })
+        if payload != required_python | required_data:
+            raise PromotionArtifactError("wheel payload set differs from declared candidate members")
         project = data["project"]
         validate_runtime_metadata(project, metadata)
         entries = project.get("entry-points", {})

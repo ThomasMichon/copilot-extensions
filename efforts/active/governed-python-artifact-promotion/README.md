@@ -147,7 +147,7 @@ private consumer feed. Consumer-side admission still checks the actual feed.
       `artifact_id`. Smoke-tested for real: building `agent-bridge` then
       `agent-worktrees` against the SAME `--toolchain-venv` produced
       identical `lock_id`s, confirming the shared-lock mechanism. **Not yet
-      done:** live release-lane proof. The `python-artifacts` job now
+      done:** live release-lane proof. The `build-python-artifacts` job now
       invokes `promote_release.py --build-python-artifacts-dir` to compose
       the real candidate and build every first-party set in a second,
       disposable checkout with one shared public-runner toolchain. The

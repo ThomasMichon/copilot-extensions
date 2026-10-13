@@ -422,7 +422,7 @@ jobs:
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
           uv pip install --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --no-deps --only-binary :all: --require-hashes \
-            --index-url https://pypi.org/simple -r tools/artifact_validation_requirements.txt
+            --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r tools/artifact_validation_requirements.txt
       - name: Build the composed, versioned promotion candidate without release authority
         id: build
         env:
@@ -477,7 +477,7 @@ jobs:
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
           uv pip install --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --no-deps --only-binary :all: --require-hashes \
-            --index-url https://pypi.org/simple -r tools/artifact_validation_requirements.txt
+            --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r tools/artifact_validation_requirements.txt
       - uses: actions/download-artifact@v4
         if: needs.build-python-artifacts.outputs.exported == 'true'
         with:
@@ -863,7 +863,7 @@ jobs:
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
           uv pip install --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --no-deps --only-binary :all: --require-hashes \
-            --index-url https://pypi.org/simple -r tools/artifact_validation_requirements.txt
+            --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r tools/artifact_validation_requirements.txt
       - name: Download this run's signed Python artifacts
         if: steps.decide.outputs.proceed == 'true' && needs.python-artifacts.outputs.exported == 'true'
         uses: actions/download-artifact@v4
@@ -1257,7 +1257,7 @@ jobs:
           uv venv --python "$(command -v python)" "$RUNNER_TEMP/artifact-validator"
           uv pip install --python "$RUNNER_TEMP/artifact-validator/bin/python" \
             --no-config --no-deps --only-binary :all: --require-hashes \
-            --index-url https://pypi.org/simple -r tools/artifact_validation_requirements.txt
+            --index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}" -r tools/artifact_validation_requirements.txt
       - uses: actions/download-artifact@v4
         with:
           name: promotion-python-artifacts

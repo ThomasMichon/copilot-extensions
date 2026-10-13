@@ -19,6 +19,8 @@ from test_promotion_python_artifacts import _complete_manifest, _publish_fixture
     "match", "changed-code", "injected-code", "missing-code", "missing-source",
     "valid-data", "changed-data", "missing-data", "valid-entry-points",
     "forged-entry-points", "valid-top-level", "forged-top-level", "unsupported-layout",
+    "undeclared-data", "undeclared-pth", "undeclared-script", "multiple-data",
+    "wildcard-data", "excluded-data", "data-files",
 ])
 def test_wheel_source_mapping_requires_exact_candidate_bytes(tmp_path, monkeypatch, case):
     directory, entry = _publish_fixture(tmp_path, monkeypatch)
@@ -37,11 +39,34 @@ def test_wheel_source_mapping_requires_exact_candidate_bytes(tmp_path, monkeypat
         (source / "src" / "demo" / "required.py").write_text("REQUIRED = True\n")
     elif case == "missing-source":
         (source / "src" / "demo" / "__init__.py").unlink()
+    elif case in ("undeclared-data", "undeclared-pth", "undeclared-script"):
+        name = {
+            "undeclared-data": "demo/undeclared.json",
+            "undeclared-pth": "undeclared.pth",
+            "undeclared-script": "demo-1.0.data/scripts/undeclared",
+        }[case]
+        path = source / "src" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"import demo\n")
+        members[name] = path.read_bytes()
+    elif case == "data-files":
+        project.write_text(project.read_text() + '\n[tool.setuptools.data-files]\nshare = ["README.md"]\n')
     elif case.endswith("data"):
         project.write_text(project.read_text() + '\n[tool.setuptools.package-data]\ndemo = ["*.json"]\n')
         (source / "src" / "demo" / "data.json").write_bytes(b'{"candidate": true}\n')
         if case != "missing-data":
             members["demo/data.json"] = b"forged" if case == "changed-data" else b'{"candidate": true}\n'
+        if case == "wildcard-data":
+            project.write_text(project.read_text().replace('demo = ["*.json"]', '"*" = ["*.json"]'))
+        elif case == "multiple-data":
+            project.write_text(project.read_text() + '"demo.nested" = ["*.txt"]\n')
+            nested = source / "src" / "demo" / "nested"
+            nested.mkdir()
+            (nested / "__init__.py").write_bytes(b"")
+            (nested / "required.txt").write_bytes(b"declared\n")
+            members.update({"demo/nested/__init__.py": b"", "demo/nested/required.txt": b"declared\n"})
+        elif case == "excluded-data":
+            project.write_text(project.read_text() + '\n[tool.setuptools.exclude-package-data]\ndemo = ["*.json"]\n')
     elif case.endswith("entry-points"):
         members["demo-1.0.dist-info/entry_points.txt"] = b"[console_scripts]\ndemo = demo:main\n"
         if case == "valid-entry-points":
@@ -53,7 +78,7 @@ def test_wheel_source_mapping_requires_exact_candidate_bytes(tmp_path, monkeypat
     elif case == "unsupported-layout":
         project.write_text(project.read_text() + '\n[tool.setuptools.packages.find]\nwhere = ["generated"]\n')
     archive = io.BytesIO(_wheel_bytes("demo", "1.0", payload=payload, members=members))
-    if case in ("match", "valid-data", "valid-entry-points", "valid-top-level"):
+    if case in ("match", "valid-data", "multiple-data", "wildcard-data", "valid-entry-points", "valid-top-level"):
         artifacts.validate_wheel(archive, wheel, source_dir=source)
     else:
         with pytest.raises(artifacts.PromotionArtifactError):
@@ -173,7 +198,7 @@ def test_validator_provisioning_never_exposes_release_authority():
         )
         assert "--require-hashes" in provision["run"]
         assert "--no-deps" in provision["run"] and "--only-binary :all:" in provision["run"]
-        assert "--index-url https://pypi.org/simple" in provision["run"]
+        assert '--index-url "${ARTIFACT_VALIDATION_INDEX_URL:-https://pypi.org/simple}"' in provision["run"]
         assert "secrets." not in json.dumps(provision)
         if job == "promote":
             assert provision["env"]["GH_TOKEN"] == "${{ github.token }}"
