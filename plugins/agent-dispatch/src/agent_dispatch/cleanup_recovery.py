@@ -65,6 +65,8 @@ def _identity(row):
     return {name: row[name] for name in (
         "key", "task_id", "attempt", "reserved_at", "worktree",
         "worktree_ownership", "creating_host", "driver", "state", "session_handle",
+        "exclusive_key", "inherited_worktree", "allocation_project", "worktree_path",
+        "allocation_revision", "creation_key", "allocation_reservation_key",
     )}
 
 
@@ -89,11 +91,14 @@ def _reset_payload(raw):
         component = payload.get(name)
         if component is None:
             continue
-        if not isinstance(component, dict) or component.get("state") not in {"held", "pending", "complete"}:
+        if (not isinstance(component, dict) or not isinstance(component.get("state"), str)
+                or component["state"] not in {"held", "pending", "complete"}):
             raise TaskError(f"unknown cleanup component: {name}")
         components.append(component)
         if component["state"] != "complete":
             updated[name] = {**component, "state": "pending", "attempts": 0, "next_attempt_at": 0}
+    if "cleanup_kind" in payload and not components:
+        raise TaskError("structured cleanup envelope requires a supported incomplete component")
     if components and all(component["state"] == "complete" for component in components):
         raise TaskError("cleanup envelope has no incomplete component")
     return updated

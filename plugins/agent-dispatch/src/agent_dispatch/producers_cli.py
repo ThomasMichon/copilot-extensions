@@ -296,7 +296,7 @@ def _cmd_reservations(args: argparse.Namespace) -> int:
                     request_id=args.request_id,
                 ))
             except DispatchError as exc:
-                print(f"agent-dispatch reservations retry-cleanup: {exc}", file=sys.stderr)
+                print(f"agent-dispatch reservations {args.reservations_command}: {exc}", file=sys.stderr)
                 return 2
         if args.reservations_command == "list":
             rows = c.list_reservations(task_id=args.task, state=args.state, limit=args.limit)

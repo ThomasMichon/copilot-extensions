@@ -63,7 +63,10 @@ def reciprocal_snapshot(record, sibling, sibling_path: Path):
                 or receipt["sibling_digest"] != _digest(sibling_path)):
             return None
         pair = receipt["sibling_pair"]
-        if set(pair) != set(_PAIR_FIELDS):
+        if (not isinstance(pair, dict) or set(pair) != set(_PAIR_FIELDS)
+                or any(not isinstance(pair[name], str) or not pair[name].strip() for name in _PAIR_FIELDS)
+                or pair["pair_role"] not in {"harness", "knowledge"}
+                or pair["pair_kind"] != "worktree"):
             return None
         return replace(sibling, **pair)
     except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError):

@@ -417,3 +417,21 @@ requested contract.
   adopter recovery remain coordinator-owned gates after implementation review.
 - Implementation is not the effort's completion. Scalar repair stays with its
   existing owner; category, supervision and registry slices retain their owners.
+
+### 2026-10-13 - #6542 review correction
+
+- Reproduced the four actual review findings before changing runtime code:
+  incomplete retained allocation identity, component-free structured envelopes,
+  malformed retained pair values, and the wrong cleanup-history diagnostic.
+- Fenced every immutable allocation field consumed by cleanup, including
+  project/path/originating reservation and the exclusive key, at lease claim,
+  validation and outcome publication. Logical creation and inherited-allocation
+  identity are retained too.
+- Required structured envelopes to carry supported incomplete housekeeping while
+  retaining legitimate flat legacy progress. Validated pair receipt values
+  before reconstruction; malformed receipts use existing preservation reasons
+  without widening exception catches or changing provenance authority.
+- Added focused regression coverage for each field/boundary, component-free
+  envelopes, malformed receipt values and both CLI error paths. Existing native
+  first-touch and partial-pair checks remain part of validation.
+- Serial merge, release, rollout and adopter recovery remain coordinator-owned.

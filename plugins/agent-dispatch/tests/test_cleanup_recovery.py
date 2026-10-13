@@ -132,6 +132,84 @@ def test_recovery_revalidates_generation_after_cleanup_lease(held):
         queue.validate_spawn_conclusion_claim(key, token)
 
 
+@pytest.mark.parametrize("column,value", [
+    ("allocation_project", "other-project"), ("worktree_path", "other-checkout"),
+    ("allocation_reservation_key", "other-reservation"), ("exclusive_key", "other-exclusive"),
+    ("allocation_revision", 99), ("creation_key", "other-creation"),
+    ("inherited_worktree", "other-inherited"),
+])
+@pytest.mark.parametrize("boundary", ["claim", "validate", "outcome"])
+def test_recovery_fences_complete_allocation_identity(held, column, value, boundary):
+    queue, task_id, key = held
+    before = asdict(queue.get(task_id))
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE spawn_reservations SET allocation_project='fixture-project', "
+            "worktree_path='fixture-checkout', allocation_reservation_key=?, "
+            "creation_key='fixture-creation', inherited_worktree='fixture-prior' WHERE key=?",
+            (key, key),
+        )
+    apply(held, preview(held))
+    token = None
+    if boundary != "claim":
+        _, claimed, token = queue.claim_spawn_conclusion_retry(key)
+        assert claimed
+    with queue._connect() as conn:
+        conn.execute(f"UPDATE spawn_reservations SET {column}=? WHERE key=?", (value, key))
+    detail = queue.get_reservation(key).conclusion_detail
+    with pytest.raises(TaskError, match="provenance changed"):
+        if boundary == "claim":
+            queue.claim_spawn_conclusion_retry(key)
+        elif boundary == "validate":
+            queue.validate_spawn_conclusion_claim(key, token)
+        else:
+            queue.record_spawn_conclusion(
+                key, conclusion_state="complete", conclusion_detail='{"action":"primed"}',
+                claim_token=token,
+            )
+    assert queue.get_reservation(key).conclusion_detail == detail
+    assert asdict(queue.get(task_id)) == before
+
+
+@pytest.mark.parametrize("payload", [
+    {"cleanup_kind": "terminal"},
+    {"cleanup_kind": "attempt"},
+    {"cleanup_kind": "terminal", "session_end": None},
+    {"cleanup_kind": "terminal", "unknown_component": {"state": "held"}},
+    {"cleanup_kind": "terminal", "worktree_cleanup": {"state": "complete"}},
+])
+def test_recovery_requires_incomplete_structured_component(held, payload):
+    queue, _, key = held
+    raw = json.dumps(payload)
+    with queue._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET conclusion_detail=? WHERE key=?", (raw, key))
+    with pytest.raises(TaskError, match="component"):
+        preview(held)
+    assert queue.get_reservation(key).conclusion_state == "held"
+    assert queue.get_reservation(key).conclusion_detail == raw
+
+
+@pytest.mark.parametrize("command", ["retry-cleanup", "cleanup-history"])
+def test_cleanup_cli_errors_name_selected_command(monkeypatch, capsys, command):
+    import types
+    from contextlib import nullcontext
+    from agent_dispatch import producers_cli
+    from agent_dispatch.client import DispatchError
+
+    def fail(*args, **kwargs):
+        raise DispatchError(409, "fixture rejection")
+
+    client = types.SimpleNamespace(recover_held_cleanup=fail, cleanup_recovery_history=fail)
+    monkeypatch.setattr(producers_cli, "_client", lambda args: nullcontext(client))
+    monkeypatch.setattr(producers_cli, "_registration_scope", lambda args: ("host", "default"))
+    args = types.SimpleNamespace(
+        reservations_command=command, key="exact-reservation", expected_generation=1,
+        apply=False, expected_preview=None, reason=None, request_id=None,
+    )
+    assert producers_cli._cmd_reservations(args) == 2
+    assert f"reservations {command}: HTTP 409" in capsys.readouterr().err
+
+
 def test_recovery_supports_recorded_legacy_retry_progress(held):
     queue, _, key = held
     with queue._connect() as conn:

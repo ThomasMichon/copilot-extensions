@@ -43,10 +43,17 @@ attempts, generation, result, timestamps, logs and session/worktree attachment
 history are unchanged. The full previous failure envelope and request reason
 are retained transactionally in the cleanup recovery history, including after
 later success replaces the current conclusion detail. Old recorded flat retry
-payloads remain supported; malformed or unsupported envelopes fail explicitly.
+payloads remain supported. Structured envelopes must identify at least one
+supported housekeeping component, with at least one incomplete component;
+`cleanup_kind` alone is not evidence of pending cleanup. Malformed or unsupported
+envelopes fail explicitly.
 
 The task generation, exact provenance and allocation fences are rechecked when
 the supervisor claims and validates its cleanup lease and records the outcome.
+The retained allocation identity includes the execution project, physical
+worktree path, originating reservation, logical creation key/revision, inherited
+worktree and exclusive key. Drifting any of them after acceptance cannot redirect
+the leased retry or change which allocation fence applies.
 All ordinary terminal guards still apply: live/unknown processes, dirty or
 unlanded work, open PRs, unfinished efforts, claims, pairing and ambiguous
 ownership remain protected. Preview eligibility is permission to retry those
@@ -60,6 +67,8 @@ the discharged pair fields). Live, modified, missing or retargeted siblings,
 and missing/malformed receipts, remain preserved. Existing pre-receipt
 one-sided corruption is not repaired by inference. An intermediate `primed`
 outcome with explicit `managed_gc_eligible: false` remains retryable, not complete.
+Receipt pair fields must be non-empty strings with supported complementary
+roles and worktree kind before retained provenance can be reconstructed.
 Managed garbage collection remains the deletion authority.
 
 ## API
