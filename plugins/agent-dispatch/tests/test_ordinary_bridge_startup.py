@@ -191,10 +191,28 @@ def test_retry_reservation_carries_agent_without_exclusive_key(startup):
     ordinary_bridge.start(task, client=client, agent="local", project="example",
                           charter="reviewer", prompt="assigned task")
     queue.defer_spawn(task["spawn_reservation_key"], detail="transport interrupted")
-    retry, admitted = queue.reserve_spawn(task["id"], reserved_by="supervisor")
+    retry, admitted = queue.reserve_spawn(
+        task["id"], reserved_by="supervisor", driver="ordinary-bridge")
     assert admitted and retry.agent_info["session_id"] == "bridge-a"
     assert retry.session_handle == "local-body:bridge-a"
     assert retry.worktree == "worktree-a"
+
+
+@pytest.mark.parametrize("driver", [None, "cli", "fleet"])
+def test_non_bridge_retry_does_not_inherit_ordinary_agent(
+    startup: tuple, driver: str | None,
+) -> None:
+    queue, task, client, _ = startup
+    ordinary_bridge.start(task, client=client, agent="local", project="example",
+                          charter="reviewer", prompt="assigned task")
+    queue.defer_spawn(task["spawn_reservation_key"], detail="transport interrupted")
+    retry, admitted = queue.reserve_spawn(
+        task["id"], reserved_by="supervisor", driver=driver)
+    assert admitted
+    assert retry.driver == driver
+    assert retry.agent_info is None
+    assert retry.session_handle is None
+    assert retry.worktree is None
 
 
 def test_ordinary_start_checks_native_identity_without_acquisition_receipt(startup):

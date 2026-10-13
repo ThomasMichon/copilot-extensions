@@ -294,9 +294,11 @@ class SpawnReservationMixin:
                     worktree_ownership = None
                     conversation_retired = False
                     break
-            from .ordinary_bridge import carry_agent
-            carried_worktree, carried_session, worktree_ownership, agent_info = carry_agent(
-                conn, task, carried_worktree, carried_session, worktree_ownership, conversation_retired)
+            agent_info = None
+            if driver == "ordinary-bridge":
+                from .ordinary_bridge import carry_agent
+                carried_worktree, carried_session, worktree_ownership, agent_info = carry_agent(
+                    conn, task, carried_worktree, carried_session, worktree_ownership, conversation_retired)
             conn.execute(
                 "INSERT INTO spawn_reservations "
                 "(key, task_id, exclusive_key, attempt, state, reserved_by, "
