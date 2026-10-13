@@ -174,6 +174,13 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-10-13 - Shared foundation integration
+
+- Rebasing #6396 preserves #6164's conditional capture, receiver-bound drain, publication witnesses, process birth tokens, native exit confirmation and uncertain-publication fences. Conditional cutover publishes before drain; the watch-owner seam drains before publication. Combining those opt-ins refuses before mutation rather than silently mixing their contracts.
+- Owned and caller-held guards now enter the same preparation and recovery checks. Added conditional borrowed-guard, corrupt-recovery, incompatible-ordering and stateful uncertain-publication regressions. The rollback methods retain their compatibility entry points while delegating to a focused helper, keeping the orchestrator within the existing 1,000-line cap.
+- Windows validation passes the integrated canonical suite (403 tests, 24 platform skips), actual Worktrees vendor (113 tests, four skips), and default plus conditional Bridge consumers (16 tests). Updated native replacement test interception for Windows and retained Linux-only directory-fsync cases in the native Linux lane. Updated stale vendor fixtures to supply birth/witness/exit evidence and to retain promoted generations; no production custody guard was weakened.
+- Fatal lint, module size, headless launch, install contract, changefile coverage and vendor synchronization pass. Fresh current-head review and required native Linux/Windows CI still gate merge. The watch-owner recovery adapter, installation-cell adoption, rollout and saved dispatch integration remain open; this foundation does not complete the parent effort.
+
 ### 2026-10-12 - Governed lifecycle intent approved
 
 - The next current-head review identified numeric thread-ID recycling in the borrowed-guard boundary. Ownership now retains the acquiring `Thread` object alongside its PID and compares object identity; an unrelated execution with the same numeric identifier cannot borrow the guard. A deterministic regression preserves the original execution's borrow and native contender exclusion. Adoption remains gated on this shared slice's current-head review and CI.
