@@ -679,3 +679,22 @@ credential changes, broad policy weakening or unreviewed releases.
   or clear every hosted timeout. Review and required CI must run again after
   this correction. No gate is bypassed and no competing installation work
   is taken over.
+
+### 2026-10-13 - Review closes filename-transport bypass
+
+- Current-head review of #6577 identified a real inherited line-delimited
+  filename bypass: a valid newline-containing Git path became two nonexistent
+  paths and its contents were skipped. Merge stayed blocked despite green CI.
+- The shared action now emits one JSON-string filename per record; scanner and
+  reporter consume that lossless representation. The old `--paths-file` API
+  remains compatible, while `--paths-jsonl` rejects malformed/non-string/NUL
+  records and cannot be combined with the other explicit scope selectors.
+- Actual passive Git trees cover newline, carriage return, Unicode line
+  separators, whitespace and backslash filenames even on Windows, where some
+  cannot be checked out. Binary tree creation and a NUL-delimited byte assertion
+  prove exact fixture filenames before the real scanner command runs.
+- The telemetry-corrected head's required hosted Windows runner and launch
+  selections passed. Its subsequent low-severity documentation advisory exposed
+  a CLI stdin-body transport failure; the full PR description was restored from
+  an explicit file and read back, including Documentation impact and attribution.
+  Review must evaluate that complete description and the filename fix together.

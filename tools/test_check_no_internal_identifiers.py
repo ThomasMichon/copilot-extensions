@@ -600,6 +600,32 @@ def test_load_paths_file_preserves_filename_whitespace(repo: Path):
     assert module._load_paths_file(paths_file) == [" leading space.txt ", "plain.txt"]
 
 
+def test_jsonl_paths_preserve_all_git_filename_characters(repo: Path):
+    module = _load_module(repo)
+    paths = ["line\nbreak.txt", "line\rbreak.txt", "line\u2028break.txt", "slash\\name", " space "]
+    path = repo / "paths.jsonl"
+    path.write_text("".join(json.dumps(p, ensure_ascii=False) + "\n" for p in paths), encoding="utf-8")
+    assert module._load_paths_jsonl(path) == paths
+
+
+@pytest.mark.parametrize("record", ['123', '""', '"nul\\u0000name"', 'not-json'])
+def test_jsonl_paths_reject_invalid_records(repo: Path, record: str):
+    module = _load_module(repo)
+    path = repo / "paths.jsonl"
+    path.write_text(record + "\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        module._load_paths_jsonl(path)
+
+
+def test_jsonl_path_interface_is_exclusive_and_empty_files_are_valid(repo: Path):
+    module = _load_module(repo)
+    path = repo / "paths.jsonl"
+    path.write_text("", encoding="utf-8")
+    assert module._load_paths_jsonl(path) == []
+    result = _run(repo, "--paths-file", "old.txt", "--paths-jsonl", str(path))
+    assert result.returncode == 2 and "mutually exclusive" in result.stderr
+
+
 def test_json_out_writes_hashed_findings_without_raw_token_or_reason(repo: Path, tmp_path: Path):
     _write(repo, "plugins/new/clean.txt", f"oops {CI_TOKEN} sneaked in\n")
     _git(repo, "add", "-A")

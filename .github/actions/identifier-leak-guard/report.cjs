@@ -23,7 +23,10 @@ module.exports = async function report({github, context, core}) {
   const findings = readJson(process.env.FINDINGS_PATH);
   const details = readJson(process.env.DETAILS_PATH);
   const scannedPaths = fs.readFileSync(process.env.PATHS_PATH, "utf8")
-    .split(/\r?\n/).filter(Boolean);
+    .split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  if (scannedPaths.some((path) => typeof path !== "string" || !path || path.includes("\0"))) {
+    throw new Error("Identifier paths must be nonempty Git filename strings.");
+  }
   const configured = process.env.DENYLIST_CONFIGURED === "true";
   const scanOutcome = process.env.SCAN_OUTCOME || "skipped";
   const failingSteps = [

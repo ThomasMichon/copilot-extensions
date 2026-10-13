@@ -50,8 +50,8 @@ runs:
         HEAD_SHA: ${{ inputs.head-sha }}
       run: |
         gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" \
-          --jq '.[] | select(.status != "removed") | .filename' \
-          > identifier-guard-paths.txt
+          --jq '.[] | select(.status != "removed") | .filename | @json' \
+          > identifier-guard-paths.jsonl
         git -c core.hooksPath= -c core.fsmonitor=false fetch --no-tags --no-recurse-submodules --depth=1 origin \
           "$HEAD_SHA:refs/remotes/origin/pr-head/$PR_NUMBER"
 
@@ -104,7 +104,7 @@ runs:
       run: >-
         python tools/check-no-internal-identifiers.py
         --ci
-        --paths-file identifier-guard-paths.txt
+        --paths-jsonl identifier-guard-paths.jsonl
         --git-ref "refs/remotes/origin/pr-head/$PR_NUMBER"
         --json-out identifier-guard-findings.json
         --trusted-details-json-out identifier-guard-details.json
@@ -118,7 +118,7 @@ runs:
         PR_HEAD_SHA: ${{ inputs.head-sha }}
         FINDINGS_PATH: identifier-guard-findings.json
         DETAILS_PATH: identifier-guard-details.json
-        PATHS_PATH: identifier-guard-paths.txt
+        PATHS_PATH: identifier-guard-paths.jsonl
         STALE: ${{ steps.pr.outputs.stale }}
         DENYLIST_CONFIGURED: ${{ steps.denylist.outputs.configured }}
         SETUP_PYTHON_OUTCOME: ${{ steps.setup-python.outcome }}

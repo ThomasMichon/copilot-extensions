@@ -805,7 +805,9 @@ stop allocating CI. Full main-push validation, contributor CI, fork approval and
 deep/platform lanes are not removed by this staging change.
 The existing post-CI caller and an admitted-owner-only job in this host share
 `.github/actions/identifier-leak-guard/`: the same trusted scanner reads changed,
-non-removed PR blobs without checking out PR code, and the same reporter publishes
+non-removed PR blobs without checking out PR code. Filenames travel as JSON-string
+records end-to-end (`--paths-jsonl`), preserving newlines and other Git filename
+characters rather than splitting them into nonexistent paths. The same reporter publishes
 the `identifier leak guard` context with full match details. It fences stale heads
 before scanning and again before reporting. Only a working but unconfigured guard
 is neutral; infrastructure failures fail, including checkout/action-loading

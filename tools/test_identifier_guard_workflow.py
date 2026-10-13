@@ -69,7 +69,7 @@ new AsyncFunction("github", "context", "core", "require", input.script)(github, 
   .catch(error => {result.error = error.message; process.stdout.write(JSON.stringify(result));});
 """
 
-    def run(*, details=(), findings=(), paths="changed.txt\n", overrides=None, **options):
+    def run(*, details=(), findings=(), paths='"changed.txt"\n', overrides=None, **options):
         Path(env["FINDINGS_PATH"]).write_text(json.dumps(findings), encoding="utf-8")
         Path(env["DETAILS_PATH"]).write_text(json.dumps(details), encoding="utf-8")
         Path(env["PATHS_PATH"]).write_text(paths, encoding="utf-8")
@@ -117,8 +117,10 @@ def test_both_callers_keep_trusted_checkout_and_shared_action_with_failure_repor
     steps = {step.get("id"): step for step in action["runs"]["steps"]}
     fetch = steps["fetch-pr-data"]["run"]
     assert "--paginate" in fetch and 'select(.status != "removed")' in fetch
+    assert ".filename | @json" in fetch
     assert "--no-recurse-submodules" in fetch and "checkout" not in fetch
     assert "--git-ref" in steps["scan"]["run"] and "--trusted-details-json-out" in steps["scan"]["run"]
+    assert "--paths-jsonl identifier-guard-paths.jsonl" in steps["scan"]["run"]
     for name in ("fetch-pr-data", "init-files", "denylist", "scan"):
         assert steps[name]["if"] == "steps.pr.outcome == 'success' && steps.pr.outputs.stale != 'true'"
     assert action["runs"]["steps"][-1]["if"] == "always()"
@@ -206,7 +208,20 @@ def test_wrong_report_shape_cannot_publish_success(reporter, invalid):
     assert result["error"] and not result["checks"]
 
 
-def test_composite_scans_generated_pr_blob_not_checked_out_tooling(tmp_path):
+def test_reporter_counts_lossless_paths_and_rejects_invalid_records(reporter):
+    paths = json.dumps("line\nbreak\u2028name.txt", ensure_ascii=False) + "\n"
+    check = reporter(paths=paths)["checks"][0]
+    assert check["output"]["summary"].startswith("Scanned 1 changed file")
+    for invalid in ('123\n', '""\n', '"nul\\u0000name"\n', "not-json\n"):
+        result = reporter(paths=invalid)
+        assert result["error"] and not result["checks"]
+
+
+@pytest.mark.parametrize("filename", [
+    "generated.txt", "line\nbreak.txt", "line\rbreak.txt", "line\u2028break.txt",
+    " leading space.txt ", "slash\\name.txt",
+])
+def test_composite_scans_generated_pr_blob_not_checked_out_tooling(tmp_path, filename):
     git = shutil.which("git")
     bash = shutil.which("bash")
     assert git
@@ -226,22 +241,34 @@ def test_composite_scans_generated_pr_blob_not_checked_out_tooling(tmp_path):
                 "COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI": "fixture-identifier | replace it"})
     env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env["PATH"]
 
-    def run(args):
-        return subprocess.run(args, cwd=tmp_path, env=env, capture_output=True, text=True,
-                              timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    def run(args, *, binary=False, **kwargs):
+        return subprocess.run(args, cwd=tmp_path, env=env, capture_output=True, text=not binary,
+                              encoding=None if binary else "utf-8",
+                              timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                              **kwargs)
 
     for args in (["init", "-q"], ["config", "user.name", "Test"],
                  ["config", "user.email", "test@example.com"]):
         assert run([git, *args]).returncode == 0
     (tmp_path / "tools").mkdir()
     shutil.copy(ROOT / "tools" / "check-no-internal-identifiers.py", tmp_path / "tools")
-    (tmp_path / "generated.txt").write_text("fixture-identifier\n")
-    for args in (["add", "."], ["-c", "core.hooksPath=", "commit", "-qm", "generated"],
-                 ["update-ref", "refs/remotes/origin/pr-head/7", "HEAD"]):
-        assert run([git, *args]).returncode == 0
+    blob = run([git, "hash-object", "-w", "--stdin"], input="fixture-identifier\n")
+    assert blob.returncode == 0, blob.stderr
+    # Git data can contain filenames that Windows cannot check out.
+    tree = run([git, "mktree", "-z"], binary=True,
+               input=f"100644 blob {blob.stdout.strip()}\t{filename}\0".encode("utf-8"))
+    assert tree.returncode == 0, tree.stderr
+    commit = run([git, "commit-tree", tree.stdout.decode("ascii").strip()], input="generated\n")
+    assert commit.returncode == 0, commit.stderr
+    listed = run([git, "ls-tree", "-rz", commit.stdout.strip()], binary=True)
+    assert b"\t" + filename.encode("utf-8") + b"\0" in listed.stdout
+    result = run([git, "update-ref", "refs/remotes/origin/pr-head/7", commit.stdout.strip()])
+    assert result.returncode == 0, result.stderr
     # A different working tree proves the action reads the commit, not current files.
     (tmp_path / "generated.txt").write_text("clean worktree\n")
-    (tmp_path / "identifier-guard-paths.txt").write_text("generated.txt\n")
+    (tmp_path / "identifier-guard-paths.jsonl").write_text(
+        json.dumps(filename, ensure_ascii=False) + "\n", encoding="utf-8",
+    )
     action = yaml.safe_load((ACTION / "action.yml").read_text())
     command = next(s["run"] for s in action["runs"]["steps"] if s.get("id") == "scan")
     result = run([bash, "-e", "-c", command])
@@ -249,4 +276,4 @@ def test_composite_scans_generated_pr_blob_not_checked_out_tooling(tmp_path):
     assert (tmp_path / "identifier-guard-details.json").exists(), result.stdout + result.stderr
     details = json.loads((tmp_path / "identifier-guard-details.json").read_text())
     assert details[0]["identifier"] == "fixture-identifier"
-    assert details[0]["file"] == "generated.txt" and details[0]["reason"] == "replace it"
+    assert details[0]["file"] == filename and details[0]["reason"] == "replace it"
