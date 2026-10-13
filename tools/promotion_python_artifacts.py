@@ -748,7 +748,7 @@ def validate_candidate_artifacts(
         )
         # A fresh destination applies checkout attributes even to stat-clean generated files.
         with tempfile.TemporaryDirectory(prefix="promotion-artifact-validation-") as temporary:
-            candidate = Path(temporary)
+            candidate = Path(temporary).resolve()
             promotion._git(
                 ["checkout-index", "--all", f"--prefix={candidate}{os.sep}"], cwd=scratch,
             )

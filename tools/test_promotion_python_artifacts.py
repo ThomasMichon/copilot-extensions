@@ -1238,6 +1238,44 @@ def test_workflow_validator_rejects_changed_bundle(repo, tmp_path, monkeypatch):
     assert len(_git(["worktree", "list"], repo).splitlines()) == 1
 
 
+@pytest.mark.parametrize("entrypoint", ["cli", "workflow"])
+def test_candidate_artifact_validation_resolves_temporary_root_aliases(
+    repo, tmp_path, monkeypatch, entrypoint,
+):
+    _git(["checkout", "-q", "dev"], repo)
+    _fake_builder(repo, monkeypatch, public=entrypoint == "workflow")
+    dev = _commit(repo, "candidate")
+    main = _git(["rev-parse", "main"], repo)
+    directory = tmp_path / "export"
+    promotion.promote(
+        repo=repo, dev_ref="dev", main_ref="main", build_python_artifacts_dir=directory,
+        toolchain_source="seasoned-public" if entrypoint == "workflow" else "governed",
+        toolchain_min_age_days=7 if entrypoint == "workflow" else None,
+    )
+    temporary_directory = artifacts.tempfile.TemporaryDirectory
+
+    class AliasedTemporaryDirectory:
+        def __init__(self, **kwargs):
+            self.directory = temporary_directory(**kwargs)
+
+        def __enter__(self):
+            root = Path(self.directory.__enter__())
+            (root / "alias-child").mkdir()
+            return str(root / "alias-child" / "..")
+
+        def __exit__(self, *args):
+            return self.directory.__exit__(*args)
+
+    monkeypatch.setattr(artifacts.tempfile, "TemporaryDirectory", AliasedTemporaryDirectory)
+    if entrypoint == "workflow":
+        _run_workflow_validator(repo, directory, dev, main, monkeypatch)
+    else:
+        artifacts.validate_candidate_artifacts(
+            directory, repo=repo, dev_head=dev, main_before=main,
+        )
+    assert len(_git(["worktree", "list"], repo).splitlines()) == 1
+
+
 def test_workflow_separates_candidate_execution_signing_and_release_authority():
     root = Path(__file__).resolve().parent.parent
     workflow = yaml.safe_load((root / ".github" / "workflows" / "validate-and-promote.yml").read_text())

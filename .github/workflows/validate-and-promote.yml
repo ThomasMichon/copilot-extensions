@@ -517,7 +517,7 @@ jobs:
               control = {"control": summary["control_preserved"]} if "control_preserved" in summary else {}
               tree = promotion.build_promotion_tree(scratch, **control)
               with tempfile.TemporaryDirectory(prefix="promotion-artifact-validation-") as temporary:
-                  candidate = Path(temporary)
+                  candidate = Path(temporary).resolve()
                   promotion._git(
                       ["checkout-index", "--all", f"--prefix={candidate}{os.sep}"], cwd=scratch,
                   )
