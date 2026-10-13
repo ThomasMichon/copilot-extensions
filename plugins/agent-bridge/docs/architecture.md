@@ -457,6 +457,21 @@ it (for example, it is the selected runtime or still in use), in which case the
 install fails instead of building over it. A refused completion-marker
 publication fails the install rather than being ignored.
 
+The payload hash compared by admission fingerprints everything the installer
+installs into the slot: the plugin's `pyproject.toml`, `src/` and any plugin-local
+`libs/`, plus every shared library it installs from outside the plugin directory
+(the libraries it installs explicitly, resolved exactly as the build resolves
+them, and the transitive `[tool.uv.sources]` path dependencies, e.g.
+`../../libs/<lib>` in a checkout). Caches, build artifacts and each library's
+own `tests/` are excluded, so building or testing never changes it. The hash is
+computed once per transaction, under the install lock and before admission,
+and that same value is published in the completion marker and the deploy
+manifest; it is never recomputed after the build, so an edit landing mid-install
+cannot be recorded as installed. Because a shared-library edit now counts as a
+content change, a completed slot built before this fingerprint covered shared
+libraries is refused as different content until the plugin version changes;
+the next version bump builds a fresh slot with the current fingerprint.
+
 ### Scheduled task: write-once bootstrap (decoupled from the runtime version)
 
 On Windows the auto-start scheduled task is **write-once bootstrap

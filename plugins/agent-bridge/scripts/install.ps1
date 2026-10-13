@@ -655,38 +655,129 @@ function Ensure-Uv {
     return $true
 }
 
+function Get-UvSourcePaths {
+    <# The [tool.uv.sources] `path = "..."` dependencies one pyproject.toml
+       declares, resolved relative to that project's own directory (the same
+       resolution uv applies when it installs the project). Only directories
+       that hold a pyproject.toml are returned. #>
+    param([Parameter(Mandatory)][string]$PyprojectPath)
+    $text = Get-Content -LiteralPath $PyprojectPath -Raw
+    $table = [regex]::Match($text, '(?ms)^\[tool\.uv\.sources\](.*?)(?=^\[|\z)')
+    if (-not $table.Success) { return @() }
+    $base = Split-Path -Parent $PyprojectPath
+    $out = @()
+    foreach ($m in [regex]::Matches($table.Groups[1].Value, 'path\s*=\s*"([^"]*)"')) {
+        $dir = Join-Path $base $m.Groups[1].Value
+        if (Test-Path -LiteralPath (Join-Path $dir 'pyproject.toml')) {
+            $out += (Resolve-Path -LiteralPath $dir).Path.TrimEnd('\', '/')
+        }
+    }
+    return $out
+}
+
+function Get-PayloadLibRoots {
+    <# Every shared-library directory OUTSIDE $PluginDir that this installer
+       installs into the runtime slot: the libraries it installs explicitly
+       (resolved through Resolve-VendoredLib, exactly as the build does) plus
+       the transitive closure of [tool.uv.sources] path dependencies of the
+       plugin and of those libraries (resolved live by `uv pip install`, e.g.
+       "../../libs/<lib>" in a checkout). Directories under $PluginDir (a
+       materialized/vendored libs/ copy) are already covered by the plugin
+       scan in Get-PayloadHash and are not repeated here. #>
+    $pluginReal = (Resolve-Path -LiteralPath $PluginDir).Path.TrimEnd('\', '/')
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    foreach ($name in @('ssh-manager', 'credential-relay', 'zdd', 'single-instance-lease', 'config-migrate')) {
+        $dir = Resolve-VendoredLib -LibName $name
+        if ($dir) { $candidates.Add(("$dir").Trim()) }
+    }
+    $pending = [System.Collections.Generic.List[string]]::new()
+    $pending.Add((Join-Path $pluginReal 'pyproject.toml'))
+    $localLibs = Join-Path $pluginReal 'libs'
+    if (Test-Path -LiteralPath $localLibs) {
+        Get-ChildItem -LiteralPath $localLibs -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { $pending.Add((Join-Path $_.FullName 'pyproject.toml')) }
+    }
+    foreach ($dir in @($candidates)) { $pending.Add((Join-Path $dir 'pyproject.toml')) }
+    $visited = @{}
+    for ($i = 0; $i -lt $pending.Count; $i++) {
+        $pp = $pending[$i]
+        if (-not (Test-Path -LiteralPath $pp)) { continue }
+        $key = (Resolve-Path -LiteralPath $pp).Path.ToLowerInvariant()
+        if ($visited.ContainsKey($key)) { continue }
+        $visited[$key] = $true
+        foreach ($dir in @(Get-UvSourcePaths -PyprojectPath $pp)) {
+            $candidates.Add($dir)
+            $pending.Add((Join-Path $dir 'pyproject.toml'))
+        }
+    }
+    $seen = @{}
+    $roots = [System.Collections.Generic.List[string]]::new()
+    $sep = [System.IO.Path]::DirectorySeparatorChar
+    foreach ($dir in $candidates) {
+        $real = (Resolve-Path -LiteralPath $dir).Path.TrimEnd('\', '/')
+        if ($real.Equals($pluginReal, [StringComparison]::OrdinalIgnoreCase) -or
+            $real.StartsWith("$pluginReal$sep", [StringComparison]::OrdinalIgnoreCase)) { continue }
+        $key = $real.ToLowerInvariant()
+        if ($seen.ContainsKey($key)) { continue }
+        $seen[$key] = $true
+        $roots.Add($real)
+    }
+    return $roots.ToArray()
+}
+
 function Get-PayloadHash {
-    <# Content fingerprint of the RUNTIME PAYLOAD (#935/#776/ce#811). sha256 over
-       the sorted list of "<relpath>:<per-file sha256>" for pyproject.toml plus
-       every file under src/ and libs/ (excluding caches/build artifacts). Unlike
-       the old pyproject-only fingerprint, a src/-only edit WITHOUT a version bump
-       changes this value, so the completion marker + the live-slot content guards
-       detect real content drift, not just a pyproject/version change. The value
-       is re-baselined by the accompanying version bump (a fresh install records
-       the new-algorithm hash), so the algorithm change is self-healing. Never
-       throws -> '' on error. #>
+    <# Content fingerprint of EVERY source this installer installs into the
+       runtime slot (#935/#776/ce#811, #5472): pyproject.toml, src/, the
+       plugin-local libs/, and each shared library resolved outside $PluginDir
+       (Get-PayloadLibRoots). sha256 over the sorted "<label>:<per-file sha256>"
+       list, where a plugin file's label is its $PluginDir-relative path and an
+       external library's files are labeled "libs/<lib>/<relpath>" so the value
+       does not depend on where the checkout lives. Caches and build artifacts
+       (which the build itself writes into these trees) and each library's own
+       top-level tests/ (never installed) are excluded, so building or testing
+       never changes the value.
+
+       A completed slot is reused only when this value matches its marker, so
+       it is computed ONCE per transaction, before admission, and that same
+       value is carried to admission, the completion marker and the deploy
+       manifest -- never recomputed after the build, when an edit landing
+       mid-install would describe bytes that were never installed. Never
+       throws -> '' on error (admission then fails closed for a completed slot). #>
     try {
         $sha = [System.Security.Cryptography.SHA256]::Create()
-        $base = (Resolve-Path $PluginDir).Path
-        $files = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
+        $base = (Resolve-Path -LiteralPath $PluginDir).Path.TrimEnd('\', '/')
+        $excluded = '/(__pycache__|\.venv|venv|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.git|node_modules|build|dist|[^/]+\.egg-info)/'
+        # (directory, label prefix, pattern of never-installed test trees)
+        $sources = [System.Collections.Generic.List[object]]::new()
+        $sources.Add(@((Join-Path $base 'src'), 'src', $null))
+        $sources.Add(@((Join-Path $base 'libs'), 'libs', '^[^/]+/tests/'))
+        foreach ($lib in @(Get-PayloadLibRoots)) {
+            $sources.Add(@($lib, ('libs/' + (Split-Path -Leaf $lib)), '^tests/'))
+        }
+        $entries = [System.Collections.Generic.List[string]]::new()
         $pp = Join-Path $base 'pyproject.toml'
-        if (Test-Path $pp) { $files.Add((Get-Item $pp)) }
-        foreach ($sub in @('src', 'libs')) {
-            $d = Join-Path $base $sub
-            if (Test-Path $d) {
-                Get-ChildItem -Path $d -Recurse -File -Force -ErrorAction SilentlyContinue |
-                    Where-Object {
-                        $_.FullName -notmatch '[\\/](__pycache__|\.venv|venv|\.pytest_cache|\.mypy_cache|build|dist|[^\\/]+\.egg-info)[\\/]' -and
-                        $_.Extension -ne '.pyc'
-                    } | ForEach-Object { $files.Add($_) }
+        if (Test-Path -LiteralPath $pp) {
+            $fh = [BitConverter]::ToString($sha.ComputeHash([System.IO.File]::ReadAllBytes($pp))).Replace('-', '').ToLower()
+            $entries.Add("pyproject.toml:${fh}")
+        }
+        foreach ($source in $sources) {
+            $dir, $label, $testsPattern = $source
+            if (-not (Test-Path -LiteralPath $dir)) { continue }
+            $dirReal = (Resolve-Path -LiteralPath $dir).Path.TrimEnd('\', '/')
+            Get-ChildItem -LiteralPath $dirReal -Recurse -File -Force -ErrorAction Stop | ForEach-Object {
+                $rel = $_.FullName.Substring($dirReal.Length).TrimStart('\', '/') -replace '\\', '/'
+                if ("/$rel" -match $excluded -or $_.Extension -eq '.pyc') { return }
+                if ($testsPattern -and $rel -match $testsPattern) { return }
+                $fh = [BitConverter]::ToString($sha.ComputeHash([System.IO.File]::ReadAllBytes($_.FullName))).Replace('-', '').ToLower()
+                $entries.Add("${label}/${rel}:${fh}")
             }
         }
-        $entries = foreach ($f in $files) {
-            $rel = ($f.FullName.Substring($base.Length).TrimStart('\', '/')) -replace '\\', '/'
-            $fh = [BitConverter]::ToString($sha.ComputeHash([System.IO.File]::ReadAllBytes($f.FullName))).Replace('-', '').ToLower()
-            "${rel}:${fh}"
-        }
-        $joined = [string]::Join("`n", ($entries | Sort-Object))
+        # Ordinal sort: Sort-Object's culture-aware order differs between
+        # Windows PowerShell 5.1 and PowerShell 7, and either host may run
+        # this installer against the same slot.
+        $sorted = $entries.ToArray()
+        [Array]::Sort($sorted, [StringComparer]::Ordinal)
+        $joined = [string]::Join("`n", $sorted)
         $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($joined))
         return (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
     } catch { return '' }
@@ -716,13 +807,19 @@ function Invoke-VersionedMarkComplete {
     <# Write the slot's completion marker AFTER its isolated health gate passed,
        so the slot is provably a healthy, complete build. A crashed / watchdog-
        killed install never reaches here, leaving its slot markerless and thus
-       tossable + retryable (#935). No-op in legacy mode. #>
+       tossable + retryable (#935). No-op in legacy mode.
+
+       $PayloadHash is the value computed ONCE before admission and used to
+       build this slot -- never recomputed here: an edit landing between
+       admission and this post-build write would otherwise publish a hash for
+       bytes that were never installed, letting a later install wrongly reuse
+       the slot. #>
+    param([string]$PayloadHash = '')
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $ScriptDir 'versioned_runtime.py'
     $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
     $mcArgs = @($vr, '--root', $InstallDir, '--link-name', 'venv', 'mark-complete', $SrcVersion)
-    $ph = Get-PayloadHash
-    if ($ph) { $mcArgs += @('--payload-hash', $ph) }
+    if ($PayloadHash) { $mcArgs += @('--payload-hash', $PayloadHash) }
     & $py @mcArgs 2>&1 | ForEach-Object { Write-Step $_ }
     # A refused publication (e.g. conflicting completion evidence for this
     # numbered version) must fail the install, never be swallowed (#5472).
@@ -776,7 +873,9 @@ function Test-SlotContentCurrent {
        $false, so the installer falls through to the admission check and a
        genuine install is never skipped. A deliberate force-rebuild remains a
        dedicated command (`versioned_runtime toss` + re-install / `service
-       restart`), never a silent side effect of a routine same-version reconcile. #>
+       restart`), never a silent side effect of a routine same-version reconcile.
+       $PayloadHash is the caller's once-computed Get-PayloadHash value. #>
+    param([string]$PayloadHash = '')
     if (-not $VersionedRuntime) { return $false }
     try {
         $vr = Join-Path $ScriptDir 'versioned_runtime.py'
@@ -791,7 +890,7 @@ function Test-SlotContentCurrent {
         if (-not $py -or -not (Test-Path $vr)) { return $false }
         $cur = (& $py $vr --root $InstallDir --link-name 'venv' current 2>$null | Out-String).Trim()
         if (-not $cur -or $cur -ne $SrcVersion) { return $false }
-        return ((Get-SlotAdmission) -eq 'reuse')
+        return ((Get-SlotAdmission -PayloadHash $PayloadHash) -eq 'reuse')
     } catch { return $false }
 }
 
@@ -808,12 +907,15 @@ function Get-SlotAdmission {
        Only 'construct' and 'reuse' may proceed: a published slot is immutable,
        so new content needs a new version, never an in-place rebuild. A helper
        failure with no completion marker on disk stays 'construct' so an
-       incomplete slot is still rebuilt exactly as before. #>
+       incomplete slot is still rebuilt exactly as before. $PayloadHash is the
+       caller's once-computed Get-PayloadHash value (empty = unavailable), the
+       same value later published by Invoke-VersionedMarkComplete. #>
+    param([string]$PayloadHash = '')
     if (-not $VersionedRuntime) { return 'construct' }
     $markerPresent = Test-Path -LiteralPath (Join-Path $VenvDir '.install-complete.json')
     $fallback = if ($markerPresent) { 'unverified' } else { 'construct' }
     $vr = Join-Path $ScriptDir 'versioned_runtime.py'
-    $ph = Get-PayloadHash
+    $ph = $PayloadHash
     if (-not $ph -or -not (Test-Path -LiteralPath $vr)) { return $fallback }
     $candidates = @()
     if (Test-Path -LiteralPath $VenvPython) { $candidates += $VenvPython }
@@ -1471,6 +1573,9 @@ function Get-SourceKind {
 # === end install-contract:v3 source-kind ===
 
 function Write-DeployManifest {
+    # $PayloadHash: the transaction's once-computed Get-PayloadHash value, so
+    # the manifest records the same content the slot was admitted/built for.
+    param([string]$PayloadHash = '')
     $sourcePathOverride = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { '' }
     Write-DeployManifestShared `
         -Service 'agent-bridge' `
@@ -1482,7 +1587,7 @@ function Write-DeployManifest {
         -GetGitInfo ${function:Get-GitInfo} `
         -SourcePathOverride $sourcePathOverride `
         -VersionOverride $SrcVersion `
-        -PayloadHash (Get-PayloadHash)
+        -PayloadHash $PayloadHash
 }
 
 function Get-ScheduledTaskLastResult {
@@ -2251,9 +2356,10 @@ function Invoke-Install {
     # WinError-2 crash cascade (dotfiles#1612). Idempotency is keyed on content,
     # not the mutable version label. A force rebuild/restart stays a dedicated
     # command, never a routine-reconcile side effect.
-    if (Test-SlotContentCurrent) {
+    $preLockHash = Get-PayloadHash
+    if (Test-SlotContentCurrent -PayloadHash $preLockHash) {
         Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no venv rebuild, no restart)."
-        Write-DeployManifest   # re-assert the manifest so version drift clears and this never re-triggers every session
+        Write-DeployManifest -PayloadHash $preLockHash   # re-assert the manifest so version drift clears and this never re-triggers every session
         return
     }
 
@@ -2265,11 +2371,15 @@ function Invoke-Install {
         Write-Warn 'Another agent-bridge install is in progress -- deferring this run (the in-flight install lands the version). No-op.'
         return
     }
+    # The transaction's single payload fingerprint (#5472): computed once under
+    # the lock, BEFORE admission, and carried unchanged through admission, the
+    # completion marker and the deploy manifest.
+    $payloadHash = Get-PayloadHash
     # Re-check after acquiring: the install we waited on may have JUST landed this
     # exact content, so our rebuild would be redundant (and a live-slot stomp).
-    if (Test-SlotContentCurrent) {
+    if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
         Write-Ok "agent-bridge $SrcVersion already installed and healthy after lock wait -- no-op."
-        Write-DeployManifest
+        Write-DeployManifest -PayloadHash $payloadHash
         Exit-InstallLock
         return
     }
@@ -2280,7 +2390,7 @@ function Invoke-Install {
     # (WinError 2, dotfiles#1612). Different content must ship under a NEW
     # version. Refuse (non-zero, no override) before touching anything; an
     # absent/incomplete slot ('construct') still builds exactly as before.
-    $admission = Get-SlotAdmission
+    $admission = Get-SlotAdmission -PayloadHash $payloadHash
     if ($admission -ne 'construct' -and $admission -ne 'reuse') {
         Write-SlotAdmissionRefusal -Admission $admission
         Exit-InstallLock
@@ -2312,7 +2422,7 @@ function Invoke-Install {
             Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
             throw 'Versioned slot health gate failed'
         }
-        if (-not (Invoke-VersionedMarkComplete)) { throw 'Versioned completion publication failed' }
+        if (-not (Invoke-VersionedMarkComplete -PayloadHash $payloadHash)) { throw 'Versioned completion publication failed' }
         if (-not (Invoke-VersionedActivate)) { throw 'Versioned activate failed' }
     }
 
@@ -2340,7 +2450,7 @@ function Invoke-Install {
     # on; writing it first means a failure/interruption in the (best-effort,
     # possibly-elevation-gated) task step can never leave drift permanently
     # unresolved -- which would otherwise re-trigger the reconcile every session.
-    Write-DeployManifest
+    Write-DeployManifest -PayloadHash $payloadHash
 
     # Register scheduled task
     Register-ScheduledTask_
@@ -2948,9 +3058,10 @@ function Invoke-Update {
     # cascade (dotfiles#1612). If the active slot already matches the target
     # content there is nothing to do; a genuine force-restart is a dedicated
     # command (`service restart`), not an implicit effect of a reconcile.
-    if (Test-SlotContentCurrent) {
+    $preLockHash = Get-PayloadHash
+    if (Test-SlotContentCurrent -PayloadHash $preLockHash) {
         Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no stop, no rebuild)."
-        Write-DeployManifest
+        Write-DeployManifest -PayloadHash $preLockHash
         return
     }
 
@@ -2961,9 +3072,11 @@ function Invoke-Update {
         Write-Warn 'Another agent-bridge install/update is in progress -- deferring this run. No-op.'
         return
     }
-    if (Test-SlotContentCurrent) {
+    # The transaction's single payload fingerprint (see Invoke-Install).
+    $payloadHash = Get-PayloadHash
+    if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
         Write-Ok "agent-bridge $SrcVersion already active after lock wait -- no-op."
-        Write-DeployManifest
+        Write-DeployManifest -PayloadHash $payloadHash
         Exit-InstallLock
         return
     }
@@ -2971,7 +3084,7 @@ function Invoke-Update {
     # Refuse to rebuild a published same-version slot in place (#5472) --
     # checked BEFORE the update marker, the drain, or any stop, so a refused
     # update never disturbs the live daemon. See Invoke-Install.
-    $admission = Get-SlotAdmission
+    $admission = Get-SlotAdmission -PayloadHash $payloadHash
     if ($admission -ne 'construct' -and $admission -ne 'reuse') {
         Write-SlotAdmissionRefusal -Admission $admission
         Exit-InstallLock
@@ -3135,7 +3248,7 @@ function Invoke-Update {
     # OLD daemon keeps serving from its own immutable slot until drained. No-op in
     # legacy mode.
     if ($VersionedRuntime) {
-        if (-not (Invoke-VersionedMarkComplete)) { throw 'Versioned completion publication failed' }
+        if (-not (Invoke-VersionedMarkComplete -PayloadHash $payloadHash)) { throw 'Versioned completion publication failed' }
         if (-not (Invoke-VersionedActivate)) { throw 'Versioned activate failed' }
     }
 
@@ -3149,7 +3262,7 @@ function Invoke-Update {
 
     # Update deploy manifest BEFORE the scheduled task (see the install path):
     # clearing drift must not depend on the best-effort task step succeeding.
-    Write-DeployManifest
+    Write-DeployManifest -PayloadHash $payloadHash
 
     # Scheduled task: routine updates NEVER rewrite it. The task is version-stable
     # bootstrap infrastructure (its action points at the start-agent-bridge.ps1

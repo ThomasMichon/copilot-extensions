@@ -295,6 +295,12 @@ fi
 VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 # === end install-contract:v3 versioned-venv ===
 
+# The transaction's payload fingerprint, fixed once before admission by
+# _guard_published_slot and carried to the completion marker and deploy
+# manifest (see _payload_hash). Never inherited from the environment.
+PAYLOAD_HASH=""
+PAYLOAD_HASH_FIXED=0
+
 # Ensure ~/.local/bin is on PATH
 if [[ ":$PATH:" != *":$LOCAL_BIN:"* ]]; then
     export PATH="$LOCAL_BIN:$PATH"
@@ -596,29 +602,133 @@ _bootstrap_python() {
     return 1
 }
 
-_payload_hash() {
-    # Content fingerprint of the RUNTIME PAYLOAD (#935/#776/ce#811): sha256 over
-    # the sorted "<per-file sha256>  <relpath>" list for pyproject.toml plus every
-    # file under src/ and libs/ (excluding caches/build artifacts). A src/-only
-    # edit without a version bump changes this value, so the completion marker +
-    # content guards detect real content drift, not just a pyproject change.
-    # Re-baselined by the accompanying version bump (self-healing). Empty on error.
+_uv_source_paths() {
+    # The [tool.uv.sources] `path = "..."` dependencies one pyproject.toml ($1)
+    # declares, resolved relative to that project's own directory (as uv
+    # resolves them when installing it). Prints one directory per line; only
+    # directories holding a pyproject.toml.
+    local pp="$1" base rel resolved
+    base="$(cd "$(dirname "$pp")" 2>/dev/null && pwd)" || return 0
+    while IFS= read -r rel; do
+        resolved="$(cd "$base" 2>/dev/null && cd "$rel" 2>/dev/null && pwd)" || continue
+        [[ -f "$resolved/pyproject.toml" ]] && printf '%s\n' "$resolved"
+    done < <(
+        sed -n '/^\[tool\.uv\.sources\]/,/^\[/p' "$pp" 2>/dev/null |
+        grep -o 'path[[:space:]]*=[[:space:]]*"[^"]*"' |
+        sed -n 's/.*"\([^"]*\)".*/\1/p'
+    )
+    return 0
+}
+
+_payload_lib_roots() {
+    # Every shared-library directory OUTSIDE $PLUGIN_DIR that this installer
+    # installs into the runtime slot: the libraries it installs explicitly
+    # (resolved through _resolve_vendored_lib, exactly as the build does) plus
+    # the transitive closure of [tool.uv.sources] path dependencies of the
+    # plugin and of those libraries (resolved live by `uv pip install`, e.g.
+    # "../../libs/<lib>" in a checkout). Directories under $PLUGIN_DIR (a
+    # materialized/vendored libs/ copy) are covered by the plugin scan in
+    # _compute_payload_hash and are not repeated. One directory per line.
+    local plugin_real lib dir pp key real i=0
+    plugin_real="$(cd "$PLUGIN_DIR" 2>/dev/null && pwd)" || return 0
+    local candidates=() pending=("$plugin_real/pyproject.toml")
+    for lib in ssh-manager credential-relay zdd single-instance-lease config-migrate; do
+        if dir="$(_resolve_vendored_lib "$lib")" && [[ -n "$dir" ]]; then
+            candidates+=("$dir")
+            pending+=("$dir/pyproject.toml")
+        fi
+    done
+    for pp in "$plugin_real"/libs/*/pyproject.toml; do
+        [[ -f "$pp" ]] && pending+=("$pp")
+    done
+    local visited=$'\n'
+    while (( i < ${#pending[@]} )); do
+        pp="${pending[$i]}"
+        i=$((i + 1))
+        [[ -f "$pp" ]] || continue
+        key="$(cd "$(dirname "$pp")" 2>/dev/null && pwd)" || continue
+        case "$visited" in *$'\n'"$key"$'\n'*) continue ;; esac
+        visited+="$key"$'\n'
+        while IFS= read -r dir; do
+            candidates+=("$dir")
+            pending+=("$dir/pyproject.toml")
+        done < <(_uv_source_paths "$pp")
+    done
+    local seen=$'\n'
+    for dir in "${candidates[@]+"${candidates[@]}"}"; do
+        real="$(cd "$dir" 2>/dev/null && pwd)" || continue
+        [[ "$real" == "$plugin_real" || "$real" == "$plugin_real"/* ]] && continue
+        case "$seen" in *$'\n'"$real"$'\n'*) continue ;; esac
+        seen+="$real"$'\n'
+        printf '%s\n' "$real"
+    done
+    return 0
+}
+
+_payload_tree_digests() {
+    # "<sha256>  <label>/<relpath>" for every installable file under $1,
+    # labeled with prefix $2. Caches and build artifacts (which the build itself
+    # writes into these trees) are excluded; $3 names a never-installed tests/
+    # tree to skip: `top` (<dir>/tests) or `lib` (<dir>/<lib>/tests).
+    local dir="$1" label="$2" tests="${3:-}"
+    [[ -d "$dir" ]] || return 0
+    local prune=()
+    case "$tests" in
+        top) prune=(-path ./tests -prune -o) ;;
+        lib) prune=(-path './*/tests' -prune -o) ;;
+    esac
+    (
+        cd "$dir" || exit 1
+        find . ${prune[@]+"${prune[@]}"} -type f \
+            ! -path '*/__pycache__/*' ! -path '*/.venv/*' ! -path '*/venv/*' \
+            ! -path '*/.pytest_cache/*' ! -path '*/.mypy_cache/*' ! -path '*/.ruff_cache/*' \
+            ! -path '*/.git/*' ! -path '*/node_modules/*' \
+            ! -path '*/build/*' ! -path '*/dist/*' ! -path '*.egg-info/*' \
+            ! -name '*.pyc' -print0 2>/dev/null \
+          | LC_ALL=C sort -z \
+          | xargs -0 -r sha256sum 2>/dev/null
+    ) | sed "s#^\\([0-9a-f]*\\) [ *]\\./#\\1  $label/#"
+}
+
+_compute_payload_hash() {
+    # Content fingerprint of EVERY source this installer installs into the
+    # runtime slot (#935/#776/ce#811, #5472): sha256 over the sorted
+    # "<per-file sha256>  <label>" list for pyproject.toml, src/, the
+    # plugin-local libs/, and each shared library resolved outside $PLUGIN_DIR
+    # (_payload_lib_roots), whose files are labeled "libs/<lib>/<relpath>" so
+    # the value does not depend on where the checkout lives. Caches, build
+    # artifacts and each library's own top-level tests/ (never installed) are
+    # excluded, so building or testing never changes the value. Empty on error.
+    # LC_ALL=C: identical-content files (e.g. empty __init__.py) tie on the
+    # digest and are ordered by path, which must not depend on the caller's
+    # locale (an interactive shell vs a service manager).
     (
         cd "$PLUGIN_DIR" 2>/dev/null || exit 0
         {
             [[ -f pyproject.toml ]] && sha256sum pyproject.toml 2>/dev/null
-            for __sub in src libs; do
-                [[ -d "$__sub" ]] || continue
-                find "$__sub" -type f \
-                    ! -path '*/__pycache__/*' ! -path '*/.venv/*' ! -path '*/venv/*' \
-                    ! -path '*/.pytest_cache/*' ! -path '*/.mypy_cache/*' \
-                    ! -path '*/build/*' ! -path '*/dist/*' ! -path '*.egg-info/*' \
-                    ! -name '*.pyc' -print0 2>/dev/null \
-                  | sort -z \
-                  | xargs -0 -r sha256sum 2>/dev/null
-            done
-        } | sort | sha256sum 2>/dev/null | awk '{print $1}'
+            _payload_tree_digests "$PLUGIN_DIR/src" src
+            _payload_tree_digests "$PLUGIN_DIR/libs" libs lib
+            local __lib
+            while IFS= read -r __lib; do
+                _payload_tree_digests "$__lib" "libs/$(basename "$__lib")" top
+            done < <(_payload_lib_roots)
+        } | LC_ALL=C sort | sha256sum 2>/dev/null | awk '{print $1}'
     ) || true
+}
+
+_payload_hash() {
+    # The payload fingerprint admission, the completion marker and the deploy
+    # manifest (installer-engine's write_deploy_manifest) all read. A completed
+    # slot is reused only when this matches its marker, so _guard_published_slot
+    # fixes it ONCE per transaction, before admission, and every later reader
+    # gets that same value -- never a recomputation after the build, when an
+    # edit landing mid-install would describe bytes that were never installed.
+    # Before it is fixed (no transaction yet), it is computed on demand.
+    if [[ "${PAYLOAD_HASH_FIXED:-0}" == 1 ]]; then
+        printf '%s' "${PAYLOAD_HASH:-}"
+    else
+        _compute_payload_hash
+    fi
 }
 
 _versioned_slot_clean() {
@@ -662,6 +772,8 @@ _versioned_mark_complete() {
         _fail "No python available to publish the completion marker for runtime slot versions/$SRC_VERSION"
         return 1
     fi
+    # The transaction's payload fingerprint fixed before admission (see
+    # _payload_hash) -- never recomputed after the build.
     local ph
     ph="$(_payload_hash)"
     local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
@@ -733,6 +845,10 @@ _guard_published_slot() {
     # but inactive one); EXITS 1 when the slot is published with different or
     # unverifiable content (#5472).
     local admission
+    # Fix the transaction's payload fingerprint ONCE, before admission; the
+    # completion marker and deploy manifest carry this same value (#5472).
+    PAYLOAD_HASH="$(_compute_payload_hash)"
+    PAYLOAD_HASH_FIXED=1
     admission="$(_slot_admission)"
     SLOT_ADMISSION="$admission"
     case "$admission" in

@@ -15,6 +15,7 @@ proceeded past admission.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -96,13 +97,59 @@ def _extract_sh(name: str, text: str, *, optional: bool = False) -> str:
 
 
 def _fake_plugin(tmp_path: Path) -> Path:
-    plugin = tmp_path / "plugin"
+    """A plugin inside a fake checkout, with the shared libraries it installs.
+
+    ``ssh-manager`` is installed explicitly (via the vendored-lib resolver),
+    ``plugin-resolve`` only through the plugin's ``[tool.uv.sources]``, and
+    ``agent-procutil`` only transitively through ``ssh-manager``'s own sources.
+    """
+    repo = tmp_path / "repo"
+    plugin = repo / "plugins" / "plugin"
     (plugin / "src" / "pkg").mkdir(parents=True)
     (plugin / "pyproject.toml").write_text(
-        f'[project]\nname = "pkg"\nversion = "{_VERSION}"\n', encoding="utf-8"
+        f'[project]\nname = "pkg"\nversion = "{_VERSION}"\n\n'
+        "[tool.uv.sources]\n"
+        'agent-ssh-manager = { path = "../../libs/ssh-manager", editable = true }\n'
+        'agent-plugin-resolve = { path = "../../libs/plugin-resolve", editable = true }\n',
+        encoding="utf-8",
     )
     (plugin / "src" / "pkg" / "__init__.py").write_text("VALUE = 1\n", encoding="utf-8")
+    for lib, sources in (
+        ("ssh-manager", 'agent-procutil = { path = "../agent-procutil", editable = true }\n'),
+        ("plugin-resolve", ""),
+        ("agent-procutil", ""),
+    ):
+        module = lib.replace("-", "_")
+        (repo / "libs" / lib / "src" / module).mkdir(parents=True)
+        (repo / "libs" / lib / "pyproject.toml").write_text(
+            f'[project]\nname = "agent-{lib}"\nversion = "0.1.0"\n'
+            + (f"\n[tool.uv.sources]\n{sources}" if sources else ""),
+            encoding="utf-8",
+        )
+        (repo / "libs" / lib / "src" / module / "__init__.py").write_text(
+            "VALUE = 1\n", encoding="utf-8"
+        )
     return plugin
+
+
+def _lib_source(tmp_path: Path, lib: str) -> Path:
+    module = lib.replace("-", "_")
+    return tmp_path / "repo" / "libs" / lib / "src" / module / "__init__.py"
+
+
+def _plugin_source(tmp_path: Path) -> Path:
+    return tmp_path / "repo" / "plugins" / "plugin" / "src" / "pkg" / "__init__.py"
+
+
+def _published_hash(tmp_path: Path) -> str:
+    return json.loads(_slot_marker(tmp_path).read_text(encoding="utf-8"))["payload_hash"]
+
+
+def _reported(output: str, key: str) -> str:
+    for line in output.splitlines():
+        if line.strip().startswith(f"{key}="):
+            return line.strip()[len(key) + 1 :]
+    raise AssertionError(f"{key}= not reported:\n{output}")
 
 
 def _events(tmp_path: Path) -> list[str]:
@@ -164,6 +211,8 @@ def _assert_outcome(tmp_path: Path, result: subprocess.CompletedProcess, expecte
 # --------------------------------------------------------------------------
 
 _PS_FUNCTIONS = (
+    ("Get-UvSourcePaths", True),
+    ("Get-PayloadLibRoots", True),
     ("Get-PayloadHash", False),
     ("Test-SlotContentCurrent", False),
     ("Get-SlotAdmission", True),
@@ -226,7 +275,14 @@ function FakeSlotPython {{
     & $RealPython @args
 }}
 function Get-RunningProcess {{ return $null }}
-function Write-DeployManifest {{ Rec 'MANIFEST' }}
+function Write-DeployManifest {{ param([string]$PayloadHash = '') Rec 'MANIFEST'; Rec "MANIFEST_HASH=$PayloadHash" }}
+# Hermetic shared-library resolution: only the fake checkout's libs/.
+function Resolve-VendoredLib {{
+    param([string]$LibName)
+    $c = Join-Path $PluginDir "..\\..\\libs\\$LibName"
+    if (Test-Path -LiteralPath (Join-Path $c 'pyproject.toml')) {{ return (Resolve-Path -LiteralPath $c).Path }}
+    return $null
+}}
 function Write-UpdateMarker {{ Rec 'MARKER' }}
 function Invoke-UpdateDrainStop {{ Rec 'DRAINED'; exit 43 }}
 function Test-ActiveIsForward {{ return $false }}
@@ -321,7 +377,7 @@ def test_ps1_mark_complete_reports_publication_result(
     harness = _ps_harness(
         tmp_path,
         scenario,
-        "$r = Invoke-VersionedMarkComplete\nWrite-Host \"RESULT=[$r]\"\n",
+        "$r = Invoke-VersionedMarkComplete -PayloadHash $ph\nWrite-Host \"RESULT=[$r]\"\n",
     )
     result = _run_ps(harness)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -333,7 +389,12 @@ def test_ps1_mark_complete_reports_publication_result(
 
 def test_ps1_call_sites_fail_on_refused_completion_and_guard_precedes_mutation() -> None:
     text = _INSTALL_PS1.read_text(encoding="utf-8")
-    assert text.count("if (-not (Invoke-VersionedMarkComplete)) { throw") == 2
+    assert (
+        text.count(
+            "if (-not (Invoke-VersionedMarkComplete -PayloadHash $payloadHash)) { throw"
+        )
+        == 2
+    )
     for name, mutations in (
         ("Invoke-Update", ("Write-UpdateMarker\n", "Invoke-UpdateDrainStop -", "Invoke-UpdateSlotBuild -")),
         ("Invoke-Install", ("Invoke-InstallSlotBuild\n",)),
@@ -344,10 +405,144 @@ def test_ps1_call_sites_fail_on_refused_completion_and_guard_precedes_mutation()
 
 
 # --------------------------------------------------------------------------
+# The payload fingerprint covers every install source and is computed once
+# --------------------------------------------------------------------------
+
+# Shared libraries the installer installs from outside the plugin directory.
+_SHARED_LIBS = (
+    "ssh-manager",  # installed explicitly from the resolved lib
+    "plugin-resolve",  # installed via the plugin's [tool.uv.sources]
+    "agent-procutil",  # installed transitively via ssh-manager's own sources
+)
+
+# Files the build and local test runs write into a shared library's checkout,
+# none of which is ever installed into the slot.
+_LIB_ARTIFACTS = (
+    "build/lib/ssh_manager/__init__.py",
+    "src/agent_ssh_manager.egg-info/PKG-INFO",
+    "src/ssh_manager/__pycache__/__init__.cpython-312.pyc",
+    "tests/test_ssh_manager.py",
+    ".ruff_cache/content",
+)
+
+
+def _assert_hash_steps(result: subprocess.CompletedProcess) -> None:
+    """H0 (baseline) == H1 (after build/test artifacts), then every shared-lib
+    source edit (H-<lib>) changes the hash again."""
+    detail = result.stdout + result.stderr
+    previous = _reported(result.stdout, "H0")
+    assert previous, detail
+    assert _reported(result.stdout, "H1") == previous, "build/test artifacts changed the hash\n" + detail
+    for lib in _SHARED_LIBS:
+        current = _reported(result.stdout, f"H-{lib}")
+        assert current != previous, f"a {lib} source change was not hashed\n" + detail
+        previous = current
+
+
+@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+def test_ps1_shared_lib_only_change_is_not_reused(tmp_path: Path) -> None:
+    """A shared library the installer installs is part of the slot's content:
+    changing only its source must refuse the completed active slot, never
+    reuse it as unchanged (#5472)."""
+    change = f"Add-Content -LiteralPath {_ps_quote(_lib_source(tmp_path, 'ssh-manager'))} 'VALUE = 2'\n"
+    result = _run_ps(_ps_harness(tmp_path, "match-active", change + "Invoke-Install"))
+    _assert_outcome(tmp_path, result, _REFUSED)
+    assert "different payload content" in result.stdout, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+def test_ps1_payload_hash_covers_every_shared_lib_but_not_artifacts(tmp_path: Path) -> None:
+    lib_dir = tmp_path / "repo" / "libs" / "ssh-manager"
+    action = "Write-Host \"H0=$(Get-PayloadHash)\"\n"
+    action += "".join(
+        f"New-Item -ItemType File -Force -Path {_ps_quote(lib_dir / rel)} -Value 'x' | Out-Null\n"
+        for rel in _LIB_ARTIFACTS
+    )
+    action += "Write-Host \"H1=$(Get-PayloadHash)\"\n"
+    for lib in _SHARED_LIBS:
+        action += f"Set-Content -LiteralPath {_ps_quote(_lib_source(tmp_path, lib))} 'VALUE = 2'\n"
+        action += f"Write-Host \"H-{lib}=$(Get-PayloadHash)\"\n"
+    _assert_hash_steps(_run_ps(_ps_harness(tmp_path, "absent", action)))
+
+
+@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+def test_ps1_marker_publishes_the_pre_admission_hash(tmp_path: Path) -> None:
+    """The completion marker records the hash admission used, even when a
+    source file changes while the slot is being built."""
+    source = _ps_quote(_plugin_source(tmp_path))
+    action = (
+        "Write-Host \"PH=$ph\"\n"
+        "function Invoke-InstallSlotBuild {\n"
+        f"    Rec 'BUILT'; Add-Content -LiteralPath {source} 'VALUE = 2'\n"
+        "    Write-Host \"FRESH=$(Get-PayloadHash)\"\n"
+        "}\n"
+        "Invoke-Install\n"
+    )
+    result = _run_ps(_ps_harness(tmp_path, "incomplete", action))
+    detail = f"rc={result.returncode}\n{result.stdout}{result.stderr}"
+    assert result.returncode == 50 and "BUILT" in _events(tmp_path), detail
+    ph = _reported(result.stdout, "PH")
+    assert _reported(result.stdout, "FRESH") != ph, detail
+    assert _published_hash(tmp_path) == ph, detail
+
+
+@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+def test_ps1_manifest_records_the_admitted_hash(tmp_path: Path) -> None:
+    """The deploy manifest records the hash admission matched, not one
+    recomputed after a source change landed mid-transaction."""
+    source = _ps_quote(_plugin_source(tmp_path))
+    action = (
+        "Write-Host \"PH=$ph\"\n"
+        # A concurrent install activates the slot while we wait for the lock.
+        "function Enter-InstallLock { Activate; return $true }\n"
+        # Runs inside admission, after the transaction's hash was taken.
+        "function Get-BootstrapPython {\n"
+        f"    Add-Content -LiteralPath {source} 'VALUE = 2'; return $RealPython\n"
+        "}\n"
+        "Invoke-Install\n"
+    )
+    result = _run_ps(_ps_harness(tmp_path, "match-inactive", action))
+    detail = f"rc={result.returncode}\nevents={_events(tmp_path)}\n{result.stdout}{result.stderr}"
+    assert result.returncode == 0, detail
+    assert f"MANIFEST_HASH={_reported(result.stdout, 'PH')}" in _events(tmp_path), detail
+
+
+_WINDOWS_POWERSHELL = shutil.which("powershell") if os.name == "nt" else None
+
+
+@pytest.mark.skipif(
+    _PWSH is None or _WINDOWS_POWERSHELL is None,
+    reason="needs both pwsh and Windows PowerShell 5.1",
+)
+def test_ps1_payload_hash_is_identical_on_both_powershell_hosts(tmp_path: Path) -> None:
+    """Either host may run the installer against the same slot, so the hash
+    must not depend on the host's culture-aware sort order (NLS vs ICU)."""
+    harness = _ps_harness(tmp_path, "absent", "Write-Host \"PH=$ph\"\n")
+    for name in ("a-b.py", "a_b.py", "a.b.py", "ab.py", "aB.py"):
+        (_plugin_source(tmp_path).parent / name).write_text("X = 1\n", encoding="utf-8")
+    hashes = {}
+    for host in (_PWSH, _WINDOWS_POWERSHELL):
+        result = subprocess.run(
+            [host, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(harness)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        hashes[host] = _reported(result.stdout, "PH")
+        assert hashes[host], result.stdout + result.stderr
+    assert len(set(hashes.values())) == 1, hashes
+
+
+# --------------------------------------------------------------------------
 # POSIX (bash)
 # --------------------------------------------------------------------------
 
 _SH_FUNCTIONS = (
+    ("_uv_source_paths", True),
+    ("_payload_lib_roots", True),
+    ("_payload_tree_digests", True),
+    ("_compute_payload_hash", True),
     ("_payload_hash", False),
     ("_bootstrap_python", False),
     ("_versioned_current", False),
@@ -431,6 +626,12 @@ _versioned_activate() {{ rec ACTIVATED; exit 50; }}
 _versioned_slot_clean() {{ rec PROCEEDED; exit 42; }}
 _venv_healthy() {{ return 1; }}
 _uv_venv_resilient() {{ rec BUILT; exit 42; }}
+# Hermetic shared-library resolution: only the fake checkout's libs/.
+_resolve_vendored_lib() {{
+    local c="$PLUGIN_DIR/../../libs/$1"
+    [[ -f "$c/pyproject.toml" ]] || return 1
+    (cd "$c" && pwd)
+}}
 {functions}
 vr="$SCRIPT_DIR/versioned_runtime.py"
 ph="$(_payload_hash)"
@@ -524,6 +725,85 @@ def test_sh_call_sites_fail_on_refused_completion_and_guard_precedes_mutation() 
     assert guard < update.index('_update_lifecycle_drain_stop "')
     install = _extract_sh("do_install", text)
     assert install.index("if _guard_published_slot; then") < install.index("_install_slot_build\n")
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+def test_sh_payload_hash_does_not_depend_on_locale(tmp_path: Path) -> None:
+    """Identical-content files tie on their digest and are ordered by path;
+    that order must not follow the caller's locale (shell vs service manager)."""
+    harness = _sh_harness(tmp_path, "absent", 'echo "PH=$ph"\n')
+    for name in ("a-b.py", "a_b.py", "aB.py", "ab.py"):
+        (_plugin_source(tmp_path).parent / name).write_text("", encoding="utf-8")
+    hashes = set()
+    for locale in ("C", "en_US.UTF-8"):
+        env = {**os.environ, "LC_ALL": locale}
+        result = subprocess.run(
+            [_bash(), str(harness)], capture_output=True, text=True, timeout=120, check=False, env=env
+        )
+        hashes.add(_reported(result.stdout, "PH"))
+    assert len(hashes) == 1 and "" not in hashes, hashes
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+def test_sh_shared_lib_only_change_is_not_reused(tmp_path: Path) -> None:
+    change = f"echo 'VALUE = 2' >> {_sh_quote(_posix(_lib_source(tmp_path, 'ssh-manager')))}\n"
+    result = _run_sh(_sh_harness(tmp_path, "match-active", change + "do_install"))
+    _assert_outcome(tmp_path, result, _REFUSED)
+    assert "different payload content" in result.stderr, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+def test_sh_payload_hash_covers_every_shared_lib_but_not_artifacts(tmp_path: Path) -> None:
+    lib_dir = tmp_path / "repo" / "libs" / "ssh-manager"
+    action = 'echo "H0=$(_payload_hash)"\n'
+    action += "".join(
+        f"mkdir -p {_sh_quote(_posix((lib_dir / rel).parent))}; "
+        f"echo x > {_sh_quote(_posix(lib_dir / rel))}\n"
+        for rel in _LIB_ARTIFACTS
+    )
+    action += 'echo "H1=$(_payload_hash)"\n'
+    for lib in _SHARED_LIBS:
+        action += f"echo 'VALUE = 2' > {_sh_quote(_posix(_lib_source(tmp_path, lib)))}\n"
+        action += f'echo "H-{lib}=$(_payload_hash)"\n'
+    _assert_hash_steps(_run_sh(_sh_harness(tmp_path, "absent", action)))
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+def test_sh_marker_publishes_the_pre_admission_hash(tmp_path: Path) -> None:
+    """The completion marker records the hash admission used, even when a
+    source file changes while the slot is being built."""
+    source = _sh_quote(_posix(_plugin_source(tmp_path)))
+    action = (
+        'echo "PH=$ph"\n'
+        "_install_slot_build() {\n"
+        f"    rec BUILT; echo 'VALUE = 2' >> {source}\n"
+        '    echo "FRESH=$(_compute_payload_hash 2>/dev/null)"\n'
+        "}\n"
+        "do_install\n"
+    )
+    result = _run_sh(_sh_harness(tmp_path, "incomplete", action))
+    detail = f"rc={result.returncode}\n{result.stdout}{result.stderr}"
+    assert result.returncode == 50 and "BUILT" in _events(tmp_path), detail
+    ph = _reported(result.stdout, "PH")
+    assert _published_hash(tmp_path) == ph, detail
+    assert _reported(result.stdout, "FRESH") != ph, detail
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+def test_sh_manifest_hash_is_the_admitted_hash(tmp_path: Path) -> None:
+    """installer-engine's write_deploy_manifest reads `_payload_hash`; after
+    admission it must return the admitted value, not a recomputation."""
+    source = _sh_quote(_posix(_plugin_source(tmp_path)))
+    action = (
+        'echo "PH=$ph"\n'
+        "if _guard_published_slot; then rec GUARDED; fi\n"
+        f"echo 'VALUE = 2' >> {source}\n"
+        'echo "MANIFEST_HASH=$(_payload_hash)"\n'
+    )
+    result = _run_sh(_sh_harness(tmp_path, "match-active", action))
+    detail = f"rc={result.returncode}\n{result.stdout}{result.stderr}"
+    assert result.returncode == 0 and "GUARDED" in _events(tmp_path), detail
+    assert _reported(result.stdout, "MANIFEST_HASH") == _reported(result.stdout, "PH"), detail
 
 
 # --------------------------------------------------------------------------
