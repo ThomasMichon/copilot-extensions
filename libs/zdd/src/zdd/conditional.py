@@ -370,23 +370,21 @@ class PreparedCutover:
                     ):
                         raise CutoverError("candidate identity changed before disposal")
                     termination = diagnostics.terminate_pid_if_identity(
-                        self.new.pid, self.new.process_start_time
+                        self.new.pid, self.new.process_start_time,
+                        exit_timeout=min(5.0, self.request.retirement_timeout),
                     )
                     if (
                         termination.get("killed") is not True
                         or termination.get("identity_verified") is not True
+                        or termination.get("exit_confirmed") is not True
                     ):
                         raise CutoverError("identity-bound candidate disposal refused")
+                result.rolled_back = True
+                result.steps.append("rollback: new daemon exit confirmed")
         except (OSError, ValueError, CutoverError):
             result.steps.append("rollback pending: candidate disposal refused or failed")
             log.error("Conditional cutover candidate disposal refused or failed")
             return
-        if self.orch._await_exit(handle):
-            result.rolled_back = True
-            result.steps.append("rollback: new daemon exit confirmed")
-        else:
-            result.steps.append("rollback pending: candidate exit unconfirmed")
-            log.error("Conditional cutover candidate exit remains unconfirmed")
 
 
 def run_conditional_cutover(

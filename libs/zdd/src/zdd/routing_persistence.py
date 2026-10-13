@@ -42,7 +42,7 @@ def write(path: Path, data: dict) -> None:
             if getattr(exc, "winerror", None) not in (5, 32, 33) or attempt == 19:
                 raise
             time.sleep(0.05)
-    if sys.platform != "win32":
+    if sys.platform == "linux":
         try:
             descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
             try:

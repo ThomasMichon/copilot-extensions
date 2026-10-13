@@ -62,9 +62,12 @@ Missing/malformed history, a changed epoch, an unknown birth token or a matching
 PID/port publication cannot authorize disposal. PID/port reuse conservatively
 blocks cleanup instead of weakening custody.
 Conservative custody is durably committed while the old route remains visible,
-before publishing a route that can admit work. Writes flush the file and parent
-directory on POSIX and use a flushed file plus native write-through replacement
-on Windows. A failed final flip may retain an extra protected candidate; it
+before publishing a route that can admit work. Linux writes flush the file and
+parent directory; Windows uses a flushed file plus native write-through
+replacement. Other POSIX platforms, including macOS, retain flushed-file
+atomic replacement without the Linux-only directory barrier; power-loss
+durability and native identity-bound conditional retirement are not validated
+there. A failed final flip may retain an extra protected candidate; it
 must never manufacture a false negative after a crash.
 Replacement visibility and durability are separate outcomes. A post-replace
 directory-flush failure raises `PublicationCommitUncertain`; cutover retains
@@ -149,7 +152,9 @@ capture channel; there is no generic health-based configuration fabrication.
 the process-local lock. Pre-spawn contention refuses unchanged; publication
 contention attempts disposal only of a verified never-promoted candidate;
 unavailable cleanup authority retains it with a nonterminal breadcrumb.
-Disposal rechecks publication and process identity under the routing lock.
+Disposal rechecks publication and process identity under the routing lock and
+holds that fence through exact native exit confirmation (at most five seconds,
+capped by `retirement_timeout`). Signal acceptance alone retains recovery state.
 After publication,
 rollback CAS-restores only the attempt's own route, revalidates the predecessor,
 and undrains it through captured credentials. Changed ownership or inability to

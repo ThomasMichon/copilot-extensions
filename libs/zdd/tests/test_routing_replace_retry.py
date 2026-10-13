@@ -1,8 +1,36 @@
-"""Atomic route publication survives brief Windows sharing conflicts."""
+"""Atomic route publication survives sharing conflicts and platform barriers."""
 
+import json
+import os
+import stat
 import pytest
 
 from zdd import routing
+
+
+@pytest.mark.parametrize("platform,directory_flushes", [("linux", 1), ("darwin", 0)])
+def test_directory_barrier_matches_supported_platform(
+    tmp_path, monkeypatch, platform, directory_flushes,
+):
+    from zdd import routing_persistence
+
+    real_fsync = os.fsync
+    calls = []
+
+    def fsync(descriptor):
+        directory = stat.S_ISDIR(os.fstat(descriptor).st_mode)
+        calls.append(directory)
+        if directory and platform == "darwin":
+            raise OSError("fixture unsupported directory fsync")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(routing_persistence.sys, "platform", platform)
+    monkeypatch.setattr(routing_persistence.os, "fsync", fsync)
+    path = tmp_path / "active.json"
+    routing_persistence.write(path, {"active": "new"})
+    assert json.loads(path.read_text()) == {"active": "new"}
+    assert calls.count(False) == 1
+    assert calls.count(True) == directory_flushes
 
 
 @pytest.mark.parametrize("winerror", [5, 32, 33])

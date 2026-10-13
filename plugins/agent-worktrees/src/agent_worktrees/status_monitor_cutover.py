@@ -410,6 +410,12 @@ def activate_after_update(
     if not summary["enabled"]:
         summary["reason"] = "disabled"
         return summary
+    refusal = breadcrumb.recovery_refusal(
+        routing_dir(), breadcrumb.read_breadcrumb(routing_dir()),
+    )
+    if refusal is not None:
+        summary.update(action="refused", reason=refusal, result={"ok": False, "error": refusal})
+        return summary
     monitor_was_live = _monitor_lock_is_live() if monitor_was_live is None else bool(monitor_was_live)
     if not _monitor_lock_is_live():
         if monitor_was_live:
@@ -442,7 +448,15 @@ def activate_after_update(
             _make_client,
             health_check=_health_check,
         )
+        if summary["recovery"].get("refused"):
+            reason = breadcrumb.refusal_reason(summary["recovery"])
+            summary.update(action="refused", reason=reason, result={"ok": False, "error": reason})
+            return summary
         summary["passive_reap"] = _reap_abandoned_passive(pre_recovery)
+        if summary["passive_reap"].get("refused"):
+            reason = breadcrumb.refusal_reason(summary["passive_reap"])
+            summary.update(action="refused", reason=reason, result={"ok": False, "error": reason})
+            return summary
         orch = CutoverOrchestrator(
             routing_dir(),
             bind=_BIND,

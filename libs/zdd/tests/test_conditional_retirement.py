@@ -444,7 +444,9 @@ def test_identity_bound_candidate_disposal_refusal_retains_recovery(case, monkey
 
     monkeypatch.setattr(
         "zdd.diagnostics.terminate_pid_if_identity",
-        lambda *_: {"killed": False, "identity_verified": False},
+        lambda *_args, **_kwargs: {
+            "killed": False, "identity_verified": False, "exit_confirmed": False,
+        },
     )
     result = orch.run(
         conditional=replace(

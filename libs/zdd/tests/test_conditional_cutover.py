@@ -54,10 +54,11 @@ def case(tmp_path, monkeypatch):
 
     handle = Handle()
 
-    def terminate_identity(pid, start):
+    def terminate_identity(pid, start, *, exit_timeout):
         assert pid == handle.pid and start == str(pid * 10)
+        assert exit_timeout == 5.0
         handle.terminate()
-        return {"killed": True, "identity_verified": True}
+        return {"killed": True, "identity_verified": True, "exit_confirmed": True}
 
     monkeypatch.setattr("zdd.diagnostics.terminate_pid_if_identity", terminate_identity)
 
@@ -213,6 +214,53 @@ def test_candidate_promoted_then_displaced_twice_is_not_disposed(case):
     assert not result.ok and not result.rolled_back
     assert handle.poll() is None and events == ["spawn"]
     assert any("candidate disposal refused" in step for step in result.steps)
+
+
+@pytest.mark.parametrize("exit_confirmed", [False, True])
+def test_disposal_confirms_native_exit_before_releasing_publication_fence(
+    case, monkeypatch, exit_confirmed,
+):
+    root, _, events, handle, snapshot, request, orch = case
+    outcomes = []
+
+    def publish_competitor():
+        try:
+            with routing.routing_lock(root, deadline=time.monotonic()):
+                outcomes.append("admitted")
+        except routing.RoutingLockTimeout:
+            outcomes.append("blocked")
+
+    def terminate(pid, start, *, exit_timeout):
+        assert pid == handle.pid and start == str(pid * 10) and exit_timeout == 5.0
+        competitor = threading.Thread(target=publish_competitor)
+        competitor.start()
+        competitor.join(timeout=2)
+        assert not competitor.is_alive()
+        if exit_confirmed:
+            handle.terminate()
+        return {
+            "killed": True, "identity_verified": True, "exit_confirmed": exit_confirmed,
+        }
+
+    monkeypatch.setattr("zdd.diagnostics.terminate_pid_if_identity", terminate)
+    monkeypatch.setattr(
+        orch, "_await_exit",
+        lambda _: pytest.fail("candidate exit checked outside publication fence"),
+    )
+    attest = snapshot.attest
+    request = replace(request, capture_runtime=lambda _: replace(
+        snapshot, attest=lambda endpoint: replace(
+            attest(endpoint), ready=endpoint.pid != handle.pid,
+        ),
+    ))
+    result = orch.run(conditional=request, health_timeout=0)
+    assert not result.ok and result.rolled_back is exit_confirmed
+    assert outcomes == ["blocked"]
+    assert events == (["spawn", "terminate"] if exit_confirmed else ["spawn"])
+    if exit_confirmed:
+        assert breadcrumb.read_breadcrumb(root) is None
+    else:
+        assert breadcrumb.read_breadcrumb(root)["state"] == "conditional-started"
 
 
 @pytest.mark.parametrize("content", ["{", "{}", '{"state":"unknown"}'])

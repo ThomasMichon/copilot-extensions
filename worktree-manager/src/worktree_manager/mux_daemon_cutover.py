@@ -585,14 +585,18 @@ def _already_at_version(route: routing.Endpoint | None, version: str, *, root: P
 
 
 def _stale_cutover_in_progress(root: Path) -> bool:
-    """True if the durable breadcrumb marks an aborted prior cutover.
+    """True if recovery custody needs locked validation before any fast path.
 
     Only used to gate the *lock-free* pre-check below: it cannot safely run
     recovery itself (no lock held), so while a cutover looks aborted it must
     fall through to the locked path, where recovery always runs before any
     no-op decision is made.
     """
-    return breadcrumb.is_stale(breadcrumb.read_breadcrumb(routing_dir(root)))
+    record = breadcrumb.read_breadcrumb(routing_dir(root))
+    return (
+        breadcrumb.recovery_refusal(routing_dir(root), record) is not None
+        or breadcrumb.is_stale(record)
+    )
 
 
 def activate_after_update(
@@ -627,6 +631,13 @@ def activate_after_update(
 
     lease = _acquire_cutover_lock(resolved_root)
     try:
+        pre_recovery = breadcrumb.read_breadcrumb(routing_dir(resolved_root))
+        refusal = breadcrumb.recovery_refusal(routing_dir(resolved_root), pre_recovery)
+        if refusal is not None:
+            summary.update(
+                action="refused", reason=refusal, result={"ok": False, "error": refusal},
+            )
+            return summary
         load_or_create_control_token(resolved_root)
         lock_data = mux_daemon.read_lock_data(mux_daemon.lock_path(resolved_root))
         route = routed_endpoint(resolved_root)
@@ -646,7 +657,6 @@ def activate_after_update(
         # right below -- so a crashed prior cutover's stranded old daemon or
         # abandoned passive is never masked by an early "already active"
         # return.
-        pre_recovery = breadcrumb.read_breadcrumb(routing_dir(resolved_root))
         summary["recovery"] = breadcrumb.recover_stale_cutover(
             routing_dir(resolved_root),
             lambda base_url: _make_client(base_url, root=resolved_root),
