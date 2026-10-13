@@ -147,6 +147,10 @@ verified by this effort's Validation Plan.
 - [x] Implement the operator-approved bounded
       [CLI wall-admission circuit](reader-admission.md), preserving fallback
       and native holder ownership; CPU and process-tree gates stay separate.
+- [ ] Implement the operator-approved
+      [owned CPU observation boundary](reader-cpu-observation.md) through
+      optional shared procutil metrics; reader wiring and enforcement remain
+      separate gates.
 - [ ] Define role keys, expected wall/CPU cost, fan-out limits, and provenance.
 - [ ] Open admission circuits on repeated budget overruns without reclaiming
       live progressing holders; successful bounded probes close them.
@@ -317,3 +321,11 @@ The provider absence compatibility edge is covered and clarified in the
 pattern. The CLI wall-admission slice and its focused validation are complete;
 the parent role CPU/wall accounting, wider caller admission, identity-safe
 native tree cleanup and cross-platform release/adoption gates remain open.
+
+### 2026-10-13 - Owned CPU observation boundary selected
+
+The operator selected psutil-backed observation of only reader-owned PIDs
+and descendants through shared procutil. The next reviewed slice preserves
+stdlib-only default consumers via optional metrics and explicitly represents
+partial coverage and unavailable samples. Numeric CPU budgets and any
+process termination policy have not been approved by this selection.
