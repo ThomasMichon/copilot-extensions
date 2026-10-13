@@ -51,7 +51,7 @@ def _input(operation: str, payload: object) -> dict:
         if not isinstance(payload["recovery"], dict):
             raise ValueError("reserve: recovery must be a JSON object")
     else:
-        if not isinstance(payload["token"], str) or not producer._TOKEN.fullmatch(payload["token"]):
+        if not producer.is_valid_token(payload["token"]):
             raise ValueError("invalid producer token")
         if operation == "bind" and not isinstance(payload["identity"], dict):
             raise ValueError("bind: identity must be a JSON object")

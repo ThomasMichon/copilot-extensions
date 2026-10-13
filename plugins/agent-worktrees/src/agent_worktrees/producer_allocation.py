@@ -40,7 +40,7 @@ def parse_fence(value: object) -> AllocationFence:
     generation, key = value["generation"], value["key"]
     if type(generation) is not int or not 1 <= generation <= MAX_GENERATION:
         raise ValueError("invalid allocation fence generation")
-    if not isinstance(key, str) or not producer._TOKEN.fullmatch(key):
+    if not producer.is_valid_token(key):
         raise ValueError("invalid allocation fence key")
     return AllocationFence(generation, key)
 

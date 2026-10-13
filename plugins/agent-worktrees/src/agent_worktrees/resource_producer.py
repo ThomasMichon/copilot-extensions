@@ -22,6 +22,11 @@ _TOKEN = re.compile(r"^[A-Za-z0-9_-]{32,128}\Z")
 _write_paths: ContextVar[frozenset[str]] = ContextVar("producer_write_paths", default=frozenset())
 
 
+def is_valid_token(value: object) -> bool:
+    """Validate public opaque-token syntax without exposing its implementation."""
+    return isinstance(value, str) and _TOKEN.fullmatch(value) is not None
+
+
 def canonical_json(value: object) -> str:
     """Validate actual JSON values and encode deterministically, without NaN."""
     def check(item: object, depth: int = 0) -> None:
@@ -97,7 +102,7 @@ def valid_metadata(value: object) -> bool:
         return False
     if type(value["version"]) is not int or value["version"] != VERSION or value["lifetime"] != "disposable-owned":
         return False
-    if not isinstance(value["token"], str) or not _TOKEN.fullmatch(value["token"]):
+    if not is_valid_token(value["token"]):
         return False
     namespace = value["namespace"]
     if not isinstance(namespace, str) or not claim_providers.is_safe_argument(namespace):
@@ -190,7 +195,10 @@ def transaction(*paths: Path) -> Iterator[None]:
 
 def preserve_claims(record, current, path: Path) -> None:
     """Fence generic full-record writers, including stale saves and repairs."""
-    for claims in (record.resources, current.resources if current is not None else []):
+    sides = (record.resources, current.resources if current is not None else [])
+    if not any(claim.has_producer for claims in sides for claim in claims):
+        return
+    for claims in sides:
         seen: dict[str, bool] = {}
         tokens: set[str] = set()
         for claim in claims:
