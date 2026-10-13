@@ -798,6 +798,8 @@ async def post_live_message(
         log, after=after, timeout=body.wait_timeout, message_id=message_id
     )
     current_receipt = db.live_message_receipt(target_session_id, message_id)
+    if current_receipt:
+        target_session_id = current_receipt["session_id"]
     return SendMessageResult(
         session_id=target_session_id,
         message_id=message_id,

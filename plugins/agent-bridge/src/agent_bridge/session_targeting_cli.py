@@ -362,6 +362,7 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
         if refused is None:
             raise
         raise refused from exc
+    session_id = result.get("session_id", session_id)
     if args.json:
         # A daemon that reports duplicates always includes the field; an older
         # one omits it, so a keyed retry can't be told from a first delivery.
@@ -392,6 +393,12 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
     else:
         print("    (no reply-to: this sender is not a live session; reply won't route)")
     if not wait:
+        return
+    if result.get("duplicate"):
+        print(
+            "\n[..] Duplicate request; no additional reply wait was started "
+            "(inspect the existing message receipt rather than resend)."
+        )
         return
     if result.get("replied"):
         reply = result.get("reply")

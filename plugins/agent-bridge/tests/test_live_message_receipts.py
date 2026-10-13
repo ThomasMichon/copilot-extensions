@@ -302,6 +302,35 @@ def test_reply_timeout_does_not_change_admitted_message_or_trigger_retry(api):
     assert retry["message_id"] == first["message_id"]
 
 
+@pytest.mark.parametrize("replied", [False, True])
+def test_same_process_rename_during_reply_wait_returns_current_identity(
+    api: TestClient, tmp_db: Database, monkeypatch: pytest.MonkeyPatch, replied: bool,
+) -> None:
+    now = time.time()
+    tmp_db.register_live_session(
+        "live-1", machine="example-host", cwd="/example", worktree_id="wt-1", repo=None,
+        branch=None, pid=77, role=None, now=now, process_started_at=now - 10,
+    )
+    tmp_db.execute_write("UPDATE live_sessions SET cli_mode=1 WHERE session_id='live-1'")
+
+    async def renamed(_log: EventLog, **_kwargs: object) -> dict[str, object]:
+        tmp_db.register_live_session(
+            "live-renamed", machine="example-host", cwd="/example", worktree_id="wt-1",
+            repo=None, branch=None, pid=77, role=None, now=now + 1,
+            process_started_at=now - 10,
+        )
+        return {"replied": replied, "reply": "observed reply" if replied else None,
+                "stop_reason": "end_turn" if replied else None}
+
+    monkeypatch.setattr(live_sessions, "await_turn_reply", renamed)
+    result = _send(api, wait=True, wait_timeout=0.1)
+    assert result["session_id"] == result["receipt"]["session_id"] == "live-renamed"
+    assert result["receipt_current"] and result["replied"] is replied
+    retry = _send(api, wait=True)
+    assert retry["duplicate"] and retry["message_id"] == result["message_id"]
+    assert retry["session_id"] == "live-renamed"
+
+
 def test_retirement_during_reply_wait_preserves_admission_and_reports_lost_evidence(api, tmp_db, monkeypatch):
     async def retired(_log, **_kwargs):
         tmp_db.deregister_live_session("live-1")
@@ -413,6 +442,36 @@ def test_live_cli_defaults_to_receipt_and_explicit_wait_is_opt_in(monkeypatch, c
     args.wait_reply = True
     _deliver_to_live_session(client, args, "live-1", "update")
     assert client.wait is True
+
+
+@pytest.mark.parametrize("duplicate", [False, True])
+@pytest.mark.parametrize("as_json", [False, True])
+def test_cli_wait_output_distinguishes_duplicate_and_uses_current_identity(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    duplicate: bool, as_json: bool,
+) -> None:
+    client = BridgeClient("http://127.0.0.1:1", "test")
+    monkeypatch.setattr(client, "_request", lambda *_args, **_kwargs: {
+        "message_id": 7, "session_id": "live-renamed", "duplicate": duplicate,
+        "receipt": {"stage": "admitted"}, "replied": False,
+    })
+    monkeypatch.setattr(cli, "_live_sender_label", lambda _args: "peer")
+    monkeypatch.setattr(cli, "_live_reply_to", lambda _args: None)
+    args = argparse.Namespace(
+        json=as_json, no_wait=False, wait_reply=True, reply_timeout=120.0,
+        idempotency_key="message-1",
+    )
+    _deliver_to_live_session(client, args, "live-1", "update")
+    output = capsys.readouterr().out
+    if as_json:
+        result = json.loads(output)
+        assert result["duplicate"] is duplicate and result["accepted"]
+        assert result["target"] == result["session_id"] == "live-renamed"
+    else:
+        assert "Accepted by live session inbox live-renamed" in output
+        assert "observe: agent-bridge read live-renamed --message-id 7 --json" in output
+        assert ("No reply within 120s" in output) is not duplicate
+        assert ("no additional reply wait was started" in output) is duplicate
 
 
 @pytest.mark.parametrize("tail", [0, 2, 100])
