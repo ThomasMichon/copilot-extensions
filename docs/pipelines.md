@@ -109,7 +109,10 @@ resolving a toolchain or executing a build.
 Using only those trusted tools, it recomposes the bound dev/main snapshot
 (including version bumps and materialization), discovers the plugin/vendored
 source closure, checks distribution names and versions, and recomputes each
-payload hash from that candidate data. Candidate-supplied hashes and
+payload hash from that candidate data. Before hashing, it checks out the
+composed index through Git so declared checkout attributes, including CRLF
+scripts, match the fresh candidate checkout used by the exporter. It does not
+normalize payload hashes or waive byte equality. Candidate-supplied hashes and
 first-party labels alone never establish source provenance. The publisher
 repeats this source binding against the actual merged snapshot.
 It rejects duplicate, extra, missing, non-regular or unsafe members, with a

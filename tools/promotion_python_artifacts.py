@@ -743,14 +743,21 @@ def validate_candidate_artifacts(
             last_dev_head=(state.get("last_promotion") or {}).get("dev_head"),
             trusted_source=Path(__file__).resolve().parent.parent,
         )
-        return validate_artifacts(
-            directory, content_tree=promotion.build_promotion_tree(
-                scratch, control=summary.get("control_preserved"),
-            ),
-            dev_head=dev_head, main_before=main_before, projects=candidate_projects(scratch),
-            candidate_root=scratch,
-            source_policy=source_policy, min_age_days=min_age_days,
+        content_tree = promotion.build_promotion_tree(
+            scratch, control=summary.get("control_preserved"),
         )
+        # A fresh destination applies checkout attributes even to stat-clean generated files.
+        with tempfile.TemporaryDirectory(prefix="promotion-artifact-validation-") as temporary:
+            candidate = Path(temporary)
+            promotion._git(
+                ["checkout-index", "--all", f"--prefix={candidate}{os.sep}"], cwd=scratch,
+            )
+            return validate_artifacts(
+                directory, content_tree=content_tree,
+                dev_head=dev_head, main_before=main_before, projects=candidate_projects(candidate),
+                candidate_root=candidate,
+                source_policy=source_policy, min_age_days=min_age_days,
+            )
     except promotion.PromotionError as exc:
         raise PromotionArtifactError(f"cannot compose trusted artifact sources: {exc}") from exc
     finally:
