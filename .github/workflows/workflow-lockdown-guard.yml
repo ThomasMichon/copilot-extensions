@@ -281,6 +281,8 @@ jobs:
   workflow-lockdown-guard:
     name: workflow-lockdown-guard
     if: github.event_name == 'pull_request_target'
+    # A skipped required check can count as success; label/body edits must not
+    # replace a protected-path failure with a skipped job.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -377,6 +379,7 @@ jobs:
       - name: Require public-safe source metadata
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
+          retries: 0
           script: |
             await require("./.github/actions/required-pr-attribution.cjs").enforce({github, context, core});
 
@@ -404,5 +407,6 @@ jobs:
       - name: Refresh current dev source metadata checks
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
+          retries: 0
           script: |
             await require("./.github/actions/required-pr-attribution.cjs").backfill({github, context, core});

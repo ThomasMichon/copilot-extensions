@@ -10,6 +10,32 @@ const context = {
 function pr(body, labels = []) {
   return { body, labels, base: { ref: "dev" }, state: "open", head: { sha: "head" } };
 }
+function paged(invoke) {
+  invoke.iterator = async function* (method, options) {
+    const values = await invoke(method, options);
+    for (let start = 0; start < Math.max(1, values.length); start += options.per_page) {
+      const next = start + options.per_page < values.length;
+      yield { data: values.slice(start, start + options.per_page),
+        headers: next ? { link: '<https://api.github.com/next>; rel="next"' } : {} };
+    }
+  };
+  return invoke;
+}
+function countRequests(github) {
+  let requests = 0;
+  for (const endpoints of Object.values(github.rest)) {
+    for (const [name, invoke] of Object.entries(endpoints)) {
+      endpoints[name] = async (...params) => { requests++; return invoke(...params); };
+    }
+  }
+  const paginate = github.paginate;
+  github.paginate = paged(async (method, options) => {
+    const result = await paginate(method, options);
+    requests += Math.max(1, Math.ceil(result.length / options.per_page));
+    return result;
+  });
+  return () => requests;
+}
 function core() {
   const messages = [];
   const summary = {
@@ -54,6 +80,12 @@ test("malformed, duplicate, raw and quoted forms fail without reflecting their v
   }
 });
 
+test("unsupported description types and sizes have distinct actionable diagnostics", () => {
+  assert.match(gate.validate({}), /description must be text/);
+  assert.match(gate.validate("x".repeat(65537)), /65,536-character limit; shorten/);
+  assert.equal(gate.validate(marker + "\n" + "x".repeat(65536 - marker.length - 1)), null);
+});
+
 test("silent approvals emit no attribution diagnostic", async () => {
   for (const value of [
     pr("", [{ name: "attribution-exempt" }]),
@@ -63,7 +95,7 @@ test("silent approvals emit no attribution diagnostic", async () => {
     await gate.enforce({
       context, core: output,
       github: {
-        paginate: async () => [{ ...value, number: 1 }],
+        paginate: paged(async () => [{ ...value, number: 1 }]),
         rest: { repos: { listPullRequestsAssociatedWithCommit() {} },
           pulls: { list() {}, get: async () => ({ data: value }) } },
       },
@@ -186,7 +218,7 @@ test("quoted and indented examples neither satisfy nor conflict with standalone 
 test("current description is reread and body-only repairs change the verdict", async () => {
   let current = pr("");
   const github = {
-    paginate: async () => [{ ...current, number: 1 }],
+    paginate: paged(async () => [{ ...current, number: 1 }]),
     rest: { repos: { listPullRequestsAssociatedWithCommit() {} },
       pulls: { list() {}, get: async () => ({ data: current }) } },
   };
@@ -208,10 +240,10 @@ test("current description is reread and body-only repairs change the verdict", a
 function headFixture(values) {
   const created = [];
   const github = {
-    paginate: async (_method, options) => values.filter((value) =>
+    paginate: paged(async (_method, options) => values.filter((value) =>
       value.state === "open" && value.base.ref === "dev" &&
       (!options.commit_sha || value.head.sha === options.commit_sha),
-    ),
+    )),
     rest: {
       repos: { listPullRequestsAssociatedWithCommit() {} },
       pulls: { list() {}, get: async ({ pull_number }) => ({
@@ -288,11 +320,11 @@ test("peer membership changes invalidate refresh publication and deduplicated re
     const update = github.rest.checks.update;
     const paginate = github.paginate;
     let lists = 0;
-    github.paginate = async (...params) => {
+    github.paginate = paged(async (...params) => {
       // Initial batch listing, observed policy, then deduplication reread.
       if (stage === "deduplicate" && ++lists === 3) join();
       return paginate(...params);
-    };
+    });
     github.rest.checks.create = async (check) => {
       const result = await create(check);
       if (stage === "create" && check.status === "in_progress") join();
@@ -323,10 +355,10 @@ test("native enforcement refuses stale event heads and changing membership", asy
     if (stale === "membership") {
       const paginate = github.paginate;
       let lists = 0;
-      github.paginate = async (...params) => {
+      github.paginate = paged(async (...params) => {
         if (++lists === 2) values.push({ ...pr(""), number: 2 });
         return paginate(...params);
-      };
+      });
     }
     const output = core();
     await gate.enforce({ github, context, core: output });
@@ -364,13 +396,13 @@ test("normal refreshes list all open PRs once and query only associated heads th
       endpoints[name] = async (...params) => { requests++; return invoke(...params); };
     }
   }
-  github.paginate = async (method, options) => {
+  github.paginate = paged(async (method, options) => {
     if (method === github.rest.pulls.list) { fullLists++; assert.equal(options.commit_sha, undefined); }
     else { associations++; assert.ok(options.commit_sha); }
     const result = await paginate(method, options);
     requests += Math.max(1, Math.ceil(result.length / options.per_page));
     return result;
-  };
+  });
   await gate.backfill({ github, context, core: core(), pause: async () => {} });
   assert.equal(fullLists, 1);
   assert.equal(created.length, values.length);
@@ -379,19 +411,83 @@ test("normal refreshes list all open PRs once and query only associated heads th
   assert.ok(created.every((check) => check.conclusion === "success"));
 });
 
+test("larger refreshes stop explicitly before exhausting the Actions request quota", async () => {
+  const values = Array.from({ length: 200 }, (_, index) => ({
+    ...pr(marker), number: index + 1, head: { sha: `head-${index}` },
+  }));
+  const { github, created } = headFixture(values);
+  const requests = countRequests(github);
+  const output = core();
+  await assert.rejects(gate.backfill({ github, context, core: output, pause: async () => {} }),
+                       /request budget; retry after the rate-limit reset/);
+  assert.ok(requests() <= 950);
+  assert.ok(created.length < values.length + 1);
+  assert.ok(created.every((check) => check.status === "completed"));
+  assert.equal(created.at(-1).conclusion, "failure");
+  assert.ok(!output.messages.includes("Current dev pull request metadata checks refreshed."));
+});
+
+test("budget exhaustion reserves failure fencing before and after completion", async () => {
+  for (const requestLimit of [7, 8, 9]) {
+    const { github, created } = headFixture([{ ...pr(marker), number: 1 }]);
+    const requests = countRequests(github);
+    await assert.rejects(gate.backfill({
+      github, context, core: core(), requestLimit, pause: async () => {},
+    }), /request budget/);
+    assert.ok(requests() <= requestLimit);
+    assert.ok(created.every((check) => check.status === "completed"));
+    assert.equal(created.at(-1).conclusion, "failure");
+    if (requestLimit === 9) assert.equal(created[0].conclusion, "success",
+                                       "the completed conclusion is superseded, never rewritten");
+  }
+});
+
+test("budget exhaustion fences an existing success when deduplication cannot be verified", async () => {
+  const { github, created } = headFixture([{ ...pr(marker), number: 1 }]);
+  await gate.backfill({ github, context, core: core(), pause: async () => {} });
+  assert.equal(created[0].conclusion, "success");
+  const requests = countRequests(github);
+  await assert.rejects(gate.backfill({
+    github, context, core: core(), requestLimit: 6, pause: async () => {},
+  }), /request budget/);
+  assert.ok(requests() <= 6);
+  assert.equal(created[0].conclusion, "success");
+  assert.equal(created.at(-1).conclusion, "failure");
+  assert.ok(created.at(-1).external_id.endsWith(":superseded"));
+});
+
+test("each pagination page is admitted before its request, including oversized listings", async () => {
+  const { RefreshBudget } = require("./source-refresh-budget.cjs");
+  const budget = new RefreshBudget(4);
+  let requested = 0;
+  let closed = false;
+  const github = { paginate: { iterator: () => ({
+    [Symbol.asyncIterator]() { return this; },
+    async next() {
+      requested++;
+      return { done: false, value: { data: [], headers: { link: '<https://api.github.com/next>; rel="next"' } } };
+    },
+    async return() { closed = true; return { done: true }; },
+  }) } };
+  await assert.rejects(budget.list(github, () => {}, { per_page: 100 }), /request budget/);
+  assert.equal(requested, 4);
+  assert.equal(budget.used, 4);
+  assert.ok(closed);
+});
+
 test("association omissions use a fresh full listing without hiding same-head peers", async () => {
   for (const peer of [false, true]) {
     const values = [{ ...pr(marker), number: 1 }];
     if (peer) values.push({ ...pr(""), number: 2 });
     const { github } = headFixture(values);
     const paginate = github.paginate;
-    github.paginate = async (method, options) => method === github.rest.pulls.list ?
-      paginate(method, options) : [{ ...pr(marker), number: 3, state: "closed" }];
+    github.paginate = paged(async (method, options) => method === github.rest.pulls.list ?
+      paginate(method, options) : [{ ...pr(marker), number: 3, state: "closed" }]);
     const output = core();
     await gate.enforce({ github, context, core: output });
     if (peer) assert.ok(output.messages.join("\n").includes("Multiple open dev pull requests"));
     else assert.deepEqual(output.messages, []);
-    github.paginate = async () => [];
+    github.paginate = paged(async () => []);
     await assert.rejects(gate.enforce({ github, context, core: core() }), /membership could not be verified/);
   }
 });
@@ -404,7 +500,7 @@ test("associated ancestor commits, non-dev and closed PRs do not create head col
     { ...pr(""), number: 4, state: "closed" },
   ];
   const { github } = headFixture(values);
-  github.paginate = async () => values;
+  github.paginate = paged(async () => values);
   const output = core();
   await gate.enforce({ github, context, core: output });
   assert.deepEqual(output.messages, []);
@@ -413,9 +509,9 @@ test("associated ancestor commits, non-dev and closed PRs do not create head col
 test("existing PR heads receive distinct current metadata results", async () => {
   const created = [];
   const github = {
-    paginate: async () => [1, 2].map((number) => ({
+    paginate: paged(async () => [1, 2].map((number) => ({
       ...pr(number === 1 ? marker : ""), number, head: { sha: `head-${number}` },
-    })),
+    }))),
     rest: {
       repos: { listPullRequestsAssociatedWithCommit() {} },
       pulls: {
@@ -445,7 +541,7 @@ test("unchanged decisions avoid repeated writes while body changes are reevaluat
   let current = pr(marker);
   const created = [];
   const github = {
-    paginate: async () => [{ ...current, number: 1 }],
+    paginate: paged(async () => [{ ...current, number: 1 }]),
     rest: {
       repos: { listPullRequestsAssociatedWithCommit() {} },
       pulls: { list() {}, get: async () => ({ data: current }) },
@@ -482,7 +578,7 @@ test("changes during pacing and publication cannot leave a stale success", async
     let changed = false;
     const invalidate = () => { changed = true; current = pr(""); };
     const github = {
-      paginate: async () => [{ ...current, number: 1 }],
+      paginate: paged(async () => [{ ...current, number: 1 }]),
       rest: {
         repos: { listPullRequestsAssociatedWithCommit() {} },
         pulls: { list() {}, get: async () => ({ data: current }) },
@@ -523,10 +619,10 @@ test("unverifiable publication is failed closed without exposing metadata", asyn
   let published = false;
   const created = [];
   const github = {
-    paginate: async () => {
+    paginate: paged(async () => {
       if (published) throw new Error("metadata unavailable");
       return [{ ...pr(marker), number: 1 }];
-    },
+    }),
     rest: {
       repos: { listPullRequestsAssociatedWithCommit() {} },
       pulls: { list() {}, get: async () => {
@@ -553,14 +649,14 @@ test("unverifiable or unstable PRs do not starve later current heads", async () 
     let reads = 0;
     const output = core();
     const github = {
-      paginate: async (_method, options) => {
+      paginate: paged(async (_method, options) => {
         const number = options.commit_sha === "head-1" ? 1 : 2;
         if (options.commit_sha && number === 1 && unavailable) throw new Error("private diagnostic");
         return [1, 2].map((value) => ({
           ...pr(marker), number: value, head: { sha: `head-${value}` },
           ...(options.commit_sha && value === 1 ? { body: marker + "\n" + (++reads) } : {}),
         }));
-      },
+      }),
       rest: {
         repos: { listPullRequestsAssociatedWithCommit() {} },
         pulls: { list() {}, get: async ({ pull_number }) => {

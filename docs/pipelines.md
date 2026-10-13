@@ -312,6 +312,16 @@ do not add a separate per-PR GET to each freshness read. New checks remain
 pending during pacing and are completed only after a fresh matching snapshot.
 The 150-distinct-head contract counts every read, write and pagination request
 (902 total), below the standard 1,000-request Actions quota for that pass.
+Backfill also enforces a 950-request per-run budget, including every pagination
+page, metadata read, check write and retry. It reserves failure-fencing requests
+before inspecting a head, including deduplication of an existing result, so
+exhaustion cannot strand a pending check or leave an inspected but unverifiable
+completed success as the latest result. Transport retries are disabled in both
+trusted metadata script steps; policy retries consume the same budget. A larger or
+unstable batch stops with an explicit incomplete-refresh error instead of
+hammering the exhausted quota or reporting that every PR was checked.
+Retry after the rate-limit reset, or refresh remaining PRs through their normal
+metadata events; native per-PR enforcement remains independent of this batch.
 The trusted checkout's integrity-locked CommonMark and HTML parsers identify
 actual HTML comments, excluding fenced/indented code and quoted examples even
 inside continuation list items. HTML containers cannot conceal additional

@@ -3,12 +3,14 @@ const crypto = require("node:crypto");
 const path = require("node:path");
 const { Parser, HtmlRenderer } = require("commonmark");
 const { parseFragment } = require("parse5");
+const { RefreshBudget, RefreshLimitError, invoke, paginate } = require("./source-refresh-budget.cjs");
 
 const HANDLE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const WORKFLOW = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
 const EXEMPTION = "attribution-exempt";
 const CONTEXT = "source-attribution";
 const DEFINITION = crypto.createHash("sha256").update(fs.readFileSync(__filename))
+  .update(fs.readFileSync(path.join(__dirname, "source-refresh-budget.cjs")))
   .update(fs.readFileSync(path.join(__dirname, "package-lock.json"))).digest("hex");
 const REPAIR = [
   "Every pull request targeting dev must carry one source attribution comment in its description.",
@@ -119,7 +121,8 @@ function withoutInlineCode(text) {
 
 function validate(body) {
   if (body == null) body = "";
-  if (typeof body !== "string" || body.length > 65536) return "Source attribution could not be validated.";
+  if (typeof body !== "string") return "PR description must be text before source attribution can be validated.";
+  if (body.length > 65536) return "PR description exceeds the supported 65,536-character limit; shorten it before retrying.";
   const text = metadataText(body);
   const candidates = text.match(/<!--\s*agent-worktrees:source\b/g) || [];
   const nativeCount = (text.match(/<!--\s*gh-aw-workflow-id:/g) || []).length;
@@ -162,15 +165,17 @@ function decision(pr) {
   return validate(pr.body);
 }
 
-async function currentPR(github, context, number) {
+async function currentPR(github, context, number, budget) {
   if (!Number.isSafeInteger(number) || number < 1) throw new Error("Invalid pull request metadata.");
-  return { ...(await github.rest.pulls.get({ ...context.repo, pull_number: number })).data, number };
+  return { ...(await invoke(budget, () => github.rest.pulls.get({
+    ...context.repo, pull_number: number,
+  }))).data, number };
 }
 
-async function headPolicy(github, context, number, expectedHead) {
-  let pr = expectedHead ? null : await currentPR(github, context, number);
+async function headPolicy(github, context, number, expectedHead, budget) {
+  let pr = expectedHead ? null : await currentPR(github, context, number, budget);
   const head = expectedHead || pr.head.sha;
-  let listed = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
+  let listed = await paginate(budget, github, github.rest.repos.listPullRequestsAssociatedWithCommit, {
     ...context.repo, commit_sha: head, per_page: 100,
   });
   const associated = listed.find((item) => item.number === number &&
@@ -178,10 +183,10 @@ async function headPolicy(github, context, number, expectedHead) {
   if (associated) pr = associated;
   else {
     // Commits already on the default branch can omit open PRs from the association API.
-    listed = await github.paginate(github.rest.pulls.list, {
+    listed = await paginate(budget, github, github.rest.pulls.list, {
       ...context.repo, state: "open", base: "dev", per_page: 100,
     });
-    pr = listed.find((item) => item.number === number) || await currentPR(github, context, number);
+    pr = listed.find((item) => item.number === number) || await currentPR(github, context, number, budget);
   }
   const peersForHead = (items) => items.filter((item) =>
     item.state === "open" && item.base.ref === "dev" && item.head.sha === pr.head.sha,
@@ -223,15 +228,18 @@ function snapshot(pr, peers) {
   })).digest("hex");
 }
 
-async function backfill({ github, context, core, pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
-  const prs = await github.paginate(github.rest.pulls.list, {
+async function backfill({ github, context, core, requestLimit = 950,
+  pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
+  const budget = new RefreshBudget(requestLimit);
+  const prs = await paginate(budget, github, github.rest.pulls.list, {
     ...context.repo, state: "open", base: "dev", per_page: 100,
   });
   const failed = [];
   for (const listed of prs) {
     try {
-      await refreshPR(github, context, listed, pause);
-    } catch {
+      await refreshPR(github, context, listed, pause, budget);
+    } catch (error) {
+      if (error instanceof RefreshLimitError) throw error;
       const number = Number.isSafeInteger(listed.number) && listed.number > 0 ? listed.number : "unknown";
       failed.push(number);
       core.warning(`Source metadata refresh failed for PR ${number}; continuing other PRs.`);
@@ -241,48 +249,51 @@ async function backfill({ github, context, core, pause = (ms) => new Promise((re
   core.info("Current dev pull request metadata checks refreshed.");
 }
 
-async function refreshPR(github, context, listed, pause) {
-    let stable = false;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const observed = await headPolicy(github, context, listed.number, listed.head.sha);
-      const { pr } = observed;
+async function refreshPR(github, context, listed, pause, budget) {
+  let stable = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    budget.protectPending();
+    let pr = listed;
+    let externalId = "source-metadata:" + DEFINITION + ":unverified";
+    let created;
+    try {
+      const observed = await headPolicy(github, context, listed.number, listed.head.sha, budget);
+      pr = observed.pr;
+      externalId = observed.snapshot;
       if (pr.state !== "open" || pr.base.ref !== "dev") { stable = true; break; }
-      const { data } = await github.rest.checks.listForRef({
+      const { data } = await invoke(budget, () => github.rest.checks.listForRef({
         ...context.repo, ref: pr.head.sha, check_name: CONTEXT, per_page: 100,
-      });
+      }));
       const latest = data.check_runs.filter((check) => check.app?.slug === "github-actions")
         .sort((a, b) => b.id - a.id)[0];
-      if (latest?.external_id === observed.snapshot && latest.status === "completed" &&
+      if (latest?.external_id === externalId && latest.status === "completed" &&
           latest.conclusion === (observed.error ? "failure" : "success")) {
-        if ((await headPolicy(github, context, listed.number, pr.head.sha)).snapshot === observed.snapshot) { stable = true; break; }
+        if ((await headPolicy(github, context, listed.number, pr.head.sha, budget)).snapshot === externalId) { stable = true; break; }
         continue;
       }
       await pause(1000);
-      const externalId = observed.snapshot;
-      const error = observed.error;
-      const created = await github.rest.checks.create({
+      created = await invoke(budget, () => github.rest.checks.create({
         ...context.repo, name: CONTEXT, head_sha: pr.head.sha,
-        external_id: externalId,
-        status: "in_progress",
+        external_id: externalId, status: "in_progress",
         details_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
         output: {
           title: "Required source attribution",
           summary: "Validating current source metadata.",
         },
-      });
+      }));
+      if ((await headPolicy(github, context, listed.number, pr.head.sha, budget)).snapshot === externalId) {
+        await invoke(budget, () => github.rest.checks.update({
+          ...context.repo, check_run_id: created.data.id, status: "completed",
+          conclusion: observed.error ? "failure" : "success",
+          output: {
+            title: "Required source attribution",
+            summary: observed.error ? `${observed.error}\n\n${REPAIR}` : "Required source metadata check completed.",
+          },
+        }));
+        stable = (await headPolicy(github, context, listed.number, pr.head.sha, budget)).snapshot === externalId;
+      }
+    } finally {
       try {
-        if ((await headPolicy(github, context, listed.number, pr.head.sha)).snapshot === externalId) {
-          await github.rest.checks.update({
-            ...context.repo, check_run_id: created.data.id, status: "completed",
-            conclusion: error ? "failure" : "success",
-            output: {
-              title: "Required source attribution",
-              summary: error ? `${error}\n\n${REPAIR}` : "Required source metadata check completed.",
-            },
-          });
-          stable = (await headPolicy(github, context, listed.number, pr.head.sha)).snapshot === externalId;
-        }
-      } finally {
         if (!stable) {
           const invalidated = {
             ...context.repo, name: CONTEXT, head_sha: pr.head.sha,
@@ -294,21 +305,24 @@ async function refreshPR(github, context, listed, pause) {
               summary: "Source metadata changed or could not be verified; this result is superseded.",
             },
           };
-          await github.rest.checks.create(invalidated);
-          const original = await github.rest.checks.get({
-            ...context.repo, check_run_id: created.data.id,
-          });
-          if (original.data.status !== "completed") {
-            await github.rest.checks.update({
-              ...context.repo, check_run_id: created.data.id, status: "completed", conclusion: "failure",
-              output: invalidated.output,
-            });
+          await invoke(budget, () => github.rest.checks.create(invalidated), true);
+          if (created) {
+            const original = await invoke(budget, () => github.rest.checks.get({
+              ...context.repo, check_run_id: created.data.id,
+            }), true);
+            if (original.data.status !== "completed") {
+              await invoke(budget, () => github.rest.checks.update({
+                ...context.repo, check_run_id: created.data.id, status: "completed", conclusion: "failure",
+                output: invalidated.output,
+              }), true);
+            }
           }
         }
-      }
-      if (stable) break;
+      } finally { budget.release(); }
     }
-    if (!stable) throw new Error("Source metadata changed too often to validate; retry the check.");
+    if (stable) break;
+  }
+  if (!stable) throw new Error("Source metadata changed too often to validate; retry the check.");
 }
 
 module.exports = { validate, decision, enforce, backfill, REPAIR };

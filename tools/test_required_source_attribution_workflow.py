@@ -29,6 +29,7 @@ def test_metadata_events_and_trusted_checkout_do_not_execute_pr_content():
     assert install["working-directory"] == ".github/actions"
     assert install["run"] == "npm ci --ignore-scripts --no-audit --no-fund"
     assert "required-pr-attribution.cjs" in source["steps"][2]["with"]["script"]
+    assert source["steps"][2]["with"]["retries"] == "0"
     protected = workflow["jobs"]["workflow-lockdown-guard"]
     assert protected["if"] == "github.event_name == 'pull_request_target'"
     assert "protectedPrefixes" in protected["steps"][0]["with"]["script"]
@@ -46,6 +47,7 @@ def test_existing_heads_are_refreshed_from_only_the_default_branch():
     assert refresh["steps"][0]["uses"] == "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
     assert refresh["steps"][1]["run"] == "npm ci --ignore-scripts --no-audit --no-fund"
     assert ".backfill(" in refresh["steps"][2]["with"]["script"]
+    assert refresh["steps"][2]["with"]["retries"] == "0"
     assert "labeled" in workflow["jobs"]["request-review"]["if"]
     assert "unlabeled" in workflow["jobs"]["request-review"]["if"]
 
