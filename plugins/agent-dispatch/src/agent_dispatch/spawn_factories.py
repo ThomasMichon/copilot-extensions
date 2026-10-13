@@ -34,7 +34,7 @@ from .spawn_script_body import (  # noqa: F401 -- re-exported for existing call 
 
 
 class SpawnPreparationRetained(RuntimeError):
-    """A created worktree could not be recorded; retain the reservation fence."""
+    """Workspace provenance is unproven or incompatible; retain the reservation fence."""
 
 
 #: A spawn function: given a task snapshot, launch a worker and report
@@ -236,6 +236,7 @@ def _default_attempt_conclusion(
     session: str | None,
     reservation_key: str,
     driver: str,
+    *, project: str | None = None, worktree_path: str | None = None,
 ) -> dict:
     from . import embody
 
@@ -244,6 +245,7 @@ def _default_attempt_conclusion(
         session,
         reservation_key,
         owner=driver,
+        project=project, worktree_path=worktree_path,
     )
 
 
@@ -525,7 +527,7 @@ def make_embody_spawn(
 
     The supervisor runs CWD-neutral (a service whose working directory is its own
     runtime dir, not any repo), so the spawn **names the target project
-    explicitly** -- derived from the task's lane -- via embody's ``--project``
+    explicitly** -- retained from allocation owner facts -- via acquisition's project
     global, rather than relying on git-like CWD discovery (which would fail with
     "Could not resolve a project for 'embody'"). See the
     ``project-scoped-invocation`` pattern.
@@ -548,16 +550,16 @@ def make_embody_spawn(
                     repo=None if all_repos else task.get("repo"), all_repos=all_repos,
                 ),
                 driver=driver,
-                project=embody.project_for_task(task),
+                project=task.get("spawn_allocation_project") or embody.project_for_task(task),
                 charter=charter,
                 verify_timeout=verify_timeout,
             )
         except bridge.BridgeCarriedSessionBusy as exc:
             return False, {"error": str(exc), "deferred": True}
         except bridge.BridgeUnavailable as exc:
-            return False, {"error": str(exc)}
+            return False, {"error": str(exc), "preserve_workspace": True}
         if result.returncode != 0:
-            return False, {"error": (result.stderr or "").strip()[:200] or "nonzero exit"}
+            return False, {"error": (result.stderr or "").strip()[:200] or "nonzero exit", "preserve_workspace": True}
         handle = session_acquisition.handle(result)
         if not handle.get("session"):
             # A zero exit with no recognizable session id is not a usable
@@ -667,7 +669,7 @@ def make_headless_spawn(
                 agent=agent,
                 charter=charter,
                 prompt=seed,
-                project=embody.project_for_task(task),
+                project=task.get("spawn_allocation_project") or embody.project_for_task(task),
             )
         except ordinary_bridge.CreatedAgentUnrecorded as exc:
             return False, {"error": str(exc), "retained": True}

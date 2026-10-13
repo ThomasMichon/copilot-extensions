@@ -64,6 +64,26 @@ rather than as a successful refresh. The existing `auto_fast_forward` policy
 disables opportunistic anchor movement during creation without preventing
 remote-ref-based worktree creation.
 
+### Replay-safe programmatic creation
+
+`create --creation-key <opaque-key> --json` binds one logical request to its
+allocation facts and generated worktree identity. It creates space only:
+the keyed result contains `worktree` plus versioned `creation` metadata,
+not an executable session launch plan. Existing unkeyed creation is unchanged.
+The key is not a worktree ID. Callers choose a different logical revision
+only for a deliberate replacement, never for a transport retry or dispatch
+attempt.
+
+The per-project, installation-qualified owner journal records intent before
+allocation effects and completion before returning. An exact completed replay
+returns the original result after checking the owner record, path, branch, and
+creation nonce. Changed allocation facts conflict; removed or retired results
+refuse rather than allocating again. Concurrent or interrupted creation returns
+an explicit pending/recovery error (exit 3), including the reserved identity
+when known. It never treats a missing response as permission to repeat create.
+Pending effects require reconciliation; no automatic replacement is authorized
+by an absent local receipt.
+
 ## Worktree states
 
 The tracking state (seen in `list` / the picker) and its status-bar block:

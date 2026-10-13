@@ -22,6 +22,12 @@ class SpawnReservationClientMixin:
     _http: Any
     _unwrap: Callable[[Any], Any]
 
+    def record_spawn_allocation(self, key: str, project: str) -> dict:
+        """Persist the selected execution repository before allocation effects."""
+        return self._unwrap(self._http.post(
+            f"/spawn-reservations/{key}/allocation", json={"project": project},
+        ))
+
     def record_created_agent(self, key: str, *, task_generation: int, agent_info: dict) -> dict:
         """Persist ordinary Bridge readiness before any first task prompt."""
         return self._unwrap(self._http.post(

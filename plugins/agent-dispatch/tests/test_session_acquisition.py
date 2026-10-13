@@ -22,6 +22,8 @@ def task(**changes):
         "spawn_reservation_key": "reservation-a", "spawn_worktree": "worktree-a",
         "spawn_worktree_ownership": "reused", "spawn_conversation_retired": False,
         "spawn_session_handle": "local-body:bridge-a", **changes,
+        "spawn_allocation_project": changes.get("spawn_allocation_project", "example"),
+        "spawn_worktree_path": changes.get("spawn_worktree_path", "workspace-path"),
     }
 
 

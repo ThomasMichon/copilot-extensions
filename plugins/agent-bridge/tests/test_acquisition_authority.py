@@ -66,3 +66,24 @@ async def test_cached_display_never_overrides_native_head(
     assert command.await_args_list[1].args == (
         ["head-session", "--worktree-id", "worktree-a", "--json"], "project-a",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("project,path", [
+    ("queue-repo", "workspace-path"), (None, "workspace-path"),
+    ("execution-repo", "other-path"), ("execution-repo", None),
+])
+async def test_workspace_owner_identity_must_match_request(
+    acquisition_request, monkeypatch, project, path,
+):
+    request = acquisition_request.model_copy(update={
+        "version": 2, "project": "execution-repo", "worktree_path": "workspace-path",
+    })
+    command = AsyncMock(return_value={"worktrees": [{
+        "id": "worktree-a", "repo": project, "path": path,
+    }]})
+    monkeypatch.setattr(authority, "worktree_command", command)
+    with pytest.raises(AcquisitionRefused) as error:
+        await authority.verify_worktree(request)
+    assert error.value.code in {"worktree_unknown", "workspace_identity_conflict"}
+    assert command.await_count == 1

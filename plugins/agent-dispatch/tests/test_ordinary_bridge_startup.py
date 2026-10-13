@@ -26,6 +26,9 @@ def startup(tmp_path, monkeypatch):
         def get_reservation(self, key):
             return asdict(queue.get_reservation(key))
 
+        def record_spawn_allocation(self, key, project):
+            return asdict(queue.record_spawn_allocation(key, project))
+
         def record_created_agent(self, key, **facts):
             calls.append(("store", facts))
             return asdict(ordinary_bridge.record_created_agent(queue, key, **facts))
@@ -39,12 +42,14 @@ def startup(tmp_path, monkeypatch):
             assert "--prompt-file" not in argv
             assert "--charter" in argv and "reviewer" in argv
             assert argv[3] == "example@local"
+            assert argv[argv.index("--creation-key") + 1] == queue.get_reservation(snapshot["spawn_reservation_key"]).creation_key
             return subprocess.CompletedProcess(argv, 0, json.dumps({
                 "session_id": "bridge-a", "ready": True,
                 "status": "awaiting_first_prompt",
                 "connection": {
                     "worktree_id": "worktree-a", "repo": "example",
                     "native_session_id": "native-a",
+                    "target_dir": "synthetic-worktree-a",
                 },
             }), "")
         if command == "send":
@@ -196,6 +201,74 @@ def test_retry_reservation_carries_agent_without_exclusive_key(startup):
     assert admitted and retry.agent_info["session_id"] == "bridge-a"
     assert retry.session_handle == "local-body:bridge-a"
     assert retry.worktree == "worktree-a"
+
+def test_lost_create_response_replays_key_after_restart_and_routing_change(startup, monkeypatch):
+    queue, task, client, calls = startup
+    original = ordinary_bridge.subprocess.run
+    lost = True
+
+    def run(argv, **kwargs):
+        nonlocal lost
+        result = original(argv, **kwargs)
+        if argv[2] == "create" and lost:
+            lost = False
+            raise subprocess.TimeoutExpired(argv, 1)
+        return result
+
+    monkeypatch.setattr(ordinary_bridge.subprocess, "run", run)
+    with pytest.raises(ordinary_bridge.CreatedAgentUnrecorded):
+        ordinary_bridge.start(task, client=client, agent="local", project="example",
+                              charter="reviewer", prompt="assigned task")
+    first = queue.get_reservation(task["spawn_reservation_key"])
+    assert first.allocation_project == "example"
+    assert first.agent_info is None
+    queue.defer_spawn(first.key, detail="lost create response")
+    restarted = TaskQueue(queue.db_path)
+    retry, admitted = restarted.reserve_spawn(task["id"], driver="ordinary-bridge")
+    assert admitted and retry.creation_key == first.creation_key
+    monkeypatch.setattr(bridge, "registered_agent_project", lambda *_a, **_kw: "changed-routing")
+    result = ordinary_bridge.start(
+        {**task, "spawn_reservation_key": retry.key}, client=client,
+        agent="local", project="changed-routing", charter="reviewer", prompt="assigned task",
+    )
+    assert result["session"] == "local-body:bridge-a"
+    creates = [call[1] for call in calls if call[0] == "create"]
+    assert len(creates) == 2 and creates[0] == creates[1]
+    assert queue.get_reservation(retry.key).worktree_path == "synthetic-worktree-a"
+    assert [call[0] for call in calls].count("send") == 1
+
+
+def test_unrecorded_keyed_creation_reconciles_without_liveness_guess(startup):
+    queue, task, _, _ = startup
+    import types
+    key = task["spawn_reservation_key"]
+    queue.record_spawn_allocation(key, "example")
+    supervisor = types.SimpleNamespace(
+        supervisor_id="supervisor", reserving_timeout=0,
+        local_body_verdict_fn=lambda _: pytest.fail("no recorded native handle to probe"),
+        client=types.SimpleNamespace(defer_spawn=queue.defer_spawn),
+    )
+    assert ordinary_bridge.reconcile_created(
+        supervisor, asdict(queue.get_reservation(key)), task,
+    ) == 1
+    retry, admitted = queue.reserve_spawn(task["id"], driver="ordinary-bridge")
+    assert admitted and retry.creation_key == queue.get_reservation(key).creation_key
+
+
+def test_replacement_revision_never_recovers_disposed_ordinary_agent(startup):
+    queue, task, client, _ = startup
+    ordinary_bridge.start(task, client=client, agent="local", project="example",
+                          charter="reviewer", prompt="assigned task")
+    first = queue.get_reservation(task["spawn_reservation_key"])
+    queue.fail_spawn(first.key, conclusion_state="complete",
+                     conclusion_detail=json.dumps({"action": "removed"}))
+    replacement, _ = queue.reserve_spawn(task["id"], driver="ordinary-bridge", allocation_revision=2)
+    queue.record_spawn_allocation(replacement.key, "example")
+    queue.fail_spawn(replacement.key, detail="lost replacement response")
+    retry, _ = queue.reserve_spawn(task["id"], driver="ordinary-bridge")
+    assert retry.allocation_revision == 2
+    assert retry.creation_key == replacement.creation_key != first.creation_key
+    assert retry.agent_info is None and retry.worktree is None and retry.session_handle is None
 
 
 @pytest.mark.parametrize("driver", [None, "cli", "fleet"])

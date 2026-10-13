@@ -92,6 +92,14 @@ def record_created_agent(
         if row["agent_info"] and row["agent_info"] != encoded:
             raise TaskError("created-agent identity is already bound")
         worktree = agent_info["connection"]["worktree_id"]
+        project = agent_info["connection"]["repo"]
+        path = agent_info["connection"].get("target_dir")
+        if (
+            row["allocation_project"] and row["allocation_project"] != project
+            or row["worktree_path"] and row["worktree_path"] != path
+            or row["creation_key"] and (not isinstance(path, str) or not path)
+        ):
+            raise TaskError("created agent does not match retained allocation provenance")
         handle = f"local-body:{agent_info['session_id']}"
         if (row["worktree"] and row["worktree"] != worktree) or (
             row["session_handle"] and row["session_handle"] != handle
@@ -105,8 +113,9 @@ def record_created_agent(
             raise TaskError("created-agent worktree has another active owner or cleanup")
         conn.execute(
             "UPDATE spawn_reservations SET worktree=?,session_handle=?,agent_info=?,"
-            "worktree_ownership='targeted',driver='ordinary-bridge',updated_at=? WHERE key=?",
-            (worktree, handle, encoded, queue._now(None), key),
+            "worktree_ownership='targeted',driver='ordinary-bridge',allocation_project=?,"
+            "worktree_path=?,updated_at=? WHERE key=?",
+            (worktree, handle, encoded, project, path, queue._now(None), key),
         )
         result = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
         conn.commit()
@@ -157,16 +166,17 @@ def legacy_bound(queue: Any, task_id: str, worktree: str | None) -> bool:
 
 
 def carry_agent(conn: Any, task: Any, worktree: str | None, session: str | None,
-                ownership: str | None, retired: bool) -> tuple:
+                ownership: str | None, retired: bool, *, creation_key: str) -> tuple:
     """Carry stored identity after a retry, including tasks without exclusivity."""
     row = conn.execute(
-        "SELECT * FROM spawn_reservations WHERE task_id=? AND agent_info IS NOT NULL "
-        "ORDER BY attempt DESC LIMIT 1", (task.id,),
+        "SELECT * FROM spawn_reservations WHERE creation_key=? AND agent_info IS NOT NULL "
+        "ORDER BY reserved_at DESC, attempt DESC LIMIT 1", (creation_key,),
     ).fetchone()
     if row is None and worktree and session:
         row = conn.execute(
-            "SELECT * FROM spawn_reservations WHERE worktree=? AND session_handle=? AND agent_info IS NOT NULL "
-            "ORDER BY reserved_at DESC LIMIT 1", (worktree, session),
+            "SELECT * FROM spawn_reservations WHERE creation_key=? AND worktree=? "
+            "AND session_handle=? AND agent_info IS NOT NULL "
+            "ORDER BY reserved_at DESC LIMIT 1", (creation_key, worktree, session),
         ).fetchone()
     if not row or retired or row["conversation_retired"] or row["release_requested"] or row["conclusion_state"] == "pending":
         return worktree, session, ownership, None
@@ -184,22 +194,26 @@ def reconcile_created(supervisor: Any, reservation: dict, task: dict) -> int:
     if reservation.get("reserved_by") != supervisor.supervisor_id or reservation.get("release_requested"):
         return 0
     info = reservation.get("agent_info")
-    if not info:
+    if not info and not (
+        reservation.get("creation_key") and reservation.get("allocation_project")
+        and not reservation.get("worktree") and not reservation.get("session_handle")
+    ):
         log.error("ordinary reservation %s has unrecorded creation; explicit repair required", reservation["key"])
         return 0
     if task.get("status") != "queued" or task.get("owner") or task.get("hold_reason"):
         return 0
     if time.time() - reservation["updated_at"] < supervisor.reserving_timeout:
         return 0
-    session_id = info["session_id"]
-    verdict = supervisor.local_body_verdict_fn(session_id)
-    if verdict == "unknown":
-        return 0
-    if verdict == "live" and supervisor.local_body_activity_fn(session_id) != "IDLE":
-        return 0
+    if info:
+        session_id = info["session_id"]
+        verdict = supervisor.local_body_verdict_fn(session_id)
+        if verdict == "unknown":
+            return 0
+        if verdict == "live" and supervisor.local_body_activity_fn(session_id) != "IDLE":
+            return 0
     try:
         supervisor.client.defer_spawn(
-            reservation["key"], detail="ordinary created agent retained for same-handle send retry",
+            reservation["key"], detail="ordinary allocation retained for keyed create or same-handle send retry",
         )
     except DispatchError:
         log.exception("could not defer retained ordinary reservation %s", reservation["key"])
@@ -240,7 +254,13 @@ def start(
     info = reservation.get("agent_info")
     from .bridge import registered_agent_project
     harness = registered_agent_project(agent, strict=True)
-    project = harness or project
+    project = reservation.get("allocation_project") or harness or project
+    from .workspace_binding import bind_allocation
+    from .spawn_factories import SpawnPreparationRetained
+    try:
+        bind_allocation(client, reservation, project)
+    except SpawnPreparationRetained as exc:
+        raise CreatedAgentUnrecorded(str(exc)) from exc
 
     def run(argv: list[str], *, prompt_input: str | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run([*prefix, *argv], input=prompt_input, capture_output=True,
@@ -272,8 +292,8 @@ def start(
         if reservation.get("worktree") or reservation.get("session_handle"):
             raise BridgeUnavailable("retained allocation has no ordinary created-agent metadata; explicit migration required")
         # Bridge's existing repo@venue target selects the harness, not the task's lane.
-        target = f"{project}@{agent}" if project and not harness and "@" not in agent else agent
-        argv = ["--json", "create", target]
+        target = f"{project}@{agent}" if project and "@" not in agent else agent
+        argv = ["--json", "create", target, "--creation-key", reservation["creation_key"]]
         if charter:
             argv += ["--charter", charter]
         try:

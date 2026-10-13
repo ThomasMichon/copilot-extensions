@@ -6,8 +6,8 @@ from dataclasses import asdict
 import logging
 import subprocess
 
-from fastapi import Depends, FastAPI, HTTPException
-from pydantic import BaseModel, ConfigDict, FiniteFloat
+from fastapi import Depends, FastAPI, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, FiniteFloat, Field
 
 from .events import EventBus
 from .queue import RoutingAssignment, SpawnReservation, TaskError, TaskQueue
@@ -18,6 +18,7 @@ class ReserveSpawnBody(BaseModel):
     reserved_by: str | None = None
     allow_suspended_reembodiment: bool = False
     driver: str | None = None
+    allocation_revision: int | None = Field(default=None, ge=1, le=2**63 - 1, strict=True)
 
 
 class RoutingAssignmentBody(BaseModel):
@@ -62,10 +63,19 @@ class RecordSpawnBody(BaseModel):
 
 
 class RecordSpawnWorktreeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     worktree: str
     ownership: str = "unknown"
     creating_host: str | None = None
     driver: str | None = None
+    allocation_project: str | None = None
+    worktree_path: str | None = None
+
+
+class RecordSpawnAllocationBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project: str = Field(min_length=1)
 
 
 class ReservationDetailBody(BaseModel):
@@ -167,7 +177,10 @@ def register_spawn_routes(
             raise HTTPException(status_code=status, detail=msg) from exc
 
     @app.post("/spawn-reservations")
-    def reserve_spawn(body: ReserveSpawnBody) -> dict:
+    @app.post("/spawn-reservations/revisions")
+    def reserve_spawn(body: ReserveSpawnBody, request: Request) -> dict:
+        if request.url.path.endswith("/revisions") and body.allocation_revision is None:
+            raise HTTPException(status_code=422, detail="explicit allocation revision is required")
         _require_task(body.task_id)
         try:
             reservation, reserved = queue.reserve_spawn(
@@ -175,6 +188,7 @@ def register_spawn_routes(
                 reserved_by=body.reserved_by,
                 allow_suspended_reembodiment=body.allow_suspended_reembodiment,
                 driver=body.driver,
+                allocation_revision=body.allocation_revision,
             )
         except TaskError as exc:
             msg = str(exc)
@@ -342,6 +356,11 @@ def register_spawn_routes(
 
     from .ordinary_bridge import register_routes
     register_routes(app, queue, bus)
+    @app.post("/spawn-reservations/{key}/allocation")
+    def record_spawn_allocation(key: str, body: RecordSpawnAllocationBody) -> dict:
+        result = _reservation_guard(lambda: queue.record_spawn_allocation(key, body.project))
+        bus.publish({"type": "spawn.allocation_bound", "reservation": result})
+        return result
 
     @app.post("/spawn-reservations/{key}/worktree")
     def record_spawn_worktree(key: str, body: RecordSpawnWorktreeBody) -> dict:
@@ -352,6 +371,8 @@ def register_spawn_routes(
                 ownership=body.ownership,
                 creating_host=body.creating_host,
                 driver=body.driver,
+                allocation_project=body.allocation_project,
+                worktree_path=body.worktree_path,
             )
         )
         bus.publish({"type": "spawn.worktree_recorded", "reservation": result})

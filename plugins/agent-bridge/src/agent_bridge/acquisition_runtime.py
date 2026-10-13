@@ -59,6 +59,10 @@ class AcquisitionRuntime:
                 self.manager._active_acquisitions = getattr(self.manager, "_active_acquisitions", 0) + 1
                 try:
                     return await self._acquire_locked(req)
+                except AcquisitionRefused as exc:
+                    if self.store.journal.refused_before_effect(req):
+                        exc.effect = "not_started"
+                    raise
                 finally:
                     self.manager._active_acquisitions -= 1
 
@@ -379,12 +383,12 @@ class AcquisitionRuntime:
                 raise AcquisitionRefused("live_holder", "ACP ownership fence was not acquired")
             await worktree_command(
                 [
-                    "register-session",
+                    "bind-session",
                     "--session-id",
                     session.acp_session_id,
                     "--worktree-id",
                     req.worktree_id,
-                    "--cwd",
+                    "--worktree-dir",
                     row["path"],
                 ],
                 req.project,
@@ -914,8 +918,8 @@ class AcquisitionRuntime:
         if not self.db.reserve_worktree_ownership(req.worktree_id, session_id, now=time.time()):
             raise AcquisitionRefused("recovery_holder_conflict", "native ownership could not be restored")
         await worktree_command([
-            "register-session", "--session-id", native,
-            "--worktree-id", req.worktree_id, "--cwd", row["path"],
+            "bind-session", "--session-id", native,
+            "--worktree-id", req.worktree_id, "--worktree-dir", row["path"],
         ], req.project)
 
     @staticmethod

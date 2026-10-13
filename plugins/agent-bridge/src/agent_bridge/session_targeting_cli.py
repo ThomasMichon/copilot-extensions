@@ -399,6 +399,7 @@ def _submit_and_stream(
     prompt: str,
     *,
     caller_id: str | None,
+    submitted_result: dict | None = None,
 ) -> None:
     core = _core()
     from .send_outcome import emit, prompt_outcome
@@ -408,7 +409,9 @@ def _submit_and_stream(
 
     try:
         expected_native = getattr(args, "expected_native_session_id", None)
-        if expected_native is not None:
+        if submitted_result is not None:
+            result = submitted_result
+        elif expected_native is not None:
             from .native_bound_prompt import submit_native_bound_prompt
             result = submit_native_bound_prompt(
                 client, session_id, prompt, caller_id=caller_id,
@@ -779,6 +782,9 @@ def _cmd_create_cli(
 
 
 def _cmd_create(args: argparse.Namespace) -> None:
+    if getattr(args, "creation_key", None) is not None and getattr(args, "cli", False):
+        print("[FAIL] --creation-key is not supported by CLI-mode venue creation.", file=sys.stderr)
+        sys.exit(2)
     if getattr(args, "detach", False) and not getattr(args, "cli", False):
         print("[FAIL] --detach requires --cli", file=sys.stderr)
         sys.exit(2)
@@ -803,6 +809,12 @@ def _cmd_create(args: argparse.Namespace) -> None:
     caller_id = core._caller_id_for(args)
 
     from .client import BridgeClientError
+
+    creation_key = getattr(args, "creation_key", None)
+    if creation_key is not None:
+        from .workspace_creation_cli import create
+        create(args, client, caller_id=caller_id)
+        return
 
     try:
         existing = client.get_session(target)
@@ -972,6 +984,7 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     create_p.add_argument("--charter", dest="charter", default=None, metavar="AGENT", help="Optional .github/agents/<charter>.agent.md behavior overlay -- passed as Copilot's own --agent flag on the launched session, independent of TARGET (the venue this session spawns onto).")
     create_p.add_argument("--target-dir", dest="target_dir", default=None, metavar="PATH", help="Run this agent session in an existing checkout directory.")
     create_p.add_argument("--worktree-id", dest="worktree_id", default=None, metavar="ID", help="Bind the created session to an existing agent-worktrees worktree id.")
+    create_p.add_argument("--creation-key", help="opaque logical creation identity; exact local workspace/session retries retain the original result")
     create_p.add_argument("--cli", action="store_true", help="Deliver a live, human-attachable CLI-mode Copilot session on the venue TARGET names (codespace:<name>, container:<name>, or ssh:<name>) instead of an ordinary headless ACP session -- hands off entirely to that provider's own `copilot` verb, optionally seeded with the positional prompt as its first turn (agent-bridge-cli-mode-sessions Phase 4). Defaults to anchor mode on the venue (no worktree required). Refused for a bare/unprefixed TARGET -- use `agent-worktrees copilot` directly for a local session.")
     create_p.add_argument("--driver", default=None, metavar="LABEL", help="With --cli: forwarded to the remote `agent-worktrees copilot --driver` (stamps the 'driven by' banner).")
     create_p.add_argument("--detach", action="store_true", help="With --cli on a codespace:<name>, container:<name>, or ssh:<name> target: start the CLI-mode session in the background (seeded with the prompt) and print a JSON handle (session id plus attach/observe/nudge/stop commands) instead of taking over this terminal -- for an orchestrating agent that must not hand its TTY away.")

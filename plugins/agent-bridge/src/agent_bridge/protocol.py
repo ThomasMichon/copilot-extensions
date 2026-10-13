@@ -188,8 +188,12 @@ CURRENT_ATTENTION_PROTOCOL_VERSION = 29
 ACQUISITION_RETIREMENT_REVALIDATION_PROTOCOL_VERSION = 31
 ACQUISITION_RETIREMENT_RECOVERY_PROTOCOL_VERSION = 32
 NATIVE_BOUND_PROMPT_PROTOCOL_VERSION = 33
-
-HTTP_PROTOCOL_VERSION = 33
+# Owner-qualified acquisition checks persisted project/path and the exact
+# ground record. Older daemons must not silently ignore those safety facts.
+ACQUISITION_WORKSPACE_PROTOCOL_VERSION = 34
+# Keyed standalone allocation/embodiment has its own non-fallback endpoint.
+WORKSPACE_CREATION_PROTOCOL_VERSION = 34
+HTTP_PROTOCOL_VERSION = 34
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

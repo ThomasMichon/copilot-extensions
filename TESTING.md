@@ -118,6 +118,25 @@ python tools\run-plugin-tests.py agent-worktrees -k native_shell_collection
 python tools\run-plugin-tests.py agent-worktrees --allow-explicit-tiers -k 'installer_copilot_resolution or installer_pipefail or invoke_payload_runtime_posix'
 ```
 
+The keyed workspace-creation regressions have an opt-in native companion.
+It runs the real create parser/handler, Git allocation, tracking writer, and
+creation journal in a fresh synthetic owner, then replays from a second Python
+process. No Copilot session or host registration is created. Run it with:
+
+```powershell
+$env:AGENT_WORKTREES_CREATION_NATIVE = '1'
+python tools\run-plugin-tests.py agent-worktrees -k creation_requests --test-timeout 120
+python tools\run-plugin-tests.py agent-bridge -k workspace_creation --test-timeout 120
+```
+
+The bridge companion uses the same fresh-owner fixture across real create,
+exact-record/head reads and explicit `bind-session` subprocess calls. It also
+exercises a real dispatch queue's lost allocation response, restart and changed
+routing, proving one execution checkout despite a different queue lane. Bridge
+SessionManager/SQLite and durable first-turn admission are real; Copilot ACP/
+provider I/O is simulated. This is connected first-touch evidence, not a
+deployed binstub, full host installation or live model transcript check.
+
 Resident list-warm snapshot policy tests keep process calls mocked and verify
 exact output shapes, filter/project separation, next-pass freshness, unavailable
 classification, and unchanged standalone reads. Their bounded native companion

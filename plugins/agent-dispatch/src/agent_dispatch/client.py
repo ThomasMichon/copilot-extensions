@@ -623,6 +623,7 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
         allow_suspended_reembodiment: bool = False,
         coordinator_launch: bool = False,
         driver: str | None = None,
+        allocation_revision: int | None = None,
     ) -> dict:
         """Atomically reserve the right to spawn an embody worker for a task.
 
@@ -638,12 +639,13 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
         """
         return self._unwrap(
             self._http.post(
-                "/spawn-reservations",
+                "/spawn-reservations/revisions" if allocation_revision is not None else "/spawn-reservations",
                 json={
                     "task_id": task_id,
                     "reserved_by": reserved_by,
                     "allow_suspended_reembodiment": allow_suspended_reembodiment,
                     **({"driver": driver} if driver is not None else {}),
+                    **({"allocation_revision": allocation_revision} if allocation_revision is not None else {}),
                 },
                 **({"timeout": 180.0} if coordinator_launch else {}),
             )
@@ -747,6 +749,8 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
         ownership: str = "unknown",
         creating_host: str | None = None,
         driver: str | None = None,
+        allocation_project: str | None = None,
+        worktree_path: str | None = None,
     ) -> dict:
         """Record the reserved worktree before launching the worker session."""
         return self._unwrap(
@@ -757,6 +761,8 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
                     "ownership": ownership,
                     "creating_host": creating_host,
                     "driver": driver,
+                    "allocation_project": allocation_project,
+                    "worktree_path": worktree_path,
                 },
             )
         )

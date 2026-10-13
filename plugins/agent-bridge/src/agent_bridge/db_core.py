@@ -141,6 +141,16 @@ CREATE TABLE IF NOT EXISTS sessions (
     updated_at REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS workspace_embodiments (
+    key_digest TEXT PRIMARY KEY,
+    facts_digest TEXT NOT NULL,
+    state TEXT NOT NULL,
+    worktree_json TEXT,
+    session_id TEXT NOT NULL,
+    native_session_id TEXT,
+    turn_index INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS turns (
     session_id TEXT NOT NULL,
     turn_index INTEGER NOT NULL,

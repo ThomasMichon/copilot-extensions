@@ -42,6 +42,13 @@ async def worktree_command(args: list[str], project: str | None) -> dict[str, An
         raise AcquisitionRefused("owner_response_invalid", "worktree owner returned invalid JSON") from exc
     if not isinstance(result, dict):
         raise AcquisitionRefused("owner_response_invalid", "worktree owner returned no object")
+    if args[0] == "bind-session" and (
+        result.get("bound") is not True or result.get("is_head") is not True
+        or result.get("worktree_id") != args[args.index("--worktree-id") + 1]
+        or result.get("session") != args[args.index("--session-id") + 1]
+        or result.get("head_session") != result.get("session")
+    ):
+        raise AcquisitionRefused("native_binding_unproven", "owner did not bind the exact native head")
     return result
 
 
@@ -68,6 +75,10 @@ async def verify_dispatch(request: AcquisitionRequest, resolver: Any) -> dict[st
         or reservation.get("state") not in {"reserving", "spawned"}
         or reservation.get("release_requested")
         or resolved.worktree_id != request.worktree_id
+        or request.version == 2 and (
+            reservation.get("allocation_project") != request.project
+            or reservation.get("worktree_path") != request.worktree_path
+        )
     ):
         raise AcquisitionRefused("dispatch_fence_changed", "task/reservation admission fence changed")
     return venue
@@ -84,6 +95,10 @@ async def verify_worktree(request: AcquisitionRequest) -> tuple[dict[str, Any], 
     if len(matches) != 1 or not matches[0].get("path"):
         raise AcquisitionRefused("worktree_unknown", "worktree owner did not resolve one target")
     row = matches[0]
+    if request.version == 2 and (
+        row.get("repo") != request.project or row.get("path") != request.worktree_path
+    ):
+        raise AcquisitionRefused("workspace_identity_conflict", "worktree owner changed execution identity")
     if row.get("status") in {"finalized", "complete", "completed", "archived"}:
         raise AcquisitionRefused("worktree_terminal", "worktree is terminal")
     head = parse_head_payload(json.dumps(await worktree_command(

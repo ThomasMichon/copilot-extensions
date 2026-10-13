@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase isolated worktrees and PRs to `dev`
 - **Created:** 2026-10-12
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** worktrees `replay-safe-workspace-allocation`, bridge workspace
   allocation/embodiment, dispatch execution continuity and bounded refusal.
 - **Umbrella issue:** #6440
@@ -24,12 +24,15 @@ from allocating another workspace or session.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Implementation owner | Proposal, targeted fixes, validation, and PR stewardship | Source worktree codename `rusty-relay` |
+| Runtime fix worker | Preserved Phase 2 implementation; failed before final handback | Bounded task worker `workspace-target-fix` |
 
 ## Coordination
 
 - **Topology:** serial per-phase PRs; one implementation owner.
 - **Host (owns PRs):** Implementation owner.
-- **Delegates:** none.
+- **Delegates:** The runtime worker's source ownership is closed. The
+  implementation owner continues its preserved changes, remaining validation,
+  Phase 3, integration, and publication directly.
 - **Handoff:** retain this reviewed plan, issue claim, current slice, and pending
   completion gate; never treat an opened PR as completion.
 - Preserve separately owned acquisition, legacy-recovery, producer-ownership,
@@ -69,29 +72,29 @@ distinguishes deliberate replacement.
 
 - [x] Reconcile the three owning visions and shared architecture contract,
   keeping should-be intent separate from implemented creation interfaces.
-- [ ] Land this proposal through automated review before runtime execution.
+- [x] Land this proposal through automated review before runtime execution.
 
 ### Phase 2 - Correct execution-target and refusal handling
 
-- [ ] Carry the resolved execution project and exact worktree/path from
+- [x] Carry the resolved execution project and exact worktree/path from
   preparation to acquisition; reject incompatible owner-returned identity.
-- [ ] Preserve that identity for retries and restart recovery, coordinating
+- [x] Preserve that identity for retries and restart recovery, coordinating
   the persisted-project requirement in #5511.
-- [ ] Classify positively proven pre-effect refusals as bounded failures while
+- [x] Classify positively proven pre-effect refusals as bounded failures while
   retaining ambiguous launch outcomes for same-allocation reconciliation.
-- [ ] Preserve native holder, mode, retirement, and first-conversation gates.
+- [x] Preserve native holder, mode, retirement, and first-conversation gates.
 
 ### Phase 3 - Replay-safe creation
 
-- [ ] Add optional caller creation identity through the existing worktree and
+- [x] Add optional caller creation identity through the existing worktree and
   bridge creation boundaries, with one owner of allocation facts.
-- [ ] Bind the key and effective target facts before effects; replay the
+- [x] Bind the key and effective target facts before effects; replay the
   original result or report explicit pending/recovery, conflict, or terminal
   state. Keep the key distinct from generated worktree/session IDs.
-- [ ] Derive a stable dispatch allocation identity from task deduplication
+- [x] Derive a stable dispatch allocation identity from task deduplication
   identity (durable task ID when absent) and explicit logical revision,
   independently of reservation attempt and ordinary claim generation.
-- [ ] Keep deliberate unkeyed creation and separately owned producer
+- [x] Keep deliberate unkeyed creation and separately owned producer
   obligations compatible; version safety-affecting wire behavior explicitly.
 
 ### Phase 4 - Validate, land, and close ownership
@@ -105,21 +108,21 @@ distinguishes deliberate replacement.
 
 ## Validation Plan
 
-- [ ] Connected queue-project versus execution-project regression proves one
+- [x] Connected queue-project versus execution-project regression proves one
   workspace from allocation through bridge/native acquisition.
-- [ ] Deterministic pre-effect refusal spends the bounded failure budget;
+- [x] Deterministic pre-effect refusal spends the bounded failure budget;
   an unknown effect retains the same allocation and does not create again.
-- [ ] Repeated and concurrent keyed creation, lost responses, and interrupted
+- [x] Repeated and concurrent keyed creation, lost responses, and interrupted
   effects preserve exactly one allocated workspace and native conversation.
-- [ ] Changed facts and terminal-key replay refuse; deliberate logical revision
+- [x] Changed facts and terminal-key replay refuse; deliberate logical revision
   permits a separately authorized allocation.
-- [ ] Existing positively sessionless worktree admits its first conversation;
+- [x] Existing positively sessionless worktree admits its first conversation;
   foreign/live holders, missing legacy proof, and uncertain launch still refuse.
 - [ ] Existing unkeyed creation, CLI/ACP mode, task/lane authority, retirement,
   source-control ownership, and installation-cell isolation stay compatible.
-- [ ] Native Windows and portable contained tests exercise real CLI/process
+- [x] Native Windows and portable contained tests exercise real CLI/process
   boundaries; clean-room first-touch checks cover new creation persistence.
-- [ ] Unit, simple end-to-end, clean-room, and available live-venue evidence
+- [x] Unit, simple end-to-end, clean-room, and available live-venue evidence
   are recorded with explicit reasons for skipped tiers.
 
 ## Proposal
@@ -138,3 +141,181 @@ takeover, blanket freshness authorization, or parallel session owner is proposed
   acquisition, allocation, legacy-recovery, and producer-ownership work.
 - Request capture retains the operator's scope; concrete downstream examples
   are abstracted without changing the single-workspace or stable-key contract.
+
+### 2026-10-12 - Reviewed intent landed
+
+- Proposal #6445 merged with a current-head clean Copilot Comment and all
+  required CI green. The review was Lite; its full agentic runner did not
+  start, so no full-agentic-review claim is made.
+- Phase 2 proceeds under one exclusive runtime edit owner while the coordinator
+  retains integration and the later stable creation-key contract.
+
+### 2026-10-12 - Phase 2 execution identity trace
+
+- The ground owner already returns `worktree.repo`, ID, and path. Dispatch
+  currently drops the repository in create/resolve, prepared snapshots, and
+  reservation persistence; factories and one-shot acquisition then rederive it.
+- Phase 2 retains that owner-qualified tuple through supervised, one-shot, and
+  interactive callers. Reservation project/path survive retries and restart;
+  absence probes use persisted provenance, never current routing. Missing or
+  conflicting provenance holds the allocation rather than authorizing create.
+- Bridge's exact current refused/prepared journal receipt can prove a pre-effect
+  refusal. Launching, historical, busy, and pending outcomes remain ambiguous.
+  Creation keys and new allocation revisions remain Phase 3.
+
+### 2026-10-12 - Phase 2 contained validation blocked
+
+- Added synthetic owner-project, factory request, and unkeyed persisted retry
+  regressions in `test_workspace_continuity.py`; staged only that new test so
+  the supported runner includes it. No runtime implementation changed.
+- Command: `python tools\run-plugin-tests.py agent-dispatch -k
+  workspace_continuity --max-processes 32 --max-memory-mb 2048 --max-temp-mb 512`.
+- The runner failed during dependency preparation, before collecting tests:
+  the manifest requires `fastapi>=0.143.0`, but the configured resolver reports
+  only `fastapi<=0.142.2` available. No regression pass/fail is established.
+- Dependency manifests and runner repair are outside this worker's edit
+  ownership. Integration owner must restore supported contained validation
+  before the runtime slice proceeds; no raw pytest or dependency substitution
+  was used. Phase 2 remains unresolved.
+
+### 2026-10-12 - Dependency floor compatibility repair
+
+- The supported runner inherits uv configuration during preparation; it
+  supplies no index override or constraints. Its configured default feed has
+  no age/override constraint and currently exposes FastAPI through 0.142.2.
+  No feed URL, authentication, or machine configuration is recorded here.
+- The 0.143.0 floor came from dependency-only #6362, with no accompanying
+  runtime feature change. Dispatch uses established FastAPI routing, response,
+  security, and validation APIs. Restored the preceding `>=0.141.1` floor,
+  which still permits 0.143.0 and later as they become available.
+- This source-only correction is authorized by the integration owner; plugin
+  release versions, user settings, and feed selection remain unchanged.
+  Contained coordinator/API tests will supply compatibility evidence.
+
+### 2026-10-12 - Phase 2 target and refusal milestone
+
+- The four initial continuity regressions genuinely failed after supported
+  dependency preparation was restored. They now pass with the runtime change.
+- Owner-returned project/path flow through all three local callers; retries
+  without exclusive keys retain that tuple. Missing/incompatible provenance
+  records or holds the workspace and cannot authorize another allocation.
+  Recovery absence probes use only persisted project, not changed routing.
+- Acquisition request v2 and bridge protocol 33 fence the additional workspace
+  facts. Legacy request digests remain stable; version-1 recovery, native holder,
+  retirement, and first-conversation policy remain under their existing owners.
+- Exact deterministic refused/prepared receipts classify as bounded failures;
+  unavailable-owner, busy, pending, and launching outcomes remain ambiguous.
+  Neither path treats a failure as permission to remove/recreate the workspace.
+- Contained adapter/connected selection: 117 passed. Bridge acquisition/protocol
+  selection: 248 passed, one platform skip. Dependent queue/supervisor and
+  coordinator regression reconciliation remains in progress.
+
+### 2026-10-12 - Ground creation replay milestone
+
+- Added optional `create --creation-key` through the ground allocation owner.
+  A project/installation-qualified SQLite journal commits intent before effects
+  and the original result before returning. The key never becomes the worktree
+  ID. Attempt/reservation and parent-session changes do not revise allocation.
+- Exact completed replay verifies the owner record, path, branch, and creation
+  nonce. Changed facts conflict. Pending/interrupted effects retain the reserved
+  identity and refuse repeat-create. Observed terminal history stays terminal
+  even if an old tracking record reappears.
+- Keyed allocation returns space-only versioned metadata, never a session
+  launch plan; unkeyed creation and existing ownership/seed behavior remain.
+- Contained owner/seed compatibility selection: 40 passed. After additional
+  terminal and native concurrency hardening, focused replay selection:
+  17 passed. The native fresh-owner fixture exercises the actual create
+  parser/handler, Git allocation, tracking writer, and durable journal across
+  concurrent and restarted processes, asserting one directory, branch, and
+  tracking record and zero conversations.
+- This is native process/real-Git evidence, not a published-binstub rollout or a
+  full disposable-host rig claim. Bridge and dispatch creation-key integration,
+  connected native-conversation replay, and publication remain open.
+
+### 2026-10-12 - Runtime worker recovery
+
+- The runtime worker ended with a tool/model transport failure before final
+  handback. Its source edits and validation milestones were preserved; no
+  completion or publication is inferred from that failure.
+- The implementation owner stopped delegated supervision and took over
+  directly, without starting a competing worker or implementation.
+- The last broad dispatch run had two contradictory spawn fixtures: each
+  reported a different worktree after preparation or retained allocation.
+  Corrected those fixtures to return the exact prepared/retained worktree,
+  preserving the new identity guard rather than weakening it.
+- Targeted pair: 2 passed. Recovered continuity, acquisition, embody,
+  reservation, supervisor, and coordinator selection: 915 passed, 2 platform
+  skips. Bridge acquisition/protocol milestone remains 248 passed with one
+  platform skip. Stable creation-key integration and publication remain open.
+
+### 2026-10-13 - Integrated creation and continuity
+
+- Dispatch now persists the selected execution project before ground effects.
+  Its stable key includes durable queue/lane/logical-task identity and explicit
+  allocation revision. Lost responses retain the original allocation
+  reservation/attempt provenance; claim generation and retry do not revise it.
+  Explicit revision requests use a distinct endpoint so older coordinators
+  cannot silently ignore the field. Replacement requires positive disposal,
+  not priming or a pending cleanup. Independent logical requests retain their
+  existing exclusive-lane behavior without inheriting a cleaning allocation.
+- Local keyed bridge creation composes the ground journal with one durable
+  native embodiment and optional first-turn admission, without fabricating
+  dispatch authority. Existing positive-sessionless worktrees are supported.
+  Protocol 34 and a separate endpoint fence downlevel capability; SSH/provider
+  and CLI-mode keyed venues refuse explicitly. Completed replay does not
+  rebind or redeliver, missing completed-turn proof refuses, and established
+  cold recovery resumes strictly with native recreation disabled.
+- Connected native-owner tests exercise real create/list/head/bind CLI
+  subprocesses, Git allocation, tracking, SQLite and SessionManager. A real
+  queue with a different execution project loses its allocation response,
+  restarts and changes routing, then retains one checkout and native identity.
+  The same fresh-owner fixture covers direct ground-to-bridge composition.
+  ACP/provider I/O is simulated; these are not deployed-binstub or live-model
+  transcript claims.
+- Independent pre-submit review found two replacement-revision bugs: carrying
+  an already-disposed older revision after a lost new response, and rejecting
+  the supervisor's nested disposal receipt. Both were corrected with targeted
+  regression coverage, including the real cleanup-envelope producer.
+- Cohesive client/model, caller-selection, disposal-proof and response-reader
+  extractions preserve public import paths and shrink-only module ceilings.
+  Baseline changes cover only changed source; no ceiling was widened.
+- Final focused validation includes dispatch 454 passed, bridge 244 passed/
+  one platform skip, and ground 39 passed with the native owner lane enabled.
+  Earlier client/model compatibility selection passed 394/one platform skip.
+  Lint, installation-contract and module-size checks are green. Required
+  publication CI and the actual PR merge remain open.
+- Validation tiers: unit/connected contracts and simple owner-CLI end-to-end
+  checks exercised; fresh synthetic owner roots directly prove first-touch
+  journal initialization. A full disposable-host install rig is not exercised
+  because this change does not alter installer/bootstrap code. No live external
+  venue or production runtime was changed: the resolved development locus is
+  local, and production rollout is not authorized. Promotion and later
+  authorized installation must be reported separately from a dev merge.
+
+### 2026-10-13 - Publication integration with current dev
+
+- The initial runtime commit hit real publication rebase conflicts. Preserved a
+  local backup and integrated current `dev` rather than overwriting upstream
+  ordinary ACP create/store/send (#6469), disposable producer ownership (#6391),
+  remote seed admission (#6073), or dependency repair (#6458).
+- Ordinary ACP startup now freezes its execution project before bridge effects
+  and passes the same durable creation key on lost-response/restart retries.
+  Bridge's keyed no-prompt CLI returns the existing ready connection shape;
+  dispatch retains repository/worktree/path with the created-agent receipt.
+  Unrecorded keyed creation can reconcile by replay without guessing liveness;
+  replacement revisions never carry a disposed earlier ordinary agent.
+- Existing CLI acquisition remains independent. Native-bound ordinary send
+  keeps its protocol-33 capability floor; owner-qualified acquisition and keyed
+  creation require protocol 34, preventing a daemon with only the former
+  capability from accepting the latter.
+- Retained upstream FastAPI `>=0.142.2`; the earlier local floor restoration is
+  superseded by that already-merged available-feed fix. No user/feed edits.
+- Updated two lifecycle fixtures that had allowed automatic replacement during
+  pending cleanup. They now assert the retained identity fence and same
+  allocation after completed priming; replacement still requires explicit
+  revision and positive disposal.
+- Rebased broad dispatch pass: 1,028 passed, two platform skips, with nine
+  integration failures corrected rather than ignored. Final affected selection:
+  66 passed. Bridge native/keyed/acquisition/native-bound selection: 157 passed,
+  one platform skip. Ground native keyed creation: 17 passed. Module-size guard
+  remains green; required CI/review and actual runtime merge are still pending.

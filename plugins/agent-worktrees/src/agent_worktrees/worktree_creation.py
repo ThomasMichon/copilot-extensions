@@ -26,6 +26,7 @@ from __future__ import annotations
 import re
 
 import argparse
+from collections.abc import Callable
 import os
 import secrets
 import sys
@@ -548,6 +549,8 @@ def _create_worktree_core(
     pending_seed: str | None = None,
     pending_seed_id: str | None = None,
     allocation: tuple[str, str] | None = None,
+    creation_key: str | None = None,
+    creation_intent: Callable[[dict], None] | None = None,
 ) -> dict:
     """Create a new worktree and return a dict with worktree info + launch plan.
 
@@ -569,9 +572,33 @@ def _create_worktree_core(
     worktree state through the daemon writer. This function never launches
     Copilot; its returned plan carries the intent identity without claiming it.
 
+    ``creation_key`` retains one allocation across retries. Keyed results carry
+    allocation metadata rather than an executable launch plan.
+
     Raises ``RuntimeError`` on failure.
     """
     core = _core()
+    from .execution_spaces import require_current_execution_space
+
+    require_current_execution_space(config)
+    if creation_key is not None:
+        from . import creation_requests
+
+        options = {
+            "profile": profile, "profile_is_explicit": profile_is_explicit,
+            "no_mux": no_mux, "kind": kind, "owner": owner, "interface": interface,
+            "origin": origin, "name": name, "parent_session": parent_session,
+            "inherit_parent_session": inherit_parent_session,
+            "caller_worktree": caller_worktree, "owner_ref": owner_ref,
+            "dispatch_attempt": dispatch_attempt, "launch_preflight": launch_preflight,
+            "recovery": recovery, "bound_agent": bound_agent,
+            "no_pair": no_pair, "pending_seed": pending_seed,
+            "pending_seed_id": pending_seed_id, "allocation": allocation,
+        }
+        return creation_requests.create(
+            config, creation_key, creation_requests.allocation_facts(config, **options),
+            lambda reserve: _create_worktree_core(config, **options, creation_intent=reserve),
+        )
     # Stage D: local-shadow deferred names via _self_override (keeps create/worktree_ops_cli cluster-free).
     from . import claims_cli as _claims_cli
     from . import resolve_launch_cli as _resolve_launch_cli
@@ -586,9 +613,6 @@ def _create_worktree_core(
     _reflect_assignment = _self_override(vars(core), "_reflect_assignment", _resolve_launch_cli._reflect_assignment)
     _slugify = _self_override(vars(core), "_slugify", _worktree_ops_cli._slugify)
 
-    from .execution_spaces import require_current_execution_space
-
-    require_current_execution_space(config)
     repo = config.default_repo
     if kind != "system" and getattr(repo, "knowledge_only", False):
         raise RuntimeError(
@@ -619,6 +643,11 @@ def _create_worktree_core(
         worktree_id = f"{config.machine}-{plat_short}-{timestamp}-{suffix}"
     branch = f"worktree/{worktree_id}"
     worktree_path = str(Path(repo.worktree_root) / worktree_id)
+    if creation_intent is not None:
+        creation_intent({
+            "id": worktree_id, "path": worktree_path,
+            "branch": branch, "repo": config.repo_name,
+        })
 
     if owner_ref:
         parsed_owner = tracking.parse_claim_ref(owner_ref)
@@ -639,7 +668,7 @@ def _create_worktree_core(
             raise CoordinationReadinessFailure(readiness)
 
     _validate_profile_assignment_config(config)
-    launches_copilot = kind != "system"
+    launches_copilot = kind != "system" and creation_intent is None
     fake_args = None
     if launches_copilot:
         fake_args = argparse.Namespace(
@@ -722,7 +751,9 @@ def _create_worktree_core(
             getattr(repo.pr, "source_attribution_configured", False)
         ),
     )
-    tracking_path = cfg.tracking_dir()
+    tracking_path = (
+        cfg.tracking_dir(config.repo_name) if creation_intent is not None else cfg.tracking_dir()
+    )
     tracking_path.mkdir(parents=True, exist_ok=True)
     with codename_tracking.allocation_lock(tracking_path):
         # Second revalidation (round-13/14 finding, sharpened by a PR

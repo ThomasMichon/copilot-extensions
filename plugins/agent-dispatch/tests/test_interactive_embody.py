@@ -93,7 +93,8 @@ def client(q):
 def _mock_prepare(monkeypatch, worktree_id="wt-interactive-1", ownership="created"):
     def fake_prepare(task, reservation, **kwargs):
         return {"worktree": worktree_id, "path": f"/fake/{worktree_id}", "created": True,
-                "replaced": False, "ownership": ownership}
+                "replaced": False, "ownership": ownership,
+                "project": kwargs.get("project") or embody.project_for_task(task)}
 
     monkeypatch.setattr(interactive_embody.embody, "prepare_reusable_worktree", fake_prepare)
 

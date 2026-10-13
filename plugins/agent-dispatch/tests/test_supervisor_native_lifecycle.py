@@ -24,7 +24,7 @@ def _native_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     read_text = Path.read_text
 
     def read(path, *args, **kwargs):
-        if str(path) == "/proc/self/cgroup":
+        if path.as_posix() == "/proc/self/cgroup":
             return f"0::/user.slice/app.slice/{UNIT}\n"
         return read_text(path, *args, **kwargs)
 
@@ -76,7 +76,7 @@ def test_unconfirmed_native_identity_defers_before_draining_or_releasing(monkeyp
     read_text = Path.read_text
 
     def read(path, *args, **kwargs):
-        if str(path) == "/proc/self/cgroup":
+        if path.as_posix() == "/proc/self/cgroup":
             raise PermissionError("fixture identity unavailable")
         return read_text(path, *args, **kwargs)
 

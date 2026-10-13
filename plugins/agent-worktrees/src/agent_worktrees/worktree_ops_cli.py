@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .worktree_creation import LaunchSeedStagingFailure
+from .creation_requests import CreationRequestFailure
 
 import argparse
 import json
@@ -73,6 +74,12 @@ def add_parsers(sub) -> None:
         "create",
         help="Create a worktree programmatically (no launch, no mux) -- the "
         "path for agents/daemons; prints id + dir (add --json for a plan)",
+    )
+    p.add_argument(
+        "--creation-key",
+        default=None,
+        help="Opaque logical allocation identity; replay returns the original "
+        "worktree, while changed facts, pending effects, or terminal results refuse",
     )
     p.add_argument(
         "--system",
@@ -364,7 +371,14 @@ def cmd_create(args: argparse.Namespace) -> int:
                 bound_agent=getattr(args, "bound_agent", None),
                 no_pair=getattr(args, "no_pair", False),
                 pending_seed=getattr(args, "seed", None),
+                creation_key=getattr(args, "creation_key", None),
             )
+        except CreationRequestFailure as exc:
+            if args.json:
+                output._json_output(exc.payload())
+            else:
+                output.err(str(exc))
+            return 3 if exc.status == "pending" else 1
         except LaunchSeedStagingFailure as exc:
             return exc.emit(json_out=args.json)
         except claims_cli.CoordinationReadinessFailure as exc:

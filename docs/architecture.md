@@ -556,8 +556,13 @@ execution project are separate identities; allocation and acquisition must
 retain the same execution workspace. See the
 [shared workspace contract](patterns/workspace-allocation-and-session-acquisition.md)
 and [local session acquisition guide](../plugins/agent-dispatch/docs/session-acquisition.md).
-The contract's stable cross-attempt creation keys are reviewed proposal work,
-not yet a generally available creation option. In fleet mode,
+Ground `create --creation-key` retains allocation intent and its original
+owner-qualified result. Local worktree-backed bridge creation composes that
+same boundary with durable native embodiment and first-turn admission;
+unsupported keyed venues refuse explicitly. Dispatch binds the execution
+project before effects and derives its allocation key from durable logical
+task identity plus an explicit revision, never the reservation attempt or
+ordinary claim generation. In fleet mode,
 `agent-dispatch supervise --pool host-a,host-b [--origin <alias>]` keeps the
 reservation and task lease on the origin coordinator while spawning only the body
 on the first live pool host; the default fleet body is still CLI/mux, and

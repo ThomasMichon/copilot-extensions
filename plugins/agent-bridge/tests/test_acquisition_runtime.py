@@ -78,7 +78,7 @@ def rig(tmp_db, session_manager, mock_acp_client, monkeypatch, tmp_path):
         if args[0] == "head-session":
             return {"tracked": True, "head_session": head["id"],
                     "active": bool(head["id"]), "state": "active" if head["id"] else None}
-        if args[0] == "register-session":
+        if args[0] == "bind-session":
             head["id"] = args[args.index("--session-id") + 1]
             return {"ok": True}
         assert args[0] == "embody"
@@ -148,6 +148,78 @@ async def test_default_cli_worker_needs_no_acp_registry_profile(rig):
 
 
 @pytest.mark.asyncio
+async def test_exact_prepared_refusal_reports_not_started_on_replay(rig, monkeypatch):
+    async def missing(_request):
+        raise AcquisitionRefused("worktree_unknown", "owner did not resolve target")
+    monkeypatch.setattr(acquisition_runtime, "verify_worktree", missing)
+    for _ in range(2):
+        with pytest.raises(AcquisitionRefused) as failure:
+            await rig.runtime.acquire(req())
+        assert failure.value.effect == "not_started"
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM acquisition_bindings")
+
+
+@pytest.mark.asyncio
+async def test_launching_refusal_never_claims_not_started(rig, monkeypatch):
+    async def uncertain(_request, *_args):
+        raise AcquisitionRefused("owner_operation_pending", "launch outcome unknown")
+    monkeypatch.setattr(rig.runtime, "_launch", uncertain)
+    with pytest.raises(AcquisitionRefused) as failure:
+        await rig.runtime.acquire(req())
+    assert failure.value.effect is None
+    assert not rig.runtime.store.journal.refused_before_effect(req())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["cli", "acp"])
+async def test_real_dispatch_allocation_qualifies_bridge_acquisition(rig, tmp_path, monkeypatch, mode):
+    from pathlib import Path
+    from dataclasses import asdict
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "agent-dispatch" / "src"))
+    from agent_dispatch.queue import TaskQueue
+    from agent_dispatch.session_acquisition import spawn_snapshot
+
+    queue = TaskQueue(tmp_path / "dispatch.db")
+    task = queue.create(title="work", repo="queue-repo")
+    reservation, _ = queue.reserve_spawn(task.id)
+    recorded = queue.record_spawn_worktree(
+        reservation.key, "worktree-a", ownership="created", creating_host="fixture-host",
+        allocation_project="test-project", worktree_path=str(tmp_path),
+    )
+    snapshot = spawn_snapshot(asdict(task), asdict(recorded), "worktree-a", {
+        "project": recorded.allocation_project, "path": recorded.worktree_path,
+    }, "created", False)
+    rig.source["task"] = asdict(task)
+    rig.source["acquisition_reservation"] = asdict(recorded)
+    original_resolve = rig.resolver.resolve_async
+    async def resolve(name):
+        if name == f"dispatch:{task.id}":
+            return SpawnTarget(type="session", worktree_id="worktree-a", venue=rig.source)
+        return await original_resolve(name)
+    rig.resolver.resolve_async = resolve
+    original_command = acquisition_authority.worktree_command
+    async def command(args, project):
+        result = await original_command(args, project)
+        if args[0] == "list":
+            result["worktrees"][0]["repo"] = "test-project"
+        return result
+    monkeypatch.setattr(acquisition_authority, "worktree_command", command)
+    request = req(
+        version=2, mode=mode, task_id=task.id, task_generation=task.generation,
+        reservation_key=recorded.key, delivery_id=f"{recorded.key}:acquire",
+        project=snapshot["spawn_allocation_project"], worktree_path=snapshot["spawn_worktree_path"],
+    )
+    with pytest.raises(AcquisitionRefused, match="fence changed"):
+        await rig.runtime.acquire(request.model_copy(update={"project": "queue-repo"}))
+    result = await rig.runtime.acquire(request)
+    assert result.native_session_id == rig.head["id"]
+    assert await rig.runtime.acquire(request) == result
+    assert len(rig.db.execute_read("SELECT * FROM acquisition_attempts")) == 1
+    assert all(project == "test-project" for _, project in rig.calls)
+
+
+@pytest.mark.asyncio
 async def test_default_cli_retry_reconciles_legacy_missing_profile_before_creation(rig, monkeypatch):
     resolve = rig.resolver.resolve_async
 
@@ -208,6 +280,7 @@ async def test_missing_registry_target_is_typed_and_refuses_prepared_journal(rig
     with pytest.raises(AcquisitionRefused) as error:
         await rig.runtime.acquire(req(mode=mode, target=target))
     assert error.value.code == "target_unavailable"
+    assert error.value.effect == "not_started"
     receipt = rig.db.execute_read(
         "SELECT state,refusal_code FROM acquisition_attempts WHERE delivery_id='delivery-a'",
     )[0]
@@ -268,6 +341,18 @@ async def test_missing_registry_target_http_refusal_is_not_a_500(rig):
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "target_unavailable"
     assert not rig.db.execute_read("SELECT * FROM live_messages")
+
+
+def test_workspace_request_cannot_downgrade_its_protocol():
+    app = FastAPI()
+    app.include_router(router)
+    request = req(version=2, worktree_path="workspace-path")
+    with TestClient(app) as http:
+        response = http.post("/api/v1/acquisitions", json={
+            **request.model_dump(), "protocol_version": 32,
+        })
+    assert response.status_code == 426
+    assert response.json()["detail"]["effect"] == "not_started"
 
 
 @pytest.mark.asyncio
@@ -758,7 +843,7 @@ async def test_drain_waits_for_active_acquisition_executor(rig, monkeypatch):
 async def test_exact_owned_native_recovers_after_crash_before_ledger_registration(rig, monkeypatch):
     original = acquisition_runtime.worktree_command
     async def interrupted(args, project):
-        if args[0] == "register-session":
+        if args[0] == "bind-session":
             raise RuntimeError("crash before register")
         return await original(args, project)
     monkeypatch.setattr(acquisition_runtime, "worktree_command", interrupted)
@@ -779,7 +864,7 @@ async def test_exact_owned_native_recovers_after_crash_before_ledger_registratio
 async def test_new_attempt_refreshes_native_head_after_prior_reconciliation(rig, monkeypatch):
     original = acquisition_runtime.worktree_command
     async def interrupted(args, project):
-        if args[0] == "register-session":
+        if args[0] == "bind-session":
             raise RuntimeError("crash before register")
         return await original(args, project)
     monkeypatch.setattr(acquisition_runtime, "worktree_command", interrupted)
@@ -1090,7 +1175,7 @@ async def test_new_reservation_recovers_interrupted_retirement_registration(rig,
     rig.runtime._deliver = deliver
     register = acquisition_runtime.worktree_command
     async def interrupted(args, project):
-        if args[0] == "register-session":
+        if args[0] == "bind-session":
             raise RuntimeError("registration interrupted")
         return await register(args, project)
     monkeypatch.setattr(acquisition_runtime, "worktree_command", interrupted)

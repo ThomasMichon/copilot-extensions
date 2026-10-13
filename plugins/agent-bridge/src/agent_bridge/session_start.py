@@ -81,6 +81,7 @@ class _SessionStartMixin:
         parity_fault: str | None = None,
         replace_session_id: str | None = None,
         retain_container_lock_on_failure: bool = False,
+        creation_session_id: str | None = None,
     ) -> Session:
         """Create and start a new agent session.
 
@@ -172,7 +173,9 @@ class _SessionStartMixin:
         # None (a non-worktree caller / stale runtime) simply skips it.
         if caller_owner_ref and not target.caller_owner_ref:
             target = replace(target, caller_owner_ref=caller_owner_ref)
-        session_id = str(uuid.uuid4())[:12]
+        session_id = creation_session_id or str(uuid.uuid4())[:12]
+        if session_id in self._sessions:
+            raise ValueError("creation session already exists; reconcile its original start")
         name = _generate_name()
         now = time.time()
 

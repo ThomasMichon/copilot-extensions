@@ -31,7 +31,9 @@ async def inspect_acquisition(delivery_id: str, request: Request) -> dict:
 
 @router.post("", response_model=AcquisitionResult)
 async def acquire_session(body: RequestEnvelope, request: Request) -> AcquisitionResult:
-    if body.protocol_version not in {30, 31, ACQUISITION_PROTOCOL_VERSION}:
+    if body.protocol_version not in {30, 31, 32, ACQUISITION_PROTOCOL_VERSION} or (
+        body.version == 2 and body.protocol_version < ACQUISITION_PROTOCOL_VERSION
+    ):
         raise HTTPException(426, detail={
             "code": "unsupported_acquisition_protocol",
             "message": "request does not support strict session acquisition protocol",

@@ -1126,10 +1126,9 @@ def _worktree_to_dict(
     # to rank by real recency-of-use rather than original creation age; a
     # never-resumed worktree simply omits the field (callers fall back to
     # ``started_at``).
-    if rec.last_resumed_at:
-        d["last_resumed_at"] = rec.last_resumed_at
-    if rec.codename:
-        d["codename"] = rec.codename
+    for field in ("last_resumed_at", "codename", "creation_nonce"):
+        if value := getattr(rec, field):
+            d[field] = value
     # Session ownership is durable record state, not live-scan enrichment.
     # Cache-only Picker rows must therefore carry the registered session count
     # and current head before any events/mux/process scan runs.  The head is the

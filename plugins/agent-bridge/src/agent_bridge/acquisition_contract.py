@@ -20,7 +20,7 @@ class AcquisitionRequest(BaseModel):
 
     model_config = ConfigDict(extra="ignore", frozen=True)
 
-    version: Literal[1] = ACQUISITION_CONTRACT_VERSION
+    version: Literal[1, 2] = ACQUISITION_CONTRACT_VERSION
     target: str = Field(min_length=1)
     mode: Mode
     task_id: str = Field(min_length=1)
@@ -37,12 +37,15 @@ class AcquisitionRequest(BaseModel):
     model: str | None = None
     effort: str | None = None
     project: str | None = None
+    worktree_path: str | None = None
     reservation_key: str = Field(min_length=1)
     driver: str = "agent-dispatch"
     verify_timeout: float = Field(default=0.0, ge=0, le=600)
 
     @model_validator(mode="after")
     def validate_intent(self) -> AcquisitionRequest:
+        if self.version == 2 and (not self.project or not self.worktree_path):
+            raise ValueError("workspace-qualified acquisition requires project and path")
         if self.intent == "continue" and self.conversation_retired is True:
             raise ValueError("strict continuation cannot revive a retired conversation")
         if self.intent == "fresh" and (

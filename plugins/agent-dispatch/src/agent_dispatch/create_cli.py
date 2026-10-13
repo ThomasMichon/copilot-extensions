@@ -268,8 +268,12 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
     route = _core()._spawn_route(args)
     try:
         with _core()._client(args) as c:
-            resp = c.reserve_spawn(task_id, reserved_by=reserved_by, **(
-                {"driver": "ordinary-bridge"} if getattr(args, "spawn_backend", "bridge") == "bridge" else {}))
+            resp = c.reserve_spawn(
+                task_id, reserved_by=reserved_by,
+                **({"driver": "ordinary-bridge"} if getattr(args, "spawn_backend", "bridge") == "bridge" else {}),
+                **({"allocation_revision": args.allocation_revision}
+                   if getattr(args, "allocation_revision", None) is not None else {}),
+            )
     except DispatchError as exc:
         # Fail safe: if we cannot reserve, we do NOT spawn (better to leave the
         # task queued than risk a second autonomous worker).
@@ -296,7 +300,9 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
     spawn_task = task
     prepared = None
     ownership = "unknown"
-    from . import embody, remote_dispatch
+    from . import bridge, embody, remote_dispatch, session_acquisition
+    from .workspace_binding import record_prepared
+    from .spawn_factories import SpawnPreparationRetained
 
     try:
         interface = "cli" if getattr(args, "spawn_backend", "bridge") == "embody" else "acp"
@@ -304,41 +310,33 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
             with _core()._client(args) as c:
                 _spawn_ordinary_worker(args, task, reservation, c, route=route)
             return
-        prepared = embody.prepare_reusable_worktree(
-            task,
-            reservation,
-            interface=interface,
-            driver="agent-dispatch",
-            supervisor=reserved_by,
-        )
+        with _core()._client(args) as c:
+            prepared = embody.prepare_reusable_worktree(
+                task,
+                reservation,
+                project=reservation.get("allocation_project") or (
+                    bridge.registered_agent_project(getattr(args, "spawn_agent", "task-worker"), strict=True)
+                    if interface == "acp" else embody.project_for_task(task)
+                ),
+                interface=interface,
+                driver="agent-dispatch",
+                supervisor=reserved_by,
+                allocation_client=c,
+            )
         worktree = str(prepared["worktree"])
         ownership = str(prepared.get("ownership") or "unknown")
-        if (
-            reservation.get("worktree") != worktree
-            or reservation.get("worktree_ownership") != ownership
-        ):
-            with _core()._client(args) as c:
-                c.record_spawn_worktree(
-                    key,
-                    worktree,
-                    ownership=ownership,
-                    creating_host=(
-                        remote_dispatch.local_machine() if ownership == "created" else None
-                    ),
-                    driver="agent-dispatch",
-                )
-        spawn_task = {
-            **task,
-            "spawn_worktree": worktree,
-            "spawn_worktree_path": prepared["path"],
-            "spawn_worktree_ownership": ownership,
-            "spawn_reservation_key": key,
-            "spawn_session_handle": (
-                None if prepared.get("replaced") else reservation.get("session_handle")
-            ),
-            "spawn_conversation_retired": reservation.get("conversation_retired"),
-        }
-    except (DispatchError, embody.EmbodyUnavailable) as exc:
+        with _core()._client(args) as c:
+            record_prepared(
+                c, reservation, prepared, driver="agent-dispatch",
+                creating_host=remote_dispatch.local_machine(),
+            )
+        spawn_task = session_acquisition.spawn_snapshot(
+            task, reservation, worktree, prepared, ownership, bool(prepared.get("replaced")),
+        )
+    except SpawnPreparationRetained as exc:
+        print(f"agent-dispatch: workspace retained for repair: {exc}", file=sys.stderr)
+        return
+    except (DispatchError, embody.EmbodyUnavailable, bridge.BridgeUnavailable) as exc:
         if prepared is None or ownership != "created":
             try:
                 with _core()._client(args) as c:
@@ -359,24 +357,14 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
     try:
         with _core()._client(args) as c:
             if spawned is None:
-                if spawn_task.get("spawn_worktree_ownership") == "created":
-                    _core()._release_failed_created_spawn(
-                        c,
-                        key,
-                        worktree=str(spawn_task["spawn_worktree"]),
-                        session_id=None,
-                        detail="no spawn mechanism available",
-                        body_absent=True,
-                    )
-                else:
-                    c.fail_spawn(key, detail="no spawn mechanism available")
+                c.fail_spawn(key, detail="no spawn mechanism available; workspace retained")
             else:
                 result, via, handle = spawned
                 if handle.get("deferred"):
                     c.defer_spawn(key, detail=result.stderr or "acquisition awaits reconciliation")
                 elif result.returncode != 0:
                     detail = f"{via} exited {result.returncode}"
-                    if spawn_task.get("spawn_worktree_ownership") == "created":
+                    if spawn_task.get("spawn_worktree_ownership") == "created" and not handle.get("preserve_workspace"):
                         _core()._release_failed_created_spawn(
                             c,
                             key,
@@ -384,6 +372,9 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
                             session_id=handle.get("session"),
                             detail=detail,
                             body_absent=bool(handle.get("not_started")),
+                            project=spawn_task.get("spawn_allocation_project"),
+                            worktree_path=spawn_task.get("spawn_worktree_path"),
+                            allocation_reservation_key=spawn_task.get("spawn_allocation_reservation_key"),
                         )
                     else:
                         c.fail_spawn(key, detail=detail)
@@ -407,6 +398,9 @@ def _release_failed_created_spawn(
     session_id: str | None,
     detail: str,
     body_absent: bool,
+    project: str | None = None,
+    worktree_path: str | None = None,
+    allocation_reservation_key: str | None = None,
 ) -> None:
     """Fence and synchronously conclude a one-shot spawn's created checkout."""
     from . import embody
@@ -421,7 +415,8 @@ def _release_failed_created_spawn(
         outcome = embody.conclude_dispatch_attempt(
             worktree,
             session_id,
-            key,
+            allocation_reservation_key or key,
+            project=project, worktree_path=worktree_path,
         )
     except embody.DisposableConclusionError as exc:
         outcome = {
@@ -568,7 +563,7 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
             agent=args.spawn_agent,
             prompt=prompt,
             charter=getattr(args, "spawn_charter", None),
-            project=embody.project_for_task(task),
+            project=task.get("spawn_allocation_project"),
             verify_timeout=getattr(args, "verify_timeout", 0) or 0,
             wait=not args.run_async,
         )
@@ -593,7 +588,9 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
     return (
         result,
         "agent-bridge",
-        session_acquisition.handle(result) if result.returncode == 0 else {"not_started": True},
+        session_acquisition.handle(result) if result.returncode == 0 else {
+            "not_started": True, "preserve_workspace": True,
+        },
     )
 
 def _report_spawn_result(result, task_id: str, via: str) -> None:
@@ -727,6 +724,10 @@ def _create_args_parent() -> argparse.ArgumentParser:
         "--spawn",
         action="store_true",
         help="after creating, spawn a worker to execute it (best effort)",
+    )
+    cp.add_argument(
+        "--allocation-revision", type=int, default=None,
+        help="with --spawn: explicitly replace a positively disposed allocation; retries retain the current revision",
     )
     cp.add_argument(
         "--spawn-backend",

@@ -368,6 +368,37 @@ def test_create_app_registers_representative_extracted_route_groups(app):
     } <= route_paths
 
 
+def test_explicit_allocation_revision_endpoint_is_required_and_persisted(api):
+    queue = api.app.state.queue
+    task = queue.create("work")
+    missing = api.post("/spawn-reservations/revisions", json={"task_id": task.id})
+    assert missing.status_code == 422
+    assert queue.latest_reservation(task.id) is None
+    first = api.post("/spawn-reservations/revisions", json={
+        "task_id": task.id, "allocation_revision": 1,
+    })
+    assert first.status_code == 200
+    reservation = first.json()["reservation"]
+    assert reservation["allocation_revision"] == 1
+    assert reservation["creation_key"]
+    assert queue.get_reservation(reservation["key"]).creation_key == reservation["creation_key"]
+
+
+def test_client_never_sends_explicit_revision_to_an_old_reservation_endpoint():
+    paths = []
+
+    def old_server(request):
+        paths.append(request.url.path)
+        assert request.url.path == "/spawn-reservations/revisions"
+        return httpx.Response(404, json={"detail": "unsupported explicit allocation revision"})
+
+    with DispatchClient("http://test", transport=httpx.MockTransport(old_server)) as client:
+        with pytest.raises(DispatchError) as failure:
+            client.reserve_spawn("task", allocation_revision=2)
+    assert failure.value.status_code == 404
+    assert paths == ["/spawn-reservations/revisions"]
+
+
 def test_health_loops_empty_when_sweep_disabled(api):
     # The loop-health map is always present once lifespan starts; disabled
     # loops report zero intervals instead of disappearing.

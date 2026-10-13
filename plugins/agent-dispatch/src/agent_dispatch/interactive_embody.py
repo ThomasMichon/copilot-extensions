@@ -116,6 +116,7 @@ class _Client(Protocol):
     ) -> dict: ...
 
     def record_spawn_worktree(self, key: str, worktree: str, **kwargs: Any) -> dict: ...
+    def record_spawn_allocation(self, key: str, project: str) -> dict: ...
 
     def record_spawn(
         self, key: str, *, session_handle: str | None = None, worktree: str | None = None
@@ -250,7 +251,9 @@ def launch_interactive_embodiment(
         )
     key = reservation["key"]
 
-    resolved_project = project or embody.project_for_task(task)
+    resolved_project = reservation.get("allocation_project") or project or embody.project_for_task(task)
+    from .spawn_factories import SpawnPreparationRetained
+    from .workspace_binding import record_prepared
     try:
         prepared = embody.prepare_reusable_worktree(
             task,
@@ -260,7 +263,10 @@ def launch_interactive_embodiment(
             driver=driver,
             supervisor=supervisor,
             timeout=timeout,
+            allocation_client=client,
         )
+    except SpawnPreparationRetained as exc:
+        raise InteractiveEmbodimentError(f"workspace retained for repair: {exc}") from exc
     except (embody.EmbodyUnavailable, OSError, subprocess.TimeoutExpired) as exc:
         # `create_worktree`/`resolve_worktree` (unlike embody's own launch
         # helpers) don't wrap a raw subprocess failure into
@@ -273,11 +279,11 @@ def launch_interactive_embodiment(
 
     worktree_id = str(prepared["worktree"])
     ownership = str(prepared.get("ownership") or "unknown")
-    if (
-        reservation.get("worktree") != worktree_id
-        or reservation.get("worktree_ownership") != ownership
-    ):
-        client.record_spawn_worktree(key, worktree_id, ownership=ownership)
+    try:
+        record_prepared(client, reservation, prepared, driver=driver, creating_host=machine)
+    except SpawnPreparationRetained as exc:
+        raise InteractiveEmbodimentError(f"workspace retained for repair: {exc}") from exc
+    resolved_project = str(prepared["project"])
 
     worker_id = worker_id_for(machine, worktree_id)
 
@@ -307,12 +313,9 @@ def launch_interactive_embodiment(
         from . import bridge, session_acquisition
         current_task = client.get(task_id)
         result = session_acquisition.acquire(
-            {
-                **current_task, "spawn_worktree": worktree_id,
-                "spawn_worktree_ownership": ownership, "spawn_reservation_key": key,
-                "spawn_conversation_retired": reservation.get("conversation_retired"),
-                "spawn_session_handle": reservation.get("session_handle"),
-            },
+            session_acquisition.spawn_snapshot(
+                current_task, reservation, worktree_id, prepared, ownership, False,
+            ),
             mode="cli", prompt=seed,
             driver=driver,
             project=resolved_project,

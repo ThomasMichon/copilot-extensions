@@ -571,7 +571,7 @@ class Supervisor:
 
         driver = self._spawn_attribute(task, "allocation_driver", "agent-dispatch")
         interface = self._spawn_attribute(task, "allocation_interface", "cli")
-        project = self._spawn_attribute(
+        project = reservation.get("allocation_project") or self._spawn_attribute(
             task, "allocation_project", embody.project_for_task(task) or ""
         )
         agent = self._spawn_attribute(task, "allocation_agent", "")
@@ -584,29 +584,15 @@ class Supervisor:
             supervisor=self.supervisor_id,
             agent=agent or None,
             no_pair=self._spawn_no_pair(task),
+            allocation_client=self.client,
         )
         worktree = str(prepared["worktree"])
         replaced = bool(prepared.get("replaced"))
         ownership = str(prepared.get("ownership") or "unknown")
-        if (
-            reservation.get("worktree") != worktree
-            or reservation.get("worktree_ownership") != ownership
-        ):
-            try:
-                self.client.record_spawn_worktree(
-                    reservation["key"],
-                    worktree,
-                    ownership=ownership,
-                    creating_host=self.machine if ownership == "created" else None,
-                    driver=driver,
-                )
-            except DispatchError as exc:
-                if ownership == "created":
-                    raise SpawnPreparationRetained(
-                        f"created worktree {worktree} could not be recorded; "
-                        "reservation retained for repair"
-                    ) from exc
-                raise
+        from .workspace_binding import record_prepared
+        record_prepared(
+            self.client, reservation, prepared, driver=driver, creating_host=self.machine,
+        )
         from .session_acquisition import spawn_snapshot
         return spawn_snapshot(task, reservation, worktree, prepared, ownership, replaced)
 
@@ -992,14 +978,10 @@ class Supervisor:
             or res["creating_host"].casefold() != (self.machine or "").casefold()
         ):
             return False
-        from . import embody
-
         try:
-            probe_project = self._spawn_attribute(
-                task,
-                "allocation_project",
-                embody.project_for_task(task) or "",
-            ) or None
+            probe_project = res.get("allocation_project")
+            if not probe_project:
+                return False
             present = self.worktree_directory_present_fn(worktree, probe_project)
         except Exception:
             present = None
@@ -1412,11 +1394,16 @@ class Supervisor:
                 "reason": "allocation-driver-unknown",
             }
         try:
+            provenance = {name: reservation.get(name) for name in ("allocation_project", "worktree_path")}
+            if not all(provenance.values()):
+                return _CONCLUSION_HELD, {"action": "preserved", "reason": "allocation-provenance-unknown"}
             outcome = self.attempt_conclusion_fn(
                 worktree,
                 session_id,
-                str(reservation["key"]),
+                str(reservation.get("allocation_reservation_key") or reservation["key"]),
                 driver,
+                **({"project": provenance["allocation_project"], "worktree_path": provenance["worktree_path"]}
+                   if self.attempt_conclusion_fn is _default_attempt_conclusion else {}),
             )
         except Exception as exc:
             log.exception(
@@ -1828,8 +1815,6 @@ class Supervisor:
                             # this worktree was actually created under, since
                             # this daemon is CWD-neutral) instead of staying
                             # unknown forever.
-                            from . import embody
-
                             try:
                                 # Resolution happens inside this same guarded
                                 # block: `_spawn_attribute` can invoke an
@@ -1840,14 +1825,10 @@ class Supervisor:
                                 # must degrade this reservation to `unknown`
                                 # for this cycle, not abort the whole
                                 # `release_requested_bodies` polling pass.
-                                probe_project = self._spawn_attribute(
-                                    task,
-                                    "allocation_project",
-                                    embody.project_for_task(task) or "",
-                                ) or None
+                                probe_project = res.get("allocation_project")
                                 present = self.worktree_directory_present_fn(
                                     worktree, probe_project
-                                )
+                                ) if probe_project else None
                             except Exception:
                                 present = None
                             if present is False:
@@ -3807,7 +3788,7 @@ class Supervisor:
                             key,
                             handle.get("error"),
                         )
-                    elif spawn_task.get("spawn_worktree_ownership") == "created":
+                    elif spawn_task.get("spawn_worktree_ownership") == "created" and not handle.get("preserve_workspace"):
                         request_failed_created_spawn_release(
                             self.client, key, handle, spawn_task, detail
                         )

@@ -52,6 +52,7 @@ from ..session_manager import (
     SessionConflictError,
 )
 from ..transport import SpawnTarget
+from ..session_start_selection import find_reusable_caller_session as _find_reusable_session
 from ..worktree_head import resolve_head
 from ..preference_requests import apply_request_preferences, reused_preference_source
 from .event_pages import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, events_before_page, rows_to_events as _rows_to_events
@@ -477,30 +478,6 @@ def _persisted_session_info(
 
 # Session states considered "alive"/reusable for caller affinity. Terminal
 # states are excluded -- reusing one would hand back a no-process session.
-_REUSABLE_STATES = frozenset({
-    SessionStatus.CREATED,
-    SessionStatus.STARTING,
-    SessionStatus.RUNNING,
-    SessionStatus.IDLE,
-})
-
-
-def _find_reusable_session(mgr, agent_name, caller_id):
-    """Return an alive session matching (agent_name, caller_id), or None.
-
-    Picks the most recently updated match so a reload reattaches to the
-    freshest session for that caller.
-    """
-    for session in mgr.list_sessions():  # already sorted newest-first
-        if (
-            session.caller_id == caller_id
-            and session.agent_name == agent_name
-            and session.status in _REUSABLE_STATES
-        ):
-            return session
-    return None
-
-
 def _enforce_worktree_head_guard(worktree_id: str, mgr=None) -> None:
     """Refuse a create into a worktree with an active head or pending handoff.
 
@@ -592,8 +569,11 @@ def _enforce_worktree_head_guard(worktree_id: str, mgr=None) -> None:
 
 
 @router.post("", response_model=StartSessionResponse, status_code=201)
+@router.post("/workspace-creations", response_model=StartSessionResponse)
 async def start_session(req: StartSessionRequest, request: Request):
     mgr: SessionManager = request.app.state.session_manager
+    if request.url.path.endswith("/workspace-creations") and req.creation_key is None:
+        raise HTTPException(status_code=422, detail="workspace-creations requires creation_key")
     resolver = getattr(request.app.state, "resolver", None)
     agent_name = req.agent
     if agent_name and not getattr(request.app.state, "ready", True):
@@ -654,7 +634,7 @@ async def start_session(req: StartSessionRequest, request: Request):
     # that (agent, caller_id) pair, return it instead of spawning a new
     # one -- makes create idempotent for HTTP consumers. Pass force_new
     # to opt out.
-    if req.caller_id and not req.force_new:
+    if req.caller_id and not req.force_new and req.creation_key is None:
         existing = _find_reusable_session(mgr, agent_name, req.caller_id)
         if existing is not None:
             existing_source = reused_preference_source(req, existing)
@@ -674,7 +654,7 @@ async def start_session(req: StartSessionRequest, request: Request):
     # agent-bridge-cold-resume Phase 3). Head is *derived* from
     # agent-worktrees; fails open if unreadable. Sibling of
     # `resume_worktree`'s `live_cli_holds_worktree` liveness guard.
-    if req.worktree_id:
+    if req.worktree_id and req.creation_key is None:
         _enforce_worktree_head_guard(req.worktree_id, mgr)
 
     if agent_name:
@@ -738,6 +718,11 @@ async def start_session(req: StartSessionRequest, request: Request):
     # Per-session env overrides (e.g. BYOK provider selection) merge onto the
     # agent's declared env, per-session winning (applied by the transport).
     request_env, source = apply_request_preferences(req, request.app.state, target)
+
+    from ..workspace_creation import start_request
+    creation = await start_request(req, mgr, target, agent_name=agent_name, env=request_env, source=source)
+    if creation is not None:
+        return creation
 
     try:
         session = await mgr.start_session(
