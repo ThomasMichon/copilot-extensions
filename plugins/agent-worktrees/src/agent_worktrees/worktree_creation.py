@@ -700,12 +700,6 @@ def _create_worktree_core(
     if kind == "session" and not no_pair:
         core._paired_knowledge_allocation_preflight(config)
 
-    if creation_intent is not None:
-        creation_intent({
-            "id": worktree_id, "path": worktree_path,
-            "branch": branch, "repo": config.repo_name,
-        })
-
     # Ensure root exists
     Path(repo.worktree_root).mkdir(parents=True, exist_ok=True)
 
@@ -807,6 +801,11 @@ def _create_worktree_core(
             owner_guard.__enter__()
 
         try:
+            if creation_intent is not None:
+                creation_intent({
+                    "id": worktree_id, "path": worktree_path,
+                    "branch": branch, "repo": config.repo_name,
+                })
             if owner_guard is not None and not core._journal_owner_reciprocal_claim(
                 config, worktree_id, owner_ref, owner_locked=True
             ):

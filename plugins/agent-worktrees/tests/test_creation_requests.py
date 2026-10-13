@@ -289,6 +289,44 @@ def test_core_profile_refusal_does_not_reserve_a_phantom_allocation(tmp_path, mo
     assert first["worktree"] == second["worktree"]
     assert len(created) == len(tracking.list_records(records)) == 1
 
+@pytest.mark.guard
+def test_core_codename_policy_refusal_does_not_reserve_a_phantom_allocation(tmp_path, monkeypatch):
+    import sqlite3
+    from dataclasses import replace
+    import agent_worktrees.__main__ as main
+    from agent_worktrees import codename_tracking
+    from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
+
+    config = _create_config(tmp_path)
+    records = tmp_path / "tracking"
+    monkeypatch.setattr(main.cfg, "tracking_dir", lambda _name=None: records)
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    config = replace(config, repos={
+        config.repo_name: replace(
+            config.default_repo,
+            pr=replace(config.default_repo.pr, enabled=True, source_attribution_configured=False),
+            codename=main.cfg.CodenameConfig(
+                wordlist_path=str(tmp_path / "custom-wordlist.json"), wordlist_path_configured=True,
+            ),
+        ),
+    })
+    monkeypatch.setattr(main.cfg, "load_config", lambda *a, **k: config)
+    created = []
+    monkeypatch.setattr(main.git_ops, "create_worktree",
+        lambda _anchor, path, *_args: created.append(path) or Path(path).mkdir())
+    with pytest.raises(codename_tracking.CodenameAttributionPolicyError):
+        main._create_worktree_core(config, creation_key="caller", no_pair=True)
+    with sqlite3.connect(records.parent / "workspace-creation.sqlite3") as db:
+        assert db.execute("SELECT status,worktree FROM creations").fetchall() == [("refused", None)]
+    assert created == [] and tracking.list_records(records) == []
+    config = replace(config, repos={
+        config.repo_name: replace(config.default_repo, codename=main.cfg.CodenameConfig()),
+    })
+    first = main._create_worktree_core(config, creation_key="caller", no_pair=True)
+    second = main._create_worktree_core(config, creation_key="caller", no_pair=True)
+    assert first["worktree"] == second["worktree"]
+    assert len(created) == len(tracking.list_records(records)) == 1
+
 
 def test_cli_creation_key_and_pending_response(monkeypatch, capfd):
     import agent_worktrees.__main__ as main
@@ -318,7 +356,8 @@ def test_cli_creation_key_and_pending_response(monkeypatch, capfd):
     reason="opt-in native fresh-owner creation boundary",
 )
 @pytest.mark.timeout(120)
-def test_native_pre_effect_refusal_then_same_key_repair(tmp_path):
+@pytest.mark.parametrize("refusal", ["profile", "codename"])
+def test_native_pre_effect_refusal_then_same_key_repair(tmp_path, refusal):
     import sqlite3
 
     anchor = tmp_path / "anchor"
@@ -338,12 +377,13 @@ def test_native_pre_effect_refusal_then_same_key_repair(tmp_path):
     ]
     refused = subprocess.run(
         argv, capture_output=True, text=True, timeout=40,
-        env={**os.environ, "FIXTURE_REFUSE_PROFILE": "1"}, **no_window_kwargs(),
+        env={**os.environ, f"FIXTURE_REFUSE_{refusal.upper()}": "1"}, **no_window_kwargs(),
     )
-    assert refused.returncode == 1 and "fixture profile refused" in refused.stdout
+    assert refused.returncode == 1, refused.stdout
+    assert ("fixture profile refused" if refusal == "profile" else "custom codename") in refused.stdout
     with sqlite3.connect(tmp_path / "state" / "workspace-creation.sqlite3") as db:
         assert db.execute("SELECT status,worktree FROM creations").fetchall() == [("refused", None)]
-    assert not (tmp_path / "worktrees").exists()
+    assert not (tmp_path / "worktrees").exists() or not list((tmp_path / "worktrees").iterdir())
     first = subprocess.run(argv, capture_output=True, text=True, timeout=40, **no_window_kwargs())
     assert first.returncode == 0, first.stderr
     replay = subprocess.run(argv, capture_output=True, text=True, timeout=40, **no_window_kwargs())

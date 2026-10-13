@@ -58,6 +58,9 @@ Completed replay is read-only with respect to native binding and turn
 admission; missing completed-turn evidence refuses instead of resubmitting.
 It settles only its own stranded launch gate if interruption occurred after
 the completed receipt was persisted; another request's gate is never released.
+A typed drain refusal at the session manager's pre-effect guard restores the
+retained allocation and releases its own gate, allowing same-key continuation
+after cutover. Unknown native-start exceptions remain pending instead.
 An established cold native conversation is strictly resumed only to admit
 its still-unadmitted original prompt, with recreation disabled.
 The journal composes the existing per-worktree async lock and OS executor lease;

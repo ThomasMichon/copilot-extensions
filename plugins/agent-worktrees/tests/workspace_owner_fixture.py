@@ -1,6 +1,7 @@
 """Fresh synthetic owner CLI for connected allocation/embodiment tests."""
 
 from pathlib import Path
+from dataclasses import replace
 import os
 import sys
 import time
@@ -32,18 +33,18 @@ session_binding_cli._register_manager_owned_monitor_session = lambda *args, **kw
 session_binding_cli._spawn_status_updater = lambda *args, **kwargs: None
 
 if os.environ.get("FIXTURE_PAUSE_CREATION") == "1":
-    prepare = main._prepare_worktree_source
+    create = main.git_ops.create_worktree
 
-    def paused_prepare(*args, **kwargs):
+    def paused_create(*args, **kwargs):
         (root / "creating").write_text("pending")
         deadline = time.monotonic() + 15
         while not (root / "release").exists():
             if time.monotonic() >= deadline:
                 raise RuntimeError("fixture release was not received")
             time.sleep(0.05)
-        return prepare(*args, **kwargs)
+        return create(*args, **kwargs)
 
-    main._prepare_worktree_source = paused_prepare
+    main.git_ops.create_worktree = paused_create
 
 if os.environ.get("FIXTURE_REFUSE_PROFILE") == "1":
     from agent_worktrees import resolve_launch_cli
@@ -52,6 +53,17 @@ if os.environ.get("FIXTURE_REFUSE_PROFILE") == "1":
         raise RuntimeError("fixture profile refused before effects")
 
     resolve_launch_cli._validate_profile_assignment_config = refused_profile
+
+if os.environ.get("FIXTURE_REFUSE_CODENAME") == "1":
+    config = replace(config, repos={
+        "fixture": replace(
+            config.default_repo,
+            pr=replace(config.default_repo.pr, enabled=True, source_attribution_configured=False),
+            codename=cfg.CodenameConfig(
+                wordlist_path=str(root / "custom-wordlist.json"), wordlist_path_configured=True,
+            ),
+        ),
+    })
 
 argv, project = main._extract_project_flag(sys.argv[2:])
 if project not in (None, "fixture"):

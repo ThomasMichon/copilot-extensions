@@ -74,6 +74,36 @@ async def test_exact_lost_response_replay_keeps_workspace_session_and_turn(creat
         await workspace_creation.start(rig.manager, rig.target, key="logical-work", prompt="Changed", agent_name="worker")
     await asyncio.sleep(0)
 
+@pytest.mark.asyncio
+async def test_drain_after_owner_revalidation_restores_allocated_creation_for_same_key(creation_rig, monkeypatch):
+    rig = creation_rig
+    command = workspace_creation.worktree_command
+    head_reads = 0
+
+    async def drain_during_owner_read(args, project):
+        nonlocal head_reads
+        result = await command(args, project)
+        if args[0] == "head-session":
+            head_reads += 1
+            if head_reads == 2:
+                rig.manager._draining = True
+        return result
+
+    monkeypatch.setattr(workspace_creation, "worktree_command", drain_during_owner_read)
+    with pytest.raises(AcquisitionRefused) as refused:
+        await workspace_creation.start(rig.manager, rig.target, key="logical-work", prompt="Do the work")
+    assert refused.value.code == "creation_draining" and refused.value.effect == "not_started"
+    saved = rig.db.execute_read("SELECT state,session_id FROM workspace_embodiments")[0]
+    assert saved["state"] == "allocated" and saved["session_id"]
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT 1 FROM acquisition_launch_gates")
+    rig.manager._draining = False
+    session, receipt = await workspace_creation.start(rig.manager, rig.target, key="logical-work", prompt="Do the work")
+    assert session.session_id == saved["session_id"] and receipt["status"] == "complete"
+    assert sum(args[0] == "create" for args, _ in rig.calls) == 1
+    assert len(rig.db.execute_read("SELECT * FROM turns")) == 1
+    await asyncio.sleep(0)
+
 
 @pytest.mark.asyncio
 async def test_completed_creation_with_missing_turn_evidence_never_resubmits(creation_rig):

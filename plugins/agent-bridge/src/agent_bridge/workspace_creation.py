@@ -112,7 +112,7 @@ async def start(
             effect="not_started",
         )
     if manager.is_draining:
-        raise AcquisitionRefused("creation_draining", "bridge is draining")
+        raise AcquisitionRefused("creation_draining", "bridge is draining", effect="not_started")
     db = manager.db
     store = AcquisitionStore(db)
     digest = hashlib.sha256(json.dumps([target.project, key]).encode()).hexdigest()
@@ -205,10 +205,17 @@ async def start(
                         raise
                     _update(db, digest, state="launching")
                     target = replace(target, worktree_id=worktree_id, cwd=saved["path"], explicit_cwd=True)
-                    session = await manager.start_session(
-                        target, creation_session_id=operation["session_id"],
-                        **{**options, "caller_id": f"acquisition:{delivery_id}"},
-                    )
+                    from .session_manager import DaemonDrainingError
+
+                    try:
+                        session = await manager.start_session(
+                            target, creation_session_id=operation["session_id"],
+                            **{**options, "caller_id": f"acquisition:{delivery_id}"},
+                        )
+                    except DaemonDrainingError as exc:
+                        _update(db, digest, state="allocated")
+                        store.release_workspace_gate(worktree_id, delivery_id)
+                        raise AcquisitionRefused("creation_draining", str(exc), effect="not_started") from exc
                 if (
                     session is None or not session.acp_session_id
                     or session.status not in {SessionStatus.IDLE, SessionStatus.RUNNING, SessionStatus.STOPPED}

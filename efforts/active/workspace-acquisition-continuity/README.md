@@ -412,3 +412,24 @@ takeover, blanket freshness authorization, or parallel session owner is proposed
   passed/one platform skip. Promoted cheap pre-effect refusal regressions into
   the worktrees guard lane so required CI exercises that safety boundary.
   Publication review, required CI, and actual merge remain open.
+
+### 2026-10-13 - Complete deterministic allocation and drain refusal recovery
+
+- The next review identified codename-policy validation and a drain race as two
+  remaining deterministic refusal paths. Ground reservation now occurs after
+  codename selection and under-lock policy validation, immediately before the
+  first reciprocal claim/checkout/tracking effect. Source/root preparation may
+  precede that point; it is not an allocated execution workspace.
+- Added real codename-policy refusal/repair coverage alongside profile refusal,
+  including the fresh owner subprocess. Existing concurrent native tests now
+  pause at the actual checkout boundary, after reservation, preserving the
+  distinction between recoverable validation and ambiguous workspace effects.
+- Typed `DaemonDrainingError` from the session manager's pre-effect start guard
+  restores `allocated` and releases only this request's gate. Retry preserves the
+  original workspace and planned session ID; unknown native-start exceptions
+  still hold for reconciliation.
+- Initial new codename fixtures attempted to mutate frozen configuration
+  values. Corrected them using nested dataclass replacement, not by weakening
+  configuration immutability. Ground/native/seed selection: 32 passed. Connected
+  bridge creation/drain selection: 28 passed/one platform skip. Lint, module-size
+  and patch guards remain green.
