@@ -4,11 +4,12 @@ import os
 import threading
 import time
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
-from zdd import breadcrumb, routing
-from zdd.conditional import ConditionalCutover, RuntimeAttestation, RuntimeSnapshot
+from zdd import breadcrumb, conditional, routing
+from zdd.conditional import ConditionalCutover, PreparedCutover, RuntimeAttestation, RuntimeSnapshot
 from zdd.cutover import CutoverOrchestrator
 from zdd.cutover_lock import CutoverLock
 
@@ -106,6 +107,31 @@ def case(tmp_path, monkeypatch):
         pick_free_port=lambda: 61002,
     )
     return tmp_path, old, events, handle, snapshot, request, orch
+
+
+def test_routing_budget_is_fresh_after_runtime_capture(case, monkeypatch):
+    root, _, _, _, snapshot, request, orch = case
+    now = [100.0]
+    deadlines = []
+    real_validate = routing.validate_active
+
+    def capture(_owner):
+        now[0] += 30.0
+        return snapshot
+
+    def validate(*args, **kwargs):
+        deadlines.append(kwargs["lock_deadline"])
+        return real_validate(*args, **kwargs)
+
+    monkeypatch.setattr(conditional, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(routing, "validate_active", validate)
+    with CutoverLock(root):
+        prepared = PreparedCutover(orch, replace(request, capture_runtime=capture))
+    assert deadlines == pytest.approx([
+        100.0 + request.routing_lock_timeout,
+        130.0 + request.routing_lock_timeout,
+    ])
+    assert prepared.routing_deadline() == pytest.approx(130.0 + request.routing_lock_timeout)
 
 
 @pytest.mark.parametrize("change", ["pid", "generation", "start", "missing-start", "newer"])

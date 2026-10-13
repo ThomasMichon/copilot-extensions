@@ -6,6 +6,10 @@ import logging
 import math
 import select
 
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+PROCESS_TERMINATE = 0x0001
+SYNCHRONIZE = 0x00100000
+
 log = logging.getLogger("zdd")
 
 

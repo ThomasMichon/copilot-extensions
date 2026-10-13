@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from copy import deepcopy
 
 import pytest
 
@@ -15,6 +16,28 @@ def _publish(root, pid, port):
         root, bind="127.0.0.1", port=port, pid=pid, version="fixture",
         demote_existing=True,
     )
+
+
+@pytest.mark.parametrize("caller_history", [False, True])
+def test_atomic_write_preserves_input_and_uses_persisted_custody(tmp_path, caller_history):
+    witness = routing.publication_witness(tmp_path, deadline=time.monotonic() + 1)
+    data = {"active": routing.Endpoint(
+        bind="127.0.0.1", port=61002, pid=202, generation=2, process_start_time="2020",
+    ).to_dict()}
+    if caller_history:
+        data[publication_history.KEY] = {
+            "version": 1, "epoch": "caller-memory", "saturated": False, "entries": [],
+        }
+    original = deepcopy(data)
+    routing._atomic_write(routing.routing_table_path(tmp_path), data)
+    assert data == original
+    persisted = routing.read_table(tmp_path)
+    assert persisted["active"] == data["active"]
+    assert publication_history.read(persisted)["epoch"] == witness
+    assert not publication_history.never_published(persisted, witness, pid=202, port=61002)
+    assert routing.publication_witness(
+        tmp_path, deadline=time.monotonic() + 1,
+    ) == witness
 
 
 def test_displaced_publication_survives_restore_clear_and_later_flips(tmp_path):

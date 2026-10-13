@@ -160,9 +160,8 @@ def _terminate_windows_if_identity(
 ) -> dict:
     import ctypes
     from ctypes import wintypes
+    from .diagnostic_exit import PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, SYNCHRONIZE
 
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    PROCESS_TERMINATE = 0x0001
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     k32.OpenProcess.restype = wintypes.HANDLE
@@ -181,7 +180,7 @@ def _terminate_windows_if_identity(
 
     handle = k32.OpenProcess(
         PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE
-        | (0x00100000 if exit_timeout is not None else 0), False, pid,
+        | (SYNCHRONIZE if exit_timeout is not None else 0), False, pid,
     )
     if not handle:
         return {

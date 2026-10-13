@@ -155,7 +155,13 @@ Each adopter owns those distinct authentication contracts and the authenticated
 capture channel; there is no generic health-based configuration fabrication.
 
 `routing_lock_timeout` bounds each native `active.lock` acquisition, including
-the process-local lock. Pre-spawn contention refuses unchanged; publication
+the process-local lock. It is not a whole-attempt deadline: capture, health,
+drain and retirement are distinct operations, and a later lock acquisition
+receives its own budget. Overall production completion bounds must be supplied
+separately by the adopter, not by consuming this budget during startup.
+Routing persistence does not mutate caller-supplied tables; witness
+initialization reads the persisted custody back under the routing lock.
+Pre-spawn contention refuses unchanged; publication
 contention attempts disposal only of a verified never-promoted candidate;
 unavailable cleanup authority retains it with a nonterminal breadcrumb.
 Disposal rechecks publication and process identity under the routing lock and

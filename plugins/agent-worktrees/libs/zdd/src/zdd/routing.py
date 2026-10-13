@@ -340,12 +340,13 @@ def _atomic_write(path: Path, data: dict) -> None:
     previous = _read_mutation_table(path.parent)
     if publication_history.KEY in previous and publication_history.read(previous) is None:
         log.error("Publication history unavailable; prior negative proofs invalidated")
-    data[publication_history.KEY] = publication_history.updated(previous, data)
+    history = publication_history.updated(previous, data)
+    following = {**data, publication_history.KEY: history}
     # Persist conservative custody before making the new route visible. A
     # daemon can admit work as soon as another process sees the renamed route.
-    protected = {**previous, publication_history.KEY: data[publication_history.KEY]}
+    protected = {**previous, publication_history.KEY: history}
     routing_persistence.write(path, protected)
-    routing_persistence.write(path, data)
+    routing_persistence.write(path, following)
 
 
 def _read_mutation_table(config_dir: str | os.PathLike[str]) -> dict:
@@ -366,7 +367,7 @@ def publication_witness(
         history = publication_history.read(table)
         if history is None:
             _atomic_write(routing_table_path(config_dir), table)
-            history = publication_history.read(table)
+            history = publication_history.read(_read_mutation_table(config_dir))
         if history is None:
             raise ActivePublicationRefused("publication history cannot establish candidate custody")
         return history["epoch"]

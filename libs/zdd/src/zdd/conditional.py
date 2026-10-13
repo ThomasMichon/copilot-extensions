@@ -125,7 +125,7 @@ class PreparedCutover:
             orch.config_dir,
             self.old,
             refuse_current=self.refuse_current,
-            lock_deadline=self.deadline(),
+            lock_deadline=self.routing_deadline(),
         )
         if (
             not orch.version
@@ -146,10 +146,11 @@ class PreparedCutover:
             orch.config_dir,
             self.old,
             refuse_current=self.refuse_current,
-            lock_deadline=self.deadline(),
+            lock_deadline=self.routing_deadline(),
         )
 
-    def deadline(self) -> float:
+    def routing_deadline(self) -> float:
+        """Bound one routing acquisition, independently of capture/health/drain."""
         return time.monotonic() + self.request.routing_lock_timeout
 
     def refuse_current(self, raw: dict | None) -> str | None:
@@ -178,7 +179,7 @@ class PreparedCutover:
 
     def spawn(self, port: int) -> _Handle:
         self.publication_witness = routing.publication_witness(
-            self.orch.config_dir, deadline=self.deadline(),
+            self.orch.config_dir, deadline=self.routing_deadline(),
         )
         handle = self.snapshot.spawn_passive(port)
         raw_pid = getattr(handle, "pid", None)
@@ -212,7 +213,7 @@ class PreparedCutover:
             self.orch.config_dir,
             self.new,
             refuse_current=self.refuse_current,
-            lock_deadline=self.deadline(),
+            lock_deadline=self.routing_deadline(),
         )
 
     def retire_predecessor(self) -> None:
@@ -256,13 +257,13 @@ class PreparedCutover:
         if self.new is None or not self.matches(self.new):
             raise CutoverError("successor identity unavailable before relay adoption")
         routing.validate_active(
-            self.orch.config_dir, self.new, lock_deadline=self.deadline()
+            self.orch.config_dir, self.new, lock_deadline=self.routing_deadline()
         )
         return _captured_call("adopt", self.snapshot.adopt_successor, self.new)
 
     def complete(self, result: CutoverResult) -> None:
         """Publish success and clear recovery only for the verified routed owner."""
-        with routing.routing_lock(self.orch.config_dir, deadline=self.deadline()):
+        with routing.routing_lock(self.orch.config_dir, deadline=self.routing_deadline()):
             attested = self.new is not None and self.matches(self.new)
             table = routing.read_table(self.orch.config_dir, strict=True) or {}
             raw = table.get("active")
@@ -302,7 +303,7 @@ class PreparedCutover:
                     process_start_time=self.old.process_start_time,
                     expected_active=self.new,
                     refuse_current=self.refuse_current,
-                    lock_deadline=self.deadline(),
+                    lock_deadline=self.routing_deadline(),
                     demote_existing=True,
                 )
             except (
@@ -322,7 +323,7 @@ class PreparedCutover:
                 if not self.matches(restored):
                     raise CutoverError("restored predecessor is not ready")
                 routing.validate_active(
-                    self.orch.config_dir, restored, lock_deadline=self.deadline()
+                    self.orch.config_dir, restored, lock_deadline=self.routing_deadline()
                 )
             except (OSError, ValueError, CutoverError, routing.ActivePublicationRefused):
                 result.serving_endpoint = None
@@ -338,7 +339,7 @@ class PreparedCutover:
         try:
             if self.new is None or self.new.pid is None:
                 raise CutoverError("candidate process identity unavailable; refusing disposal")
-            with routing.routing_lock(self.orch.config_dir, deadline=self.deadline()):
+            with routing.routing_lock(self.orch.config_dir, deadline=self.routing_deadline()):
                 table = routing.read_table(self.orch.config_dir, strict=True) or {}
                 active_raw = table.get("active")
                 active = Endpoint.from_dict(active_raw) if isinstance(active_raw, dict) else None

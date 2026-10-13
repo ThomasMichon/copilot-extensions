@@ -512,7 +512,7 @@ class CutoverOrchestrator:
                         if candidate is None or not candidate.process_start_time:
                             raise CutoverError("candidate publication identity unavailable")
                         conditional_kwargs = {
-                            "lock_deadline": conditional.deadline(),
+                            "lock_deadline": conditional.routing_deadline(),
                             "process_start_time": candidate.process_start_time,
                         }
                     published, _ = self.routing.publish_active_with_previous_guarded(
