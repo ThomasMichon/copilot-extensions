@@ -80,7 +80,8 @@ unverifiable or later-than-first known field boundary refuses; no field boundary
 is guessed. The repair quotes
 only the delimited text, preserves surrounding fields, holds native record and
 publication-authority locks, and retains the exact original bytes in a
-content-addressed `.yaml.repair-<digest>.bak` beside the record. Contention or
+content-addressed `.yaml.repair-<digest>.bak` beside the record (created exclusively
+with mode `0600`; existing non-private POSIX backups refuse reuse). Contention or
 a changed record requires a fresh inspection. Never hand-edit tracking YAML.
 
 Run it per project (`dotfiles`, `test-chamber`, …) — the command scopes to the

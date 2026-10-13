@@ -43,6 +43,7 @@ def record_dir(tmp_path, monkeypatch):
     return tmp_path, path
 
 
+@pytest.mark.guard
 @pytest.mark.parametrize("agent", [
     "standing-reviewer", "yes", "agent: reviewer", _TEXT,
     'Mixed "quotes": keep\n\nall paragraphs.', "Spaces # and comments",
@@ -63,6 +64,7 @@ def test_bound_agent_writer_round_trips_arbitrary_text(tmp_path, agent):
     assert tracking.load_record(path).bound_agent == agent
 
 
+@pytest.mark.guard
 def test_legacy_repair_preserves_exact_agent_text_and_surrounding_fields():
     fixed = repair.repair_bound_agent(_RAW, "pair_id")
     assert fixed.startswith(_PREFIX) and fixed.endswith(_SUFFIX)
@@ -72,6 +74,7 @@ def test_legacy_repair_preserves_exact_agent_text_and_surrounding_fields():
     }
 
 
+@pytest.mark.guard
 @pytest.mark.parametrize("raw,boundary", [
     (_RAW, "status"),
     (_RAW, "sessions"),
@@ -88,6 +91,7 @@ def test_ambiguous_or_foreign_boundary_refuses(raw, boundary):
     assert repair.repair_bound_agent(raw, boundary) is None
 
 
+@pytest.mark.guard
 def test_targeted_report_and_apply_do_not_touch_other_records(record_dir, capsys, monkeypatch):
     root, path = record_dir
     sibling = root / "wt-other.yaml"
@@ -111,8 +115,10 @@ def test_targeted_report_and_apply_do_not_touch_other_records(record_dir, capsys
     assert not json.loads(capsys.readouterr().out)["repaired"]
 
 
+@pytest.mark.guard
 @pytest.mark.parametrize("changes", [
     {"repair_record": "../wt-agent"}, {"repair_record": None},
+    {"repair_record": "wt..agent"}, {"repair_record": r"wt\agent"},
     {"gc_sessions": True}, {"prune_pivots": True}, {"apply_daemon_health": True},
     {"bound_agent_end_field": None},
 ])
@@ -124,6 +130,7 @@ def test_targeted_repair_refuses_unsafe_requests(record_dir, capsys, changes):
     assert path.read_bytes() == before
 
 
+@pytest.mark.guard
 def test_later_boundary_cannot_remove_pr_authority(record_dir, capsys):
     root, path = record_dir
     raw = _PREFIX + "bound_agent: " + _TEXT + "\n" + (
@@ -142,6 +149,33 @@ def test_later_boundary_cannot_remove_pr_authority(record_dir, capsys):
         "pr_id": "original-pr", "number": 42, "state": "open", "branch": "pr/original-agent",
     }]
     assert data["sessions"] == []
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("helper", [
+    "session_backend_raw", "dispatch_attempt_raw", "controller_metadata_opaque",
+])
+def test_runtime_only_dataclass_helpers_are_not_serialized_fields(
+    record_dir, capsys, helper,
+):
+    root, path = record_dir
+    raw = _RAW.replace("status: active\n", f"status: active\n{helper}: null\n")
+    path.write_bytes(raw.encode())
+    assert repair.targeted_doctor(args(fix=True)) == 1
+    assert "unknown fields" in json.loads(capsys.readouterr().out)["error"]
+    assert path.read_bytes() == raw.encode() and not list(root.glob("*.bak"))
+
+
+@pytest.mark.guard
+def test_fqdn_machine_worktree_id_is_accepted(record_dir, capsys):
+    root, old_path = record_dir
+    record_id = "host.example-win-20261013-123456-abcd"
+    path = root / f"{record_id}.yaml"
+    path.write_bytes(_RAW.replace("wt-agent", record_id).encode())
+    assert repair.targeted_doctor(args(fix=True, repair_record=record_id)) == 0
+    assert json.loads(capsys.readouterr().out)["repaired"]
+    assert repair.strict_mapping(path.read_text())["worktree_id"] == record_id
+    assert old_path.read_bytes() == _RAW.encode()
 
 
 def test_changed_record_refuses_before_backup_or_write(record_dir):
@@ -211,6 +245,7 @@ def test_invalid_fixed_mapping_cannot_mutate(record_dir):
     assert path.read_bytes() == _RAW.encode() and not list(root.glob("*.bak"))
 
 
+@pytest.mark.guard
 def test_unverifiable_existing_backup_refuses_without_replacement(record_dir):
     root, path = record_dir
     observed = path.read_bytes()
@@ -222,6 +257,7 @@ def test_unverifiable_existing_backup_refuses_without_replacement(record_dir):
     assert path.read_bytes() == observed and backup.read_bytes() == b"foreign backup"
 
 
+@pytest.mark.guard
 def test_failed_replacement_retains_exact_backup_and_original(record_dir, monkeypatch):
     root, path = record_dir
     observed = path.read_bytes()
@@ -234,6 +270,40 @@ def test_failed_replacement_retains_exact_backup_and_original(record_dir, monkey
         repair.apply_repair(path, observed, repair.repair_bound_agent(_RAW, "pair_id"))
     assert path.read_bytes() == observed
     assert next(root.glob("*.bak")).read_bytes() == observed
+
+
+@pytest.mark.guard
+def test_backup_creation_is_exclusive_and_private(record_dir, monkeypatch):
+    _, path = record_dir
+    observed = path.read_bytes()
+    original = os.open
+    modes = []
+
+    def opened(file, flags, mode=0o777, **kwargs):
+        if str(file).endswith(".bak"):
+            assert flags & os.O_CREAT and flags & os.O_EXCL
+            modes.append(mode)
+        return original(file, flags, mode, **kwargs)
+
+    monkeypatch.setattr(os, "open", opened)
+    backup = repair.apply_repair(path, observed, repair.repair_bound_agent(_RAW, "pair_id"))
+    assert modes == [0o600] and backup.read_bytes() == observed
+    if os.name != "nt":
+        assert backup.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.guard
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file permission enforcement")
+def test_existing_public_backup_refuses_without_mutation(record_dir):
+    root, path = record_dir
+    observed = path.read_bytes()
+    digest = hashlib.sha256(observed).hexdigest()[:16]
+    backup = root / f"wt-agent.yaml.repair-{digest}.bak"
+    backup.write_bytes(observed)
+    backup.chmod(0o644)
+    with pytest.raises(ValueError, match="permissions"):
+        repair.apply_repair(path, observed, repair.repair_bound_agent(_RAW, "pair_id"))
+    assert path.read_bytes() == observed and backup.read_bytes() == observed
 
 
 def test_real_cli_reports_and_repairs_only_named_record(tmp_path):

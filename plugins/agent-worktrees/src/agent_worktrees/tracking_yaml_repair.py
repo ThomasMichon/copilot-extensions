@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import re
-from dataclasses import fields
 from pathlib import Path
 
 import yaml
@@ -18,6 +17,20 @@ _AGENT_TAIL_FIELDS = (
     "pair_kind", "reaped_at", "codename", "codename_source", "resources",
     "last_finalize_released", "follow_ups", "prs", "pr", "sessions",
 )
+_SERIALIZED_FIELDS = frozenset("""
+active_effort activity activity_at bound_agent bound_live bound_live_at branch
+caller_worktree checkout_managed codename codename_source completed_at
+controller_revision controllers creation_nonce dispatch_attempt effort_revision
+execution_leg finalized_checkout follow_up follow_ups git_state handoff_counter
+handoffs head_revision head_session head_transitions interface kind
+last_finalize_released last_finalized_at last_resumed_at lifecycle_revision
+machine mux_live mux_live_at origin owner owner_ref pair_id pair_kind pair_ref
+pair_role parent_session paused paused_revision pending_seed pending_seed_revision
+platform pr profile_assignment_revision profile_assignments prs reaped_at repo
+resources resume_count session_backend session_state_at session_summary session_turns
+sessions started_at status status_note_at summary title title_asserted worktree_id
+worktree_path
+""".split())
 
 
 def add_doctor_arguments(parser) -> None:
@@ -90,13 +103,16 @@ def apply_repair(path: Path, observed: bytes, fixed: str) -> Path:
         digest = hashlib.sha256(observed).hexdigest()[:16]
         backup = path.with_name(f"{path.name}.repair-{digest}.bak")
         try:
-            with backup.open("xb") as handle:
+            descriptor = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "wb") as handle:
                 handle.write(observed)
                 handle.flush()
                 os.fsync(handle.fileno())
         except FileExistsError:
             if backup.is_symlink() or backup.read_bytes() != observed:
                 raise ValueError("repair backup cannot be verified") from None
+            if os.name != "nt" and backup.stat().st_mode & 0o077:
+                raise ValueError("existing repair backup permissions are not private") from None
         tracking._atomic_write(path, fixed)
         return backup
 
@@ -115,7 +131,11 @@ def targeted_doctor(args) -> int:
         "repaired": False, "error": None,
     }
     try:
-        if not isinstance(record_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", record_id):
+        if (
+            not isinstance(record_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", record_id)
+            or ".." in record_id
+        ):
             raise ValueError("repair requires an exact worktree ID, not a path")
         if any(getattr(args, field, False) for field in (
             "gc_sessions", "prune_pivots", "apply_daemon_health",
@@ -134,14 +154,13 @@ def targeted_doctor(args) -> int:
             parsed = strict_mapping(raw)
         except (ValueError, TypeError, yaml.YAMLError):
             parsed = None
-        known = {field.name for field in fields(tracking.WorktreeRecord)} | {"pr"}
         fixed = (
             repair_bound_agent(raw, end_field) if end_field else
             health.repair_yaml_text(raw) if parsed is None else None
         )
         if fixed is not None:
             parsed = strict_mapping(fixed)
-            if parsed.keys() - known:
+            if parsed.keys() - _SERIALIZED_FIELDS:
                 raise ValueError("record contains unknown fields outside the selected agent text")
             if parsed.get("worktree_id") != record_id:
                 raise ValueError("record identity does not match the selected worktree")
@@ -150,7 +169,7 @@ def targeted_doctor(args) -> int:
                 report["backup"] = apply_repair(path, observed, fixed).name
                 report["repaired"] = True
         else:
-            if parsed is None or parsed.keys() - known:
+            if parsed is None or parsed.keys() - _SERIALIZED_FIELDS:
                 raise ValueError("record has no verified repair; supply an exact agent-text boundary")
             if parsed.get("worktree_id") != record_id:
                 raise ValueError("record identity does not match the selected worktree")
