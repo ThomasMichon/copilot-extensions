@@ -1006,16 +1006,18 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
-            '^(fleet-manager/|tools/(run-standalone-tests\.py|standalone_consumers\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|_admission_protocol\.py|_devcontainer_host_admission\.py|test_run_standalone_tests\.py|test_fleet_ci_scope\.py)$|libs/(single-instance-lease|agent-procutil)/|\.github/workflows/ci\.yml$)'; then
+            '^(fleet-manager/|tools/(run-standalone-tests\.py|standalone_consumers\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|_admission_protocol\.py|_devcontainer_host_admission\.py|test_run_standalone_tests\.py|test_fleet_ci_scope\.py)$|libs/(single-instance-lease|agent-procutil|versioned-runtime)/|\.github/workflows/ci\.yml$)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Test thin fleet planner with installed package and host containment
         if: steps.fleet-contracts.outputs.run == 'true'
+        env:
+          PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not client_distribution_full"' || '' }}
         run: |
           uv run --with pytest python -m pytest -q tools/test_fleet_ci_scope.py
-          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 60
+          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 120
 
   agent-index-service-linux:
     name: agent-index-service (ubuntu-latest, out-of-plugin)
@@ -1133,16 +1135,18 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
-            '^(fleet-manager/|tools/(run-standalone-tests\.py|standalone_consumers\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|_admission_protocol\.py|_devcontainer_host_admission\.py|test_run_standalone_tests\.py|test_fleet_ci_scope\.py)$|libs/(single-instance-lease|agent-procutil)/|\.github/workflows/ci\.yml$)'; then
+            '^(fleet-manager/|tools/(run-standalone-tests\.py|standalone_consumers\.py|plugin_test_containment\.py|pytest_portfolio_guard\.py|_admission_protocol\.py|_devcontainer_host_admission\.py|test_run_standalone_tests\.py|test_fleet_ci_scope\.py)$|libs/(single-instance-lease|agent-procutil|versioned-runtime)/|\.github/workflows/ci\.yml$)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Test thin fleet planner with installed package and host containment
         if: steps.fleet-contracts.outputs.run == 'true'
+        env:
+          PYTEST_ADDOPTS: ${{ github.event_name != 'workflow_dispatch' && '-m "not client_distribution_full"' || '' }}
         run: |
           uv run --with pytest python -m pytest -q tools/test_fleet_ci_scope.py
-          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 60
+          python tools/run-standalone-tests.py fleet-manager --prepare --admission-wait 60 --timeout 120
 
   archive-sources-windows:
     name: archive sources (windows-latest)

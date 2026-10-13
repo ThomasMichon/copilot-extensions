@@ -249,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
                     root / "tests" / "test_staging.py", root / "tests" / "test_staging_cli.py",
                     root / "tests" / "test_staging_cleanup_review.py",
                     root / "tests" / "test_staging_processes.py",
+                    root / "tests" / "test_runtime_resource_distribution.py",
                 ]
                 if args.smoke else [root / "tests"]
             )

@@ -1,0 +1,13 @@
+{
+  "comment": "Ship shared artifact-contained client lifecycle resources and truthful installed-client diagnostics",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index-service",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-"""Thin standalone offline planning and release-snapshot inspection."""
+"""Thin standalone planning, release snapshots and installed-client diagnostics."""
 
 import argparse
 import sys
@@ -34,12 +34,18 @@ def main(argv=None):
     inspection.add_argument("--role", choices=ROLES, required=True)
     inspection.add_argument("--authority", required=True)
     inspection.add_argument("--installation", required=True)
+    diagnostic = commands.add_parser("doctor", help="Check this installed thin client; never install or probe a controller")
+    diagnostic.add_argument("--role", choices=("client",), default="client")
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return 0 if exc.code == 0 else 1
     try:
-        if args.command == "inspect":
+        if args.command == "doctor":
+            from .client_diagnostics import diagnose_client
+
+            result = diagnose_client()
+        elif args.command == "inspect":
             result = inspect_release(
                 read(args.release, "release"),
                 read(args.observation, "observation") if args.observation else None,
@@ -55,6 +61,8 @@ def main(argv=None):
         print(f"fleet-manager: {exc}", file=sys.stderr)
         return 1
     print(serialized)
+    if args.command == "doctor":
+        return 0
     if args.command == "inspect":
         return 0 if result["status"] in ("installed", "ready") else 2
     return 2 if result["blockers"] else 0

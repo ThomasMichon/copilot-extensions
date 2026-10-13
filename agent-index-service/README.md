@@ -47,6 +47,11 @@ macOS host/client installation remains unchanged; it is not redirected through
 this new adapter. Darwin parity is an explicit deferred lifecycle item, not a
 claim that native compatibility is complete.
 
+Its byte-identical versioned-runtime resource is delivered by the same canonical
+build-only helper as the thin fleet client. Wheels/sdists remain independently
+buildable, including after moving a service project into a nested directory.
+This packaging reuse does not alter staging, activation or host configuration.
+
 `stage` provisions a candidate but never selects it, starts a service or changes
 the host configuration/data/routing. The install root must be an explicit
 absolute dedicated directory, disjoint from the host home/data/routing, bundle,
