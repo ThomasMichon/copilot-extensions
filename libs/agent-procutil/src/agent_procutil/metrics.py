@@ -10,8 +10,11 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import Future
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal, Protocol, cast
+from uuid import uuid4
+
+from .metrics_accounting import SampleAccounting, _read_clock, _SampleTimer
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +59,7 @@ class CpuObservation:
     issues: tuple[CpuIssue, ...]
     truncated: bool
     coverage: Literal["observed_lower_bound"] = "observed_lower_bound"
+    sample: SampleAccounting | None = None
 
 
 @dataclass
@@ -78,7 +82,8 @@ class OwnedProcessCpuSampler:
 
     def __init__(
         self, root: ProcessIdentity, *, max_identities: int = 128,
-        clock: Callable[[], float] = time.monotonic,
+        clock: Callable[[], float | None] = time.monotonic,
+        thread_clock: Callable[[], float | None] = time.thread_time,
     ) -> None:
         if root.pid <= 0:
             raise ValueError("root PID must be positive")
@@ -91,12 +96,29 @@ class OwnedProcessCpuSampler:
         self._root = root
         self._cap = max_identities
         self._clock = clock
+        self._thread_clock = thread_clock
+        self._instance = uuid4().hex
+        self._sequence = 0
         self._records = {root.pid: _Record(root)}
         self._truncated = False
         self._last: CpuObservation | None = None
         self._last_at: float | None = None
         self._pending: Future[CpuObservation] | None = None
+        self._accounting_future: Future[SampleAccounting] | None = None
+        self._current_sample: SampleAccounting | None = None
         self._lock = threading.Lock()
+
+    @property
+    def current_sample(self) -> SampleAccounting | None:
+        """Return only the current/last sample, including pending or failed work."""
+        with self._lock:
+            return self._current_sample
+
+    @property
+    def sample_accounting_future(self) -> Future[SampleAccounting] | None:
+        """Pin accounting to this native attempt, even if its result raises."""
+        with self._lock:
+            return self._accounting_future
 
     @property
     def pending_sample_future(self) -> Future[CpuObservation] | None:
@@ -105,42 +127,77 @@ class OwnedProcessCpuSampler:
             return pending if pending is not None and not pending.done() else None
 
     async def sample(self) -> CpuObservation:
-        now = self._clock()
-        start_worker = False
+        now, _ = _read_clock(self._clock, "cache")
+        new_sample: tuple[Future[SampleAccounting], SampleAccounting] | None = None
         with self._lock:
             pending = self._pending
             if pending is None or pending.done():
                 if (
-                    self._last is not None and self._last_at is not None
-                    and now - self._last_at < 1.0
+                    self._last is not None and self._last_at is not None and now is not None
+                    and 0 <= now - self._last_at < 1.0
                 ):
                     return self._last
                 pending = Future()
                 pending.set_running_or_notify_cancel()
                 self._pending = pending
-                start_worker = True
-        if start_worker:
+                if self._sequence == (1 << 63) - 1:
+                    self._instance = uuid4().hex
+                    self._sequence = 0
+                self._sequence += 1
+                accounting: Future[SampleAccounting] = Future()
+                accounting.set_running_or_notify_cancel()
+                self._accounting_future = accounting
+                sample = SampleAccounting(self._instance, self._sequence, "pending")
+                self._current_sample = sample
+                new_sample = accounting, sample
+        if new_sample is not None:
+            accounting, sample = new_sample
             try:
                 worker = threading.Thread(
-                    target=self._run_sample, args=(pending,), name="owned-cpu-sample", daemon=True,
+                    target=self._run_sample, args=(pending, accounting, sample),
+                    name="owned-cpu-sample", daemon=True,
                 )
                 worker.start()
-            except RuntimeError as error:
+            except Exception as error:
+                failed = replace(sample, state="failed", issues=("worker_start_failed",))
+                with self._lock:
+                    self._current_sample = failed
+                accounting.set_result(failed)
                 pending.set_exception(error)
                 log.error("Owned CPU sampling worker could not start", exc_info=error)
-        return await asyncio.shield(asyncio.wrap_future(pending))
+        wrapped = asyncio.wrap_future(pending)
+        wrapped.add_done_callback(
+            lambda future: None if future.cancelled() else future.exception(),
+        )
+        return await asyncio.shield(wrapped)
 
-    def _run_sample(self, pending: Future[CpuObservation]) -> None:
+    def _run_sample(
+        self, pending: Future[CpuObservation], accounting: Future[SampleAccounting],
+        sample: SampleAccounting,
+    ) -> None:
+        timer = _SampleTimer(
+            sample.instance, sample.sequence, self._clock, self._thread_clock,
+        )
+        with self._lock:
+            self._current_sample = timer.pending
         try:
             observation = self._sample_sync()
-            completed_at = self._clock()
-            with self._lock:
-                self._last = observation
-                self._last_at = completed_at
         except BaseException as error:
+            completed = timer.complete("failed")
+            with self._lock:
+                self._current_sample = completed
+                self._last_at = None
+            accounting.set_result(completed)
             pending.set_exception(error)
             log.error("Owned CPU sample failed", exc_info=error)
         else:
+            completed = timer.complete("succeeded")
+            observation = replace(observation, sample=completed)
+            with self._lock:
+                self._current_sample = completed
+                self._last = observation
+                self._last_at = completed.completed_at
+            accounting.set_result(completed)
             pending.set_result(observation)
 
     def _observation(self, issues: list[CpuIssue]) -> CpuObservation:

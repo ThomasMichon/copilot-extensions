@@ -470,3 +470,22 @@ native sample bounded completion provenance so cached reuse and repeated
 observations cannot inflate accounting. It remains measurement-only;
 cumulative role reduction, expected cost/fan-out policy, enforced budgets and
 identity-safe process-tree reclamation are separate open gates.
+
+### 2026-10-13 - Sample accounting plan landed; implementation prepared
+
+Merged #6534 as `0fdda518f` after exact-head approval with zero findings and
+actual CI success. The reviewed measurement-only contract now has an
+implementation: bounded per-sampler/sequence provenance, current/last native
+accounting, separate collector wall/thread CPU, and explicit clock uncertainty.
+Cache reuse carries the same cost; backend exceptions still reach awaiters.
+Bridge exports late accounting through the existing content-free sink, including
+failed or cancelled waits, without losing native holder ownership.
+
+The physical procutil mirror and all 13 consumer changefile entries are
+synchronized; default helper consumers neither import psutil nor sample.
+Windows library validation passed 99 tests, including a direct native-thread
+counter witness. All nine Agent Bridge sub-suites passed (4,245 passed, 94
+skipped), including native accounting export. Linux CI and exact-head review
+remain required before merge. Numeric policy, role reduction, reclamation and
+authorized adoption remain unresolved parent gates; this implementation does
+not close them.

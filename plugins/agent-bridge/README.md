@@ -113,6 +113,17 @@ failed or rate-limited measurements retain an earlier valid lower bound when
 one exists; otherwise they remain `null`. Uncertainty is always explicit.
 Wall duration remains `null` until the native command finishes; a cancelled
 asyncio task does not establish thread/process completion.
+Each event's `sample` is the bounded current native accounting record;
+`observation_sample` identifies the successful sample that supplied the CPU
+lower bound, which may precede a failed or pending attempt. The separate
+`reader_cpu_sample_completed` event exports final accounting even after the
+command or its waiter ends. It includes only the same role/namespace/root
+identity and sample record, never backend exception text. Collector wall and
+thread CPU costs remain separate from command wall duration and tree CPU.
+Deduplicate accounting by `(instance, sequence)`, including cached reuse or a
+record repeated in both event types. See
+[`agent-procutil` accounting](../../libs/agent-procutil/README.md#optional-owned-process-cpu-observations)
+for clock uncertainty and the pending/completion contract.
 Measurement failure does not discard valid enumeration. Resolve, ensure-ready
 and target-repo calls are not instrumented. No CPU admission policy, process
 registry or new termination behavior is implied; existing execution deadlines

@@ -15,6 +15,7 @@ from agent_procutil.metrics import (
     CpuObservation,
     OwnedProcessCpuSampler,
     ProcessIdentity,
+    SampleAccounting,
 )
 
 from .reader_command import OwnedReaderCommand
@@ -25,6 +26,21 @@ log = logging.getLogger("agent-bridge")
 _SAMPLE_JOIN_SECONDS = 0.1
 _SAMPLE_INTERVAL_SECONDS = 1.0
 _TaskResult = TypeVar("_TaskResult")
+
+
+def _accounting_fields(sample: SampleAccounting | None) -> dict[str, object] | None:
+    if sample is None:
+        return None
+    return {
+        "instance": sample.instance,
+        "sequence": sample.sequence,
+        "state": sample.state,
+        "started_at": sample.started_at,
+        "completed_at": sample.completed_at,
+        "wall_seconds": sample.wall_seconds,
+        "thread_cpu_seconds": sample.thread_cpu_seconds,
+        "issues": list(sample.issues),
+    }
 
 
 def _consume_task_failure(task: asyncio.Task[_TaskResult], label: str) -> None:
@@ -43,6 +59,7 @@ class ReaderCpuObservation:
         self._sample_holder: asyncio.Task[CpuObservation] | None = None
         self._sample_completed: Future[float] | None = None
         self._next_sample_at = 0.0
+        self._last_accounted: tuple[str, int] | None = None
 
     @property
     def pending_sample_future(self) -> Future[CpuObservation] | None:
@@ -64,21 +81,46 @@ class ReaderCpuObservation:
     def _track_sample_completion(
         self,
         sampler: OwnedProcessCpuSampler,
+        root: ProcessIdentity,
         task: asyncio.Task[CpuObservation],
         completed: Future[float],
     ) -> None:
         def record(future: object) -> None:
-            completed.set_result(time.monotonic())
+            if not completed.done():
+                completed.set_result(time.monotonic())
 
-        pending = sampler.pending_sample_future
-        if pending is not None:
-            pending.add_done_callback(record)
+        def track_accounting(accounting: Future[SampleAccounting]) -> None:
+            def accounted(future: Future[SampleAccounting]) -> None:
+                record(future)
+                sample = future.result()
+                key = (sample.instance, sample.sequence)
+                if key != self._last_accounted:
+                    self._last_accounted = key
+                    emit(
+                        {
+                            "kind": "event",
+                            "name": "reader_cpu",
+                            "event": "reader_cpu_sample_completed",
+                            "plugin": "agent-bridge",
+                            "role": "namespace-list",
+                            "namespace": self._namespace,
+                            "pid": root.pid,
+                            "created_at": root.created_at,
+                            "sample": _accounting_fields(sample),
+                        }
+                    )
+
+            accounting.add_done_callback(accounted)
+
+        accounting = sampler.sample_accounting_future
+        if accounting is not None:
+            track_accounting(accounting)
         else:
 
             def task_completed(waiter: asyncio.Task[CpuObservation]) -> None:
-                pending = sampler.pending_sample_future
-                if pending is not None:
-                    pending.add_done_callback(record)
+                accounting = sampler.sample_accounting_future
+                if accounting is not None:
+                    track_accounting(accounting)
                 else:
                     record(waiter)
 
@@ -109,7 +151,7 @@ class ReaderCpuObservation:
             try:
                 await asyncio.sleep(0)
             finally:
-                self._track_sample_completion(sampler, holder, completed)
+                self._track_sample_completion(sampler, root, holder, completed)
         elif not holder.done() and not final:
             return previous, CpuIssue(root.pid, "sample_pending")
         try:
@@ -134,6 +176,7 @@ class ReaderCpuObservation:
         root: ProcessIdentity | None = None
         observation: CpuObservation | None = None
         issue: CpuIssue | None = None
+        sampler: OwnedProcessCpuSampler | None = None
         try:
             await asyncio.wait({command, receipt}, return_when=asyncio.FIRST_COMPLETED)
             if receipt.done():
@@ -193,6 +236,16 @@ class ReaderCpuObservation:
                     "wall_seconds": owned.wall_seconds,
                     "observed_cpu_seconds": (
                         observation.observed_cpu_seconds if observation is not None else None
+                    ),
+                    "sample": _accounting_fields(
+                        sampler.current_sample if sampler is not None else None,
+                    ),
+                    "observation_sample": (
+                        {
+                            "instance": observation.sample.instance,
+                            "sequence": observation.sample.sequence,
+                        }
+                        if observation is not None and observation.sample is not None else None
                     ),
                     "coverage": "observed_lower_bound",
                     "truncated": (observation.truncated if observation is not None else False)

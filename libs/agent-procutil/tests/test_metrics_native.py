@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -52,7 +54,14 @@ def test_native_owned_child_cpu_increases(tmp_path: Path) -> None:
     )
     try:
         identity = ProcessIdentity(process.pid, psutil.Process(process.pid).create_time())
-        sampler = OwnedProcessCpuSampler(identity)
+        thread_reads: list[tuple[int, float]] = []
+
+        def thread_clock() -> float:
+            value = time.thread_time()
+            thread_reads.append((threading.get_ident(), value))
+            return value
+
+        sampler = OwnedProcessCpuSampler(identity, thread_clock=thread_clock)
 
         async def run() -> None:
             first = await sampler.sample()
@@ -67,6 +76,20 @@ def test_native_owned_child_cpu_increases(tmp_path: Path) -> None:
             assert second.coverage == "observed_lower_bound"
             assert not second.truncated
             assert not second.issues
+            for observation in (first, second):
+                sample = observation.sample
+                assert sample is not None and sample.state == "succeeded"
+                assert sample.started_at is not None and sample.completed_at is not None
+                assert sample.wall_seconds is not None and sample.wall_seconds >= 0
+                assert sample.thread_cpu_seconds is not None and sample.thread_cpu_seconds >= 0
+                start, end = thread_reads[2 * (sample.sequence - 1):2 * sample.sequence]
+                assert start[0] == end[0] != threading.get_ident()
+                assert sample.thread_cpu_seconds == end[1] - start[1]
+                assert not sample.issues
+                assert sampler.current_sample is second.sample
+            assert first.sample.instance == second.sample.instance
+            assert first.sample.sequence < second.sample.sequence
+            assert await sampler.sample() is second
 
         asyncio.run(asyncio.wait_for(run(), timeout=8))
     finally:

@@ -49,3 +49,20 @@ CPU admission limits; it does not authorize either enforcement or termination.
 
 Cumulative role reduction, fan-out policy, numeric budgets, admission circuits,
 no-progress/tree reclamation and authorized release/adoption remain parent gates.
+
+## Implementation prepared
+
+The optional procutil API now retains one current/last immutable accounting
+record and an uncancellable native accounting future. Successful observations
+carry their sample identity; failed awaits retain accounting but still raise.
+Bridge exports final sample accounting independently of reader completion, and
+distinguishes the latest attempt from the successful observation's provenance.
+No enforcement or termination API is added.
+
+Deterministic regressions cover cache reuse, recreated instances, sequence
+rollover, timing uncertainty, native failure, cancelled awaits, loop shutdown
+and bounded retention. Native fixtures check collector CPU against the actual
+sampling thread's counter delta; CPU and wall clocks can be quantized
+independently on Windows, so no clipping or CPU-versus-wall ordering is imposed.
+The library and consumer documentation own the resulting API/event contract.
+Linux CI and exact-head review remain pre-merge obligations.

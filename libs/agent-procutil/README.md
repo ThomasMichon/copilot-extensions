@@ -125,6 +125,26 @@ daemon-scoped to its owning process and cannot outlive that process.
 psutil may inspect system process tables internally; the identity cap alone
 does not prove host-independent constant sampling cost.
 
+Each actual attempt has immutable `SampleAccounting`: a random 32-character
+sampler instance, a bounded sequence, `pending`/`succeeded`/`failed` state,
+monotonic start/completion, elapsed sampling `wall_seconds`, worker
+`thread_cpu_seconds`, and bounded timing `issues`. `observation.sample` carries
+the completed successful attempt. Cached reuse returns the same observation,
+provenance and cost; deduplicate by `(instance, sequence)` rather than adding
+the cost again. Recreating a sampler or exhausting its 63-bit sequence creates
+a new instance.
+
+`current_sample` exposes only the current/last attempt.
+`sample_accounting_future` pins its native completion accounting, including
+backend failures that still raise to ordinary sample awaiters. Cancellation,
+loop shutdown and join timeout never finalize this uncancellable accounting
+future. A worker-start failure is explicitly failed with unknown timing.
+Timing failures preserve a valid process observation and mark unavailable,
+invalid or regressed clocks as unknown, never invented zero. Both duration
+clocks are read in the sampling thread; native CPU counters may be quantized
+independently of wall time. Collector CPU is not the observed process-tree
+CPU lower bound, and must never be added to it.
+
 CPU enforcement, consumer role aggregation and process-tree reclamation are
 not provided by this API. Run its focused and native tests with the library's
 `dev` and `metrics` extras under the adopting repository's bounded test runner.
