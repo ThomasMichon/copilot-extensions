@@ -397,6 +397,7 @@ def test_client_invalid_reply_wait_makes_no_transport_request(monkeypatch, timeo
 @pytest.mark.parametrize("timeout,effective", [(None, 120.0), (0.0, 0.0), (600.0, 600.0)])
 def test_client_reply_wait_uses_validated_bound_plus_transport_margin(monkeypatch, timeout, effective):
     client = BridgeClient("http://127.0.0.1:1", "test")
+    monkeypatch.setattr(client, "daemon_supports", lambda version: version == 33)
     calls = []
     monkeypatch.setattr(client, "_request", lambda *args, **kwargs: calls.append((args, kwargs)) or {})
     client.send_live_message("live-1", sender="peer", body="update", wait=True, wait_timeout=timeout)
@@ -422,6 +423,66 @@ def test_receipt_only_send_does_not_use_ignored_reply_timeout(monkeypatch, capsy
     assert calls[0][1]["request_timeout"] is None
     assert "wait_timeout" not in calls[0][0][2]
     assert json.loads(capsys.readouterr().out)["outcome"] == "admitted"
+
+
+@pytest.mark.parametrize("protocol", [0, 32, 33])
+@pytest.mark.parametrize("wait", [False, True])
+def test_reply_wait_requires_receipt_protocol_before_message_submission(
+    monkeypatch: pytest.MonkeyPatch, protocol: int, wait: bool,
+) -> None:
+    client = BridgeClient("http://127.0.0.1:1", "test")
+    calls: list[tuple[str, str]] = []
+
+    def request(method: str, path: str, *args: object, **kwargs: object) -> dict[str, object]:
+        calls.append((method, path))
+        if path == "/health":
+            return {"protocol_version": protocol, "min_protocol_version": 0}
+        assert method == "POST"
+        return {"message_id": 7, "replied": False}
+
+    monkeypatch.setattr(client, "_request", request)
+    if wait and protocol < 33:
+        with pytest.raises(BridgeClientError, match="reply waits require daemon protocol 33") as error:
+            client.send_live_message("live-1", sender="peer", body="update",
+                                     wait=wait, wait_timeout=0)
+        assert error.value.status == 426 and calls == [("GET", "/health")]
+    else:
+        result = client.send_live_message("live-1", sender="peer", body="update",
+                                          wait=wait, wait_timeout=0)
+        assert result["message_id"] == 7
+        assert calls == ([("GET", "/health")] if wait else []) + [
+            ("POST", "/api/v1/live-sessions/live-1/messages"),
+        ]
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_cli_legacy_reply_wait_reports_typed_refusal_without_sending(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], as_json: bool,
+) -> None:
+    client = BridgeClient("http://127.0.0.1:1", "test")
+
+    def request(method: str, path: str, *args: object, **kwargs: object) -> dict[str, object]:
+        assert (method, path) == ("GET", "/health"), "unsupported wait must not submit a message"
+        return {"protocol_version": 32, "min_protocol_version": 0}
+
+    monkeypatch.setattr(client, "_request", request)
+    monkeypatch.setattr(cli, "_live_sender_label", lambda _args: "peer")
+    monkeypatch.setattr(cli, "_live_reply_to", lambda _args: None)
+    args = argparse.Namespace(
+        json=as_json, target="live-1", no_wait=False, wait_reply=True, reply_timeout=0,
+    )
+    with pytest.raises(SystemExit) as error:
+        run_send(args, lambda actual: _deliver_to_live_session(client, actual, "live-1", "update"))
+    assert error.value.code == 69
+    output = capsys.readouterr()
+    assert "require daemon protocol 33" in output.err
+    if as_json:
+        result = json.loads(output.out)
+        assert result["outcome"] == "refused_unavailable"
+        assert result["reason"] == "unsupported_protocol" and result["retryable"] is False
+        assert result["target"] == "live-1"
+    else:
+        assert output.out == ""
 
 
 @pytest.mark.parametrize("stage,delivered", [("admitted", False), ("sdk_accepted", False), ("consumed", True)])
@@ -451,6 +512,7 @@ def test_cli_wait_output_distinguishes_duplicate_and_uses_current_identity(
     duplicate: bool, as_json: bool,
 ) -> None:
     client = BridgeClient("http://127.0.0.1:1", "test")
+    monkeypatch.setattr(client, "daemon_supports", lambda version: version == 33)
     monkeypatch.setattr(client, "_request", lambda *_args, **_kwargs: {
         "message_id": 7, "session_id": "live-renamed", "duplicate": duplicate,
         "receipt": {"stage": "admitted"}, "replied": False,

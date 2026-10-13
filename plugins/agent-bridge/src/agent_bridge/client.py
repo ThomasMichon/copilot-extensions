@@ -770,6 +770,7 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
                 seconds = validate_live_reply_timeout(wait_timeout)
             except ValueError as exc:
                 raise BridgeClientError(422, f"wait_timeout {exc}") from exc
+            self._require_live_message_receipts()
             payload["wait"] = True
             if wait_timeout is not None:
                 payload["wait_timeout"] = seconds

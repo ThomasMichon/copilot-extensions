@@ -20,7 +20,8 @@ exit with a distinct code, so a caller never parses text:
 
 - ``refused_busy`` (75): the target is running a turn (no ``--force``/``--queue``).
 - ``refused_unavailable`` (69): the target isn't a fresh, current live session
-  (``not_found``, ``stale``, ``superseded``, ``expected_mismatch``).
+  (``not_found``, ``stale``, ``superseded``, ``expected_mismatch``), or its daemon
+  lacks the requested capability (``unsupported_protocol``).
 - ``refused_conflict`` (65): the idempotency key is bound to a different request.
 - ``refused_invalid`` (2): an active reply wait has an invalid timeout; no
   message is submitted.
@@ -88,10 +89,13 @@ def prompt_outcome(result: dict[str, Any]) -> str:
 
 
 def refusal_from_live_error(exc: Any, target: str) -> SendRefused | None:
-    """Map the live-message route's 404/409 refusals; ``None`` for anything else."""
+    """Map live-message availability/capability refusals; ``None`` otherwise."""
     status, detail = getattr(exc, "status", None), str(getattr(exc, "detail", "") or exc)
     if status == 404:
         return SendRefused("refused_unavailable", reason="not_found", error=detail,
+                           retryable=False, target=target)
+    if status == 426:
+        return SendRefused("refused_unavailable", reason="unsupported_protocol", error=detail,
                            retryable=False, target=target)
     if status != 409:
         return None

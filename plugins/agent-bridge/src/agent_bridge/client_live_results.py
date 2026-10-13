@@ -6,12 +6,19 @@ from typing import Any
 
 
 class LiveResultsClientMixin:
-    def get_live_message_receipt(self, session_id: str, message_id: int) -> dict[str, Any]:
+    def _require_live_message_receipts(self) -> None:
         from .client import BridgeClientError
         from .protocol import LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
 
         if not self.daemon_supports(LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION):
-            raise BridgeClientError(426, "live-message receipts require daemon protocol 33")
+            raise BridgeClientError(
+                426,
+                "live-message receipts and post-consumption reply waits require daemon "
+                f"protocol {LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION}",
+            )
+
+    def get_live_message_receipt(self, session_id: str, message_id: int) -> dict[str, Any]:
+        self._require_live_message_receipts()
         return self._request(
             "GET", f"/api/v1/live-sessions/{session_id}/messages/{message_id}/receipt"
         ) or {}
