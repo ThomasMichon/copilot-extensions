@@ -51,6 +51,7 @@ def _request_with_floor(
     while True:
         if retrying:
             time.sleep(0.5)
+            client._daemon_proto = None
             base = resolve() if resolve else None
             if base:
                 client._base = base.rstrip("/")

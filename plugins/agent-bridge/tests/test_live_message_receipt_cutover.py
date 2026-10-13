@@ -299,3 +299,52 @@ def test_history_merging_retry_is_bounded_and_never_repeats_a_post(
     assert len(resources) == (1 if method == "POST" else 2)
     assert len(healths) == (1 if method == "POST" else 3)
     assert now[0] <= 1
+
+
+@pytest.mark.parametrize("replacement", ["new-url", "same-url", "pinned"])
+@pytest.mark.parametrize("refusal", ["connection-refused", "draining", "initializing", "merging"])
+@pytest.mark.parametrize("predecessor,successor", [(34, 33), (33, 34)])
+def test_supported_result_retry_invalidates_cached_capabilities_before_discovery(
+    monkeypatch: pytest.MonkeyPatch, replacement: str, refusal: str,
+    predecessor: int, successor: int,
+) -> None:
+    old_base = "http://127.0.0.1:57585"
+    new_base = "http://127.0.0.1:47000" if replacement == "new-url" else old_base
+
+    def resolve() -> str:
+        assert client._daemon_proto is None
+        return new_base
+
+    client = BridgeClient(
+        old_base, "test", connect_grace=2,
+        reresolve=None if replacement == "pinned" else resolve,
+    )
+    retired = False
+    resources: list[str] = []
+    healths: list[str] = []
+
+    def transport(req: urllib.request.Request, timeout: float | None = None) -> _Response:
+        nonlocal retired
+        if req.full_url.endswith("/health"):
+            healths.append(req.full_url)
+            return _Response({"protocol_version": successor if retired else predecessor})
+        resources.append(req.full_url)
+        if not retired:
+            retired = True
+            if refusal == "connection-refused":
+                raise urllib.error.URLError(ConnectionRefusedError("retired"))
+            raise urllib.error.HTTPError(
+                req.full_url, 503, "unavailable", {},
+                io.BytesIO(json.dumps({"detail": refusal}).encode()),
+            )
+        return _Response({"session_id": "live-1"})
+
+    monkeypatch.setattr("agent_bridge.client.urllib.request.urlopen", transport)
+    monkeypatch.setattr("agent_bridge.client_protocol_floor.time.sleep", lambda _seconds: None)
+    assert client.get_live_result_snapshot("live-1")["session_id"] == "live-1"
+    assert client.daemon_supports(LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION) is (
+        successor >= LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
+    )
+    assert client.daemon_protocol()[0] == successor
+    assert resources == [f"{base}/api/v1/live-sessions/live-1/result" for base in (old_base, new_base)]
+    assert len(healths) == 4
