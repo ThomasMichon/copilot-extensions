@@ -75,8 +75,11 @@ enforced: plans allow 4 MiB, depth 15 and 513-object/collection items to
 accommodate preserved config plus joined recommendations and observations.
 Output hashing, saved-plan verification and CLI serialization use these output
 bounds and output-specific diagnostics, not the individual input limits.
-The package uses only the standard library and has no server,
-Docker, Copilot, marketplace or private-provider dependency.
+Default planning and inspection use only the standard library and have no
+server, Docker, Copilot, marketplace or private-provider dependency. The
+explicit `release-verification` extra adds maintained cryptographic support
+for the separate [pinned-key authentication API](docs/release-authentication.md);
+it does not select a trust policy, install a service or authorize activation.
 
 ## Thin client artifacts and local diagnostics
 
@@ -202,7 +205,10 @@ implement that authority or replace its acceptance gate.
 Vision reconciliation: closes the first contract portion of machine-fleet
 `unified-coordination-product` under [Fleet Control V2](../efforts/active/fleet-control-v2/README.md).
 Ordinary standalone client planning remains unchanged. Live lifecycle, signed
-release distribution and node/Gateway operation remain pending.
+release distribution and node/Gateway operation remain pending. The separate
+[release authentication API](docs/release-authentication.md) implements explicit
+pinned-key verification, not installation: default planning remains dependency-free,
+and GitHub-attestation selection explicitly refuses until its own verifier lands.
 
 ### Actual artifact integrity
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Authenticate canonical fleet releases with explicit pinned Ed25519 policy and no verification fallback",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

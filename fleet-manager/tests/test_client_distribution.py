@@ -75,7 +75,11 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
             line for line in archive.read(metadata).decode().splitlines()
             if line.startswith("Requires-Dist:")
         ]
-        assert all('extra == "dev"' in line for line in requirements)
+        assert all('extra == "dev"' in line or 'extra == "release-verification"' in line
+                   for line in requirements)
+        assert [line.split(";")[0] for line in requirements
+                if 'extra == "release-verification"' in line] == [
+                    "Requires-Dist: cryptography<47,>=46"]
         assert not any(name.endswith("/_standalone_runtime_build.py") for name in archive.namelist())
 
 

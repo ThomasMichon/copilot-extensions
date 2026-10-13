@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; artifact preflight landed, both-method release trust plan next
+- **Status:** Active; pinned-key verifier prepared, review and GitHub proof next
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts;
@@ -136,8 +136,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
   assembly, signature verification and lifecycle activation remain pending.
   Role-selected actual artifact integrity preflight landed in #6437 as a prerequisite;
   client packaging/diagnostics/managed installation remain owned by #6424.
-  The [both-method release authentication plan](release-authentication.md) is
-  the next reviewed slice; it grants no live trust-root or signing authority.
+  The [both-method release authentication plan](release-authentication.md)
+  landed in #6451; verifier implementation is next, without live trust-root
+  or signing authority.
 - [ ] Prove independent setup/update/doctor/recovery and bounded activation,
   with no installation or update from Copilot hooks.
 - [ ] Prove thin client installation has no controller/container-manager effects;
@@ -538,3 +539,78 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   implementation with package ownership agreed before shared metadata changes.
   #6424 owns the client lifecycle and #5789 principal/connector authentication.
   No signing key, live trust root, workflow/token or deployment was changed.
+
+### 2026-10-13 - Release authentication plan reviewed; verifier seam coordinated
+- #6451 merged at `2026-10-13T05:33:50Z`, commit
+  `e0ba68ce7982c97a1a12a7eb49616c70ad6b6e91`, after required CI passed.
+  The current-head Copilot COMMENTED review had zero findings and explicitly
+  reported a Lite fallback because the full agentic review did not start
+  before its timeout. This meets the documented owner-authored clean-Comment
+  gate; it is not evidence of a full agentic review. No CI gate was bypassed.
+- Re-read every parent Plan/Validation item. Reviewed intent does not close
+  release authentication, lifecycle activation or any Phase 1-4/full validation
+  item; the effort and worktree remain active.
+- #6424's lifecycle owner agreed the optional verification capability boundary:
+  default client dependencies stay empty, verifier imports stay lazy, and
+  unavailable selected verification refuses rather than downgrading to
+  integrity-only preflight. Parser, build resources, doctor and installer
+  remain with that owner. Exact optional-extra/API coordination precedes any
+  shared metadata change.
+- Next is the bounded #6240 policy/proof and pinned-key cryptographic slice;
+  real GitHub attestation evidence and lifecycle integration remain distinct
+  gates. No trust roots, signing workflow or live deployment were changed.
+
+### 2026-10-13 - Bounded pinned-key verification prepared
+- Added a separate, lazy-import verification API and explicit trusted
+  policy/signed-byte contract. Real Ed25519 verification authenticates the
+  exact canonical manifest digest, signed authority/sequence/lifetime and
+  configured key role/validity/revocation policy. No missing or selected
+  GitHub method falls back to another method. GitHub verification itself is
+  still unimplemented and explicitly refuses.
+- The positive fixture was generated independently by Node's signer; no
+  private fixture key was retained. Tampered bytes/signature, wrong key,
+  revoked/disallowed/expired policy, duplicate/noncanonical encoding,
+  scope mismatch and configured rollback-floor replay all refuse.
+- Native Windows installed contained suite: 410 passed, one native FIFO
+  platform skip. Real verification ran outside the checkout with Python
+  socket entry points denied; an isolated `-I -S` child loaded the installed
+  package without site packages and proved actual absent-crypto refusal.
+  This is not OS-level network isolation, clean-machine installation or
+  native Linux evidence. Full machine clean-room is deferred because no
+  installer/bootstrap changes; no live signing/deployment lane is authorized.
+- The first run explicitly exposed missing crypto support in the managed
+  test environment and an oversized parametrized test name on Windows.
+  Installed the chosen crypto dependency only into that test environment
+  and used bounded test IDs; no failures were skipped. Shared production/dev
+  metadata remains untouched pending the exact #6424 extra/API confirmation.
+  Fresh declared-dependency CI validation and publication await that agreement.
+- Extended the independently generated signing fixture to bind real component
+  bytes, exercised all three role closures and changed-file refusal, and ran
+  the installed isolated client through authentication plus actual artifact
+  preflight against the same manifest. Focused verifier suite: 48 passed.
+  This proves the pinned-method chain, not GitHub verification or immutable
+  staging/activation; the full both-method gate remains open.
+- Documentation impact covers the product README, new authentication contract
+  and this canonical journal/index. No parent Phase 1-4/Validation item is
+  closed by a prepared verifier, and no live trust or activation changed.
+
+### 2026-10-13 - Exact optional dependency seam approved
+- #6432's client resource/diagnostic prerequisite merged at
+  `2026-10-13T06:26:04Z`, commit `ca7b3e5630673bf2dee2c7519c950575ad91b825`;
+  its owner explicitly retained the optional verification seam and the
+  independently owned managed lifecycle. The operator then explicitly approved
+  the proposed `release-verification = ["cryptography>=46,<47"]`, matching
+  crypto development dependency and `authenticate_release(...)` API.
+- Integrated that prerequisite, preserving its build dependencies and resource/
+  diagnostic implementation. Added only the agreed optional/development metadata
+  and directly dependent wheel-metadata assertion. Default dependencies remain
+  empty; parser, build helper, doctor and installer logic were not changed.
+- Next gate is installed validation using declared dependencies, actual review
+  and required CI. No trust enrollment, signing workflow or rollout is approved
+  by this package-metadata decision.
+- Fresh managed native Windows environment, provisioned solely from the
+  declared development dependencies: 450 passed, one native FIFO platform skip,
+  in 44.62 seconds. The real built wheel's metadata proves crypto is restricted
+  to `dev` or the explicit `release-verification` extra; no unconditional
+  runtime requirement was introduced. Lint, whitespace and the 13-plugin
+  install-contract gate passed. Actual PR review/native CI remain next.
