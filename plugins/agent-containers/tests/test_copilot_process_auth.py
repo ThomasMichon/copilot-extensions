@@ -240,6 +240,72 @@ def test_detached_success_waits_for_consumption_before_cleanup(launch_seams, mon
 
 
 @pytest.mark.guard
+@pytest.mark.parametrize("outcome", ["nonzero", "timeout", "invalid-receipt", "unconsumed"])
+def test_detached_ambiguous_launch_retains_inputs(launch_seams, monkeypatch, capsys, outcome):
+    target, seen = launch_seams
+    adapter = detach._ContainerAdapter(
+        name="example-1", ssh_config=None, hold_id="scope", remote_env="/launch/general.env",
+        relay_port=None, host_relay_port=None, target=target,
+    )
+
+    def run(argv, **kwargs):
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        if outcome == "invalid-receipt":
+            return subprocess.CompletedProcess(argv, 0, "interrupted-response", "")
+        if outcome == "unconsumed":
+            return subprocess.CompletedProcess(argv, 0, '{"created":true,"resumed":false}', "")
+        return subprocess.CompletedProcess(argv, 255, "", "connection lost")
+
+    monkeypatch.setattr(detach.subprocess, "run", run)
+    def unconsumed(*args, **kwargs):
+        raise RuntimeError("unconsumed launch")
+
+    monkeypatch.setattr(auth, "wait_for_consumption", unconsumed)
+    if outcome == "nonzero":
+        assert adapter.launch("agent-worktrees embody --detach", timeout=1)[0] == 255
+    else:
+        with pytest.raises((RuntimeError, subprocess.TimeoutExpired)):
+            adapter.launch("agent-worktrees embody --detach", timeout=1)
+    assert not seen.cleaned
+    assert adapter.inputs_safe_to_cleanup is False
+    assert "bounded abandoned-input cleanup" in capsys.readouterr().err
+
+
+@pytest.mark.guard
+def test_detached_nonzero_resume_receipt_allows_unused_input_cleanup(launch_seams, monkeypatch):
+    target, seen = launch_seams
+    adapter = detach._ContainerAdapter(
+        name="example-1", ssh_config=None, hold_id="scope", remote_env=None,
+        relay_port=None, host_relay_port=None, target=target,
+    )
+    monkeypatch.setattr(detach.subprocess, "run", lambda argv, **kwargs:
+        subprocess.CompletedProcess(argv, 255, '{"created":false,"resumed":true}', "attach failed"))
+    monkeypatch.setattr(auth, "wait_for_consumption", lambda *a, **k: pytest.fail("no new child"))
+    assert adapter.launch("agent-worktrees embody --detach", timeout=1)[0] == 255
+    assert adapter.inputs_safe_to_cleanup is True
+    assert seen.cleaned
+
+
+@pytest.mark.guard
+def test_detached_prelaunch_failure_cleans_unused_inputs(launch_seams, monkeypatch):
+    target, seen = launch_seams
+    adapter = detach._ContainerAdapter(
+        name="example-1", ssh_config=None, hold_id="scope", remote_env=None,
+        relay_port=None, host_relay_port=None, target=target,
+    )
+
+    def reject_ssh(*args, **kwargs):
+        raise RuntimeError("invalid SSH binding")
+
+    monkeypatch.setattr(auth.transport, "build_ssh_command", reject_ssh)
+    with pytest.raises(RuntimeError, match="invalid SSH binding"):
+        adapter.launch("agent-worktrees embody --detach", timeout=1)
+    assert adapter.inputs_safe_to_cleanup is True
+    assert seen.cleaned
+
+
+@pytest.mark.guard
 def test_missing_consumption_receipt_refuses_success(monkeypatch):
     monkeypatch.setattr(auth.transport, "_run", lambda argv, **kwargs:
         subprocess.CompletedProcess(argv, 0, "", ""))

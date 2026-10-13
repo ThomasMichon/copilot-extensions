@@ -288,6 +288,11 @@ of native startup. Explicit create-or-resume receipts distinguish a new native
 child from rejoining a running session: a rejoin cleans unused launch inputs
 without claiming the existing process's authentication was refreshed.
 The attended CLI writes that nonsecret result before attaching.
+SSH failure, interruption, or a missing receipt does not prove that a detached
+child was never created. Those ambiguous outcomes retain the scoped launch
+inputs for the bounded abandoned-input reaper; only confirmed consumption,
+an explicit resume receipt, or failure before submitting the remote launch
+allows immediate cleanup. Receipt handling is independent of the SSH exit code.
 Session Host authentication lives in the existing launch handle's companion
 directory, so the original `session-host-cleanup --remote-env` call removes it
 even when an older bridge knows no additional authentication response fields.

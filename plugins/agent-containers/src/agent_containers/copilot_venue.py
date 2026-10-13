@@ -228,6 +228,7 @@ def cmd_copilot(
 
             auth_env = None
             remote_env = None
+            inputs_safe_to_cleanup = True
             try:
                 auth_env = auth.prepare_launch(config, target.fleet, args.name, user)
                 if auth_env:
@@ -248,15 +249,24 @@ def cmd_copilot(
                     reverse_forwards=reverse_forwards, pty=True,
                 )
                 env = auth.without_inference_token({**os.environ, **relay_env})
+                inputs_safe_to_cleanup = auth_env is None
                 rc = subprocess.run(
                     spawn_cmd, env=env, creationflags=creation_flags()
                 ).returncode
-                if rc == 0 and auth_env and auth.attached_created_child(args.name, user, auth_env):
-                    auth.wait_for_consumption(args.name, user, auth_env)
+                if auth_env:
+                    if auth.attached_created_child(args.name, user, auth_env):
+                        auth.wait_for_consumption(args.name, user, auth_env)
+                    inputs_safe_to_cleanup = True
                 return rc
             finally:
-                cleanup_remote_env(args.name, user, auth_env)
-                cleanup_remote_env(args.name, user, remote_env)
+                if inputs_safe_to_cleanup:
+                    cleanup_remote_env(args.name, user, auth_env)
+                    cleanup_remote_env(args.name, user, remote_env)
+                elif auth_env:
+                    print(
+                        "[WARN] Retaining unconfirmed Copilot launch inputs for bounded abandoned-input cleanup.",
+                        file=sys.stderr,
+                    )
 
         try:
             return run_venue_copilot(
