@@ -164,6 +164,37 @@ def _redact_obj(value):
     return value
 
 
+def _bound_strings(record: dict, limit: int) -> None:
+    for key, value in list(record.items()):
+        if isinstance(value, str) and len(value) > limit:
+            record[key] = value[:limit]
+        elif isinstance(value, dict):
+            _bound_strings(value, limit)
+
+
+def encode_event(record: dict) -> str:
+    """Serialize one event as a line of at most ``MAX_LINE`` UTF-8 bytes.
+
+    An oversize record first loses ``argv`` and ``details``, then every
+    remaining free-form string is bounded ever tighter until the line fits.
+    """
+    def dumps() -> str:
+        return json.dumps(record, separators=(",", ":"), ensure_ascii=False)
+
+    line = dumps()
+    if len(line.encode("utf-8")) <= MAX_LINE:
+        return line
+    record.pop("argv", None)
+    if "details" in record:
+        record["details"] = {"truncated": True}
+    for limit in (512, 128, 32):
+        _bound_strings(record, limit)
+        line = dumps()
+        if len(line.encode("utf-8")) <= MAX_LINE:
+            return line
+    raise ValueError("update event exceeds the line limit")
+
+
 class PhaseResult:
     """Mutable result a ``with run.phase(...)`` body may fill in."""
 
@@ -263,13 +294,7 @@ class Run:
                 details = _redact_obj(record["details"])
                 too_big = len(json.dumps(details)) > MAX_DETAILS
                 record["details"] = {"truncated": True} if too_big else details
-            line = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
-            if len(line.encode("utf-8")) > MAX_LINE:
-                record.pop("argv", None)
-                record["details"] = {"truncated": True}
-                if "error" in record:
-                    record["error"]["message"] = record["error"].get("message", "")[:512]
-                line = json.dumps(record, separators=(",", ":"), ensure_ascii=False)
+            line = encode_event(record)
             append_line(self.events_path, line)
             due = time.monotonic() - self._last_status >= REFRESH_SECONDS
             if self.is_owner and event == "end" and component == "run" and due:

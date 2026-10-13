@@ -18,7 +18,7 @@ from . import picker_profiles_cli, services_cli
 from . import update_events as _events, update_options
 from . import worktree_identity
 from .update_runtime import describe_copilot_spawn_error as _describe_copilot_spawn_error
-from .update_runtime import _installer_timeout
+from .update_runtime import _installer_timeout, _run_engine_installer
 
 
 def _core():
@@ -301,7 +301,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         return 1
 
     output.info(f"Plugin source: {plugin_dir}")
-    _events.enter("runtime_reconcile")
+    _events.enter("engine_runtime")
 
     from . import reconcile as _reconcile
 
@@ -315,7 +315,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         )
     except ValueError as error:
         output.err(f"Installation context invalid: {error}")
-        _events.record("runtime_reconcile", plugin_ref, "installation context invalid")
+        _events.record("engine_runtime", plugin_ref, "installation context invalid")
         return 1
     aw_payload_ver = _reconcile.payload_version(plugin_dir)
     aw_context_selected = "COPILOT_EXTENSIONS_CONTEXT" in aw_runtime_env
@@ -332,7 +332,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
             f"Runtime already at {aw_deployed_ver} -- skipping installer "
             "(use --force to re-deploy)"
         )
-        _events.record("runtime_reconcile", plugin_ref, "SKIPPED (current)", changed=False)
+        _events.record("engine_runtime", plugin_ref, "SKIPPED (current)", changed=False)
         if plat == "windows":
             _refresh_terminal_profiles()
     else:
@@ -347,7 +347,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
             shell = shutil.which("pwsh") or shutil.which("powershell")
             if not shell:
                 output.err("PowerShell not found")
-                _events.record("runtime_reconcile", plugin_ref, "powershell not found")
+                _events.record("engine_runtime", plugin_ref, "powershell not found")
                 return 1
             argv = [
                 shell,
@@ -379,15 +379,9 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         except (OSError, ValueError) as error:
             output.err(str(error))
             return 1
-        result = subprocess.run(
-            argv,
-            cwd=plugin_dir,
-            timeout=installer_timeout,
-            env=aw_runtime_env,
+        rc = _run_engine_installer(
+            argv, plugin_dir, installer_timeout, aw_runtime_env, aw_runtime_root, aw_payload_ver
         )
-        rc = result.returncode
-        _events.record("runtime_reconcile", plugin_ref,
-                       "OK" if rc == 0 else f"installer exited {rc}", changed=rc == 0)
         if rc != 0:
             return rc
 
@@ -397,7 +391,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
     except Exception as e:
         output.warn(f"Binstub reconcile skipped: {e}")
 
-    _events.enter("runtime_reconcile")
+    _events.enter("module_update")
     skip_modules = getattr(args, "skip_modules", None)
     runtimes_ok = True
     if (
@@ -413,6 +407,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
     ):
         runtimes_ok = False
 
+    _events.enter("runtime_reconcile")
     if (
         _core_helper("_reconcile_registered_runtimes", _reconcile_registered_runtimes)(
             plugin_dir,

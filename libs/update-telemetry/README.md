@@ -62,9 +62,15 @@ generation still serving) to `blocked_by_lock`, `76` (degraded cutover) to
 
 ## Events and redaction
 
-One JSON object per line (at most 8 KiB), written with a single `write()` in
+One JSON object per line (at most 8 KiB: an oversize event drops `argv` and
+`details`, then bounds its remaining strings until it fits), written with a
+single `write()` in
 append mode; readers skip and count unparseable lines. The schemas live in
-[`schemas/`](schemas/). Values after `http.extraheader=` and `Authorization:`,
+[`schemas/`](schemas/). Run-level phases include `manager_self_update` (the
+Manager's own update), `payload_refresh`, `engine_runtime` (agent-worktrees'
+own runtime installer), `binstubs`, `module_update` (`modules.json` sibling
+modules), `runtime_reconcile` (other registered runtimes), `anchor_sync` and
+`prune`, so each has its own timing. Values after `http.extraheader=` and `Authorization:`,
 authorization-scheme credentials, GitHub token shapes, and URL user-info are
 redacted from `argv`, `action`, `error` and `details` before anything is
 written.

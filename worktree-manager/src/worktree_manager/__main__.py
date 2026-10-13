@@ -1518,27 +1518,29 @@ def _cmd_update_steps(rest: list[str], run) -> int:
     print("  Self-updating the Worktree Manager …")
     with run.self_update_phase():
         su = self_update(dry_run=False)
-    cutover = su.cutover if isinstance(su.cutover, dict) else None
-    cutover_failed = bool(
-        cutover
-        and (
-            cutover.get("action") == "error"
-            or (
-                isinstance(cutover.get("result"), dict)
-                and cutover["result"].get("ok") is False
+        cutover = su.cutover if isinstance(su.cutover, dict) else None
+        cutover_failed = bool(
+            cutover
+            and (
+                cutover.get("action") == "error"
+                or (
+                    isinstance(cutover.get("result"), dict)
+                    and cutover["result"].get("ok") is False
+                )
             )
         )
-    )
-    if su.action == "updated":
-        print(f"    ✓ updated {su.previous or '(none)'} → {su.version} "
-              "(active on next run)")
-    elif su.action == "already-current":
-        print(f"    ✓ already current ({su.version})")
-    else:
-        print(f"    ○ self-update {su.action}: {su.reason} — continuing")
-    if cutover_failed:
-        print(f"    ✗ mux-daemon cutover failed: {cutover}")
-    run.record_self_update(su.action, cutover_failed, str(cutover) if cutover_failed else su.reason)
+        if su.action == "updated":
+            print(f"    ✓ updated {su.previous or '(none)'} → {su.version} "
+                  "(active on next run)")
+        elif su.action == "already-current":
+            print(f"    ✓ already current ({su.version})")
+        else:
+            print(f"    ○ self-update {su.action}: {su.reason} — continuing")
+        if cutover_failed:
+            print(f"    ✗ mux-daemon cutover failed: {cutover}")
+        # Inside the phase, so a failed cutover is the phase's own outcome.
+        run.record_self_update(su.action, cutover_failed,
+                               str(cutover) if cutover_failed else su.reason)
     # The manager_update_check cache is stale after a version change -- drop
     # it so the next poll re-checks for real instead of serving the
     # pre-update verdict (#4424).

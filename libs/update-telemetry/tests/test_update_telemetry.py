@@ -235,10 +235,10 @@ def test_exit_code_table():
     assert ut.outcome_for_installer_exit(76)[0] == ut.COMMAND_FAILED
     assert ut.outcome_for_installer_exit(124)[0] == ut.TIMEOUT
     assert ut.outcome_for_installer_exit(3)[0] == ut.COMMAND_FAILED
-    for code in (0, 1, 3, 4, 5, 6, 130):
+    for code in (0, 1, 2, 3, 4, 5, 6, 130):
         outcome, error_code = ut.outcome_for_exit_code(code)
         assert ut.exit_code_for(outcome, error_code) == code
-    assert ut.outcome_for_exit_code(2)[0] == ut.COMMAND_FAILED
+    assert ut.outcome_for_exit_code(2) == (ut.COMMAND_FAILED, ut.USAGE)
 
 
 def test_schema_examples(env):
@@ -323,3 +323,34 @@ def test_prune_keeps_newest_runs(env):
     assert len(names) == run_mod.KEEP_RUNS
     assert run.run_id in names
     assert "20200101T000000Z-1-abcd" not in names
+
+
+@pytest.mark.parametrize("field", [
+    "action", "component", "phase", "argv", "details",
+    "error.message", "error.path", "error.op", "error.code",
+])
+@pytest.mark.parametrize("filler", ["x", "\u00e9", "\U0001f600", "\x01"])
+def test_oversize_event_fits_line_limit(env, field, filler):
+    huge = filler * 20000
+    fields = {"error": {"code": "c", "message": "m", "path": "p", "op": "o"}}
+    phase, component = "runtime_reconcile", "a@m"
+    if field == "phase":
+        phase = huge
+    elif field == "component":
+        component = huge
+    elif field == "argv":
+        fields["argv"] = [huge, huge]
+    elif field == "details":
+        fields["details"] = {"blob": huge}
+    elif field.startswith("error."):
+        fields["error"][field.split(".", 1)[1]] = huge
+    else:
+        fields[field] = huge
+    run = ut.Run.from_env_or_new("engine", environ=env)
+    run.emit(phase, component, "end", outcome=ut.VERIFIED_CURRENT, **fields)
+    run.finish()
+    raw = run.events_path.read_bytes().splitlines()
+    assert all(len(line) + 1 <= run_mod.MAX_LINE for line in raw)
+    events = [json.loads(line) for line in raw]
+    assert any(e["event"] == "end" and e.get("outcome") == ut.VERIFIED_CURRENT
+               and e["run_id"] == run.run_id and e["phase"] != "run" for e in events)

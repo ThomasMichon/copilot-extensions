@@ -639,7 +639,9 @@ through the shared [`update-telemetry`](../../../libs/update-telemetry/README.md
 library: phase and per-plugin events go to
 `~/.copilot-extensions/update/runs/<run_id>/events.jsonl` and the folded result
 to `~/.copilot-extensions/update/update-status.json` (override the directory
-with `COPILOT_EXTENSIONS_UPDATE_HOME`). The exit code is 0 on success and
+with `COPILOT_EXTENSIONS_UPDATE_HOME`). Each step is its own timed phase
+(`payload_refresh`, `engine_runtime`, `binstubs`, `module_update`,
+`runtime_reconcile`, `anchor_sync`, `prune`). The exit code is 0 on success and
 non-zero for every failure:
 
 | Exit | Meaning |

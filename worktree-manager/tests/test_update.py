@@ -183,11 +183,11 @@ def test_cutover_failure_command_failed(monkeypatch, update_home):
     status = _telemetry_status(update_home)
     assert status["run"]["outcome"] == "command_failed"
     assert status["last_failure"]["summary"].startswith("manager: command_failed")
-    phases = [p["phase"] for p in status["run"]["phases"]]
-    assert phases == ["manager_self_update"]
+    phases = [(p["phase"], p["outcome"]) for p in status["run"]["phases"]]
+    assert phases == [("manager_self_update", "command_failed")]
 
 
-@pytest.mark.parametrize(("engine_rc", "expected"), [(0, 0), (6, 6), (5, 5), (75, 1)])
+@pytest.mark.parametrize(("engine_rc", "expected"), [(0, 0), (2, 2), (6, 6), (5, 5), (75, 1)])
 def test_engine_exit_code_maps_through_table(monkeypatch, update_home, engine_rc, expected):
     from worktree_manager.self_install import SelfUpdateResult
     monkeypatch.setattr(self_install, "self_update",

@@ -653,16 +653,40 @@ def _reconcile_one_runtime_status(
             env=child_environment,
         )
     except subprocess.TimeoutExpired:
-        # Past the deadline, but a complete slot for the payload version means
-        # the installer finished its work: report a late success, not a timeout.
-        from .status_monitor_reap_stale import _slot_marker_valid
-
-        if pver and _slot_marker_valid(runtime_root / "versions" / pver, pver):
-            return "OK (late success)"
-        return "timed out"
+        return _timeout_status(runtime_root, pver)
     except Exception as exc:
         return str(exc)[:120]
     return "OK" if r.returncode == 0 else f"installer exited {r.returncode}"
+
+
+def _timeout_status(runtime_root: Path, version: str | None) -> str:
+    """Status for an installer that outlived its deadline.
+
+    A complete slot for the payload version means the installer finished its
+    work anyway: report a late success rather than a timeout.
+    """
+    from .status_monitor_reap_stale import _slot_marker_valid
+
+    if version and _slot_marker_valid(runtime_root / "versions" / version, version):
+        return "OK (late success)"
+    return "timed out"
+
+
+def _run_engine_installer(
+    argv: list[str], plugin_dir: Path, timeout: int, env: Mapping[str, str],
+    runtime_root: Path, payload_version: str | None,
+) -> int:
+    """Run agent-worktrees' own runtime installer and record its result."""
+    try:
+        rc = subprocess.run(argv, cwd=plugin_dir, timeout=timeout, env=env).returncode
+        status = "OK" if rc == 0 else f"installer exited {rc}"
+    except subprocess.TimeoutExpired:
+        status = _timeout_status(runtime_root, payload_version)
+        rc = 0 if status.startswith("OK") else 1
+        (output.warn if rc == 0 else output.err)(f"agent-worktrees installer: {status}")
+    update_events.record("engine_runtime", "agent-worktrees@copilot-extensions", status,
+                         changed=status.startswith("OK"))
+    return rc
 
 
 def _fast_forward_project_anchors() -> None:
@@ -920,8 +944,9 @@ def _update_modules(
                 results.append((name, "OK"))
                 continue
         except subprocess.TimeoutExpired:
-            output.warn(f"Module '{name}' update timed out")
-            results.append((name, "timed out"))
+            status = _timeout_status(runtime_root, mod_payload_ver)
+            output.warn(f"Module '{name}' update: {status}")
+            results.append((name, status))
             continue
         except Exception as exc:
             output.warn(f"Module '{name}' update failed: {exc}")
@@ -942,14 +967,15 @@ def _update_modules(
                 output.warn(f"Module '{name}' install exited with code {r.returncode}")
                 results.append((name, f"install exited {r.returncode}"))
         except subprocess.TimeoutExpired:
-            output.warn(f"Module '{name}' install timed out")
-            results.append((name, "timed out"))
+            status = _timeout_status(runtime_root, mod_payload_ver)
+            output.warn(f"Module '{name}' install: {status}")
+            results.append((name, status))
         except Exception as exc:
             output.warn(f"Module '{name}' install failed: {exc}")
             results.append((name, str(exc)))
 
     for name, status in results:
-        update_events.record("runtime_reconcile", f"{name}@copilot-extensions", status,
+        update_events.record("module_update", f"{name}@copilot-extensions", status,
                              changed=status.startswith("OK"))
     if results:
         output.header("Module Update Summary")

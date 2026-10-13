@@ -16,7 +16,8 @@
     "phase": {
       "enum": [
         "run", "lock", "auth_report", "auth_fallback", "auth_cleanup", "anchor_sync",
-        "payload_refresh", "manager_self_update", "runtime_reconcile", "binstubs", "prune",
+        "payload_refresh", "manager_self_update", "engine_runtime", "module_update",
+        "runtime_reconcile", "binstubs", "prune",
         "verify", "report", "snapshot", "payload_recovery", "bootstrap", "reexec",
         "runtime_plan", "runtime_build", "runtime_activate"
       ]

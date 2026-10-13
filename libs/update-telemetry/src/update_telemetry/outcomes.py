@@ -33,6 +33,7 @@ OUTCOMES = (*SEVERITY, SKIPPED)
 # Stable ``error.code`` tokens with a meaning beyond the outcome itself.
 INTERRUPTED = "interrupted"
 LATE_SUCCESS = "late_success"
+USAGE = "usage"
 
 EXIT_USAGE = 2
 EXIT_INTERRUPTED = 130
@@ -66,6 +67,8 @@ def exit_code_for(outcome: str | None, error_code: str | None = None) -> int:
     """Map a final outcome to the process exit code; success is always 0."""
     if error_code == INTERRUPTED:
         return EXIT_INTERRUPTED
+    if error_code == USAGE:
+        return EXIT_USAGE
     return EXIT_CODES.get(outcome or "", 1)
 
 
@@ -73,6 +76,8 @@ def outcome_for_exit_code(code: int) -> tuple[str, str | None]:
     """Map a child orchestrator's exit code (the same table) back to an outcome."""
     if code == EXIT_INTERRUPTED:
         return COMMAND_FAILED, INTERRUPTED
+    if code == EXIT_USAGE:
+        return COMMAND_FAILED, USAGE
     if code == 0:
         return VERIFIED_CURRENT, None
     for outcome, value in EXIT_CODES.items():

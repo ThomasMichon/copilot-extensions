@@ -53,6 +53,8 @@ def wired(monkeypatch, tmp_path):
 
     def run(argv, *a, **k):
         rc = installer_rc["value"] if "install.sh" in " ".join(map(str, argv)) else 0
+        if rc == "timeout":
+            raise subprocess.TimeoutExpired(argv, k.get("timeout"))
         return subprocess.CompletedProcess(argv, rc, "", "")
 
     monkeypatch.setattr(subprocess, "run", run)
@@ -78,8 +80,8 @@ def test_phase_events_emitted(wired, _update_home):
     assert status["run"]["outcome"] == ut.VERIFIED_CURRENT
     assert status["run"]["exit_code"] == 0
     phases = [p["phase"] for p in status["run"]["phases"]]
-    assert phases[:3] == ["payload_refresh", "runtime_reconcile", "binstubs"]
-    assert "runtime_reconcile" in phases[3:]
+    assert phases == [
+        "payload_refresh", "engine_runtime", "binstubs", "module_update", "runtime_reconcile"]
     events = _events(_update_home)
     assert {e["proc"] for e in events} == {"engine"}
     starts = [e["phase"] for e in events if e["component"] == "run" and e["event"] == "start"]
@@ -186,3 +188,68 @@ def test_force_runtime_option_parses_forwards_and_selects(monkeypatch, tmp_path)
     assert runtime._reconcile_registered_runtimes(
         tmp_path, "linux", targets=targets, force_runtimes=frozenset({"agent-a"}))
     assert seen == {"agent-a": True, "agent-c": False}
+
+
+def _write_slot(root: Path, version: str) -> None:
+    slot = root / "versions" / version
+    slot.mkdir(parents=True)
+    (slot / ".install-complete.json").write_text(json.dumps(
+        {"version": version, "completed_at": "2026-01-01T00:00:00Z", "pid": 1}))
+
+
+def test_engine_installer_timeout_exits_6(wired, _update_home):
+    wired["value"] = "timeout"
+    assert m.cmd_update(_args()) == 6
+    status = _status(_update_home)
+    assert status["run"]["outcome"] == ut.TIMEOUT
+    phase = {p["phase"]: p for p in status["run"]["phases"]}["engine_runtime"]
+    assert phase["outcome"] == ut.TIMEOUT
+
+
+def test_engine_installer_timeout_with_complete_slot_is_late_success(
+    wired, tmp_path, _update_home,
+):
+    wired["value"] = "timeout"
+    _write_slot(tmp_path / "aw-runtime", "1.0.1")
+    assert m.cmd_update(_args()) == 0
+    aw = _status(_update_home)["plugins"]["agent-worktrees@copilot-extensions"]
+    assert aw["outcome"] == ut.VERIFIED_CURRENT
+    assert aw["notes"] == [ut.LATE_SUCCESS]
+
+
+@pytest.mark.parametrize("slot", [False, True])
+def test_module_installer_timeout_honors_complete_slot(tmp_path, monkeypatch, _update_home,
+                                                       slot):
+    plugin = tmp_path / "agent-worktrees"
+    plugin.mkdir()
+    (plugin / "modules.json").write_text(json.dumps(
+        {"modules": [{"name": "agent-example", "source": "agent-example"}]}))
+    module = tmp_path / "agent-example"
+    (module / "scripts").mkdir(parents=True)
+    (module / "scripts" / "install.sh").write_text("#!/bin/sh\n")
+    root = tmp_path / "module-runtime"
+    if slot:
+        _write_slot(root, "3.0.0")
+    environment = {k: v for k, v in os.environ.items() if k != "COPILOT_EXTENSIONS_CONTEXT"}
+    monkeypatch.setattr(reconcile, "payload_version", lambda path: "3.0.0")
+    monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *a, **k: "2.0.0")
+    monkeypatch.setattr(reconcile, "runtime_installer_environment",
+                        lambda *a, **k: (environment, root))
+    monkeypatch.setattr(reconcile, "_zero_downtime_update", lambda path: False)
+
+    def timeout(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
+
+    monkeypatch.setattr(runtime.subprocess, "run", timeout)
+    targets = {"agent-example": runtime._RegisteredPluginTarget(
+        None, runtime._PluginActivation.ACTIVE)}
+    update_events.start("engine")
+    ok = runtime._update_modules(plugin, "linux", None, targets=targets)
+    code = update_events.finish(0 if ok else 1)
+    target = _status(_update_home)["plugins"]["agent-example@copilot-extensions"]
+    if slot:
+        assert ok is True and code == 0
+        assert target["notes"] == [ut.LATE_SUCCESS]
+    else:
+        assert ok is False and code == 6
+        assert target["outcome"] == ut.TIMEOUT
