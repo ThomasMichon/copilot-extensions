@@ -1561,8 +1561,11 @@ _versioned_mark_complete() {
     local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
     args+=(--payload-hash "$ph")
     local rc
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'
-    rc="${PIPESTATUS[0]}"
+    if "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'; then
+        rc=0
+    else
+        rc="${PIPESTATUS[0]}"
+    fi
     if [[ "$rc" -ne 0 ]]; then
         err "Completion publication failed for versions/$SRC_VERSION -- refusing activation"
     fi

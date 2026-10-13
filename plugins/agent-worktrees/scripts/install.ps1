@@ -1579,7 +1579,9 @@ function Invoke-VersionedMarkComplete {
     }
     $mcArgs += @('--payload-hash', $ph)
     $result = Invoke-NativeCapture { & $py @mcArgs }
-    if ($result.Output) { Write-Host "  ...    $($result.Output)" }
+    if ($result.Output) {
+        ($result.Output -split '\r?\n') | ForEach-Object { Write-Host "  ...    $_" }
+    }
     if ($result.ExitCode -ne 0) {
         Write-ServiceErr "Completion publication failed for versions/$SrcVersion -- refusing activation"
         return $false

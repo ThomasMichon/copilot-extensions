@@ -116,12 +116,42 @@ function Get-PayloadHash {{ return {_ps_quote(digest)} }}
     assert result.returncode == 0, result.stdout + result.stderr
     expected = case in {"fresh", "reuse"}
     assert f"RESULT={expected}" in result.stdout
+    assert all(
+        line.startswith(("  ...    ", "RESULT="))
+        for line in result.stdout.splitlines()
+    ), result.stdout
     if before is not None:
         assert (marker.read_bytes(), marker.stat().st_ino, marker.stat().st_mtime_ns) == before
     else:
         assert marker.exists() == expected
     if not expected:
         assert "refusing" in result.stderr.lower(), result.stdout + result.stderr
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash unavailable")
+def test_bare_posix_publication_reports_failure_before_errexit(tmp_path: Path):
+    function = _function_body(
+        (SCRIPTS / "install.sh").read_text(encoding="utf-8"),
+        "_versioned_mark_complete",
+    ) + "\n}\n"
+    script = f"""
+set -euo pipefail
+SCRIPT_DIR={shlex.quote(_bash_path(tmp_path))}
+INSTALL_DIR={shlex.quote(_bash_path(tmp_path / 'runtime'))}
+LINK_DIR="$INSTALL_DIR/.venv"
+SRC_VERSION=1.2.3
+VERSIONED_RUNTIME=1
+err() {{ echo "$*" >&2; }}
+_bootstrap_python() {{ printf '%s' {shlex.quote(_bash_path(Path(sys.executable)))}; }}
+_payload_hash() {{ printf '%s' {shlex.quote(DIGEST)}; }}
+{function}
+_versioned_mark_complete
+echo UNEXPECTED
+"""
+    result = _run("bash", _BASH, script, tmp_path)
+    assert result.returncode == 2
+    assert "Completion publication failed" in result.stderr
+    assert "UNEXPECTED" not in result.stdout
 
 
 @pytest.mark.parametrize("shell,executable", SHELLS)
