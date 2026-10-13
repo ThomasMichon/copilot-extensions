@@ -130,6 +130,7 @@ def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrappe
         credentials_for=lambda fleet: (True, True),
         acp_command_for=lambda fleet: command,
         copilot_cli_account_for=lambda fleet: None,
+        copilot_auth_mode="legacy",
     )
     fleet = types.SimpleNamespace(security_profile="trusted")
     ssh = SSHConfig(

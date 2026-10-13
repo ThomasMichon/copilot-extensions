@@ -39,7 +39,8 @@ def _args(**kw):
 
 
 def _target(profile: str = "trusted"):
-    config = ContainersConfig(forward_gh_token=False, relay_enabled=True, relay_port=9857)
+    config = ContainersConfig(forward_gh_token=False, relay_enabled=True, relay_port=9857,
+                              copilot_auth_mode="legacy")
     fleet = FleetConfig(
         repo="example/repo", workspace_folder="/workspaces/repo", exec_user="vscode"
     )
@@ -349,6 +350,7 @@ def test_actual_detached_launch_fails_closed_when_source_is_missing(monkeypatch)
 
     monkeypatch.setattr(resolver_mod, "host_copilot_cli_token", lambda account: None)
     target = _target()
+    target.config.copilot_auth_mode = "host-copilot"
     target.fleet.copilot_cli_account = "inference-user"
 
     with pytest.raises(RuntimeError, match="copilot-login"):

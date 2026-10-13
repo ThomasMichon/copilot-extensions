@@ -35,6 +35,7 @@ def _args(**kw) -> Namespace:
 
 def _config() -> tuple[ContainersConfig, FleetConfig]:
     config = ContainersConfig(
+        copilot_auth_mode="legacy",
         forward_gh_token=False,
         relay_enabled=True,
         relay_port=9857,

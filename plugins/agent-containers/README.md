@@ -212,6 +212,7 @@ are therefore preserved fail-closed until their bounded heartbeat expires.
 ```yaml
 exec_user: vscode
 workspace_folder: /workspaces/myrepo
+copilot_cli_account: inference-user   # intended host Copilot login; no gh fallback
 forward_gh_token: true
 image_prefixes:
   - vsc-myrepo-                  # narrow discovery to your devcontainer image
@@ -225,18 +226,18 @@ fleets:
 
 ### Separating Copilot CLI inference identity from git/PR identity
 
-By default, `forward_gh_token`'s GH_TOKEN does double duty for a trusted
-fleet: it is both the in-container `git`/`gh` identity AND (per Copilot
-CLI's own env-var precedence: `COPILOT_GITHUB_TOKEN` > `GH_TOKEN` >
-`GITHUB_TOKEN`) the identity Copilot CLI itself authenticates inference
-requests as. Some setups want these to be two DIFFERENT GitHub accounts --
-e.g. a dedicated/dev account backs git commits and PRs while a separate
-seat's Copilot subscription backs the actual model calls. Set
+Trusted launches default to `copilot_auth_mode: host-copilot`. This mode
+requires the intended host Copilot account and its current token, independently
+of the in-container `git`/`gh` identity. An unset account or missing source
+refuses the launch, even if `GH_TOKEN`, `GITHUB_TOKEN`, ambient inference
+credentials or an existing container login are available. No arbitrary account
+is selected to repair an unset policy. Set
 `copilot_cli_account` (globally or per-fleet) to the GitHub account whose
 own Copilot CLI login on THIS HOST should back `COPILOT_GITHUB_TOKEN`,
 independent of whatever GH_TOKEN carries:
 
 ```yaml
+copilot_auth_mode: host-copilot       # default; no repository-token fallback
 copilot_cli_account: inference-user   # global default for every trusted fleet
 fleets:
   myrepo:
@@ -254,11 +255,17 @@ refreshed by agent-containers itself. The operator keeps it current simply
 by running `copilot login` as that account on this host; agent-containers
 only ever reads whatever is currently there, and fails closed (refuses to
 launch, naming the exact fallback command below) if that account has no
-live login yet. `None` (the default, for both the global and per-fleet
-settings) means no fleet separates the two identities -- Copilot CLI falls
-back to whatever GH_TOKEN/GITHUB_TOKEN already carries, the pre-existing
-behavior. Restricted fleets never receive this (or any) host credential,
+live login yet. An unset `copilot_cli_account` is an admission failure in the
+default host-Copilot mode, not a request to use repository credentials.
+Restricted fleets never receive this (or any) host credential,
 same hard boundary as `forward_gh_token`.
+
+Compatibility is explicit: `copilot_auth_mode: legacy` (global or per-fleet)
+opts into the old native/container/repository authentication behavior. It does
+not promise host-Copilot identity or inference-token isolation and is never an
+implicit fallback from a failed host-Copilot launch. A per-fleet mode overrides
+the global mode; an invalid mode refuses configuration. Restricted inference
+does not use either trusted authentication mode and remains unchanged.
 
 For an explicit `copilot_cli_account`, trusted ACP, Session Host child, and
 attached/detached CLI launches re-read that existing host source for each launch. Only

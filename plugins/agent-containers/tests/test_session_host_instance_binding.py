@@ -47,7 +47,7 @@ def test_replaced_instance_refuses_before_any_projection(monkeypatch, replacemen
 
 def test_preparation_pins_every_remote_operation_to_selected_id(monkeypatch, capsys):
     selected = "a" * 64
-    config = ContainersConfig()
+    config = ContainersConfig(copilot_auth_mode="legacy")
     config.forward_gh_token = False
     config.fleets["example"] = FleetConfig(
         security_profile="trusted", acp_command="{{target_preference_launcher}} copilot --acp",

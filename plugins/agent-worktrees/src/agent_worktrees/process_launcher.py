@@ -36,7 +36,11 @@ def apply_process_launcher(command, args, error_type):
             "A process-only Copilot launcher requires a direct copilot "
             "launch template or normalized setup"
         )
-    if "--copilot-path" in result or "-CopilotPath" in result:
+    if any(
+        arg == "--copilot-path" or arg.startswith("--copilot-path=")
+        or arg.lower() == "-copilotpath" or arg.lower().startswith("-copilotpath:")
+        for arg in result
+    ):
         raise error_type(
             "A process-only Copilot launcher cannot replace a configured copilot_path"
         )

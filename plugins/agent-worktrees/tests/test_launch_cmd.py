@@ -109,6 +109,25 @@ def test_normalized_setup_path_as_data_cannot_bypass_executable_validation(tmp_p
 
 
 @pytest.mark.guard
+@pytest.mark.parametrize("override", [
+    "--copilot-path=/custom/copilot", "-CopilotPath:/custom/copilot",
+    "-copilotpath:/custom/copilot",
+])
+def test_inline_copilot_path_override_is_refused(tmp_path, monkeypatch, override):
+    from agent_worktrees import installer
+    from agent_worktrees.process_launcher import apply_process_launcher
+
+    launcher = tmp_path / "copilot"
+    launcher.write_text("#!/bin/sh\nexit 0\n")
+    launcher.chmod(0o700)
+    args = _args([])
+    args.copilot_process_launcher = str(launcher)
+    command = ["bash", str(installer.install_dir() / "scripts" / "default-setup.sh"), override]
+    with pytest.raises(m.LaunchPreflightError, match="configured copilot_path"):
+        apply_process_launcher(command, args, m.LaunchPreflightError)
+
+
+@pytest.mark.guard
 @pytest.mark.parametrize("created", [True, False])
 def test_attached_launch_result_is_nonsecret_and_exclusive(tmp_path, created):
     from agent_worktrees.process_launcher import write_launch_result

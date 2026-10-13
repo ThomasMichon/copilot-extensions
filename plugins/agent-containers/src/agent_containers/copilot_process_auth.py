@@ -6,6 +6,7 @@ import json
 import shlex
 
 from . import ssh_transport as transport
+from .copilot_auth_policy import LEGACY, trusted_auth_mode
 from .resolver import resolve_copilot_cli_token_or_raise
 
 TOKEN_VARIABLE = "COPILOT_GITHUB_TOKEN"
@@ -122,9 +123,18 @@ def prepare_launch(
     config, fleet, container: str, user: str, *, cleanup_owner: str | None = None,
 ) -> str | None:
     """Re-read the existing account source immediately before a launch."""
+    mode = trusted_auth_mode(config, fleet)
+    if mode is None or mode == LEGACY:
+        return None
+    if not config.copilot_cli_account_for(fleet):
+        raise RuntimeError(
+            "host-copilot mode requires an intended copilot_cli_account; "
+            "refusing GH_TOKEN/GITHUB_TOKEN or repository-auth fallback. "
+            "Select the intended host Copilot account, or explicitly opt into legacy mode."
+        )
     token = resolve_copilot_cli_token_or_raise(config, fleet, container)
     if token is None:
-        return None
+        raise RuntimeError("host-copilot source returned no token; refusing repository-auth fallback")
     probe = transport._run([
         "docker", "exec", "-u", user, container, "bash", "-lc",
         "unset COPILOT_GITHUB_TOKEN; "
@@ -180,7 +190,9 @@ def launcher_script(native: str, auth_env: str) -> str:
     directory = launcher_directory(auth_env)
     return (
         "#!/bin/sh\nset -eu\n"
-        f"PATH=${{PATH#{shlex.quote(launcher_directory(auth_env))}:}}\nexport PATH\n"
+        f"launcher_dir={shlex.quote(directory)}\n"
+        'case "$PATH" in "$launcher_dir") PATH="";; '
+        '"$launcher_dir":*) PATH=${PATH#"$launcher_dir":};; esac\nexport PATH\n'
         f"unset {TOKEN_VARIABLE}\n"
         'case "${1:-}" in --help|--version) '
         f'exec {shlex.quote(native)} "$@";; esac\n'

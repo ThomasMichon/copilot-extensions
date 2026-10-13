@@ -147,6 +147,22 @@ def test_each_actual_launch_reads_updated_source_without_manager_token(
                 busy_exit=75, creation_flags=lambda: 0,
             )
     assert len(seen.commands) == command_count
+    target.fleet.copilot_cli_account = None
+    target.config.copilot_cli_account = None
+    with pytest.raises(RuntimeError, match="requires an intended copilot_cli_account"):
+        if boundary == "acp":
+            cli._launch_container_agent(args, target.config, target.fleet, "trusted",
+                                        target.user, "copilot --acp --stdio")
+        elif boundary == "session-host":
+            cli._cmd_session_host_prepare(args)
+        elif boundary == "detached":
+            adapter.launch("agent-worktrees embody --detach", timeout=30)
+        else:
+            copilot_venue.cmd_copilot(
+                args, require_live_relay_port=lambda: 1, relay_healthy=lambda p: True,
+                busy_exit=75, creation_flags=lambda: 0,
+            )
+    assert len(seen.commands) == command_count
     for environment in seen.staged:
         if "GH_TOKEN" in environment:
             assert environment["GH_TOKEN"] == "git-only"
@@ -291,7 +307,10 @@ def test_wrapper_transport_failure_cleans_staged_token_and_owner(launch_seams, m
     assert "/launch/1.env" in seen.cleaned and "/launch/owner.env" in seen.cleaned
 
 
-def test_native_launcher_consumes_token_restores_path_and_keeps_git_identity(tmp_path):
+@pytest.mark.parametrize("folder", ["ordinary", "spaces and [glob]"])
+def test_native_launcher_consumes_token_restores_path_and_keeps_git_identity(tmp_path, folder):
+    tmp_path = tmp_path / folder
+    tmp_path.mkdir()
     if os.name == "nt":
         git = shutil.which("git")
         shell = Path(git).parents[1] / "bin" / "bash.exe" if git else None
