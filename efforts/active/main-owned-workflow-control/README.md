@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees; ordinary changes target `dev`
 - **Created:** 2026-10-12
-- **Status:** Active; reviewed plan, first consolidation slice in progress
+- **Status:** Active; first wave live, candidate/validation consolidation open
 - **Vision:** `visions/main-owned-workflow-control/README.md`
 - **Umbrella issue:** #6237
 - **Related campaigns:** #3336; `promotion-failure-reactive-fix-agent`; #6142
@@ -70,6 +70,10 @@ Related review-request repair #6233 was already released; do not repeat it.
 > run more often without getting throttled. The main-owned-workflow-control
 > is a means to an end, but not the highest priority.
 
+> Yes, noting we always still need an escape hatch. The Copilot reviewer still
+> isn't perfect, so we as maintainers always need a way to forcbly self-merge as
+> a worst-case, but we don't want agents reaching for that button prematurely.
+
 The operator confirmed the explicit main-owned control/dev-owned content model.
 The detailed decomposition and validation cases below are **agent-recommended**,
 reconciled with the other planning agent's public handoff on #6237.
@@ -101,8 +105,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
-- [ ] Coalesce or prevent redundant event-triggered runs, not merely mark all
+- [x] Coalesce or prevent redundant event-triggered runs, not merely mark all
   jobs skipped; preserve timely contributor feedback and review delivery.
+  #6308/#6314 reduce trusted invocations; released #6359 prevents irrelevant
+  PR ancestry runner allocation. Natural events verified both remaining jobs.
 - [ ] Measure before/after run and check counts and review latency over comparable
   events; retain distinct heavy/platform/installation coverage.
 - [ ] Deploy only the minimal critical control repair required to unblock the
@@ -313,3 +319,92 @@ credential changes, broad policy weakening or unreviewed releases.
   required checks passed. It prevents PR CI completions from allocating an
   ancestry-filter runner, retaining success/ancestry checks for push/manual
   events. Release and live skip evidence for that latest slice remain pending.
+
+### 2026-10-12 - Missing-check incident and operator-authorized recovery
+
+- #6323 was prematurely merged as `145f6dfb01cf`: the watcher treated reported
+  green checks as complete while the required PR aggregate had not registered.
+  The driver also failed to treat its absence as blocking. Owner-profile merge
+  used admin escalation, and classic protection still exempted admins.
+- The driver disclosed the incident immediately; the operator directed actual
+  CI/promotion observation and repair of any failures. Exact-head CI
+  `38310113011` later passed with both named required contexts explicitly green.
+  Covering dev CI passed, and release `38313645096` validated dev
+  `cbb7256268e6`, including `145f6dfb01cf` by Git ancestry.
+- Generated #6377 merged at `22:40:12Z` as main `677cc12041a4`, with exact PR
+  wait and post-merge tagging successful. No CI failure needed fixing in this
+  recovery. Later success does not retroactively justify the premature merge.
+- #6367 tracks the tooling defect. Pending or absent required contexts now block
+  the driving session independently of its watcher rollup.
+- The operator authorized enabling `dev`'s existing `enforce_admins` setting.
+  Live readback confirmed true, the same required aggregate and strict=false;
+  review-required ruleset and its existing Maintainer bypass actors unchanged.
+  No additional workflow/check, main policy or credential was introduced.
+- The operator explicitly retained a worst-case review self-merge escape hatch,
+  without premature agent use. CI enforcement changes require separate bounded
+  human recovery authorization, never an inferred routine exemption.
+- The first-wave publication/recovery watches are complete. Remaining main
+  duplicate validation, stronger candidate assurance and normalized review
+  capacity measurement remain open campaign gates.
+
+### 2026-10-12 - Safety documentation landed; software preflight
+
+- #6386 merged as `78a236501b89` after current-head Copilot approval and both
+  explicit required contexts passed, with admin CI enforcement active. A
+  mechanical index conflict was resolved by retaining the peer's new row.
+- #6367's software follow-up adds required-context completeness only at the
+  explicit GitHub admin merge boundary, preserving the review escape hatch and
+  adding no watcher polling, workflow or check. The verified head is pinned;
+  missing, unsuccessful or unreadable requirements refuse the mutation.
+- Contained targeted tests exercise both classic and ruleset contexts, missing
+  aggregate, permission failures, malformed evidence and head/base races.
+  A live read-only call against #6332 refused its not-yet-passing PR aggregate;
+  no merge/write operation was invoked in that consumer check.
+- Candidate assurance will reuse the active attestation contract in #6332,
+  not a competing receipt framework. Its builder/signing/publication files
+  remain with their existing owner. Main duplicate validation cannot be pruned
+  until that final-tree assurance and required admission gate are proven.
+
+### 2026-10-13 - Required-rule pagination review fix
+
+- #6402's review found that later effective-rule pages could add required
+  contexts omitted by the initial preflight. The merge boundary now consumes
+  all pages with `gh api --paginate --slurp`, validates every page and refuses
+  partial output on a pagination error.
+- The contained provider/guard selection passed 162 cases, including missing
+  and passing later-page contexts, malformed pages and a later-page read
+  failure. Focused Python lint and the 13-plugin install contract passed.
+  A read-only native API invocation confirmed the outer-page response shape.
+- This changes no first-provision behavior, so a clean-room install lane is
+  not applicable. Live required PR checks and a fresh review remain pending;
+  no review or CI bypass is authorized by this local evidence.
+
+### 2026-10-13 - Integration identity and measured first-wave reduction
+
+- The next #6402 review correctly found that context names alone cannot
+  distinguish two required integrations. Classic numeric app declarations and
+  ruleset integration declarations are now preserved; bound contexts require
+  successful, complete, paginated exact-head check-run evidence from each app.
+  Unknown integration identity fails closed. Same-app deliberate spoofing
+  remains outside this preflight's documented assurance boundary.
+- The contained provider/guard selection passed 178 cases; focused lint and
+  changed-module limits passed. The actual read-only provider boundary refused
+  #6402 while its required PR aggregate was still absent. Fresh current-head
+  review and CI remain necessary; no mutation was attempted by that probe.
+- Complete, equally sized three-hour Actions windows show 60 paired PR events
+  producing 120 guard/reviewer runs and 52 CI completions producing 104
+  identifier/filter runs before cutover. After cutover, 100 and 109 comparable
+  events produced 100 and 109 combined runs: 50% fewer invocations per event in
+  each consolidated family, or 209 removed invocations in that latter window
+  compared with the former layout at the same event volume.
+- Windows were `2026-10-12T18:00:00Z..21:00:00Z` (367 total runs) and
+  `2026-10-12T21:05:00Z..2026-10-13T00:05:00Z` (495 total runs), with API
+  reported counts matching complete pagination. Higher later traffic prevents
+  comparing raw totals as throughput. The later window had 79 successful
+  Copilot review runs; this does not establish a causal quota improvement.
+  Distinct job coverage and required-check counts were not removed by that wave.
+- #6409 owns the next independent reduction: migrate the exact dev-PR
+  payload-CWD smoke into existing native CI jobs, retaining standalone
+  main-target, weekly and manual coverage. The unchanged Windows selection
+  passed 10 cases in 51 seconds before migration; candidate/promotion files
+  remain with #6332's owner.

@@ -5,8 +5,11 @@
 - **Branch(es):** independent per-slice PRs against `dev`
 - **Created:** 2026-10-11
 - **Status:** Active; Phase 1 + Phase 2 landed; release-promotion regression
-  fixed; Phase 3 interoperability proof done -- fresh-machine bootstrap
-  validation and the plugin-delivered-flows-unaffected check remain open
+  fixed; Phase 3 interoperability proof done; Phase 4 (plugin consumes
+  upstream installer on demand) implemented -- fresh-machine bootstrap
+  validation, the plugin-delivered-flows-unaffected check, a live
+  on-demand-fetch exercise, and dropping the fallback installer copy all
+  remain open
 - **Vision:** [machine-fleet](../../../visions/machine-fleet/README.md):
   `standalone-service-installation`, role deployments and container managers
   (role instances may run directly or in containers on explicitly admitted
@@ -206,6 +209,36 @@ for review before any implementation.
 - [ ] Mark Done only after every Plan and Validation Plan item is resolved or
   explicitly transferred to a named follow-on objective.
 
+### Phase 4 -- Single installer source of truth (plugin consumes upstream)
+- [x] Flip the plugin's first-use (self-)provisioning flow to fetch and run
+  the UPSTREAM installer (`agent-dispatch-service/bootstrap.{sh,ps1}` on
+  `main`) rather than relying on the plugin's own already-staged payload
+  snapshot -- done 2026-10-12. The locally stamped snapshot remains a
+  fallback for offline/network-restricted hosts
+  (`AGENT_DISPATCH_PROVISION_OFFLINE=1` skips straight to it) during this
+  transition; per operator direction it is expected to be dropped once the
+  on-demand path is validated in the wild, at which point `install.ps1`/
+  `install.sh` would no longer need to ship inside the plugin's own
+  marketplace payload at all. Scoped to agent-dispatch only for now, with
+  an explicit expectation this becomes a reusable pattern other plugins
+  adopt later (a separate, larger effort).
+- [ ] Validate the on-demand fetch path for real (a live first-use
+  provisioning run against the actual `raw.githubusercontent.com` URL, not
+  just static/syntax checks) and confirm the offline fallback still
+  activates correctly when the fetch is unreachable.
+- [ ] Once validated, remove `install.ps1`/`install.sh` from the plugin's
+  own payload entirely (thin trigger only) -- the actual "drop the
+  fallback" step named above.
+- [ ] **Naming/layout note (2026-10-12):** `agent-dispatch-service/` is
+  slated to move to `services/dispatch/` under the new
+  `docs/patterns/standalone-service-layout.md` convention (`agent-<topic>`
+  reserved for plugins; standalone packages live at `services/<topic>`).
+  Tracked separately in
+  [#6419](https://github.com/ThomasMichon/copilot-extensions/issues/6419),
+  which also covers updating the hardcoded upstream-installer URL this
+  phase just added. Do not hardcode further references to the current
+  `agent-dispatch-service/` path without checking that issue first.
+
 ## Validation Plan
 
 - [ ] Standalone bootstrap: fresh-machine install (no Copilot, no marketplace,
@@ -219,6 +252,12 @@ for review before any implementation.
   schema/location contract, same CLI/API behavior, no silent divergence --
   done 2026-10-12 (isolated real coordinator + cross-version CLI
   round-trip; see Journal).
+- [x] Plugin's first-use provisioning fetches and runs the upstream
+  installer (agent-dispatch-service/bootstrap.{sh,ps1}) on demand instead
+  of using its own staged payload copy, with the staged copy retained only
+  as an offline fallback during the transition -- done 2026-10-12 (see
+  Phase 4 and the Journal). A real (non-mocked) end-to-end exercise of the
+  network fetch path remains open -- see Phase 4.
 - [ ] Existing plugin-delivered install/update/status/start/stop/uninstall
   flows remain unaffected; this effort adds a parallel path, not a
   replacement.
@@ -445,3 +484,67 @@ _Pending._
   install; existing plugin-delivered flows unaffected) are pre-existing,
   lower-priority gaps already called out in Phase 1/2 -- not newly
   discovered by this slice -- and are left open for a future pass.
+
+### 2026-10-12 -- Phase 4: plugin consumes the upstream installer on demand
+- Operator expectation (confirmed via `ask_user` before touching this
+  heavily-engineered, race-condition-sensitive file): the plugin's
+  deferred-setup (`stamp` -> first-use `provision`) flow should actually
+  trigger the upstream installer -- downloading and running it on demand --
+  instead of relying on the installer already bundled in the plugin's own
+  marketplace payload. Confirmed specifics: keep `install.ps1`/`install.sh`
+  in the payload only as a transition fallback (remove once validated);
+  the network-at-first-use tradeoff is accepted; pin the fetch to `main`
+  (matching `bootstrap.{sh,ps1}`'s own existing default); scope to
+  agent-dispatch only, with an explicit expectation this generalizes to
+  other plugins later.
+- Implemented in both `Deploy-SelfProvisioningBinstub` (install.ps1) and
+  `deploy_binstub` (install.sh): the generated self-provisioning binstub's
+  first-use path now fetches `agent-dispatch-service/bootstrap.{ps1,sh}`
+  from `raw.githubusercontent.com/.../main` into a temp file and runs it
+  with `provision` (the bootstrap script already forwards args straight
+  into `plugins/agent-dispatch/scripts/install.{ps1,sh}`, so this is
+  byte-for-byte the same install path the standalone package's own
+  bootstrap uses -- no new installer logic, just a different source for an
+  existing one). Only on fetch/run failure (or when
+  `AGENT_DISPATCH_PROVISION_OFFLINE=1` is set) does it fall back to the
+  locally stamped snapshot's installer, the prior sole behavior.
+  `AGENT_DISPATCH_NO_SELFPROVISION=1` still opts out of provisioning
+  entirely, unchanged.
+- Validated the generated binstub content directly rather than only the
+  wrapping function: extracted the literal heredoc/here-doc payload from
+  both `install.ps1` (`$ps1Content`) and `install.sh` (the `STUBEOF`
+  block) and syntax-checked each in isolation --
+  `[System.Management.Automation.Language.Parser]::ParseFile` for the
+  PowerShell binstub (clean) and `bash -n` (via WSL, since this machine's
+  `bash.exe` resolves to WSL rather than Git Bash -- `/mnt/c/...` paths
+  needed) for the POSIX one (clean). Also parsed the full `install.ps1`
+  file with the same PowerShell parser API to confirm no syntax damage to
+  the surrounding 4000+-line file.
+- Ran the plugin's installer-focused test files directly (the ones that
+  could plausibly exercise this code path):
+  `test_install_ps1_stamp_guard.py`, `test_install_sh_activation_guard.py`,
+  `test_installer_engine_adoption.py`, `test_payload_invocation.py`,
+  `test_install_ps1_activation_guard.py`, `test_install_ps1_build_snapshot.py`
+  -- 86 passed, 13 skipped, 0 failed. (The stamp-guard suite stubs out
+  `Deploy-SelfProvisioningBinstub` entirely for its own guard-ordering
+  tests, so it exercises the surrounding lock/version logic, not this
+  function's new body -- the parser-level check above is this change's
+  direct verification.)
+- Also ran the full plugin suite (`pytest -q`, no selector) to check for
+  any broader regression: it surfaced pre-existing failures confined to
+  `tests/test_coordinator.py`, a pure-Python coordinator test file with
+  zero overlap with this diff (`git status --short` at the time showed
+  only `README.md`, `scripts/install.ps1`, `scripts/install.sh` modified --
+  no Python source touched), so they predate and are unrelated to this
+  change. Did not chase them further; CI's own full-suite run is the
+  authoritative check, same as every prior phase in this effort.
+- Updated `plugins/agent-dispatch/README.md`'s installer-lifecycle
+  paragraph and both functions' doc comments to describe the new primary/
+  fallback order and the new `AGENT_DISPATCH_PROVISION_OFFLINE` escape
+  hatch.
+- Left open for a follow-up pass: a real (non-mocked) first-use run that
+  actually exercises the live `raw.githubusercontent.com` fetch end-to-end
+  (this validation stopped at syntax/static-content checks plus the
+  existing automated suites, not a live network provisioning run), and the
+  actual removal of the fallback installer copy from the plugin payload
+  once that's done.

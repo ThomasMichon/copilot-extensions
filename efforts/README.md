@@ -11,8 +11,8 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Configuration Backstage and Worker Instances](active/configuration-backstage-and-worker-instances/README.md) | Draft; horizontal sections, list-first resources, explicit activation outcomes | #6379 |
-| [Main-Owned Workflow Control](active/main-owned-workflow-control/README.md) | Active; first consolidation slice | #6237; run/check consolidation primary, ownership enabling |
-| [Fleet Control V2](active/fleet-control-v2/README.md) | Active; local journal landed, node effect receipts next | #6236, #6240, #6241; existing #5789/#6030 owners retained |
+| [Main-Owned Workflow Control](active/main-owned-workflow-control/README.md) | Active; first wave live, validation consolidation open | #6237; run/check consolidation primary, ownership enabling |
+| [Fleet Control V2](active/fleet-control-v2/README.md) | Active; cooperative local ownership landed, release evidence next | #6236, #6240, #6241; existing #5789/#6030 owners retained |
 | [Lean Runtime Dependencies](active/lean-runtime-dependencies/README.md) | Active; proposal reviewed, dependency reduction | #6234 |
 | [Process Slot Ownership](active/process-slot-ownership/README.md) | Active; reader-lifetime continuation | #3963; registry presentation separately #5559 |
 | [Process Spawn Reduction](active/process-spawn-reduction/README.md) | Active | #6086 |
@@ -28,7 +28,7 @@ that pattern to this repository.
 | [Machine Fleet Routing Foundation](active/machine-fleet-routing-foundation/README.md) | Active; contract implementation | #5789 |
 | [Mutable dev slot](active/mutable-dev-slot/README.md) | Active | #5472 |
 | [Machine Transport Convergence](active/machine-transport-convergence/README.md) | Active | #5737, #5738, #5740, #5741, #5972, #5973, #5974, #6039 |
-| [agent-index Standalone Service](active/agent-index-standalone-service/README.md) | Active; proposal reviewed | #5768, #5769 |
+| [agent-index Standalone Service](active/agent-index-standalone-service/README.md) | Active; fleet integration amendment in review | #5768, #5769, #6383 |
 | [agent-dispatch Standalone + Container](active/agent-dispatch-standalone-container/README.md) | Active; Phase 1 landed | #6177 |
 | [Dispatch Task Lifecycle and Conversations](active/agent-dispatch-monitor-and-confirmed-state/README.md) | Active; submission/output/delivery amendment proposed | #3681 |
 | [Dispatch Tasks-Pane UX](active/agent-dispatch-tasks-pane-ux-overhaul/README.md) | Active; review/history/follow-up amendment proposed | #3681 (backend dependency) |

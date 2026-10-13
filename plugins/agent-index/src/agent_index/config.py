@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import importlib.util
 import json
 import os
 import sys
@@ -61,15 +62,8 @@ def run_dir() -> Path:
 def server_venv_python() -> Path | None:
     """Resolve the sibling SERVER venv's interpreter, if one is provisioned.
 
-    agent-index-server-venv-split moves the FastAPI/uvicorn/pydantic HTTP
-    service shell (the ``[server]`` extra) into its own per-version sibling
-    venv, distinct from the client/orchestrator venv this process normally
-    runs in -- so the server's own heavy deps never load into a pure client
-    install. Until the installer actually provisions that sibling venv
-    (still a separate Plan item), this returns ``None`` for every existing
-    layout today, and callers fall back to running the server in-process
-    exactly as before -- this resolver is inert scaffolding, not a behavior
-    change on its own.
+    Native host installers place store/server dependencies in this sibling,
+    leaving the primary CLI environment base-only. A client has no sibling.
 
     Standalone explicit-source hosts use their current complete native runtime
     and bypass this legacy sibling resolver entirely.
@@ -100,11 +94,36 @@ def server_venv_python() -> Path | None:
         candidate = Path(override).expanduser()
         return candidate if candidate.is_file() else None
 
-    current = Path(sys.executable).resolve()
+    # Resolving a POSIX venv symlink would escape to the base interpreter and
+    # lose the selected immutable slot's sibling.
+    current = Path(os.path.abspath(sys.executable))
     venv_bin = current.parent
     venv_root = venv_bin.parent
     candidate = venv_root / "server" / venv_bin.name / current.name
     return candidate if candidate.is_file() else None
+
+
+def host_runtime_python() -> Path:
+    """Select a complete hosted runtime without falling back to a light CLI."""
+    current = Path(os.path.abspath(sys.executable))
+    if os.environ.get(SOURCE_MODE_ENV) == "explicit":
+        return current
+    sibling = server_venv_python()
+    if sibling is not None:
+        return Path(os.path.abspath(sibling))
+    if os.environ.get(SERVER_VENV_PYTHON_ENV):
+        raise RuntimeError("configured agent-index server interpreter is unavailable")
+    # Existing complete service cells and development environments own their
+    # host dependencies directly and need no second service environment.
+    if all(
+        importlib.util.find_spec(name) is not None
+        for name in ("fastapi", "uvicorn", "numpy", "pyarrow", "lancedb")
+    ):
+        return current
+    raise RuntimeError(
+        "agent-index host runtime is unavailable; provision the host runtime "
+        "with the owning installer before running hosted commands"
+    )
 
 
 def routing_dir() -> Path:

@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; local journal landed, node effect receipts next
+- **Status:** Active; cooperative local ownership landed, release evidence next
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts. Existing dependencies #5789, #6030, #5861, #5862 retain ownership.
@@ -114,7 +114,10 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [ ] Implement identified command admission, content-bound idempotency,
   transactional intent/claims/audit/outbox and target-side receipt reconciliation.
   Intent/receipt contracts and local admission/outbox/audit persistence landed
-  in #6357/#6360. Allocation claims and durable node effect receipts remain open.
+  in #6357/#6360; explicit node acceptance/effect receipts landed in #6388.
+  Durable receiver cursors landed in #6395 and local allocation claims in #6403.
+  Cooperative SQLite effect-owner checks landed in #6411. Verified release,
+  external effect-owner fencing and authenticated runtime integration remain open.
 - [ ] Prove objective -> workspace -> host -> prompt -> outcome -> settlement
   locally, then through one Gateway and two separate nodes.
 - [ ] Persist scope/generation fences at cooperative effect owners; define
@@ -248,3 +251,152 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   reconciliation, followed by allocation/authorization and actual effect-owner
   fencing. Installation, Gateway service, live fleet adoption and migration
   gates remain open. No deployment or enrollment was performed.
+
+### 2026-10-12 - Node acceptance and effect receipts landed
+- #6388 merged at `2026-10-12T23:27:09Z`, commit
+  `a7d327c6f2d1b332b2369f421ba003b48d42b30e`, after actual current-head Copilot
+  APPROVED with zero findings and green required and ordinary CI.
+  Installed contained suite: 177 passed.
+- Separate process evidence covers cooperative effect/receipt commit, pre-commit
+  crash rollback, post-commit lost reply with one effect after retry, concurrent
+  duplicate effects, and external-attempt crashes preserving UNKNOWN.
+  This does not establish arbitrary external exactly-once or remote fencing.
+- Re-read the parent Plan and advanced the clean worktree to the verified merge,
+  retaining a backup of the published commit. The full effort remains active.
+- Next is durable Gateway receiver cursor plus receipt/outbox/audit reconciliation
+  in one transaction, so reconnect after a lost receiver reply does not replay
+  stale acceptance over a later outcome. Allocation/authorization/effect-owner
+  fencing and real local/two-node runtime proof follow. Existing routing/auth
+  and deployment ownership remains intact; no fleet was enrolled or deployed.
+
+### 2026-10-13 - Durable receiver replay landed
+- #6395 merged at `2026-10-13T00:06:21Z`, commit
+  `d0a64764aadd61ac16fb4507f8a570cf219b2cd5`, after fresh rebased-head Copilot
+  APPROVED with zero findings and every required/ordinary check green.
+  Installed contained suite: 196 passed.
+- Receiver cursor, correlated receipts, outbox and audit commit together.
+  Separate receiver processes prove page rollback before cursor commit and
+  restart from the durable position after a committed but lost reply.
+- Known schema-1 journals upgrade transactionally to schema 2; foreign
+  inventory and ordinary/virtual/stored generated columns are refused without
+  mutation. Kept the effort index aligned, preserved a concurrent effort owner's
+  updated row during rebase, and reran the installed suite afterward.
+- Re-read the full Plan; none of its broader runtime or lifecycle gates is
+  complete from these local primitives. The next bounded seam is transactional
+  allocation claims and cooperative effect-owner fencing, coordinated with
+  existing routing/auth owners before any runtime interface is changed.
+  Live enrollment, deployment, authority migration and retirement remain gated.
+
+### 2026-10-13 - Allocation claim slice prepared
+- Under #6241, added combined identified allocation admission/claim/outbox/audit,
+  exact intent/resource retry and exclusive resource ownership across targets,
+  principals and accounts in one explicit local ledger. No receipt status releases
+  a claim, and there is no expiry, release or reassignment API.
+- Schema 1/2 upgrade adds an empty claim table without inventing historical
+  ownership. Legacy unclaimed admissions cannot acquire claims retroactively.
+- Installed contained suite: 224 passed. Separate-process crash/lost-reply and
+  four-process distinct/duplicate contention exercise the real installed package.
+  Fixed the migration fixture's missing explicit commit and reran the suite.
+- Validation tiers: unit and local installed-package E2E exercised; fresh local
+  database creation exercised, but full first-machine clean-room omitted because
+  this slice has no installer/bootstrap changes. Live external-venue validation
+  omitted: no integrated Gateway/node service or authorized fleet is available.
+- Documentation describes local claim evidence, canonical resource resolution,
+  migration and lack of effect-side exclusion. This closes only the storage seam
+  of machine-fleet `unified-coordination-product`; reviewed architecture and
+  independence/effect-owner-fencing invariants remain unchanged.
+- Next after review/merge is cooperative effect-owner resource fencing and explicit
+  release evidence, not TTL-based reassignment. The full Plan and Validation Plan
+  remain open; routing/auth and deployment owners retain their scopes.
+
+### 2026-10-13 - Allocation claims landed; effect-owner seam started
+- #6403 merged at `2026-10-13T00:40:17Z`, commit
+  `a8a7e0636e86b80d1534be0b7242eca430e46788`, after current-head Copilot APPROVED
+  with zero findings and green required and ordinary CI. Final installed suite:
+  224 passed. Pulled forward the verified merge with managed sync.
+- Re-read the parent Plan and Validation Plan. Local storage joins are now present;
+  authenticated runtime integration, effect exclusion and lifecycle/adoption proof
+  remain open. This is not complete Phase 2 or objective settlement.
+- Next bounded #6241 slice persists a cooperative local SQLite resource owner at
+  node acceptance and checks exact owner/intent/generation in the effect
+  transaction. Retained ownership blocks competing generations; no expiry or
+  external-resource fencing is inferred. Explicit verified release evidence follows.
+
+### 2026-10-13 - Cooperative allocation owner slice prepared
+- Added node-local held ownership with acceptance/spool, and exact
+  resource/intent/generation checks inside the cooperative SQLite effect
+  transaction. Callback effects and outcomes still commit or roll back together.
+  Rechecks reject a callback that mutates its own binding.
+- Generic unbound allocation effects and external allocation attempts fail
+  explicitly. Node-local SQLite ownership is not a fence for a filesystem,
+  provider, running process or resource shared across nodes/databases.
+- Known schema-1 upgrade preserves accepted work, result spool and effect tables,
+  adds no historical ownership, and refuses reserved-name/core-column collisions.
+  No claim release, TTL or generation reassignment was introduced.
+- Unit and simple installed-package local E2E: 247 passed, including four real
+  competing/duplicate node clients, acceptance and effect precommit crashes,
+  postcommit lost replies, resource storage failure, receipt rollback and
+  Gateway result reconciliation. Lint, install contract and version consistency
+  passed. Full machine clean-room omitted: no installer/bootstrap seam changed.
+  Live external-venue omitted: no adopted integrated Gateway/node runtime exists.
+- Documentation states the exact cooperative boundary and changed failure paths.
+  This realizes part of the reviewed machine-fleet effect-owner intent without
+  changing standalone lifecycle/defaults or existing routing/auth ownership.
+  Next after review/merge is explicit verified release evidence and safe local
+  generation transfer, not expiration-based reassignment. Full runtime, partition,
+  host-survival, installation and adoption gates remain open.
+
+### 2026-10-13 - Cooperative local ownership landed
+- #6411 merged at `2026-10-13T01:04:24Z`, commit
+  `4b9a0fe246d45d78aec8a4c17dbee13910eda355`, after current-head Copilot APPROVED
+  with zero findings and every required/ordinary check green. The first review
+  window timed out; an explicit request and fresh wait produced the actual verdict.
+  Installed contained suite: 247 passed.
+- Managed sync pulled forward the verified merge. Re-read the full parent
+  Plan/Validation Plan; the cooperative SQLite seam does not prove external
+  fencing, authenticated runtime, partition behavior or complete Phase 2.
+- Next under #6241 is immutable, exact-resource/scope/generation-bound cooperative
+  release evidence with atomic effect-owner retirement and retained tombstones.
+  Gateway release must consume validated matching evidence, never infer it from
+  a terminal outcome or timer. Safe local generation transfer follows only after
+  that release; provider/shared-resource fences remain separate.
+
+### 2026-10-13 - Cooperative retirement and generation transfer prepared
+- Added immutable exact intent/scope/generation/digest/resource/node-installation
+  release evidence. A trusted SQLite-only retirement callback, permanent
+  tombstone and node-owner removal commit together. The Gateway consumes
+  authenticated-by-caller matching evidence with claim removal and audit in one
+  transaction; outcome receipts and elapsed time still never release claims.
+- Exact historical admission/retirement repeats preserve the original operation
+  and proof without resurrecting ownership. Old effects and old proofs cannot
+  affect successors; new allocations require a strictly higher resource-specific
+  generation across identities. Connector epochs are not allocation generations.
+- Known node schemas 1/2 upgrade to 3 and Gateway schemas 1-3 to 4, preserving
+  held claims, accepted work, receipts and cursors without inventing retirement.
+  Unsupported writers and reserved-name/core-column collisions fail closed.
+- Unit and simple installed-package E2E: 284 passed, including real node/Gateway
+  precommit crashes, postcommit lost replies, four concurrent retirement clients,
+  competing successors and stale installed-process effects after reassignment.
+  Lint and install-contract checks passed. Fresh local DB/legacy-upgrade paths
+  exercised; full machine clean-room omitted because no installer/bootstrap
+  changed. Live external-venue omitted because no adopted integrated runtime
+  exists; no enrollment, deployment or credential authority was changed.
+- Documentation-impact review updated the product README and operation/node/
+  ledger contracts. This realizes the reviewed cooperative effect-owner intent,
+  not external/provider fencing or a complete Phase 2. After review/merge,
+  select the authenticated vertical-slice integration boundary with existing
+  routing owners; full baseline/lifecycle/runtime/migration/adoption gates remain
+  open and no parent Plan/Validation checkbox is closed by this primitive.
+
+### 2026-10-13 - Release review follow-through
+- #6418 review identified possible callback mutation of earlier permanent
+  tombstones and unindexed history scans in both admission paths. Protected
+  journal DML/schema/index/trigger changes are now refused by the cooperative
+  authorizer, including generic effects; effect tables remain writable.
+- Both journals now store released generations with a verified descending
+  resource/generation index. Admission performs one maximum lookup rather than
+  scanning/decoding proofs. Missing/foreign index definitions fail explicitly.
+  New regressions attempt prior-tombstone/core-state mutation through both
+  callbacks and bound the actual lookup under 5,000 retained releases.
+- Installed contained suite: 333 passed; lint passed. These are fixes to the
+  current unmerged release slice, not a new runtime/adoption milestone.

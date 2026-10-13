@@ -159,6 +159,14 @@ The same jobs run every marked scenario on `workflow_dispatch`, with no
 additional matrix. `tools/test_environment_admission.py` is present in both
 platforms' selectors.
 
+Those native jobs also host the existing focused payload-CWD smoke for relevant
+dev PRs. `tools/test_payload_cwd_ci_scope.py` proves their checked-in selectors
+and executes the actual changed-path Bash step against real Git fixtures,
+including invalid refs and unrelated base advances. The standalone
+`payload-cwd-contract.yml` retains non-dev PR coverage and its weekly/manual
+full matrix; this consolidation adds no job or check and leaves both native
+job budgets at five minutes.
+
 Tests may declare `@pytest.mark.portfolio_tier("T0" ... "T4")` and repeatable
 `@pytest.mark.effect(...)` markers. The injected policy rejects effects that do
 not belong in the declared tier. T3 clean-room and T4 end-to-end families are

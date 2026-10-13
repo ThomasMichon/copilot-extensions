@@ -351,7 +351,7 @@ def _cp(rc, out="", err=""):
 def test_relay_profile_via_cli_parses():
     prof = {"sources": ["git-credential"], "gated_actions": [], "azure_resources": []}
     with patch("shutil.which", return_value="/bin/agent-codespaces"), \
-         patch("subprocess.run", return_value=_cp(0, json.dumps(prof))):
+         patch("agent_bridge.agent_registry_relay.run_captured", return_value=_cp(0, json.dumps(prof))):
         assert _relay_profile_via_cli("agent-codespaces") == prof
 
 
@@ -359,10 +359,10 @@ def test_relay_profile_via_cli_none_on_failure():
     with patch("shutil.which", return_value=None):
         assert _relay_profile_via_cli("agent-codespaces") is None
     with patch("shutil.which", return_value="/bin/x"), \
-         patch("subprocess.run", return_value=_cp(1, "", "boom")):
+         patch("agent_bridge.agent_registry_relay.run_captured", return_value=_cp(1, "", "boom")):
         assert _relay_profile_via_cli("agent-codespaces") is None
     with patch("shutil.which", return_value="/bin/x"), \
-         patch("subprocess.run", return_value=_cp(0, "not json")):
+         patch("agent_bridge.agent_registry_relay.run_captured", return_value=_cp(0, "not json")):
         assert _relay_profile_via_cli("agent-codespaces") is None
 
 
@@ -376,7 +376,7 @@ def test_register_provider_relay_prefers_cli(tmp_path):
     }
     b = _FakeBuilder()
     with patch("shutil.which", return_value="/bin/agent-codespaces"), \
-         patch("subprocess.run", return_value=_cp(0, json.dumps(prof))), \
+         patch("agent_bridge.agent_registry_relay.run_captured", return_value=_cp(0, json.dumps(prof))), \
          patch("importlib.import_module") as imp:
         _register_provider_relay(b, "agent-codespaces")
     imp.assert_not_called()  # CLI path -> no in-process import
@@ -417,7 +417,7 @@ def test_registered_provider_retries_until_profile_available(tmp_path, monkeypat
     sleeps: list[float] = []
     b = _FakeBuilder()
     with patch("shutil.which", side_effect=lambda _n: next(which)), \
-         patch("subprocess.run", return_value=_cp(0, json.dumps(prof))):
+         patch("agent_bridge.agent_registry_relay.run_captured", return_value=_cp(0, json.dumps(prof))):
         _register_provider_relay(b, "agent-codespaces", sleep=sleeps.append)
     assert len(sleeps) == 2
     assert b.port == 1 and isinstance(b.validator, FileTokenValidator)
@@ -428,7 +428,7 @@ def test_registered_provider_warns_after_bounded_retries(tmp_path, monkeypatch, 
     sleeps: list[float] = []
     b = _FakeBuilder()
     with patch("shutil.which", return_value="/bin/agent-codespaces"), \
-         patch("subprocess.run", return_value=_cp(1, "", "mid-update")), \
+         patch("agent_bridge.agent_registry_relay.run_captured", return_value=_cp(1, "", "mid-update")), \
          caplog.at_level("WARNING", logger="agent-bridge"):
         _register_provider_relay(b, "agent-codespaces", sleep=sleeps.append)
     assert sleeps and sum(sleeps) <= 30
@@ -467,7 +467,7 @@ def test_registered_provider_retries_stay_within_total_budget(tmp_path, monkeypa
 
     b = _FakeBuilder()
     with patch("shutil.which", return_value="/bin/agent-codespaces"), \
-         patch("subprocess.run", side_effect=hung_probe):
+         patch("agent_bridge.agent_registry_relay.run_captured", side_effect=hung_probe):
         relay._register_provider_relay(
             b, "agent-codespaces", sleep=sleep, clock=lambda: now[0],
         )

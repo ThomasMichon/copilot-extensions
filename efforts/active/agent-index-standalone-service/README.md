@@ -10,7 +10,7 @@
   `independently-packaged-indexer-service`,
   `released-version-controller-contract`, `deployment-backend-parity`
 - **Umbrella issue:** #5768
-- **Sub-issues:** #5769 (existing host recovery)
+- **Sub-issues:** #5769 (existing host recovery); #6383 (fleet service integration)
 
 ## Guiding Intent
 
@@ -36,6 +36,11 @@ deployment or destructive migration of durable data.
 - **Topology:** independent per-slice PRs.
 - **Host (owns PRs):** Coordinator.
 - **Delegates:** bounded read-only packaging and vision evidence; no delegated git changes.
+- **Fleet integration:** #6383 owns the index service image, source-credential
+  consumption and index-client adapter. #5789 owns Gateway routing/auth,
+  #6030 owns fleet deployment/client lifecycle, and #6236 owns integrated
+  coordination. Interface agreement precedes changes to their surfaces; no
+  competing Gateway, token broker or deployment controller is introduced.
 - **Handoff:** this README and [architecture proposal](architecture.md) are the
   canonical portable plan. Deployment-specific elaboration remains downstream;
   the public plan never links to private state.
@@ -102,6 +107,23 @@ After the merge-only pause, the operator authorized resumption:
 
 > Okay, we may resume work now
 
+Subsequent operator direction, with only the private target name redacted:
+
+> Okay, great. Next step is to contribute to the fleet-manager effort and focus
+> on getting agent-index's indexer service to run in a container on [the selected
+> Linux fleet host], with token requests routed through the Gateway to a
+> subscribed controller, and provide the transport so that agent-index client
+> CLI calls can reach the Gateway to make queries, served by the container.
+
+The portable integration is specified in [fleet integration](fleet-integration.md).
+The concrete host, capacity and enrollment configuration stay downstream.
+This direction prioritizes the container integration slice; it does not mark
+unfinished native activation, rollback or platform-parity gates complete.
+
+Operator clarified the Gateway target:
+
+> Contribute to the new fleet-manager Gateway; leave the older Gateway untouched
+
 ## Plan
 
 ### Phase 1 - Existing recovery and reviewed proposal
@@ -137,10 +159,20 @@ After the merge-only pause, the operator authorized resumption:
   immutable executable slots make data rollback safe. _(agent-recommended)_
 
 ### Phase 3 - Deployment adapters and release reconciliation
+- [ ] Review the [fleet integration contract](fleet-integration.md) and agree
+  non-overlapping interfaces with the existing fleet campaign owners (#6383).
+- [ ] Package the standalone indexer for an independently configured Linux
+  container, preserving one local corpus/task writer and ordinary native use.
+- [ ] Consume source/account-scoped, refreshable credentials requested through
+  the Gateway from an authorized subscribed controller; keep ingestion
+  credentials separate from query-caller authentication.
+- [ ] Provide explicit index-client Gateway query transport backed by the
+  container service; preserve typed results and report authorization/transport
+  failures without falling back to a different trust domain.
 - [ ] Supply the portable discover/install/activate/status/rollback contract for
   an external released-`main` reconciler; keep its deployment platform downstream.
-- [ ] Decide whether a generic Dockerfile materially improves the reference
-  deployment; if included, keep model/cache/data and controller ownership explicit.
+- [ ] Supply a generic image definition for the requested container deployment;
+  keep model/cache/data and controller ownership explicit.
 - [ ] Integrate standalone-service versioning and release validation without
   declaring a second Copilot plugin.
 - [ ] Prove native-host and optional-container parity before any downstream
@@ -161,6 +193,13 @@ After the merge-only pause, the operator authorized resumption:
 - [ ] Queued full/incremental sequencing, worker adoption and corpus preservation
   through update, failed activation and supported rollback.
 - [ ] Optional container restart, persistent volumes and graceful termination.
+- [ ] Actual CLI -> authenticated Gateway -> container retrieval and distinct
+  container -> Gateway -> subscribed-controller credential acquisition; prove
+  refresh, expiry, controller disconnect and unauthorized/cross-source denial.
+  Query admission and execution must bind each principal to its permitted
+  corpus/source independently of fleet/service/operation authority, including
+  omitted filters and query-derived metadata.
+  Deterministic provider mocks supplement, never replace, live transport proof.
 - [ ] Independently hosted API/controller, execution and persistence contracts,
   without cross-container database-handle or shared-SQLite assumptions.
 - [ ] Authenticated inter-component transport and component/job/source-scoped
@@ -177,6 +216,19 @@ After the merge-only pause, the operator authorized resumption:
 boundaries from implementation decisions and deployment-specific policy.
 
 ## Journal
+
+### 2026-10-12 - Candidate staging merged; fleet integration prioritized
+- Immutable native candidate staging #6074 merged into `dev` at
+  `2026-10-12T13:13:08Z`, commit `2d4b613846a5bb70b6fd76bdc358ed22f0931835`.
+  Candidate preparation is not active-slot selection, schema-safe rollback or
+  deployed standalone service readiness; those gates remain open.
+- Captured the operator's container/Gateway/subscribed-controller direction,
+  redacting only the private host identity. Claimed #6383 after deduplication
+  and requested coordination with the existing routing and fleet owners.
+- Prepared the portable integration proposal before implementation. The current
+  fleet release/receipt work and native identity contracts retain their owners.
+  No live enrollment, container deployment, data migration or token grant was
+  performed by this proposal.
 
 ### 2026-10-08 - Kickoff
 - Operator confirmed the slug. Public coordination opened in #5768; the bounded

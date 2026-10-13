@@ -47,3 +47,33 @@ consumers; measured acceptance thresholds justified by baseline results; and a
 reviewed compatibility/lifecycle design before any production migration.
 If sharing costs more or weakens isolation, retain per-service execution and
 record the evidence rather than forcing a singleton.
+
+## Preliminary source evidence - 2026-10-12
+
+This is investigation evidence, not an accepted production reuse design.
+
+- `libs/zdd/pyproject.toml` declares no runtime dependencies. Its 11 Python
+  source files total 169,474 bytes in the reviewed proposal snapshot.
+  `libs/zdd/README.md` explicitly chooses a routing table instead of a resident
+  front proxy and injects service-owned spawn, health, drain and retirement
+  callbacks. There is no generic existing ZDD front daemon to consolidate.
+- `libs/work-coalescing-singleton/README.md` supplies a stdlib-only warm request
+  server for cheap idempotent work, with caller keys and subscriber lifetime.
+  It deliberately leaves discovery, boot, leases and concurrency policy with
+  the owner; it is prior art, not an interchangeable cutover broker.
+- `plugins/agent-index/src/agent_index/engine/shim.py` is a real resident front:
+  it activates and proxies a heavyweight embedding worker and owns idle
+  shutdown. Consolidating such fronts differs from deduplicating ZDD source.
+
+| Candidate | Likely benefit to measure | Required boundary |
+|-----------|---------------------------|-------------------|
+| Immutable artifacts/files | Reuse library builds and package bytes without new resident processes | Verified content/provenance, hardlink-aware accounting, no mutation of shared files |
+| Compatible helper runtime, separate processes | Avoid rebuilding the same closure while retaining process isolation | Durable consumer references, version/ABI compatibility, safe update/uninstall |
+| Shared multi-service front | Potentially amortize genuinely repeated warm process cost | Independent route/auth/state/lifecycle, bounded contention and failure blast radius |
+
+The native profile experiment also demonstrates that dependency-role separation
+can remove a roughly half-GiB logical host stack from the primary environment.
+That is a substantially larger current opportunity than copying the small ZDD
+library. It does not reject shared helpers: the next experiment must identify
+the actual expensive process or build being shared, rather than introduce a
+broker solely to deduplicate a cheap routing-table read.

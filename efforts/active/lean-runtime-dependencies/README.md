@@ -81,13 +81,13 @@ marked agent-recommended; exploratory backend replacements are not commitments.
 
 ### Phase 1 - Reviewed intent and dependency baseline
 - [x] Land this proposal, the audit motivation and vision amendments through review (#6235).
-- [ ] Refresh declaration/import and installation-profile evidence against the
+- [x] Refresh declaration/import and installation-profile evidence against the
   execution snapshot; record direct/transitive, active/retained and logical/physical distinctions.
 - [ ] Coordinate overlapping index and daemon work with existing owners.
 
 ### Phase 2 - Worktrees UI dependency removal
-- [ ] Remove Textual from agent-worktrees while retaining Worktree Manager's UI.
-- [ ] Preserve version comparison and Manager process dispatch without relying
+- [x] Remove Textual from agent-worktrees while retaining Worktree Manager's UI.
+- [x] Preserve version comparison and Manager process dispatch without relying
   accidentally on removed transitive packages.
 - [ ] Add dependency-minimal regression evidence, update directly related docs
   and ship the slice with a changefile.
@@ -193,3 +193,42 @@ shared mutable venv is presumed acceptable.
   execution is unavailable because no daemon is listening on this host.
   Native Windows evidence is local; Linux runs in PR CI. No macOS lane or live
   runtime rollout is claimed for this declaration-only slice.
+
+### 2026-10-12 - Textual slice merged
+- #6293 merged to `dev` as `cd7f0f939` after a current-head approving review
+  and successful CI run `38250963792`, including Linux guard execution and the
+  Windows launch lane. Version comparison and the actual Manager process boundary
+  remain intact without Textual. Release promotion is tracked separately; a
+  `dev` merge is not a production rollout or proof of publication to `main`.
+- Review added normalized-distribution guards for equivalent UI package spellings.
+  The final eight focused tests pass. Dependency comments reflect required
+  `packaging` while retaining existing defensive damaged-runtime behavior.
+- The docstring correction briefly exceeded the shrink-only module ceiling;
+  it was condensed rather than widening the baseline or bypassing CI.
+
+### 2026-10-12 - Index dependency boundary implementation
+- Implemented the native base-only primary CLI and required healthy host sibling
+  without duplicating complete service-cell or explicit-source native runtimes.
+  Hosted query/index/worker commands preserve original arguments and exit codes;
+  missing host dependencies are explicit errors. No production activation occurred.
+- Full contained Windows suite passed: 789 tests, 97 platform/explicit-tier skips.
+  Subsequent headless-command and lexical-path normalization checks passed:
+  43 tests, one POSIX-only symlink skip. Both installer parsers, focused Python
+  lint, headless-launch and installation-contract guards pass.
+- Real fresh base installation contains no store/server/model packages and
+  refuses hosted startup honestly. The actual PowerShell sibling provisioner
+  installed a complete, origin-checked host environment beside it without
+  starting a daemon, registering supervision or publishing an active version.
+- RECORD-accounted external logical files measured 2.46 MiB for the unseeded
+  development client profile and 508.85 MiB for the signed native host sibling.
+  The latter includes pip/setuptools; versions and seeding differ, so these are
+  profile evidence, not physical reclaim or a universal before/after estimate.
+  LanceDB 0.39.0 contributes 314.31 MiB, chiefly its 312.02 MiB native extension.
+- Docker clean-room and local Linux/macOS execution remain unavailable.
+  Available Linux validation belongs to PR CI; existing live canary/warm-engine
+  rollout remains with the standalone-service owner and was not performed.
+- The first Linux CI run exposed eight stale POSIX test-harness expectations:
+  a missing dropin fixture, an optional-server success assertion and an overly
+  broad procutil extraction. Corrected those harnesses to exercise the required
+  host package failure before activation; Linux execution of the corrections
+  remains a gate rather than being inferred from Windows skips.

@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 from .acquisition_authority import verify_dispatch, verify_worktree, worktree_command, bind_dispatch_receipt, mark_dispatch_acquisition
 from .acquisition_contract import (
+    DEFAULT_CLI_WORKER_TARGET,
     AcquisitionRefused,
     AcquisitionRequest,
     AcquisitionResult,
@@ -30,6 +31,7 @@ from .db_core import live_session_is_fresh, local_pid_alive
 from .models import SessionStatus, StartSessionRequest
 from .preference_requests import apply_request_preferences
 from .routes.worktrees import _fresh_start_locks, _apply_bound_charter
+from .transport import SpawnTarget
 
 
 class AcquisitionRuntime:
@@ -425,7 +427,18 @@ class AcquisitionRuntime:
         req: AcquisitionRequest,
         row: dict[str, Any],
     ) -> tuple[Any, dict[str, str]]:
-        target = await self.resolver.resolve_async(req.target)
+        if req.mode == "cli" and req.target == DEFAULT_CLI_WORKER_TARGET:
+            # The worktree owner, not an ACP profile, owns CLI launch defaults.
+            return SpawnTarget(
+                type="local", cwd=row["path"], worktree_id=req.worktree_id,
+                explicit_cwd=True,
+            ), {}
+        try:
+            target = await self.resolver.resolve_async(req.target)
+        except KeyError as exc:
+            raise AcquisitionRefused(
+                "target_unavailable", f"Acquisition target '{req.target}' is not registered",
+            ) from exc
         if target.type != "local":
             raise AcquisitionRefused("venue_unsupported", "this acquisition adapter is local only")
         bound = row.get("bound_agent")

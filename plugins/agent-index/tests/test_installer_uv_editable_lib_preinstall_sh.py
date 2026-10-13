@@ -28,7 +28,7 @@ _RESOLVE_VENDORED_LIB_END = "\n}\n\n"
 _BLOCKS = {
     "service": (
         "    # agent-procutil is a `uv`-editable canonical reference in a dev",
-        "\n\n    _pip_install() {",
+        "\n\n    local dropin_dir",
     ),
     "engine": (
         "    # agent-procutil is likewise a `uv`-editable canonical reference in a",

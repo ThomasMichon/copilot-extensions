@@ -513,7 +513,7 @@ def test_posix_cli_build_uses_shared_venv_and_keeps_engine_lazy(tmp_path: Path):
     )
     uv.chmod(0o755)
     plugin = tmp_path / "plugin"
-    for library in ("zdd", "agent-procutil"):
+    for library in ("zdd", "agent-procutil", "dropin-registry"):
         directory = plugin / "libs" / library
         directory.mkdir(parents=True)
         (directory / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
@@ -570,14 +570,15 @@ _ensure_runtime
     assert calls[0] == "--version"
     assert sum(line.startswith("venv ") for line in calls) == 1
     installs = [line for line in calls if line.startswith("pip install")]
-    assert len(installs) == 3
+    assert len(installs) == 4
     assert "zdd" in installs[0] and "agent-procutil" in installs[1]
-    assert installs[2].endswith(str(plugin))
+    assert "dropin-registry" in installs[2]
+    assert installs[3].endswith(str(plugin))
     assert all("torch" not in line and "[store,server]" not in line for line in installs)
     assert not (tmp_path / "runtime/engine").exists()
 
 
-def test_optional_server_package_failure_does_not_abort_primary_under_errexit(tmp_path: Path):
+def test_required_server_package_failure_refuses_activation_under_errexit(tmp_path: Path):
     bash = shutil.which("bash")
     if os.name == "nt" or not bash:
         pytest.skip("native POSIX bash is unavailable")
@@ -587,25 +588,39 @@ def test_optional_server_package_failure_does_not_abort_primary_under_errexit(tm
     python = server / "bin/python3"
     python.write_text(FAKE_PYTHON, encoding="utf-8")
     python.chmod(0o755)
+    plugin = tmp_path / "plugin"
+    for library in ("zdd", "agent-procutil", "dropin-registry"):
+        directory = plugin / "libs" / library
+        directory.mkdir(parents=True)
+        (directory / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
     uv = tmp_path / "uv"
-    uv.write_text("#!/usr/bin/env bash\necho fixture-package-failure\nexit 37\n", encoding="utf-8")
+    uv.write_text(
+        "#!/usr/bin/env bash\n"
+        "for arg in \"$@\"; do\n"
+        "  if [[ \"$arg\" == *'[store,server]' ]]; then\n"
+        "    echo fixture-package-failure; exit 37\n"
+        "  fi\n"
+        "done\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
     uv.chmod(0o755)
     env = environment(tmp_path)
     env["PATH"] = str(tmp_path) + os.pathsep + env["PATH"]
     result = subprocess.run([bash, "-c", f"""
 set -euo pipefail
 _skip() {{ :; }}; _ok() {{ :; }}; _warn() {{ echo "$*" >&2; }}
+{function("_resolve_vendored_lib", "sh")}
 {function("_test_index_venv", "sh")}
 {function("_new_index_venv", "sh")}
-_resolve_zdd() {{ return 1; }}
 _uv_pip_install() {{ '{uv}' pip install "$@"; }}
 VENV_DIR='{server.parent}'
-PLUGIN_DIR='{tmp_path / "plugin"}'
+PLUGIN_DIR='{plugin}'
 {function("_install_server_venv", "sh")}
 _install_server_venv host forbidden
-echo primary-continues
+echo forbidden-activation
 """], env=env, capture_output=True, text=True, timeout=20)
-    assert result.returncode == 0, result.stderr
-    assert "primary-continues" in result.stdout
+    assert result.returncode == 1, result.stderr
+    assert "forbidden-activation" not in result.stdout
     assert "fixture-package-failure" in result.stderr
     assert "Server venv package install failed" in result.stderr

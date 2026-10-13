@@ -208,6 +208,28 @@ approval counts, not all of them):
   exists rather than naming dynamic matrix jobs directly) apply to
   everyone with no bypass, including every Maintainer.
 
+#### Review escape hatch is separate from CI enforcement
+
+The `dev` classic protection's `enforce_admins` setting is enabled. An owner
+merge using `--admin` therefore cannot waive the existing required CI context.
+The separate review-required ruleset still grants Maintainers their existing
+pull-request-scoped review bypass: a stuck or imperfect Copilot review does not
+remove the worst-case self-merge escape hatch.
+
+Agents must not reach for that review escape hatch prematurely. Follow
+`CONTRIBUTING.md`'s review loop, address blocking findings and independently
+confirm every configured required context has completed successfully for the
+current head. A successful rollup of *reported* checks is not enough when a
+required check has not registered. Missing or unreadable required evidence blocks.
+
+Administrative recovery remains available for genuine infrastructure deadlock,
+but changing enforcement requires an explicit human decision for the named
+incident and PR, bounded scope, recorded before-state and restoration proof.
+There is no standing agent permission to disable CI enforcement, add a bypass
+actor, or wave away an ordinary test failure. The review escape hatch does not
+relax the dev contribution route or the critical-workflow/metadata-only main
+repair boundary.
+
 #### Onboarding a Maintainer
 
 The repository owner applies both halves of the existing Maintainer tier:
@@ -363,7 +385,7 @@ output, and `stale-branch-sweep.yml` acts on already-merged PRs' branches):
 | `context-handoff-exhaustive.yml` | `schedule` (weekly), `workflow_dispatch` | The real-git/child-process/lock-race exhaustive suite for `context-handoff`'s exhaustive test tree — deliberately its own workflow so its `schedule` trigger doesn't apply to the rest of `ci.yml`'s matrix. |
 | `crash-diagnostics-stress.yml` | `schedule` (daily), `workflow_dispatch` | Stress-tests `context-handoff` crash-diagnostics paths. |
 | `agent-dispatch-pwsh-race-exhaustive.yml` | `schedule` (weekly), `workflow_dispatch` | Runs `agent-dispatch`'s multi-process `pwsh` mutex-race tests (self-skipped by default in `ci.yml`'s smoke lane) on both `ubuntu-latest` and `windows-latest` — deliberately its own workflow for the same reason as `context-handoff-exhaustive.yml`. |
-| `payload-cwd-contract.yml` | Path-filtered `pull_request`, `schedule` (weekly), `workflow_dispatch` | Proves installer/watchdog payload replaceability and HOME CWD on Linux and Windows; relevant PRs run a focused smoke, while scheduled/manual runs cover the full inherited-staging-flag matrix. |
+| `payload-cwd-contract.yml` | Path-filtered non-dev `pull_request`, `schedule` (weekly), `workflow_dispatch` | Proves installer/watchdog payload replaceability and HOME CWD on Linux and Windows. Relevant dev PRs run the identical platform smoke in CI's existing native runner jobs and required aggregate, avoiding one workflow and two check records; non-dev PRs retain this standalone smoke, and scheduled/manual runs retain the full inherited-staging-flag matrix. |
 | `ci-failure-fix-attempt.lock.yml` | `issues: [labeled]`, `workflow_dispatch` | Generated agentic-workflow (`gh-aw` compiled) that reacts to a labeled CI-failure tracking issue; also manually dispatchable with inputs. |
 
 The release reporter checks the optional fixer's workflow state once before

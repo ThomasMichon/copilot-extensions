@@ -337,6 +337,8 @@ claims only that request; another hook observes the live pending owner even
 before the child starts rendering. No lease or inherited log handle stays open
 in the Git administrative directory during rendering. The worker atomically
 publishes a latest-result log capped at 8 KiB and its completed receipt.
+Snapshot replacement uses a short, bounded retry for transient Windows reader
+handles; persistent permission failures still propagate rather than reporting delivery.
 Finalization and cleanup's normal liveness checks spare a live queued/running
 worker using its workspace-local receipt, without spawning Git per checkout.
 Owner birth identity uses native process APIs on Windows and macOS, and

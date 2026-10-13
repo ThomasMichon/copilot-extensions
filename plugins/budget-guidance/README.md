@@ -29,3 +29,12 @@ composition is proven at the supported Copilot CLI version floor.
 
 See [Configuration](docs/configuration.md) and
 [Architecture](docs/architecture.md).
+
+The [session quota reader](docs/session-quota.md) adds a bounded helper over an
+existing Copilot SDK session and a credential-filtered offline capture command.
+It preserves requesting-session attribution and labels cached compatibility
+freshness unknown. Opt-in [provider evidence](docs/provider-quota.md) evaluates
+one provider's observation, units, business state, and raw reset separately.
+Qualified incumbent readings reuse posture arithmetic for sustainable pace.
+Rate-based projections, provider refresh adapters, and session-start injection
+remain later slices.

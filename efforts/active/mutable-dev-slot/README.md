@@ -234,6 +234,49 @@ operator directive to remove the explicit claimed-dev exception.
 
 ## Journal
 
+### 2026-10-13 — Canonical candidate and rollback retention merged
+
+#6381 merged into `dev` as
+`234da41ffb66374060a78e76711864f619fb0110`. The current-head Copilot review
+reported zero open findings after both high-severity claim-evidence findings
+were fixed, and every required PR check passed. The shared primitive and all
+13 exact vendor copies now provide descriptor-owned shared retention,
+matching-content admission under retention, and exclusive cleanup/selector
+rechecks. The primitive supports transferring a completed candidate to retention
+before construction release; native fixtures exercise that handoff and retained
+candidate/rollback lifetimes. Real adopting entrypoints must still hold those
+descriptors through their actual cutover/drain or rollback outcome. Canonical
+GC, incomplete sweeping, and explicit slot cleanup respect holders of these
+leases. Selected incomplete numbered identities refuse ordinary rebuild
+with distinct-generation repair guidance; the mutable dev exception remains.
+
+Claim mutation and cleanup read dev ownership and rollback evidence strictly:
+only a missing file is absent. Invalid new/forced owner or rollback input is
+rejected before publication, leaving an existing claim unchanged and releasable.
+Public status reads preserve their compatibility behavior. Dev claim/release
+shares selector-publication coordination and protects the recorded previous
+version until that claim is settled or transferred to retention.
+
+The contained Windows matrix passed 197 tests with four platform skips,
+including native process ownership/death/cancellation, construction handoff,
+shared reuse, each cleanup path, selector races, promotion/rollback, and actual
+CLI GC. The executable install-contract probe passed for all 13 plugins;
+eight guard regressions and three standalone wheel/sdist resource checks
+passed. Five focused retention smoke cases join the existing PR guard lane,
+with the broader native matrix remaining in the full/manual portfolio.
+The explicit, reviewable single-file module-ceiling adjustment preserves the
+existing offline bootstrap and standalone artifact resource ABI.
+
+Normal post-merge CI runs `38325174861` and `38325580916` were cancelled with
+no failed jobs as newer `dev` commits superseded them; the continuing gate
+follows the newest normal run containing this change. Promotion and authorized
+installed verification remain pending. This is a merged shared-core milestone,
+not a deployed installer-adoption claim. No Phase 3 adoption or validation
+checkbox is completed by it. The effort remains Active: create-once completion
+publication, the complete first adopter on both entrypoints, correct
+generation propagation, dev/release and distinct-generation repair, and the
+remaining runtime portfolio still require their own implementation and proof.
+
 ### 2026-10-12 — Revised-legacy publisher prerequisite delivered
 
 Normal validation run `38305079883` completed successfully and promotion #6358

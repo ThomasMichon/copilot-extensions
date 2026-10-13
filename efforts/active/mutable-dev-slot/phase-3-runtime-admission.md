@@ -146,6 +146,22 @@ each adopter is already safe.
       retention protocol across construction release, cutover waits, concurrent
       cleanup, promotion, and drain. Matching-slot reuse needs the same atomic
       retention admission. Do not use immutable-slot mtime mutation as a pin.
+      The canonical Python implementation now supplies shared OS-backed
+      `retention_lease()` ownership, matching-content revalidation under that
+      lease, and exclusive cleanup admission/rechecks shared with activation.
+      GC, incomplete sweeping, and slot cleanup respect construction and
+      retention owners; selected incomplete numbered identities refuse ordinary
+      reconstruction with distinct-generation repair guidance. Current,
+      last-known-good, and a dev claim's previous-version rollback reference
+      survive cleanup. Native process regressions and the executable
+      install-contract probe exercise this primitive, not installer adoption.
+      This item remains unchecked until adopting entrypoints retain the owning
+      descriptors across their real promotion/drain or rollback lifetimes.
+      The single-file bootstrap primitive and its 13 byte-identical copies have
+      an explicit reviewable module-ceiling change from 2,153 to 2,322 lines;
+      preserving their existing standalone/offline and artifact resource
+      contracts avoids introducing a new deploy-time import/fan-out dependency
+      merely to relocate this small kernel-ownership seam.
 - [ ] Surface timeout and actual storage/permission failures distinctly.
       Diagnostic owner evidence is attributable to the actual lease holder,
       not a completion helper's PID or a mere lock-file timestamp. A surviving

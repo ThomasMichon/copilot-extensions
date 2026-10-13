@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from decimal import Decimal
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import Any
 from . import __version__
 from .models import ModelError, load_json, parse_config, parse_instant
 from .posture import build_posture, unavailable_posture
+from .quota import normalize_quota
 
 
 def _default_config() -> Path:
@@ -93,6 +95,58 @@ def _version(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _quota(args: argparse.Namespace) -> int:
+    try:
+        path = Path(args.capture)
+        if not path.is_file():
+            raise ModelError("quota capture must be a regular file")
+        try:
+            capture = load_json(path, max_bytes=65536)
+        except ModelError:
+            raise ModelError(
+                "quota capture must be valid UTF-8 JSON with unique keys within 65536 bytes"
+            ) from None
+        if capture.get("schema") != "copilot-extensions.copilot-quota-capture":
+            raise ModelError("unsupported quota capture schema")
+        if not isinstance(capture.get("version"), Decimal) or capture["version"] != 1:
+            raise ModelError("unsupported quota capture version")
+        for field in ("session_id", "runtime_version", "acquired_at"):
+            if not isinstance(capture.get(field), str):
+                raise ModelError(f"capture.{field} must be a string")
+        projection = capture.get("projection")
+        if not isinstance(projection, dict):
+            raise ModelError("capture.projection must be an object")
+        result = normalize_quota(
+            projection, session_id=capture["session_id"],
+            expected_session_id=args.session_id,
+            runtime_version=capture["runtime_version"],
+            acquired_at=parse_instant(capture["acquired_at"], "capture.acquired_at"),
+            category=args.category,
+            provider_id=args.provider_id, quota_id=args.quota_id,
+            evaluated_at=(
+                parse_instant(args.at, "--at") if args.at is not None
+                else datetime.now(timezone.utc)
+            ),
+            max_age_seconds=args.max_age_seconds,
+        )
+    except OSError as exc:
+        return _emit_model_error(
+            args, ModelError(f"cannot read quota capture: {exc.strerror}"), human_prefix=""
+        )
+    except ModelError as exc:
+        return _emit_model_error(args, exc, human_prefix="")
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(
+            f"Session quota: {result['availability']}; "
+            f"quantity {result['quantity_kind']}; allowance {result['allowance']}; "
+            f"used {result['consumption']}; provider freshness {result['freshness']}; "
+            f"diagnostics {', '.join(result['diagnostics'])}"
+        )
+    return 0 if result["availability"] in {"available", "cached", "unlimited"} else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the public command parser."""
     parser = argparse.ArgumentParser(prog="budget-guidance")
@@ -103,6 +157,16 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--at", help="evaluate freshness at an RFC 3339 instant")
     status.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     status.set_defaults(handler=_status)
+    quota = subparsers.add_parser("quota", help="inspect a bounded session quota capture")
+    quota.add_argument("--capture", required=True, help="allowlisted JSON capture, at most 64 KiB")
+    quota.add_argument("--session-id", required=True, help="expected requesting SDK session")
+    quota.add_argument("--category", default="premium_interactions")
+    quota.add_argument("--provider-id", help="opt in to one SDK provider's quota evidence")
+    quota.add_argument("--quota-id", help="select a quota within the explicit provider")
+    quota.add_argument("--at", help="evaluate provider freshness at an RFC 3339 instant")
+    quota.add_argument("--max-age-seconds", type=int, default=300)
+    quota.add_argument("--json", action="store_true")
+    quota.set_defaults(handler=_quota)
     version = subparsers.add_parser("version", help="print the budget-guidance version and exit")
     version.set_defaults(handler=_version)
     return parser

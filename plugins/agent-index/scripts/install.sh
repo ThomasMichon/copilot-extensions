@@ -1162,24 +1162,8 @@ _new_index_venv() {
 }
 
 _install_server_venv() {
-    # agent-index-server-venv-split: provision a sibling SERVER venv inside
-    # the current runtime slot ($VENV_DIR/server), installing the full
-    # agent-index[store,server] package -- so `spawn_passive` (and, once its
-    # own dispatcher retarget lands, `cmd_start`/`cmd_cell_start`) can run the
-    # FastAPI/uvicorn/pydantic service from a venv separate from the
-    # client/orchestrator's own, keeping a pure client's install footprint
-    # light. This is the exact sibling path `config.server_venv_python()`
-    # already resolves (a `server` subdirectory of whichever directory
-    # contains the current interpreter's own `Scripts`/`bin` folder) --
-    # provisioning here just makes that existing, previously-inert resolver
-    # find something.
-    #
-    # Host role only: a client never runs the service, so it never needs this
-    # second venv. Provisioning failures are WARN, never FAIL --
-    # `config.server_venv_python()` already falls back to `None` (in-process
-    # `serve()`, or the shared venv for `spawn_passive`) when no sibling
-    # exists, so a failure here must never block the primary client
-    # install/update.
+    # Hosts require one complete sibling service runtime. The primary CLI is
+    # base-only; failed sibling provisioning must prevent candidate activation.
     local install_role="$1" py="$2"
     if [[ "$install_role" != "host" ]]; then
         _skip 'Server venv: skipped (client role never runs the service)'
@@ -1192,21 +1176,25 @@ _install_server_venv() {
     command -v uv >/dev/null 2>&1 && have_uv=1
 
     if ! _new_index_venv "$server_venv_dir" "$server_venv_python" "$py" "$have_uv"; then
-            _warn "Server venv creation failed -- $server_venv_python not found (spawn_passive falls back to the shared venv)"
-            return 0
+            _warn "Server venv creation failed -- $server_venv_python not found"
+            return 1
     fi
 
-    local zdd_dir
-    if zdd_dir="$(_resolve_zdd)"; then
+    local lib_name lib_dir
+    for lib_name in zdd agent-procutil dropin-registry; do
+        if ! lib_dir="$(_resolve_vendored_lib "$lib_name")"; then
+            _warn "Server venv dependency source is missing: $lib_name"
+            return 1
+        fi
         if [[ "$have_uv" -eq 1 ]]; then
-            _uv_pip_install --python "$server_venv_python" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet >/dev/null 2>&1
+            _uv_pip_install --python "$server_venv_python" "$lib_dir" --quiet >/dev/null 2>&1
         else
-            "$server_venv_python" -m pip install "$zdd_dir" >/dev/null 2>&1
+            "$server_venv_python" -m pip install "$lib_dir" >/dev/null 2>&1
         fi || {
-            _warn "Server venv zdd install failed -- spawn_passive falls back to the shared venv"
-            return 0
+            _warn "Server venv $lib_name install failed"
+            return 1
         }
-    fi
+    done
 
     local srv_out srv_rc=0
     if [[ "$have_uv" -eq 1 ]]; then
@@ -1215,13 +1203,18 @@ _install_server_venv() {
         srv_out="$("$server_venv_python" -m pip install "${PLUGIN_DIR}[store,server]" 2>&1)" || srv_rc=$?
     fi
     if [[ "$srv_rc" -ne 0 ]]; then
-        _warn 'Server venv package install failed -- spawn_passive falls back to the shared venv'
+        _warn 'Server venv package install failed'
         printf '%s\n' "$srv_out" >&2
-        return 0
+        return 1
     fi
     if ! _test_index_venv "$server_venv_dir" "$server_venv_python"; then
-        _warn 'Server venv failed final interpreter/prefix health validation -- using the shared venv'
-        return 0
+        _warn 'Server venv failed final interpreter/prefix health validation'
+        return 1
+    fi
+    if ! "$server_venv_python" -I -c 'import fastapi, uvicorn, numpy, pyarrow, lancedb; import agent_index.server' ||
+        ! _runtime_origin_under "$server_venv_python" "$server_venv_dir"; then
+        _warn 'Server venv failed host dependency/package-origin health validation'
+        return 1
     fi
     _ok "Server venv provisioned: $server_venv_dir"
 }
@@ -1474,25 +1467,21 @@ _ensure_runtime() {
         }
     fi
 
+    local dropin_dir
+    if ! dropin_dir="$(_resolve_vendored_lib dropin-registry)"; then
+        _fail 'Cannot locate dropin-registry dependency source'
+        exit 1
+    fi
+    if [[ "$have_uv" -eq 1 ]]; then
+        _uv_pip_install --python "$VENV_PYTHON" "$dropin_dir" --quiet
+    else
+        "$VENV_PYTHON" -m pip install "$dropin_dir"
+    fi || { _fail 'dropin-registry install failed'; exit 1; }
+
     _pip_install() {
-        # A host runs the local indexing/vector-store stack and the FastAPI/
-        # uvicorn server, so it needs the [store,server] extras (numpy,
-        # pyarrow, lancedb, tree-sitter*, mcp, fastapi, uvicorn, pydantic); a
-        # client stays on the light base deps only (see
-        # agent-index-server-venv-split, which will eventually move [server]
-        # into its own dedicated per-version venv instead of this shared one).
-        # This is distinct from -- and must never pull in -- the durable
-        # agent-index-engine program (torch), which is provisioned exclusively
-        # by `engine`/`engine-update` (see durable-vs-versioned-runtime.md).
-        # Resolve role BEFORE the package install so a host's versioned venv
-        # actually carries what its own service/search/index code imports.
-        # _activation_role falls back to _machine_role, so this is correct
-        # even before any per-repo role config exists.
-        local install_role
-        install_role="$(_activation_role)"
-        [[ "$install_role" == "unconfigured" ]] && install_role="$(_machine_role)"
+        # Both roles retain a light primary CLI. A host's service dependencies
+        # live only in its sibling; the embedding engine remains explicit.
         local pkg="$PLUGIN_DIR"
-        [[ "$install_role" == "host" ]] && pkg="${PLUGIN_DIR}[store,server]"
         if [[ "$have_uv" -eq 1 ]]; then
             _uv_pip_install --python "$VENV_PYTHON" "$pkg"
         else
@@ -1504,15 +1493,15 @@ _ensure_runtime() {
         printf '%s\n' "$pkg_out" >&2
         exit 1
     fi
-    # _pip_install ran in a command-substitution subshell, so its own
-    # install_role assignment above didn't survive back to this scope --
-    # recompute it directly (cheap, side-effect-free) rather than trying to
-    # thread a subshell result back out.
+    # Resolve the host role only for sibling provisioning.
     install_role="$(_activation_role)"
     [[ "$install_role" == "unconfigured" ]] && install_role="$(_machine_role)"
     _ok 'Package installed: agent-index'
 
-    _install_server_venv "$install_role" "$py"
+    if ! _install_server_venv "$install_role" "$py"; then
+        _fail 'Required host runtime failed provisioning -- not activating'
+        exit 1
+    fi
 
     local prev_version=""
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then

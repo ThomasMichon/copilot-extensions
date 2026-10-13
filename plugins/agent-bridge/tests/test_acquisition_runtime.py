@@ -130,6 +130,147 @@ def rig(tmp_db, session_manager, mock_acp_client, monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_default_cli_worker_needs_no_acp_registry_profile(rig):
+    resolve = rig.resolver.resolve_async
+
+    async def without_worker_profile(name):
+        if name == "task-worker":
+            raise AssertionError("default CLI worker must not resolve an ACP profile")
+        return await resolve(name)
+
+    rig.resolver.resolve_async = without_worker_profile
+    result = await rig.runtime.acquire(req(mode="cli"))
+    assert result.target == "task-worker"
+    assert result.native_session_id == "cli-native-new" == rig.head["id"]
+    assert len(rig.db.execute_read("SELECT * FROM live_messages")) == 1
+    assert await rig.runtime.acquire(req(mode="cli")) == result
+    assert len(rig.db.execute_read("SELECT * FROM live_messages")) == 1
+
+
+@pytest.mark.asyncio
+async def test_default_cli_retry_reconciles_legacy_missing_profile_before_creation(rig, monkeypatch):
+    resolve = rig.resolver.resolve_async
+
+    async def missing_worker_profile(name):
+        if name == "task-worker":
+            raise KeyError(name)
+        return await resolve(name)
+
+    async def legacy_preparation(request, _row):
+        return await rig.resolver.resolve_async(request.target), {}
+
+    rig.resolver.resolve_async = missing_worker_profile
+    with monkeypatch.context() as patch:
+        patch.setattr(rig.runtime, "_prepare_target", legacy_preparation)
+        with pytest.raises(KeyError):
+            await rig.runtime.acquire(req(mode="cli"))
+    assert rig.db.execute_read(
+        "SELECT state FROM acquisition_attempts WHERE delivery_id='delivery-a'",
+    )[0]["state"] == "pending"
+    original = {**rig.source["acquisition_reservation"], "state": "deferred"}
+    current = {
+        **original, "key": "reservation-b", "attempt": 2,
+        "state": "reserving", "worktree_ownership": "reused",
+    }
+    rig.source["acquisition_reservation"] = current
+    rig.source["acquisition_reservation_history"] = {
+        "version": 1, "reservations": [current, original],
+    }
+    retry = req(
+        mode="cli", allocation="reused",
+        reservation_key="reservation-b", delivery_id="delivery-b",
+    )
+    result = await rig.runtime.acquire(retry)
+    assert result.acquired == "created"
+    assert result.target == "task-worker"
+    receipt = rig.db.execute_read(
+        "SELECT state,refusal_code FROM acquisition_attempts WHERE delivery_id='delivery-a'",
+    )[0]
+    assert receipt["state"] == "refused"
+    assert receipt["refusal_code"] == "interrupted_before_launch"
+    assert await rig.runtime.acquire(retry) == result
+    assert len(rig.db.execute_read("SELECT * FROM live_messages")) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode,target", [
+    ("acp", "task-worker"), ("cli", "named-missing"), ("acp", "named-missing"),
+])
+async def test_missing_registry_target_is_typed_and_refuses_prepared_journal(rig, mode, target):
+    resolve = rig.resolver.resolve_async
+
+    async def missing_target(name):
+        if name == target:
+            raise KeyError(name)
+        return await resolve(name)
+
+    rig.resolver.resolve_async = missing_target
+    with pytest.raises(AcquisitionRefused) as error:
+        await rig.runtime.acquire(req(mode=mode, target=target))
+    assert error.value.code == "target_unavailable"
+    receipt = rig.db.execute_read(
+        "SELECT state,refusal_code FROM acquisition_attempts WHERE delivery_id='delivery-a'",
+    )[0]
+    assert receipt["state"] == "refused"
+    assert receipt["refusal_code"] == "target_unavailable"
+    assert not rig.manager.list_sessions()
+    assert not rig.db.execute_read("SELECT * FROM live_messages")
+    assert not rig.db.execute_read("SELECT * FROM turns")
+    assert not any(args[0] == "embody" for args, _ in rig.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("venue", ["local", "ssh"])
+async def test_explicit_named_cli_target_retains_resolver_and_local_venue_checks(rig, venue):
+    resolve = rig.resolver.resolve_async
+    names = []
+
+    async def named_target(name):
+        names.append(name)
+        if name == "named-worker":
+            return SpawnTarget(type=venue, cwd="/named")
+        return await resolve(name)
+
+    rig.resolver.resolve_async = named_target
+    if venue == "local":
+        result = await rig.runtime.acquire(req(mode="cli", target="named-worker"))
+        assert result.target == "named-worker"
+        assert result.native_session_id == rig.head["id"]
+    else:
+        with pytest.raises(AcquisitionRefused) as error:
+            await rig.runtime.acquire(req(mode="cli", target="named-worker"))
+        assert error.value.code == "venue_unsupported"
+        assert not rig.db.execute_read("SELECT * FROM live_messages")
+    assert "named-worker" in names
+
+
+@pytest.mark.asyncio
+async def test_missing_registry_target_http_refusal_is_not_a_500(rig):
+    resolve = rig.resolver.resolve_async
+
+    async def missing_target(name):
+        if name == "named-missing":
+            raise KeyError(name)
+        return await resolve(name)
+
+    rig.resolver.resolve_async = missing_target
+    app = FastAPI()
+    app.include_router(router)
+    app.state.session_manager = rig.manager
+    app.state.resolver = rig.resolver
+    app.state.db = rig.db
+    app.state.acquisition_runtime = rig.runtime
+    with TestClient(app) as http:
+        response = http.post("/api/v1/acquisitions", json={
+            **req(mode="cli", target="named-missing").model_dump(),
+            "protocol_version": ACQUISITION_PROTOCOL_VERSION,
+        })
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "target_unavailable"
+    assert not rig.db.execute_read("SELECT * FROM live_messages")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("history", ["absent", "journal", "spawned"])
 async def test_missing_owner_preflight_precedes_mark_and_preserves_ambiguity(rig, monkeypatch, history):
     if history == "journal":

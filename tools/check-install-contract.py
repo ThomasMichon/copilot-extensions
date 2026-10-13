@@ -39,6 +39,7 @@ import importlib.util
 import json
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -299,6 +300,33 @@ def _uses_engine_manifest_writer(text: str, ext: str) -> bool:
     )
 
 
+def _check_runtime_retention(runtime) -> None:
+    """Exercise the canonical lifetime contract without an installed runtime."""
+    with tempfile.TemporaryDirectory(prefix="runtime-retention-contract-") as temporary:
+        root = Path(temporary)
+        candidate = runtime.slot(root, "candidate")
+        payload = candidate / "payload"
+        payload.write_text("unchanged", encoding="utf-8")
+        with runtime.construction_lease(root, "candidate", timeout=0):
+            assert runtime.gc(root) == [], "GC removed a construction owner"
+            assert runtime.toss_incomplete(root) == [], "toss removed a construction owner"
+        with runtime.retention_lease(root, "candidate", timeout=0):
+            assert runtime.gc(root) == [], "GC removed a retained candidate"
+            assert runtime.toss_incomplete(root) == [], "toss removed a retained candidate"
+            try:
+                runtime.slot(root, "candidate", clean_incomplete=True)
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("incomplete cleanup admitted a retained candidate")
+            assert payload.read_text(encoding="utf-8") == "unchanged"
+        assert runtime.toss_incomplete(root) == ["candidate"], "released candidate was not reclaimed"
+        runtime.mark_complete(root, "candidate", payload_hash="same")
+        with runtime.retention_lease(root, "candidate", payload_hash="same", timeout=0):
+            runtime.activate(root, "candidate")
+        assert runtime.gc(root) == [], "GC removed the published candidate"
+
+
 def check() -> int:
     violations: list[str] = []
     ps1_resolvers: dict[str, str | None] = {}
@@ -508,6 +536,14 @@ def check() -> int:
                 f"({VERSIONED_RUNTIME_CANONICAL.relative_to(REPO).as_posix()}) in: "
                 f"{', '.join(drifted)} -- run 'python tools/sync-versioned-runtime.py'"
             )
+        spec = importlib.util.spec_from_file_location("install_contract_runtime", VERSIONED_RUNTIME_CANONICAL)
+        assert spec is not None and spec.loader is not None
+        runtime = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runtime)
+        try:
+            _check_runtime_retention(runtime)
+        except (OSError, RuntimeError, AssertionError, AttributeError, ValueError) as exc:
+            violations.append(f"canonical runtime retention contract failed: {exc}")
 
     installer_engine_drift = _verify_installer_engine_sync()
     if installer_engine_drift:

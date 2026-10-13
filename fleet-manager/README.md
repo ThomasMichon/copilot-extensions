@@ -159,6 +159,29 @@ by `agent-fleet-contracts`.
 
 An explicit Python [local operation journal](docs/operation-ledger.md) now
 persists admission/outbox/audit and correlated receipt updates transactionally.
-It is not automatically installed or activated and supplies no executor,
-authentication, allocation claims, resource fencing or node effect journal.
+Its combined allocation-admission API also persists one exclusive identified
+resource claim with intent/outbox/audit. Claims survive every receipt outcome; explicit cooperative retirement evidence
+can release a claim and permit a higher allocation generation. No expiry-based
+release exists. This is local storage evidence,
+not authentication, a signed grant or an effect-owner fence.
+The journal is not automatically installed or activated and supplies no executor
+or resource fencing. Generic admission does not claim allocations.
 The offline CLI remains non-mutating.
+Its explicit result-reconciliation API commits a node spool's receiver cursor
+with receipt/outbox/audit updates, avoiding stale history replay after a lost
+receiver acknowledgment. Node identity authentication and transport remain
+the caller's responsibility.
+
+An explicit [node journal](docs/node-journal.md) now persists local acceptance,
+cooperative SQLite effects and correlated receipts with an append-only result
+spool. External attempts conservatively persist UNKNOWN before execution and
+cannot be retried blindly. Allocations instead require identified held ownership
+at acceptance and within the cooperative SQLite effect transaction; generic
+unbound effects and external allocation attempts are refused. Ownership survives
+outcomes until a trusted SQLite-only retirement callback commits with permanent
+release evidence and owner removal. Stale effects remain refused after
+reassignment. This protects correctly implemented
+local SQLite adapters, not external workspaces or resources shared across nodes.
+This Python API is not a node service, remote
+executor, authenticated reconnect protocol or distributed fence; no role is
+installed or activated automatically.

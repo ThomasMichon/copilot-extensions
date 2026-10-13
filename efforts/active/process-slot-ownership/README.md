@@ -128,18 +128,18 @@ verified by this effort's Validation Plan.
 - [x] Separate operational registry presentation (#5559) and lean launch
       lifecycle (#5579/#5664) from reader admission; do not duplicate them.
 - [x] Land this plan through review before implementation (#6091).
-- [ ] Inventory remaining status/list/discovery caller seams and record
+- [x] Inventory remaining status/list/discovery caller seams and record
       already-satisfied versus unverified requirements.
 
 ### Continuation B - Preserve outstanding reader ownership (Phase 6)
 
-- [ ] Reproduce cancellation-resistant same-provider namespace admission:
+- [x] Reproduce cancellation-resistant same-provider namespace admission:
       bound the caller wait without starting a second underlying reader.
-- [ ] Retain exact task/provider ownership through timeout and cancellation;
+- [x] Retain exact task/provider ownership through timeout and cancellation;
       fence late publication independently from slot release.
-- [ ] Account for superseded-provider tasks until actual completion or
+- [x] Account for superseded-provider tasks until actual completion or
       bounded shutdown; replacement must not erase shutdown ownership.
-- [ ] Land the smallest correction with deterministic async regressions,
+- [x] Land the smallest correction with deterministic async regressions,
       documentation, and an agent-bridge changefile.
 
 ### Continuation C - Reader budgets and circuit-first admission (Phase 6)
@@ -241,3 +241,43 @@ scan start is logged as normal discarded work, not a failed scan warning,
 and the replacement shutdown fixture uses an explicit start handshake.
 The targeted roster contract passes (51 passed, one skipped); native worker
 exit and budget/circuit gates remain unresolved.
+
+### 2026-10-12 - Coroutine holder correction landed
+
+Merged #6129 as `57eaa07e2` after current-head approval and green checks.
+Continuation B's namespace coroutine ownership correction is complete.
+The native CLI worker can still outlive cancellation of its `to_thread`
+awaiter; that distinct worker boundary is the next bounded correction.
+Continuation C and release/adoption/native validation remain open. Merge
+does not establish promotion or running-state adoption.
+
+### 2026-10-12 - Native CLI enumeration holder prepared
+
+CLI namespace enumeration now coalesces through a provider-local task that
+shields the full thread/subprocess operation from caller cancellation.
+The initial admitted timeout bounds that subprocess; later callers keep
+their outer wait budgets without replacing its execution policy.
+A native Python provider fixture records one PID launch, stays blocked until
+explicit graceful release, and returns the same result to eight joiners after
+the first caller cancels. The namespace/roster selection passed 105 tests,
+one skipped. This proves direct native enumeration admission, not descendant
+tree cleanup, CPU circuits, cross-platform adoption, or runtime release.
+
+### 2026-10-12 - Native ownership linked to cache supervision
+
+Review identified that a provider-local shielded task needed an explicit
+cache lifecycle handoff when the outer cache scan ended. Resolvers now expose
+pending enumeration; cache scan cleanup retains its exact native holder.
+Bounded cache shutdown observes those tasks without cancelling their native
+work, including after provider replacement, and retains timed-out holders
+until completion. Two native process regressions demonstrate shutdown and
+replacement accounting. The combined contracts pass 107 tests, one skipped.
+
+### 2026-10-12 - Native enumeration correction landed
+
+Merged #6400 as `913479b04` after exact-head approval with zero open findings
+and green checks. Native enumeration now retains one provider-local holder
+through cancelled callers and hands remaining ownership to bounded cache
+shutdown supervision, including after provider replacement. The umbrella
+remains open: process-tree identity/reclamation, role CPU/wall circuits,
+cross-platform acceptance, promotion and authorized adoption are not complete.

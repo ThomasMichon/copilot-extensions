@@ -74,6 +74,11 @@ class NamespaceResolver(ABC):
         """The workspace repo this target hosts, or ``None``."""
         return None
 
+    @property
+    def pending_list_task(self) -> asyncio.Task[list[NamespaceAgentInfo]] | None:
+        """Actual enumeration holder, if it can outlive a cancelled caller."""
+        return None
+
 
 class CliNamespaceResolver(NamespaceResolver):
     """Drive a namespace provider over a process boundary."""
@@ -91,10 +96,15 @@ class CliNamespaceResolver(NamespaceResolver):
         self._fallback = fallback
         self._command = list(command) if command else None
         self._list_cache: tuple[float, list[NamespaceAgentInfo]] | None = None
+        self._list_task: asyncio.Task[list[NamespaceAgentInfo]] | None = None
 
     def invalidate_list_cache(self) -> None:
         """Drop the cached ``list()`` result so the next call re-queries live."""
         self._list_cache = None
+
+    @property
+    def pending_list_task(self) -> asyncio.Task[list[NamespaceAgentInfo]] | None:
+        return self._list_task
 
     @property
     def prefix(self) -> str:
@@ -156,6 +166,28 @@ class CliNamespaceResolver(NamespaceResolver):
         return await fn(*args, **kwargs)
 
     async def list(self, *, timeout: float | None = None) -> list[NamespaceAgentInfo]:
+        """Join the provider's owned enumeration without cancelling its worker.
+
+        The first admitted caller sets the subprocess execution timeout.
+        Later callers retain their own outer wait budgets; cancellation only
+        ends their join, not the thread/subprocess or its admission slot.
+        """
+        task = self._list_task
+        if task is None or task.done():
+            task = asyncio.create_task(self._list_once(timeout=timeout))
+            self._list_task = task
+            task.add_done_callback(self._on_list_done)
+        return await asyncio.shield(task)
+
+    def _on_list_done(self, task: asyncio.Task[list[NamespaceAgentInfo]]) -> None:
+        if self._list_task is task:
+            self._list_task = None
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                log.warning("Namespace '%s:' enumeration failed: %s", self._prefix, error)
+
+    async def _list_once(self, *, timeout: float | None = None) -> list[NamespaceAgentInfo]:
         """Enumerate this namespace's agents.
 
         A missing binstub (the provider isn't installed on this machine) is

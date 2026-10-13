@@ -1318,6 +1318,21 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
 > only *where* it lives and *how* it is activated change. The per-plugin installer
 > points its venv/binstub/manifest at the slot the primitive returns.
 
+The canonical Python API additionally supplies OS-backed
+`construction_lease` and shared `retention_lease` lifetimes. Builders transfer
+to candidate retention before releasing construction; completed reuse rechecks
+its content under retention; candidate and rollback owners retain references
+through cutover/drain or rollback settlement. Canonical cleanup takes
+construction, exclusive retention, then selector-publication ownership and
+rechecks selectors before deleting; activation shares the same protection.
+The install-contract guard executes a small fresh-root lifetime/reclamation
+probe as well as checking byte-identical fan-out. See
+[`versioned-runtime`](../libs/versioned-runtime/README.md) for the exact API,
+ordering, storage-failure behavior, and installer-adoption boundary. Shipping
+this helper does not itself enroll an old shell installer's build lifetime.
+Installation-cell provenance/receipt governance and its receipt-only
+reservation release remain independently binding.
+
 ### Hard rules
 
 1. **No file-copy of the package** into `~/.<runtime>/lib`. Install via
@@ -1531,8 +1546,11 @@ When that logical location is already a safe workspace, only the native CWD is
 updated; the caller's workspace is preserved rather than replaced by HOME.
 Only FileSystem-provider locations qualify as native directory candidates;
 registry or other provider containers use the validated project/HOME fallback.
-The path-gated `Payload CWD contract` workflow runs a focused Linux/Windows smoke
-on relevant PRs; its scheduled/manual lane runs the full inherited-flag matrix.
+Relevant dev PRs run the same focused Linux/Windows smoke inside CI's existing
+native runner jobs, so their outcomes feed the required PR aggregate without
+another workflow or check. Changed-path reads use the real PR head and fail on
+Git errors. The path-gated `Payload CWD contract` workflow retains non-dev PR
+coverage; its scheduled/manual lane runs the full inherited-flag matrix.
 
 ### Watchdog — a stalled install self-terminates (fixes stall-outs)
 
@@ -2089,7 +2107,7 @@ mechanics move into the engine.
 
 `agent-index` uses canonical references on `dev` and shared acquisition,
 native capture, transient retries and manifest writing. Its versioned CLI,
-optional host-server sibling and separately provisioned durable embedding venv
+host-only server sibling and separately provisioned durable embedding venv
 all use those shared build mechanics. Signed-Python discovery, signature/venv
 health validation, dependency order, Torch/CUDA feeds, engine configuration and
 every activation/service lifecycle remain local. Signed results are accepted
@@ -2105,6 +2123,12 @@ while the independent embedding engine keeps its uv-first policy.
 PowerShell package paths consult only the executable accepted by `Ensure-Uv`;
 a rejected but still-discoverable PATH uv is never selected again for packages.
 If no validated uv remains, CLI/server/engine package paths use Python/pip.
+Native primary CLI environments are base-only for both roles. Host candidates
+must provision their slot-owned `[store,server]` sibling, including local base
+libraries, and pass dependency/package-origin health before completion and
+activation. Hosted commands dispatch to that runtime; missing host dependencies
+never silently fall back to the light CLI. A complete service cell or standalone
+explicit-source host continues using its already-owned complete runtime.
 Index uv acquisition and executable validation use one installation-wide guard
 shared by CLI and durable-engine callers. Windows uses the existing mutex
 adapter's `Uv` scope; POSIX uses fd7 with the same OS advisory locking and

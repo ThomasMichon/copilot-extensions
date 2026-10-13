@@ -55,8 +55,18 @@ slot, then cut traffic over with zdd; the durable engine remains on its separate
 explicit lifecycle and is never rebuilt by a routine service update.
 
 Both canonical installers use the shared installer engine for uv acquisition,
-venv/package retries and deploy manifests. The versioned CLI, optional
-host-server sibling and durable embedding venv retain separate lifetimes and
+venv/package retries and deploy manifests. Native installs keep the versioned
+primary CLI base-only for both roles. A host installs `[store,server]` once,
+in its required slot-owned server sibling; server provisioning and dependency
+health must pass before candidate activation. Host search, indexing, workers
+and service starts execute in that complete runtime, preserving original
+arguments and exit codes. A missing host runtime is reported explicitly rather
+than falling back to a client environment.
+
+Complete service cells and standalone explicit-source native services keep
+their independently owned full host runtime; they do not acquire a duplicate
+sibling merely to match the legacy layout. The durable embedding venv retains
+its separate lifecycle. These runtimes retain
 plugin-owned dependency/signature policy. PowerShell stamps are immutable,
 self-contained snapshots; see the
 [shared installer contract](../../docs/install-contract.md#shared-installer-engine-helpers-libsinstaller-engine)

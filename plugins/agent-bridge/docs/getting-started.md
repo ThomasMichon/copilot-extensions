@@ -103,6 +103,14 @@ the target-specific credential policy. agent-bridge applies each provider's
 back-compat), then hosts one shared relay. With no provider sources, the relay is
 disabled and the bridge service still works.
 
+Profile probes retain ownership of their finite command trees and captured
+pipes. Windows requires a non-breakaway kill-on-close Job before the provider wrapper runs;
+POSIX uses a separate process group. A timeout cleans up that owned tree before
+returning, so a wrapper's descendants cannot keep relay adoption waiting after
+the declared probe deadline. Registered providers still use the existing bounded
+retry policy and warning when their profile is unavailable. Invalid UTF-8 profile
+output is refused rather than repaired into credential policy.
+
 ### Verify
 
 ```bash

@@ -28,11 +28,11 @@ from .config import (
     Config,
     client_url,
     discovered_endpoint,
+    host_runtime_python,
     install_dir,
     load_config,
     routing_dir,
     run_dir,
-    server_venv_python,
 )
 from .query_surface import format_error, hit_to_dict
 from .rendezvous import clear_endpoint, pid_alive as _pid_exists
@@ -602,55 +602,38 @@ def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
 
 
 def _dispatch_to_server_venv(
-    args: argparse.Namespace, subcommand: str
+    args: argparse.Namespace, subcommand: str, *, raw_args: list[str] | None = None
 ) -> int | None:
-    """Dispatch a FOREGROUND start/serve/__cell-start invocation to the
-    sibling SERVER venv's own interpreter, when one is provisioned
-    (agent-index-server-venv-split). Returns the dispatched child's exit
-    code, or ``None`` when no server venv exists so the caller falls back
-    to running ``serve()`` in-process exactly as before.
+    """Return the hosted child's exit code, or None in a complete host runtime.
 
-    Unlike ``spawn_passive``'s fully-detached background spawn, this is a
-    genuine foreground replacement: it inherits this process's own stdio
-    (so operator-visible output is identical) and deliberately does NOT
-    create a new process group/session, so the terminal's own Ctrl+C
-    (SIGINT) / Ctrl+Break already reaches the child directly, alongside
-    this process -- the OS's own signal fan-out across the inherited
-    console/process group, not a hand-rolled forwarder. A SIGTERM sent to
-    just this process (e.g. by a supervisor, which -- unlike a terminal
-    signal -- targets only this PID) IS explicitly relayed to the child,
-    since nothing else would deliver it there. This process then simply
-    waits for the child and relays its exit code, swallowing its own
-    KeyboardInterrupt from the same terminal signal so it doesn't race the
-    child's own graceful shutdown with a second one.
+    Preserve original argv for store commands and inherited stdio. Foreground
+    services retain terminal signal fan-out; parent-only SIGTERM is relayed.
+    Noninteractive Windows data commands suppress a new console and explicitly
+    terminate the child on a parent interrupt. Missing host runtimes fail loud.
     """
-    server_python = server_venv_python()
-    if server_python is None:
+    server_python = host_runtime_python()
+    if os.path.normcase(str(server_python)) == os.path.normcase(
+        os.path.abspath(sys.executable)
+    ):
         return None
 
-    cfg = _config_from_args(args)
-    cmd = [
-        str(server_python),
-        "-I",
-        "-X",
-        "utf8",
-        "-m",
-        "agent_index",
-        subcommand,
-        "--host",
-        cfg.host,
-        "--port",
-        str(cfg.port),
-    ]
-    if getattr(args, "passive", False):
-        cmd.append("--passive")
+    cmd = [str(server_python), "-I", "-X", "utf8", "-m", "agent_index"]
+    if raw_args is not None:
+        cmd.extend(raw_args)
+    else:
+        cfg = _config_from_args(args)
+        cmd.extend([subcommand, "--host", cfg.host, "--port", str(cfg.port)])
+        if getattr(args, "passive", False):
+            cmd.append("--passive")
     env = {
         key: value
         for key, value in os.environ.items()
         if key not in {"PYTHONPATH", "PYTHONHOME"}
     }
+    windowless = os.name == "nt" and raw_args is not None and not sys.stdin.isatty()
     process = subprocess.Popen(  # noqa: S603
-        cmd, cwd=str(install_dir().resolve()), env=env
+        cmd, cwd=str(install_dir().resolve()), env=env,
+        **(no_window_kwargs() if windowless else {}),
     )
 
     def _forward_sigterm(signum: int, _frame: Any) -> None:
@@ -663,17 +646,20 @@ def _dispatch_to_server_venv(
             try:
                 return process.wait()
             except KeyboardInterrupt:
+                if windowless:
+                    process.terminate()
                 continue
     finally:
         signal.signal(signal.SIGTERM, previous_handler)
 
 
 def cmd_start(args: argparse.Namespace) -> int:
-    """Run the local service -- dispatched to the sibling SERVER venv's own
-    interpreter when one is provisioned (agent-index-server-venv-split),
-    else run in the current interpreter exactly as before."""
+    """Run the local service in its complete hosted runtime."""
     subcommand = getattr(args, "command", None) or "start"
-    dispatched = _dispatch_to_server_venv(args, subcommand)
+    try:
+        dispatched = _dispatch_to_server_venv(args, subcommand)
+    except RuntimeError as exc:
+        return _emit_error(exc)
     if dispatched is not None:
         return dispatched
     serve(_config_from_args(args), passive=bool(getattr(args, "passive", False)))
@@ -701,7 +687,10 @@ def cmd_cell_start(args: argparse.Namespace) -> int:
     except ServiceOwnershipError as exc:
         print(f"agent-index: {exc}", file=sys.stderr)
         return 2
-    dispatched = _dispatch_to_server_venv(args, "__cell-start")
+    try:
+        dispatched = _dispatch_to_server_venv(args, "__cell-start")
+    except RuntimeError as exc:
+        return _emit_error(exc)
     if dispatched is not None:
         return dispatched
     serve(_config_from_args(args), passive=bool(getattr(args, "passive", False)))
@@ -1383,12 +1372,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     def spawn_passive(port: int):
         start_command = "__cell-start" if expected_installation else "start"
-        # Prefer the dedicated SERVER venv's own interpreter, if one has been
-        # provisioned (agent-index-server-venv-split) -- the passive instance
-        # then never loads fastapi/uvicorn/pydantic into a client-shaped venv.
-        # Falls back to the current interpreter (today's single-venv layout)
-        # when no server venv exists yet.
-        python = str(server_venv_python() or sys.executable)
+        python = str(host_runtime_python())
         cmd = [
             windowless_python(python),
             "-I",
@@ -1857,6 +1841,16 @@ def main(argv: list[str] | None = None) -> int:
         rc = transport.maybe_delegate(sub, raw)
         if rc is not None:
             return rc
+
+    if sub in {"index", "index-worker", "search", "similar", "clusters", "mcp"}:
+        role, _indexer = transport.plan_route()
+        if role == "host":
+            try:
+                dispatched = _dispatch_to_server_venv(args, sub, raw_args=raw)
+            except RuntimeError as exc:
+                return _emit_error(exc)
+            if dispatched is not None:
+                return dispatched
 
     return int(args.func(args))
 

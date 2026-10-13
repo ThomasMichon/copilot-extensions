@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import pytest
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -71,3 +72,33 @@ def test_engine_usage_accepts_trailing_comment_same_as_shared_parser() -> None:
 
     assert checker._uses_installer_engine(sh, "sh") is True
     assert checker._uses_installer_engine(ps1, "ps1") is True
+
+
+def _runtime():
+    spec = importlib.util.spec_from_file_location("guard_runtime", checker.VERSIONED_RUNTIME_CANONICAL)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_canonical_retention_contract_executes() -> None:
+    checker._check_runtime_retention(_runtime())
+
+
+@pytest.mark.parametrize("cleanup", ["gc", "toss_incomplete"])
+def test_retention_contract_rejects_unprotected_cleanup(monkeypatch, cleanup) -> None:
+    runtime = _runtime()
+    monkeypatch.setattr(runtime, cleanup, lambda root: ["candidate"])
+    with pytest.raises(AssertionError, match="construction owner"):
+        checker._check_runtime_retention(runtime)
+
+
+def test_retention_contract_rejects_unprotected_incomplete_slot(monkeypatch) -> None:
+    runtime = _runtime()
+    real_slot = runtime.slot
+    monkeypatch.setattr(
+        runtime, "slot",
+        lambda root, version, **kwargs: real_slot(root, version, clean_incomplete=False),
+    )
+    with pytest.raises(AssertionError, match="incomplete cleanup"):
+        checker._check_runtime_retention(runtime)

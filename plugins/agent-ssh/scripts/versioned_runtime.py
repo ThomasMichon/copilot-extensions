@@ -78,9 +78,10 @@ import re
 import shutil
 import stat
 import sys
+import threading
 import time
 from pathlib import Path
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 CURRENT_LINK = "current"
 VERSIONS_DIR = "versions"
@@ -360,6 +361,16 @@ def _remove_link(link: Path) -> None:
 
 def activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
              replace_nonlink: bool = False, link_free: bool = False) -> Path:
+    """Publish selectors while the target is pinned against concurrent cleanup."""
+    with retention_lease(root, version), _publication_lease(root):
+        return _activate(
+            root, version, link_name=link_name,
+            replace_nonlink=replace_nonlink, link_free=link_free,
+        )
+
+
+def _activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
+              replace_nonlink: bool = False, link_free: bool = False) -> Path:
     """Mark ``versions/<version>`` as the active runtime.
 
     Always writes the ``current-version`` marker file atomically (temp +
@@ -487,19 +498,34 @@ def _detach_marker_reference(
 
 def slot(root: Path, version: str, *, clean_incomplete: bool = False,
          link_name: str = CURRENT_LINK) -> Path:
+    """Prepare a slot; incomplete cleanup refuses active construction/retention."""
+    if not clean_incomplete:
+        return _slot(root, version, link_name=link_name)
+    with _cleanup_lease(root, version, allow_construction_owner=True) as admitted:
+        if not admitted:
+            raise RuntimeError(f"runtime slot has a construction or retention owner: {version}")
+        return _slot(root, version, clean_incomplete=True, link_name=link_name)
+
+
+def _slot(root: Path, version: str, *, clean_incomplete: bool = False,
+          link_name: str = CURRENT_LINK) -> Path:
     """Ensure ``versions/<version>`` exists (empty is fine) and return it.
 
     With ``clean_incomplete`` (dotfiles #935): if the slot already exists but is
     NOT marked complete -- a failed/partial/watchdog-killed prior build -- remove
     it first so the caller builds a FRESH venv rather than reusing a corpse via
     ``uv venv --allow-existing`` (which can inherit half-installed packages). A
-    complete slot is left intact (idempotent, fast re-run). An incomplete slot
-    is protected only while a live process owns it. Otherwise any
-    ``current-version`` / ``last-known-good`` references are atomically detached
-    before the slot is removed, including when the malformed slot is current.
+    complete slot is left intact (idempotent, fast re-run). An incomplete
+    numbered slot selected by current/last-known-good requires distinct-generation
+    repair, never reconstruction of its published identity. A claimed mutable
+    dev slot retains the existing process-evidence cleanup safeguards.
     """
     vdir = version_dir(root, version)
     if clean_incomplete and vdir.is_dir() and not is_complete(root, version):
+        if version.lower() != DEV_VERSION and version.lower() in _gc_protected_versions(root, None, False, link_name):
+            raise RuntimeError(
+                f"selected incomplete runtime requires distinct-generation health repair: {vdir}"
+            )
         was_current = current_version(root, link_name) == version
         completion_pair = _detach_file(marker_path(root, version))
         detached = [completion_pair]
@@ -940,7 +966,8 @@ def gc(root: Path, keep: list[str] | None = None,
        min_age_days: float = DEFAULT_GC_MIN_AGE_DAYS) -> list[str]:
     """Remove version dirs that are not protected. Returns the removed names.
 
-    Never removes: the ``current`` version, any name in ``keep`` (e.g. the
+    Never removes: current or last-known-good, construction/retention owners,
+    any name in ``keep`` (e.g. the
     previous-good for rollback), any version a live process is running from (when
     ``protect_pids``), the ``dev`` slot while a live claim exists (see
     :func:`read_dev_claim`), and -- if a positive ``min_age_days`` is passed --
@@ -960,42 +987,49 @@ def gc(root: Path, keep: list[str] | None = None,
     removed via :func:`_remove_slot` as the exact reparse-point entry, never
     traversing the junction target.
     """
-    keep_set = set(keep or [])
+    removed: list[str] = []
+    for v in _gc_candidate_versions(root):
+        with _cleanup_lease(root, v) as admitted:
+            if not admitted or v.lower() in _gc_protected_versions(root, keep, protect_pids, link_name):
+                continue
+            d = version_dir(root, v)
+            # A junction's age describes its target, not the removable entry.
+            if min_age_days > 0 and not _is_link(d) and _slot_age_days(root, v) < min_age_days:
+                continue
+            if _remove_slot(d, label="gc"):
+                removed.append(v)
+    return removed
+
+
+def _gc_protected_versions(root: Path, keep, protect_pids: bool, link_name: str) -> set[str]:
+    protected = set(keep or [])
+    # Missing selectors permit legacy-link fallback; unreadable selectors must
+    # not become permission to delete their unknown target.
+    for name in (CURRENT_VERSION_FILE, LAST_KNOWN_GOOD_FILE):
+        try:
+            selected = (root / name).read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            continue
+        if selected:
+            protected.add(selected)
     cur = current_version(root, link_name)
     if cur:
-        keep_set.add(cur)
-    if read_dev_claim(root) is not None:
-        keep_set.add(DEV_VERSION)
-
+        protected.add(cur)
+    claim = read_dev_claim(root, strict=True)
+    if claim is not None:
+        protected.add(DEV_VERSION)
+        previous = claim.get("previous_version")
+        if isinstance(previous, str) and previous:
+            protected.add(previous)
     if protect_pids:
         in_use = _versions_with_live_process(root)
         if in_use:
-            keep_set |= in_use
+            protected |= in_use
         elif _running_pids(root):
-            # Enumeration yielded nothing yet a live pid is recorded -> we cannot
-            # attribute it to a slot on this platform; keep the newest non-current
-            # version as its likely home (the pre-precision conservative rule).
             non_current = [v for v in list_versions(root) if v != cur]
             if non_current:
-                keep_set.add(non_current[-1])
-
-    removed: list[str] = []
-    for v in _gc_candidate_versions(root):
-        if v in keep_set:
-            continue
-        d = version_dir(root, v)
-        # Optional recency backstop (default off): active-process usage is the
-        # primary gate, but a caller may pass a floor to hold just-superseded
-        # slots for a stored (not-running) pinned reference to age out. Never
-        # applies to a legacy junction slot (#846): its ``stat()`` would traverse
-        # the reparse point and report the *target's* mtime (possibly young),
-        # shielding the junction indefinitely -- junction slots must always be
-        # reclaimable, and ``_remove_slot`` only unlinks the entry anyway.
-        if min_age_days > 0 and not _is_link(d) and _slot_age_days(root, v) < min_age_days:
-            continue
-        if _remove_slot(d, label="gc"):
-            removed.append(v)
-    return removed
+                protected.add(non_current[-1])
+    return {version.lower() for version in protected}
 
 
 # --------------------------------------------------------------------------
@@ -1028,30 +1062,53 @@ def dev_claim_path(root: Path) -> Path:
     return root / DEV_CLAIM_FILE
 
 
-def read_dev_claim(root: Path) -> dict | None:
+def _validate_dev_previous_version(previous) -> None:
+    if previous is not None and (
+        not isinstance(previous, str) or
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", previous) or previous.endswith(".")
+    ):
+        raise ValueError("dev rollback version must be a single ordinary slot name or None")
+
+
+def read_dev_claim(root: Path, *, strict: bool = False) -> dict | None:
     """Return the current dev-slot claim record, or ``None`` if absent/malformed.
 
-    A malformed or schema-mismatched file is treated as absent (fail-open on
-    read, same posture as the other marker readers in this module) -- it never
-    raises, so callers like :func:`gc` can check it unconditionally.
+    Status reads retain their legacy malformed-as-absent behavior. Cleanup and
+    mutations use ``strict=True``: only a missing file is absent; unreadable or
+    malformed ownership/rollback evidence refuses the operation.
     """
     path = dev_claim_path(root)
     try:
         data = _load_unique_json(path)
+    except FileNotFoundError:
+        return None
     except (OSError, UnicodeError, ValueError):
+        if strict:
+            raise
         return None
-    if not isinstance(data, dict):
+    owner = data.get("owner") if isinstance(data, dict) else None
+    if (not isinstance(data, dict) or data.get("schema") != DEV_CLAIM_SCHEMA
+            or not isinstance(owner, str) or not owner.strip()):
+        if strict:
+            raise ValueError(f"invalid dev claim ownership evidence: {path}")
         return None
-    if data.get("schema") != DEV_CLAIM_SCHEMA:
-        return None
-    owner = data.get("owner")
-    if not isinstance(owner, str) or not owner.strip():
-        return None
+    if strict:
+        _validate_dev_previous_version(data.get("previous_version"))
     return data
 
 
 def claim_dev(root: Path, owner: str, *, host: str | None = None,
              previous_version: str | None = None, force: bool = False) -> dict:
+    """Publish a dev claim under the same selector guard as cleanup."""
+    if not isinstance(owner, str) or not owner.strip():
+        raise ValueError("dev claim owner must be a nonempty string")
+    _validate_dev_previous_version(previous_version)
+    with _publication_lease(root):
+        return _claim_dev(root, owner, host=host, previous_version=previous_version, force=force)
+
+
+def _claim_dev(root: Path, owner: str, *, host: str | None = None,
+               previous_version: str | None = None, force: bool = False) -> dict:
     """Claim the mutable ``dev`` slot for ``owner``.
 
     Refuses (raises :class:`DevClaimConflict`) if a *different* owner already
@@ -1061,7 +1118,7 @@ def claim_dev(root: Path, owner: str, *, host: str | None = None,
     was active before dev mode was ever claimed -- not whatever was current at
     the moment of a second claim call).
     """
-    existing = read_dev_claim(root)
+    existing = read_dev_claim(root, strict=True)
     if existing is not None and existing.get("owner") != owner and not force:
         raise DevClaimConflict(existing)
     same_owner_reclaim = existing is not None and existing.get("owner") == owner
@@ -1086,6 +1143,12 @@ def claim_dev(root: Path, owner: str, *, host: str | None = None,
 
 
 def release_dev(root: Path, owner: str, *, force: bool = False) -> dict | None:
+    """Settle a dev claim under the same selector guard as cleanup."""
+    with _publication_lease(root):
+        return _release_dev(root, owner, force=force)
+
+
+def _release_dev(root: Path, owner: str, *, force: bool = False) -> dict | None:
     """Release ``owner``'s claim on the ``dev`` slot.
 
     Returns the released claim record (so the caller can read
@@ -1096,7 +1159,7 @@ def release_dev(root: Path, owner: str, *, force: bool = False) -> dict | None:
     or `agent-worktrees finalize`'s obligation-settlement forcing an
     abandoned/stale claim closed.
     """
-    existing = read_dev_claim(root)
+    existing = read_dev_claim(root, strict=True)
     if existing is None:
         return None
     if existing.get("owner") != owner and not force:
@@ -1231,20 +1294,19 @@ def toss_incomplete(root: Path, link_name: str = CURRENT_LINK) -> list[str]:
 
     These are failed/partial builds (dotfiles #935). ``current`` is always kept
     (a live daemon serves from it; a legacy slot may also predate the marker
-    convention). Incomplete slots are never activated -- activate runs only after
-    the health gate + marker -- so they are never the daemon's live version and
-    are always safe to toss. Returns the tossed version names.
+    convention).     Construction/retention owners, last-known-good, and live-process evidence
+    also protect incomplete slots. Admission and rechecks remain held through
+    deletion. Returns the tossed version names.
     """
-    cur = current_version(root, link_name)
     tossed: list[str] = []
     for v in list_versions(root):
-        if v == cur:
-            continue
-        if is_complete(root, v):
-            continue
-        d = version_dir(root, v)
-        if _rmtree_deferrable(d, label="toss"):
-            tossed.append(v)
+        with _cleanup_lease(root, v) as admitted:
+            if not admitted or v.lower() in _gc_protected_versions(root, None, True, link_name):
+                continue
+            if is_complete(root, v):
+                continue
+            if _remove_slot(version_dir(root, v), label="toss"):
+                tossed.append(v)
     return tossed
 
 
@@ -1265,6 +1327,17 @@ class ConstructionTimeout(TimeoutError):
     """The construction owner did not release its kernel lease in budget."""
 
 
+class RetentionTimeout(TimeoutError):
+    """Cleanup or publication did not release kernel ownership in budget."""
+
+
+_construction_owners = threading.local()
+
+
+def _ownership_key(root: Path, version: str) -> tuple[int, str, str]:
+    return os.getpid(), os.path.normcase(str(root.resolve())), version.lower()
+
+
 @contextmanager
 def construction_lease(root: Path, version: str, *, timeout: float = 60.0,
                        poll_interval: float = 0.05):
@@ -1275,7 +1348,7 @@ def construction_lease(root: Path, version: str, *, timeout: float = 60.0,
     Recheck ``check_admission`` inside the context before any slot writes.
     Release before unrelated reconciliation or activation/cutover locking.
 
-    POSIX uses flock; Windows uses a nonblocking one-byte CRT lock. Closing
+    POSIX uses flock; Windows uses a nonblocking LockFileEx byte lock. Closing
     the descriptor (including process death) releases ownership. The persistent
     lock file is never unlinked: replacing it could create a second lock inode.
     No PID file, stale timestamp, or mkdir fallback grants ownership.
@@ -1283,20 +1356,90 @@ def construction_lease(root: Path, version: str, *, timeout: float = 60.0,
     This does not pin a completed candidate against GC or replace a repair's
     outer cutover guard. Those protocols remain separate adoption prerequisites.
     """
+    with _kernel_lease(
+        root, version, kind="construction", shared=False,
+        timeout=timeout, poll_interval=poll_interval,
+    ):
+        owners = getattr(_construction_owners, "keys", None)
+        if owners is None:
+            owners = _construction_owners.keys = set()
+        key = _ownership_key(root, version)
+        owners.add(key)
+        try:
+            yield
+        finally:
+            owners.remove(key)
+
+
+@contextmanager
+def retention_lease(root: Path, version: str, *, payload_hash: str | None = None,
+                    timeout: float = 60.0, poll_interval: float = 0.05):
+    """Pin an existing candidate or rollback slot until its lifecycle settles.
+
+    Shared holders coexist. Cleanup takes the same lease exclusively and
+    rechecks selectors before deleting. An optional fingerprint admits only
+    exact completed reuse, checked after acquiring ownership. Builders acquire
+    this lease before releasing construction; retain it through cutover/drain
+    or rollback, never store a PID/timestamp pin inside the immutable slot.
+    """
+    with _kernel_lease(
+        root, version, kind="retention", shared=True,
+        timeout=timeout, poll_interval=poll_interval,
+    ):
+        vdir = version_dir(root, version)
+        if not vdir.is_dir() or _is_link(vdir):
+            raise FileNotFoundError(f"ordinary runtime slot not installed: {vdir}")
+        if payload_hash is not None:
+            decision = check_admission(root, version, payload_hash=payload_hash)
+            if decision != ADMIT_REUSE:
+                raise RuntimeError(f"runtime retention admission refused: {version}: {decision}")
+        yield vdir
+
+
+def _publication_lease(root: Path, *, timeout: float = 60.0):
+    return _kernel_lease(root, "selectors", kind="publication", shared=False, timeout=timeout)
+
+
+@contextmanager
+def _cleanup_lease(root: Path, version: str, *, allow_construction_owner: bool = False):
+    owns_construction = _ownership_key(root, version) in getattr(_construction_owners, "keys", ())
+    if owns_construction and not allow_construction_owner:
+        yield False
+        return
+    construction = nullcontext() if owns_construction else construction_lease(root, version, timeout=0)
+    # Catch acquisition contention only; storage failures and errors in the
+    # cleanup body propagate rather than appearing as a harmless busy slot.
+    from contextlib import ExitStack
+    with ExitStack() as stack:
+        try:
+            stack.enter_context(construction)
+            stack.enter_context(_kernel_lease(
+                root, version, kind="retention", shared=False, timeout=0,
+            ))
+            stack.enter_context(_publication_lease(root, timeout=0))
+        except (ConstructionTimeout, RetentionTimeout):
+            yield False
+            return
+        yield True
+
+
+@contextmanager
+def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
+                  timeout: float = 60.0, poll_interval: float = 0.05):
     import hashlib
 
     if not isinstance(version, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]*", version):
-        raise ValueError("construction version must be a single ordinary slot name")
+        raise ValueError(f"{kind} version must be a single ordinary slot name")
     if version.endswith("."):
-        raise ValueError("construction version must not end in a dot")
+        raise ValueError(f"{kind} version must not end in a dot")
     if not math.isfinite(timeout) or timeout < 0:
-        raise ValueError("construction timeout must be finite and non-negative")
+        raise ValueError(f"{kind} timeout must be finite and non-negative")
     if not math.isfinite(poll_interval) or poll_interval <= 0:
-        raise ValueError("construction poll interval must be finite and positive")
+        raise ValueError(f"{kind} poll interval must be finite and positive")
 
     # Case aliases share ownership, including on case-insensitive POSIX volumes.
     key = hashlib.sha256(version.lower().encode("utf-8")).hexdigest()
-    lock_dir = root / ".construction-leases"
+    lock_dir = root / f".{kind}-leases"
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_path = lock_dir / (key + ".lock")
     flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
@@ -1306,43 +1449,69 @@ def construction_lease(root: Path, version: str, *, timeout: float = 60.0,
         named = os.lstat(lock_path)
         if (not stat.S_ISREG(named.st_mode) or
                 (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
-            raise OSError("construction lease path is not the opened ordinary file")
+            raise OSError(f"{kind} lease path is not the opened ordinary file")
         if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
             import msvcrt
 
+            class Overlapped(ctypes.Structure):
+                _fields_ = [
+                    ("Internal", ctypes.c_size_t), ("InternalHigh", ctypes.c_size_t),
+                    ("Offset", wintypes.DWORD), ("OffsetHigh", wintypes.DWORD),
+                    ("hEvent", wintypes.HANDLE),
+                ]
+
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.LockFileEx.argtypes = [
+                wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
+                wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(Overlapped),
+            ]
+            kernel.LockFileEx.restype = wintypes.BOOL
+            kernel.UnlockFileEx.argtypes = [
+                wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
+                wintypes.DWORD, ctypes.POINTER(Overlapped),
+            ]
+            kernel.UnlockFileEx.restype = wintypes.BOOL
+            handle = msvcrt.get_osfhandle(fd)
+            overlapped = Overlapped()
+
             def try_lock():
-                os.lseek(fd, 0, os.SEEK_SET)
-                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                flags = 1 | (0 if shared else 2)  # fail immediately; exclusive
+                if not kernel.LockFileEx(handle, flags, 0, 1, 0, ctypes.byref(overlapped)):
+                    raise ctypes.WinError(ctypes.get_last_error())
 
             def unlock():
-                os.lseek(fd, 0, os.SEEK_SET)
-                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                if not kernel.UnlockFileEx(handle, 0, 1, 0, ctypes.byref(overlapped)):
+                    raise ctypes.WinError(ctypes.get_last_error())
 
-            # CRT _locking reports a competing byte lock as EACCES/EDEADLK.
-            # Filesystem access failures from open/stat are not retried.
-            busy_errors = {errno.EACCES, errno.EDEADLK}
+            def is_busy(exc):
+                return exc.winerror == 33  # ERROR_LOCK_VIOLATION
         else:
             import fcntl
 
             def try_lock():
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                mode = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
+                fcntl.flock(fd, mode | fcntl.LOCK_NB)
 
             def unlock():
                 fcntl.flock(fd, fcntl.LOCK_UN)
 
-            busy_errors = {errno.EAGAIN, errno.EWOULDBLOCK}
+            def is_busy(exc):
+                return exc.errno in {errno.EAGAIN, errno.EWOULDBLOCK}
         deadline = time.monotonic() + timeout
         while True:
             try:
                 try_lock()
                 break
             except OSError as exc:
-                if exc.errno not in busy_errors:
+                if not is_busy(exc):
                     raise
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise ConstructionTimeout(
-                        f"Timed out waiting for construction of versions/{version}; "
+                    timeout_type = ConstructionTimeout if kind == "construction" else RetentionTimeout
+                    raise timeout_type(
+                        f"Timed out waiting for {kind} of versions/{version}; "
                         "the lease owner is not identified by the surviving lock file"
                     ) from exc
                 time.sleep(min(poll_interval, remaining))
@@ -1350,7 +1519,7 @@ def construction_lease(root: Path, version: str, *, timeout: float = 60.0,
             named = os.lstat(lock_path)
             if (not stat.S_ISREG(named.st_mode) or
                     (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
-                raise OSError("construction lease path changed while waiting")
+                raise OSError(f"{kind} lease path changed while waiting")
             yield
         finally:
             unlock()

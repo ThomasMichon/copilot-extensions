@@ -17,6 +17,7 @@ from .records import (
     decode_json,
     encode_json,
 )
+from .responses import BackendResponseError, IndexHealth, IndexHit, IndexSearchResult
 
 __all__ = [
     "ConnectorRegistration",
@@ -32,6 +33,10 @@ __all__ = [
     "SearchParameters",
     "ServiceOffer",
     "TargetRef",
+    "BackendResponseError",
+    "IndexHealth",
+    "IndexHit",
+    "IndexSearchResult",
     "decode_json",
     "encode_json",
 ]

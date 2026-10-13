@@ -253,9 +253,11 @@ function Invoke-VersionedSlotClean {{ }}
 function Remove-ConsoleTrampolines {{ param($VenvDir) }}
 Install-Runtime
 if ($script:UvCommand) {{ throw 'broken uv was accepted' }}
-Install-ServerVenv -InstallRole host -PythonCmd fixture_python
+if (-not (Install-ServerVenv -InstallRole host -PythonCmd fixture_python)) {{ throw 'server pip fallback failed' }}
 if (-not (Install-Engine -Upgrade)) {{ throw 'engine pip fallback failed' }}
 """)
     assert result.returncode == 0, result.stderr
-    assert len((tmp_path / "pip-calls").read_text().splitlines()) == 9
+    pip_calls = (tmp_path / "pip-calls").read_text().splitlines()
+    assert len(pip_calls) == 12
+    assert sum("[store,server]" in call for call in pip_calls) == 1
     assert calls.read_text().splitlines() == ["--version", "--version"]

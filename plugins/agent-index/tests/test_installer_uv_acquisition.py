@@ -141,7 +141,11 @@ function Test-IndexVenv {{ param($Dir,$Python) return $false }}
 function Get-SignedBasePython {{ return $null }}
 function Get-ActivationRole {{ return 'client' }}
 function Resolve-Zdd {{ return '{package}' }}
-function Resolve-VendoredLib {{ param($LibName) return $null }}
+function Resolve-VendoredLib {{
+    param($LibName)
+    if ($LibName -eq 'dropin-registry') {{ return '{package}' }}
+    return $null
+}}
 function Invoke-VersionedSlotClean {{ }}
 function Remove-ConsoleTrampolines {{ param($VenvDir) }}
 function Invoke-IndexUvPipInstall {{

@@ -971,6 +971,28 @@ jobs:
           tools/test_run_tests_in_devcontainer.py
           tools/tests/test_komodo_role_fleet.py
 
+      - id: payload-cwd-contracts
+        name: Detect dev PR payload CWD changes
+        if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
+          if printf '%s\n' "$changed" | grep -Eq \
+            '^(plugins/[^/]+/scripts/(install|init|bootstrap-check)\.[^/]*$|libs/payload-invocation/|tools/test_payload_cwd_(contract|ci_scope)\.py$|\.github/workflows/(payload-cwd-contract|ci)\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Payload CWD scope and Linux smoke
+        if: steps.payload-cwd-contracts.outputs.run == 'true'
+        shell: bash
+        run: |
+          uv run --with pytest python -m pytest tools/test_payload_cwd_ci_scope.py -q
+          uv run --with pytest python -m pytest tools/test_payload_cwd_contract.py -q -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or launch_survives"
+
       - id: fleet-contracts
         name: Detect standalone fleet contract changes
         shell: bash
@@ -1075,6 +1097,28 @@ jobs:
           tools/test_environment_admission.py
           tools/test_run_plugin_tests.py
           tools/test_run_standalone_tests.py
+
+      - id: payload-cwd-contracts
+        name: Detect dev PR payload CWD changes
+        if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA")"
+          if printf '%s\n' "$changed" | grep -Eq \
+            '^(plugins/[^/]+/scripts/(install|init|bootstrap-check)\.[^/]*$|libs/payload-invocation/|tools/test_payload_cwd_(contract|ci_scope)\.py$|\.github/workflows/(payload-cwd-contract|ci)\.yml$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Payload CWD scope and Windows smoke
+        if: steps.payload-cwd-contracts.outputs.run == 'true'
+        shell: bash
+        run: |
+          uv run --with pytest python -m pytest tools/test_payload_cwd_ci_scope.py -q
+          uv run --with pytest python -m pytest tools/test_payload_cwd_contract.py -q -k "legacy-1 or context-1 or unavailable_home or all_reconcile or watchdog or windows_bash"
 
       - id: fleet-contracts
         name: Detect standalone fleet contract changes

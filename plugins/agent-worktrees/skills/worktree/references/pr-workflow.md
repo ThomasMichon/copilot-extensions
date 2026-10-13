@@ -156,6 +156,25 @@ or an equivalent "complete past a policy" action on another provider), which
 deliberately overrides a gate rather than waiting for it -- keep those two
 concepts distinct in any guidance you write or give.
 
+**GitHub direct admin merges verify required CI before bypassing review.**
+The provider enumerates the target branch's classic protection and effective
+ruleset status contexts across all pages, then requires every declared context
+and configured integration to report a pass. Integration-bound checks need
+exact-head check-run evidence from that app; an unverifiable legacy status
+cannot substitute for a bound check run.
+Absent, pending, unsuccessful or unreadable evidence refuses the merge even if
+all *reported* checks look green. Optional checks do not become required.
+The verified PR head is pinned with `--match-head-commit`, and a head/base change
+during verification requires new validation.
+
+This preflight runs only at the explicit admin merge boundary, not on every
+watcher poll. `pr-watch`'s observed check rollup is not authoritative required-gate
+completeness. Server-side CI enforcement remains necessary for atomic policy
+protection; this guard does not authenticate a same-app check against deliberate
+spoofing or grant permission to change branch policy. Existing role-authorized
+review self-merge remains available after required CI passes. A policy API that
+cannot be read fails closed rather than assuming the branch has no requirements.
+
 - **Prefer requesting auto-complete/auto-merge whenever the provider offers
   it**, on any repo, independent of whether this identity holds self-merge or
   bypass authority there. It is the normal low-friction path once a PR is

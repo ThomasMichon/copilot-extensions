@@ -9,13 +9,17 @@ pytestmark = pytest.mark.guard
 
 _PLUGIN = Path(__file__).resolve().parents[1]
 _CANDIDATES = (
-    _PLUGIN / "libs" / "fleet-contracts" / "tests" / "test_records.py",
-    _PLUGIN.parents[1] / "libs" / "fleet-contracts" / "tests" / "test_records.py",
+    _PLUGIN / "libs" / "fleet-contracts" / "tests",
+    _PLUGIN.parents[1] / "libs" / "fleet-contracts" / "tests",
 )
-_SOURCE = next((path for path in _CANDIDATES if path.is_file()), None)
-if _SOURCE is None:
+_DIRECTORY = next((path for path in _CANDIDATES if path.is_dir()), None)
+if _DIRECTORY is None:
     raise RuntimeError("the canonical fleet contract test suite is missing")
-globals().update({
-    name: value for name, value in runpy.run_path(str(_SOURCE)).items()
-    if name.startswith("test_")
-})
+for _filename in ("test_records.py", "test_responses.py"):
+    _tests = {
+        name: value for name, value in runpy.run_path(str(_DIRECTORY / _filename)).items()
+        if name.startswith("test_")
+    }
+    if globals().keys() & _tests.keys():
+        raise RuntimeError("canonical fleet contract test names must be unique")
+    globals().update(_tests)

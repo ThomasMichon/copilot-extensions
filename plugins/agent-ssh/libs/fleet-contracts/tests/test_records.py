@@ -223,6 +223,21 @@ def test_operation_binding_and_health_parameters():
     assert request().check_offer(longer, 1499, max_ttl=3600) is longer.services[0]
 
 
+def test_native_installation_identity_is_opaque_not_a_logical_name_or_path():
+    native_id = "marketplace-identity/agent-index"
+    reg = registration()
+    offer = replace(reg.services[0], installation_id=native_id)
+    reg = replace(reg, services=(offer,))
+    routed = replace(request(), installation_id=native_id)
+    assert routed.check_offer(reg, 1499) is offer
+    assert RouteRequest.from_dict(decode_json(encode_json(routed.to_dict()))) == routed
+    for invalid in ("", " ", "a\nb", "a\0b", "a" * 257):
+        with pytest.raises(ContractError):
+            replace(offer, installation_id=invalid)
+        with pytest.raises(ContractError):
+            replace(routed, installation_id=invalid)
+
+
 def test_driver_states_do_not_imply_live_health_or_managed_capabilities():
     target = DriverTarget("worker-a", "configured", ("ssh",))
     assert target.reason is None
@@ -302,6 +317,30 @@ def test_route_response_for_request_echoes_originating_identity():
     health_req = replace(req, operation="health", parameters=None)
     health = RouteResponse.for_request(health_req, health=HealthResult(True))
     assert health.operation == "health"
+
+
+@pytest.mark.parametrize("identity", [
+    "example-marketplace/agent-index", "\u7814\u7a76/\u7d22\u5f15", "i" * 256,
+], ids=["native-cell", "opaque-utf8", "byte-boundary"])
+@pytest.mark.parametrize("operation", ["health", "index.search"])
+def test_native_opaque_identity_is_preserved_through_routed_response(identity, operation):
+    req = replace(
+        request(), installation_id=identity, operation=operation,
+        parameters=None if operation == "health" else SearchParameters("query"),
+    )
+    result = (
+        RouteResponse.for_request(req, health=HealthResult(True))
+        if operation == "health" else RouteResponse.for_request(req, hits=(hit(),))
+    )
+    assert result.installation_id == identity
+    assert RouteResponse.from_dict(decode_json(encode_json(result.to_dict()))) == result
+
+
+@pytest.mark.parametrize("identity", ["", "\n", "\x80", "i" * 257, "\u00e9" * 129, None],
+                         ids=["empty", "c0", "c1", "long-ascii", "long-utf8", "wrong-type"])
+def test_routed_response_rejects_invalid_installation_identity(identity):
+    with pytest.raises(ContractError):
+        health_response(installation_id=identity)
 
 
 @pytest.mark.parametrize("change", [

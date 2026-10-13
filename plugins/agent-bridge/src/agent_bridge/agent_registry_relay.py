@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from agent_procutil import no_window_flags
+from .provider_process import run_captured
 
 log = logging.getLogger("agent-bridge")
 
@@ -150,14 +150,8 @@ def _relay_profile_via_cli(binstub: str, *, timeout: float = 20.0) -> dict | Non
     if not exe:
         return None
     try:
-        result = subprocess.run(
-            [exe, "relay-profile"],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            creationflags=no_window_flags(),
-        )
-    except Exception:
+        result = run_captured([exe, "relay-profile"], timeout=timeout)
+    except (OSError, RuntimeError, UnicodeError, subprocess.TimeoutExpired):
         log.debug("relay-profile CLI failed for %s", binstub, exc_info=True)
         return None
     if result.returncode != 0 or not result.stdout.strip():
