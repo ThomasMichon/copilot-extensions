@@ -105,6 +105,22 @@ specifically when reviewing a pull request, not a replacement for them.
   generated snapshot commit.
 - **Tests for runtime logic.** Flag PRs that change a runtime plugin's logic
   without adding or updating that plugin's `tests/`.
+- **Review reproducible test flows, not demands for public evidence.** When
+  validation coverage is missing, ask for a focused test or a reproducible
+  flow: safe prerequisites, commands or steps, and expected assertions for
+  the behavior being changed. Do not require submitters to post execution
+  receipts, logs, screenshots, recordings, environment inventories, or other
+  artifacts into PR descriptions, comments, or attachments. Their absence
+  alone is not a correctness finding or an additional approval gate.
+  Reviewers and maintainers own checking available CI and, where needed,
+  running the flow in an authorized isolated environment; do not shift that
+  responsibility into a demand for the author's private environment or data.
+  Keep reproduction inputs synthetic or safely redacted, and treat voluntary
+  artifacts as optional context, not a publication obligation. A test flow
+  defines how to verify behavior; it does not assert that execution passed.
+  Continue to flag concrete defects and missing or inadequate test coverage,
+  and honor actual required checks and documented validation obligations
+  without inventing a separate public-evidence requirement.
 - **Test portfolio growth.** Flag new exhaustive matrices, repeated process
   startup, or specialized suites added unconditionally to required PR CI.
   Require path gating, a focused smoke contract, and a scheduled/manual
