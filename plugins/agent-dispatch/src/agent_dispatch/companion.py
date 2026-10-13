@@ -16,9 +16,7 @@ import stat
 import subprocess
 import sys
 import time
-import threading
 from collections.abc import Callable, Mapping
-from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
@@ -953,9 +951,7 @@ class DefaultCompanionController(ReceiptReconciliation):
         self.sleeper = sleeper
         self.monotonic = monotonic
         self._retention = retention
-        self._receipt_operations: dict[str, Future] = {}
-        self._receipt_adopted: set[str] = set()
-        self._receipt_state_lock = threading.RLock()
+        self._init_receipt_reconciliation()
 
     def _managed_retention(self) -> ManagedRuntimeRetention:
         if self._retention is None:

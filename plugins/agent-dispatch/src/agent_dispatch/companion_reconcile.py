@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 import math
 import os
+import threading
 import time
-from concurrent.futures import Executor
+from concurrent.futures import Executor, Future, TimeoutError
 from pathlib import Path
 
 from plugin_activation import write_json_object_atomic
@@ -17,6 +18,37 @@ from .managed_runtime import ManagedRuntimeError, _canonical_digest, _read_metad
 
 class ReceiptReconciliation:
     """Internal controller mixin sharing its receipt and process-identity primitives."""
+
+    def _init_receipt_reconciliation(self) -> None:
+        self._receipt_operations: dict[str, Future] = {}
+        self._receipt_adopted: set[str] = set()
+        self._receipt_state_lock = threading.RLock()
+        self._receipt_owner_future: Future | None = None
+        self._receipt_owner_identity: tuple[int, str] | None = None
+
+    def receipt_futures(self) -> tuple[Future, ...]:
+        return tuple(self._receipt_operations.values()) + (
+            (self._receipt_owner_future,) if self._receipt_owner_future is not None else ()
+        )
+
+    def _receipt_owner_token(self, executor: Executor, deadline: float) -> str | None:
+        pid = os.getpid()
+        if self._receipt_owner_identity is not None and self._receipt_owner_identity[0] == pid:
+            return self._receipt_owner_identity[1]
+        if self._receipt_owner_future is None:
+            self._receipt_owner_future = executor.submit(lambda: (pid, self.token_source(pid)))
+        try:
+            owner, token = self._receipt_owner_future.result(
+                timeout=max(0.0, deadline - self.monotonic())
+            )
+        except TimeoutError:
+            if self._receipt_owner_future.done():
+                raise
+            return None
+        if owner != pid or not isinstance(token, str) or not token:
+            raise lifecycle.CompanionIndeterminate("receipt operation owner identity is unavailable")
+        self._receipt_owner_identity = (owner, token)
+        return token
 
     def _operation_path(self, registration_id: str) -> Path:
         return self._receipt_path(registration_id).with_suffix(".reconcile-operation.json")
@@ -75,7 +107,9 @@ class ReceiptReconciliation:
         if record is not None and record["state"] in {"pending", "timeout", "unknown"}:
             raise lifecycle.CompanionIndeterminate("receipt reconciliation outcome is not confirmed")
 
-    def _retirement_readback(self, generation: dict) -> bool:
+    def _retirement_readback(self, generation: dict, *, deadline: float) -> bool:
+        if self.monotonic() >= deadline:
+            return False
         receipt = generation["receipt"]
         if receipt is None:
             return True
@@ -83,9 +117,37 @@ class ReceiptReconciliation:
         if type(pid) is not int or not isinstance(token, str) or not token:
             return False
         current = self.token_source(pid)
-        return current != token and not (
+        confirmed = current != token and not (
             current is None and (lifecycle._process_exists(pid) or lifecycle._process_group_exists(pid))
         )
+        return confirmed and self.monotonic() < deadline
+
+    def _readback_receipt_operation(self, rid: str, operation: dict, deadline: float) -> None:
+        with _RootLock(
+            self.receipt_dir, scope=_canonical_digest(rid),
+            timeout=min(0.1, max(0.0, deadline - self.monotonic())),
+        ):
+            current = self._operation_record(rid)
+            if current is None or any(
+                current[key] != operation[key] for key in
+                ("generation_digest", "owner_pid", "owner_start_token", "started_at")
+            ):
+                return
+            generation = self._receipt_generation(rid)
+            state = "complete" if (
+                all(value is None for value in generation.values())
+                and self._retirement_readback(operation["generation"], deadline=deadline)
+            ) else "unknown"
+            if state == "complete" and any(
+                value is not None for value in self._receipt_generation(rid).values()
+            ):
+                state = "unknown"
+            with self._receipt_state_lock:
+                latest = self._operation_record(rid)
+                if latest == current:
+                    self._write_operation(rid, {
+                        **current, "state": state, "observed_at": time.time(),
+                    })
 
     def receipt_operation_progress(self) -> list[dict]:
         if not self.receipt_dir.exists():
@@ -138,16 +200,14 @@ class ReceiptReconciliation:
             if record is not None and record["state"] in {"pending", "timeout", "unknown"}:
                 blocked.add(rid)
                 if rid not in self._receipt_operations:
-                    generation = self._receipt_generation(rid)
-                    state = "complete" if (
-                        all(value is None for value in generation.values())
-                        and self._retirement_readback(record["generation"])
-                    ) else "unknown"
-                    self._write_operation(rid, {
-                        **record, "state": state, "observed_at": time.time(),
-                    })
-                    if state == "complete":
-                        blocked.discard(rid)
+                    if record["state"] != "unknown":
+                        self._write_operation(rid, {
+                            **record, "state": "unknown", "observed_at": time.time(),
+                        })
+                    if len(self._receipt_operations) < 2 and self.monotonic() < deadline:
+                        self._receipt_operations[rid] = executor.submit(
+                            self._readback_receipt_operation, rid, record, deadline,
+                        )
                 elif self.monotonic() >= record["deadline"]:
                     with self._receipt_state_lock:
                         latest = self._operation_record(rid)
@@ -163,9 +223,9 @@ class ReceiptReconciliation:
             generation = self._receipt_generation(rid)
             if all(value is None for value in generation.values()):
                 continue
-            token = self.token_source(os.getpid())
-            if not token:
-                raise lifecycle.CompanionIndeterminate("receipt operation owner identity is unavailable")
+            token = self._receipt_owner_token(executor, deadline)
+            if token is None or self.monotonic() >= deadline:
+                continue
             record = {
                 "schema_version": 1, "registration_id": rid,
                 "generation": generation, "generation_digest": _canonical_digest(generation),
@@ -209,6 +269,8 @@ class ReceiptReconciliation:
                     if self._read_receipt(rid) != generation["receipt"]:
                         raise lifecycle.CompanionIndeterminate("receipt changed during retirement")
                     self._delete_receipt(rid)
+                    if self._read_receipt(rid) is not None:
+                        raise lifecycle.CompanionIndeterminate("receipt deletion is not confirmed")
                 if generation["selection"] is not None:
                     self.forget_managed(rid, _operation=operation)
                 state = "complete"

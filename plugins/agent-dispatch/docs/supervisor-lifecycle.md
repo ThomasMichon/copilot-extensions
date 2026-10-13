@@ -20,6 +20,11 @@ preserve prior operation generations; this slice does not prune that history.
 A new supervisor reads back the same generation;
 it never repeats an unconfirmed retirement or withdrawal. Completion requires
 absent receipts **and** confirmed retirement of the recorded process generation.
+Restart identity readback and initial owner-token sampling use the receipt
+executor, never synchronous per-receipt process probes on the master. Owner
+sampling waits only for the remaining shared deadline; unfinished identity work
+stays in shutdown accounting. Late readback does not settle authority. A receipt
+deletion failure remains unknown and cannot schedule another destructive retirement.
 Changed receipts are superseded rather than retired. The existing crash-safe OS
 lock primitive serializes the exact receipt operation. No new reservation store,
 force-release policy or automatic recovery scheduler is introduced.
@@ -35,7 +40,12 @@ Runtime status records the master's PID/start token, cycle, phase and receipt
 operation states. `supervisor_health.supervisor_progress_observation` is a
 read-only seam for an **independently invoked existing lifecycle owner**; stale
 progress and process existence are different observations. Its results never
-authorize replacement, restart or withdrawal. Independent watchdog invocation,
+authorize replacement, restart or withdrawal. Optional progress read/publication
+failures cannot abort desired-state reconciliation or hide completed mutations:
+they report fixed, sanitized reason/error categories through standard logging,
+limited to one warning per category per 30 seconds. Unavailable receipt progress
+is marked unknown (`null` with an observation error), not a confirmed empty list.
+Independent watchdog invocation,
 custody/recovery and native platform proof remain integration gates of the
 existing #5301/#5655 owners. This slice neither implements a second watchdog nor
 claims that same-loop status writing proves independent recovery. The inner-lane

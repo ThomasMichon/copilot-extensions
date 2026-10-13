@@ -9,7 +9,8 @@ from collections.abc import Callable
 from concurrent.futures import Executor, ThreadPoolExecutor, TimeoutError
 from typing import Any
 
-from .companion import CompanionIndeterminate
+from .companion import CompanionError, CompanionIndeterminate
+from .managed_runtime import ManagedRuntimeError
 
 log = logging.getLogger("agent-dispatch.supervisor-daemon")
 
@@ -27,6 +28,7 @@ class BoundedReconciliation:
         self._last_store_registrations = []
         self._progress_callback = None
         self._phase_name = "idle"
+        self._progress_warning_after: dict[str, float] = {}
 
     def _shutdown_bounded_pools(self, drained: bool) -> None:
         for field in ("_receipt_executor", "_read_executor"):
@@ -39,15 +41,38 @@ class BoundedReconciliation:
     def _phase(self, phase: str) -> None:
         self._phase_name = phase
         if self._progress_callback is not None:
-            self._progress_callback(self.progress_snapshot())
+            try:
+                self._progress_callback(self.progress_snapshot())
+            except (OSError, ValueError, TypeError, RuntimeError) as exc:
+                self._warn_progress_failure("publication-unavailable", exc)
+
+    def _warn_progress_failure(self, reason: str, exc: Exception) -> None:
+        now = time.monotonic()
+        if now < self._progress_warning_after.get(reason, float("-inf")):
+            return
+        self._progress_warning_after[reason] = now + 30.0
+        error_type = (
+            "io" if isinstance(exc, OSError)
+            else "invalid-observation" if isinstance(exc, (ValueError, TypeError))
+            else "runtime-state"
+        )
+        log.warning(
+            "supervisor optional progress unavailable: reason=%s error_type=%s",
+            reason, error_type,
+        )
 
     def progress_snapshot(self) -> dict:
-        operations = getattr(self._companion(), "receipt_operation_progress", None)
-        return {
+        snapshot = {
             "phase": self._phase_name, "observed_at": self.clock(),
             "cycle_id": self._cycle_count,
-            "receipt_operations": operations() if callable(operations) else [],
         }
+        try:
+            operations = getattr(self._companion(), "receipt_operation_progress", None)
+            snapshot["receipt_operations"] = operations() if callable(operations) else []
+        except (OSError, ValueError, CompanionError, CompanionIndeterminate, ManagedRuntimeError) as exc:
+            self._warn_progress_failure("receipt-progress-unavailable", exc)
+            snapshot.update(receipt_operations=None, observation_error="receipt-progress-unavailable")
+        return snapshot
 
     def _bounded_read(self, key: str, read: Callable[[], Any]) -> Any:
         if self._reconcile_deadline is None:
@@ -114,7 +139,7 @@ class BoundedReconciliation:
                 deadline=self._reconcile_deadline if self._reconcile_deadline is not None
                 else time.monotonic() + self._reconcile_call_budget,
             ))
-            self._probe_inflight.update(self._companion()._receipt_operations.values())
+            self._probe_inflight.update(self._companion().receipt_futures())
             return
         if self._receipt_reconcile_future is None:
             self._receipt_reconcile_future = self._receipt_pool().submit(
