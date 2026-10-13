@@ -200,6 +200,10 @@ def test_unsupported_native_cli_is_not_weakened(monkeypatch):
     "echo copilot && custom-agent --acp", "custom-agent copilot",
     "copilot --acp && custom-agent",
     'cd "$(custom-agent)" && copilot --acp',
+    "{{target_preference_launcher}}",
+    "{{target_preference_launcher}} --acp --stdio",
+    "{{target_preference_launcher}} custom-agent --acp",
+    "{{target_preference_launcher}} /usr/bin/copilot --acp",
 ])
 def test_custom_acp_executable_cannot_bypass_required_process_auth(command):
     with pytest.raises(RuntimeError, match="PATH-resolved"):
@@ -211,7 +215,7 @@ def test_custom_acp_executable_cannot_bypass_required_process_auth(command):
     "copilot --acp --stdio",
     "exec copilot --acp --stdio",
     "cd '/workspace with spaces' && exec copilot --acp --stdio",
-    "cd /workspace && {{target_preference_launcher}} --acp --stdio",
+    "cd /workspace && {{target_preference_launcher}} copilot --acp --stdio",
 ])
 def test_supported_executable_positions_remain_available(command):
     assert auth.wrap_command(command, "/launch/auth.env").endswith(command)

@@ -48,8 +48,12 @@ def wrap_command(command: str, auth_env: str | None, *, manager: bool = False) -
         words = words[3:] if valid_cd else []
     if words[:1] == ["exec"]:
         words = words[1:]
+    copilot_executable = (
+        words[:1] == ["copilot"]
+        or words[:2] == ["{{target_preference_launcher}}", "copilot"]
+    )
     if not manager and (
-        not words or words[0] not in {"copilot", "{{target_preference_launcher}}"}
+        not copilot_executable
         or any(word in {";", "&", "&&", "|", "||", "(", ")", "<", ">", ">>"}
                or "$(" in word or "`" in word for word in words[1:])
         or "\n" in command
