@@ -861,8 +861,11 @@ duplicate registrations, absent local checkouts and older peers fail explicitly;
 no PATH/ancestor/srcroot discovery substitutes for registration. Acquire or
 adopt an absent checkout through its owner's standard `repos clone`/adoption
 flow before retrying. Read-only discovery never clones or registers it.
-Reference-class checkouts may supply read-only recipe/declaration content but
-cannot execute scripts. Existing standalone non-repository commands and legacy
+Reference and knowledge registrations may supply read-only recipes and effort
+state, but cannot supply execution context. Active named registrar pointers must
+use worktree or singleton registrations: discovery refuses read-only classes
+before expanding declarations into executable units or implicit checkout paths.
+Existing standalone non-repository commands and legacy
 path declarations remain compatible; migration is explicit, not a startup rewrite.
 
 ### Repository reviewer loops (`agent-dispatch reviewer-loop`)

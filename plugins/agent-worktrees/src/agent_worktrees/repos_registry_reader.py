@@ -95,10 +95,15 @@ def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
                     bool(raw_agent) if raw_agent is not None
                     else norm_class != "reference"
                 )
+                remote = entry.get("remote", "")
+                if strict and not isinstance(remote, str):
+                    raise RepositoryResolutionError(
+                        f"registered repository {name!r} has invalid remote"
+                    )
                 repos[name] = RepoEntry(
                     name=name,
                     repo_class=norm_class,
-                    remote=entry.get("remote", ""),
+                    remote=remote,
                     default_branch=entry.get("default_branch", ""),
                     tags=tags,
                     contributing=entry.get("contributing", ""),

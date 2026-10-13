@@ -287,3 +287,22 @@ requested contract.
 - The non-blocking platform documentation finding now distinguishes native
   Windows and Linux evidence from unverified macOS custody. Missing unreaped
   child primitives refuse before spawning; no unsafe fallback is promised.
+
+### 2026-10-13 - Discovery class and strict metadata boundaries
+
+- A registered read-only pointer lost its class when discovery expanded relative
+  executable fields against a bare path. Discovery now checks the registered
+  active-source class before expansion; reference and knowledge registrations
+  remain usable for recipe/state reads, never execution. This chooses explicit
+  source refusal rather than inventing path-based provenance after expansion.
+- Strict owner resolution now rejects non-string remotes before returning the
+  ready response. Empty or omitted string remotes and legacy non-strict readers
+  retain their prior behavior.
+- Three dispatch and three metadata regressions failed before the source fixes.
+  Final consumer suites pass 144 dispatch tests and 20 owner tests, including
+  cached read-only checks, inherited recipe/state reads and exact negative CLI
+  responses with unchanged registry bytes. Fatal lint, module ceilings and the
+  install contract pass.
+- Corrected MCP native Linux CI and the Windows launch check passed on the
+  preceding head. No unconditional retry or bypass was used; the tracked
+  independent Windows launch investigation remains owned separately.

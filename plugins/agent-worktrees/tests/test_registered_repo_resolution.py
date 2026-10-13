@@ -44,6 +44,9 @@ def test_srcroot_candidate_is_not_registration(registry_path, tmp_path):
     ("repos:\n  tools: null\n", "must be a mapping"),
     ("repos:\n  tools: {linux: 123}\n", "invalid linux path"),
     ("repos:\n  tools: {class: typo}\n", "invalid class"),
+    ("repos:\n  tools: {remote: []}\n", "invalid remote"),
+    ("repos:\n  tools: {remote: null}\n", "invalid remote"),
+    ("repos:\n  tools: {remote: 123}\n", "invalid remote"),
     ("repos:\n  tools: {}\n  tools: {}\n", "duplicate"),
     ("repos: [", "could not be read"),
     ("[not, a, mapping]", "must be a mapping"),
@@ -80,6 +83,21 @@ def test_registered_only_cli_reports_explicit_capability(registry_path, tmp_path
     assert result["registration"] == "ready"
     assert result["path"] == str(tmp_path)
     assert result["class"] == "reference"
+
+
+@pytest.mark.parametrize("remote", [[], None, 123])
+def test_registered_only_cli_refuses_malformed_remote(registry_path, tmp_path, capfd, remote):
+    registry_path.write_text(
+        "repos:\n  tools:\n    class: worktree\n"
+        f"    linux: {json.dumps(str(tmp_path))}\n    remote: {json.dumps(remote)}\n",
+        encoding="utf-8",
+    )
+    before = registry_path.read_bytes()
+    assert repos_cli.cmd_repos_dispatch(["find", "tools", "--registered-only", "--json"]) == 1
+    result = json.loads(capfd.readouterr().out)
+    assert "invalid remote" in result["error"]
+    assert result.get("registration") != "ready"
+    assert registry_path.read_bytes() == before
 
 
 def test_registered_only_native_cli_first_touch(tmp_path):

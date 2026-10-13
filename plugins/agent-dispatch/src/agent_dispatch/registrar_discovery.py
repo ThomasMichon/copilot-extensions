@@ -659,7 +659,11 @@ def discover_trusted(
     for pointer in pts:
         owner = pointer.effective_owner()
         if pointer.kind == "repo":
-            declarations = read_repo_location_layers(pointer.repo_root(), owner=owner)
+            root = (
+                registered_repository_root(pointer.repository, execution=True)
+                if pointer.repository is not None else pointer.repo_root()
+            )
+            declarations = read_repo_location_layers(root, owner=owner)
         else:
             location = pointer.resolved_location()
             # A supported dir pointer may point directly at an in-repo

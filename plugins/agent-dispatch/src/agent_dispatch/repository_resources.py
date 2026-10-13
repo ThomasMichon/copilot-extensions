@@ -45,8 +45,10 @@ def registered_repository_root(
 
 
 def _check_execution_class(name: str, repo_class: str, *, execution: bool) -> None:
-    if execution and repo_class == "reference":
-        raise RegistrarError(f"registered repository {name!r} is reference-only; execution is refused")
+    if execution and repo_class in {"reference", "knowledge"}:
+        raise RegistrarError(
+            f"registered repository {name!r} is {repo_class}-only; execution is refused"
+        )
 
 
 def _registered_repository(name: str, *, timeout: float) -> tuple[Path, str]:

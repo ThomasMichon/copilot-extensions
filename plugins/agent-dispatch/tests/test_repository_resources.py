@@ -74,11 +74,34 @@ def test_invalid_path_in_advertised_owner_contract_fails_explicitly(tmp_path, mo
         resources.registered_repository_root("tools")
 
 
-def test_reference_root_can_be_read_but_not_executed(tmp_path, monkeypatch):
-    _registry(monkeypatch, tmp_path, repo_class="reference")
+@pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
+def test_read_only_root_can_be_read_but_not_executed(tmp_path, monkeypatch, repo_class):
+    _registry(monkeypatch, tmp_path, repo_class=repo_class)
     assert resources.registered_repository_root("tools") == tmp_path
-    with pytest.raises(RegistrarError, match="reference-only"):
+    with pytest.raises(RegistrarError, match=f"{repo_class}-only"):
         resources.registered_repository_root("tools", execution=True)
+
+
+@pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
+def test_read_only_pointer_cannot_expand_relative_executable_declarations(
+    tmp_path, monkeypatch, repo_class,
+):
+    from agent_dispatch import registrar_discovery as discovery, repo_config
+    from agent_dispatch.registrar_pointer import Pointer
+    from tests.test_repository_issue_loops import _config
+
+    directory = tmp_path / repo_config.CANONICAL_REPO_CONFIG_DIR / "registrar"
+    directory.mkdir(parents=True)
+    (tmp_path / "backlog.py").write_text("print('[]')", encoding="utf-8")
+    (directory / "backlog.json").write_text(json.dumps(_config(
+        forge={"provider": "script", "producer_login": "fixture",
+               "command": [sys.executable, "backlog.py"], "cwd": "."},
+    )), encoding="utf-8")
+    _registry(monkeypatch, tmp_path, repo_class=repo_class)
+    with pytest.raises(RegistrarError, match=f"{repo_class}-only"):
+        discovery.discover_trusted([
+            Pointer(name="tools", kind="repo", repository="tools"),
+        ])
 
 
 def test_missing_file_is_not_invented(tmp_path, monkeypatch):
@@ -449,19 +472,23 @@ def test_named_nested_recipe_chain_shares_registry_snapshot(tmp_path, monkeypatc
     assert len(calls) == 1
 
 
-def test_snapshot_allows_reference_reads_but_refuses_cached_execution(tmp_path, monkeypatch):
-    calls = _registry(monkeypatch, tmp_path, repo_class="reference")
+@pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
+def test_snapshot_allows_read_only_reads_but_refuses_cached_execution(
+    tmp_path, monkeypatch, repo_class,
+):
+    calls = _registry(monkeypatch, tmp_path, repo_class=repo_class)
     snapshot = resources.RepositoryResourceSnapshot()
     assert snapshot.resolve("repo:tools:.", execution=False, directory=True) == str(tmp_path)
-    with pytest.raises(RegistrarError, match="reference-only"):
+    with pytest.raises(RegistrarError, match=f"{repo_class}-only"):
         snapshot.resolve("repo:tools:.", execution=True, directory=True)
     assert len(calls) == 1
 
 
-def test_effort_state_root_is_a_read_of_reference_repo(tmp_path, monkeypatch):
+@pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
+def test_effort_state_root_is_a_read_of_read_only_repo(tmp_path, monkeypatch, repo_class):
     from agent_dispatch.effort_driver_loops import _resolve_state_root
 
-    calls = _registry(monkeypatch, tmp_path, repo_class="reference")
+    calls = _registry(monkeypatch, tmp_path, repo_class=repo_class)
     assert _resolve_state_root(
         "repo:tools:.", cwd=None, snapshot=resources.RepositoryResourceSnapshot(),
     ) == str(tmp_path)
@@ -469,7 +496,10 @@ def test_effort_state_root_is_a_read_of_reference_repo(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("pending", [False, True])
-def test_named_recipe_relative_cwd_keeps_reference_provenance(tmp_path, monkeypatch, pending):
+@pytest.mark.parametrize("repo_class", ["reference", "knowledge"])
+def test_named_recipe_relative_cwd_keeps_read_only_provenance(
+    tmp_path, monkeypatch, pending, repo_class,
+):
     from agent_dispatch.registrar_recipes import resolve_extends
 
     recipes = tmp_path / "recipes"
@@ -480,13 +510,13 @@ def test_named_recipe_relative_cwd_keeps_reference_provenance(tmp_path, monkeypa
                  "interval_seconds": 60},
     }), encoding="utf-8")
     (recipes / "mid.json").write_text(json.dumps({"extends": "base.json"}), encoding="utf-8")
-    calls = _registry(monkeypatch, tmp_path, repo_class="reference")
+    calls = _registry(monkeypatch, tmp_path, repo_class=repo_class)
     result = resolve_extends({
         "extends": "repo:tools:recipes/mid.json", "params": {"workdir": "."},
     }, base_dir=tmp_path / "leaf")
     assert result["spec"]["cwd"] == "repo:tools:recipes"
     assert len(calls) == 1
-    with pytest.raises(RegistrarError, match="reference-only"):
+    with pytest.raises(RegistrarError, match=f"{repo_class}-only"):
         resources.resolve_execution_resources(["python"], result["spec"]["cwd"])
 
 
