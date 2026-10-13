@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-12
+- **Last revised:** 2026-10-13
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -282,6 +282,22 @@ Continuation storage, fire-and-forget delegation, reactive production, and
 scheduled production are all **first-class** ways to put work on the queue (see
 *Producers*). One queue, one lifecycle, one claim primitive serves all four; a
 deployment adds producers without changing the store.
+
+### orthogonal-task-category
+Every task carries a durable **work or maintenance category**, independent of
+its execution kind, routing labels, source, and deduplication identity.
+Creation that omits the category means **work**, including existing producers
+and records; producers and schedule templates deliberately declare maintenance
+when that is the purpose of their tasks. A script worker or a recurring schedule
+is not, by itself, maintenance. Category does not change managed-creation retry
+or replay identity, and compatible omitted defaults remain compatible.
+
+Both categories remain full-fidelity tasks in the same store and lifecycle:
+failures, results, progress, logs, events, statistics, and session/worktree
+attachment history remain queryable. Classification changes metadata only,
+preserving task identity, timestamps, status, claims, reservations, and audit
+associations. Category is **not a pruning or retention policy**; separating
+presentation never deletes or shortens the history of either category.
 
 ### fenced-producer-cutover
 A production domain can be placed under permanent, coordinator-authenticated
@@ -695,6 +711,25 @@ closes mid-session — a satellite offers nothing back to the fleet merely
 because the capability exists, only when the operator has said so.
 
 ## Behaviors
+
+### category-selection-precedes-bounds
+API and CLI callers can deliberately retrieve **all categories**, including
+historical records, or select work or maintenance. Category selection takes
+place **before query limits or pagination** across listing, finding/searching,
+sweeping, and local or delegated remote views; a burst of maintenance cannot
+consume a work query's bound and hide eligible work. Local and remote consumers
+share this contract. A peer that cannot honor a requested category contract
+reports that incompatibility explicitly rather than silently returning an
+unfiltered result.
+
+### historical-category-is-evidence-based
+Historical classification is an explicit, **preview-first, audited, repeatable**
+metadata operation. It uses exact producer source and origin-lane provenance,
+corroborated by labels, rather than guessing from titles, worker kind, absent
+sessions, or the fact that a task was scheduled. Ambiguous records remain
+unchanged, and repeating a classification does not duplicate its effects or
+discard prior evidence. Classification never replays work or alters its
+lifecycle, ownership, results, or attachment history.
 
 ### focus-is-an-early-signal-not-a-heartbeat
 Worktree focus is advertised and checked at the start of substantial work and
