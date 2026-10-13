@@ -108,12 +108,18 @@ def _serve_handle(socket_path: str | None) -> str:
 def _spawn_serve_host(handle: str) -> None:
     """Spawn a detached ``agent-mcp serve`` host bound to ``handle``.
 
-    Fully detached (its own session/process group, broken away from any
-    kill-on-close Job around this forwarder) so it **outlives** this forwarder
-    and serves later sessions too; the host installs no parent-death watchdog,
-    and its single-instance lease collapses concurrent spawns from racing
-    forwarders into exactly one live host. Launched through the shared
-    resident-daemon primitive ``agent_procutil.spawn_daemon``: no console
+    Fully detached (its own session/process group, and on Windows broken away
+    from any kill-on-close Job around this forwarder) so that it normally
+    **outlives** this forwarder and serves later sessions too; the host
+    installs no parent-death watchdog, and its single-instance lease collapses
+    concurrent spawns from racing forwarders into exactly one live host.
+    Survival is conditional on breakaway being permitted: when the
+    forwarder's Job forbids breakaway, the host is started *inside* that Job
+    instead (``contained_fallback``, logged as a warning and in
+    ``serve.log``) and dies when the Job closes, and contained test mode
+    (``COPILOT_EXTENSIONS_TEST_CONTAINED=1``) never requests breakaway at
+    all. Launched through the shared resident-daemon primitive
+    ``agent_procutil.spawn_daemon``: no console
     window, the stable ``AGENT_MCP_HOME`` directory as its cwd (never this
     forwarder's cwd, which may be a worktree that is later removed), and its
     stdout/stderr appended to ``$AGENT_MCP_HOME/serve.log`` rather than
@@ -132,6 +138,7 @@ def _spawn_serve_host(handle: str) -> None:
     # contained_fallback: before adopting spawn_daemon this host always ran
     # inside the forwarder's Job; if that Job forbids breakaway, a host with
     # the forwarder's lifetime still beats losing the multiplexer entirely.
+    # That host does NOT outlive the Job; spawn_daemon logs the fallback.
     spawn_daemon(cmd, cwd=home, log_path=home / "serve.log",
                  env_overrides=env_overrides,
                  contained_fallback=True, display="agent_mcp serve")

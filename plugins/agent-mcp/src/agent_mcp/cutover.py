@@ -123,7 +123,8 @@ def spawn_passive_daemon(ctx: _CutoverContext, control_port: int) -> subprocess.
     uses): ``windowless_python()`` avoids a Windows venv ``python.exe`` re-exec
     flashing a fresh console, and ``spawn_daemon`` fully detaches the child,
     breaks it away from a kill-on-close Job around this short-lived cutover
-    process (an updater's, for instance), runs it from the stable
+    process (an updater's, for instance; contained test mode never requests
+    breakaway), runs it from the stable
     ``AGENT_MCP_HOME`` data root rather than the caller's cwd, and appends its
     stdout/stderr to the generation's own log file. Without that log, a POSIX
     child would inherit whatever fds the launcher held open, and a daemon
