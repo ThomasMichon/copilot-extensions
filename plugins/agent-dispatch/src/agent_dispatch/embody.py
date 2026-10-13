@@ -226,9 +226,10 @@ def prepare_reusable_worktree(
     allocation_client=None,
 ) -> dict[str, object]:
     """Resolve a carried owner-qualified workspace or allocate a new one."""
-    from .workspace_binding import allocation_project, hold
+    from .workspace_binding import allocation_project, allocation_provenance, hold
 
     project = allocation_project(reservation, project or project_for_task(task))
+    allocation_task, allocation_key, allocation_attempt = allocation_provenance(str(task["id"]), reservation)
     carried = reservation.get("worktree")
     if isinstance(carried, str) and carried:
         try:
@@ -236,7 +237,7 @@ def prepare_reusable_worktree(
                 carried,
                 project=project,
                 timeout=timeout,
-                task_id=str(task["id"]),
+                task_id=allocation_task,
             )
         except WorktreeNotFound as exc:
             hold(f"carried workspace {carried} unavailable; retained for repair: {exc}")
@@ -262,10 +263,9 @@ def prepare_reusable_worktree(
     created = create_worktree(
         project=project,
         interface=interface,
-        task_id=str(task["id"]),
-        reservation_key=str(reservation.get("allocation_reservation_key") or reservation["key"]),
-        attempt=int(str(reservation.get("allocation_reservation_key") or reservation["key"]).rsplit(":", 1)[1])
-        if reservation.get("allocation_reservation_key") else int(reservation["attempt"]),
+        task_id=allocation_task,
+        reservation_key=allocation_key,
+        attempt=allocation_attempt,
         driver=driver,
         supervisor=supervisor,
         timeout=timeout,

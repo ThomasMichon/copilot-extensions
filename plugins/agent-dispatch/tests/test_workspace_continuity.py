@@ -315,6 +315,62 @@ def test_creation_key_survives_unrecorded_response_and_restart(tmp_path, monkeyp
         assert argv[argv.index("--dispatch-reservation-key") + 1] == first.key
         assert argv[argv.index("--dispatch-attempt") + 1] == "1"
 
+@pytest.mark.parametrize("recorded", [False, True])
+def test_dedup_reemission_preserves_ground_allocation_task_provenance(tmp_path, monkeypatch, recorded):
+    queue = TaskQueue(tmp_path / "queue.db")
+    first_task = queue.create(title="work", repo="queue-repo", dedup_key="logical-work")
+    first, _ = queue.reserve_spawn(first_task.id)
+    client = QueueBackedClient(queue)
+    calls = []
+    monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: ["worktrees"])
+
+    def run(argv, **_kwargs):
+        calls.append(argv)
+        row = {
+            "id": "workspace-a", "path": "workspace-path", "repo": "execution-repo",
+            "dispatch_attempt": {"task_id": first_task.id, "reservation_key": first.key, "attempt": 1},
+        }
+        if "create" in argv:
+            assert argv[argv.index("--dispatch-task-id") + 1] == first_task.id
+            if len(calls) == 1 and not recorded:
+                raise subprocess.TimeoutExpired(argv, 1)
+            payload = {"creation": {"version": 1, "status": "complete"}, "worktree": row}
+        else:
+            payload = {"worktrees": [row]}
+        return subprocess.CompletedProcess(argv, 0, json.dumps(payload), "")
+
+    monkeypatch.setattr(embody.subprocess, "run", run)
+    if recorded:
+        prepared = embody.prepare_reusable_worktree(
+            asdict(first_task), asdict(first), project="execution-repo",
+            interface="cli", driver="agent-dispatch", supervisor="first", allocation_client=client,
+        )
+        record_prepared(client, asdict(first), prepared, driver="agent-dispatch", creating_host="host-a")
+    else:
+        with pytest.raises(subprocess.TimeoutExpired):
+            embody.prepare_reusable_worktree(
+                asdict(first_task), asdict(first), project="execution-repo",
+                interface="cli", driver="agent-dispatch", supervisor="first", allocation_client=client,
+            )
+    queue.fail_spawn(first.key, detail="prior allocation retained")
+    queue.claim_one("first-worker", task_id=first_task.id)
+    queue.start(first_task.id, "first-worker")
+    queue.complete(first_task.id, "first-worker")
+    new_task = queue.create(title="next generation", repo="queue-repo", dedup_key="logical-work")
+    assert new_task.id != first_task.id
+    retry, _ = queue.reserve_spawn(new_task.id)
+    assert retry.creation_key == first.creation_key and retry.allocation_reservation_key == first.key
+    prepared = embody.prepare_reusable_worktree(
+        asdict(new_task), asdict(retry), project="changed-routing",
+        interface="cli", driver="agent-dispatch", supervisor="next", allocation_client=client,
+    )
+    assert prepared["worktree"] == "workspace-a" and prepared["project"] == "execution-repo"
+    snapshot = session_acquisition.spawn_snapshot(
+        asdict(new_task), asdict(retry), prepared["worktree"], prepared, "reused", False,
+    )
+    assert snapshot["id"] == new_task.id and snapshot["spawn_reservation_key"] == retry.key
+    assert snapshot["spawn_allocation_reservation_key"] == first.key
+
 
 def test_allocation_revision_is_explicit_and_disposal_qualified(tmp_path):
     queue = TaskQueue(tmp_path / "queue.db")

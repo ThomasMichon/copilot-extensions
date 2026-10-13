@@ -63,7 +63,10 @@ response therefore cannot restore mutable routing as target authority.
 typed deduplication identity (task ID when absent), and persisted
 `allocation_revision`. Attempts, task generation and transport retries do not
 advance that revision. The owner receives `create --creation-key` and the
-original `allocation_reservation_key`/attempt provenance on every replay.
+original allocation task ID and `allocation_reservation_key`/attempt provenance
+on every replay. A re-emitted task with the same typed deduplication identity
+retains that ground provenance, even before its original response was recorded;
+the current task/reservation still owns admission and prompt delivery.
 
 `create --spawn --allocation-revision <positive-integer>` is the explicit
 replacement input; the reserve API/client expose the same optional field.

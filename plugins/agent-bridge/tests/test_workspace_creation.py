@@ -412,8 +412,9 @@ async def test_native_ground_and_bridge_creation_share_one_fresh_workspace(
 )
 @pytest.mark.timeout(120)
 @pytest.mark.asyncio
+@pytest.mark.parametrize("new_generation", [False, True])
 async def test_native_dispatch_lost_allocation_response_retains_execution_owner(
-    rig, monkeypatch, native_owner,
+    rig, monkeypatch, native_owner, new_generation,
 ):
     from types import SimpleNamespace
     from agent_bridge import acquisition_runtime
@@ -454,6 +455,13 @@ async def test_native_dispatch_lost_allocation_response_retains_execution_owner(
             driver="agent-dispatch", supervisor="first", allocation_client=client,
         )
     queue.fail_spawn(first.key, detail="owner response lost")
+    original_task = task
+    if new_generation:
+        queue.claim_one("first-worker", task_id=task.id)
+        queue.start(task.id, "first-worker")
+        queue.complete(task.id, "first-worker")
+        task = queue.create(title="next generation", repo="queue-repo", dedup_key="logical-work")
+        assert task.id != original_task.id
     restarted = TaskQueue(root / "queue.db")
     retry, _ = restarted.reserve_spawn(task.id)
     prepared = embody.prepare_reusable_worktree(
@@ -465,6 +473,7 @@ async def test_native_dispatch_lost_allocation_response_retains_execution_owner(
     assert recorded.creation_key == first.creation_key
     assert recorded.allocation_project == "fixture"
     assert recorded.allocation_reservation_key == first.key
+    assert all(argv[argv.index("--dispatch-task-id") + 1] == original_task.id for argv in attempts)
     monkeypatch.setattr(acquisition_authority, "worktree_command", command)
     monkeypatch.setattr(acquisition_runtime, "worktree_command", command)
 

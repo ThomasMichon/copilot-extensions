@@ -26,6 +26,22 @@ def allocation_project(reservation: dict, selected: str | None) -> str | None:
             hold("carried workspace has no allocation provenance; retained for repair")
     return reservation.get("allocation_project") or selected
 
+def allocation_provenance(task_id: str, reservation: dict) -> tuple[str, str, int]:
+    """Original allocation provenance is independent of the current task generation."""
+    original = reservation.get("allocation_reservation_key")
+    if original is None:
+        return task_id, str(reservation["key"]), int(reservation["attempt"])
+    if not isinstance(original, str) or not original.startswith("dispatch-task:"):
+        hold("original allocation reservation provenance is invalid")
+    original_task, separator, attempt = original[len("dispatch-task:"):].rpartition(":")
+    if (
+        not separator or not original_task or len(attempt) > 19
+        or not attempt.isascii() or not attempt.isdecimal()
+        or not 1 <= int(attempt) <= 2**63 - 1
+    ):
+        hold("original allocation task/attempt provenance is invalid")
+    return original_task, original, int(attempt)
+
 
 def bind_allocation(client, reservation: dict, project: str | None) -> None:
     """No lost owner response may restore mutable routing as allocation authority."""

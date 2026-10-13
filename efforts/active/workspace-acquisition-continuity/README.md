@@ -392,3 +392,23 @@ takeover, blanket freshness authorization, or parallel session owner is proposed
   owner, so it did not inject the refusal. Corrected that fixture to patch the
   actual `resolve_launch_cli` owner; no runtime validation was weakened.
   Owner/native/seed selection: 30 passed. Lint and module-size guards are green.
+
+### 2026-10-13 - Ground provenance across deduplicated task generations
+
+- A subsequent review identified that the stable deduplication creation key
+  could cross task IDs while ground allocation facts still used the current
+  concrete task ID. That mismatch conflicted on replay despite an unchanged
+  logical allocation.
+- Ground creation and carried-worktree attribution now use the original
+  allocation task/reservation/attempt from the immutable allocation reservation
+  key. Current task generation/reservation remain the distinct admission and
+  delivery authority. Malformed original provenance refuses before effects.
+- Recorded and lost-response SQLite regressions close one task and emit another
+  with the same typed dedup identity, preserving one target and original ground
+  provenance. The real fresh-owner/bridge companion now covers both same-task
+  restart and re-emitted-task restart, proving one checkout/native identity with
+  simulated ACP/provider I/O.
+- Dispatch affected selection: 34 passed. Native connected companion: two
+  passed/one platform skip. Promoted cheap pre-effect refusal regressions into
+  the worktrees guard lane so required CI exercises that safety boundary.
+  Publication review, required CI, and actual merge remain open.

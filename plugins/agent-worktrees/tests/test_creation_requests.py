@@ -101,6 +101,7 @@ def test_interrupted_effect_preserves_original_recovery_identity(allocation):
     assert len(calls) == 1
 
 @pytest.mark.parametrize("failure", [RuntimeError, ValueError, OSError])
+@pytest.mark.guard
 def test_refused_pre_effect_creation_can_retry_only_the_same_facts(allocation, failure):
     config, facts, allocate, calls, _ = allocation
 
@@ -119,6 +120,7 @@ def test_refused_pre_effect_creation_can_retry_only_the_same_facts(allocation, f
     assert result["worktree"] == replay["worktree"]
     assert len(calls) == 1
 
+@pytest.mark.guard
 def test_failure_after_allocation_reservation_never_resets_the_key(allocation):
     config, facts, allocate, calls, _ = allocation
     original = {"id": "original", "repo": "worker", "path": "original-path", "branch": "worktree/original"}
@@ -258,6 +260,7 @@ def test_core_keyed_creation_replays_without_running_create_again(tmp_path, monk
     assert first["worktree"] == second["worktree"]
     assert len(created) == len(tracking.list_records(records)) == 1
 
+@pytest.mark.guard
 def test_core_profile_refusal_does_not_reserve_a_phantom_allocation(tmp_path, monkeypatch):
     import sqlite3
     import agent_worktrees.__main__ as main
