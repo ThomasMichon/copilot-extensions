@@ -1,7 +1,7 @@
 # Temporary Docker resource obligations
 
-**Status:** Original plan reviewed in PR #6116; review-directed allocation-fence
-amendment awaits the normal review gate; Docker integration and validation pending.
+**Technical boundary:** Generic ownership ledger and allocation-fence source
+implementation validated; Docker producer integration and live validation pending.
 **Coordination:** #6109.
 **Canonical effort:** [Vendored Installer Engine](README.md).
 
@@ -206,9 +206,10 @@ to bypass its invariants or the live cleanup confirmation gate.
 - [ ] Report native PowerShell/Windows-container/macOS evidence separately;
       parser checks or simulated platform tests are not native lifecycle proof.
 
-Plan publication and review belong to the parent integrator. Implementation,
-live cleanup authority and native proofs remain pending. After implementation,
-update worktree obligation docs, clean-room architecture/operator docs and
+The generic ledger is source-validated. Docker identity callbacks, integrated
+allocation/cleanup paths and live/native Docker lifecycle proofs remain pending.
+Physical cleanup requires separate explicit authority. As those integrations
+land, update worktree obligation docs, clean-room architecture/operator docs and
 the test-flow docs to describe only the guarantees actually delivered.
 
 ## Allocation-fence rationale

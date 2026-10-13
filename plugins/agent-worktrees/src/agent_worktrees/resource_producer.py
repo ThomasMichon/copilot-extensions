@@ -150,8 +150,8 @@ def valid_metadata(value: object) -> bool:
 
 
 def verified_absence(result: object, ref: str) -> bool:
-    """Require a status callback's exact versioned subject and absence proof."""
-    if not isinstance(result, dict) or result.get("exists") is not False:
+    """Require an available callback's exact versioned subject and absence proof."""
+    if not isinstance(result, dict) or result.get("available") is not True or result.get("exists") is not False:
         return False
     proof = result.get("producer_verification")
     return (

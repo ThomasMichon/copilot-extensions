@@ -597,6 +597,15 @@ installs, no service-specific config needed for this class of plugin.
 
 ### 2026-10-12 — Generic disposable producer ledger implemented and validated
 
+- Direct regressions confirmed that stored closeout validation already rejected
+  missing, false and non-boolean availability before the shared predicate changed.
+  The shared exact-subject absence predicate now also requires literal
+  `available: true`, retaining the existing caller and persisted-metadata guards.
+  The Docker plan now states the technical source/integration boundary rather
+  than a transient review status. The earlier JSON-projection snapshot
+  `ff3e134c0a19d1403d5b22dad5a371e34a082c35` passed 191 contained focused tests,
+  530 structural guards with 13 intentional skips and 11 exact-snapshot native
+  Windows projection regressions with verified supervisor cleanup.
 - A subsequent review found malformed raw YAML could break JSON claim/status
   projections. The source correction exposes an explicit invalid-metadata
   sentinel without changing the raw ledger or its unsettled ownership.
