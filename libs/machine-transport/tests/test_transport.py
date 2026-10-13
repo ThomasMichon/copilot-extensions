@@ -133,18 +133,18 @@ class TestResolveSshTarget:
 
 class TestWrapRemoteCommand:
     def test_wraps_posix_shells(self):
-        assert wrap_remote_command("bash", "aperture-labs") == "bash -lc aperture-labs"
-        assert wrap_remote_command("sh", "aperture-labs") == "sh -lc aperture-labs"
-        assert wrap_remote_command("zsh", "aperture-labs") == "zsh -lc aperture-labs"
+        assert wrap_remote_command("bash", "example-command") == "bash -lc example-command"
+        assert wrap_remote_command("sh", "example-command") == "sh -lc example-command"
+        assert wrap_remote_command("zsh", "example-command") == "zsh -lc example-command"
 
     def test_quotes_the_inner_command(self):
-        wrapped = wrap_remote_command("bash", "aperture-labs list --json")
-        assert wrapped == "bash -lc 'aperture-labs list --json'"
+        wrapped = wrap_remote_command("bash", "example-command list --json")
+        assert wrapped == "bash -lc 'example-command list --json'"
 
     def test_never_wraps_pwsh_or_unrecognized_shell(self):
-        assert wrap_remote_command("pwsh", "aperture-labs") == "aperture-labs"
-        assert wrap_remote_command("", "aperture-labs") == "aperture-labs"
-        assert wrap_remote_command("cmd", "aperture-labs") == "aperture-labs"
+        assert wrap_remote_command("pwsh", "example-command") == "example-command"
+        assert wrap_remote_command("", "example-command") == "example-command"
+        assert wrap_remote_command("cmd", "example-command") == "example-command"
 
 
 class TestGetMachineTransport:
@@ -186,7 +186,7 @@ class TestGetMachineTransport:
         plan = get_machine_transport(
             "borealis", config_machine="aurora-cloud2", load_entries=_loader(entries),
         )
-        assert plan.wrap("aperture-labs") == "bash -lc aperture-labs"
+        assert plan.wrap("example-command") == "bash -lc example-command"
 
     def test_remote_windows_plan_wrap_passes_through_untouched(self):
         entries = {
@@ -198,7 +198,7 @@ class TestGetMachineTransport:
         plan = get_machine_transport(
             "atlas-core", config_machine="aurora-cloud2", load_entries=_loader(entries),
         )
-        assert plan.wrap("aperture-labs") == "aperture-labs"
+        assert plan.wrap("example-command") == "example-command"
 
     def test_unknown_machine_is_unresolved(self):
         plan = get_machine_transport(

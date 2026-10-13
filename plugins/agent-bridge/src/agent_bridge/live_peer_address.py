@@ -93,6 +93,7 @@ def caller_reply_address(args: Namespace, client_factory: Callable[[], BridgeCli
                          worktree_handle: Callable[[], str | None]) -> str | None:
     import os
     import sys
+    from .protocol import QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
 
     explicit = getattr(args, "reply_to", None)
     if explicit:
@@ -102,11 +103,13 @@ def caller_reply_address(args: Namespace, client_factory: Callable[[], BridgeCli
                or os.environ.get("COPILOT_AGENT_SESSION_ID"))
     candidate = os.environ.get("COPILOT_AGENT_SESSION_ID") or session or handle
     if candidate:
-        address = LivePeerAddress.from_registration(client_factory().resolve_live_session(candidate))
-        if address is not None:
-            return str(address)
+        client = client_factory()
+        if client.daemon_supports(QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
+            address = LivePeerAddress.from_registration(client.resolve_live_session(candidate))
+            if address is not None:
+                return str(address)
     if candidate or handle:
-        print("[!] Caller registration lacks a qualified reply address; reply-to is local-only.",
+        print("[!] Caller daemon or registration lacks qualified reply support; reply-to is local-only.",
               file=sys.stderr)
     return handle or session
 

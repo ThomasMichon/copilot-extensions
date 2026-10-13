@@ -429,7 +429,7 @@ def test_registered_caller_address_does_not_require_worktrees_sibling(monkeypatc
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "caller")
     client = SimpleNamespace(resolve_live_session=lambda _: {
         "machine": "host-a", "repo": "project-a", "worktree_id": "wt-a",
-    })
+    }, daemon_supports=lambda _: True)
     monkeypatch.setattr(cli, "_get_client", lambda: client)
     assert cli._live_reply_to(argparse.Namespace()) == "live:host-a:project-a:wt-a"
 
@@ -438,7 +438,9 @@ def test_unrepresented_hosted_caller_keeps_legacy_bridge_handle(monkeypatch):
     monkeypatch.setattr(cli, "_worktrees_get", lambda _: None)
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "conversation")
     monkeypatch.setenv("AGENT_BRIDGE_SESSION_ID", "bridge-session")
-    monkeypatch.setattr(cli, "_get_client", lambda: SimpleNamespace(resolve_live_session=lambda _: {}))
+    monkeypatch.setattr(cli, "_get_client", lambda: SimpleNamespace(
+        resolve_live_session=lambda _: {}, daemon_supports=lambda _: True,
+    ))
     assert cli._live_reply_to(argparse.Namespace()) == "bridge-session"
 
 
@@ -451,9 +453,70 @@ def test_unencodable_registration_keeps_legacy_reply_with_warning(monkeypatch, c
     monkeypatch.setattr(cli, "_worktrees_get", lambda _: None)
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "caller")
     monkeypatch.setenv("AGENT_BRIDGE_SESSION_ID", "legacy-bridge-session")
-    monkeypatch.setattr(cli, "_get_client", lambda: SimpleNamespace(resolve_live_session=lambda _: metadata))
+    monkeypatch.setattr(cli, "_get_client", lambda: SimpleNamespace(
+        resolve_live_session=lambda _: metadata, daemon_supports=lambda _: True,
+    ))
     assert LivePeerAddress.from_registration(metadata) is None
     assert cli._live_reply_to(argparse.Namespace()) == "legacy-bridge-session"
+    assert "local-only" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("version", [32, 34])
+@pytest.mark.parametrize("worktree", [None, "wt-caller"])
+def test_new_payload_old_daemon_cli_call_and_reverse_reply_use_legacy_handle(
+    tmp_db, monkeypatch, capsys, version, worktree,
+):
+    _register(tmp_db, "caller-session", "host-a", worktree="wt-caller")
+    _register(tmp_db, "recipient", "host-a", worktree="wt-recipient")
+    collision = "live:host-a:project-a:wt-caller"
+    _register(tmp_db, collision, "other-host", worktree="wt-collision")
+    _app, client = _bridge(tmp_db)
+    client.daemon_supports = lambda floor: version >= floor
+    monkeypatch.setattr(cli, "_get_client", lambda: client)
+    monkeypatch.setattr(cli, "_live_sender_label", lambda _: "caller")
+    monkeypatch.setattr(
+        cli, "_worktrees_get",
+        lambda key: f"C:/worktrees/{worktree}" if key == "worktree-dir" and worktree else None,
+    )
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "caller-session")
+    monkeypatch.setenv("AGENT_BRIDGE_SESSION_ID", "caller-session")
+    cli._cmd_send(argparse.Namespace(
+        target="recipient", prompt="legacy call", no_wait=True, json=True,
+    ))
+    envelope = tmp_db.list_pending_live_messages("recipient")[0]
+    assert envelope["reply_to"] == (worktree or "caller-session")
+    cli._cmd_send(argparse.Namespace(
+        target=envelope["reply_to"], prompt="legacy response", no_wait=True, json=True,
+        reply_to="recipient",
+    ))
+    assert tmp_db.list_pending_live_messages("caller-session")[0]["body"] == "legacy response"
+    assert tmp_db.list_pending_live_messages(collision) == []
+    assert "local-only" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("version", [32, 34])
+@pytest.mark.parametrize("worktree", [None, "wt-caller"])
+def test_new_payload_old_daemon_keeps_legacy_automatic_reply(
+    monkeypatch, capsys, version, worktree,
+):
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "caller-conversation")
+    monkeypatch.setenv("AGENT_BRIDGE_SESSION_ID", "caller-session")
+    monkeypatch.setattr(
+        cli, "_worktrees_get",
+        lambda key: f"C:/worktrees/{worktree}" if key == "worktree-dir" and worktree else None,
+    )
+    checked = []
+
+    def supports(floor):
+        checked.append(floor)
+        return version >= floor
+
+    monkeypatch.setattr(cli, "_get_client", lambda: SimpleNamespace(
+        daemon_supports=supports,
+        resolve_live_session=lambda _: pytest.fail("old daemon metadata must not advertise a peer"),
+    ))
+    assert cli._live_reply_to(argparse.Namespace()) == (worktree or "caller-session")
+    assert checked == [35]
     assert "local-only" in capsys.readouterr().err
 
 

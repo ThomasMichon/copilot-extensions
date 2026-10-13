@@ -539,6 +539,7 @@ def test_live_reply_to_uses_worktree_handle(monkeypatch):
     monkeypatch.setenv("SESSION_ID", "env-sess")
     monkeypatch.setattr(m, "_get_client", lambda: SimpleNamespace(
         resolve_live_session=lambda _: {"machine": "host-a", "repo": "project-a", "worktree_id": "wt-abc"},
+        daemon_supports=lambda _: True,
     ))
     args = argparse.Namespace(reply_to=None)
     assert m._live_reply_to(args) == "live:host-a:project-a:wt-abc"
@@ -551,7 +552,9 @@ def test_live_reply_to_falls_back_to_env_session(monkeypatch):
     monkeypatch.delenv("AGENT_BRIDGE_SESSION_ID", raising=False)
     monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
     monkeypatch.setenv("SESSION_ID", "env-sess")
-    monkeypatch.setattr(m, "_get_client", lambda: SimpleNamespace(resolve_live_session=lambda _: {}))
+    monkeypatch.setattr(m, "_get_client", lambda: SimpleNamespace(
+        resolve_live_session=lambda _: {}, daemon_supports=lambda _: True,
+    ))
     args = argparse.Namespace(reply_to=None)
     assert m._live_reply_to(args) == "env-sess"
 
@@ -672,6 +675,7 @@ def test_live_sender_label_matches_reply_to_worktree_handle(monkeypatch):
     args = argparse.Namespace()
     monkeypatch.setattr(m, "_get_client", lambda: SimpleNamespace(
         resolve_live_session=lambda _: {"machine": "host-a", "repo": "project-a", "worktree_id": "wt-abc123"},
+        daemon_supports=lambda _: True,
     ))
     assert m._live_sender_label(args) == "wt-abc123"
     assert m._live_reply_to(args) == "live:host-a:project-a:wt-abc123"
