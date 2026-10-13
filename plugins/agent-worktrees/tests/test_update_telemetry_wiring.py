@@ -4,6 +4,7 @@ and maps its result onto the shared exit-code table."""
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 import subprocess
@@ -523,3 +524,157 @@ def test_missing_copilot_cli_is_configuration_exit_3(wired, monkeypatch, _update
     assert status["run"]["outcome"] == ut.CONFIGURATION_LIMITATION
     assert _phase_outcomes(_update_home)["payload_refresh"] == ut.CONFIGURATION_LIMITATION
     assert "not found" in status["plugins"]["agent-worktrees@copilot-extensions"]["detail"]
+
+
+def _module_payload(tmp_path, monkeypatch):
+    plugin = tmp_path / "agent-worktrees"
+    plugin.mkdir()
+    (plugin / "modules.json").write_text(json.dumps(
+        {"modules": [{"name": "agent-example", "source": "agent-example"}]}))
+    module = tmp_path / "agent-example"
+    (module / "scripts").mkdir(parents=True)
+    (module / "scripts" / "install.sh").write_text("#!/bin/sh\n")
+    (module / "plugin.json").write_text(
+        json.dumps({"name": "agent-example", "runtimeScope": "universal"}))
+    environment = {k: v for k, v in os.environ.items() if k != "COPILOT_EXTENSIONS_CONTEXT"}
+    monkeypatch.setattr(reconcile, "payload_version", lambda path: "3.0.0")
+    monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *a, **k: "2.0.0")
+    monkeypatch.setattr(reconcile, "runtime_installer_environment",
+                        lambda *a, **k: (environment, tmp_path / "module-runtime"))
+    monkeypatch.setattr(reconcile, "_zero_downtime_update", lambda path: False)
+    launched = []
+    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: launched.append(a))
+    targets = {"agent-example": runtime._RegisteredPluginTarget(
+        None, runtime._PluginActivation.ACTIVE)}
+    return plugin, targets, launched
+
+
+def _run_modules(plugin, targets, home):
+    update_events.start("engine")
+    ok = runtime._update_modules(plugin, "linux", None, targets=targets)
+    code = update_events.finish(0 if ok else 1)
+    return ok, code, _status(home)
+
+
+@pytest.mark.parametrize(("error", "code"), [
+    (PermissionError(errno.EACCES, "Permission denied", "plugin.json"), ut.PERMISSION_DENIED),
+    (OSError(errno.EIO, "Input/output error", "plugin.json"), ut.IO_ERROR),
+], ids=["permission", "io"])
+def test_module_unreadable_deadline_manifest_keeps_its_os_error_class(
+    tmp_path, monkeypatch, _update_home, error, code,
+):
+    plugin, targets, launched = _module_payload(tmp_path, monkeypatch)
+
+    def unreadable(*a, **k):
+        raise error
+
+    monkeypatch.setattr(runtime, "_installer_timeout", unreadable)
+    ok, exit_code, status = _run_modules(plugin, targets, _update_home)
+    target = status["plugins"]["agent-example@copilot-extensions"]
+    assert ok is False and launched == []
+    assert (exit_code, target["outcome"], target["error_code"]) == (1, ut.COMMAND_FAILED, code)
+    assert "plugin.json" in target["detail"]
+
+
+def test_module_installation_context_error_records_its_cause(
+    tmp_path, monkeypatch, _update_home,
+):
+    plugin, targets, _launched = _module_payload(tmp_path, monkeypatch)
+
+    def invalid(*a, **k):
+        raise ValueError("receipt names https://user:hunter2@example.com/missing")
+
+    monkeypatch.setattr(reconcile, "runtime_installer_environment", invalid)
+    ok, exit_code, status = _run_modules(plugin, targets, _update_home)
+    target = status["plugins"]["agent-example@copilot-extensions"]
+    assert ok is False and exit_code == 3
+    assert "example.com/missing" in target["detail"]
+    assert "hunter2" not in json.dumps(status)
+    assert "hunter2" not in Path(status["run"]["events_path"]).read_text(encoding="utf-8")
+
+
+def test_engine_installation_context_error_records_its_cause(wired, monkeypatch, _update_home):
+    def invalid(*a, **k):
+        raise ValueError("receipt names https://user:hunter2@example.com/missing")
+
+    monkeypatch.setattr(reconcile, "runtime_installer_environment", invalid)
+    assert m.cmd_update(_args()) == 3
+    status = _status(_update_home)
+    assert "example.com/missing" in status["plugins"][
+        "agent-worktrees@copilot-extensions"]["detail"]
+    assert "example.com/missing" in status["last_failure"]["summary"]
+    assert "hunter2" not in json.dumps(status)
+    assert "hunter2" not in Path(status["run"]["events_path"]).read_text(encoding="utf-8")
+
+
+def test_engine_unreadable_deadline_manifest_is_not_a_configuration_error(
+    wired, monkeypatch, _update_home,
+):
+    def unreadable(*a, **k):
+        raise OSError(errno.ENOSPC, "No space left on device", "plugin.json")
+
+    monkeypatch.setattr(update_cli, "_installer_timeout", unreadable)
+    assert m.cmd_update(_args()) == 1
+    aw = _status(_update_home)["plugins"]["agent-worktrees@copilot-extensions"]
+    assert aw["outcome"] == ut.COMMAND_FAILED and "No space left" in aw["detail"]
+
+
+def test_registered_runtime_invalid_declared_deadline_is_configuration(
+    registered_runtime, monkeypatch, tmp_path, _update_home,
+):
+    environment = {k: v for k, v in os.environ.items()
+                   if k != "COPILOT_EXTENSIONS_CONTEXT" and not k.endswith("_DEADLINE_SEC")}
+    monkeypatch.setattr(reconcile, "runtime_installer_environment",
+                        lambda *a, **k: (environment, registered_runtime))
+    (tmp_path / "agent-example" / "plugin.json").write_text(
+        json.dumps({"name": "agent-example", "installerDeadlineSeconds": 0}))
+    update_events.start("engine")
+    status = runtime._reconcile_one_runtime("agent-example", "linux", force=False)
+    assert status.startswith("invalid installer deadline: ")
+    assert update_events.finish(1) == 3
+
+
+@pytest.mark.parametrize(("cause", "exit_code", "code"), [
+    ("[Errno 13] Permission denied: 'machines.yaml'", 1, ut.PERMISSION_DENIED),
+    ("an explicit execution space is required", 3, "configuration"),
+], ids=["permission", "configuration"])
+def test_module_machine_detection_failure_records_its_cause(
+    tmp_path, monkeypatch, _update_home, cause, exit_code, code,
+):
+    plugin, targets, launched = _module_payload(tmp_path, monkeypatch)
+    monkeypatch.setattr(reconcile, "manifest_runtime_scope", lambda path: "machine-gated")
+
+    def undetectable(*a, **k):
+        raise runtime.MachineDetectionError(cause)
+
+    monkeypatch.setattr(runtime, "_machine_gate_blocks", undetectable)
+    ok, actual, status = _run_modules(plugin, targets, _update_home)
+    target = status["plugins"]["agent-example@copilot-extensions"]
+    assert ok is False and launched == [] and actual == exit_code
+    assert target["error_code"] == code and cause in target["detail"]
+
+
+def test_force_runtime_with_unreadable_modules_manifest_keeps_the_os_error(
+    tmp_path, monkeypatch, _update_home,
+):
+    plugin = tmp_path / "agent-worktrees"
+    plugin.mkdir()
+    manifest = plugin / "modules.json"
+    manifest.write_text(json.dumps({"modules": [{"name": "mod-a"}]}))
+    original = Path.read_text
+
+    def read(path, *args, **kwargs):
+        if path == manifest:
+            raise PermissionError(errno.EACCES, "Permission denied", str(path))
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: None)
+    targets = {"mod-a": runtime._RegisteredPluginTarget(None, runtime._PluginActivation.ACTIVE)}
+    update_events.start("engine")
+    assert not update_options.check_forced_runtimes(
+        _args(force_runtime=["mod-a"]), targets, plugin)
+    assert update_events.finish(1) == 1
+    assert _status(_update_home)["run"]["outcome"] == ut.COMMAND_FAILED
+    forced = [e for e in _events(_update_home) if e["component"] == "force-runtime"]
+    assert forced[-1]["error"]["code"] == ut.PERMISSION_DENIED

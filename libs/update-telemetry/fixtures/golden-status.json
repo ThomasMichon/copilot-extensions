@@ -71,6 +71,7 @@
       "required": true,
       "outcome": "timeout",
       "detail": "timed out",
+      "error_code": "timeout",
       "notes": [
         "timeout"
       ],

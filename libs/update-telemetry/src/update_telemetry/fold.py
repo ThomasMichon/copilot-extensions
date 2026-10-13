@@ -21,7 +21,8 @@ def _merge_target(entry: dict, event: dict) -> None:
 
     Required and advisory events are kept apart so an advisory failure never
     becomes the outcome of a component that also has a required result, and
-    the detail is the one from the event that set each pool's worst outcome.
+    the detail and error code are both the ones from the event that set each
+    pool's worst outcome (never one event's detail with another's code).
     """
     details = event.get("details") if isinstance(event.get("details"), dict) else {}
     pool = entry["_pools"]["required" if details.get("required", True) is not False
@@ -29,13 +30,13 @@ def _merge_target(entry: dict, event: dict) -> None:
     outcome = event.get("outcome")
     pool["outcomes"].append(outcome)
     detail = details.get("detail") or (event.get("error") or {}).get("message")
+    code = (event.get("error") or {}).get("code")
     if _severity(outcome) >= pool["severity"]:
         pool["severity"] = _severity(outcome)
-        if detail:
-            pool["detail"] = str(detail)[:MAX_DETAIL]
+        pool["detail"] = str(detail)[:MAX_DETAIL] if detail else None
+        pool["code"] = str(code) if code else None
     if event.get("changed") is not None:
         entry["changed"] = bool(entry.get("changed")) or bool(event["changed"])
-    code = (event.get("error") or {}).get("code")
     if code:
         entry.setdefault("notes", []).append(code)
     if isinstance(event.get("duration_ms"), int):
@@ -57,6 +58,8 @@ def _finish_target(entry: dict) -> dict:
     entry["outcome"] = _pool_outcome(chosen)
     if chosen.get("detail"):
         entry["detail"] = chosen["detail"]
+    if chosen.get("code"):
+        entry["error_code"] = chosen["code"]
     if required["outcomes"] and oc.is_failure(_pool_outcome(advisory)):
         entry["advisory_outcome"] = _pool_outcome(advisory)
         entry["advisory_detail"] = advisory.get("detail") or entry["advisory_outcome"]
@@ -147,20 +150,22 @@ def fold(
             "duration_ms": run.get("duration_ms"),
         }
     elif final:
+        # Summary and remediation come from one source: the worst required
+        # target when it set the run's outcome, otherwise the run's own error.
         first = targets[failing[0]] if failing else {}
-        summary = (
-            f"{failing[0]}: {first.get('outcome')}"
-            + (f" ({first['detail']})" if first.get("detail") else "")
-            if failing
-            else f"run: {outcome}" + (f" ({error_code})" if error_code else "")
-        )
+        if first.get("outcome") == outcome:
+            summary = f"{failing[0]}: {outcome}" + (
+                f" ({first['detail']})" if first.get("detail") else "")
+            fix_code = first.get("error_code")
+        else:
+            summary = f"run: {outcome}" + (f" ({error_code})" if error_code else "")
+            fix_code = error_code
         last_failure = {
             "run_id": run.get("id"),
             "ended_at": run.get("ended_at"),
             "outcome": outcome,
             "summary": summary[:MAX_DETAIL],
-            "fix": oc.fix_for(outcome, run.get("events_path"),
-                              error_code or next(iter(first.get("notes") or []), None)),
+            "fix": oc.fix_for(outcome, run.get("events_path"), fix_code),
         }
     restart = sorted(
         name for name, t in targets.items()

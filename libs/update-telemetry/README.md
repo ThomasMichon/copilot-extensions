@@ -46,7 +46,7 @@ non-required targets are reported as `advisories`.
 |---|---|
 | 0 | `verified_current` or `requires_restart` |
 | 1 | `command_failed` |
-| 2 | usage error |
+| 2 | usage error (recorded only when an owning run already exists, e.g. a Manager whose engine rejects the forwarded arguments) |
 | 3 | `configuration_limitation` |
 | 4 | `auth_required` |
 | 5 | `blocked_by_lock` |
@@ -63,8 +63,11 @@ evidence -- `LockTimeout` (`lock_timeout`) or a Windows sharing/lock violation
 (winerror 32/33); plain access denial (`PermissionError`, EACCES, EPERM,
 winerror 5) to `command_failed` with `error.code=permission_denied`, POSIX EIO
 to `command_failed` with `io_error`; anything else to `command_failed`. OS
-errors carry `error.path`/`error.op` when known, and `last_failure.fix` names a
-remedy that matches the error code.
+errors carry `error.path`/`error.op` when known. Each `plugins` entry carries the
+`detail` and `error_code` of the one event that set its outcome, and
+`last_failure` takes its `summary` and `fix` from one source -- the worst
+required target when it set the run's outcome, otherwise the run's own error --
+so the remedy always matches the failure it describes.
 
 ## Events and redaction
 

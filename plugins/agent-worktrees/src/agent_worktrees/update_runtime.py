@@ -53,6 +53,17 @@ def _installer_timeout(
     return (deadline if deadline > 0 else 480) + 30
 
 
+def installer_deadline_status(error: Exception) -> str:
+    """Status for a failed :func:`_installer_timeout`, keeping its cause.
+
+    An unreadable manifest is an OS failure (its ``[Errno N]`` marker classifies
+    it), never an invalid deadline value.
+    """
+    if isinstance(error, OSError):
+        return f"installer manifest unreadable: {error}"
+    return f"invalid installer deadline: {error}"
+
+
 def _core():
     from . import __main__ as core
 
@@ -602,12 +613,16 @@ def _reconcile_one_runtime_status(
     if context is None and installer is not None and not installer.exists():
         return "installer not found"
 
+    try:
+        installer_timeout = _installer_timeout(name, child_environment, pdir)
+    except (OSError, ValueError) as error:
+        return installer_deadline_status(error)
     output.header(f"Reconciling Runtime: {name}" + (" (forced)" if force else ""))
     try:
         r = subprocess.run(
             argv,
             cwd=pdir,
-            timeout=_installer_timeout(name, child_environment, pdir),
+            timeout=installer_timeout,
             env=child_environment,
         )
     except subprocess.TimeoutExpired:
@@ -814,7 +829,7 @@ def _update_modules(
             )
         except MachineDetectionError as error:
             output.warn(f"{name}: machine detection failed: {error}")
-            results.append((name, "machine detection failed"))
+            results.append((name, f"machine detection failed: {error}"))
             continue
         if gate_blocks:
             output.info(f"Skipping module runtime not allowed on this machine: {name}")
@@ -825,7 +840,7 @@ def _update_modules(
             runtime_env, runtime_root = _reconcile.runtime_installer_environment(name, module_dir)
         except ValueError as error:
             output.warn(f"{name}: installation context invalid: {error}")
-            results.append((name, "installation context invalid"))
+            results.append((name, f"installation context invalid: {error}"))
             continue
         mod_payload_ver = _reconcile.payload_version(module_dir)
         mod_deployed_ver = _reconcile.runtime_deployed_version(name, root=runtime_root)
@@ -842,7 +857,7 @@ def _update_modules(
             installer_timeout = _installer_timeout(name, runtime_env, module_dir)
         except (OSError, ValueError) as error:
             output.warn(str(error))
-            results.append((name, "invalid installer deadline"))
+            results.append((name, installer_deadline_status(error)))
             continue
 
         if platform_name == "windows":

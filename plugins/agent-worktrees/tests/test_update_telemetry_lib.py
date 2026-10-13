@@ -580,6 +580,50 @@ def test_fold_keeps_the_detail_of_the_worst_event():
     assert ut.fold_targets([worse, later, same])["a@m"]["detail"] == "timed out again"
 
 
+def _failed(component, outcome, code, message, phase="runtime_reconcile"):
+    event = _target(component, outcome, phase=phase)
+    event["error"] = {"code": code, "message": message}
+    return event
+
+
+def test_fold_remediation_matches_the_summarized_failure():
+    timeout = _failed("a@m", ut.TIMEOUT, ut.TIMEOUT, "timed out", phase="payload_refresh")
+    denied = _failed("a@m", ut.COMMAND_FAILED, ut.PERMISSION_DENIED,
+                     "[Errno 13] Permission denied: 'x'")
+    entry = ut.fold_targets([timeout, denied])["a@m"]
+    assert (entry["detail"], entry["error_code"]) == (
+        "[Errno 13] Permission denied: 'x'", ut.PERMISSION_DENIED)
+    status = ut.fold([timeout, denied], run={"id": "r", "owner": "engine:1"},
+                     updated_at="2026-01-01T00:00:00.000Z")
+    assert "Permission denied" in status["last_failure"]["summary"]
+    assert status["last_failure"]["fix"] == ut.outcomes.fix_for(
+        ut.COMMAND_FAILED, None, ut.PERMISSION_DENIED)
+    assert _validate(status, _schema("update-status")) == []
+
+
+def test_fold_never_pairs_a_worse_event_with_an_older_detail_or_code():
+    denied = _failed("a@m", ut.TIMEOUT, ut.PERMISSION_DENIED, "denied earlier")
+    worse = _target("a@m", ut.COMMAND_FAILED)
+    entry = ut.fold_targets([denied, worse])["a@m"]
+    assert "detail" not in entry and "error_code" not in entry
+
+
+def test_fold_run_level_failure_keeps_its_own_remediation():
+    # The run's own error (worse than any target) is what the summary reports,
+    # so the fix must come from it rather than from a lesser target's code.
+    denied = _failed("a@m", ut.CONFIGURATION_LIMITATION, ut.PERMISSION_DENIED, "denied")
+    status = ut.fold([denied], run={"id": "r", "owner": "engine:1"}, hint=ut.TIMEOUT,
+                     error_code=ut.TIMEOUT, updated_at="2026-01-01T00:00:00.000Z")
+    assert status["last_failure"]["summary"] == "run: timeout (timeout)"
+    assert status["last_failure"]["fix"] == ut.outcomes.fix_for(ut.TIMEOUT)
+    target_led = ut.fold([denied], run={"id": "r", "owner": "engine:1"},
+                         hint=ut.CONFIGURATION_LIMITATION, error_code=ut.IO_ERROR,
+                         updated_at="2026-01-01T00:00:00.000Z")
+    assert target_led["last_failure"]["summary"] == "a@m: configuration_limitation (denied)"
+    assert target_led["last_failure"]["fix"] == ut.outcomes.fix_for(
+        ut.CONFIGURATION_LIMITATION, None, ut.PERMISSION_DENIED)
+
+
 def test_fold_never_promotes_an_advisory_failure_to_required():
     required = _target("a@m", ut.VERIFIED_CURRENT)
     advisory = _target("a@m", ut.COMMAND_FAILED, required=False, phase="payload_refresh")

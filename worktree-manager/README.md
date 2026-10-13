@@ -265,7 +265,9 @@ A failed cutover fails the run (`command_failed`, exit 1); the engine's exit
 code is mapped through the shared update exit-code table (0 success, 1
 `command_failed`, 2 usage error, 3 configuration, 4 auth, 5 blocked by a lock,
 6 timeout (never reported as success), 130 interrupted; see the
-agent-worktrees CLI reference). Events go to
+agent-worktrees CLI reference). The run exists before the engine parses the
+forwarded arguments, so an engine usage error is recorded as the run's failure
+(error code `usage`) and exits 2. Events go to
 `~/.copilot-extensions/update/runs/<run_id>/events.jsonl`.
 
 On Windows, ordinary and passive daemon starts resolve the real base

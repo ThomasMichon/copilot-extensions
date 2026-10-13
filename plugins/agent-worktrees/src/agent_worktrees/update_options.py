@@ -34,9 +34,17 @@ def forwarded_flags(args: argparse.Namespace) -> list[str]:
 
 
 def _module_dirs(plugin_dir: Path) -> dict[str, Path]:
-    """``modules.json`` modules and their payload directories."""
+    """``modules.json`` modules and their payload directories.
+
+    A missing or malformed manifest has no modules; an unreadable one raises
+    its ``OSError`` so the caller reports the real cause.
+    """
     try:
-        data = json.loads((plugin_dir / "modules.json").read_text(encoding="utf-8"))
+        text = (plugin_dir / "modules.json").read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
+    try:
+        data = json.loads(text)
         modules = data.get("modules", []) or []
     except Exception:
         return {}
@@ -96,7 +104,14 @@ def check_forced_runtimes(args: argparse.Namespace, targets: Mapping[str, object
     forced = forced_runtimes(args)
     if not forced:
         return True
-    unknown = sorted(forced - eligible_runtimes(args, targets, plugin_dir))
+    try:
+        eligible = eligible_runtimes(args, targets, plugin_dir)
+    except OSError as error:
+        output.err(f"--force-runtime: cannot read modules.json: {error}")
+        update_events.record("engine_runtime", "force-runtime",
+                             f"modules.json unreadable: {error}")
+        return False
+    unknown = sorted(forced - eligible)
     if not unknown:
         return True
     names = ", ".join(unknown)

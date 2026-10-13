@@ -18,7 +18,7 @@ from . import picker_profiles_cli, services_cli
 from . import update_events as _events, update_options
 from . import worktree_identity
 from .update_runtime import describe_copilot_spawn_error as _describe_copilot_spawn_error
-from .update_runtime import _installer_timeout, _run_engine_installer
+from .update_runtime import _installer_timeout, _run_engine_installer, installer_deadline_status
 
 
 def _core():
@@ -317,7 +317,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         )
     except ValueError as error:
         output.err(f"Installation context invalid: {error}")
-        _events.record("engine_runtime", plugin_ref, "installation context invalid")
+        _events.record("engine_runtime", plugin_ref, f"installation context invalid: {error}")
         return 1
     aw_payload_ver = _reconcile.payload_version(plugin_dir)
     aw_context_selected = "COPILOT_EXTENSIONS_CONTEXT" in aw_runtime_env
@@ -381,7 +381,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
             installer_timeout = max(600, _installer_timeout("agent-worktrees", aw_runtime_env, plugin_dir))
         except (OSError, ValueError) as error:
             output.err(str(error))
-            _events.record("engine_runtime", plugin_ref, f"invalid installer deadline: {error}")
+            _events.record("engine_runtime", plugin_ref, installer_deadline_status(error))
             return 1
         rc = _run_engine_installer(argv, plugin_dir, installer_timeout, aw_runtime_env)
         if rc != 0:

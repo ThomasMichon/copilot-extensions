@@ -89,6 +89,7 @@
           "outcome": {"type": "string"},
           "changed": {"type": "boolean"},
           "detail": {"type": "string", "maxLength": 300},
+          "error_code": {"type": "string"},
           "payload": {"type": ["object", "null"]},
           "runtime": {"type": ["object", "null"]},
           "live_generation": {"type": ["object", "null"]},
