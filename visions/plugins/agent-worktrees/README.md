@@ -291,13 +291,11 @@ confirmed is marked as such in the rendered result — never silently reported
 as certain, and never given a separate, whole state of its own standing in
 for "unverified."
 
-**This describes the accelerator's first-landed shape**
-(`agent-worktrees-external-status-accelerator`, 2026-09-20): read-only warmth
-over facts the durable YAML record (and direct git/session/claims
-computation) already own, never a second writer, never authoritative over a
-fresher direct read. *The resident daemon as the authoritative live-state
-database* below asserts the deliberate long-term inversion of that stance —
-read this section as Phase 1 of that trajectory, not as the ceiling.
+The derived-status projection is a read surface of the worktree-lifetime
+authority, not a competing owner of the underlying observations. *The
+resident daemon as the authoritative live-state database* below owns coherent
+current state and its publication. Projection freshness never grants a reader
+authority to reconstruct or overwrite it.
 
 ### The resident daemon as the authoritative live-state database
 
@@ -468,22 +466,16 @@ engine or persisting a second copy of its state.
 
 ### external-status-consumer-contract
 
-*(Phase 1 shape — see* daemon-mediated-write-authority *and* single-write-
-path-across-plugins *below for the asserted long-term inversion this is
-expected to grow into.)*
-
 Any other capability that needs a worktree's current status — a Tasks-board
 status card, a dashboard, a notification — is the same kind of reader
 *Derived status* above already describes: it boots the resident accelerator
 on demand if none is reachable, subscribes, and reads the answer from its
 fast, coalesced cache, rather than independently recomputing git state,
 session lineage, liveness, or the claims graph, or spawning its own
-subprocess on a hot per-render or per-click path. Per the suite-wide
-work-coalescing-singleton pattern, this is **warmth, not truth**: the
-accelerator owns no fact a consumer couldn't otherwise obtain, it only saves
-everyone from separately paying to recompute the same shareable answer, and
-a stale or unreachable accelerator is never treated as authoritative over a
-fresher direct answer. The projection itself carries the same per-fact
+subprocess on a hot per-render or per-click path. The read is O(state-schema),
+independent of growing records, histories, ledgers, lists and graphs.
+The authority owns materialization; a stale or unreachable service does not
+license a reader to compute a competing answer. The projection carries the same per-fact
 freshness/unconfirmed markers *Derived status* already requires (never a
 flattened, all-or-nothing "current" verdict); a consumer renders those
 markers as given rather than presenting a successfully-fetched but stale or
@@ -492,17 +484,15 @@ excluded from this cache (see *Not a transcript or event warehouse* below) —
 a consumer that wants recent messages pulls them on demand from the owning
 session host instead.
 
-A consumer able to compute these facts itself (an in-process agent-worktrees
-caller) retains *Derived status*'s existing direct-computation fallback when
-no accelerator is reachable. A consumer that cannot — a separate plugin
-operating under its own documented subprocess-free contract (a Tasks-board
-render loop or card click forbidden from spawning work, for instance) — has
-no such fallback available to it: this is the narrow, named exception
-`docs/patterns/work-coalescing-singleton.md` records for exactly this
-shape. Its boot-on-demand subscribe attempt either succeeds within its own
-bounded wait, or it reports the requested facts as stale/unknown and moves
-on, never blocking its own render or click path and never silently
-recomputing or guessing at the answer.
+Every ordinary reader, including an in-process agent-worktrees caller,
+retains the same bound when no accelerator is reachable. Where its own
+access contract permits it, it may read the independently addressable bounded
+durable projection as explicitly advisory; it never loads a growing record or
+recomputes the facts instead. A separate plugin with a subprocess-free render
+contract does not bypass that contract to recover missing state. Its bounded
+subscribe attempt either succeeds or it presents last-good advisory facts or
+explicit stale/unknown/unavailable state, never blocking its render or click
+path and never silently reconstructing or guessing the answer.
 
 ### daemon-mediated-write-authority
 
