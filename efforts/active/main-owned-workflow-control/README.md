@@ -346,3 +346,21 @@ credential changes, broad policy weakening or unreviewed releases.
 - The first-wave publication/recovery watches are complete. Remaining main
   duplicate validation, stronger candidate assurance and normalized review
   capacity measurement remain open campaign gates.
+
+### 2026-10-12 - Safety documentation landed; software preflight
+
+- #6386 merged as `78a236501b89` after current-head Copilot approval and both
+  explicit required contexts passed, with admin CI enforcement active. A
+  mechanical index conflict was resolved by retaining the peer's new row.
+- #6367's software follow-up adds required-context completeness only at the
+  explicit GitHub admin merge boundary, preserving the review escape hatch and
+  adding no watcher polling, workflow or check. The verified head is pinned;
+  missing, unsuccessful or unreadable requirements refuse the mutation.
+- Contained targeted tests exercise both classic and ruleset contexts, missing
+  aggregate, permission failures, malformed evidence and head/base races.
+  A live read-only call against #6332 refused its not-yet-passing PR aggregate;
+  no merge/write operation was invoked in that consumer check.
+- Candidate assurance will reuse the active attestation contract in #6332,
+  not a competing receipt framework. Its builder/signing/publication files
+  remain with their existing owner. Main duplicate validation cannot be pruned
+  until that final-tree assurance and required admission gate are proven.

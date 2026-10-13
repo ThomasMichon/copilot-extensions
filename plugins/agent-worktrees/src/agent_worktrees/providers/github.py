@@ -605,22 +605,12 @@ class GitHubProvider:
         call reads the real ref.
         """
         host = self.authority_endpoint(api_base)
-        args = ["gh", "pr", "merge", str(number), "--repo", repo]
-        if squash:
-            args.append("--squash")
-        if admin:
-            args.append("--admin")
-        if delete_source_branch:
-            args.append("--delete-branch")
-        if expected_head_sha:
-            args += ["--match-head-commit", expected_head_sha]
-        proc = run_cli(args, env=self._env(token, host=host))
-        if proc.returncode != 0:
-            return (
-                f"gh pr merge failed for {repo}#{number}: "
-                f"{proc.stderr.strip() or proc.stdout.strip()}"
-            )
-        return ""
+        from .github_required_checks import merge_pull
+        return merge_pull(
+            repo, number, squash=squash, admin=admin,
+            delete_source_branch=delete_source_branch, expected_head_sha=expected_head_sha,
+            host=host, invoke=lambda argv: run_cli(argv, env=self._env(token, host=host)),
+        )
 
     def close_pull(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,

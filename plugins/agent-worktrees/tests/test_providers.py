@@ -1105,6 +1105,15 @@ class TestGiteaProvider:
 # ---------------------------------------------------------------------------
 
 class TestGitHubProvider:
+    @pytest.fixture
+    def passed_admin_checks(self, monkeypatch):
+        from agent_worktrees.providers import github_required_checks
+
+        monkeypatch.setattr(
+            github_required_checks, "verified_merge_head",
+            lambda *args, **kwargs: kwargs["expected_head_sha"] or "a" * 40,
+        )
+
     def test_observe_head_uses_server_date(self, monkeypatch):
         from agent_worktrees.providers import github
 
@@ -1451,7 +1460,7 @@ class TestGitHubProvider:
         assert captured["env"]["GH_TOKEN"] == "tok"
         assert res.state == "open"
 
-    def test_merge_pull_squash_admin_builds_args(self, monkeypatch):
+    def test_merge_pull_squash_admin_builds_args(self, monkeypatch, passed_admin_checks):
         # pr-merge --now: a submitter self-merge is a squash merge, admin past
         # the non-blocking gate, and deletes the branch by default (safe --
         # finalize/pr-complete verify a merged PR against the tracked record's
@@ -1483,7 +1492,7 @@ class TestGitHubProvider:
         )
         assert "--delete-branch" not in captured["args"]
 
-    def test_merge_pull_passes_match_head_commit(self, monkeypatch):
+    def test_merge_pull_passes_match_head_commit(self, monkeypatch, passed_admin_checks):
         # The stale-PR-object safety net (ThomasMichon/copilot-extensions#4949):
         # when pr-merge --now resolves a locally tracked pushed head, it must
         # reach gh as --match-head-commit <sha> so GitHub's own merge endpoint
@@ -1502,7 +1511,7 @@ class TestGitHubProvider:
         assert "--match-head-commit" in a
         assert a[a.index("--match-head-commit") + 1] == "deadbeef"
 
-    def test_merge_pull_omits_match_head_commit_when_not_given(self, monkeypatch):
+    def test_admin_merge_pins_verified_head_when_not_given(self, monkeypatch, passed_admin_checks):
         from agent_worktrees.providers import github
         captured = {}
         monkeypatch.setattr(
@@ -1510,7 +1519,8 @@ class TestGitHubProvider:
             lambda args, **kw: (captured.__setitem__("args", args), _proc())[1],
         )
         github.GitHubProvider().merge_pull("o/r", 7, squash=True, admin=True)
-        assert "--match-head-commit" not in captured["args"]
+        assert "--match-head-commit" in captured["args"]
+        assert captured["args"][captured["args"].index("--match-head-commit") + 1] == "a" * 40
 
     def test_enable_auto_merge_passes_match_head_commit(self, monkeypatch):
         # Same stale-PR-object safety net as merge_pull, but for the
