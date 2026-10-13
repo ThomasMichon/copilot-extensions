@@ -146,6 +146,10 @@ Write-Output "DERIVED=$derived"
 @pytest.mark.guard
 def test_install_ps1_gc_call_has_min_age_days_floor():
     text = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
+    text = text[
+        text.index("function Invoke-VersionedActivateInner {"):
+        text.index("\nfunction Invoke-VersionedActivate {")
+    ]
     assert "'gc', '--protect-pids', '--min-age-days', '0.05'" in text
     assert "LastWriteTime = Get-Date" in text
     # $prev must be derived from the canonical resolver, not a hand-rolled
@@ -174,6 +178,10 @@ def test_install_ps1_gc_call_has_min_age_days_floor():
 @pytest.mark.guard
 def test_install_sh_gc_call_has_min_age_days_floor():
     text = (SCRIPTS / "install.sh").read_text(encoding="utf-8")
+    text = text[
+        text.index("_versioned_activate_inner() {"):
+        text.index("\n_versioned_activate() {")
+    ]
     assert "gc --protect-pids \"${gc_keep_args[@]}\" --min-age-days 0.05" in text
     assert 'touch "$INSTALL_DIR/versions/$prev"' in text
     # $prev must be derived from the canonical resolver.

@@ -689,8 +689,8 @@ function Invoke-VersionedActivateInner {
        so the caller can abort. No-op ($true) in legacy mode. #>
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    if (-not (Test-Path $py)) {
+    $py = if (Test-Path -LiteralPath $VenvPython -PathType Leaf) { $VenvPython } else { $LinkPython }
+    if (-not (Test-Path -LiteralPath $py -PathType Leaf)) {
         Write-ServiceErr "Runtime interpreter missing for versions/$SrcVersion -- refusing activation"
         return $false
     }
@@ -1567,7 +1567,7 @@ function Invoke-VersionedMarkComplete {
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) {
+    if (-not $py -or -not (Test-Path -LiteralPath $py -PathType Leaf)) {
         Write-ServiceErr "Completion publication requires bootstrap Python -- refusing activation"
         return $false
     }

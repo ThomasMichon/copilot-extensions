@@ -56,7 +56,7 @@ def _run(shell: str, executable: str, script: str, tmp_path: Path):
 @pytest.mark.parametrize("shell,executable", SHELLS)
 @pytest.mark.parametrize("case", [
     "fresh", "reuse", "conflict", "malformed", "no-python", "no-hash",
-    "no-helper", "storage-error",
+    "no-helper", "storage-error", "python-directory", "python-missing",
 ])
 def test_completion_publication_caller_preserves_native_result(
     tmp_path: Path, shell: str, executable: str | None, case: str,
@@ -83,6 +83,10 @@ def test_completion_publication_caller_preserves_native_result(
     ) if marker.exists() else None
     digest = "" if case == "no-hash" else DIGEST
     python = "" if case == "no-python" else sys.executable
+    if case in {"python-directory", "python-missing"}:
+        python = str(tmp_path / "bad-python")
+        if case == "python-directory":
+            Path(python).mkdir()
     if shell == "bash":
         text = (SCRIPTS / "install.sh").read_text(encoding="utf-8")
         function = _function_body(text, "_versioned_mark_complete") + "\n}\n"
@@ -245,12 +249,18 @@ function Probe {{
 
 
 @pytest.mark.parametrize("shell,executable", SHELLS)
+@pytest.mark.parametrize("interpreter_shape", ["missing", "directory", "wildcard"])
 def test_activation_refuses_missing_interpreter(
-    tmp_path: Path, shell: str, executable: str | None,
+    tmp_path: Path, shell: str, executable: str | None, interpreter_shape: str,
 ):
     if not executable:
         pytest.skip(f"{shell} unavailable")
     missing = tmp_path / "missing-python"
+    if interpreter_shape == "directory":
+        missing.mkdir()
+    elif interpreter_shape == "wildcard":
+        missing = tmp_path / "python[12]"
+        (tmp_path / "python1").write_text("not the requested interpreter", encoding="utf-8")
     if shell == "bash":
         text = (SCRIPTS / "install.sh").read_text(encoding="utf-8")
         function = _function_body(text, "_versioned_activate_inner") + "\n}\n"
@@ -291,12 +301,12 @@ def test_missing_interpreter_cannot_pass_activation_gate():
     ps = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
     sh = (SCRIPTS / "install.sh").read_text(encoding="utf-8")
     assert re.search(
-        r"if \(-not \(Test-Path \$py\)\) \{\s*"
+        r"if \(-not \(Test-Path -LiteralPath \$py -PathType Leaf\)\) \{\s*"
         r'Write-ServiceErr "Runtime interpreter missing.*?\s*return \$false',
         _ps_function(ps, "Invoke-VersionedActivateInner"),
     )
     assert re.search(
-        r'if \[\[ ! -x "\$py" \]\]; then\s*'
+        r'if \[\[ ! -f "\$py" \|\| ! -x "\$py" \]\]; then\s*'
         r'err "Runtime interpreter missing.*?\s*return 1',
         _function_body(sh, "_versioned_activate_inner"),
     )

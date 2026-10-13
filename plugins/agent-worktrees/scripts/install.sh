@@ -682,7 +682,7 @@ _versioned_activate_inner() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_PYTHON"
-    if [[ ! -x "$py" ]]; then
+    if [[ ! -f "$py" || ! -x "$py" ]]; then
         err "Runtime interpreter missing for versions/$SRC_VERSION -- refusing activation"
         return 1
     fi
