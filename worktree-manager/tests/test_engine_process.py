@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import signal
 import subprocess
 from types import SimpleNamespace
 
@@ -33,24 +32,28 @@ def test_cancel_closes_job_or_owned_group(monkeypatch, failure, windows):
         return process, job if windows else None
 
     monkeypatch.setattr(ep, "_WINDOWS", windows)
-    monkeypatch.setattr(ep.signal, "SIGKILL", 9, raising=False)
     monkeypatch.setattr(ep, "contained_test_mode", lambda: False)
     monkeypatch.setattr(ep, "detached_kwargs", lambda: {"start_new_session": True})
     monkeypatch.setattr(ep, "spawn_sync_in_kill_on_close_job", spawn)
-    monkeypatch.setattr(ep.os, "killpg", lambda pid, sig: calls.append(("group", pid, sig)), raising=False)
+    if not windows:
+        def run_posix(argv, **kwargs):
+            calls.append(("posix", kwargs))
+            raise failure
+
+        monkeypatch.setattr(ep.engine_posix_process, "run", run_posix)
     with pytest.raises(type(failure)):
         ep.run(["engine"], timeout=1, env={}, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    spawned = calls[0][1]
-    assert spawned["require_job"] == windows
-    assert spawned["allow_breakaway"] is False
     if windows:
+        spawned = calls[0][1]
+        assert spawned["require_job"] is True
+        assert spawned["allow_breakaway"] is False
         assert ep.OWNED_GROUP_ENV not in spawned["env"]
         assert ("close",) in calls
+        assert calls[-1] == ("communicate", 5)
     else:
-        assert spawned["start_new_session"] is True
-        assert spawned["env"][ep.OWNED_GROUP_ENV] == "1"
-        assert ("group", 123, signal.SIGKILL) in calls
-    assert calls[-1] == ("communicate", 5)
+        assert calls[0][0] == "posix"
+        assert calls[0][1]["env"][ep.OWNED_GROUP_ENV] == "1"
+        assert calls[0][1]["timeout"] == 1
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows descendant Job integration")

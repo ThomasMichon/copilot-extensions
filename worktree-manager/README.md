@@ -75,7 +75,10 @@ to the launch terminal; the final plan remains JSON on stdout. Individual
 engine operations keep their own failure bounds, and automation can explicitly
 request a bounded plan call.
 Captured preparation owns a kill-on-close Job on Windows and a dedicated
-process group on POSIX. Foreground projection inherits the latter rather than
+process group on POSIX. A POSIX group owner stays unreaped until the engine's
+completion receipt has been read and the entire group has been cleaned up,
+including when an inner render failure degrades and the engine exits normally.
+Foreground projection inherits the latter rather than
 detaching from its launch owner, so an explicit timeout or cancellation also
 terminates renderer and Git descendants. The bounded asynchronous backup
 worker keeps its independent lifetime and containment.

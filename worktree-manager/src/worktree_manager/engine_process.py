@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import signal
 import subprocess
 
 from agent_procutil import (
@@ -11,6 +10,7 @@ from agent_procutil import (
     detached_kwargs,
     spawn_sync_in_kill_on_close_job,
 )
+from . import engine_posix_process
 
 OWNED_GROUP_ENV = "WORKTREE_MANAGER_ENGINE_OWNS_PROCESS_GROUP"
 _WINDOWS = os.name == "nt"
@@ -26,6 +26,8 @@ def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
     else:
         env.pop(OWNED_GROUP_ENV, None)
     kwargs["env"] = env
+    if owns_group:
+        return engine_posix_process.run(argv, timeout=timeout, **kwargs)
     process, job = spawn_sync_in_kill_on_close_job(
         argv, require_job=_WINDOWS, allow_breakaway=False,
         **kwargs, **(detached_kwargs() if not _WINDOWS else {}),
@@ -38,11 +40,6 @@ def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
     finally:
         if job is not None:
             job.close()
-        elif owns_group and process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
         elif process.poll() is None:
             process.kill()
         if not completed:
