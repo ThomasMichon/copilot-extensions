@@ -305,7 +305,31 @@ def _catalog_environment(fixture: dict) -> dict[str, str]:
     for relative in (".cache/powershell", ".local/share/powershell/Modules"):
         (fixture["home"] / relative).mkdir(parents=True)
     if os.name == "nt":
-        (fixture["home"] / "AppData/Local/Microsoft/PowerShell").mkdir(parents=True)
+        for relative in (
+            "AppData/Local/Microsoft/PowerShell",
+            "AppData/Local/Microsoft/Windows/PowerShell", "AppData/Roaming",
+        ):
+            (fixture["home"] / relative).mkdir(parents=True, exist_ok=True)
+        if POWERSHELL:
+            host_command = [
+                POWERSHELL, "-NoLogo", "-NoProfile", "-Command",
+                "$null=Get-Command python -ErrorAction SilentlyContinue;"
+                "$null=@{schema='fixture';version=1;commands=@(@{argv=@('example')})}"
+                "|ConvertTo-Json -Depth 8",
+            ]
+            for _ in range(2):
+                subprocess.run(
+                    host_command, env=environment, cwd=fixture["home"],
+                    capture_output=True, text=True, timeout=30, check=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+            before = _snapshot(fixture["home"])
+            subprocess.run(
+                host_command, env=environment, cwd=fixture["home"],
+                capture_output=True, text=True, timeout=30, check=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            assert _snapshot(fixture["home"]) == before, "PowerShell host-only control writes"
         return environment
     wrapper_dir = fixture["home"] / "test-bin"
     wrapper_dir.mkdir()
@@ -384,14 +408,24 @@ def test_command_binding_real_catalog_read_only(
     pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX installer")),
     pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
 ])
+@pytest.mark.parametrize("contextual", [False, True])
 def test_command_binding_native_manifest_publication_and_foreign_refusal(
-    binding_fixture: dict, shell: str,
+    binding_fixture: dict, shell: str, contextual: bool,
 ) -> None:
     _prepare_catalog(binding_fixture)
+    runtime = binding_fixture["legacy"]
+    if contextual:
+        selected = _activate(binding_fixture, binding_fixture["payload"])
+        runtime = Path(selected["pluginRoot"])
+        binding_fixture["environment"]["COPILOT_EXTENSIONS_CONTEXT"] = selected["installReceipt"]
+        _write(binding_fixture["home"] / ".copilot-extensions/installation-mode.json", {
+            "schema": "copilot-extensions.installation-mode", "version": 1,
+            "installationMode": {"enabled": True, "marketplaces": {}},
+        })
     environment = _catalog_environment(binding_fixture)
     environment.update({
         "TEST_PAYLOAD": str(binding_fixture["payload"]),
-        "TEST_RUNTIME": str(binding_fixture["legacy"]),
+        "TEST_RUNTIME": str(runtime),
         "TEST_PYTHON": (
             sys.executable if os.name == "nt" else
             str(binding_fixture["home"] / "test-bin/python3")
@@ -412,6 +446,7 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
             "err() { printf '%s\\n' \"$*\" >&2; }\n"
             "PLUGIN_DIR=\"$TEST_PAYLOAD\"\nINSTALL_DIR=\"$TEST_RUNTIME\"\n"
             "VENV_PYTHON=\"$TEST_PYTHON\"\nLINK_DIR=\"$TEST_RUNTIME/.venv\"\n"
+            f"CONTEXTUAL_INSTALL={'true' if contextual else 'false'}\n"
             + function + "\nwrite_deploy_manifest\n"
         )
         argv = ["bash", "-c", program]
@@ -431,6 +466,7 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
             "}\n"
             "$PluginDir=$env:TEST_PAYLOAD\n$InstallDir=$env:TEST_RUNTIME\n"
             "$VenvPython=$env:TEST_PYTHON\n$LinkDir=Join-Path $InstallDir '.venv'\n"
+            f"$ContextualInstall=${'true' if contextual else 'false'}\n"
             + function + "\nWrite-V3Manifest\n"
         )
         program_path = binding_fixture["home"] / "publish-fixture.ps1"
@@ -443,6 +479,21 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert _resolve(binding_fixture)["status"] == "selected"
+    if contextual:
+        manifest = json.loads((runtime / "deploy-manifest.json").read_text(encoding="utf-8"))
+        assert manifest["schema_version"] == 3
+        assert manifest["service"] == PLUGIN_ID
+        assert "commandBinding" not in manifest
+        assert "commandLifecycle" not in manifest
+        assert not (binding_fixture["legacy"] / "deploy-manifest.json").exists()
+        repeated = subprocess.run(
+            argv, env=environment, cwd=binding_fixture["home"],
+            capture_output=True, text=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        assert repeated.returncode == 0, repeated.stdout + repeated.stderr
+        assert _resolve(binding_fixture)["status"] == "selected"
+        return
     _write(binding_fixture["home"] / ".copilot/settings.json", {
         "extraKnownMarketplaces": {
             "example": {"source": {"source": "github", "repo": "Other/Plugins"}}

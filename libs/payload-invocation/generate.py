@@ -665,6 +665,14 @@ def expected_files(manifest: Path) -> dict[Path, str]:
             if path in generated or path in protected_paths:
                 raise ValueError(f"{manifest}: generated path collision: {path}")
             generated[path] = binding_source
+            lifecycle_path = path.with_name(
+                "_command_lifecycle.py" if path.name.startswith("_") else "command_lifecycle.py"
+            )
+            if lifecycle_path in generated or lifecycle_path in protected_paths:
+                raise ValueError(f"{manifest}: generated path collision: {lifecycle_path}")
+            generated[lifecycle_path] = (TEMPLATES.parent / "command_lifecycle.py").read_text(
+                encoding="utf-8"
+            )
     return generated
 
 

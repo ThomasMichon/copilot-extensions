@@ -1085,6 +1085,7 @@ jobs:
           libs/installation-context/tests/test_diagnostic_consumers.py
           libs/installation-context/tests/test_payload_source.py
           libs/payload-invocation/tests/test_command_binding.py
+          libs/payload-invocation/tests/test_command_lifecycle.py
           -k "payload_source or installation_context_ci_scope or command_binding or status_and_probe_cli_parity_and_read_only or diagnostic_api_never_enters_mutation or active_namespaced_cli_is_visible_and_probe_refuses or explicit_powershell or derived_diagnostic_api_read_only or peer_governance_wrapper_read_only"
       - name: Manager read-only wrapper (Windows)
         if: steps.installation-context.outputs.run == 'true'

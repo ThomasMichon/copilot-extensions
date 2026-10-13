@@ -495,6 +495,36 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-10-13 — Catalog review correction: admit ownership before runtime mutation
+
+- The first catalog-adopter review identified a real lifecycle boundary gap:
+  the manifest transaction was serialized, but native and Python callers
+  could deploy or activate a foreign runtime before reaching its refusal.
+  The correction moves ownership admission before shared-runtime mutation
+  and holds the same token-owned lock through the entire operation.
+- Independent review caught the deferred stamp boundary: it has no venv or
+  runtime build to finalize. Stamping retains early ownership admission and
+  serialization without publishing a pending build or a new selected owner;
+  first-use provision performs the separate runtime transaction.
+- The existing deploy manifest now retains a pending reservation on partial
+  failure. Discovery refuses to select it; native children must validate a
+  live, same-host token, source, and exact root before dispatch. Runtime-write
+  and activation race coverage executes both actual native admission/dispatch
+  fragments, not only concurrent manifest publication.
+- Native contextual install/update publication was also incorrectly sent
+  through the legacy publisher. Its separate schema-3 writer is restored and
+  tested twice against a disposable active namespaced receipt. The Python
+  source-footprint writer was extracted cohesively to honor the shrink-only
+  module baseline instead of raising it.
+- Legacy compatibility remains explicit: the canonical probe can admit an
+  unowned, unattributed install only under its established missing-policy
+  default-false rule. That flow remains serialized but never claims
+  source-qualified catalog selection. Classic Windows PowerShell host-cache
+  preparation includes a host-only control and preserves whole-profile
+  byte/directory/mtime comparisons; native provider confirmation remains open.
+- No effort checkbox, release, rollout, or persistent-host permission is
+  changed by this correction.
+
 ### 2026-10-13 — Source foundation landed; lifecycle-bound catalog adoption
 
 - [#6539](https://github.com/ThomasMichon/copilot-extensions/pull/6539)

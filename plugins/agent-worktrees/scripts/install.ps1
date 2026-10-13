@@ -1734,6 +1734,16 @@ function Write-V3Manifest {
         venv           = ($LinkDir -replace '\\', '/')
         runtime        = 'python'
     }
+    if ($ContextualInstall) {
+        $temporaryManifest = "$manifestPath.tmp-$PID"
+        [IO.File]::WriteAllText(
+            $temporaryManifest, ($manifest | ConvertTo-Json -Depth 8),
+            (New-Object System.Text.UTF8Encoding($false))
+        )
+        Move-Item -LiteralPath $temporaryManifest -Destination $manifestPath -Force
+        Write-ServiceOk "Deploy manifest written (source: $kind)"
+        return
+    }
     if (-not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
         throw 'Runtime interpreter required for owned deploy-manifest publication.'
     }
@@ -3779,6 +3789,40 @@ function Invoke-Stamp {
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Deploy-GlobalBinstub
     Write-ServiceOk 'Stamped: agent-worktrees tool binstub on PATH; runtime provisions on first use.'
+}
+
+if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision', 'stamp')) {
+    $lifecyclePython = Get-BootstrapPython -ExcludeVenvDir
+    if (-not $lifecyclePython) { throw 'Attributable runtime admission requires bootstrap Python.' }
+    $lifecycleSource = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+        $env:COPILOT_PLUGIN_STAGED_FROM
+    } else { $PluginDir }
+    $lifecycleArgs = @(
+        '-B', '-E', '-X', 'utf8', (Join-Path $PluginDir 'scripts\command_binding.py'),
+        '--payload-root', $PluginDir, '--plugin-id', 'agent-worktrees',
+        '--legacy-root', $InstallDir, '--source-payload-root', $lifecycleSource
+    )
+    if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
+        & $lifecyclePython @lifecycleArgs --check-lifecycle
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    } else {
+        $lifecycleForward = @()
+        foreach ($key in $PSBoundParameters.Keys) {
+            $value = $PSBoundParameters[$key]
+            if ($value -is [System.Management.Automation.SwitchParameter]) {
+                if ($value.IsPresent) { $lifecycleForward += "-$key" }
+            } else {
+                $lifecycleForward += "-$key"
+                $lifecycleForward += [string]$value
+            }
+        }
+        $lifecycleShell = (Get-Process -Id $PID).Path
+        if ($Action -eq 'stamp') { $lifecycleArgs += '--deferred-runtime' }
+        & $lifecyclePython @lifecycleArgs --run-lifecycle -- `
+            $lifecycleShell -NoLogo -NoProfile -ExecutionPolicy Bypass `
+            -File $PSCommandPath @lifecycleForward
+        exit $LASTEXITCODE
+    }
 }
 
 switch ($Action) {

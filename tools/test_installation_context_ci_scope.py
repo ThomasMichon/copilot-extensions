@@ -37,11 +37,14 @@ SPEC.loader.exec_module(MODULE)
         "plugins/agent-worktrees/tests/test_reconcile.py",
         "plugins/agent-worktrees/src/agent_worktrees/installer.py",
         "plugins/agent-worktrees/src/agent_worktrees/installation_cli.py",
+        "plugins/agent-worktrees/src/agent_worktrees/deploy_manifest.py",
         "plugins/agent-worktrees/tests/test_installer_command_binding.py",
         "plugins/agent-worktrees/scripts/install.sh",
         "plugins/agent-worktrees/scripts/install.ps1",
         "plugins/agent-worktrees/scripts/command_binding.py",
         "plugins/agent-worktrees/src/agent_worktrees/_command_binding.py",
+        "plugins/agent-worktrees/scripts/command_lifecycle.py",
+        "plugins/agent-worktrees/src/agent_worktrees/_command_lifecycle.py",
         "plugins/agent-worktrees/scripts/emit-command-catalog.sh",
         "plugins/agent-worktrees/scripts/emit-command-catalog.ps1",
         "plugins/agent-worktrees/payload-invocation.json",
@@ -120,6 +123,7 @@ def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     assert "libs/installation-context/tests/test_payload_source.py" in smoke["run"]
     assert 'payload_source or installation_context_ci_scope' in smoke["run"]
     assert "libs/payload-invocation/tests/test_command_binding.py" in smoke["run"]
+    assert "libs/payload-invocation/tests/test_command_lifecycle.py" in smoke["run"]
     assert "or command_binding" in smoke["run"]
     manager = next(
         step for step in steps if step.get("name") == "Manager read-only wrapper (Windows)"

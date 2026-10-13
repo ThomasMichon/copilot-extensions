@@ -2272,13 +2272,8 @@ print(fingerprint(Path('$stable_plugin')))
         [[ -n "$fp" ]] && payload_fingerprint="\"$fp\""
     fi
 
-    if [[ ! -x "$VENV_PYTHON" ]]; then
-        err "Runtime interpreter required for owned deploy-manifest publication."
-        return 1
-    fi
-    if ! "$VENV_PYTHON" -B -E -X utf8 "$PLUGIN_DIR/scripts/command_binding.py" \
-        --payload-root "$PLUGIN_DIR" --plugin-id agent-worktrees --legacy-root "$INSTALL_DIR" \
-        --publish-legacy --write-manifest --source-payload-root "$stable_plugin" >/dev/null <<EOF
+    local manifest_json
+    manifest_json="$(cat <<EOF
 {
   "schema_version": 3,
   "service": "agent-worktrees",
@@ -2299,7 +2294,17 @@ print(fingerprint(Path('$stable_plugin')))
   "runtime": "python"
 }
 EOF
-    then
+    )"
+    if $CONTEXTUAL_INSTALL; then
+        printf '%s\n' "$manifest_json" > "$manifest_path.tmp.$$"
+        mv -f "$manifest_path.tmp.$$" "$manifest_path"
+    elif [[ ! -x "$VENV_PYTHON" ]]; then
+        err "Runtime interpreter required for owned deploy-manifest publication."
+        return 1
+    elif ! printf '%s\n' "$manifest_json" |
+        "$VENV_PYTHON" -B -E -X utf8 "$PLUGIN_DIR/scripts/command_binding.py" \
+            --payload-root "$PLUGIN_DIR" --plugin-id agent-worktrees --legacy-root "$INSTALL_DIR" \
+            --publish-legacy --write-manifest --source-payload-root "$stable_plugin" >/dev/null; then
         err "Command ownership validation refused deploy-manifest publication."
         return 1
     fi
@@ -2817,6 +2822,34 @@ except Exception as e:
 }
 
 # ── Actions ──────────────────────────────────────────────────────────────
+
+if ! $CONTEXTUAL_INSTALL; then
+    case "$ACTION" in
+        install|update|provision|stamp)
+            __aw_lifecycle_python="$(_bootstrap_python exclude-venv-dir)" || {
+                err "Attributable runtime admission requires bootstrap Python."
+                exit 1
+            }
+            __aw_lifecycle_args=(
+                -B -E -X utf8 "$PLUGIN_DIR/scripts/command_binding.py"
+                --payload-root "$PLUGIN_DIR" --plugin-id agent-worktrees
+                --legacy-root "$INSTALL_DIR"
+                --source-payload-root "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+            )
+            if [[ -n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
+                "$__aw_lifecycle_python" "${__aw_lifecycle_args[@]}" --check-lifecycle || exit $?
+            else
+                __aw_lifecycle_bash="$(resolve_executable_command_path bash)" || exit 1
+                if [[ "$ACTION" == stamp ]]; then
+                    __aw_lifecycle_args+=(--deferred-runtime)
+                fi
+                "$__aw_lifecycle_python" "${__aw_lifecycle_args[@]}" --run-lifecycle -- \
+                    "$__aw_lifecycle_bash" "$SCRIPT_DIR/install.sh" "${__aw_args[@]}"
+                exit $?
+            fi
+            ;;
+    esac
+fi
 
 case "$ACTION" in
     stamp)

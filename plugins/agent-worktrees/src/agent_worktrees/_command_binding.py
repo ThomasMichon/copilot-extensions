@@ -7,7 +7,9 @@ import importlib.util
 import json
 import os
 import sys
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Mapping, Protocol
 
 SCHEMA = "copilot-extensions.command-installation-binding"
@@ -31,6 +33,8 @@ class InstallationPrimitive(Protocol):
     def read_json(self, path: Path) -> Any: ...
     def _DirectoryLock(self, path: Path, **arguments: Any) -> Any: ...
     def _atomic_write_json(self, path: Path, value: Any, **arguments: Any) -> None: ...
+    def _pid_is_live(self, pid: int) -> bool: ...
+    def probe_legacy_entrypoint(self, **arguments: Any) -> dict[str, Any]: ...
 
 
 def _identity(value: Mapping[str, Any]) -> str:
@@ -66,6 +70,7 @@ def publish_legacy_binding(
     """Build ownership metadata only inside an authorized legacy lifecycle."""
     manifest_path = Path(arguments["legacy_root"]) / "deploy-manifest.json"
     previous = None
+    reservation = None
     if os.path.lexists(manifest_path):
         if manifest_path.is_symlink() or not manifest_path.is_file():
             raise CommandOwnershipConflict("The legacy deploy manifest is not an owned file.")
@@ -82,6 +87,7 @@ def publish_legacy_binding(
         ):
             raise CommandOwnershipConflict("The legacy deploy manifest is not owned by this plugin.")
         previous = incumbent.get("commandBinding")
+        reservation = incumbent.get("commandLifecycle")
     source_arguments = {
         "payload_root": arguments["payload_root"],
         "plugin_id": arguments["plugin_id"],
@@ -111,6 +117,17 @@ def publish_legacy_binding(
             f"status={mode['status']}, reason={mode['reason']}."
         )
     receipt = _legacy_receipt(provenance, mode)
+    if reservation is not None and (
+        not isinstance(reservation, dict)
+        or type(reservation.get("version")) is not int
+        or reservation.get("version") != 1
+        or reservation.get("state") not in {"pending", "complete"}
+        or reservation.get("owner") != {
+            key: value for key, value in receipt.items() if key != "payloadRoot"
+        }
+        or set(reservation) != {"version", "state", "owner"}
+    ):
+        raise CommandOwnershipConflict("Runtime lifecycle reservation names another owner.")
     if previous is not None:
         expected_owner = {key: value for key, value in receipt.items() if key != "payloadRoot"}
         if (
@@ -139,17 +156,37 @@ def write_legacy_manifest(
         or "commandBinding" in manifest
     ):
         raise ValueError("The lifecycle must supply an unbound schema-3 plugin manifest.")
-    with primitive._DirectoryLock(
+    lifecycle = _load_lifecycle()
+    lease = lifecycle.borrowed_lease(_rules(), primitive, **arguments)
+    with (nullcontext(lease) if lease is not None else primitive._DirectoryLock(
         root / ".command-binding-publication.lock",
         kind="command-binding-publication", marketplace_id="legacy",
         plugin_id=arguments["plugin_id"],
-    ) as lock:
+    )) as lock:
         try:
             receipt = publish_legacy_binding(primitive, **arguments)
         except SourceProvenanceUnavailable as error:
+            if lease is not None:
+                manifest["commandLifecycle"] = {
+                    "version": 1, "state": "complete", "owner": lease.owner,
+                }
+            elif (root / "deploy-manifest.json").exists():
+                incumbent = primitive.read_json(root / "deploy-manifest.json")
+                if "commandLifecycle" in incumbent:
+                    owner = lifecycle._owner(_rules(), primitive, arguments)
+                    lifecycle._reservation(_rules(), primitive, root, owner)
+                    manifest["commandLifecycle"] = incumbent["commandLifecycle"]
             result = {"status": "unresolved", "reason": str(error)}
         else:
             manifest = {**manifest, "commandBinding": receipt}
+            if lease is not None:
+                manifest["commandLifecycle"] = {
+                    "version": 1, "state": "complete", "owner": lease.owner,
+                }
+            elif (root / "deploy-manifest.json").exists():
+                incumbent = primitive.read_json(root / "deploy-manifest.json")
+                if "commandLifecycle" in incumbent:
+                    manifest["commandLifecycle"] = incumbent["commandLifecycle"]
             result = {"status": "published", "reason": "ownership-validated"}
         primitive._atomic_write_json(root / "deploy-manifest.json", manifest, lock=lock)
         return result
@@ -257,6 +294,20 @@ def resolve_command_binding(
                 result.update(status="blocked", reason="legacy-manifest-invalid")
                 return result
             receipt = manifest.get("commandBinding")
+            lifecycle = manifest.get("commandLifecycle")
+            if lifecycle is not None and (
+                not isinstance(lifecycle, dict)
+                or type(lifecycle.get("version")) is not int
+                or lifecycle.get("version") != 1
+                or lifecycle.get("state") != "complete"
+                or lifecycle.get("owner") != {
+                    key: value for key, value in _legacy_receipt(provenance, mode).items()
+                    if key != "payloadRoot"
+                }
+                or set(lifecycle) != {"version", "state", "owner"}
+            ):
+                result.update(status="blocked", reason="legacy-lifecycle-incomplete")
+                return result
             if receipt is None:
                 result["reason"] = "legacy-ownership-missing"
                 return result
@@ -293,6 +344,30 @@ def _load_primitive(payload_root: Path) -> InstallationPrimitive:
     return module
 
 
+def _load_lifecycle() -> Any:
+    name = f"{__package__}._command_lifecycle" if __package__ else "_payload_command_lifecycle"
+    if name in sys.modules:
+        return sys.modules[name]
+    path = Path(__file__).with_name(
+        "_command_lifecycle.py" if __package__ else "command_lifecycle.py"
+    )
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"Cannot load lifecycle helper '{path}'.")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _rules() -> Any:
+    return SimpleNamespace(
+        publish_legacy_binding=publish_legacy_binding,
+        CommandOwnershipConflict=CommandOwnershipConflict,
+        SourceProvenanceUnavailable=SourceProvenanceUnavailable,
+    )
+
+
 def binding_for_payload(
     payload_root: Path, plugin_id: str, legacy_root: Path
 ) -> dict[str, Any]:
@@ -311,15 +386,24 @@ def main() -> int:
     parser.add_argument("--publish-legacy", action="store_true")
     parser.add_argument("--source-payload-root", type=Path)
     parser.add_argument("--write-manifest", action="store_true")
+    parser.add_argument("--run-lifecycle", action="store_true")
+    parser.add_argument("--check-lifecycle", action="store_true")
+    parser.add_argument("--deferred-runtime", action="store_true")
+    parser.add_argument("command", nargs=argparse.REMAINDER)
     arguments = parser.parse_args()
     if arguments.payload_root.resolve() != Path(__file__).resolve().parents[1]:
         parser.error("The requested payload does not own this binding helper.")
-    if arguments.source_payload_root is not None and not arguments.publish_legacy:
+    lifecycle_action = arguments.run_lifecycle or arguments.check_lifecycle
+    if sum((arguments.run_lifecycle, arguments.check_lifecycle, arguments.publish_legacy)) > 1:
+        parser.error("Specify only one lifecycle operation.")
+    if arguments.deferred_runtime and not arguments.run_lifecycle:
+        parser.error("--deferred-runtime requires --run-lifecycle.")
+    if arguments.source_payload_root is not None and not (arguments.publish_legacy or lifecycle_action):
         parser.error("--source-payload-root belongs to explicit lifecycle publication.")
     if arguments.write_manifest and not arguments.publish_legacy:
         parser.error("--write-manifest requires --publish-legacy.")
     try:
-        if arguments.publish_legacy:
+        if arguments.publish_legacy or lifecycle_action:
             source_payload = arguments.source_payload_root or arguments.payload_root
             publication_arguments = dict(
                 payload_root=source_payload, plugin_id=arguments.plugin_id,
@@ -327,7 +411,20 @@ def main() -> int:
                 environment={**os.environ, "COPILOT_PLUGIN_ROOT": str(source_payload)},
             )
             primitive = _load_primitive(arguments.payload_root)
-            if arguments.write_manifest:
+            if lifecycle_action:
+                lifecycle = _load_lifecycle()
+                if arguments.check_lifecycle:
+                    if lifecycle.borrowed_lease(_rules(), primitive, **publication_arguments) is None:
+                        raise CommandOwnershipConflict("Runtime lifecycle ticket is missing.")
+                    return 0
+                command = arguments.command
+                if command and command[0] == "--":
+                    command = command[1:]
+                return lifecycle.run_lifecycle(
+                    _rules(), primitive, command,
+                    deferred_runtime=arguments.deferred_runtime, **publication_arguments
+                )
+            elif arguments.write_manifest:
                 manifest = json.load(sys.stdin)
                 if not isinstance(manifest, dict):
                     raise ValueError("Lifecycle manifest input must be an object.")

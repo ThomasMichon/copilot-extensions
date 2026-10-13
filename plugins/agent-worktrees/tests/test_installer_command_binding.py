@@ -1,6 +1,7 @@
 """The Python lifecycle publishes ownership without replacing a foreign owner."""
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from typing import Any
@@ -102,3 +103,38 @@ def test_command_binding_python_cli_reports_refusal_without_traceback(
     assert "Deploy manifest publication refused" in output.out + output.err
     assert "Traceback" not in output.out + output.err
     assert manifest.read_bytes() == before
+
+
+def test_command_binding_python_install_admission_precedes_runtime_mutation(
+    owned_install: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+) -> None:
+    home, runtime = owned_install
+    monkeypatch.setattr(installer, "check_prereqs", lambda: [])
+    monkeypatch.setattr(installation_cli.worktree_identity, "_find_repo_dir", lambda: home)
+    monkeypatch.setattr(installation_cli.cfg, "project_name", lambda: "example")
+    monkeypatch.setattr(installation_cli.cfg, "machines_yaml_path", lambda root: home / "missing-machines.yaml")
+    mutations = []
+
+    def deploy(*args: Any) -> int:
+        mutations.append("deployed")
+        state = json.loads((runtime / "deploy-manifest.json").read_text())
+        assert state["commandLifecycle"]["state"] == "pending"
+        (runtime / "runtime-slot").write_text("example", encoding="utf-8")
+        installer.write_deploy_manifest(home, "example-host")
+        return 0
+
+    monkeypatch.setattr(installation_cli, "_install_project", deploy)
+    assert installation_cli.cmd_install(argparse.Namespace(machine="example-host")) == 0
+    assert mutations == ["deployed"]
+    before = {path.name: path.read_bytes() for path in runtime.iterdir() if path.is_file()}
+    (home / ".copilot/settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "example": {"source": {"source": "github", "repo": "Other/Plugins"}}
+        },
+    }), encoding="utf-8")
+    assert installation_cli.cmd_install(argparse.Namespace(machine="example-host")) == 1
+    assert mutations == ["deployed"]
+    assert {path.name: path.read_bytes() for path in runtime.iterdir() if path.is_file()} == before
+    captured = capsys.readouterr()
+    assert "Runtime installation refused" in captured.out + captured.err
+    assert "Traceback" not in captured.out + captured.err

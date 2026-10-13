@@ -62,9 +62,26 @@ deploy manifest, published by the Python, POSIX, and PowerShell installer
 boundaries. A payload path, display name, repository field, or old manifest
 without that record is not ownership. Publication refuses a conflicting
 incumbent. Validation and atomic manifest replacement share the installation
-primitive's token-owned lifecycle lock, so two publishers cannot both claim an
-unowned manifest. An unavailable source on an unowned legacy installation is reported
-without breaking its existing command.
+primitive's token-owned lifecycle lock. Legacy `stamp`, `provision`, `install`,
+and `update` acquire that lock and validate the incumbent before any shared
+runtime writes and hold it through activation and publication. Runtime-building
+actions reserve a
+`pending` lifecycle owner in the existing manifest. Partial failures retain
+the reservation and cannot produce a selected binding. Native children borrow
+only a matching live, same-host token whose source and runtime root are
+revalidated; environment-variable presence alone never admits mutation.
+Successful publication marks the reservation `complete`.
+Deferred `stamp` holds the same admission lock but neither reserves an
+unfinished runtime build nor publishes new selectable ownership. First-use
+`provision` performs the runtime-building transaction.
+
+An unavailable source on an unowned legacy installation is reported without
+breaking its existing command. An explicit install can still use the canonical
+legacy probe's missing-policy/default-false admission, under the same lock,
+but records only an unattributed mutation reservation and emits no selectable
+source binding. An explicit policy, conflicting source, or invalid incumbent
+cannot use that compatibility path. Namespaced native installers retain their
+separate schema-3 manifest writer; they never publish legacy ownership.
 
 Namespaced selection validates the active install receipt, exact payload,
 source fingerprint, and governance, and carries install/activation generations.
