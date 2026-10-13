@@ -219,10 +219,12 @@ def test_redaction(telemetry_env):
         "fine-grained " + fine,
         "https://user:" + "pa55" + "word@example.com/repo.git",
         "https://" + "t0kenONLY" + "value@example.com/repo.git",
+        "Ba" + "sic " + "YTpi",
     ]
     redacted = [ut.redact(t) for t in texts]
     leaked = [r for r in redacted if "s3cr3tVALUE" in r or "Q" * 20 in r or "Z" * 20 in r
-              or "abcDEF123456789xyz" in r or "pa55word" in r or "t0kenONLY" in r]
+              or "abcDEF123456789xyz" in r or "pa55word" in r or "t0kenONLY" in r
+              or "YTpi" in r]
     assert not leaked
     assert ut.redact("https://example.com/a@b") == "https://example.com/a@b"
     assert ut.redact("plain message") == "plain message"

@@ -14,7 +14,9 @@ _SCHEMES = "|".join(("bea" + "rer", "ba" + "sic"))
 _RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?i)(http\.extraheader\s*=)[^\r\n]*"), r"\1" + MASK),
     (re.compile(r"(?i)(authorization\s*:)[^\r\n]*"), r"\1 " + MASK),
-    (re.compile(r"(?i)\b(" + _SCHEMES + r")(\s+)[A-Za-z0-9._~+/=-]{12,}"), r"\1\2" + MASK),
+    # Full RFC 7235 token68 with no minimum length: short valid credentials
+    # (e.g. Base64 of a one-letter user and password) are credentials too.
+    (re.compile(r"(?i)\b(" + _SCHEMES + r")(\s+)[A-Za-z0-9._~+/-]+=*"), r"\1\2" + MASK),
     (re.compile(r"gh[pousr]_\w{20,}"), MASK),
     (re.compile(r"github_pat_\w{20,}"), MASK),
     # Any URL userinfo (``user:password@`` or a token-only ``token@``).
