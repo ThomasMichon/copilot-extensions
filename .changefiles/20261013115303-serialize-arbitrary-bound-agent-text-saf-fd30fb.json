@@ -1,0 +1,9 @@
+{
+  "comment": "Serialize arbitrary bound-agent text safely and add fenced, record-scoped doctor repair for legacy unquoted text.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

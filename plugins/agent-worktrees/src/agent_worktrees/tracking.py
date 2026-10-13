@@ -2869,7 +2869,7 @@ def _save_record_unlocked(
     # agent-bridge-worktree-native-agents: the bound charter. Emitted only
     # when set, so an unbound worktree's YAML stays byte-identical.
     if record.bound_agent:
-        content += f"bound_agent: {_yaml_scalar(record.bound_agent)}\n"
+        content += yaml.safe_dump({"bound_agent": record.bound_agent}, sort_keys=False)
     if record.pending_seed:
         # yaml.safe_dump (not the hand-rolled _yaml_scalar, which only
         # quotes a leading reserved-indicator char) so arbitrary, possibly
