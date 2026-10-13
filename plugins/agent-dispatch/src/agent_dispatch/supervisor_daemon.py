@@ -464,6 +464,8 @@ class SupervisorDaemon(BoundedReconciliation):
             for rid, registration in desired.items()
             if registration.get("kind") == RegistrationKind.PLUGIN_COMPANION
         }
+        if callable(getattr(self._companion(), "request_receipt_inventory", None)):
+            self._prime_receipt_inventory(present | set(self._units))
         for rid in set(self._last_companion_desired) - present:
             self._last_companion_desired.pop(rid, None)
         for rid in present:
@@ -541,7 +543,7 @@ class SupervisorDaemon(BoundedReconciliation):
         }
         self._phase("receipts")
         try:
-            adopted = set(current) | managed_companions | self._managed_uncertain
+            adopted = set(current) | managed_companions | (self._managed_uncertain & present)
             self._reconcile_companion_receipts(adopted)
         except (CompanionError, CompanionIndeterminate, OSError) as exc:
             log.warning("companion receipt reconciliation is incomplete: %s", exc)
@@ -1675,6 +1677,7 @@ class SupervisorDaemon(BoundedReconciliation):
         summary = ReconcileSummary()
         reconcile_deadline = time.monotonic() + self._reconcile_call_budget
         self._reconcile_deadline = reconcile_deadline
+        self._reconcile_token = object()
         self._phase("discovery")
         desired = self._desired()
         self._phase("units")
@@ -1910,10 +1913,6 @@ class SupervisorDaemon(BoundedReconciliation):
         # so it is only ever drained here, best-effort -- reflected in this
         # method's own return value rather than a reason to defer
         # self-update.
-        self._prune_probe_inflight()
-        pending = set(self._managed_runtime_inflight) | self._probe_inflight
-        if self._managed_cleanup_future is not None:
-            pending.add(self._managed_cleanup_future)
         # Idempotent re-entry: a future already covered by a prior grace
         # wait (e.g. serve()'s finally re-calling shutdown() after
         # _maybe_self_update already did, during the same handoff) is not
@@ -1921,11 +1920,7 @@ class SupervisorDaemon(BoundedReconciliation):
         # earlier shutdown() call) can still change the drained verdict, so
         # re-waiting on the same still-stuck one twice would just double
         # the delay for no new information.
-        new_pending = pending - self._shutdown_waited_futures
-        if new_pending:
-            _done, not_done = _wait_futures(new_pending, timeout=_SHUTDOWN_GRACE_SECONDS)
-            self._shutdown_drained = self._shutdown_drained and not not_done
-        self._shutdown_waited_futures |= pending
+        self._drain_tracked_futures(_SHUTDOWN_GRACE_SECONDS)
         if self._retired_runtime_executors:
             # Sweep any executor a previous failed self-update handoff
             # retired rather than silently discarded -- their own futures
@@ -2001,20 +1996,26 @@ class SupervisorDaemon(BoundedReconciliation):
                 target,
             )
             return False
-        # Every reconcile tick already runs to completion before the next one
-        # starts, so this is always a safe cutover point (unlike the
-        # coordinator, there is no in-flight request to drain). Wind down
-        # every managed unit and release the singleton lease *before* spawning
-        # the successor, so its own `acquire_singleton()` never races this
-        # daemon's still-held lock.
+        # Wind down units before releasing the singleton. Optional status I/O
+        # must also finish before an inline successor can own the same file.
         try:
             native_unit = native_restart_unit()
         except NativeOwnershipUnconfirmed as exc:
             log.warning("supervisor self-update deferred: %s", exc)
             return False
-        self._self_update_last_spawn = now
         daemon_audit(self, "handoff", "new-slot-selected")
         drained = self.shutdown()
+        if (
+            native_unit is None and self._progress_future is not None
+            and not self._progress_future.done()
+        ):
+            daemon_audit(self, "handoff", "status-publication-pending", outcome="deferred")
+            log.warning(
+                "supervisor self-update deferred: prior status publication "
+                "still owns its generation; retaining singleton"
+            )
+            return False
+        self._self_update_last_spawn = now
         self.release_singleton()
         if native_unit is not None:
             request_native_restart(self, native_unit)

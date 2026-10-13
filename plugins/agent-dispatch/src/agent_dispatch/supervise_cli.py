@@ -81,7 +81,7 @@ def _write_supervisor_runtime_status(scope: str, summary: Any) -> None:
     # last cycle's own duration, not just "when did anything last happen."
     previous, _err = _read_supervisor_runtime_status(scope)
     payload = {
-        "updated_at": time.time(),
+        "updated_at": getattr(summary, "completed_at", time.time()),
         "cycle_started_at": (previous or {}).get("cycle_started_at"),
         "cycle_id": (previous or {}).get("cycle_id"),
         "generation": (previous or {}).get("generation"),
@@ -510,17 +510,14 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
         )
 
         def _on_cycle_start(cycle_id: int, started_at: float) -> None:
-            _write_supervisor_cycle_start(
-                supervisor_lease_scope(machine, env),
-                cycle_id,
-                started_at,
-            )
+            daemon.queue_cycle_start(cycle_id, started_at, lambda cycle, timestamp: _write_supervisor_cycle_start(
+                supervisor_lease_scope(machine, env), cycle, timestamp,
+            ))
 
         def _on_cycle(summary) -> None:
-            _write_supervisor_runtime_status(
-                supervisor_lease_scope(machine, env),
-                summary,
-            )
+            daemon.queue_final_status(summary, lambda completed: _write_supervisor_runtime_status(
+                supervisor_lease_scope(machine, env), completed,
+            ))
             changed = summary.started or summary.stopped or summary.restarted or summary.revived
             if changed:
                 print(

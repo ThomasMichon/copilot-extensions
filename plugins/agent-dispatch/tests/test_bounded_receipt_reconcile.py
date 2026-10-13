@@ -66,6 +66,9 @@ def test_receipt_integrity_pending_does_not_block_unrelated_units(tmp_path, monk
         print(f"pending-receipt cycle elapsed={elapsed:.3f}s")
         assert elapsed < 0.5
         assert controller._receipt_operations["withdrawn"] is future
+        inventory = controller._receipt_inventory_future
+        if inventory is not None:
+            inventory.result(timeout=1)
         assert controller._operation_record("withdrawn")["state"] == "timeout"
         assert controller._receipt_path("withdrawn").exists()
         assert len(launcher.launched) == 1
@@ -208,8 +211,15 @@ def test_owner_identity_probe_uses_shared_deadline_and_shutdown_accounting(tmp_p
         print(f"owner identity shared-budget cycle elapsed={elapsed:.3f}s")
         assert elapsed < 0.5
         assert entered.wait(1)
+        deadline = time.monotonic() + 1
+        while controller._receipt_owner_future is None and time.monotonic() < deadline:
+            time.sleep(0.001)
         future = controller._receipt_owner_future
-        assert future in daemon._probe_inflight
+        assert future is not None
+        assert (
+            future in daemon._probe_inflight
+            or controller._receipt_inventory_future in daemon._probe_inflight
+        )
         daemon.reconcile_once()
         assert controller._receipt_owner_future is future
         assert calls == [(os.getpid(), calls[0][1])]
@@ -249,10 +259,14 @@ def test_partial_receipt_schedule_failure_still_accounts_every_running_mutation(
         assert all(event.wait(1) for event in entered.values())
         running = tuple(controller._receipt_operations.values())
         assert len(running) == 2
-        assert set(running) <= daemon._probe_inflight
+        assert (
+            set(running) <= daemon._probe_inflight
+            or controller._receipt_inventory_future in daemon._probe_inflight
+        )
         assert all(not future.done() for future in running)
         started = time.monotonic()
         assert daemon.shutdown() is False
+        assert set(running) <= daemon._probe_inflight
         elapsed = time.monotonic() - started
         print(f"partial-schedule failed drain elapsed={elapsed:.3f}s")
         assert elapsed < 0.5
@@ -290,11 +304,17 @@ def test_completed_owner_probe_failure_can_retry_in_same_daemon(tmp_path, monkey
     )
     try:
         assert daemon.reconcile_once().started == ["unrelated"]
+        if controller._receipt_inventory_future is not None:
+            with pytest.raises((OSError, CompanionIndeterminate)):
+                controller._receipt_inventory_future.result(2)
         assert controller._receipt_owner_future is None
         assert controller._receipt_owner_identity is None
         assert controller._receipt_operations == {}
         assert controller._read_receipt("withdrawn") is not None
         assert daemon.reconcile_once().running == ["unrelated"]
+        assert daemon.reconcile_once().running == ["unrelated"]
+        if controller._receipt_inventory_future is not None:
+            controller._receipt_inventory_future.result(2)
         controller._receipt_operations["withdrawn"].result(2)
         assert controller._receipt_owner_future is None
         assert controller._receipt_owner_identity == (os.getpid(), "owner")
@@ -471,6 +491,7 @@ def test_status_io_failure_cannot_abort_desired_work(tmp_path, monkeypatch, capl
         assert daemon.reconcile_once().started == ["unrelated"]
         client.set_regs([_reg("unrelated", machine="host"), _reg("another", machine="host")])
         assert daemon.reconcile_once().started == ["another"]
+        daemon._progress_future.result(2)
         assert daemon._reconcile_deadline is None
         warnings = [
             record.getMessage() for record in caplog.records
@@ -502,6 +523,7 @@ def test_completion_progress_failure_cannot_hide_completed_mutation(caplog):
         assert summary.progress["phase"] == "complete"
         assert daemon._reconcile_deadline is None
         assert daemon.reconcile_once().started == []
+        daemon._progress_future.result(2)
         assert len(daemon.launcher.launched) == 1
         assert "publication-unavailable" in caplog.text
         assert "sensitive observation contents" not in caplog.text
@@ -527,7 +549,8 @@ def test_receipt_progress_failure_is_unknown_observation_not_control_failure(cap
         summary = daemon.reconcile_once()
         assert summary.started == ["unrelated"]
         assert summary.progress["receipt_operations"] is None
-        assert summary.progress["observation_error"] == "receipt-progress-unavailable"
+        daemon._progress_future.result(2)
+        assert daemon.progress_snapshot()["observation_error"] == "receipt-progress-unavailable"
         assert all(item["receipt_operations"] is None for item in observations)
         warnings = [
             record.getMessage() for record in caplog.records

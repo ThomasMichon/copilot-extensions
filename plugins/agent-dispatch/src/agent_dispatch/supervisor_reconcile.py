@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import logging
 import time
+import threading
 from collections.abc import Callable
 from concurrent.futures import Executor, ThreadPoolExecutor, TimeoutError
 from typing import Any
@@ -19,10 +20,22 @@ class BoundedReconciliation:
 
     def _init_bounded_reconciliation(self) -> None:
         self._reconcile_deadline = None
+        self._reconcile_token = None
         self._receipt_reconcile_future = None
         self._receipt_executor = None
         self._read_executor = None
         self._publication_executor = None
+        self._provider_executor = None
+        self._inventory_executor = None
+        self._progress_executor = None
+        self._progress_future = None
+        self._progress_worker_active = False
+        self._progress_latest = None
+        self._progress_cache = None
+        self._status_callback = None
+        self._status_latest = None
+        self._status_start_latest = None
+        self._progress_lock = threading.Lock()
         self._retired_bounded_executors = []
         self._declaration_publisher = None
         self._resolution_futures = {}
@@ -37,7 +50,10 @@ class BoundedReconciliation:
             retired.shutdown(wait=False, cancel_futures=True)
         if not any(not future.done() for future in self._probe_inflight):
             self._retired_bounded_executors.clear()
-        for field in ("_receipt_executor", "_read_executor", "_publication_executor"):
+        for field in (
+            "_receipt_executor", "_read_executor", "_publication_executor",
+            "_provider_executor", "_inventory_executor", "_progress_executor",
+        ):
             pool = getattr(self, field)
             if pool is not None:
                 pool.shutdown(wait=False, cancel_futures=True)
@@ -47,11 +63,89 @@ class BoundedReconciliation:
 
     def _phase(self, phase: str) -> None:
         self._phase_name = phase
-        if self._progress_callback is not None:
+        with self._progress_lock:
+            self._progress_latest = {
+                "phase": phase, "observed_at": self.clock(), "cycle_id": self._cycle_count,
+            }
+        self._start_progress_worker()
+
+    def _start_progress_worker(self) -> None:
+        with self._progress_lock:
+            previous = self._progress_future
+            if self._progress_worker_active:
+                if previous is None or not previous.done():
+                    return
+                self._progress_worker_active = False
+            if previous is not None and previous.done() and not previous.cancelled():
+                previous.result()
+            if self._progress_executor is None:
+                self._progress_executor = ThreadPoolExecutor(
+                    max_workers=1, thread_name_prefix="dispatch-progress",
+                )
+            self._progress_worker_active = True
             try:
-                self._progress_callback(self.progress_snapshot())
+                self._progress_future = self._progress_executor.submit(self._publish_progress)
+            except RuntimeError:
+                self._progress_worker_active = False
+                raise
+            self._probe_inflight.add(self._progress_future)
+
+    def queue_final_status(self, summary, callback: Callable) -> None:
+        summary.completed_at = self.clock()
+        with self._progress_lock:
+            self._status_latest = (summary, callback, self._cycle_count)
+            self._progress_latest = {
+                "phase": "complete", "observed_at": summary.completed_at,
+                "cycle_id": self._cycle_count,
+            }
+        self._start_progress_worker()
+
+    def queue_cycle_start(self, cycle_id: int, started_at: float, callback: Callable) -> None:
+        with self._progress_lock:
+            self._status_start_latest = (cycle_id, started_at, callback)
+            self._progress_latest = {"phase": "starting", "observed_at": started_at, "cycle_id": cycle_id}
+        self._start_progress_worker()
+
+    def _publish_progress(self) -> None:
+        while True:
+            with self._progress_lock:
+                snapshot = self._progress_latest
+                if snapshot is None:
+                    self._progress_worker_active = False
+                    return
+                self._progress_latest = None
+                status = self._status_latest
+                self._status_latest = None
+                start = self._status_start_latest
+                self._status_start_latest = None
+            if start is not None:
+                try:
+                    cycle_id, started_at, callback = start
+                    callback(cycle_id, started_at)
+                except (OSError, ValueError, TypeError, RuntimeError) as exc:
+                    self._warn_progress_failure("publication-unavailable", exc)
+            try:
+                controller = self._companion_controller
+                operations = getattr(controller, "receipt_operation_progress", None)
+                if controller is None:
+                    snapshot.update(receipt_operations=None, observation_error="receipt-progress-pending")
+                else:
+                    snapshot["receipt_operations"] = operations() if callable(operations) else []
             except (OSError, ValueError, TypeError, RuntimeError) as exc:
-                self._warn_progress_failure("publication-unavailable", exc)
+                self._warn_progress_failure("receipt-progress-unavailable", exc)
+                snapshot.update(receipt_operations=None, observation_error="receipt-progress-unavailable")
+            self._progress_cache = snapshot
+            if self._progress_callback is not None:
+                try:
+                    self._progress_callback(snapshot)
+                except (OSError, ValueError, TypeError, RuntimeError) as exc:
+                    self._warn_progress_failure("publication-unavailable", exc)
+            if status is not None and status[2] == snapshot["cycle_id"]:
+                try:
+                    summary, callback, _cycle_id = status
+                    callback(summary)
+                except (OSError, ValueError, TypeError, RuntimeError) as exc:
+                    self._warn_progress_failure("publication-unavailable", exc)
 
     def _warn_progress_failure(self, reason: str, exc: Exception) -> None:
         now = time.monotonic()
@@ -73,13 +167,50 @@ class BoundedReconciliation:
             "phase": self._phase_name, "observed_at": self.clock(),
             "cycle_id": self._cycle_count,
         }
-        try:
-            operations = getattr(self._companion(), "receipt_operation_progress", None)
-            snapshot["receipt_operations"] = operations() if callable(operations) else []
-        except (OSError, ValueError, TypeError, RuntimeError) as exc:
-            self._warn_progress_failure("receipt-progress-unavailable", exc)
-            snapshot.update(receipt_operations=None, observation_error="receipt-progress-unavailable")
+        cached = self._progress_cache
+        if cached is not None and cached["cycle_id"] == self._cycle_count:
+            snapshot.update({key: cached[key] for key in ("receipt_operations", "observation_error") if key in cached})
+            snapshot["receipt_observed_at"] = cached["observed_at"]
+        else:
+            snapshot.update(receipt_operations=None, observation_error="receipt-progress-pending")
         return snapshot
+
+    def _provider_pool(self) -> Executor:
+        if self._provider_executor is None:
+            self._provider_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="dispatch-provider")
+        return self._provider_executor
+
+    def _inventory_pool(self) -> Executor:
+        if self._inventory_executor is None:
+            self._inventory_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dispatch-inventory")
+        return self._inventory_executor
+
+    def _prime_receipt_inventory(self, adopted: set[str]) -> None:
+        try:
+            self._reconcile_companion_receipts(adopted)
+        except (OSError, ValueError, RuntimeError) as exc:
+            log.warning("receipt inventory unavailable: error_type=%s", type(exc).__name__)
+
+    def _drain_tracked_futures(self, timeout: float) -> None:
+        from .supervisor_daemon import _wait_futures
+
+        deadline = time.monotonic() + timeout
+        while True:
+            inventory = getattr(self._companion(), "receipt_futures", None)
+            if callable(inventory):
+                self._probe_inflight.update(inventory())
+            self._prune_probe_inflight()
+            pending = set(self._managed_runtime_inflight) | self._probe_inflight
+            if self._managed_cleanup_future is not None:
+                pending.add(self._managed_cleanup_future)
+            unseen = pending - self._shutdown_waited_futures
+            if not unseen:
+                return
+            _, not_done = _wait_futures(unseen, timeout=max(0.0, deadline - time.monotonic()))
+            self._shutdown_waited_futures.update(pending)
+            self._shutdown_drained = self._shutdown_drained and not not_done
+            if not_done:
+                return
 
     def _publish_declarations(self, registrations: list[dict]) -> set[str]:
         from .supervisor_daemon_registration_publish import BoundedDeclarationPublisher
@@ -142,7 +273,7 @@ class BoundedReconciliation:
             entry = None
         if entry is None:
             captured = copy.deepcopy(registration)
-            future = self._read_pool().submit(lambda: self._companion().resolve(
+            future = self._provider_pool().submit(lambda: self._companion().resolve(
                 captured, machine=self.machine, env=self.env,
             ))
             self._probe_inflight.add(future)
@@ -159,6 +290,18 @@ class BoundedReconciliation:
 
     def _reconcile_companion_receipts(self, adopted: set[str]) -> None:
         controller = self._companion()
+        inventory = getattr(controller, "request_receipt_inventory", None)
+        if callable(inventory):
+            try:
+                self._managed_uncertain.update(inventory(
+                    adopted, inventory_executor=self._inventory_pool(), executor=self._receipt_pool(),
+                    deadline=self._reconcile_deadline or time.monotonic(),
+                    operation_budget=self._reconcile_call_budget,
+                    cycle_tag=self._reconcile_token,
+                ))
+            finally:
+                self._probe_inflight.update(controller.receipt_futures())
+            return
         bounded = getattr(controller, "reconcile_receipts_bounded", None)
         if callable(bounded):
             try:

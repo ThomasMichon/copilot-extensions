@@ -25,10 +25,47 @@ class ReceiptReconciliation:
         self._receipt_state_lock = threading.RLock()
         self._receipt_owner_future: Future | None = None
         self._receipt_owner_identity: tuple[int, str] | None = None
+        self._receipt_inventory_future: Future | None = None
+        self._receipt_inventory_blocked: set[str] = set()
+        self._receipt_inventory_tag = None
 
     def receipt_futures(self) -> tuple[Future, ...]:
         return tuple(self._receipt_operations.values()) + (
             (self._receipt_owner_future,) if self._receipt_owner_future is not None else ()
+        ) + ((self._receipt_inventory_future,) if self._receipt_inventory_future is not None else ())
+
+    def request_receipt_inventory(
+        self, adopted: set[str], *, inventory_executor: Executor, executor: Executor,
+        deadline: float, operation_budget: float, cycle_tag=None,
+    ) -> set[str]:
+        self._receipt_adopted = set(adopted)
+        tag = cycle_tag if cycle_tag is not None else deadline
+        if self._receipt_inventory_future is None and self._receipt_inventory_tag != tag:
+            self._receipt_inventory_tag = tag
+            self._receipt_inventory_future = inventory_executor.submit(
+                self._inventory_snapshot, executor, operation_budget,
+            )
+        future = self._receipt_inventory_future
+        if future is None:
+            return self._receipt_inventory_blocked | set(self._receipt_operations)
+        if not future.done():
+            return self._receipt_inventory_blocked | set(self._receipt_operations)
+        try:
+            blocked = future.result()
+        except TimeoutError:
+            if future.done():
+                raise
+        else:
+            self._receipt_inventory_blocked = blocked
+        finally:
+            if future.done():
+                self._receipt_inventory_future = None
+        return self._receipt_inventory_blocked | set(self._receipt_operations)
+
+    def _inventory_snapshot(self, executor: Executor, budget: float) -> set[str]:
+        return self.reconcile_receipts_bounded(
+            self._receipt_adopted, executor=executor,
+            deadline=self.monotonic() + budget, _inventory=True,
         )
 
     def _receipt_owner_token(self, executor: Executor, deadline: float) -> str | None:
@@ -173,10 +210,11 @@ class ReceiptReconciliation:
         return progress
 
     def reconcile_receipts_bounded(
-        self, adopted_registration_ids: set[str], *, executor: Executor, deadline: float
+        self, adopted_registration_ids: set[str], *, executor: Executor, deadline: float,
+        _inventory: bool = False,
     ) -> set[str]:
         """One tracked operation per receipt; restart reads back rather than replays."""
-        with self._receipt_state_lock:
+        if not _inventory:
             self._receipt_adopted = set(adopted_registration_ids)
         if not self.receipt_dir.exists():
             return set()
@@ -224,7 +262,7 @@ class ReceiptReconciliation:
                                 **latest, "state": "timeout", "observed_at": time.time(),
                             })
                 continue
-            if rid in adopted_registration_ids:
+            if rid in (self._receipt_adopted if _inventory else adopted_registration_ids):
                 continue
             if len(self._receipt_operations) >= 2 or self.monotonic() >= deadline:
                 continue

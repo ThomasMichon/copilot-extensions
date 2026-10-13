@@ -12,6 +12,15 @@ registration reads and companion provider resolution. Pending reads retain the
 last confirmed desired state; unfinished providers cannot supply new launch
 authority. Receipt integrity runs in a separate two-worker pool, so a contended
 root lock or slow tree hash cannot occupy every health/runtime worker.
+Receipt inventory, including receipt/selection/operation metadata reads, runs on
+its own single-worker executor. The master consumes only completed results and
+keeps the latest adopted set authoritative while an inventory is in flight.
+Pending inventory is tracked alongside the operations it schedules; shutdown
+refreshes child futures after an inventory finishes within the same grace budget.
+Unknown orphan operations are fences, not newly adopted units.
+Companion providers have a separate four-worker pool from authoritative
+declaration/registration discovery, so four long-running valid providers cannot
+hide unrelated additions or removals.
 Declaration conversion runs inside the discovery future. Coordinator mirroring
 uses one tracked publication batch on a separate single-worker pool: a slow
 register/remove cannot hold the master, and the batch checks its deadline
@@ -69,6 +78,17 @@ rules. The observer uses only finite, non-future progress timestamps from the
 current cycle and matching generation; a fresh phase can distinguish an advancing
 slow cycle from a wedge. A superseded writer cannot overwrite another generation's
 progress. These observations still confer no recovery authority.
+Collection and filesystem publication are also off the master: one tracked
+progress worker coalesces the latest phase/cycle-start/final-status frames instead
+of accumulating a backlog behind a blocked status volume. Final summaries use
+completed cached observations or an explicit pending/unknown marker. Cycle-start
+and final-status I/O share this worker, and completion timestamps are captured by
+the master rather than refreshed by delayed publication.
+The idle-worker handoff is atomic with producer admission, so a frame arriving
+as the worker finishes is not lost. A coalesced final summary from a superseded
+cycle cannot be written under the newer cycle's start marker. An inline update
+retains the singleton while old-generation status I/O is unresolved, without
+arming spawn cooldown for that deferral; it may hand off once publication settles.
 Independent watchdog invocation,
 custody/recovery and native platform proof remain integration gates of the
 existing #5301/#5655 owners. This slice neither implements a second watchdog nor

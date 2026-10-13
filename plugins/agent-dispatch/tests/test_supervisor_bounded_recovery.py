@@ -57,9 +57,10 @@ def test_final_snapshot_data_state_failure_cannot_hide_mutation(error, caplog):
     )
     try:
         summary = daemon.reconcile_once()
+        daemon._progress_future.result(2)
         assert summary.started == ["unit"]
         assert summary.progress["receipt_operations"] is None
-        assert summary.progress["observation_error"] == "receipt-progress-unavailable"
+        assert daemon.progress_snapshot()["observation_error"] == "receipt-progress-unavailable"
         assert "private detail" not in caplog.text
     finally:
         daemon.shutdown()
@@ -110,7 +111,13 @@ def test_declaration_publication_is_bounded_and_does_not_duplicate_pending_write
         started = time.monotonic()
         assert daemon.reconcile_once().started == ["declared:one"]
         assert time.monotonic() - started < 0.5
-        assert entered.wait(1)
+        deadline = time.monotonic() + 1
+        while not entered.is_set() and time.monotonic() < deadline:
+            cycle_started = time.monotonic()
+            daemon.reconcile_once()
+            assert time.monotonic() - cycle_started < 0.5
+            entered.wait(0.01)
+        assert entered.is_set()
         daemon.reconcile_once()
         assert client.writes == ["declared:one"]
         assert any(not future.done() for future in daemon._probe_inflight)

@@ -392,3 +392,25 @@ requested contract.
 - Adjacent loop, resource, declaration and registrar contracts pass 350 tests.
   This is source evidence, not release or deployment; adoption remains gated on
   the reviewed promoted contract and actual consumer readiness.
+
+### 2026-10-13 - Remaining master blocking boundaries
+
+- Continued the preserved implementation after an interrupted worker rather than
+  creating a competing source branch. Optional status collection/publication,
+  receipt inventory and provider resolution now use independently tracked
+  bounded workers; four slow providers cannot occupy authoritative discovery.
+- Receipt inventory and its child operations remain in shutdown custody. Pending
+  mutation outcomes are not replayed, and adopted registrations remain fenced
+  while inventory is delayed. Observer errors remain explicit and confer no
+  recovery authority.
+- Two deterministic regressions failed before correcting an idle-return producer
+  race and old-summary/new-cycle coalescing. A third failed before fixing inline
+  singleton release while a prior-generation status writer was still running.
+  Inline handoff now defers without spawn cooldown until publication settles.
+- Updated asynchronous fixtures to observe actual tracked completion instead of
+  assuming metadata publication or worker submission happens before a master
+  return. Master latency bounds and single pending-write assertions remain.
+- Final affected supervisor lifecycle, CLI, health, receipt and publication
+  coverage passes 164 tests. Fatal lint, module ceilings, install contract and
+  whitespace checks pass. This remains source validation, not deployment or
+  independent native watchdog custody.
