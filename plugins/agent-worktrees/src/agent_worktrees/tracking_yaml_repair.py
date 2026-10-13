@@ -53,6 +53,9 @@ def repair_bound_agent(raw: str, end_field: str) -> str | None:
         or boundary.start() < header.end()
     ):
         return None
+    tail_headers = "|".join(re.escape(field) for field in _AGENT_TAIL_FIELDS)
+    if re.search(rf"(?m)^(?:{tail_headers}):", raw[header.end():boundary.start()]):
+        return None
     prefix, suffix = raw[:header.start()], raw[boundary.start():]
     try:
         before, after = strict_mapping(prefix), strict_mapping(suffix)

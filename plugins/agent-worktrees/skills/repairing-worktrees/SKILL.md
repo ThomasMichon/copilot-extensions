@@ -75,8 +75,9 @@ or garbage collection. Add `--fix` only after reviewing the result.
 Legacy unquoted multiline `bound_agent` text additionally requires an explicit
 boundary: inspect the record, identify the first real field after that text,
 then use `doctor --repair-record <id> --bound-agent-end-field pair_id --json`
-(replace `pair_id` with the actual following field). A missing, repeated or
-unverifiable boundary refuses; no field boundary is guessed. The repair quotes
+(replace `pair_id` with the actual following field). A missing, repeated,
+unverifiable or later-than-first known field boundary refuses; no field boundary
+is guessed. The repair quotes
 only the delimited text, preserves surrounding fields, holds native record and
 publication-authority locks, and retains the exact original bytes in a
 content-addressed `.yaml.repair-<digest>.bak` beside the record. Contention or

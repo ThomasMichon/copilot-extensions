@@ -74,6 +74,8 @@ def test_legacy_repair_preserves_exact_agent_text_and_surrounding_fields():
 
 @pytest.mark.parametrize("raw,boundary", [
     (_RAW, "status"),
+    (_RAW, "sessions"),
+    (_RAW, "codename"),
     (_RAW.replace("pair_id:", "foreign:"), "pair_id"),
     (_RAW.replace("Loop:", "pair_id: duplicated\nLoop:"), "pair_id"),
     (_RAW + "sessions: [foreign]\n", "pair_id"),
@@ -120,6 +122,26 @@ def test_targeted_repair_refuses_unsafe_requests(record_dir, capsys, changes):
     assert repair.targeted_doctor(args(fix=True, **changes)) == 1
     assert json.loads(capsys.readouterr().out)["error"]
     assert path.read_bytes() == before
+
+
+def test_later_boundary_cannot_remove_pr_authority(record_dir, capsys):
+    root, path = record_dir
+    raw = _PREFIX + "bound_agent: " + _TEXT + "\n" + (
+        "prs:\n- pr_id: original-pr\n  number: 42\n  state: open\n"
+        "  branch: pr/original-agent\nsessions: []\n"
+    )
+    path.write_bytes(raw.encode())
+    assert repair.targeted_doctor(args(fix=True, bound_agent_end_field="sessions")) == 1
+    assert json.loads(capsys.readouterr().out)["error"]
+    assert path.read_bytes() == raw.encode() and not list(root.glob("*.bak"))
+    assert repair.targeted_doctor(args(fix=True, bound_agent_end_field="prs")) == 0
+    assert json.loads(capsys.readouterr().out)["repaired"]
+    data = repair.strict_mapping(path.read_text())
+    assert data["bound_agent"] == _TEXT
+    assert data["prs"] == [{
+        "pr_id": "original-pr", "number": 42, "state": "open", "branch": "pr/original-agent",
+    }]
+    assert data["sessions"] == []
 
 
 def test_changed_record_refuses_before_backup_or_write(record_dir):
