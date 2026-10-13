@@ -19,6 +19,7 @@ from agent_procutil.metrics import (
 )
 
 from .reader_command import OwnedReaderCommand
+from .reader_collector import CollectorLedger, CollectorSource
 from .telemetry import emit
 
 log = logging.getLogger("agent-bridge")
@@ -59,7 +60,8 @@ class ReaderCpuObservation:
         self._sample_holder: asyncio.Task[CpuObservation] | None = None
         self._sample_completed: Future[float] | None = None
         self._next_sample_at = 0.0
-        self._last_accounted: tuple[str, int] | None = None
+        self._collector = CollectorLedger()
+        self._collector_source: tuple[OwnedProcessCpuSampler, CollectorSource] | None = None
 
     @property
     def pending_sample_future(self) -> Future[CpuObservation] | None:
@@ -84,6 +86,7 @@ class ReaderCpuObservation:
         root: ProcessIdentity,
         task: asyncio.Task[CpuObservation],
         completed: Future[float],
+        source: CollectorSource,
     ) -> None:
         def record(future: object) -> None:
             if not completed.done():
@@ -91,11 +94,10 @@ class ReaderCpuObservation:
 
         def track_accounting(accounting: Future[SampleAccounting]) -> None:
             def accounted(future: Future[SampleAccounting]) -> None:
-                record(future)
                 sample = future.result()
-                key = (sample.instance, sample.sequence)
-                if key != self._last_accounted:
-                    self._last_accounted = key
+                snapshot = source.complete(sample)
+                record(future)
+                if snapshot is not None:
                     emit(
                         {
                             "kind": "event",
@@ -107,6 +109,7 @@ class ReaderCpuObservation:
                             "pid": root.pid,
                             "created_at": root.created_at,
                             "sample": _accounting_fields(sample),
+                            "collector": snapshot.fields(),
                         }
                     )
 
@@ -134,6 +137,9 @@ class ReaderCpuObservation:
         *,
         final: bool = False,
     ) -> tuple[CpuObservation | None, CpuIssue | None]:
+        if self._collector_source is None or self._collector_source[0] is not sampler:
+            self._collector_source = (sampler, self._collector.source())
+        source = self._collector_source[1]
         holder = self._sample_holder
         if holder is None:
             if not self._refresh_sample_completion():
@@ -151,7 +157,7 @@ class ReaderCpuObservation:
             try:
                 await asyncio.sleep(0)
             finally:
-                self._track_sample_completion(sampler, root, holder, completed)
+                self._track_sample_completion(sampler, root, holder, completed, source)
         elif not holder.done() and not final:
             return previous, CpuIssue(root.pid, "sample_pending")
         try:
@@ -247,6 +253,7 @@ class ReaderCpuObservation:
                         }
                         if observation is not None and observation.sample is not None else None
                     ),
+                    "collector": self._collector.snapshot.fields(),
                     "coverage": "observed_lower_bound",
                     "truncated": (observation.truncated if observation is not None else False)
                     or len(issues) > 128,

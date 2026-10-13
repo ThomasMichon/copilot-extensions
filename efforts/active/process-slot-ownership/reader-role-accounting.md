@@ -38,19 +38,38 @@ budgets, process membership, owner-liveness proof or admission enforcement.
 
 ## Validation
 
-- [ ] Stable measurement keys and distinct epochs separate replacement,
+- [x] Stable measurement keys and distinct epochs separate replacement,
       recreation and any explicit continuity reset.
-- [ ] Cached reuse/duplicate completion does not increment counts or cost;
+- [x] Cached reuse/duplicate completion does not increment counts or cost;
       successive actual attempts do, including failed attempts.
-- [ ] Deterministic mixed known/unknown/zero costs produce truthful lower
+- [x] Deterministic mixed known/unknown/zero costs produce truthful lower
       bounds and counts without mixing in command or process-tree CPU.
-- [ ] Pending/cancelled waits retain native holders and contribute only after
+- [x] Pending/cancelled waits retain native holders and contribute only after
       actual completion, including late completion under an old epoch.
-- [ ] Concurrent snapshot/publication and repeated sampling retain coherent,
+- [x] Concurrent snapshot/publication and repeated sampling retain coherent,
       bounded evidence; overflow/continuity loss is visibly incomplete.
 - [ ] Native Windows/Linux consumer fixtures export actual collector totals
       while optional-import, identity, cadence, fallback and privacy regressions
       remain green.
+
+## Implementation evidence
+
+The reviewed proposal landed in #6544. The producer-local ledger retains one
+immutable locked snapshot. Each sampler's current/last completion cursor remains
+pinned to its existing callback, not stored in a global history. Native
+completion records collector cost before exposing the completion timestamp;
+publication serializes an immutable snapshot outside the lock.
+No continuity-reset API is introduced. Provider recreation gets a fresh epoch;
+overflow/gaps remain visibly incomplete within the existing epoch.
+
+The focused Windows selection passed 52 tests, including mixed known/unknown
+costs, known zero, failed attempts, cached deduplication, overflow, sequence
+rotation, concurrent publication, bounded cursor reclamation, late completion
+after loop shutdown, provider replacement and retained native futures.
+The native consumer fixture verifies the exported aggregate against actual
+worker-thread CPU counter deltas. All nine bounded Windows consumer sub-suites
+passed (4,297 passed, 97 skipped), with cleanup verified. Fresh Linux code CI
+remains required before the final validation item closes.
 
 Expected-cost/fan-out policy, global reader coverage, logical-owner membership,
 budget enforcement, no-progress reclamation and authorized adoption remain

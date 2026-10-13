@@ -124,6 +124,26 @@ Deduplicate accounting by `(instance, sequence)`, including cached reuse or a
 record repeated in both event types. See
 [`agent-procutil` accounting](../../libs/agent-procutil/README.md#optional-owned-process-cpu-observations)
 for clock uncertainty and the pending/completion contract.
+
+Both event types also carry an immutable `collector` snapshot for the
+`(plugin, role, namespace)` measurement key. Its anonymous `epoch` lasts for
+one provider observation scope; replacing/recreating that scope starts a
+distinct epoch, while old native callbacks continue updating only their old
+epoch. Epochs are not owner-session identities or slot-release authority.
+`completed`, `succeeded` and `failed` count actual finished sampling attempts,
+not cached reuse, command completion or cancelled waits. Completion callbacks
+retain a bounded per-sampler cursor; the ledger retains no sampler/event history.
+`wall_seconds` and `thread_cpu_seconds` are independent collector-cost lower
+bounds. Their `wall_known`/`wall_unknown` and
+`thread_cpu_known`/`thread_cpu_unknown` counts distinguish known zero from
+missing cost; a total with no known contribution is `null`.
+Failed attempts may contribute known cost. These totals never include command
+wall time or process-tree CPU and must not be summed again across snapshots.
+Unknown contributions and bounded `issues` make incompleteness explicit.
+Sequence gaps/invalid provenance report lost continuity; count overflow freezes
+the bounded counters without wrapping, and cost overflow preserves the previous
+lower bound with an unknown contribution. None silently starts a fresh epoch.
+
 Measurement failure does not discard valid enumeration. Resolve, ensure-ready
 and target-repo calls are not instrumented. No CPU admission policy, process
 registry or new termination behavior is implied; existing execution deadlines

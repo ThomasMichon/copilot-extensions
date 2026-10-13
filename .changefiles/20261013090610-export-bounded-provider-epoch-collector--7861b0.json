@@ -1,0 +1,9 @@
+{
+  "comment": "Export bounded provider-epoch collector totals with native completion deduplication and explicit unknown costs",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

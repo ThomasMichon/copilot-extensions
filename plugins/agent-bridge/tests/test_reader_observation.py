@@ -380,6 +380,9 @@ async def test_stuck_sample_retained_after_command_and_provider_replacement(
 
     monkeypatch.setattr(OwnedProcessCpuSampler, "_sample_sync", sample)
     provider = CliNamespaceResolver("test", "unused", command=["private-command"])
+    all_events: list[dict] = []
+    telemetry.set_telemetry_sink(all_events.append)
+    epoch = provider._cpu_observation._collector.snapshot.epoch
     registry = AgentResolver({}, {})
     registry.register_namespace_resolver(provider)
     cache = AgentRosterCache(registry, refresh_interval=60)
@@ -394,10 +397,13 @@ async def test_stuck_sample_retained_after_command_and_provider_replacement(
             assert [row.name for row in await provider.list()] == ["valid"]
             assert provider.pending_cpu_sample_future is holder
         assert samples == 1
-        assert events[-1]["issues"] == [{"pid": 123, "reason": "previous_sample_pending"}]
+        assert all_events[-1]["issues"] == [{"pid": 123, "reason": "previous_sample_pending"}]
+        assert all_events[-1]["collector"]["completed"] == 0
+        replacement = None
         if replace_provider:
             registry.unregister_namespace_resolver("test")
-            registry.register_namespace_resolver(CliNamespaceResolver("test", "missing-provider"))
+            replacement = CliNamespaceResolver("test", "missing-provider")
+            registry.register_namespace_resolver(replacement)
             cache._reconcile_namespace_set()
         await asyncio.wait_for(cache.stop(), timeout=1)
         assert not holder.done()
@@ -407,6 +413,14 @@ async def test_stuck_sample_retained_after_command_and_provider_replacement(
         await asyncio.wait_for(asyncio.wrap_future(holder), timeout=2)
         await asyncio.sleep(0)
         assert holder not in cache._owned_provider_samples
+        completion = next(
+            event for event in all_events if event["event"] == "reader_cpu_sample_completed"
+        )
+        assert completion["collector"]["epoch"] == epoch
+        assert completion["collector"]["completed"] == 1
+        if replacement is not None:
+            snapshot = replacement._cpu_observation._collector.snapshot
+            assert snapshot.epoch != epoch and snapshot.completed == 0
     finally:
         release.set()
         await cache.stop()
@@ -637,6 +651,17 @@ async def test_native_cpu_receipt_and_telemetry(
     assert start[0] == end[0] != threading.get_ident()
     assert sample["thread_cpu_seconds"] == end[1] - start[1]
     assert sample["issues"] == []
+    collector = event["collector"]
+    assert collector["completed"] == collector["succeeded"] == sample["sequence"]
+    assert collector["failed"] == 0
+    assert collector["wall_known"] == collector["thread_cpu_known"] == sample["sequence"]
+    assert collector["wall_unknown"] == collector["thread_cpu_unknown"] == 0
+    assert collector["thread_cpu_seconds"] == sum(
+        thread_reads[index + 1][1] - thread_reads[index][1]
+        for index in range(0, len(thread_reads), 2)
+    )
+    assert collector["wall_seconds"] >= sample["wall_seconds"]
+    assert collector["issues"] == ()
     assert event["observation_sample"] == {
         "instance": sample["instance"], "sequence": sample["sequence"],
     }

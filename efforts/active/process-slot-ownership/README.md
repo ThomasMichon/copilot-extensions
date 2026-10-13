@@ -527,3 +527,21 @@ provider-epoch-scoped collector totals through existing telemetry. It introduces
 neither a membership registry nor numeric budgets; source epochs do not prove
 logical ownership or permit reclamation. Expected-cost/fan-out policy, broader
 reader coverage, global ownership validation and authorized adoption remain open.
+
+### 2026-10-13 - Collector role plan landed; reduction prepared
+
+Merged #6544 as `f7a29214b` after exact-head approval with zero findings and
+actual code CI success. The reviewed increment now has a provider-local,
+measurement-only implementation: anonymous epochs, immutable coherent totals,
+per-sampler completed-attempt cursors, separate known/unknown collector costs,
+and explicit continuity/overflow uncertainty. No unbounded sampler history,
+new observer or competing process registry is introduced.
+
+Late completion after command cancellation, provider replacement or loop
+shutdown stays pinned to the original epoch and retains existing native-holder
+ownership. Focused Windows validation passed 52 tests, including aggregate
+export compared directly with native sampling-thread CPU counter deltas.
+All nine bounded Windows consumer sub-suites passed (4,297 passed, 97 skipped),
+with cleanup verified. Fresh Linux code CI remains open for this slice.
+Expected-cost/fan-out policy, wider reader coverage, global logical ownership,
+numeric enforcement, reclamation and authorized adoption remain parent gates.

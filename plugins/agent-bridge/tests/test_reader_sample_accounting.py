@@ -60,6 +60,14 @@ async def test_completed_accounting_export_and_cached_reuse_are_not_new_cost(
         "instance": sample["instance"], "sequence": sample["sequence"],
     }
     assert reads[0]["observed_cpu_seconds"] == 100.0
+    collector = completed[0]["collector"]
+    assert reads[0]["collector"] == collector
+    assert collector["completed"] == collector["succeeded"] == 1
+    assert collector["failed"] == 0
+    assert collector["wall_seconds"] == sample["wall_seconds"]
+    assert collector["thread_cpu_seconds"] == sample["thread_cpu_seconds"]
+    assert collector["wall_known"] == collector["thread_cpu_known"] == 1
+    assert collector["wall_unknown"] == collector["thread_cpu_unknown"] == 0
     sampler = observer._sampler
     assert sampler is not None
     observer._next_sample_at = 0
@@ -68,6 +76,7 @@ async def test_completed_accounting_export_and_cached_reuse_are_not_new_cost(
     assert issue is None and cached is not None
     assert cached.sample is sampler.current_sample
     assert len([e for e in sample_events if e["event"] == "reader_cpu_sample_completed"]) == 1
+    assert observer._collector.snapshot.fields() == collector
     assert "private" not in json.dumps(sample_events)
 
 
@@ -115,6 +124,10 @@ async def test_late_completion_exports_final_cost_after_command_or_waiter_exit(
         assert pending["completed_at"] is pending["wall_seconds"] is None
         assert pending["thread_cpu_seconds"] is None
         assert not any(e["event"] == "reader_cpu_sample_completed" for e in sample_events)
+        pending_collector = pending_event["collector"]
+        assert pending_collector["completed"] == 0
+        assert pending_collector["wall_seconds"] is None
+        assert pending_collector["thread_cpu_seconds"] is None
         release.set()
         await asyncio.gather(asyncio.wrap_future(holder), return_exceptions=True)
         final = [e for e in sample_events if e["event"] == "reader_cpu_sample_completed"]
@@ -127,6 +140,13 @@ async def test_late_completion_exports_final_cost_after_command_or_waiter_exit(
         assert completed["wall_seconds"] >= (0.1 if not cancel_observer else 0)
         assert completed["thread_cpu_seconds"] >= 0
         assert final[0]["namespace"] == "other"
+        collector = final[0]["collector"]
+        assert collector["epoch"] == pending_collector["epoch"]
+        assert collector["completed"] == 1
+        assert collector["failed"] == int(fails)
+        assert collector["succeeded"] == int(not fails)
+        assert collector["wall_seconds"] == completed["wall_seconds"]
+        assert collector["thread_cpu_seconds"] == completed["thread_cpu_seconds"]
         assert "private" not in json.dumps(sample_events)
     finally:
         release.set()
@@ -169,3 +189,55 @@ async def test_failed_sample_accounting_does_not_label_prior_cpu_as_new(
     assert current.sequence > old_accounting.sequence
     assert observation.sample is old_accounting
     assert len([e for e in sample_events if e["event"] == "reader_cpu_sample_completed"]) == 2
+    collector = observer._collector.snapshot
+    assert collector.completed == 2 and collector.succeeded == collector.failed == 1
+    assert collector.wall_known == collector.thread_cpu_known == 2
+
+
+def test_loop_shutdown_and_recreation_keep_late_cost_in_original_epoch(
+    monkeypatch: pytest.MonkeyPatch, sample_events: list[dict],
+) -> None:
+    started, release = threading.Event(), threading.Event()
+
+    def run(
+        self: reader_command.OwnedReaderCommand, cmd: list[str], *, timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        self.receipt.set_result(ProcessIdentity(123 if cmd[0] == "old" else 124, 456.0))
+        return subprocess.CompletedProcess(cmd, 0, "[]", "")
+
+    def sample(self: OwnedProcessCpuSampler) -> CpuObservation:
+        if self._root.pid == 123:
+            started.set()
+            assert release.wait(5)
+        return CpuObservation(0.5, (self._root,), (), False)
+
+    monkeypatch.setattr(reader_command.OwnedReaderCommand, "run", run)
+    monkeypatch.setattr(OwnedProcessCpuSampler, "_sample_sync", sample)
+    original = reader_observation.ReaderCpuObservation("test")
+    replacement = reader_observation.ReaderCpuObservation("test")
+    holder = None
+    try:
+        asyncio.run(original.run(["old"], timeout=1))
+        assert started.is_set()
+        holder = original.pending_sample_future
+        assert holder is not None and not holder.cancel()
+        before = original._collector.snapshot
+        assert before.completed == 0
+        asyncio.run(replacement.run(["new"], timeout=1))
+        current = replacement._collector.snapshot
+        assert current.completed == 1 and current.epoch != before.epoch
+        release.set()
+        assert holder.result(timeout=2).observed_cpu_seconds == 0.5
+        old = original._collector.snapshot
+        assert old.completed == 1 and old.epoch == before.epoch
+        assert replacement._collector.snapshot is current
+        late = sample_events[-1]
+        assert late["event"] == "reader_cpu_sample_completed"
+        assert late["collector"] == old.fields()
+        assert all(event["namespace"] == "test" for event in sample_events)
+        assert {event["role"] for event in sample_events} == {"namespace-list"}
+        assert {event["plugin"] for event in sample_events} == {"agent-bridge"}
+    finally:
+        release.set()
+        if holder is not None:
+            holder.result(timeout=2)
