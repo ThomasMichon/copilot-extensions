@@ -24,6 +24,7 @@ def test_normal_wheel_metadata_and_console_program(tmp_path):
     primitive = tmp_path / "libs" / "versioned-runtime" / "versioned_runtime.py"
     primitive.parent.mkdir(parents=True)
     shutil.copy2(canonical, primitive)
+    shutil.copy2(canonical.with_name("standalone_build.py"), primitive.with_name("standalone_build.py"))
     shutil.copytree(source / "src", build / "src", ignore=shutil.ignore_patterns("__pycache__"))
     output = tmp_path / "wheel"
     output.mkdir()
