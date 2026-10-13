@@ -226,7 +226,8 @@ def test_module_installer_timeout_is_timeout_whatever_the_slot(
     module = tmp_path / "agent-example"
     (module / "scripts").mkdir(parents=True)
     (module / "scripts" / "install.sh").write_text("#!/bin/sh\n")
-    (module / "plugin.json").write_text(json.dumps({"name": "agent-example", "runtimeScope": "universal"}))
+    (module / "plugin.json").write_text(
+        json.dumps({"name": "agent-example", "runtimeScope": "universal"}))
     root = tmp_path / "module-runtime"
     _write_slot(root, "3.0.0", slot)
     environment = {k: v for k, v in os.environ.items() if k != "COPILOT_EXTENSIONS_CONTEXT"}
@@ -332,3 +333,36 @@ def test_prune_failure_is_an_advisory(wired, monkeypatch, _update_home, failure)
                         update_cli._prune_stale_pivots_after_update)
     assert m.cmd_update(_args(no_prune_pivots=False)) == 0
     assert "pivot prune failed" in _advisories(_update_home)["pivots"]
+
+
+def test_unknown_force_runtime_is_a_configuration_error(wired, monkeypatch, _update_home):
+    ran = []
+    real_run = subprocess.run
+    monkeypatch.setattr(subprocess, "run", lambda argv, *a, **k: (ran.append(argv),
+                                                                   real_run(argv, *a, **k))[1])
+    assert m.cmd_update(_args(force_runtime=["agent-typo", "agent-worktrees"])) == 3
+    assert not any("install.sh" in " ".join(map(str, argv)) for argv in ran)
+    status = _status(_update_home)
+    assert status["run"]["outcome"] == ut.CONFIGURATION_LIMITATION
+    assert "agent-typo" in status["last_failure"]["summary"]
+    assert "agent-worktrees" not in status["last_failure"]["summary"].split("not found:")[1]
+
+
+def test_eligible_force_runtime_redeploys(wired, monkeypatch, _update_home):
+    monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *a, **k: "1.0.1")
+    assert m.cmd_update(_args(force_runtime=["agent-worktrees"])) == 0
+    aw = _status(_update_home)["plugins"]["agent-worktrees@copilot-extensions"]
+    assert aw["changed"] is True
+
+
+def test_eligible_runtimes_cover_modules_and_active_registrations():
+    active = runtime._RegisteredPluginTarget(None, runtime._PluginActivation.ACTIVE)
+    inactive = runtime._RegisteredPluginTarget(None, runtime._PluginActivation.INACTIVE)
+    targets = {"agent-a": active, "agent-off": inactive}
+    args = _args(force_runtime=["agent-a"])
+    assert update_options.eligible_runtimes(args, targets, {"agent-mod"}) == {
+        "agent-worktrees", "agent-a", "agent-mod"}
+    skipped = _args(skip_modules=["agent-mod"])
+    assert "agent-mod" not in update_options.eligible_runtimes(skipped, targets, {"agent-mod"})
+    assert update_options.eligible_runtimes(_args(skip_modules=[]), targets, {"agent-mod"}) == {
+        "agent-worktrees"}

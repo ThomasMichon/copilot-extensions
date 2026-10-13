@@ -303,6 +303,9 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
 
     output.info(f"Plugin source: {plugin_dir}")
     _events.enter("engine_runtime")
+    modules = _core_helper("_module_names", _module_names)(plugin_dir)
+    if not update_options.check_forced_runtimes(args, registered_targets, modules):
+        return 1
 
     from . import reconcile as _reconcile
 

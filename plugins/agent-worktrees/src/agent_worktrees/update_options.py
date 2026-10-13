@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Collection, Mapping
+
+from . import output, update_events
 
 
 def add_update_options(p: argparse.ArgumentParser) -> None:
@@ -26,3 +29,32 @@ def forwarded_flags(args: argparse.Namespace) -> list[str]:
     for name in getattr(args, "force_runtime", None) or ():
         flags += ["--force-runtime", name]
     return flags
+
+
+def eligible_runtimes(args: argparse.Namespace, targets: Mapping[str, object],
+                      module_names: Collection[str]) -> set[str]:
+    """Runtimes this update would deploy: itself, modules and active registrations."""
+    skip = getattr(args, "skip_modules", None)
+    if skip is not None and len(skip) == 0:
+        return {"agent-worktrees"}
+    names = set(module_names)
+    names |= {name for name, target in targets.items() if getattr(target, "required", True)}
+    names -= set(skip or ())
+    return names | {"agent-worktrees"}
+
+
+def check_forced_runtimes(args: argparse.Namespace, targets: Mapping[str, object],
+                          module_names: Collection[str]) -> bool:
+    """Refuse ``--force-runtime`` names this update would never deploy.
+
+    Records a configuration failure (exit 3) naming them, so a typo or an
+    inactive runtime never turns into a silent success.
+    """
+    unknown = sorted(forced_runtimes(args) - eligible_runtimes(args, targets, module_names))
+    if not unknown:
+        return True
+    names = ", ".join(unknown)
+    output.err(f"--force-runtime: no eligible runtime named {names}")
+    update_events.record("engine_runtime", "force-runtime",
+                         f"--force-runtime target not found: {names}")
+    return False

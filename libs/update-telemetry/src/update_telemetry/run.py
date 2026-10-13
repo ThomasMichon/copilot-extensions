@@ -42,11 +42,19 @@ _SEQ = itertools.count(1)
 _WARNED = False
 
 
+def _stderr(message: str) -> None:
+    """Best-effort diagnostic: a closed or unencodable stderr is ignored."""
+    try:
+        print(message, file=sys.stderr)
+    except Exception:  # noqa: S110 - a diagnostic must never escape
+        pass
+
+
 def _warn(exc: BaseException) -> None:
     global _WARNED
     if not _WARNED:
         _WARNED = True
-        print(f"warning: update telemetry unavailable: {exc}", file=sys.stderr)
+        _stderr(f"warning: update telemetry unavailable: {exc}")
 
 
 def utc_now() -> str:
@@ -411,7 +419,7 @@ class Run:
                     previous = None
                 newer = _newer_run(previous, self.run_id, self.started_at)
                 if newer:
-                    print(f"warning: update status left to newer run {newer}", file=sys.stderr)
+                    _stderr(f"warning: update status left to newer run {newer}")
                     return
                 document = fold(events, run=meta, previous=previous, final=final,
                                       hint=hint, error_code=error_code, updated_at=now)

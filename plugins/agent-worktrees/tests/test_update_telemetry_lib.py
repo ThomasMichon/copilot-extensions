@@ -509,3 +509,33 @@ def test_newer_run_ordering_tie_breaks_on_run_id():
     assert run_mod._newer_run(previous, "20260101T000000Z-3-cccc", started) is None
     assert run_mod._newer_run(previous, "20260101T000000Z-2-bbbb", started) is None
     assert run_mod._newer_run(None, "x", started) is None
+
+
+class _BrokenStream:
+    def __init__(self, exc: BaseException) -> None:
+        self.exc = exc
+
+    def write(self, _text):
+        raise self.exc
+
+    def flush(self):
+        raise self.exc
+
+
+@pytest.mark.parametrize("exc", [
+    BrokenPipeError(32, "Broken pipe"),
+    OSError(9, "Bad file descriptor"),
+    UnicodeEncodeError("ascii", "\u2713", 0, 1, "unencodable"),
+])
+def test_diagnostics_never_escape_a_broken_stderr(telemetry_env, monkeypatch, exc):
+    monkeypatch.setattr(sys, "stderr", _BrokenStream(exc))
+    monkeypatch.setattr(run_mod, "_WARNED", False)
+
+    def boom(*_a, **_k):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(run_mod, "append_line", boom)
+    run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
+    run.target("runtime_reconcile", "a@m", ut.TIMEOUT)
+    assert run.finish() == 6
+    run_mod._stderr("warning: still best-effort")

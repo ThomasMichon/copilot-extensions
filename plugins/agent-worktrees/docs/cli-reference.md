@@ -656,7 +656,8 @@ non-zero for every failure:
 | 130 | Interrupted |
 
 `--force-runtime NAME` re-deploys just that runtime (repeatable); it is
-forwarded through `worktree-manager update`. Inactive inventory failures are
+forwarded through `worktree-manager update`, and a name this update would not
+deploy (unknown, inactive or skipped) is a configuration error (exit 3). Inactive inventory failures are
 advisories and never fail the run. Telemetry
 is best-effort: if events or status cannot be written, `update` warns once and
 its result is unchanged.
