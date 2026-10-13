@@ -669,3 +669,187 @@ time.sleep(60)
         process.wait(timeout=5)
         if job is not None:
             job.close()
+
+
+# -- spawn_daemon ------------------------------------------------------------
+
+
+class _FakePopen:
+    def __init__(self, calls, failures=()):
+        self.calls = calls
+        self.failures = list(failures)
+
+    def __call__(self, argv, **kwargs):
+        self.calls.append((list(argv), dict(kwargs)))
+        if self.failures:
+            raise self.failures.pop(0)
+        proc = Mock()
+        proc.pid = 4242
+        return proc
+
+
+def _access_denied() -> OSError:
+    exc = OSError(13, "Access is denied")
+    exc.winerror = 5
+    return exc
+
+
+@pytest.fixture()
+def fake_popen(monkeypatch):
+    calls: list = []
+    fake = _FakePopen(calls)
+    monkeypatch.setattr(pu.subprocess, "Popen", fake)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    return fake
+
+
+@pytest.mark.parametrize("bad", [None, "relative/dir"])
+def test_spawn_daemon_requires_absolute_cwd(tmp_path, fake_popen, bad):
+    with pytest.raises(ValueError, match="cwd"):
+        pu.spawn_daemon(["x"], cwd=bad, log_path=tmp_path / "d.log")
+    assert fake_popen.calls == []
+
+
+def test_spawn_daemon_rejects_missing_cwd(tmp_path, fake_popen):
+    with pytest.raises(ValueError, match="does not exist"):
+        pu.spawn_daemon(["x"], cwd=tmp_path / "gone", log_path=tmp_path / "d.log")
+    assert fake_popen.calls == []
+
+
+def test_spawn_daemon_rejects_payload_cwd(tmp_path, fake_popen):
+    payload = tmp_path / "installed-plugins" / "market" / "plugin"
+    payload.mkdir(parents=True)
+    with pytest.raises(ValueError, match="plugin payload"):
+        pu.spawn_daemon(["x"], cwd=payload, log_path=tmp_path / "d.log")
+    assert fake_popen.calls == []
+
+
+def test_spawn_daemon_requires_log_path(tmp_path, fake_popen):
+    with pytest.raises(ValueError, match="log_path"):
+        pu.spawn_daemon(["x"], cwd=tmp_path, log_path=None)
+
+
+def test_spawn_daemon_windows_detached_breakaway_and_log(tmp_path, monkeypatch, fake_popen):
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setenv("SPAWN_DAEMON_BASE", "base")
+    log_path = tmp_path / "logs" / "daemon.log"
+
+    proc = pu.spawn_daemon(
+        ["py", "-m", "svc"], cwd=tmp_path, log_path=log_path,
+        env_overrides={"SVC_TOKEN": "t"},
+    )
+
+    assert proc.pid == 4242
+    (argv, kwargs), = fake_popen.calls
+    assert argv == ["py", "-m", "svc"]
+    assert kwargs["creationflags"] == (
+        pu._DETACHED_PROCESS | pu._CREATE_NEW_PROCESS_GROUP | pu._CREATE_BREAKAWAY_FROM_JOB
+    )
+    assert kwargs["cwd"] == str(tmp_path)
+    assert kwargs["stdin"] is subprocess.DEVNULL
+    assert kwargs["stderr"] is subprocess.STDOUT
+    assert kwargs["stdout"].name == str(log_path)
+    assert kwargs["stdout"].closed, "the parent must not keep the daemon log open"
+    assert kwargs["close_fds"] is True
+    assert kwargs["env"]["SVC_TOKEN"] == "t"
+    assert kwargs["env"]["SPAWN_DAEMON_BASE"] == "base"
+    assert "spawn_daemon cwd=" in log_path.read_text(encoding="utf-8")
+
+
+def test_spawn_daemon_windows_console_children_uses_no_window(tmp_path, monkeypatch, fake_popen):
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    pu.spawn_daemon(
+        ["py"], cwd=tmp_path, log_path=tmp_path / "d.log",
+        console_children=True, extra_creationflags=0x20,
+    )
+    (_, kwargs), = fake_popen.calls
+    assert kwargs["creationflags"] == (
+        pu._CREATE_NO_WINDOW | pu._CREATE_BREAKAWAY_FROM_JOB | 0x20
+    )
+
+
+def test_spawn_daemon_explicit_env_replaces_inherited(tmp_path, monkeypatch, fake_popen):
+    monkeypatch.setattr(pu, "_is_windows", lambda: False)
+    monkeypatch.setenv("SPAWN_DAEMON_LEAK", "1")
+    pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log", env={"A": "1"})
+    (_, kwargs), = fake_popen.calls
+    assert kwargs["env"] == {"A": "1"}
+
+
+def test_spawn_daemon_posix_new_session(tmp_path, monkeypatch, fake_popen):
+    monkeypatch.setattr(pu, "_is_windows", lambda: False)
+    pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log", extra_creationflags=0x20)
+    (_, kwargs), = fake_popen.calls
+    assert kwargs["start_new_session"] is True
+    assert "creationflags" not in kwargs
+
+
+def test_spawn_daemon_contained_mode_stays_contained(tmp_path, monkeypatch, fake_popen):
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log")
+    (_, kwargs), = fake_popen.calls
+    assert not kwargs["creationflags"] & pu._CREATE_BREAKAWAY_FROM_JOB
+
+
+def test_spawn_daemon_breakaway_denied_is_surfaced(tmp_path, monkeypatch, fake_popen):
+    """A Job that forbids breakaway must not silently hand the daemon the
+    caller's lifetime: the spawn fails (as an OSError) and the log says why."""
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    fake_popen.failures.append(_access_denied())
+    log_path = tmp_path / "d.log"
+
+    with pytest.raises(pu.DaemonSpawnError, match="forbids breakaway") as info:
+        pu.spawn_daemon(["py"], cwd=tmp_path, log_path=log_path)
+
+    assert isinstance(info.value, OSError)
+    assert len(fake_popen.calls) == 1
+    assert "daemon not started" in log_path.read_text(encoding="utf-8")
+
+
+def test_spawn_daemon_breakaway_denied_contained_fallback(tmp_path, monkeypatch, fake_popen):
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    fake_popen.failures.append(_access_denied())
+    log_path = tmp_path / "d.log"
+
+    proc = pu.spawn_daemon(["py"], cwd=tmp_path, log_path=log_path, contained_fallback=True)
+
+    assert proc.pid == 4242
+    first, second = (kwargs["creationflags"] for _, kwargs in fake_popen.calls)
+    assert first & pu._CREATE_BREAKAWAY_FROM_JOB
+    assert second == pu._DETACHED_PROCESS | pu._CREATE_NEW_PROCESS_GROUP
+    assert "starting the daemon inside it" in log_path.read_text(encoding="utf-8")
+
+
+def test_spawn_daemon_other_spawn_errors_propagate(tmp_path, monkeypatch, fake_popen):
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    fake_popen.failures.append(FileNotFoundError(2, "missing"))
+    with pytest.raises(FileNotFoundError):
+        pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log")
+    assert len(fake_popen.calls) == 1
+
+
+def test_spawn_daemon_access_denied_without_breakaway_propagates(
+    tmp_path, monkeypatch, fake_popen
+):
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    fake_popen.failures.append(_access_denied())
+    with pytest.raises(OSError):
+        pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log", breakaway=False)
+    assert len(fake_popen.calls) == 1
+
+
+def test_spawn_daemon_real_child_writes_to_log_from_cwd(tmp_path):
+    workdir = tmp_path / "home"
+    workdir.mkdir()
+    log_path = tmp_path / "daemon.log"
+    proc = pu.spawn_daemon(
+        [sys.executable, "-c", "import os; print('cwd=' + os.getcwd())"],
+        cwd=workdir,
+        log_path=log_path,
+    )
+    assert proc.wait(timeout=60) == 0
+    text = log_path.read_text(encoding="utf-8", errors="replace")
+    assert "spawn_daemon cwd=" in text
+    reported = text.splitlines()[-1].strip().removeprefix("cwd=")
+    assert os.path.samefile(reported, workdir)

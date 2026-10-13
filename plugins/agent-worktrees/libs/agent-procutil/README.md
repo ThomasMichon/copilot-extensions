@@ -43,6 +43,52 @@ ownership. Runtime code with an additional in-process survival step can use
 instead of using `DETACHED_PROCESS`, so console-subsystem grandchildren do not
 allocate a visible console.
 
+## Launching a resident daemon: `spawn_daemon`
+
+A long-lived daemon (one started by an installer, a hook, a CLI or a cutover
+and meant to outlive it) launches through one primitive instead of hand-built
+`Popen` kwargs:
+
+```python
+from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
+
+proc = spawn_daemon(
+    [windowless_python(), "-m", "my_daemon", "serve"],
+    cwd=runtime_home,                      # required: runtime root or home dir
+    log_path=runtime_home / "daemon.log",  # required: stdout+stderr appended
+    env_overrides={"MY_TOKEN": token, **windowless_python_env()},
+)
+```
+
+It composes the helpers above, so its flags never drift from them:
+
+- **Windowless.** `DETACHED_PROCESS` by default; `console_children=True` uses
+  the `windowless_daemon_kwargs()` host for daemons that keep spawning
+  console-subsystem children.
+- **Escapes the caller.** `breakaway=True` (default) adds
+  `CREATE_BREAKAWAY_FROM_JOB` on Windows so a kill-on-close Job around the
+  caller (an installer or updater) does not kill the new daemon; POSIX gets a
+  new session. When the caller's Job forbids breakaway (`ERROR_ACCESS_DENIED`),
+  the spawn fails with `DaemonSpawnError` (an `OSError`) and the daemon log
+  records why: a daemon that silently inherits its caller's lifetime dies when
+  that Job closes. A caller whose daemon already ran inside the caller's Job
+  before adopting `spawn_daemon`, and for which that lifetime still beats no
+  daemon, passes `contained_fallback=True` to start it inside the Job instead
+  (logged as a warning and in the daemon log). Contained test mode suppresses
+  breakaway and the new session, like the helpers it builds on.
+- **Explicit cwd.** `cwd` must be an existing absolute directory and must not be
+  inside an `installed-plugins` payload. Never pass the caller's cwd: a
+  long-lived process pins it, and every relative-path child breaks once that
+  directory is removed.
+- **Logged, never `DEVNULL`.** stdin is `DEVNULL`; stdout and stderr are
+  appended to `log_path` after a one-line launch header, and the parent closes
+  its own copy of the handle before returning the `Popen`.
+
+`env` defaults to a copy of `os.environ`; `env_overrides` is layered on top.
+`extra_creationflags` is OR'd into the Windows creation flags (for example a
+priority class). Interpreter selection stays with the caller
+(`windowless_python()` / `windowless_python_env()`).
+
 A child that must not outlive the process that spawned it is spawned inside a
 kill-on-close Windows Job Object:
 

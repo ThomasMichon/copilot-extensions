@@ -350,6 +350,44 @@ def test_ensure_serve_returns_existing_without_spawning(tmp_path, monkeypatch):
         srv.stop()
 
 
+def test_spawn_serve_host_launches_through_spawn_daemon(tmp_path, monkeypatch):
+    """The on-demand host launches through ``agent_procutil.spawn_daemon`` with
+    the stable AGENT_MCP_HOME as cwd (never the forwarder's own cwd) and a log
+    file under it (never DEVNULL)."""
+    import subprocess
+
+    import agent_procutil
+
+    captured: dict = {}
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(agent_procutil, "spawn_daemon",
+                        lambda argv, **kw: captured.update(argv=argv, kwargs=kw))
+    monkeypatch.setattr(
+        subprocess, "Popen",
+        lambda *_a, **_k: pytest.fail("must not hand-roll a Popen for the host"))
+
+    forward._spawn_serve_host(str(tmp_path / "serve.sock"))
+
+    home = (tmp_path / "home").resolve()
+    assert captured["argv"][0] == agent_procutil.windowless_python(sys.executable)
+    assert captured["argv"][1:] == [
+        "-m", "agent_mcp", "serve", "--socket", str(tmp_path / "serve.sock")]
+    assert captured["kwargs"]["cwd"] == home
+    assert home.is_dir()
+    assert captured["kwargs"]["log_path"] == home / "serve.log"
+    assert captured["kwargs"]["contained_fallback"] is True
+
+
+def test_ensure_serve_falls_back_when_the_spawn_is_refused(tmp_path, monkeypatch):
+    monkeypatch.delenv("AGENT_MCP_NO_SERVE", raising=False)
+
+    def _refuse(_handle):
+        raise ValueError("spawn_daemon cwd is inside a plugin payload")
+
+    monkeypatch.setattr(forward, "_spawn_serve_host", _refuse)
+    assert forward._ensure_serve(str(tmp_path / "serve.sock")) is None
+
+
 def test_ensure_serve_spawns_a_real_host(tmp_path, monkeypatch):
     """With no host up, _ensure_serve spawns a detached `agent-mcp serve`, waits
     for its socket, and returns it; the spawned host answers a ping."""
@@ -360,6 +398,7 @@ def test_ensure_serve_spawns_a_real_host(tmp_path, monkeypatch):
 
     got = forward._ensure_serve(str(sock))
     assert got is not None, "ensure-serve did not bring up a host in time"
+    assert (tmp_path / "serve.log").is_file(), "the host's output must be logged"
     try:
         pong = asyncio.run(request_via_socket(got, {"op": "ping"}))
         assert pong["ok"] and pong["pong"]

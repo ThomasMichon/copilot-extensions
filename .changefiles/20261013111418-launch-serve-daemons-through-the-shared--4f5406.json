@@ -1,0 +1,9 @@
+{
+  "comment": "Launch serve daemons through the shared spawn_daemon primitive (explicit runtime cwd, daemon log, caller Job/session escape)",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

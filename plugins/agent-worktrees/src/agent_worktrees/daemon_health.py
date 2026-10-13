@@ -23,15 +23,17 @@ def _candidates() -> list[diagnostics.DaemonCandidate]:
             if not item["cwd"]:
                 raise OSError(f"Cannot establish runtime scope for monitor PID {item['pid']}")
             if procs._is_under(item["cwd"], runtime_root):
+                # A venv-redirector launcher and its base-interpreter worker
+                # both match; the parent PID and executable let the shared
+                # doctor group them into one generation (and refuse repair
+                # when it cannot).
                 candidates.append(
-                    diagnostics.DaemonCandidate(pid=item["pid"], start_time=item["start_time"])
-                )
-        candidate_pids = {candidate.pid for candidate in candidates}
-        for candidate in candidates:
-            if procs.parent_pid(candidate.pid) in candidate_pids:
-                raise OSError(
-                    "Monitor census contains a parent/child interpreter pair; "
-                    "cannot safely classify it as duplicate daemons"
+                    diagnostics.DaemonCandidate(
+                        pid=item["pid"],
+                        start_time=item["start_time"],
+                        ppid=procs.parent_pid(item["pid"]),
+                        image=procs.process_executable_path(item["pid"]),
+                    )
                 )
         return candidates
     if sys.platform == "darwin":
@@ -92,6 +94,13 @@ def _reachability_check(host: str, port: int) -> bool:
         return False
 
 
+def _is_runtime_launcher(image: str) -> bool:
+    """A venv redirector inside this runtime's own install root."""
+    return diagnostics.is_venv_redirector(image) and procs._is_under(
+        image, str(status_monitor_runtime._aw_runtime_home())
+    )
+
+
 def _context() -> diagnostics.DiagnosticContext:
     return diagnostics.DiagnosticContext(
         service="agent-worktrees status-monitor",
@@ -111,6 +120,8 @@ def _context() -> diagnostics.DiagnosticContext:
         terminate_pid_if_identity=procs.terminate_pid_if_identity,
         make_client=status_monitor_cutover._make_client,
         health_check=status_monitor_cutover._health_check,
+        group_launchers=(sys.platform == "win32"),
+        is_launcher_image=_is_runtime_launcher,
     )
 
 

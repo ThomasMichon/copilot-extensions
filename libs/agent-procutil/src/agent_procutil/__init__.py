@@ -24,6 +24,9 @@ exact creation flags) can't drift between copies:
   interpreter can allocate a second console.
 * :func:`windowless_python_env` -- preserve the original venv context when
   ``windowless_python`` targets a base install's ``pythonw.exe``.
+* :func:`spawn_daemon` -- the one launch primitive for a long-lived daemon:
+  windowless, escapes the caller's Job object / session, runs from an
+  explicit durable ``cwd``, and appends its stdout/stderr to a log file.
 
 Both are no-ops off Windows (``no_window_kwargs`` -> ``{}``; ``detached_kwargs``
 -> ``start_new_session=True``), so call sites stay platform-agnostic::
@@ -52,6 +55,7 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 # Win32 process-creation flags. Read from ``subprocess`` when present (Windows)
@@ -92,6 +96,8 @@ __all__ = [
     "windowless_daemon_kwargs",
     "windowless_python",
     "windowless_python_env",
+    "spawn_daemon",
+    "DaemonSpawnError",
 ]
 
 
@@ -664,3 +670,152 @@ def windowless_daemon_kwargs(*, breakaway: bool = False) -> dict:
     if contained_test_mode():
         return {}
     return {"start_new_session": True}
+
+
+_PAYLOAD_DIR_MARKER = "installed-plugins"
+
+
+class DaemonSpawnError(OSError):
+    """:func:`spawn_daemon` could not give the daemon its own lifetime."""
+
+
+def _validated_daemon_cwd(cwd: str | os.PathLike[str] | None) -> str:
+    """Reject a daemon cwd that is missing, relative, or inside a plugin payload.
+
+    A long-lived daemon pins its cwd for its whole life. An inherited cwd (a
+    worktree that is later finalized) or a payload directory (replaced on the
+    next plugin update) breaks every relative-path child it spawns once that
+    directory disappears, and on Windows it also blocks the directory's removal.
+    """
+    if cwd is None:
+        raise ValueError("spawn_daemon requires an explicit cwd (a runtime root or home)")
+    path = os.fspath(cwd)
+    if not path or not os.path.isabs(path):
+        raise ValueError(f"spawn_daemon cwd must be an absolute path, got {path!r}")
+    if not os.path.isdir(path):
+        raise ValueError(f"spawn_daemon cwd does not exist: {path}")
+    parts = {part.lower() for part in os.path.normpath(path).replace("\\", "/").split("/")}
+    if _PAYLOAD_DIR_MARKER in parts:
+        raise ValueError(
+            f"spawn_daemon cwd is inside a plugin payload ({path}); use the "
+            "daemon's runtime root or home directory instead"
+        )
+    return path
+
+
+def _daemon_popen_kwargs(
+    *, console_children: bool, breakaway: bool, extra_creationflags: int
+) -> dict:
+    kwargs = (
+        windowless_daemon_kwargs(breakaway=breakaway)
+        if console_children
+        else detached_kwargs(breakaway=breakaway)
+    )
+    if _is_windows() and extra_creationflags:
+        kwargs["creationflags"] = kwargs.get("creationflags", 0) | extra_creationflags
+    return kwargs
+
+
+def _breakaway_denied(exc: OSError, kwargs: dict) -> bool:
+    flags = kwargs.get("creationflags", 0)
+    return bool(flags & _CREATE_BREAKAWAY_FROM_JOB) and (
+        getattr(exc, "winerror", None) == _ERROR_ACCESS_DENIED
+    )
+
+
+def spawn_daemon(
+    argv: Sequence[str | os.PathLike[str]],
+    *,
+    cwd: str | os.PathLike[str],
+    log_path: str | os.PathLike[str],
+    env: Mapping[str, str] | None = None,
+    env_overrides: Mapping[str, str] | None = None,
+    console_children: bool = False,
+    breakaway: bool = True,
+    contained_fallback: bool = False,
+    extra_creationflags: int = 0,
+) -> subprocess.Popen:
+    """Launch a long-lived daemon that outlives its caller.
+
+    The one shared launch primitive for resident daemons, built on
+    :func:`detached_kwargs` / :func:`windowless_daemon_kwargs` so the creation
+    flags never drift from the rest of this module:
+
+    * **Windowless.** ``console_children=False`` (default) detaches the daemon
+      from every console (``DETACHED_PROCESS``); pass ``True`` for a daemon that
+      repeatedly spawns console-subsystem children, which then inherit its
+      hidden ``CREATE_NO_WINDOW`` console instead of each allocating a window.
+    * **Escapes the caller.** With ``breakaway=True`` (default) the Windows
+      child requests ``CREATE_BREAKAWAY_FROM_JOB`` so a kill-on-close Job
+      around the caller (an installer, an updater, a hook) does not take the
+      daemon down with it; on POSIX the child gets its own session. A Job that
+      forbids breakaway rejects the spawn with ``ERROR_ACCESS_DENIED``, which
+      is surfaced as :class:`DaemonSpawnError` (an ``OSError``) and noted in
+      the daemon log: a daemon that silently inherits the caller's lifetime
+      would die when that Job closes. A caller whose daemon previously ran
+      inside the caller's Job anyway, and for which that degraded lifetime is
+      still better than no daemon, passes ``contained_fallback=True`` to start
+      it inside the Job instead (logged as a warning and in the daemon log).
+    * **Explicit cwd.** ``cwd`` is required, must be absolute and existing,
+      and must not be inside an ``installed-plugins`` payload -- use the
+      daemon's runtime root or home directory, never the caller's cwd.
+    * **Logged.** stdin is ``DEVNULL``; stdout and stderr are appended to
+      ``log_path`` (parent directories are created), after a one-line launch
+      header. The parent closes its copy of the log handle before returning.
+
+    ``env`` defaults to a copy of ``os.environ``; ``env_overrides`` is layered
+    on top. ``extra_creationflags`` is OR'd into the Windows creation flags
+    (for example a priority class). Contained test mode suppresses breakaway
+    and the new session exactly as the underlying helpers do. Interpreter
+    selection stays with the caller (:func:`windowless_python` and
+    :func:`windowless_python_env`). Never waits for the child.
+    """
+    if not argv:
+        raise ValueError("spawn_daemon requires a non-empty argv")
+    cwd_path = _validated_daemon_cwd(cwd)
+    if log_path is None:
+        raise ValueError("spawn_daemon requires a log_path")
+    log_file = os.fspath(log_path)
+    if not os.path.isabs(log_file):
+        log_file = os.path.join(cwd_path, log_file)
+    os.makedirs(os.path.dirname(log_file) or cwd_path, exist_ok=True)
+
+    child_env = dict(os.environ if env is None else env)
+    if env_overrides:
+        child_env.update(env_overrides)
+    command = [os.fspath(part) for part in argv]
+    kwargs = _daemon_popen_kwargs(
+        console_children=console_children,
+        breakaway=breakaway,
+        extra_creationflags=extra_creationflags,
+    )
+    with open(log_file, "ab") as log_fh:
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        log_fh.write(f"{stamp} spawn_daemon cwd={cwd_path} argv={command}\n".encode())
+        log_fh.flush()
+        popen_kwargs = {
+            "cwd": cwd_path,
+            "env": child_env,
+            "stdin": subprocess.DEVNULL,
+            "stdout": log_fh,
+            "stderr": subprocess.STDOUT,
+            "close_fds": True,
+        }
+        try:
+            return subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603
+        except OSError as exc:
+            if not _breakaway_denied(exc, kwargs):
+                raise
+            note = "spawn_daemon: the caller's Job object forbids breakaway"
+            if not contained_fallback:
+                log_fh.write(f"{stamp} {note}; daemon not started\n".encode())
+                raise DaemonSpawnError(
+                    f"{note}; the daemon would die with its caller "
+                    f"({command[0]})"
+                ) from exc
+            note += "; starting the daemon inside it (contained_fallback)"
+            log.warning("%s (%s)", note, command[0])
+            log_fh.write(f"{stamp} {note}\n".encode())
+            log_fh.flush()
+            kwargs["creationflags"] &= ~_CREATE_BREAKAWAY_FROM_JOB
+            return subprocess.Popen(command, **popen_kwargs, **kwargs)  # noqa: S603
