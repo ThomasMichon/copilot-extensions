@@ -1,0 +1,9 @@
+{
+  "comment": "Stage retained authenticated role-selected artifact bytes without activation",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

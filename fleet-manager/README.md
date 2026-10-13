@@ -1,9 +1,10 @@
 # fleet-manager
 
 Standalone fleet system home and thin CLI. **Current scope: offline configuration/
-capacity planning, explicit release-snapshot inspection and installed-client
-resource diagnostics.** No controller, provider invocation, credential
-lookup, managed install/update/uninstall, telemetry sink or resource mutation is delivered yet.
+capacity planning, explicit release-snapshot inspection, installed-client
+resource diagnostics and explicitly authenticated artifact staging.** No
+controller, provider invocation, credential lookup, managed install/update/uninstall,
+telemetry sink or managed-runtime/capacity mutation is delivered yet.
 Those remain the [canonical effort](../efforts/active/linux-role-fleet/README.md).
 
 ```text
@@ -80,6 +81,10 @@ server, Docker, Copilot, marketplace or private-provider dependency. The
 explicit `release-verification` extra adds maintained cryptographic support
 for the separate [pinned-key authentication API](docs/release-authentication.md);
 it does not select a trust policy, install a service or authorize activation.
+The [retained artifact-staging API](docs/artifact-staging.md) uses that explicit
+verification capability and the existing preflight to freeze selected bytes
+in a context-owned private spool. It does not execute artifacts or publish a
+runtime selector. Default planner/doctor commands do not stage anything.
 
 ## Thin client artifacts and local diagnostics
 
