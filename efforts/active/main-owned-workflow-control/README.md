@@ -558,3 +558,10 @@ credential changes, broad policy weakening or unreviewed releases.
 - This realizes the explicit-preservation vision item without changing its
   intent. The repo's fail-loud, smallest-surface and cross-platform patterns
   apply; no runtime, dependency, credential or branch-policy change is needed.
+- Native PR CI exposed #6322's previously unexplained Windows exit mismatch:
+  captured diagnostics show cold PowerShell compilation exceeding the fixture's
+  ten-second child timeout. Two such children also had only a twenty-second
+  enclosing budget. Repaired the ordinary fixture's nested deadline hierarchy,
+  without weakening any console, stream or exit assertion; the real five-second
+  timeout/tree-reap contract is unchanged. Both native local cases passed.
+  Current-head hosted Windows proof is still required, not waived as a flake.
