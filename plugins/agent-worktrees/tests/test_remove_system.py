@@ -30,6 +30,7 @@ def receiving_project_authority(monkeypatch, tmp_path):
     monkeypatch.setattr(cli.cfg, "load_machines_yaml", lambda anchor: {})
 
 
+@pytest.mark.guard
 @pytest.mark.parametrize("include_control_plane_related_pr", [False, True])
 def test_receiving_project_authority_accepts_overlay_scope(
     include_control_plane_related_pr,

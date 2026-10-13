@@ -109,6 +109,7 @@ than repeatedly importing file groups that contain no selected tests.
 Managed-worktree removal fixtures accept the canonical project loader's
 keyword-only overlay selection while retaining synthetic receiving-side
 configuration; they never discover installed project or plugin registries.
+Both explicit overlay values also run in the required PR guard lane.
 
 Agent-worktrees installer command resolution, pipefail execution and POSIX
 background-prune tests are explicit T3 native contracts. Collection never probes
