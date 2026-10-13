@@ -495,6 +495,29 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-10-13 — Native Windows proof landed; wrapper acceptance remains scoped
+
+- [#6518](https://github.com/ThomasMichon/copilot-extensions/pull/6518)
+  merged after a current-head approval and passing aggregate and lockdown
+  checks. The actual Windows PowerShell diagnostic step passed 26 tests,
+  with three POSIX-only cases skipped; its step-specific evidence and
+  consumer/copy inventory now live in the
+  [diagnostic acceptance inventory](installation-mode-governance.md#acceptance-inventory).
+- Added a two-case Manager regression that loads its real vendored
+  installation-context primitive rather than mocking resolver results.
+  The actual command resolver returns the expected selected runtime while
+  lifecycle mutation tripwires and fixture snapshots prove neither absent
+  nor retained foreign pointer evidence is changed.
+- Local command:
+  `PYTEST_ADDOPTS='-k runtime_inspection_uses_real_read_only_primitive' test-supervisor -- python3 tools/run-standalone-tests.py worktree-manager --prepare --admission-wait 60 --timeout 120`.
+  Both cases passed. This is bounded wrapper evidence, not a claim that
+  every doctor, peer, reconciliation, or installed-copy path is proven.
+- No Phase 8 or Validation Plan checkbox is closed by this accounting.
+  Persistent-host diagnostic restrictions remain in place, and release
+  promotion and managed rollout remain separate completion obligations.
+  Continue with uncovered wrapper acceptance before the source-qualified
+  session-catalog and consumer migration slices.
+
 ### 2026-10-13 — Diagnostic correction merged; native evidence is step-specific
 
 - #6497 merged with a genuine current-head approval and both required

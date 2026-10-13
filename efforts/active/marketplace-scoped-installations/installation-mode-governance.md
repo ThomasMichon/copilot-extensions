@@ -92,6 +92,22 @@ read-only status/doctor inspection on persistent hosts. The namespaced
 activation and usage restriction remains unchanged; passing this prerequisite
 does not complete Phase 8 or the effort.
 
+### Acceptance inventory
+
+This inventory records source and execution evidence, not authorization to
+invoke an older installed copy. The prerequisite remains open.
+
+| Surface | Actual entry points and selected bytes | Evidence and remaining gate |
+|---------|----------------------------------------|-----------------------------|
+| Canonical diagnostic CLI | Python `status` / `probe-legacy`, PowerShell `Resolve-InstallationStatus`, POSIX `run_status_action` | [#6497](https://github.com/ThomasMichon/copilot-extensions/pull/6497) removes the publishers. `test_status_and_probe_cli_parity_and_read_only` runs both real commands with absent and retained pointer evidence and compares bytes and modification times. `test_diagnostic_api_never_enters_mutation` guards Python lifecycle mutation entry points in legacy and active-cell fixtures. |
+| Native Windows implementation | Explicit Windows PowerShell 5.1 plus Windows Python | [#6518](https://github.com/ThomasMichon/copilot-extensions/pull/6518), [run 38391704358, job 115276823227](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38391704358/job/115276823227): the actual `Read-only diagnostics (Windows)` step passed, with 26 passed and three POSIX-only cases skipped. A green job with skipped diagnostic steps is not equivalent evidence. |
+| Native POSIX implementation | Python and no-Python POSIX helper; local PowerShell parity is supplementary | #6497's [Linux guard job 115254466358](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38382376832/job/115254466358) executed installation-context smoke and vendoring checks. Local governance selection passed 127 tests. This does not establish native Windows behavior or installed-copy freshness. |
+| Derived implementations | `vendor_pairs()` in `tools/sync-installation-context.py`: 11 standalone plugin helper trees, eight packaged Python trees, and Manager's packaged Python tree | Vendoring verification proves byte parity with canonical sources, not execution of every derived entry point. Retain the dynamic inventory rather than a second hand-maintained copy list; per-consumer wrapper execution remains separately required. |
+| Manager runtime inspection | `marketplace_cells_enabled` and `resolve_installed_plugin_command` in `worktree-manager/src/worktree_manager/agent_plugin_runtime.py`, loading Manager's own vendored primitive | `test_runtime_inspection_uses_real_read_only_primitive` exercises the real primitive in disposable active-cell fixtures, with absent and retained foreign pointers, guarded lifecycle mutation entry points, and byte/directory/modification-time snapshots. Local two-case selection passed. Native Windows execution of this wrapper and wider refusal/legacy no-write cases remain unproven by this selection. |
+| Agent Worktrees reconciliation | `_run_installation_mode_helper` in `plugins/agent-worktrees/src/agent_worktrees/reconcile.py` invokes its selected plugin payload's real `probe-legacy` helper | This is a resolution step inside lifecycle reconciliation, not proof that the entire reconciliation command is read-only. Actual wrapper no-write evidence remains required; a mocked helper result does not close it. |
+| Peer invocation governance | `_governance` in `libs/peer-launch/peer_launch.py`, including its packaged adopters, calls the selected primitive's `resolve_installation_mode` | Actual governance-wrapper no-write evidence remains required. The later invocation may intentionally launch a process; do not classify that whole operation as a diagnostic merely because its governance check is read-only. |
+| Persistent installed copies | The exact implementation each authorized consumer would invoke | Release-content and managed-update proof remain pending. Do not execute the restricted diagnostic paths to discover whether an old copy was updated. |
+
 ## Decision and rationale
 
 Legacy, non-namespaced operation remains the implicit default. A user can opt
