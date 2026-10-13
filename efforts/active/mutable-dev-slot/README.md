@@ -44,8 +44,9 @@ the transfer does not supersede adjacent dependency/identity or other adopter
 work. Construction and the complete runtime lifecycle belong in the existing
 installer-engine home, with Python owning actual construction/retention
 descriptors and its subprocess tree through publication, promotion/drain or
-rollback settlement. Native pre-Python bootstrap and OS integration remain
-initially. This changes ownership, not the full-adopter completion gate.
+rollback settlement. Native entrypoints initially continue to own pre-Python
+bootstrap and OS integration. This changes ownership, not the full-adopter
+completion gate.
 
 ## Context
 
