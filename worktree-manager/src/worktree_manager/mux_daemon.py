@@ -979,7 +979,7 @@ def ensure_daemon_running(
     single-instance lease and only one actually starts a server, so this
     function stays simple and never risks deadlocking against the very
     child it just spawned."""
-    resolved_root = root if root is not None else default_root()
+    resolved_root = Path(root if root is not None else default_root()).absolute()
     lock = lock_path(resolved_root)
     if _daemon_is_live(read_lock_data(lock)):
         return True
@@ -988,8 +988,10 @@ def ensure_daemon_running(
     # scratch directory) would wait on a lock under that root while the
     # spawned `mux-daemon run` resolved its own default installation root
     # instead, so this helper would report failure despite successfully
-    # spawning a daemon.
-    argv = mux_daemon_process.detached_child_argv(root)
+    # spawning a daemon. It is absolute because the child runs from that root:
+    # a relative root (or a relative WORKTREE_MANAGER_ROOT) would otherwise
+    # resolve against the child's new cwd.
+    argv = mux_daemon_process.detached_child_argv(resolved_root)
     if not _spawn_detached(argv, cwd=resolved_root):
         return False
     started = time.time()

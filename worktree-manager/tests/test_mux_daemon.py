@@ -1490,6 +1490,25 @@ def test_ensure_daemon_running_propagates_root_to_spawned_child(tmp_path, monkey
     assert captured["cwd"] == tmp_path
 
 
+def test_ensure_daemon_running_passes_an_absolute_root_for_a_relative_one(tmp_path, monkeypatch):
+    """The child runs from the root, so a relative root must be made absolute
+    first or the child would resolve it against its new cwd."""
+    captured: dict = {}
+
+    def _fake_spawn(argv, **kwargs):
+        captured["argv"] = argv
+        captured["cwd"] = kwargs.get("cwd")
+        return False
+
+    monkeypatch.setattr(mux_daemon, "_spawn_detached", _fake_spawn)
+    (tmp_path / "rel").mkdir()
+    monkeypatch.chdir(tmp_path)
+    mux_daemon.ensure_daemon_running(Path("rel"), boot_wait_s=0.05)
+    assert f"--root={tmp_path / 'rel'}" in captured["argv"]
+    assert captured["cwd"] == tmp_path / "rel"
+    assert captured["cwd"].is_absolute()
+
+
 def test_manager_daemon_restart_republishes_live_mapping_without_relaunch(tmp_path, monkeypatch):
     """Final Step 6 scenario: restarting the companion daemon with a live
     mapping already on disk republishes that mapping to the resident monitor
