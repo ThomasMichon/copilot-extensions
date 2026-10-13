@@ -231,14 +231,24 @@ class PickerScreenModelMixin:
         machine_keys = self._machine_key_map()
         scopes = {}
         result = {}
+        worker_pivots = [
+            d for d in self.pivots
+            if getattr(d.get("pivot"), "worker", None) is not None
+        ]
         for rec in records:
             display = rec.get("machine")
             machine = machine_keys.get(display, display) if display else None
-            if machine not in scopes:
-                scopes[machine] = supervised_workers_by_worktree(
-                    self.pivots, self._pivot_runtimes, machine)
-            result[self._row_key(rec)] = scopes[machine].get(
-                str(rec.get("id") or "").strip().lower(), [])
+            wid = str(rec.get("id") or "").strip().lower()
+            workers = []
+            for d in worker_pivots:
+                reg = d["pivot"]
+                scope = "" if getattr(reg, "account_scoped", False) else machine
+                key = (reg.name, scope)
+                if key not in scopes:
+                    scopes[key] = supervised_workers_by_worktree(
+                        [d], self._pivot_runtimes, scope)
+                workers.extend(scopes[key].get(wid, []))
+            result[self._row_key(rec)] = workers
         return result
     def _task_groups(self):
         """Task rows grouped for display. Groups by the pivot's ``group`` entry

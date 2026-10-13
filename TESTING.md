@@ -150,7 +150,9 @@ loaded worker rows. It checks Show Hidden and the actual pulse refresh through
 the real Textual compositor, bounds formatting by the viewport, retains
 one-line option geometry and exercises off-screen selection/content updates,
 late worker changes, focus and scrolling. Worker scopes are indexed once per
-build rather than scanned per worktree. Native title, detail and worker rows
+build, keyed by each pivot's effective scope: account-wide worker rows are
+indexed once even in the cross-machine All view; machine-scoped rows stay
+separate. Native title, detail and worker rows
 remain deferred during incremental repaint too. Native chrome does not build
 the data body; deterministic capture resolves its selected window with Rich
 styles intact.
