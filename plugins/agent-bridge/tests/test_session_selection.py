@@ -605,16 +605,24 @@ def test_cmd_send_resolves_worktree_handle_and_delivers(monkeypatch, capsys):
 
 
 class _ReplyingLiveClient(_LiveFakeClient):
+    def __init__(self, resolved, receipt_stage=None):
+        super().__init__(resolved)
+        self.receipt_stage = receipt_stage
+
     def send_live_message(self, session_id, *, sender, body, reply_to=None,
                           kind="prompt", wait=False, wait_timeout=None, **_options):
         self.delivered.append({"wait": wait, "wait_timeout": wait_timeout})
-        return {"message_id": 7, "replied": True, "reply": "done - rebased",
-                "stop_reason": "end_turn"}
+        result = {"message_id": 7, "replied": True, "reply": "done - rebased",
+                  "stop_reason": "end_turn"}
+        if self.receipt_stage is not None:
+            result["receipt"] = {"stage": self.receipt_stage}
+        return result
 
 
 @pytest.mark.parametrize("no_wait", [False, True])
-def test_cmd_send_returns_receipt_without_waiting(monkeypatch, capsys, no_wait):
-    client = _ReplyingLiveClient(resolved={"session_id": "live-sess-1"})
+@pytest.mark.parametrize("receipt_stage", [None, "admitted", "sdk_accepted", "consumed"])
+def test_cmd_send_returns_receipt_without_waiting(monkeypatch, capsys, no_wait, receipt_stage):
+    client = _ReplyingLiveClient(resolved={"session_id": "live-sess-1"}, receipt_stage=receipt_stage)
     monkeypatch.setattr(m, "_get_client", lambda: client)
     monkeypatch.setattr(m, "_live_sender_label", lambda args: "peer")
     monkeypatch.setattr(m, "_live_reply_to", lambda args: "wt-caller")
@@ -626,8 +634,14 @@ def test_cmd_send_returns_receipt_without_waiting(monkeypatch, capsys, no_wait):
     assert client.delivered == [{"wait": False, "wait_timeout": 90.0}]
     out = capsys.readouterr().out
     assert "Accepted by live session inbox live-sess-1 (message 7" in out
-    assert "delivery evidence unavailable" in out
-    assert "read live-sess-1 --message-id 7 --json" in out
+    if receipt_stage is None:
+        assert "receipt: unavailable (delivery evidence unavailable)" in out
+        assert "read live-sess-1 --json" in out
+        assert "--message-id" not in out
+        assert "receipt observation requires daemon protocol 33 or newer" in out
+    else:
+        assert f"receipt: {receipt_stage}" in out
+        assert "read live-sess-1 --message-id 7 --json" in out
     assert "Reply from" not in out
     assert "done - rebased" not in out
 
