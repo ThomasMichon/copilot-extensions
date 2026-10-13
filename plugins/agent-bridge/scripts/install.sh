@@ -428,7 +428,7 @@ _write_update_marker() {
 _clear_update_marker() {
     [[ "$_UPDATE_MARKER_HELD" == true ]] || return 0
     _UPDATE_MARKER_HELD=false
-    exec 9>"${UPDATE_MARKER_REFCOUNT_LOCK}" 2>/dev/null || return 0
+    { exec 9>"${UPDATE_MARKER_REFCOUNT_LOCK}"; } 2>/dev/null || return 0
     flock -w 10 9 || true
     local count tmp
     count="$(cat "${UPDATE_MARKER_REFCOUNT}" 2>/dev/null || echo 0)"
@@ -1307,7 +1307,7 @@ do_stamp() {
 # holds the lock; systemd-launched and python-cutover (close_fds) daemons don't.
 _enter_install_lock() {
     mkdir -p "$INSTALL_DIR" 2>/dev/null || true
-    exec 8>"$INSTALL_DIR/.install.lock" 2>/dev/null || return 0   # can't open -> lock-free
+    { exec 8>"$INSTALL_DIR/.install.lock"; } 2>/dev/null || return 0   # can't open -> lock-free
     command -v flock >/dev/null 2>&1 || return 0                  # no flock -> lock-free
     flock -w 150 8 || return 1                                    # held whole window -> defer
     return 0

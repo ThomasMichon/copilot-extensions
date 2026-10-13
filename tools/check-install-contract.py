@@ -284,6 +284,29 @@ def _runtime_scope_violations(plugins_dir: Path) -> list[str]:
     return violations
 
 
+# `exec 8>"$f" 2>/dev/null` (no command) applies EVERY redirection to the
+# current shell, so it silently discards all of the installer's later stderr --
+# including its own failure messages. Group it instead:
+# `{ exec 8>"$f"; } 2>/dev/null` keeps fd 8 and restores stderr.
+_EXEC_STDERR_SWALLOW = re.compile(r'\bexec\s+\d+[<>](?:&-|&\d+|"[^"]*"|\S+)\s+2>\s*/dev/null')
+
+
+def _exec_stderr_swallow_violations(plugins_dir: Path) -> list[str]:
+    violations: list[str] = []
+    for path in sorted(plugins_dir.glob("*/scripts/*.sh")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if _EXEC_STDERR_SWALLOW.search(line):
+                violations.append(
+                    f"{path.relative_to(plugins_dir.parent).as_posix()}:{lineno}: "
+                    "`exec N>... 2>/dev/null` redirects the shell's stderr for the rest "
+                    "of the script; use `{ exec N>...; } 2>/dev/null`"
+                )
+    return violations
+
+
 def _verify_installer_engine_sync() -> list[str]:
     spec = importlib.util.spec_from_file_location("sync_installer_engine", INSTALLER_ENGINE_SYNC)
     if spec is None or spec.loader is None:
@@ -411,6 +434,7 @@ def check() -> int:
         return 1
 
     violations.extend(_runtime_scope_violations(PLUGINS_DIR))
+    violations.extend(_exec_stderr_swallow_violations(PLUGINS_DIR))
 
     persistent_environment_blocks: dict[str, str | None] = {}
     for path in sorted(PLUGINS_DIR.rglob("*.ps1")):

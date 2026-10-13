@@ -50,7 +50,7 @@ _enter_install_lock() {
     mkdir -p "$INSTALL_DIR" 2>/dev/null || true
     if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
         __install_lock_fd=8
-        exec 8>"$INSTALL_DIR/.install.lock" 2>/dev/null || return 1
+        { exec 8>"$INSTALL_DIR/.install.lock"; } 2>/dev/null || return 1
         flock -w 300 8 || return 1
         return 0
     fi

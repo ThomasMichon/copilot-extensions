@@ -180,3 +180,41 @@ def test_valid_scopes_match_the_reconciler() -> None:
             assert set(ast.literal_eval(node.value)) == set(checker.VALID_RUNTIME_SCOPES)
             return
     raise AssertionError("reconcile.VALID_SCOPES not found")
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        '    exec 8>"$INSTALL_DIR/.install.lock" 2>/dev/null || return 1',
+        "            exec 8>&- 2>/dev/null || true",
+        '    exec 9>"${LOCK}" 2> /dev/null || return 0',
+    ],
+)
+def test_exec_redirect_that_swallows_stderr_is_rejected(tmp_path, line) -> None:
+    scripts = tmp_path / "plugins" / "demo" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "install.sh").write_text(f"#!/usr/bin/env bash\n{line}\n", encoding="utf-8")
+    violations = checker._exec_stderr_swallow_violations(tmp_path / "plugins")
+    assert len(violations) == 1
+    assert "demo/scripts/install.sh:2" in violations[0]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        '    { exec 8>"$INSTALL_DIR/.install.lock"; } 2>/dev/null || return 1',
+        "            { exec 8>&-; } 2>/dev/null || true",
+        '        if { exec 8>"$lease_path"; } 2>/dev/null; then',
+        '    # exec 8>"$f" 2>/dev/null would swallow stderr',
+        '    exec "$PY" -m tool 2>/dev/null',
+    ],
+)
+def test_grouped_exec_redirect_is_accepted(tmp_path, line) -> None:
+    scripts = tmp_path / "plugins" / "demo" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "install.sh").write_text(f"#!/usr/bin/env bash\n{line}\n", encoding="utf-8")
+    assert checker._exec_stderr_swallow_violations(tmp_path / "plugins") == []
+
+
+def test_repo_installers_do_not_swallow_stderr_with_exec() -> None:
+    assert checker._exec_stderr_swallow_violations(REPO / "plugins") == []

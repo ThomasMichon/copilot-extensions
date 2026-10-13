@@ -752,7 +752,7 @@ _enter_install_lock() {
     local __timeout="${1:-$(_install_lock_timeout)}"
     mkdir -p "$INSTALL_DIR" 2>/dev/null || return 1
     if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
-        exec 7>"$INSTALL_DIR/.install.lock" 2>/dev/null || return 1
+        { exec 7>"$INSTALL_DIR/.install.lock"; } 2>/dev/null || return 1
         if ! flock -w "$__timeout" 7; then
             exec 7>&-
             return 1

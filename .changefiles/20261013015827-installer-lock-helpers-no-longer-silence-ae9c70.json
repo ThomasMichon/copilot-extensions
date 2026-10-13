@@ -1,0 +1,9 @@
+{
+  "comment": "Installer lock helpers no longer silence the rest of the installer's stderr (group the exec redirection)",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -145,7 +145,7 @@ _write_update_marker() {
 _clear_update_marker() {
     [[ "$_UPDATE_MARKER_HELD" == true ]] || return 0
     _UPDATE_MARKER_HELD=false
-    exec 9>"${UPDATE_MARKER_REFCOUNT_LOCK}" 2>/dev/null || return 0
+    { exec 9>"${UPDATE_MARKER_REFCOUNT_LOCK}"; } 2>/dev/null || return 0
     flock -w 10 9 || true
     local count tmp
     count="$(cat "${UPDATE_MARKER_REFCOUNT}" 2>/dev/null || echo 0)"
@@ -492,7 +492,7 @@ _versioned_activate() {
             [[ "$owner" != "$$" ]] || rm -f "$_activate_lock_link"
         else
             flock -u 8 2>/dev/null || true
-            exec 8>&- 2>/dev/null || true
+            { exec 8>&-; } 2>/dev/null || true
         fi
     }
     if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
@@ -1216,7 +1216,7 @@ _ensure_runtime() {
                 [[ "$owner" != "$$" ]] || rm -f "$_publish_lock_link"
             else
                 flock -u 8 2>/dev/null || true
-                exec 8>&- 2>/dev/null || true
+                { exec 8>&-; } 2>/dev/null || true
             fi
         }
         if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
@@ -2075,7 +2075,7 @@ do_stamp() {
             [[ "$owner" != "$$" ]] || rm -f "$_stamp_lock_link"
         else
             flock -u 8 2>/dev/null || true
-            exec 8>&- 2>/dev/null || true
+            { exec 8>&-; } 2>/dev/null || true
         fi
     }
     if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
@@ -2231,7 +2231,7 @@ do_update() {
             [[ "$owner" != "$$" ]] || rm -f "$_cutover_lock_link"
         else
             flock -u 8 2>/dev/null || true
-            exec 8>&- 2>/dev/null || true
+            { exec 8>&-; } 2>/dev/null || true
         fi
     }
     if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
