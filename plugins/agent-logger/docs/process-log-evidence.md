@@ -69,11 +69,20 @@ Source-root changes still report a partial transfer rather than clearing health.
 Transfers check root identity before each candidate open and before its durable
 publication, stopping on root churn without reopening the pinned directory.
 
-References retain the absolute configured path for display and reference
-identity. Windows references additionally retain the canonical reader root,
+References retain their supplied path for display and reference identity.
+Enumeration anchors a relative configured root to the enumeration-time working
+directory and emits absolute paths without resolving their display aliases.
+Directly constructed references preserve the caller's path, including a
+relative path resolved against the working directory at read time.
+Enumerated Windows references additionally retain the canonical reader root,
 independent of that display path: retargeting an intentional ancestor alias
 cannot redirect later `iter_lines()` calls. Directly constructed references
 continue to resolve their own reader boundary at read time.
+If an entry becomes non-regular between validation and opening, entry-opener
+`ValueError` failures retain their cause and use process-log-specific wording
+with the offending filename. Only `ValueError` from the entry opener is
+normalized; consumer exceptions and entry-opening operating-system failures
+are propagated unchanged.
 
 The configured final root must be a real directory, not an alias. Pinning lasts
 for the operation, not across separate enumeration and read calls: references

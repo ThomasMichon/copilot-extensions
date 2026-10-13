@@ -56,6 +56,17 @@ def _open_regular(path: Path) -> Iterator[BinaryIO]:
             yield stream
 
 
+def _open_process_log_entry(
+    directory: ArchiveDirectory, name: str, *, protected: bool = False,
+) -> BinaryIO:
+    try:
+        return directory.open(name, protected=protected)
+    except ValueError as exc:
+        raise ValueError(
+            f"process-log evidence is not a regular file: {directory.path / name}",
+        ) from exc
+
+
 @contextmanager
 def _open_regular_in(
     directory: ArchiveDirectory, name: str, *, protected: bool = False,
@@ -66,7 +77,7 @@ def _open_regular_in(
     before = directory.stat(name)
     if not stat.S_ISREG(before.st_mode) or is_link_or_reparse(path, before.st_mode):
         raise ValueError(f"process-log evidence is not a regular file: {path}")
-    with directory.open(name, protected=protected) as stream:
+    with _open_process_log_entry(directory, name, protected=protected) as stream:
         opened = os.fstat(stream.fileno())
         if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
             raise ValueError(f"process-log evidence changed while opening: {path}")
@@ -220,7 +231,7 @@ def open_regular_at(dir_fd: int, name: str) -> Iterator[BinaryIO]:
     before = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
     if not stat.S_ISREG(before.st_mode):
         raise ValueError(f"process-log evidence is not a regular file: {name}")
-    with ArchiveDirectory(Path("."), dir_fd).open(name) as stream:
+    with _open_process_log_entry(ArchiveDirectory(Path("."), dir_fd), name) as stream:
         opened = os.fstat(stream.fileno())
         if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
             raise ValueError(f"process-log evidence changed while opening: {name}")

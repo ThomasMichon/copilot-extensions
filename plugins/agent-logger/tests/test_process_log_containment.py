@@ -311,6 +311,125 @@ def test_process_log_posix_enumeration_yields_before_later_archive_validation(
         iterator.close()
 
 
+@pytest.mark.parametrize("codec", ["raw", "gzip", "zip"])
+def test_process_log_relative_reference_and_enumerated_path_intent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codec: str,
+) -> None:
+    first = _evidence(tmp_path / "first" / "logs", codec, PAYLOAD)
+    _evidence(tmp_path / "second" / "logs", codec, b"second working directory\n")
+    relative = Path("logs") / first.path.name
+    direct = ProcessLogRef(relative, first.member)
+    monkeypatch.chdir(tmp_path / "first")
+    assert direct.path == relative and not direct.path.is_absolute()
+    assert direct.verified_root is None
+    enumerated = list(iter_process_log_refs(Path("logs")))[0]
+    assert enumerated.path == first.path and enumerated.path.is_absolute()
+    monkeypatch.chdir(tmp_path / "second")
+    assert "".join(direct.iter_lines()).encode() == b"second working directory\n"
+    assert "".join(enumerated.iter_lines()).encode() == PAYLOAD
+    assert direct.path == relative
+
+
+@pytest.mark.parametrize("operation", ["direct", "enumerated", "zip"])
+def test_process_log_entry_becoming_directory_after_stat_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    from agent_logger.sync.archive_directory import ArchiveDirectory
+
+    ref = _evidence(tmp_path / "logs", "zip" if operation == "zip" else "raw", PAYLOAD)
+    if operation == "enumerated":
+        ref = list(iter_process_log_refs(ref.path.parent))[0]
+    original_open = ArchiveDirectory.open
+    raced = False
+
+    def opened(
+        directory: ArchiveDirectory, name: str, *, protected: bool = False,
+    ) -> BinaryIO:
+        nonlocal raced
+        if name == ref.path.name and not raced:
+            ref.path.rename(tmp_path / "retained-evidence")
+            ref.path.mkdir()
+            raced = True
+        return original_open(directory, name, protected=protected)
+
+    monkeypatch.setattr(ArchiveDirectory, "open", opened)
+    expected = OSError if os.name == "nt" else ValueError
+    with pytest.raises(expected) as caught:
+        if operation == "zip":
+            list(iter_process_log_refs(ref.path.parent))
+        else:
+            list(ref.iter_lines())
+    assert raced and ref.path.is_dir()
+    assert (tmp_path / "retained-evidence").is_file()
+    if os.name != "nt":
+        assert "process-log evidence is not a regular file" in str(caught.value)
+        assert ref.path.name in str(caught.value)
+        assert isinstance(caught.value.__cause__, ValueError)
+        assert "archive entry" in str(caught.value.__cause__)
+
+
+@pytest.mark.parametrize(
+    "reader",
+    ["path", pytest.param("fd", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX fd API"))],
+)
+def test_process_log_entry_open_value_error_is_normalized_only_at_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reader: str,
+) -> None:
+    from agent_logger import process_logs
+    from agent_logger.sync.archive_directory import ArchiveDirectory
+
+    ref = _evidence(tmp_path / "logs", "raw", PAYLOAD)
+    origin = ValueError("archive entry is not a regular file")
+
+    def rejected_open(
+        directory: ArchiveDirectory, name: str, *, protected: bool = False,
+    ) -> BinaryIO:
+        raise origin
+
+    monkeypatch.setattr(ArchiveDirectory, "open", rejected_open)
+    with pytest.raises(ValueError, match="process-log evidence is not a regular file") as caught:
+        if reader == "path":
+            list(ref.iter_lines())
+        else:
+            with open_root_dir(ref.path.parent) as fd:
+                with process_logs.open_regular_at(fd, ref.path.name):
+                    pytest.fail("non-regular entry was admitted")
+    assert caught.value.__cause__ is origin
+    assert ref.path.name in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "reader",
+    [
+        "path", "directory",
+        pytest.param("fd", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX fd API")),
+    ],
+)
+def test_process_log_entry_consumer_value_error_is_not_normalized(
+    tmp_path: Path, reader: str,
+) -> None:
+    from agent_logger import process_logs
+    from agent_logger.sync.archive_directory import archive_directory
+
+    ref = _evidence(tmp_path / "logs", "raw", PAYLOAD)
+    consumer = ValueError("consumer failure")
+    with pytest.raises(ValueError, match="consumer failure") as caught:
+        if reader == "path":
+            with process_logs._open_regular(ref.path):
+                raise consumer
+        else:
+            with archive_directory(ref.path.parent) as directory:
+                boundary = (
+                    process_logs._open_regular_in(directory, ref.path.name)
+                    if reader == "directory"
+                    else process_logs.open_regular_at(directory.fd, ref.path.name)
+                )
+                with boundary:
+                    raise consumer
+    assert caught.value is consumer
+    assert caught.value.__cause__ is None
+
+
 @pytest.mark.parametrize("operation", ["read", "copy"])
 def test_process_log_root_identity_error_preserves_reason_and_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
