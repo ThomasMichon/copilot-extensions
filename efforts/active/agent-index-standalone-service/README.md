@@ -120,6 +120,10 @@ The concrete host, capacity and enrollment configuration stay downstream.
 This direction prioritizes the container integration slice; it does not mark
 unfinished native activation, rollback or platform-parity gates complete.
 
+Operator clarified the Gateway target:
+
+> Contribute to the new fleet-manager Gateway; leave the older Gateway untouched
+
 ## Plan
 
 ### Phase 1 - Existing recovery and reviewed proposal

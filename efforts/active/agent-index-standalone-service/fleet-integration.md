@@ -15,6 +15,10 @@ Gateway, with its source-token requests routed through that Gateway to a
 subscribed controller. Ordinary native use remains supported. Exact placement
 and provider identity are adopter configuration, not upstream constants.
 
+The target is the new fleet-manager Gateway, not an older adopter Gateway.
+Existing Gateway deployments remain untouched; implementing this slice does not
+authorize their replacement, port takeover, data import or credential reuse.
+
 The following topology and sequencing are **agent-recommended elaborations**:
 
 ```text
@@ -90,6 +94,13 @@ that binding. Omitted filters mean the authorized scope, never all indexed
 sources; explicitly requested scope outside that grant is rejected. Apply this
 to search, similar/cluster retrieval and query-derived counts/metadata before
 retrieval, not merely by stripping unauthorized hits afterward.
+
+Status reads, including source histograms, chunk/table counts and task/source
+metadata, require the same corpus/source binding at the index execution boundary.
+Return only an authorized scoped view, or reject the operation when the backend
+cannot produce one; never expose global metadata as a scoped success. Fleet-wide
+diagnostics require a separate management grant. Admission-only health must not
+disclose corpus/source inventory.
 
 Reject unavailable, stale, mismatched, unauthorized and malformed responses
 explicitly. Gateway authentication failure or outage must not silently retry
