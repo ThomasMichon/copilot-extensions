@@ -45,6 +45,14 @@ if os.environ.get("FIXTURE_PAUSE_CREATION") == "1":
 
     main._prepare_worktree_source = paused_prepare
 
+if os.environ.get("FIXTURE_REFUSE_PROFILE") == "1":
+    from agent_worktrees import resolve_launch_cli
+
+    def refused_profile(_config):
+        raise RuntimeError("fixture profile refused before effects")
+
+    resolve_launch_cli._validate_profile_assignment_config = refused_profile
+
 argv, project = main._extract_project_flag(sys.argv[2:])
 if project not in (None, "fixture"):
     raise SystemExit("fixture owner refuses a foreign project")

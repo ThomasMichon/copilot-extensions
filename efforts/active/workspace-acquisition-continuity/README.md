@@ -373,3 +373,22 @@ takeover, blanket freshness authorization, or parallel session owner is proposed
   32 passed. Bridge owner/creation selection: 42 passed, three opt-in/platform
   skips. Lint and module-size guards are green; updated-head review and required
   CI remain publication gates.
+
+### 2026-10-13 - Repairable pre-effect refusal without phantom allocation
+
+- A later review of the same published head made the pre-effect refusal concern
+  concrete: allocation identity was reserved before profile/readiness/pairing
+  validation, leaving a permanently pending tuple when those checks refused.
+- Moved reservation to the actual effects boundary, after those validations and
+  before directory/source/ownership allocation. Narrow validation/IO exceptions
+  before reservation preserve facts as a known refusal; only the same facts
+  can retry after repair. Unknown interruption and any failure after reservation
+  remain pending and never authorize another allocation.
+- Unit regressions cover three pre-effect exception classes, changed-facts
+  refusal, real profile validation, and refusal after reservation. A fresh real
+  owner subprocess refuses profile validation with no directory or tuple, then
+  repairs and replays the same key to exactly one checkout and tracking record.
+- The initial native fixture patched a lazy façade rather than its preflight
+  owner, so it did not inject the refusal. Corrected that fixture to patch the
+  actual `resolve_launch_cli` owner; no runtime validation was weakened.
+  Owner/native/seed selection: 30 passed. Lint and module-size guards are green.

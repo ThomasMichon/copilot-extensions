@@ -100,6 +100,40 @@ def test_interrupted_effect_preserves_original_recovery_identity(allocation):
     assert caught.value.payload()["creation"]["repeat_new"] is False
     assert len(calls) == 1
 
+@pytest.mark.parametrize("failure", [RuntimeError, ValueError, OSError])
+def test_refused_pre_effect_creation_can_retry_only_the_same_facts(allocation, failure):
+    config, facts, allocate, calls, _ = allocation
+
+    def refused(_reserve):
+        raise failure("pre-effect validation refused")
+
+    with pytest.raises(failure, match="pre-effect validation"):
+        requests.create(config, "logical", facts, refused)
+    assert calls == []
+    with pytest.raises(requests.CreationRequestFailure) as changed:
+        requests.create(config, "logical", {**facts, "anchor": "different"}, allocate)
+    assert changed.value.status == "conflict"
+    assert calls == []
+    result = requests.create(config, "logical", facts, allocate)
+    replay = requests.create(config, "logical", facts, allocate)
+    assert result["worktree"] == replay["worktree"]
+    assert len(calls) == 1
+
+def test_failure_after_allocation_reservation_never_resets_the_key(allocation):
+    config, facts, allocate, calls, _ = allocation
+    original = {"id": "original", "repo": "worker", "path": "original-path", "branch": "worktree/original"}
+
+    def failed(reserve):
+        reserve(original)
+        raise RuntimeError("after the effects boundary")
+
+    with pytest.raises(RuntimeError, match="effects boundary"):
+        requests.create(config, "logical", facts, failed)
+    with pytest.raises(requests.CreationRequestFailure) as pending:
+        requests.create(config, "logical", facts, allocate)
+    assert pending.value.status == "pending" and pending.value.worktree == original
+    assert calls == []
+
 
 @pytest.mark.guard
 def test_changed_facts_conflict_before_allocating(allocation):
@@ -224,6 +258,34 @@ def test_core_keyed_creation_replays_without_running_create_again(tmp_path, monk
     assert first["worktree"] == second["worktree"]
     assert len(created) == len(tracking.list_records(records)) == 1
 
+def test_core_profile_refusal_does_not_reserve_a_phantom_allocation(tmp_path, monkeypatch):
+    import sqlite3
+    import agent_worktrees.__main__ as main
+    from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
+
+    config = _create_config(tmp_path)
+    records = tmp_path / "tracking"
+    monkeypatch.setattr(main.cfg, "tracking_dir", lambda _name=None: records)
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    created = []
+    monkeypatch.setattr(main.git_ops, "create_worktree",
+        lambda _anchor, path, *_args: created.append(path) or Path(path).mkdir())
+
+    def invalid_profile(_config):
+        raise RuntimeError("invalid profile")
+
+    monkeypatch.setattr(main, "_validate_profile_assignment_config", invalid_profile)
+    with pytest.raises(RuntimeError, match="invalid profile"):
+        main._create_worktree_core(config, creation_key="caller", no_pair=True)
+    with sqlite3.connect(records.parent / "workspace-creation.sqlite3") as db:
+        assert db.execute("SELECT status,worktree FROM creations").fetchall() == [("refused", None)]
+    assert created == [] and tracking.list_records(records) == []
+    monkeypatch.setattr(main, "_validate_profile_assignment_config", lambda _config: None)
+    first = main._create_worktree_core(config, creation_key="caller", no_pair=True)
+    second = main._create_worktree_core(config, creation_key="caller", no_pair=True)
+    assert first["worktree"] == second["worktree"]
+    assert len(created) == len(tracking.list_records(records)) == 1
+
 
 def test_cli_creation_key_and_pending_response(monkeypatch, capfd):
     import agent_worktrees.__main__ as main
@@ -246,6 +308,45 @@ def test_cli_creation_key_and_pending_response(monkeypatch, capfd):
     assert response["creation"]["version"] == 1
     assert response["creation"]["status"] == "pending"
     assert response["worktree"]["id"] == "original"
+
+
+@pytest.mark.skipif(
+    os.environ.get("AGENT_WORKTREES_CREATION_NATIVE") != "1",
+    reason="opt-in native fresh-owner creation boundary",
+)
+@pytest.mark.timeout(120)
+def test_native_pre_effect_refusal_then_same_key_repair(tmp_path):
+    import sqlite3
+
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    for arguments in (
+        ["init", "-q", "--initial-branch=main"],
+        ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+         "commit", "--allow-empty", "-qm", "fixture"],
+        ["remote", "add", "origin", str(anchor)],
+    ):
+        subprocess.run(["git", "-C", str(anchor), *arguments], check=True,
+                       capture_output=True, text=True, timeout=15, **no_window_kwargs())
+    argv = [
+        sys.executable, str(Path(__file__).with_name("workspace_owner_fixture.py")), str(tmp_path),
+        "create", "--system", "--name", "fixture", "--no-owner", "--no-pair",
+        "--creation-key", "logical:1", "--json",
+    ]
+    refused = subprocess.run(
+        argv, capture_output=True, text=True, timeout=40,
+        env={**os.environ, "FIXTURE_REFUSE_PROFILE": "1"}, **no_window_kwargs(),
+    )
+    assert refused.returncode == 1 and "fixture profile refused" in refused.stdout
+    with sqlite3.connect(tmp_path / "state" / "workspace-creation.sqlite3") as db:
+        assert db.execute("SELECT status,worktree FROM creations").fetchall() == [("refused", None)]
+    assert not (tmp_path / "worktrees").exists()
+    first = subprocess.run(argv, capture_output=True, text=True, timeout=40, **no_window_kwargs())
+    assert first.returncode == 0, first.stderr
+    replay = subprocess.run(argv, capture_output=True, text=True, timeout=40, **no_window_kwargs())
+    assert replay.returncode == 0, replay.stderr
+    assert json.loads(first.stdout)["worktree"] == json.loads(replay.stdout)["worktree"]
+    assert len(tracking.list_records(tmp_path / "state" / "worktrees")) == 1
 
 
 @pytest.mark.skipif(

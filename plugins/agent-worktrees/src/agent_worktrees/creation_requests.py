@@ -172,7 +172,11 @@ def create(
                 "SELECT version, facts, status, worktree FROM creations WHERE key_digest=?",
                 (digest,),
             ).fetchone()
-            if row is not None:
+            retry_refused = (
+                row is not None and row[0] == SCHEMA_VERSION and row[1] == encoded_facts
+                and row[2] == "refused" and row[3] is None
+            )
+            if row is not None and not retry_refused:
                 try:
                     return _replay(row, encoded_facts, records, config.repo_name)
                 except CreationRequestFailure as exc:
@@ -183,10 +187,16 @@ def create(
                         )
                         connection.commit()
                     raise
-            connection.execute(
-                "INSERT INTO creations VALUES (?, ?, ?, 'pending', NULL)",
-                (digest, SCHEMA_VERSION, encoded_facts),
-            )
+            if retry_refused:
+                connection.execute(
+                    "UPDATE creations SET status='pending' WHERE key_digest=?",
+                    (digest,),
+                )
+            else:
+                connection.execute(
+                    "INSERT INTO creations VALUES (?, ?, ?, 'pending', NULL)",
+                    (digest, SCHEMA_VERSION, encoded_facts),
+                )
 
         def reserve(worktree: dict) -> None:
             with connection:
@@ -198,7 +208,16 @@ def create(
                 if changed != 1:
                     raise CreationRequestFailure("conflict", "Creation intent already has an allocation identity")
 
-        result = allocate(reserve)
+        try:
+            result = allocate(reserve)
+        except (RuntimeError, ValueError, OSError):
+            with connection:
+                connection.execute(
+                    "UPDATE creations SET status='refused' WHERE key_digest=? "
+                    "AND status='pending' AND worktree IS NULL",
+                    (digest,),
+                )
+            raise
         worktree = result["worktree"]
         record = _owner_record(worktree, records, config.repo_name)
         with connection:

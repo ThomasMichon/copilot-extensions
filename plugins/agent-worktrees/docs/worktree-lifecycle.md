@@ -83,6 +83,11 @@ an explicit pending/recovery error (exit 3), including the reserved identity
 when known. It never treats a missing response as permission to repeat create.
 Pending effects require reconciliation; no automatic replacement is authorized
 by an absent local receipt.
+Profile, ownership-readiness and pairing validation precede reservation of the
+allocation identity. A positively refused validation before that effects
+boundary preserves the bound facts but permits same-key retry after repair;
+no workspace was allocated. Once an identity is reserved, even a later failed
+call stays pending and cannot reset the key or authorize another allocation.
 
 ## Worktree states
 

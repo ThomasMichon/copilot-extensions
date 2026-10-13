@@ -643,12 +643,6 @@ def _create_worktree_core(
         worktree_id = f"{config.machine}-{plat_short}-{timestamp}-{suffix}"
     branch = f"worktree/{worktree_id}"
     worktree_path = str(Path(repo.worktree_root) / worktree_id)
-    if creation_intent is not None:
-        creation_intent({
-            "id": worktree_id, "path": worktree_path,
-            "branch": branch, "repo": config.repo_name,
-        })
-
     if owner_ref:
         parsed_owner = tracking.parse_claim_ref(owner_ref)
         if parsed_owner is None or not parsed_owner.is_qualified:
@@ -705,6 +699,12 @@ def _create_worktree_core(
     # opt-out for a registrar/pool with no bound knowledge repo to hand its workers.
     if kind == "session" and not no_pair:
         core._paired_knowledge_allocation_preflight(config)
+
+    if creation_intent is not None:
+        creation_intent({
+            "id": worktree_id, "path": worktree_path,
+            "branch": branch, "repo": config.repo_name,
+        })
 
     # Ensure root exists
     Path(repo.worktree_root).mkdir(parents=True, exist_ok=True)
