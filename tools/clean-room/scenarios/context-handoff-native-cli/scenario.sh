@@ -12,7 +12,7 @@ capture cli-help -- copilot --help
 capture config-help -- copilot help config
 capture commands-help -- copilot help commands
 capture fixture-tests -- bash -lc \
-    "cd /home/operator/scenario && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest test_validation"
+    "cd /home/operator/scenario && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -p 'test_*.py'"
 if [ -e "$HOME/.copilot/settings.json" ] || [ -e "$HOME/.agent-worktrees" ] || [ -e "$HOME/.agent-dispatch" ]; then
     jam repo-config "venue was not fresh" "use a new uniquely named clean-room container"
     cr_finalize

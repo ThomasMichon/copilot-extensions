@@ -671,21 +671,27 @@ def cursor_errors(cursor, root, baseline=None):
         line = cursor["last_line"]
         if type(line) is not int or not 1 <= line <= len(lines):
             return ["last_line must be a real 1-based corpus line"]
-        record = int(re.search(r"record=(\d+)", lines[line - 1]).group(1))
-        severity = int(re.search(r"severity=(\d+)", lines[line - 1]).group(1))
+        record_match = re.search(r"record=(\d+)", lines[line - 1])
+        severity_match = re.search(r"severity=(\d+)", lines[line - 1])
+        if record_match is None or severity_match is None:
+            return ["last_line does not contain record/severity fields"]
+        record, severity = int(record_match[1]), int(severity_match[1])
         errors = []
         if cursor["last_record"] != record or cursor["last_severity"] != severity:
             errors.append("last_record/last_severity do not match last_line")
         if line < len(lines):
             expected_path, expected_line = cursor["path"], line + 1
         else:
-            shard = int(re.search(r"shard-(\d+)", path.name).group(1)) + 1
+            shard_match = re.search(r"shard-(\d+)", path.name)
+            if shard_match is None:
+                return ["last path must identify a numbered corpus shard"]
+            shard = int(shard_match[1]) + 1
             expected_path, expected_line = f"corpus/shard-{shard:03d}.txt", 1
         if (cursor["next_path"], cursor["next_line"]) != (expected_path, expected_line):
             errors.append(f"next cursor must be {expected_path}:{expected_line}")
         return errors
-    except (OSError, ValueError, TypeError, AttributeError) as error:
-        return [f"invalid audit cursor: {error}"]
+    except (OSError, ValueError, TypeError):
+        return ["invalid audit cursor: unreadable or invalid corpus binding"]
 
 
 def action_errors(action, cursor, transitions, workspace):

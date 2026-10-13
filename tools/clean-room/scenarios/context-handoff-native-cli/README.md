@@ -102,7 +102,10 @@ the witness passes the actual native content read-back on stdin before each
 clear. It never writes artifacts or repairs invalid checkpoints. First-obstacle
 STOP applies to validation errors as well. `test_validation.py` covers warning
 extraction, line offsets, missing witness fields and stale/compound actions.
-Setup runs these deterministic tests before any paid witness turn.
+`test_cli_diagnostics.py` covers invalid controller arguments, unavailable Linux
+account lookup and stable malformed-corpus diagnostics. Setup discovers both
+modules before any paid witness turn; run the same agent-free checks with
+`python -m unittest discover -p 'test_*.py'` from this scenario directory.
 
 The selected acceptance contract for new runs is **semantic**, not exact tool
 choreography. After each clear the actual bound checkpoint, AGENTS content and

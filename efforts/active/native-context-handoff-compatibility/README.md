@@ -183,9 +183,9 @@ does not close those native gates. The effort remains **Active**.
 
 **Scope:** publish the existing generic test/evidence tranche, not a runtime fix
 or a passing acceptance claim. Relative to journal base `f926f234a`, the tranche
-changes nine files: this effort README/design plus the scenario's README,
+changes ten files: this effort README/design plus the scenario's README,
 manifest, setup shell, controller, read-only validator, deterministic tests and
-unpaid OS-permission probe
+unpaid OS-permission probe and focused CLI-diagnostic tests
 under `tools/clean-room/scenarios/context-handoff-native-cli/`. No plugin payload,
 runtime, catalog, installed settings or changefile is changed. Preparation reconciles final documentation and evidence-integrity checks;
 managed publication/review/merge
@@ -205,8 +205,8 @@ Reproduce the source checks from the repository root:
 ```powershell
 Push-Location tools\clean-room\scenarios\context-handoff-native-cli
 $env:PYTHONDONTWRITEBYTECODE = '1'
-python -m unittest test_validation
-ruff check --no-cache --select F,E9 controller.py validation.py test_validation.py os_permission_smoke.py
+python -m unittest discover -p 'test_*.py'
+ruff check --no-cache --select F,E9 controller.py validation.py test_validation.py test_cli_diagnostics.py os_permission_smoke.py
 Pop-Location
 python tools\check-effort-vision-structure.py efforts\active\native-context-handoff-compatibility\README.md
 git diff --check f926f234a..HEAD
@@ -221,7 +221,7 @@ test or ACP substitute. Release version/blob checks fail closed if current
 `main` no longer carries the recorded payload. No new eval was run or authorized
 by this preparation slice.
 
-**Safety and sanitization:** the reviewed nine-file tranche contains only
+**Safety and sanitization:** the reviewed ten-file tranche contains only
 generic tooling, synthetic fixture data/session identifiers and declared
 in-container paths. No real operator/machine/private checkout path, credential
 literal, private URL or raw run artifact is included. Raw judge packets/logs stay
@@ -314,6 +314,15 @@ below-altitude evidence/tooling documentation, with no new rollout claim.
   Thirty-eight source tests and `F,E9` checks pass, including normal snapshot
   positives. This correction does not alter the paid-run packets or repeat the
   settled fixture-containment proof.
+- The subsequent Lite review again reported an unavailable full runner and
+  carried earlier corrected threads. Its six new comments describe three
+  diagnostic issues, each duplicated: controller usage, missing Linux account
+  lookup support and unstable malformed-corpus cursor errors. Added explicit
+  guards and stable field/binding diagnostics, with focused tests in a separate
+  module rather than growing the existing near-budget test file. All forty-one
+  discovered tests and `F,E9` checks pass. The old addressed findings are not
+  being patched a second time; review-thread state is reconciled to the actual
+  corrections and independent evidence.
 - The corrections affect source evidence validation only. All four historical
   independent FAIL verdicts and their original packets remain unchanged.
   No paid trial, native deployment claim or runtime change is authorized by

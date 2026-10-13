@@ -34,6 +34,8 @@ def command(argv, *, env=None, check=True):
 
 
 def worker(argv, *, check=True):
+    if sys.platform != "linux" or pwd is None:
+        raise RuntimeError("permission probe requires Linux account lookup support")
     account = pwd.getpwnam("operator")
     env = {"HOME": account.pw_dir, "USER": "operator", "LOGNAME": "operator",
            "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -231,14 +233,16 @@ if __name__ == "__main__":
     parser.add_argument("--probe", type=Path)
     parser.add_argument("--lane")
     args = parser.parse_args()
-    if args.probe:
-        attempt_probe(args.probe, args.lane)
-    else:
-        try:
+    try:
+        if sys.platform != "linux" or pwd is None:
+            raise RuntimeError("permission probe requires Linux account lookup support")
+        if args.probe:
+            attempt_probe(args.probe, args.lane)
+        else:
             result = run_smoke(args.results)
-        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
-            print(json.dumps({"passed": False, "stopped_before_proof": True, "error": str(error)}))
-            sys.exit(1)
-        print(json.dumps({"passed": result["passed"], "errors": result["errors"],
-                          "report": str(args.results / "os-permission-report.json")}))
-        sys.exit(not result["passed"])
+            print(json.dumps({"passed": result["passed"], "errors": result["errors"],
+                              "report": str(args.results / "os-permission-report.json")}))
+            sys.exit(not result["passed"])
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
+        print(json.dumps({"passed": False, "stopped_before_proof": True, "error": str(error)}))
+        sys.exit(1)

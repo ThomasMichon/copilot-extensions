@@ -708,6 +708,12 @@ def redact():
 
 
 if __name__ == "__main__":
+    actions = {"fingerprint", "verify-release", "seed", "launch", "pressure",
+               "send", "capture", "export", "analyze", "redact"}
+    operands = {"fingerprint", "send", "capture"}
+    if (len(sys.argv) < 2 or sys.argv[1] not in actions
+            or len(sys.argv) != (3 if sys.argv[1] in operands else 2)):
+        raise SystemExit("usage: controller.py <" + "|".join(sorted(actions)) + "> [argument]")
     action = sys.argv[1]
     EVAL.mkdir(parents=True, exist_ok=True)
     if action == "fingerprint":
