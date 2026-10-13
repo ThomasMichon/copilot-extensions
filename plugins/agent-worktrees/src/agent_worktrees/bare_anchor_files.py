@@ -32,8 +32,18 @@ REFRESH_FAILED = "refresh-failed"
 QUIET_STATUSES = frozenset({REFRESHED, NONE, CURRENT})
 
 
+def _git(path: str, *args: str):
+    """Run git in the anchor, ignoring inherited repository selectors.
+
+    An ambient ``GIT_DIR``/``GIT_WORK_TREE``/``GIT_INDEX_FILE`` (for example
+    from a hook or a parent git process) would otherwise redirect these
+    probes and the ``read-tree -u`` refresh to an unrelated repository.
+    """
+    return git_ops.git(*args, cwd=path, check=False, isolated_repository=True)
+
+
 def _git_dir(path: str) -> Path | None:
-    out = git_ops.git("rev-parse", "--absolute-git-dir", cwd=path, check=False)
+    out = _git(path, "rev-parse", "--absolute-git-dir")
     text = out.stdout.strip()
     return Path(text) if out.returncode == 0 and text else None
 
@@ -46,10 +56,9 @@ def _work(path: str, git_dir: Path, *args: str):
     ``--no-optional-locks`` keeps the read-only checks from opportunistically
     rewriting the index.
     """
-    return git_ops.git(
-        "--no-optional-locks", "-c", "core.bare=false",
+    return _git(
+        path, "--no-optional-locks", "-c", "core.bare=false",
         "--git-dir", str(git_dir), "--work-tree", path, *args,
-        cwd=path, check=False,
     )
 
 
@@ -86,9 +95,9 @@ def precheck(path: str, old: str, new: str) -> str | None:
     # Re-stat the index first: plumbing diff-files and read-tree -u compare
     # cached stat data, so an untouched-but-restatted file would otherwise
     # read as modified. Content changes still show up below.
-    git_ops.git(
-        "-c", "core.bare=false", "--git-dir", str(git_dir), "--work-tree", path,
-        "update-index", "-q", "--refresh", cwd=path, check=False,
+    _git(
+        path, "-c", "core.bare=false", "--git-dir", str(git_dir), "--work-tree", path,
+        "update-index", "-q", "--refresh",
     )
     if _work(path, git_dir, "diff-files", "--quiet").returncode != 0:
         return DIRTY
@@ -98,9 +107,8 @@ def precheck(path: str, old: str, new: str) -> str | None:
     # Current git treats IGNORED files as expendable even without
     # --exclude-per-directory, so a local path that a newly tracked one would
     # overwrite or remove is refused explicitly.
-    added = git_ops.git(
-        "diff-tree", "-r", "-z", "--name-only", "--no-renames", "--diff-filter=A", old, new,
-        cwd=path, check=False,
+    added = _git(
+        path, "diff-tree", "-r", "-z", "--name-only", "--no-renames", "--diff-filter=A", old, new,
     )
     if added.returncode != 0:
         return COLLISION

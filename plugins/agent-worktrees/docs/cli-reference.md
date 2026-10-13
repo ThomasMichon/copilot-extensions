@@ -717,7 +717,7 @@ worktrees are never touched. Each bare-anchor result ends with
 | `dirty` | The checked-out files have local edits; ref left unmoved |
 | `collision` | An untracked or ignored local path is in the way of a newly tracked one; ref left unmoved |
 | `index-locked` | Another git process holds the anchor's `index.lock`; ref left unmoved |
-| `refresh-failed:<detail>` | The ref advanced (the result names the commit it advanced from) but the files could not be refreshed, for example because another git process took `index.lock` after the checks; fix the cause, then run `git -c core.bare=false --work-tree <anchor> read-tree -m -u <from> <branch>` |
+| `refresh-failed:<detail>` | The ref advanced (the result names the commit it advanced from) but the files could not be refreshed, for example because another git process took `index.lock` after the checks; fix the cause, then run `git --git-dir <anchor>/.git -c core.bare=false --work-tree <anchor> read-tree -m -u <from> <branch>` (works from any directory; an anchor with checked-out files keeps its git dir at `<anchor>/.git`) |
 
 Any status other than `refreshed`, `current`, or `none` is printed as a
 warning.

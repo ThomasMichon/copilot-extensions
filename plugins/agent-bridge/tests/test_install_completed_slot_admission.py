@@ -286,6 +286,29 @@ def test_ps1_completed_slot_admission(
     _assert_outcome(tmp_path, result, expected)
 
 
+# An unavailable payload hash must never let a same-content shortcut accept a
+# completed slot on its marker alone: every entry point (pre-lock, post-lock,
+# update) reaches the fail-closed `unverified` refusal instead.
+_PS_NO_HASH = "function Get-PayloadHash { return '' }\n"
+_PS_NO_HASH_ENTRIES = [
+    # pre-lock shortcut: the slot is already active when the installer starts
+    ("match-active", ""),
+    # post-lock shortcut: a concurrent install activates it while we wait
+    ("match-inactive", "function Enter-InstallLock { Activate; return $true }\n"),
+]
+
+
+@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+@pytest.mark.parametrize("action", ["Invoke-Update", "Invoke-Install"])
+@pytest.mark.parametrize(("scenario", "lock"), _PS_NO_HASH_ENTRIES, ids=["pre-lock", "post-lock"])
+def test_ps1_unhashable_payload_refuses_active_completed_slot(
+    tmp_path: Path, action: str, scenario: str, lock: str
+) -> None:
+    result = _run_ps(_ps_harness(tmp_path, scenario, _PS_NO_HASH + lock + action))
+    _assert_outcome(tmp_path, result, _REFUSED)
+    assert "(unverified)" in result.stdout, result.stdout + result.stderr
+
+
 @pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
 @pytest.mark.parametrize(
     ("scenario", "expected"),
@@ -444,6 +467,24 @@ def test_sh_completed_slot_admission(
 ) -> None:
     result = _run_sh(_sh_harness(tmp_path, scenario, action))
     _assert_outcome(tmp_path, result, expected)
+
+
+_SH_NO_HASH = "_payload_hash() { :; }\n"
+_SH_NO_HASH_ENTRIES = [
+    ("match-active", ""),
+    ("match-inactive", "_enter_install_lock() { activate; return 0; }\n"),
+]
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+@pytest.mark.parametrize("action", ["do_update", "do_install"])
+@pytest.mark.parametrize(("scenario", "lock"), _SH_NO_HASH_ENTRIES, ids=["pre-lock", "post-lock"])
+def test_sh_unhashable_payload_refuses_active_completed_slot(
+    tmp_path: Path, action: str, scenario: str, lock: str
+) -> None:
+    result = _run_sh(_sh_harness(tmp_path, scenario, _SH_NO_HASH + lock + action))
+    _assert_outcome(tmp_path, result, _REFUSED)
+    assert "(unverified)" in result.stderr, result.stdout + result.stderr
 
 
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")

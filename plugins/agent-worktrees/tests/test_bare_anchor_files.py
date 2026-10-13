@@ -7,6 +7,9 @@ it keeps its index and checked-out files beside the git dir).
 
 from __future__ import annotations
 
+import os
+import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -321,3 +324,144 @@ def test_repos_cli_sync_warns_on_blocked_anchor_files(
     assert by_name["locked-anchor"] == "warn", calls
     assert any("files=dirty" in msg for _, msg in calls)
     assert any("files=refresh-failed:" in msg for _, msg in calls)
+
+
+# --------------------------------------------------------------------------
+# Inherited Git selectors never redirect the sync to another repository
+# --------------------------------------------------------------------------
+
+
+def _decoy(tmp_path: Path) -> Path:
+    """An unrelated ordinary repo that ambient GIT_* selectors point at."""
+    repo = tmp_path / "decoy"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "Test")
+    _commit(repo, "decoy", {"DECOY.md": "decoy\n"})
+    _git(repo, "remote", "add", "origin", str(tmp_path / "upstream"))
+    return repo
+
+
+def _decoy_state(decoy: Path) -> tuple:
+    git_dir = decoy / ".git"
+    return (
+        _git(decoy, "for-each-ref", "--format=%(refname) %(objectname)"),
+        (git_dir / "index").read_bytes(),
+        _git(decoy, "config", "--get-all", "remote.origin.fetch"),
+        sorted(p.name for p in decoy.iterdir()),
+        _read(decoy / "DECOY.md"),
+    )
+
+
+def _point_git_at(monkeypatch, decoy: Path) -> None:
+    monkeypatch.setenv("GIT_DIR", str(decoy / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(decoy))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(decoy / ".git" / "index"))
+
+
+def test_sync_ignores_inherited_git_selectors(
+    upstream: Path, tmp_path: Path, monkeypatch
+) -> None:
+    anchor = _make_anchor(upstream, tmp_path / "anchor")
+    decoy = _decoy(tmp_path)
+    before = _decoy_state(decoy)
+    new = _commit(upstream, "second", {"README.md": "v2\n", "docs/NEW.md": "new\n"})
+
+    with monkeypatch.context() as m:
+        _point_git_at(m, decoy)
+        result = bare_anchor_sync.sync_bare_anchor(str(anchor), "main")
+
+    assert result == ("synced", "main; files=refreshed")
+    assert _ref(anchor) == new
+    assert _read(anchor / "docs" / "NEW.md") == "new\n"
+    assert _anchor_git(anchor, "status", "--porcelain") == ""
+    assert _decoy_state(decoy) == before
+
+
+@pytest.mark.parametrize("step", ["refresh", "precheck", "current_status"])
+def test_anchor_files_ignore_inherited_git_selectors(
+    upstream: Path, tmp_path: Path, monkeypatch, step: str
+) -> None:
+    anchor = _make_anchor(upstream, tmp_path / "anchor")
+    decoy = _decoy(tmp_path)
+    old = _ref(anchor)
+    new = _commit(upstream, "second", {"README.md": "v2\n"})
+    _git(anchor, "fetch", "--quiet", "origin")
+    if step == "precheck":
+        (anchor / "README.md").write_text("local edit\n", encoding="utf-8")
+    if step == "refresh":
+        _git(anchor, "update-ref", "refs/heads/main", new, old)
+    before = _decoy_state(decoy)
+
+    with monkeypatch.context() as m:
+        _point_git_at(m, decoy)
+        if step == "refresh":
+            result = bare_anchor_files.refresh(str(anchor), old, new)
+        elif step == "precheck":
+            result = bare_anchor_files.precheck(str(anchor), old, new)
+        else:
+            result = bare_anchor_files.current_status(str(anchor), old)
+
+    expected = {"refresh": "refreshed", "precheck": "dirty", "current_status": "current"}
+    assert result == expected[step]
+    if step == "refresh":
+        assert _read(anchor / "README.md") == "v2\n"
+    assert _decoy_state(decoy) == before
+
+
+def test_documented_recovery_command_works_from_any_directory(
+    upstream: Path, tmp_path: Path, monkeypatch
+) -> None:
+    """The `refresh-failed` recovery in the CLI reference must name the
+    anchor's git dir, so it works without first changing into the anchor."""
+    doc = Path(__file__).resolve().parents[1] / "docs" / "cli-reference.md"
+    row = next(ln for ln in doc.read_text(encoding="utf-8").splitlines()
+               if ln.startswith("| `refresh-failed:"))
+    command = re.search(r"then run `(git [^`]+)`", row).group(1)
+
+    anchor = _make_anchor(upstream, tmp_path / "anchor")
+    old = _ref(anchor)
+    lock = _lock_index_after_precheck(monkeypatch, anchor)
+    _commit(upstream, "second", {"README.md": "v2\n"})
+    try:
+        state, detail = bare_anchor_sync.sync_bare_anchor(str(anchor), "main")
+    finally:
+        lock.unlink(missing_ok=True)
+    assert bare_anchor_files.status_of(detail) == "refresh-failed"
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    argv = [
+        part.replace("<anchor>", anchor.as_posix())
+        .replace("<from>", old[:12]).replace("<branch>", "main")
+        for part in shlex.split(command)
+    ]
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
+    env["GIT_CEILING_DIRECTORIES"] = str(tmp_path)
+    ran = subprocess.run(argv, cwd=elsewhere, env=env, capture_output=True, text=True)
+
+    assert ran.returncode == 0, ran.stderr
+    assert _read(anchor / "README.md") == "v2\n"
+    assert _anchor_git(anchor, "status", "--porcelain") == ""
+
+
+def test_branch_switch_hint_works_from_any_directory(upstream: Path, tmp_path: Path) -> None:
+    """The suggested `symbolic-ref` command names the anchor, so it does not
+    depend on the operator's current directory."""
+    anchor = _make_anchor(upstream, tmp_path / "anchor")
+    _git(anchor, "branch", "release")
+
+    state, detail = bare_anchor_sync.sync_bare_anchor(str(anchor), "release")
+
+    assert state == "skipped"
+    command = re.search(r"e\.g\. `(git [^`]+)`", detail).group(1)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
+    env["GIT_CEILING_DIRECTORIES"] = str(tmp_path)
+    ran = subprocess.run(
+        shlex.split(command), cwd=elsewhere, env=env, capture_output=True, text=True
+    )
+    assert ran.returncode == 0, ran.stderr
+    assert _git(anchor, "symbolic-ref", "HEAD") == "refs/heads/release"

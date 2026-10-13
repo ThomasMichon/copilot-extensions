@@ -48,8 +48,10 @@ def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
     ends with ``; files=<status>`` once the ref is known to be current.
     """
 
+    # Inherited GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE must never redirect the
+    # ref move or the fetch to another repository: always act on `path`.
     def _git(*args: str):
-        return git_ops.git(*args, cwd=path, check=False)
+        return git_ops.git(*args, cwd=path, check=False, isolated_repository=True)
 
     current = _git("branch", "--show-current").stdout.strip()
     if not current:
@@ -62,8 +64,8 @@ def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
         return (
             "skipped",
             f"HEAD is on '{current}', not declared default '{target}' "
-            "(bare anchor: switch it explicitly, e.g. `git symbolic-ref "
-            f"HEAD refs/heads/{target}`)",
+            "(bare anchor: switch it explicitly, e.g. `git -C "
+            f"\"{path}\" symbolic-ref HEAD refs/heads/{target}`)",
         )
     old_sha = _git("rev-parse", "--verify", f"refs/heads/{target}").stdout.strip()
     if not old_sha:
@@ -92,7 +94,7 @@ def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
             *git_ops._auth_config_args("origin", cwd=path),
             "fetch", "--quiet", "--no-tags", "origin",
             f"+refs/heads/{target}:{scratch_ref}",
-            cwd=path, check=False, timeout=180,
+            cwd=path, check=False, timeout=180, isolated_repository=True,
         )
     finally:
         for refspec in saved_refspecs:

@@ -767,8 +767,13 @@ function Test-SlotContentCurrent {
        is keyed on CONTENT (the payload hash), not the mutable version label, so a
        reused dev label with changed content still fails the gate and rebuilds.
 
+       The content decision is Get-SlotAdmission's 'reuse' verdict, never a
+       separate marker probe: when the payload hash cannot be computed the
+       shortcut is NOT taken, so the caller reaches the fail-closed admission
+       refusal ('unverified') instead of accepting any valid marker.
+
        Fail-safe: any error (no python, helper missing, unparseable) returns
-       $false, so the installer falls through to its existing behavior and a
+       $false, so the installer falls through to the admission check and a
        genuine install is never skipped. A deliberate force-rebuild remains a
        dedicated command (`versioned_runtime toss` + re-install / `service
        restart`), never a silent side effect of a routine same-version reconcile. #>
@@ -786,11 +791,7 @@ function Test-SlotContentCurrent {
         if (-not $py -or -not (Test-Path $vr)) { return $false }
         $cur = (& $py $vr --root $InstallDir --link-name 'venv' current 2>$null | Out-String).Trim()
         if (-not $cur -or $cur -ne $SrcVersion) { return $false }
-        $icArgs = @($vr, '--root', $InstallDir, '--link-name', 'venv', 'is-complete', $SrcVersion)
-        $ph = Get-PayloadHash
-        if ($ph) { $icArgs += @('--expect-hash', $ph) }
-        & $py @icArgs 2>$null | Out-Null
-        return ($LASTEXITCODE -eq 0)
+        return ((Get-SlotAdmission) -eq 'reuse')
     } catch { return $false }
 }
 
