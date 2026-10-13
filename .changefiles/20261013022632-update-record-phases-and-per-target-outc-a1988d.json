@@ -1,5 +1,5 @@
 {
-  "comment": "update: record phases and per-target outcomes to a shared events.jsonl/update-status.json (libs/update-telemetry), map update's exit code onto a documented outcome table, report a late success when a timed-out runtime installer left a complete slot, and add --force-runtime NAME",
+  "comment": "update: record phases and per-target outcomes to a shared events.jsonl/update-status.json (libs/update-telemetry), map update's exit code onto a documented outcome table, report an installer timeout as a timeout (exit 6) instead of an unhandled error, and add --force-runtime NAME",
   "changes": [
     {
       "plugin": "agent-worktrees",

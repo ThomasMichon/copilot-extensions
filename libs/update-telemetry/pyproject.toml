@@ -15,7 +15,9 @@ requires-python = ">=3.10"
 authors = [
     { name = "Thomas Michon" }
 ]
-# Pure stdlib; no runtime dependencies.
+# Pure stdlib; no runtime dependencies. Its contract tests run in the
+# agent-worktrees suite (plugins/agent-worktrees/tests/test_update_telemetry_lib.py)
+# against the schemas/ and fixtures/ kept here.
 dependencies = []
 
 [tool.setuptools.packages.find]
@@ -25,17 +27,5 @@ where = ["src"]
 target-version = "py310"
 line-length = 99
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=9.1.1",
-]
-
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
-
-[tool.ruff.lint.per-file-ignores]
-# Tests legitimately use `assert` (pytest) and spawn this interpreter.
-"tests/**" = ["S101", "S603"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]

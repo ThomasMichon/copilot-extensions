@@ -37,7 +37,7 @@ def classify_status(status: str) -> tuple[str, str | None]:
     text = str(status).strip()
     low = text.lower()
     if text.startswith("OK"):
-        return _ut.VERIFIED_CURRENT, (_ut.LATE_SUCCESS if "late success" in low else None)
+        return _ut.VERIFIED_CURRENT, None
     if text.startswith("SKIPPED (current)"):
         return _ut.VERIFIED_CURRENT, None
     if text.startswith("SKIPPED") or text == "payload-only":
@@ -47,8 +47,10 @@ def classify_status(status: str) -> tuple[str, str | None]:
     exited = re.search(r"exit(?:ed)?(?: with code)? (-?\d+)", low)
     if exited:
         return _ut.outcome_for_installer_exit(int(exited.group(1)))
-    if "os error 5" in low or "access is denied" in low:
-        return _ut.BLOCKED_BY_LOCK, "os_error_5"
+    if "os error 32" in low or "used by another process" in low:
+        return _ut.BLOCKED_BY_LOCK, "sharing_violation"
+    if any(k in low for k in ("os error 5", "access is denied", "permission denied")):
+        return _ut.COMMAND_FAILED, "permission_denied"
     if any(k in low for k in ("not found", "context invalid", "unsupported", "deadline")):
         return _ut.CONFIGURATION_LIMITATION, "configuration"
     return _ut.COMMAND_FAILED, None

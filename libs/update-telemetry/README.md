@@ -55,10 +55,16 @@ non-required targets are reported as `advisories`.
 
 Runtime installer exits map as: `75` (cutover not completed, previous
 generation still serving) to `blocked_by_lock`, `76` (degraded cutover) to
-`command_failed`, `124` (watchdog) to `timeout`. Exceptions map as:
-`TimeoutExpired` to `timeout`; `PermissionError` / errno 5 or 13 to
-`blocked_by_lock` (with `error.path`/`error.op`); `KeyboardInterrupt` to
-`interrupted`; anything else to `command_failed`.
+`command_failed`, `124` (watchdog) to `timeout`. A timeout is always
+`timeout`: a completed version slot does not prove the timed-out attempt
+activated it. Exceptions map as: `TimeoutExpired` to `timeout`;
+`KeyboardInterrupt` to `interrupted`; `blocked_by_lock` only on contention
+evidence -- `LockTimeout` (`lock_timeout`) or a Windows sharing/lock violation
+(winerror 32/33); plain access denial (`PermissionError`, EACCES, EPERM,
+winerror 5) to `command_failed` with `error.code=permission_denied`, POSIX EIO
+to `command_failed` with `io_error`; anything else to `command_failed`. OS
+errors carry `error.path`/`error.op` when known, and `last_failure.fix` names a
+remedy that matches the error code.
 
 ## Events and redaction
 

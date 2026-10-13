@@ -123,7 +123,8 @@ def fold(
             "ended_at": run.get("ended_at"),
             "outcome": outcome,
             "summary": summary[:MAX_DETAIL],
-            "fix": oc.fix_for(outcome, run.get("events_path")),
+            "fix": oc.fix_for(outcome, run.get("events_path"),
+                              error_code or next(iter(first.get("notes") or []), None)),
         }
     restart = sorted(
         name for name, t in targets.items()

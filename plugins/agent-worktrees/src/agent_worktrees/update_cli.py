@@ -379,9 +379,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         except (OSError, ValueError) as error:
             output.err(str(error))
             return 1
-        rc = _run_engine_installer(
-            argv, plugin_dir, installer_timeout, aw_runtime_env, aw_runtime_root, aw_payload_ver
-        )
+        rc = _run_engine_installer(argv, plugin_dir, installer_timeout, aw_runtime_env)
         if rc != 0:
             return rc
 

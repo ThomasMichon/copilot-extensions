@@ -85,7 +85,7 @@ def file_lock(path: Path, timeout: float) -> Iterator[None]:
                 break
             except OSError:
                 if time.monotonic() >= deadline:
-                    raise TimeoutError(f"could not lock {path}") from None
+                    raise oc.LockTimeout(f"could not lock {path}") from None
                 time.sleep(0.01)
         try:
             yield
@@ -103,7 +103,9 @@ def append_line(path: Path, line: str) -> None:
     """Append one record with a single ``write`` under a short lock."""
     data = (line.rstrip("\n") + "\n").encode("utf-8")
     with file_lock(path.with_name(path.name + ".lock"), 5.0):
-        fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        # O_BINARY: without it Windows writes "\r\n", one byte past the line limit.
+        flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0)
+        fd = os.open(path, flags, 0o600)
         try:
             os.write(fd, data)
         finally:
@@ -172,8 +174,14 @@ def _bound_strings(record: dict, limit: int) -> None:
             _bound_strings(value, limit)
 
 
+def _fits(line: str) -> bool:
+    """Whether ``line`` plus the newline ``append_line`` adds fits ``MAX_LINE``."""
+    return len(line.encode("utf-8")) + 1 <= MAX_LINE
+
+
 def encode_event(record: dict) -> str:
-    """Serialize one event as a line of at most ``MAX_LINE`` UTF-8 bytes.
+    """Serialize one event so the written line (newline included) is at most
+    ``MAX_LINE`` UTF-8 bytes.
 
     An oversize record first loses ``argv`` and ``details``, then every
     remaining free-form string is bounded ever tighter until the line fits.
@@ -182,7 +190,7 @@ def encode_event(record: dict) -> str:
         return json.dumps(record, separators=(",", ":"), ensure_ascii=False)
 
     line = dumps()
-    if len(line.encode("utf-8")) <= MAX_LINE:
+    if _fits(line):
         return line
     record.pop("argv", None)
     if "details" in record:
@@ -190,7 +198,7 @@ def encode_event(record: dict) -> str:
     for limit in (512, 128, 32):
         _bound_strings(record, limit)
         line = dumps()
-        if len(line.encode("utf-8")) <= MAX_LINE:
+        if _fits(line):
             return line
     raise ValueError("update event exceeds the line limit")
 

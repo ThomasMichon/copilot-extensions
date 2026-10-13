@@ -1,7 +1,12 @@
-"""Contract tests for the shared update-run telemetry library."""
+"""Contract tests for the shared update-run telemetry library (``libs/update-telemetry``).
+
+They live in this suite because agent-worktrees consumes the library as a path
+dependency; the schemas and golden fixtures stay with the library itself.
+"""
 
 from __future__ import annotations
 
+import errno
 import itertools
 import json
 import os
@@ -10,18 +15,33 @@ import sys
 from pathlib import Path
 
 import pytest
-
 import update_telemetry as ut
 from update_telemetry import run as run_mod
 
-LIB = Path(__file__).resolve().parents[1]
+_PLUGIN = Path(__file__).resolve().parents[1]
+
+
+def _lib_root() -> Path:
+    """The library checkout: the editable source, a plugin-local copy, or the repo's."""
+    candidates = (
+        Path(ut.__file__).resolve().parents[2],
+        _PLUGIN / "libs" / "update-telemetry",
+        _PLUGIN.parents[1] / "libs" / "update-telemetry",
+    )
+    for candidate in candidates:
+        if (candidate / "schemas").is_dir() and (candidate / "fixtures").is_dir():
+            return candidate
+    raise AssertionError("libs/update-telemetry (schemas + fixtures) not found")
+
+
+LIB = _lib_root()
 SCHEMAS = LIB / "schemas"
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
+FIXTURES = LIB / "fixtures"
 ENV_KEYS = (ut.ENV_RUN_ID, ut.ENV_EVENTS, ut.ENV_OWNER)
 
 
 @pytest.fixture
-def env(tmp_path):
+def telemetry_env(tmp_path):
     return {ut.ENV_HOME: str(tmp_path / "home")}
 
 
@@ -69,19 +89,20 @@ def _validate(value, schema: dict, path: str = "$") -> list[str]:
     return errors
 
 
-def _status(env) -> dict:
-    return json.loads((Path(env[ut.ENV_HOME]) / "update-status.json").read_text("utf-8"))
+def _status(telemetry_env) -> dict:
+    home = Path(telemetry_env[ut.ENV_HOME])
+    return json.loads((home / "update-status.json").read_text("utf-8"))
 
 
-def test_owner_vs_participant_env(env):
-    owner = ut.Run.from_env_or_new("manager", environ=env)
+def test_owner_vs_participant_env(telemetry_env):
+    owner = ut.Run.from_env_or_new("manager", environ=telemetry_env)
     assert owner.is_owner and owner.enabled
-    assert env[ut.ENV_RUN_ID] == owner.run_id
-    assert Path(env[ut.ENV_EVENTS]).is_absolute()
-    assert env[ut.ENV_OWNER] == f"manager:{os.getpid()}"
-    assert _status(env)["run"]["outcome"] == ut.IN_PROGRESS
+    assert telemetry_env[ut.ENV_RUN_ID] == owner.run_id
+    assert Path(telemetry_env[ut.ENV_EVENTS]).is_absolute()
+    assert telemetry_env[ut.ENV_OWNER] == f"manager:{os.getpid()}"
+    assert _status(telemetry_env)["run"]["outcome"] == ut.IN_PROGRESS
 
-    child = ut.Run.from_env_or_new("engine", environ=dict(env))
+    child = ut.Run.from_env_or_new("engine", environ=dict(telemetry_env))
     assert not child.is_owner
     assert child.run_id == owner.run_id
     assert child.events_path == owner.events_path
@@ -89,18 +110,18 @@ def test_owner_vs_participant_env(env):
     assert child.finish() == 0
 
     assert owner.finish() == 0
-    assert not any(key in env for key in ENV_KEYS), "owner restores the environment"
+    assert not any(key in telemetry_env for key in ENV_KEYS), "owner restores the environment"
     events, errors = ut.read_events(owner.events_path)
     assert errors == 0
     assert {e["proc"] for e in events} == {"manager", "engine"}
-    status = _status(env)
+    status = _status(telemetry_env)
     assert status["run"]["outcome"] == ut.VERIFIED_CURRENT
     assert "agent-x@copilot-extensions" in status["plugins"]
     assert status["last_success"]["run_id"] == owner.run_id
 
 
-def test_timeout_maps_to_timeout(env):
-    run = ut.Run.from_env_or_new("engine", environ=env)
+def test_timeout_maps_to_timeout(telemetry_env):
+    run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
     with pytest.raises(subprocess.TimeoutExpired):
         with run.phase("runtime_reconcile", action="install.sh update"):
             raise subprocess.TimeoutExpired(["install.sh"], 5)
@@ -110,18 +131,72 @@ def test_timeout_maps_to_timeout(env):
     assert run.finish(ut.TIMEOUT) == 6
 
 
-def test_permission_error_has_path_op(env, tmp_path):
-    run = ut.Run.from_env_or_new("engine", environ=env)
-    locked = str(tmp_path / "held" / "file.dll")
+def test_permission_error_has_path_op(telemetry_env, tmp_path):
+    run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
+    denied = str(tmp_path / "owned-by-someone-else" / "file.dll")
     with pytest.raises(PermissionError):
         with run.phase("payload_refresh", action="copy"):
-            raise PermissionError(13, "Access is denied", locked)
+            raise PermissionError(errno.EACCES, "Permission denied", denied)
     end = [e for e in ut.read_events(run.events_path)[0] if e["event"] == "end"][-1]
-    assert end["outcome"] == ut.BLOCKED_BY_LOCK
-    assert end["error"]["path"] == locked
+    assert end["outcome"] == ut.COMMAND_FAILED
+    assert end["error"]["code"] == ut.PERMISSION_DENIED
+    assert end["error"]["path"] == denied
     assert end["error"]["op"] == "copy"
-    assert end["error"]["code"].startswith("os_error_")
-    run.finish()
+    assert run.finish(ut.COMMAND_FAILED, error=end["error"]) == 1
+    fix = _status(telemetry_env)["last_failure"]["fix"]
+    assert "permissions" in fix and "close" not in fix.lower()
+
+
+def _os_error(errno_value, *, winerror=None, cls=OSError):
+    exc = cls(errno_value, "simulated", "/some/path")
+    if winerror is not None:
+        exc.winerror = winerror
+    return exc
+
+
+@pytest.mark.parametrize(("exc", "outcome", "code"), [
+    (_os_error(errno.EIO), ut.COMMAND_FAILED, ut.IO_ERROR),
+    (_os_error(errno.EACCES, cls=PermissionError), ut.COMMAND_FAILED, ut.PERMISSION_DENIED),
+    (_os_error(errno.EPERM, cls=PermissionError), ut.COMMAND_FAILED, ut.PERMISSION_DENIED),
+    (_os_error(errno.EACCES, winerror=5), ut.COMMAND_FAILED, ut.PERMISSION_DENIED),
+    (_os_error(errno.EACCES, winerror=32), ut.BLOCKED_BY_LOCK, ut.SHARING_VIOLATION),
+    (_os_error(errno.EACCES, winerror=33), ut.BLOCKED_BY_LOCK, "lock_violation"),
+    (ut.LockTimeout("could not lock x"), ut.BLOCKED_BY_LOCK, ut.LOCK_TIMEOUT),
+    (_os_error(errno.ENOENT), ut.COMMAND_FAILED, f"os_error_{errno.ENOENT}"),
+], ids=["posix-eio", "posix-eacces", "posix-eperm", "win-access-denied",
+        "win-sharing-violation", "win-lock-violation", "lock-timeout", "enoent"])
+def test_os_error_classification_needs_contention_evidence(exc, outcome, code):
+    actual, error = ut.classify_exception(exc)
+    assert (actual, error["code"]) == (outcome, code)
+
+
+def test_only_contention_evidence_is_blocked_by_lock():
+    assert ut.outcome_for_installer_exit(75)[0] == ut.BLOCKED_BY_LOCK
+    assert "close" not in ut.outcomes.fix_for(ut.COMMAND_FAILED, None, ut.IO_ERROR).lower()
+
+
+_LOCKER = """
+import pathlib
+import sys
+sys.path.insert(0, sys.argv[1])
+import update_telemetry as ut
+from update_telemetry import run
+try:
+    with run.file_lock(pathlib.Path(sys.argv[2]), 0.2):
+        print("acquired")
+except ut.LockTimeout:
+    print("lock_timeout")
+"""
+
+
+def test_file_lock_timeout_is_lock_timeout(tmp_path):
+    lock = tmp_path / "held.lock"
+    with run_mod.file_lock(lock, 1.0):
+        child = subprocess.run(
+            [sys.executable, "-c", _LOCKER, str(LIB / "src"), str(lock)],
+            capture_output=True, text=True, timeout=60, check=False,
+        )
+    assert child.stdout.strip() == "lock_timeout", child.stderr
 
 
 def test_keyboard_interrupt_is_interrupted():
@@ -130,7 +205,7 @@ def test_keyboard_interrupt_is_interrupted():
     assert ut.exit_code_for(outcome, error["code"]) == 130
 
 
-def test_redaction(env):
+def test_redaction(telemetry_env):
     pat = "gh" + "p_" + "Q" * 36
     fine = "github" + "_pat_" + "Z" * 40
     scheme = "Bea" + "rer"
@@ -149,7 +224,7 @@ def test_redaction(env):
     assert not leaked
     assert ut.redact("plain message") == "plain message"
 
-    run = ut.Run.from_env_or_new("engine", environ=env)
+    run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
     run.emit("payload_refresh", "run", "info", argv=["git", texts[0]], action=texts[1],
              error={"code": "x", "message": texts[3]}, details={"note": texts[4]})
     run.finish()
@@ -169,9 +244,9 @@ for i in range(500):
 """
 
 
-def test_two_process_appends_parse(env):
-    owner = ut.Run.from_env_or_new("manager", environ=env)
-    child_env = {**os.environ, **env}
+def test_two_process_appends_parse(telemetry_env):
+    owner = ut.Run.from_env_or_new("manager", environ=telemetry_env)
+    child_env = {**os.environ, **telemetry_env}
     procs = [
         subprocess.Popen(
             [sys.executable, "-c", _APPENDER, str(LIB / "src"), proc], env=child_env
@@ -241,7 +316,7 @@ def test_exit_code_table():
     assert ut.outcome_for_exit_code(2) == (ut.COMMAND_FAILED, ut.USAGE)
 
 
-def test_schema_examples(env):
+def test_schema_examples(telemetry_env):
     event_schema, status_schema = _schema("update-event"), _schema("update-status")
     example_event = {"v": 1, "ts": "2026-10-10T04:12:03.512Z",
                      "run_id": "20261010T041200Z-1234-abcd", "seq": 42, "pid": 1234,
@@ -253,7 +328,7 @@ def test_schema_examples(env):
     example_status = json.loads((FIXTURES / "status-example.json").read_text("utf-8"))
     assert _validate(example_status, status_schema) == []
 
-    run = ut.Run.from_env_or_new("engine", environ=env)
+    run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
     run.enter("payload_refresh")
     run.target("payload_refresh", "a@copilot-extensions", ut.VERIFIED_CURRENT, changed=True)
     run.enter("runtime_reconcile")
@@ -264,7 +339,7 @@ def test_schema_examples(env):
     events, errors = ut.read_events(run.events_path)
     assert errors == 0
     assert all(_validate(e, event_schema) == [] for e in events)
-    status = _status(env)
+    status = _status(telemetry_env)
     assert _validate(status, status_schema) == []
     assert [p["phase"] for p in status["run"]["phases"]] == [
         "payload_refresh", "runtime_reconcile"]
@@ -289,19 +364,19 @@ def test_golden_fold():
 def test_fail_open_when_home_unwritable(tmp_path):
     blocker = tmp_path / "not-a-dir"
     blocker.write_text("x")
-    env = {ut.ENV_HOME: str(blocker / "home")}
-    run = ut.Run.from_env_or_new("engine", environ=env)
+    telemetry_env = {ut.ENV_HOME: str(blocker / "home")}
+    run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
     assert not run.enabled
     run.enter("payload_refresh")
     run.target("payload_refresh", "a@m", ut.TIMEOUT)
     with run.phase("prune"):
         pass
     assert run.finish() == 6
-    assert ut.ENV_RUN_ID not in env
+    assert ut.ENV_RUN_ID not in telemetry_env
 
 
-def test_status_write_error_never_raises(env, monkeypatch):
-    run = ut.Run.from_env_or_new("engine", environ=env)
+def test_status_write_error_never_raises(telemetry_env, monkeypatch):
+    run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
 
     def boom(*_a, **_k):
         raise OSError(28, "No space left on device")
@@ -310,14 +385,14 @@ def test_status_write_error_never_raises(env, monkeypatch):
     monkeypatch.setattr(run_mod, "append_line", boom)
     run.target("runtime_reconcile", "a@m", ut.VERIFIED_CURRENT)
     assert run.finish() == 0
-    assert ut.ENV_RUN_ID not in env
+    assert ut.ENV_RUN_ID not in telemetry_env
 
 
-def test_prune_keeps_newest_runs(env):
-    runs = Path(env[ut.ENV_HOME]) / "runs"
+def test_prune_keeps_newest_runs(telemetry_env):
+    runs = Path(telemetry_env[ut.ENV_HOME]) / "runs"
     for index in range(25):
         (runs / f"20200101T0000{index:02d}Z-1-abcd").mkdir(parents=True)
-    run = ut.Run.from_env_or_new("engine", environ=env)
+    run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
     run.finish()
     names = sorted(p.name for p in runs.iterdir())
     assert len(names) == run_mod.KEEP_RUNS
@@ -330,7 +405,7 @@ def test_prune_keeps_newest_runs(env):
     "error.message", "error.path", "error.op", "error.code",
 ])
 @pytest.mark.parametrize("filler", ["x", "\u00e9", "\U0001f600", "\x01"])
-def test_oversize_event_fits_line_limit(env, field, filler):
+def test_oversize_event_fits_line_limit(telemetry_env, field, filler):
     huge = filler * 20000
     fields = {"error": {"code": "c", "message": "m", "path": "p", "op": "o"}}
     phase, component = "runtime_reconcile", "a@m"
@@ -346,7 +421,7 @@ def test_oversize_event_fits_line_limit(env, field, filler):
         fields["error"][field.split(".", 1)[1]] = huge
     else:
         fields[field] = huge
-    run = ut.Run.from_env_or_new("engine", environ=env)
+    run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
     run.emit(phase, component, "end", outcome=ut.VERIFIED_CURRENT, **fields)
     run.finish()
     raw = run.events_path.read_bytes().splitlines()
@@ -354,3 +429,32 @@ def test_oversize_event_fits_line_limit(env, field, filler):
     events = [json.loads(line) for line in raw]
     assert any(e["event"] == "end" and e.get("outcome") == ut.VERIFIED_CURRENT
                and e["run_id"] == run.run_id and e["phase"] != "run" for e in events)
+
+
+def _record_of_size(size: int) -> dict:
+    record = {"v": 1, "event": "info", "action": ""}
+    base = len(json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+    record["action"] = "a" * (size - base)
+    return record
+
+
+def test_line_limit_counts_the_newline():
+    exact = _record_of_size(run_mod.MAX_LINE - 1)
+    line = run_mod.encode_event(dict(exact))
+    assert line == json.dumps(exact, separators=(",", ":"), ensure_ascii=False)
+    assert len(line.encode("utf-8")) + 1 == run_mod.MAX_LINE
+
+    over = _record_of_size(run_mod.MAX_LINE)
+    line = run_mod.encode_event(dict(over))
+    assert len(line.encode("utf-8")) + 1 <= run_mod.MAX_LINE
+    assert json.loads(line)["action"] != over["action"]
+
+
+def test_written_lines_never_exceed_the_limit(telemetry_env):
+    run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
+    for pad in range(run_mod.MAX_LINE - 400, run_mod.MAX_LINE + 50, 7):
+        run.emit("runtime_reconcile", "a@m", "info", action="x" * pad)
+    run.finish()
+    data = run.events_path.read_bytes()
+    assert b"\r" not in data, "events are written byte-exact (no newline translation)"
+    assert all(len(line) <= run_mod.MAX_LINE for line in data.splitlines(keepends=True))

@@ -144,20 +144,32 @@ def registered_runtime(tmp_path, monkeypatch):
     return root
 
 
-def test_timeout_with_complete_slot_is_late_success(registered_runtime, _update_home):
-    assert runtime._reconcile_one_runtime("agent-example", "linux", force=False) == "timed out"
+_SLOT_STATES = [None, "complete-active", "complete-not-active"]
 
-    slot = registered_runtime / "versions" / "2.0.0"
+
+def _write_slot(root: Path, version: str, state: str | None) -> None:
+    """A pre-existing completed slot proves nothing about this attempt."""
+    if state is None:
+        return
+    slot = root / "versions" / version
     slot.mkdir(parents=True)
     (slot / ".install-complete.json").write_text(json.dumps(
-        {"version": "2.0.0", "completed_at": "2026-01-01T00:00:00Z", "pid": 1}))
+        {"version": version, "completed_at": "2026-01-01T00:00:00Z", "pid": 1}))
+    active = version if state == "complete-active" else "0.0.1"
+    (root / "current-version").write_text(active)
+
+
+@pytest.mark.parametrize("slot", _SLOT_STATES)
+def test_registered_runtime_timeout_is_timeout_whatever_the_slot(
+    registered_runtime, _update_home, slot,
+):
+    _write_slot(registered_runtime, "2.0.0", slot)
     update_events.start("engine")
     status = runtime._reconcile_one_runtime("agent-example", "linux", force=False)
-    assert status == "OK (late success)"
-    assert update_events.finish(0) == 0
+    assert status == "timed out"
+    assert update_events.finish(1) == 6
     target = _status(_update_home)["plugins"]["agent-example@copilot-extensions"]
-    assert target["outcome"] == ut.VERIFIED_CURRENT
-    assert target["notes"] == [ut.LATE_SUCCESS]
+    assert target["outcome"] == ut.TIMEOUT
 
 
 def test_timeout_without_slot_exits_6(registered_runtime, _update_home):
@@ -190,36 +202,23 @@ def test_force_runtime_option_parses_forwards_and_selects(monkeypatch, tmp_path)
     assert seen == {"agent-a": True, "agent-c": False}
 
 
-def _write_slot(root: Path, version: str) -> None:
-    slot = root / "versions" / version
-    slot.mkdir(parents=True)
-    (slot / ".install-complete.json").write_text(json.dumps(
-        {"version": version, "completed_at": "2026-01-01T00:00:00Z", "pid": 1}))
-
-
-def test_engine_installer_timeout_exits_6(wired, _update_home):
+@pytest.mark.parametrize("slot", _SLOT_STATES)
+def test_engine_installer_timeout_exits_6(wired, tmp_path, _update_home, slot):
     wired["value"] = "timeout"
+    _write_slot(tmp_path / "aw-runtime", "1.0.1", slot)
     assert m.cmd_update(_args()) == 6
     status = _status(_update_home)
     assert status["run"]["outcome"] == ut.TIMEOUT
     phase = {p["phase"]: p for p in status["run"]["phases"]}["engine_runtime"]
     assert phase["outcome"] == ut.TIMEOUT
+    aw = status["plugins"]["agent-worktrees@copilot-extensions"]
+    assert aw["outcome"] == ut.TIMEOUT
 
 
-def test_engine_installer_timeout_with_complete_slot_is_late_success(
-    wired, tmp_path, _update_home,
+@pytest.mark.parametrize("slot", _SLOT_STATES)
+def test_module_installer_timeout_is_timeout_whatever_the_slot(
+    tmp_path, monkeypatch, _update_home, slot,
 ):
-    wired["value"] = "timeout"
-    _write_slot(tmp_path / "aw-runtime", "1.0.1")
-    assert m.cmd_update(_args()) == 0
-    aw = _status(_update_home)["plugins"]["agent-worktrees@copilot-extensions"]
-    assert aw["outcome"] == ut.VERIFIED_CURRENT
-    assert aw["notes"] == [ut.LATE_SUCCESS]
-
-
-@pytest.mark.parametrize("slot", [False, True])
-def test_module_installer_timeout_honors_complete_slot(tmp_path, monkeypatch, _update_home,
-                                                       slot):
     plugin = tmp_path / "agent-worktrees"
     plugin.mkdir()
     (plugin / "modules.json").write_text(json.dumps(
@@ -228,8 +227,7 @@ def test_module_installer_timeout_honors_complete_slot(tmp_path, monkeypatch, _u
     (module / "scripts").mkdir(parents=True)
     (module / "scripts" / "install.sh").write_text("#!/bin/sh\n")
     root = tmp_path / "module-runtime"
-    if slot:
-        _write_slot(root, "3.0.0")
+    _write_slot(root, "3.0.0", slot)
     environment = {k: v for k, v in os.environ.items() if k != "COPILOT_EXTENSIONS_CONTEXT"}
     monkeypatch.setattr(reconcile, "payload_version", lambda path: "3.0.0")
     monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *a, **k: "2.0.0")
@@ -247,9 +245,18 @@ def test_module_installer_timeout_honors_complete_slot(tmp_path, monkeypatch, _u
     ok = runtime._update_modules(plugin, "linux", None, targets=targets)
     code = update_events.finish(0 if ok else 1)
     target = _status(_update_home)["plugins"]["agent-example@copilot-extensions"]
-    if slot:
-        assert ok is True and code == 0
-        assert target["notes"] == [ut.LATE_SUCCESS]
-    else:
-        assert ok is False and code == 6
-        assert target["outcome"] == ut.TIMEOUT
+    assert ok is False and code == 6
+    assert target["outcome"] == ut.TIMEOUT
+
+
+@pytest.mark.parametrize(("status", "expected"), [
+    ("plugin update failed: Access is denied. (os error 5)",
+     (ut.COMMAND_FAILED, ut.PERMISSION_DENIED)),
+    ("plugin update failed: Permission denied", (ut.COMMAND_FAILED, ut.PERMISSION_DENIED)),
+    ("plugin update failed: The process cannot access the file because it is being "
+     "used by another process. (os error 32)", (ut.BLOCKED_BY_LOCK, ut.SHARING_VIOLATION)),
+    ("installer exited 75", (ut.BLOCKED_BY_LOCK, "installer_exit_75")),
+    ("timed out", (ut.TIMEOUT, "timeout")),
+])
+def test_status_classification_needs_contention_evidence(status, expected):
+    assert update_events.classify_status(status) == expected

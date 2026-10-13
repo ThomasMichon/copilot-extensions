@@ -651,11 +651,13 @@ non-zero for every failure:
 | 2 | Usage error |
 | 3 | A configuration problem must be fixed first (for example a missing PowerShell or an invalid installation context) |
 | 4 | Authentication is required |
-| 5 | Blocked by a lock or held file (including an installer exit of 75: the cutover did not complete and the previous generation is still serving) |
-| 6 | A runtime installer timed out. If its target version's slot completed anyway, the result is a success recorded as `late_success` |
+| 5 | Blocked by contention: a lock that timed out, a file another process holds open (Windows sharing/lock violation), or an installer exit of 75 (the cutover did not complete and the previous generation is still serving). Plain permission or I/O errors are exit 1 (`permission_denied` / `io_error`) |
+| 6 | A runtime installer timed out. A timeout is never reported as success, even if a completed slot for the target version exists |
 | 130 | Interrupted |
 
-Inactive inventory failures are advisories and never fail the run. Telemetry
+`--force-runtime NAME` re-deploys just that runtime (repeatable); it is
+forwarded through `worktree-manager update`. Inactive inventory failures are
+advisories and never fail the run. Telemetry
 is best-effort: if events or status cannot be written, `update` warns once and
 its result is unchanged.
 

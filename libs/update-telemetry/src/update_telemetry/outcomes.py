@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import subprocess
 from collections.abc import Iterable
 
@@ -32,8 +33,19 @@ OUTCOMES = (*SEVERITY, SKIPPED)
 
 # Stable ``error.code`` tokens with a meaning beyond the outcome itself.
 INTERRUPTED = "interrupted"
-LATE_SUCCESS = "late_success"
 USAGE = "usage"
+LOCK_TIMEOUT = "lock_timeout"
+SHARING_VIOLATION = "sharing_violation"
+PERMISSION_DENIED = "permission_denied"
+IO_ERROR = "io_error"
+
+# Windows ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION: another process holds
+# the file. Plain access denial (winerror 5, EACCES, EPERM) is not contention.
+_WINERROR_CONTENTION = {32: SHARING_VIOLATION, 33: "lock_violation"}
+
+
+class LockTimeout(TimeoutError):
+    """An explicit lock could not be acquired before its deadline."""
 
 EXIT_USAGE = 2
 EXIT_INTERRUPTED = 130
@@ -112,6 +124,9 @@ def classify_exception(exc: BaseException, *, op: str | None = None) -> tuple[st
     if isinstance(exc, KeyboardInterrupt):
         error["code"] = INTERRUPTED
         return COMMAND_FAILED, error
+    if isinstance(exc, LockTimeout):
+        error["code"] = LOCK_TIMEOUT
+        return BLOCKED_BY_LOCK, error
     if isinstance(exc, OSError):
         winerror = getattr(exc, "winerror", None)
         if exc.errno is not None:
@@ -120,9 +135,16 @@ def classify_exception(exc: BaseException, *, op: str | None = None) -> tuple[st
             error["winerror"] = winerror
         if exc.filename is not None:
             error["path"] = str(exc.filename)
-        error["code"] = f"os_error_{winerror or exc.errno}"
-        if isinstance(exc, PermissionError) or winerror in (5, 32) or exc.errno in (5, 13):
+        if winerror in _WINERROR_CONTENTION:
+            error["code"] = _WINERROR_CONTENTION[winerror]
             return BLOCKED_BY_LOCK, error
+        if (isinstance(exc, PermissionError) or winerror == 5
+                or exc.errno in (errno.EACCES, errno.EPERM)):
+            error["code"] = PERMISSION_DENIED
+        elif exc.errno == errno.EIO and winerror is None:
+            error["code"] = IO_ERROR
+        else:
+            error["code"] = f"os_error_{winerror or exc.errno}"
         return COMMAND_FAILED, error
     error["code"] = type(exc).__name__
     return COMMAND_FAILED, error
@@ -131,16 +153,27 @@ def classify_exception(exc: BaseException, *, op: str | None = None) -> tuple[st
 _FIXES = {
     TIMEOUT: "Re-run the update; if one installer keeps timing out, raise its "
     "<NAME>_INSTALL_DEADLINE_SEC (or COPILOT_PLUGIN_INSTALL_DEADLINE_SEC).",
-    BLOCKED_BY_LOCK: "Close processes holding the locked files (for example other "
-    "Copilot CLI sessions), then re-run the update.",
+    BLOCKED_BY_LOCK: "Another process holds a lock or the file in use; wait for it or "
+    "close it, then re-run the update.",
     CONFIGURATION_LIMITATION: "Fix the reported configuration problem, then re-run "
     "the update.",
     AUTH_REQUIRED: "Sign in to the failing source, then re-run the update.",
 }
 
 
-def fix_for(outcome: str, events_path: str | None = None) -> str:
+_CODE_FIXES = {
+    PERMISSION_DENIED: "Check the ownership and permissions of the reported path, "
+    "then re-run the update.",
+    IO_ERROR: "Check the disk or filesystem holding the reported path for I/O errors, "
+    "then re-run the update.",
+}
+
+
+def fix_for(outcome: str, events_path: str | None = None,
+            error_code: str | None = None) -> str:
     """One actionable line for a failed run's ``last_failure.fix``."""
+    if error_code in _CODE_FIXES:
+        return _CODE_FIXES[error_code]
     if outcome in _FIXES:
         return _FIXES[outcome]
     where = f" ({events_path})" if events_path else ""
