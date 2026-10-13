@@ -449,14 +449,8 @@ def expand_repository_issue_loop(
     repo_root: str | Path | None = None,
     inherited_script_fields: frozenset[str] = frozenset(),
 ) -> tuple[ProfileDeclaration, ...]:
-    """Expand into one emitter + one worker lane. ``repo_root`` resolves
-    ``worker_identity`` here and is stamped as the emitter spec's ``cwd`` so
-    a later daemon tick's re-validation resolves the same override.
-    ``inherited_script_fields`` is forwarded to ``validate_config`` (see its
-    own docstring) -- registration-time only, since by the next tick the
-    already-registered (and by then necessarily valid) declaration is
-    re-validated straight from the stamped ``spec.repository_issue_loop``
-    dict, which carries no further `extends:` provenance to check."""
+    """Expand an emitter and worker lane with cwd for worker-identity revalidation.
+    Inherited script fields are checked at registration before source stamping."""
     config = validate_config(data, cwd=repo_root, inherited_script_fields=inherited_script_fields)
     spec: dict[str, Any] = {
         "id": f"{config['name']}-source",

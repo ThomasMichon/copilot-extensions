@@ -39,6 +39,7 @@ from pathlib import Path
 import yaml
 
 from . import bare_anchor_sync, git_ops, output, registry_paths
+from .repos_registry_reader import RepositoryResolutionError, read_registry as _read_registry
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -187,120 +188,9 @@ def _repos_yaml_path() -> Path:
 # Read / write
 # ---------------------------------------------------------------------------
 
-class RepositoryResolutionError(ValueError):
-    """An authoritative registered repository could not be resolved."""
-
-
-class _UniqueRegistryLoader(yaml.SafeLoader):
-    def construct_mapping(self, node, deep=False):
-        seen = set()
-        for key_node, _ in node.value:
-            if key_node.tag == "tag:yaml.org,2002:merge":
-                continue
-            key = self.construct_object(key_node, deep=deep)
-            if key in seen:
-                raise RepositoryResolutionError(
-                    f"repository registry has duplicate key {key!r}"
-                )
-            seen.add(key)
-        self.flatten_mapping(node)
-        return super().construct_mapping(node, deep=deep)
-
-
 def read_registry(*, strict: bool = False) -> ReposRegistry:
     """Load repos.yaml, returning an empty registry if missing."""
-    path = _repos_yaml_path()
-    if not path.exists():
-        return ReposRegistry()
-
-    try:
-        from . import config_migrations
-
-        text = path.read_text(encoding="utf-8")
-        data = yaml.load(text, Loader=_UniqueRegistryLoader) if strict else yaml.safe_load(text)
-        if not isinstance(data, dict):
-            if strict:
-                raise RepositoryResolutionError("repository registry must be a mapping")
-            return ReposRegistry()
-
-        # Lazy schema migration (in memory, never persists / never raises).
-        data = config_migrations.migrate_loaded(data, config_migrations.SCHEMA_REPOS)
-
-        srcroot = data.get("srcroot", {})
-        if not isinstance(srcroot, dict):
-            srcroot = {}
-
-        raw_map = data.get("account_map", {})
-        account_map: dict[str, str] = {}
-        if isinstance(raw_map, dict):
-            for owner, login in raw_map.items():
-                if owner and login:
-                    account_map[str(owner)] = str(login)
-
-        repos: dict[str, RepoEntry] = {}
-        raw_repos = data.get("repos", {})
-        if strict and not isinstance(raw_repos, dict):
-            raise RepositoryResolutionError("repository registry 'repos' must be a mapping")
-        if isinstance(raw_repos, dict):
-            for name, entry in raw_repos.items():
-                if not isinstance(entry, dict):
-                    if strict:
-                        raise RepositoryResolutionError(
-                            f"registered repository {name!r} must be a mapping"
-                        )
-                    continue
-                paths = {}
-                for plat in ("windows", "wsl", "linux"):
-                    if plat in entry:
-                        if strict and (
-                            not isinstance(entry[plat], str) or not entry[plat].strip()
-                        ):
-                            raise RepositoryResolutionError(
-                                f"registered repository {name!r} has invalid {plat} path"
-                            )
-                        paths[plat] = str(entry[plat])
-                raw_tags = entry.get("tags", [])
-                tags = [str(t) for t in raw_tags] if isinstance(raw_tags, list) else []
-                # Prefer the new "class" field; fall back to legacy "type".
-                raw_class = entry.get("class", entry.get("type"))
-                if strict and raw_class is not None and (
-                    not isinstance(raw_class, str)
-                    or raw_class.lower() not in (*VALID_CLASSES, *_LEGACY_TYPE_MAP)
-                ):
-                    raise RepositoryResolutionError(
-                        f"registered repository {name!r} has invalid class {raw_class!r}"
-                    )
-                norm_class = normalize_class(raw_class)
-                # Agent exposure defaults ON for worktree/singleton, OFF for
-                # reference; an explicit `agent:` always wins.
-                raw_agent = entry.get("agent")
-                agent = (
-                    bool(raw_agent) if raw_agent is not None
-                    else norm_class != "reference"
-                )
-                repos[name] = RepoEntry(
-                    name=name,
-                    repo_class=norm_class,
-                    remote=entry.get("remote", ""),
-                    default_branch=entry.get("default_branch", ""),
-                    tags=tags,
-                    contributing=entry.get("contributing", ""),
-                    account=str(entry.get("account", "") or ""),
-                    copilot_account=str(entry.get("copilot_account", "") or ""),
-                    agent=agent,
-                    visibility=normalize_visibility(entry.get("visibility")),
-                    paths=paths,
-                )
-
-        return ReposRegistry(srcroot=srcroot, repos=repos, account_map=account_map)
-    except Exception as exc:
-        if strict:
-            if isinstance(exc, RepositoryResolutionError):
-                raise
-            raise RepositoryResolutionError(
-                f"repository registry could not be read: {exc}"
-            ) from exc
-        return ReposRegistry()
+    return _read_registry(_repos_yaml_path(), strict=strict)
 
 
 def write_registry(registry: ReposRegistry) -> None:

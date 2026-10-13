@@ -44,8 +44,8 @@ from .registrar_document import expand_declaration_document  # noqa: F401 -- pub
 from .repository_resources import (
     is_repository_resource,
     registered_repository_root,
-    split_repository_resource,
 )
+from .registrar_pointer import Pointer
 from .registrar_lane_aliases import (  # noqa: F401 -- re-exported for existing call sites/tests
     ENFORCE_REGISTERED_REPOS_ENV,
     _derive_git_remote_alias,
@@ -93,117 +93,6 @@ def registrar_dir() -> Path:
 def pointers_file(base: Path | None = None) -> Path:
     """Path of the pointer-registry JSON file."""
     return (base or registrar_dir()) / "pointers.json"
-
-
-@dataclass(frozen=True)
-class Pointer:
-    """A recorded location to read declarations from (the registry's atom).
-
-    ``location`` is a directory of declaration documents. ``kind`` distinguishes a
-    plain ``dir`` pointer from a ``repo`` pointer (whose ``location`` is a repo root
-    and whose declarations live under :data:`INREPO_SUBDIR`). ``owner`` is provenance
-    stamped onto every declaration read through this pointer.
-
-    A named ``repository`` replaces the legacy repo-root ``location``. Its root
-    is resolved through the repository registry on each scan, never persisted here.
-
-    ``aliases`` are canonical lane identities (``identity.canonicalize_remote``
-    shape, e.g. ``host/owner/name``) this ``repo``-kind pointer is agent-backed
-    for -- the actual, trustworthy repo identity. ``name`` is a free-form label
-    (the registrar CLI accepts any name; it is not derived from or validated
-    against the repo's real remote), so it must never itself be treated as a
-    repo identity -- see :func:`agent_dispatch.queue_agent_backed_repo.
-    AgentBackedRepoMixin._require_agent_backed_repo`, which matches a task's
-    lane against this set, never against pointer ``name``\\ s.
-    """
-
-    name: str
-    location: str = ""
-    kind: str = "dir"
-    owner: str | None = None
-    aliases: tuple[str, ...] = ()
-    repository: str | None = None
-
-    def repo_root(self) -> Path:
-        if self.repository is not None:
-            return registered_repository_root(self.repository)
-        return Path(self.location).expanduser()
-
-    def resolved_location(self) -> Path:
-        """The directory to scan for declaration documents.
-
-        For a ``repo`` pointer that is the repo root's canonical
-        ``.copilot-extensions/agent-dispatch/registrar`` directory with legacy
-        ``.agent-dispatch/registrar`` fallback; for a ``dir`` pointer it is the
-        location itself.
-        """
-        base = self.repo_root()
-        if self.kind == "repo":
-            return repo_config.selected_repo_surface_dir(base, "registrar")
-        return base
-
-    def effective_owner(self) -> str:
-        """Provenance token for declarations read here (explicit owner, else derived)."""
-        if self.owner:
-            return self.owner
-        stem = self.repository or Path(self.location).expanduser().name or self.name
-        return f"repo:{stem}" if self.kind == "repo" else f"pointer:{self.name}"
-
-    def to_dict(self) -> dict[str, str | list[str]]:
-        d: dict[str, str | list[str]] = {
-            "name": self.name,
-            "location": self.location,
-            "kind": self.kind,
-        }
-        if self.owner:
-            d["owner"] = self.owner
-        if self.aliases:
-            d["aliases"] = list(self.aliases)
-        if self.repository is not None:
-            d.pop("location")
-            d["repository"] = self.repository
-        return d
-
-    @classmethod
-    def from_dict(cls, data: Mapping) -> Pointer:
-        if not isinstance(data, Mapping):
-            raise RegistrarError(f"pointer: expected a mapping, got {type(data).__name__}")
-        name = data.get("name")
-        location = data.get("location")
-        repository = data.get("repository")
-        if not isinstance(name, str) or not name:
-            raise RegistrarError("pointer: 'name' is required and must be a non-empty string")
-        if repository is not None and (
-            not isinstance(repository, str) or not repository
-            or location is not None or data.get("kind") != "repo"
-        ):
-            raise RegistrarError(
-                "pointer.repository requires kind 'repo' and a registered name, without location"
-            )
-        if repository is None and (not isinstance(location, str) or not location):
-            raise RegistrarError("pointer: 'location' is required and must be a non-empty string")
-        if repository is not None:
-            split_repository_resource(f"repo:{repository}:.")
-        kind = data.get("kind", "dir")
-        if kind not in ("dir", "repo"):
-            raise RegistrarError(f"pointer.kind: must be 'dir' or 'repo', got {kind!r}")
-        owner = data.get("owner")
-        if owner is not None and not isinstance(owner, str):
-            raise RegistrarError(f"pointer.owner: expected a string, got {owner!r}")
-        raw_aliases = data.get("aliases", [])
-        if not isinstance(raw_aliases, list) or not all(
-            isinstance(a, str) and a for a in raw_aliases
-        ):
-            raise RegistrarError("pointer.aliases: expected a list of non-empty strings")
-        return cls(
-            name=name,
-            location=location or "",
-            kind=kind,
-            owner=owner or None,
-            aliases=tuple(raw_aliases),
-            repository=repository,
-        )
-
 
 
 def repo_pointer(
