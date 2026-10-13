@@ -93,6 +93,36 @@ def test_stopped_provider_does_not_block_native_prompt_staging(
     assert seed is not None and seeds.peek(path) == seed
 
 
+def test_peek_reenters_strict_record_lock_without_relocking_or_releasing_sidecar(
+    native_record: NativeRecord, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path, _outputs, _blob = native_record
+    seed = seeds.stage(path, kind="resume", text="accepted draft")
+    assert seed is not None and seeds.state_path(path).exists()
+    with tracking._RecordLock(path, require_sidecar=True) as outer:
+        assert outer._held in {"windows", "posix"}
+        counts = tracking._thread_sidecar_counts()
+        assert counts[outer._sidecar_key] == 1
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                tracking._RecordLock, "_sidecar_try",
+                lambda *_: pytest.fail("nested peek must reuse the held OS sidecar"),
+            )
+            assert seeds.peek(path) == seed
+            assert counts[outer._sidecar_key] == 1
+            with tracking._RecordLock(path, require_sidecar=True) as inner:
+                assert inner.acquired and inner._nested_sidecar and inner._fd is None
+                assert counts[outer._sidecar_key] == 2
+            assert counts[outer._sidecar_key] == 1
+        def contender() -> bool:
+            with tracking._RecordLock(path, blocking=False, require_sidecar=True) as lock:
+                return lock.acquired
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            assert pool.submit(contender).result(timeout=5) is False
+    with tracking._RecordLock(path, require_sidecar=True) as later:
+        assert later.acquired
+
+
 @pytest.mark.parametrize("action", ["reserve", "set"])
 @pytest.mark.parametrize("kind", ["new", "resume", "legacy"])
 def test_seed_winner_fences_provider_without_consuming_pending_intent(

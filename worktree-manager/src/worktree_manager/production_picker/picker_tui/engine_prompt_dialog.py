@@ -35,11 +35,11 @@ class PromptDlgScreen(ModalScreen[bool]):
         Binding("q", "cancel", show=False),
     ]
 
-    def __init__(self, title: str, hint: str, *, seed_supported: bool = True) -> None:
+    def __init__(self, title: str, hint: str, *, seed_refusal: str | None = None) -> None:
         super().__init__()
         self._title = title
         self._hint = hint
-        self._seed_supported = seed_supported
+        self._seed_refusal = seed_refusal
         self.seed_prompt = ""            # set on Confirm
         self._prompt_widgets, self._prompt_rec = compose_seed_prompt()
 
@@ -74,8 +74,7 @@ class PromptDlgScreen(ModalScreen[bool]):
     def on_focus_group_activated(self, event: FocusGroup.Activated) -> None:
         confirmed = event.value == "confirm"
         if confirmed:
-            options = () if self._seed_supported else ("AHP",)
-            if not self._prompt_rec["primary"].remember(options=options):
+            if not self._prompt_rec["primary"].remember(refusal_reason=self._seed_refusal):
                 return
             self.seed_prompt = self._collect_prompt()
         self.dismiss(confirmed)

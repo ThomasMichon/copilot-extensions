@@ -5,7 +5,9 @@ import os
 import stat
 import shutil
 import subprocess
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 from textual.app import App
@@ -42,6 +44,38 @@ def test_concurrent_submissions_are_not_lost(tmp_path):
     }
 
 
+def test_actual_history_connection_ddl_does_not_start_implicit_transaction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connect = sqlite3.connect
+    observed: list[tuple[str, bool, bool, str | None]] = []
+
+    class ObservedConnection(sqlite3.Connection):
+        def execute(self, sql: str, parameters=(), /) -> sqlite3.Cursor:
+            before = self.in_transaction
+            cursor = super().execute(sql, parameters)
+            observed.append((sql.split()[0], before, self.in_transaction, self.isolation_level))
+            return cursor
+
+    def observed_connect(*args, **kwargs) -> sqlite3.Connection:
+        return connect(*args, **kwargs, factory=ObservedConnection)
+
+    monkeypatch.setattr(seed_history.sqlite3, "connect", observed_connect)
+    history = seed_history.SeedHistory("demo", tmp_path)
+    history.remember("first")
+    history.remember("second")
+    assert history.entries() == ["second", "first"]
+    assert [row for row in observed if row[0] == "CREATE"] == [
+        ("CREATE", False, False, ""), ("CREATE", False, False, ""),
+    ]
+    assert [row for row in observed if row[0] == "BEGIN"] == [
+        ("BEGIN", False, True, ""), ("BEGIN", False, True, ""),
+    ]
+    assert [row for row in observed if row[0] == "INSERT"] == [
+        ("INSERT", True, True, ""), ("INSERT", True, True, ""),
+    ]
+
+
 def test_history_storage_failure_is_explicit(tmp_path):
     root = tmp_path / "not-a-directory"
     root.write_text("occupied")
@@ -63,23 +97,58 @@ def test_history_repairs_existing_permissions(tmp_path):
     assert stat.S_IMODE(history.path.parent.stat().st_mode) == 0o700
 
 
+def _acl_powershell() -> str:
+    executable = shutil.which("pwsh") or shutil.which("powershell")
+    if executable is None:
+        pytest.skip("Neither PowerShell 7 nor Windows PowerShell is available for ACL inspection")
+    return executable
+
+
+@pytest.mark.parametrize("available,expected", [
+    ({"pwsh": "pwsh.exe", "powershell": "powershell.exe"}, "pwsh.exe"),
+    ({"powershell": "powershell.exe"}, "powershell.exe"),
+    ({}, None),
+])
+def test_acl_shell_selection_and_explicit_missing_shell_skip(
+    monkeypatch: pytest.MonkeyPatch, available: dict[str, str], expected: str | None,
+) -> None:
+    monkeypatch.setattr(shutil, "which", available.get)
+    if expected is None:
+        with pytest.raises(pytest.skip.Exception, match="ACL inspection"):
+            _acl_powershell()
+    else:
+        assert _acl_powershell() == expected
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows ACL contract")
-def test_windows_history_has_protected_owner_system_acl(tmp_path):
+@pytest.mark.parametrize("legacy_only", [False, True])
+def test_windows_history_has_protected_owner_system_acl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy_only: bool,
+) -> None:
+    if legacy_only:
+        which = shutil.which
+        monkeypatch.setattr(shutil, "which", lambda name: which(name) if name != "pwsh" else None)
+    shell = _acl_powershell()
     history = seed_history.SeedHistory("demo", tmp_path)
     history.remember("private")
     for path in (history.path.parent, history.path):
+        # An inherited PSModulePath can select another PowerShell edition's module.
         script = (
+            "$ErrorActionPreference='Stop';"
+            "Import-Module (Join-Path $PSHOME "
+            "'Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1');"
             "$acl=Get-Acl -LiteralPath '" + str(path).replace("'", "''") + "';"
             "$acl.AreAccessRulesProtected;"
             "$acl.Access | ForEach-Object {"
             "$_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value}"
         )
         result = subprocess.run(
-            [shutil.which("pwsh"), "-NoProfile", "-Command", script],
-            capture_output=True, text=True, check=True, timeout=20,
+            [shell, "-NoProfile", "-Command", script],
+            capture_output=True, text=True, timeout=20,
             **no_window_kwargs(),
         )
-        assert set(result.stdout.split()) == {"True", "S-1-3-4", "S-1-5-18"}
+        if result.returncode or set(result.stdout.split()) != {"True", "S-1-3-4", "S-1-5-18"}:
+            pytest.fail(f"ACL inspection with {shell} failed:\n{result.stderr}", pytrace=False)
 
 
 def test_permission_failure_blocks_submission(tmp_path, monkeypatch):
@@ -205,7 +274,7 @@ def test_unsupported_composer_keeps_text_without_recording(tmp_path, monkeypatch
         monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
         context.set_project("demo")
         dialog = (
-            PromptDlgScreen("Resume", "Prompt", seed_supported=False)
+            PromptDlgScreen("Resume", "Prompt", seed_refusal="AHP prompt launch is unsupported")
             if option == "resume-ahp" else ScopeDlgScreen(
                 {"opts": [{"label": option, "on": True}], "section": 1},
                 show_prompt=True,
@@ -225,6 +294,58 @@ def test_unsupported_composer_keeps_text_without_recording(tmp_path, monkeypatch
             assert app.screen is dialog
             assert field.text == "unsubmitted draft" and outcomes == []
             assert seed_history.SeedHistory("demo", tmp_path).entries() == []
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("leg,ahp,reason", [
+    ({"provider": "custom", "state": "active"}, False, "execution leg is active"),
+    ({"provider": "custom", "state": "unknown"}, False, "execution leg is unknown"),
+    (None, True, "unsupported with AHP"),
+])
+def test_resume_refusal_reports_actual_transport_without_fake_option(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, leg: dict[str, str] | None,
+    ahp: bool, reason: str,
+) -> None:
+    from types import SimpleNamespace
+    from worktree_manager.production_picker.picker_tui.resume_prompt_actions import open_resume_prompt
+
+    async def run() -> None:
+        monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
+        context.set_project("demo")
+        record = {"raw": {"id": "wt-a", "execution_leg": leg}, "title": "Demo"}
+        outcomes = []
+        app = App()
+        screen = SimpleNamespace(
+            app=app, debug="",
+            _find_internal_worktree=lambda *args: (record, None),
+            _session_action_verbs=lambda _: ["Resume prompt…"],
+            _resume_decision=lambda *args, **kwargs: outcomes.append(kwargs),
+            _decide=lambda _: None,
+        )
+        async with app.run_test() as pilot:
+            open_resume_prompt(screen, record, ahp=ahp)
+            await pilot.pause()
+            dialog = app.screen
+            field = dialog.query_one(SeedPromptField)
+            notices = []
+            monkeypatch.setattr(field, "notify", lambda message, **kwargs: notices.append(message))
+            field.load_text("retained draft")
+            dialog.on_focus_group_activated(
+                FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
+            )
+            await pilot.pause()
+            assert app.screen is dialog and field.text == "retained draft"
+            assert len(notices) == 1 and reason in notices[0]
+            if not ahp:
+                assert "AHP" not in notices[0]
+            assert outcomes == []
+            assert seed_history.SeedHistory("demo", tmp_path).entries() == []
+            field.load_text("")
+            dialog.on_focus_group_activated(
+                FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
+            )
+            await pilot.pause()
+            assert outcomes == [{"no_mux": False, "ahp": ahp, "seed_prompt": ""}]
     asyncio.run(run())
 
 

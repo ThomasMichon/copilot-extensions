@@ -202,15 +202,13 @@ def _isolate_pivots(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
-def _reset_active_project(request):
+def _reset_active_project():
     from agent_worktrees import config as engine_config
     from worktree_manager.production_picker import context as picker_context
 
     saved = os.environ.get("WORKTREE_PROJECT")
     engine_config.set_active_project(None)
     picker_context.reset()
-    if request.module.__name__.rsplit(".", 1)[-1] == "test_picker_tui":
-        picker_context.set_project("demo")
     os.environ.pop("WORKTREE_PROJECT", None)
     try:
         yield

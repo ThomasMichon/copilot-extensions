@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from .. import context
 from ...seed_history import HistoryCursor, SeedHistory, SeedHistoryError
 from .field_widgets import _AutoExpandTextArea
@@ -21,14 +23,17 @@ class SeedPromptField(_AutoExpandTextArea):
         except SeedHistoryError as exc:
             self.notify(str(exc), severity="error")
 
-    def remember(self, *, options=()) -> bool:
+    def remember(
+        self, *, options: Iterable[str] = (), refusal_reason: str | None = None,
+    ) -> bool:
         unsupported = {"Anchor repo", "Bare", "AHP", "Local model"} & set(options)
-        if unsupported and self.text.strip():
-            self.notify(
+        if unsupported and not refusal_reason:
+            refusal_reason = (
                 "Prompt launch is unsupported with " + ", ".join(sorted(unsupported))
-                + "; clear the prompt or change the options.",
-                severity="error",
+                + "; clear the prompt or change the options."
             )
+        if refusal_reason and self.text.strip():
+            self.notify(refusal_reason, severity="error")
             self.focus()
             return False
         try:

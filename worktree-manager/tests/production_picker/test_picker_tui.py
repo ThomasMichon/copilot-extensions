@@ -32,6 +32,13 @@ from worktree_manager.production_picker.picker_tui.engine import (  # noqa: E402
 from worktree_manager.production_picker.picker_tui.selection import ListSelection  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _bind_composer_project(_reset_active_project) -> None:
+    from worktree_manager.production_picker import context
+
+    context.set_project("demo")
+
+
 def _quit_modal_open(scr):
     """True when the F4 QuitConfirmScreen modal is on the app's screen stack."""
     from worktree_manager.production_picker.picker_tui.engine import QuitConfirmScreen
