@@ -175,7 +175,10 @@ def verified_merge_head(
             raise RequiredChecksError("effective branch rules page is unavailable or invalid")
         for rule in rules:
             rule = obj(rule, "branch rule")
-            if rule.get("type") != "required_status_checks":
+            kind = rule.get("type")
+            if not isinstance(kind, str) or not kind.strip():
+                raise RequiredChecksError("branch rule type is unavailable or invalid")
+            if kind != "required_status_checks":
                 continue
             checks = obj(rule.get("parameters"), "required-check rule").get("required_status_checks")
             add_checks(checks, "integration_id")

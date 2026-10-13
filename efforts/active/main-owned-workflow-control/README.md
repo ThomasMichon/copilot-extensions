@@ -408,3 +408,30 @@ credential changes, broad policy weakening or unreviewed releases.
   main-target, weekly and manual coverage. The unchanged Windows selection
   passed 10 cases in 51 seconds before migration; candidate/promotion files
   remain with #6332's owner.
+
+### 2026-10-13 - Guard merged and native-smoke consolidation verified
+
+- #6402 merged as `06a5bb4e0aa6` after current-head approval `5497694992`,
+  zero open findings and both explicitly required checks passed. The real
+  read-only preflight additionally verified every configured integration at
+  head `45347c28c338` before the managed merge. Source is dev-landed; release
+  and authorized runtime adoption remain separate follow-through gates.
+- #6414 received current-head approval `5497722970` with zero findings.
+  CI `38330285814` succeeded; the consolidated native jobs finished in 108
+  seconds on Windows and 73 on Linux, within their unchanged five-minute
+  budgets. Its affected opening event had no standalone payload-CWD run.
+- #6414 merged externally as `8d33901962c7` while the read-only preflight was
+  rechecking PR identity. The preflight refused the now-closed PR and no
+  duplicate merge mutation was attempted. Full release/default-main proof
+  remains pending; neither dev merge alone completes this campaign.
+- Seven deep/platform workflow event/platform rosters were independently
+  confirmed, including full Windows rotation and both native stress/race
+  lanes. Six untouched schedules remain unchanged. Failure routing is not
+  declared in six of those workflow files; that catalog gap remains open.
+- The optional trusted self-hosted workflow is a further invocation-consolidation
+  seam, but deployment consumers may pin its exact blob. Consumer pins and
+  non-dev event coverage must be reconciled before changing it; no self-hosted
+  admission or deployment control was altered.
+- A tightly coupled preflight follow-up rejects missing/non-string/empty rule
+  discriminators rather than treating malformed policy as a non-status rule.
+  Legitimate unrelated rule types remain unchanged.

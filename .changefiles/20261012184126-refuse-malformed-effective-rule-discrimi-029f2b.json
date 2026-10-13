@@ -1,0 +1,9 @@
+{
+  "comment": "Refuse malformed effective-rule discriminators during required-CI admin preflight",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
