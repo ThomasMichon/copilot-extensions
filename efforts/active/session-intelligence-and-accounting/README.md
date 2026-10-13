@@ -106,8 +106,22 @@ Follow-up: effort slug confirmed as `session-intelligence-and-accounting`.
 
 Follow-up, 2026-10-12:
 
-> We can update agent-logger's session-sync daemon to pull and store the additional information we need, for example selections from the session_store db associated with the sessions as we sync them. This will ensure we always have it; it's possible for the session_store.db to get corrupted and rebuilt, leaving only the session-state folders.
-> We'll need a way to estimate tokens from events.jsonl transcripts, which I think are really the only durable artifacts we can count in for every session. There are probably "back-of-the-envelope" relationships we can dervice from the newer per-session metrics and their associated transcripts. That should give us the ability to produce a historical estimate.
+> We can update agent-logger's session-sync daemon to pull and store the additional
+> information we need, for example selections from the session_store db associated
+> with the sessions as we sync them. This will ensure we always have it; it's
+> possible for the session_store.db to get corrupted and rebuilt, leaving only the
+> session-state folders.
+> We'll need a way to estimate tokens from events.jsonl transcripts, which I think
+> are really the only durable artifacts we can count in for every session. There
+> are probably "back-of-the-envelope" relationships we can dervice from the newer
+> per-session metrics and their associated transcripts. That should give us the
+> ability to produce a historical estimate.
+
+Editorial note: "dervice" is retained verbatim from the operator's request.
+
+Historical-estimate policy selected by the operator: `best-effort-with-uncertainty`
+(report best-effort estimates with measured error ranges and explicit
+extrapolation warnings, rather than require a fixed held-out accuracy threshold).
 
 ## Plan
 

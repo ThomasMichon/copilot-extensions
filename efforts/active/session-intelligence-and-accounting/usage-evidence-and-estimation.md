@@ -69,6 +69,13 @@ repeated input, invisible output, prompt-cache usage or provider billing.
 Estimates never create AI-credit meters, payer attribution or invoice values.
 Consumer-specific dollar estimates remain an independently injected policy.
 
+The operator selected best-effort estimates with measured error ranges and
+explicit extrapolation warnings. Poor held-out accuracy therefore lowers
+confidence and widens the disclosed empirical range; it is not a universal
+accuracy cutoff. Unidentifiable models, unusable calibration or absent features
+still remain unknown. Empirical validation ranges are not statistical confidence
+intervals or guarantees for a historical cohort.
+
 ## Agent-recommended safeguards
 
 - Bound session counts, SQLite work/time, records, member sizes and JSON lines;
