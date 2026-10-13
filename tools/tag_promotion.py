@@ -21,9 +21,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from promote_release import PIPELINE_STATE_PATH
+from promote_release import PIPELINE_STATE_PATH, PROMOTION_TAG_PREFIX
 
-TAG_PREFIX = "promote-"
+TAG_PREFIX = f"{PROMOTION_TAG_PREFIX}-"
 
 
 class TagError(Exception):
@@ -51,6 +51,9 @@ def tag_promotion(
     """Create and push the promotion tag. Returns ``(tag_name, created)``;
     ``created`` is False when the tag already pointed at ``merge_sha``."""
     _git(["fetch", "-q", remote, main_branch], cwd=repo)
+    known = _git(["cat-file", "-e", f"{merge_sha}^{{commit}}"], cwd=repo, check=False)
+    if known.returncode != 0:
+        raise TagError(f"{merge_sha} is not a known commit after fetching {remote}/{main_branch}")
     on_main = _git(
         ["merge-base", "--is-ancestor", merge_sha, f"{remote}/{main_branch}"],
         cwd=repo, check=False,
@@ -83,7 +86,13 @@ def tag_promotion(
             return tag_name, False
         raise TagError(f"{tag_name} already exists on {existing[0]}, not {merge_sha}")
 
-    _git(["tag", "-a", tag_name, "-m", message, merge_sha], cwd=repo)
+    # A previous run may have created the tag locally and then failed to push.
+    local = _git(["rev-parse", "-q", "--verify", f"refs/tags/{tag_name}^{{commit}}"], cwd=repo, check=False)
+    if local.returncode == 0:
+        if local.stdout.strip() != merge_sha:
+            raise TagError(f"local tag {tag_name} points at {local.stdout.strip()}, not {merge_sha}")
+    else:
+        _git(["tag", "-a", tag_name, "-m", message, merge_sha], cwd=repo)
     _git(["push", "-q", remote, f"refs/tags/{tag_name}"], cwd=repo)
     return tag_name, True
 

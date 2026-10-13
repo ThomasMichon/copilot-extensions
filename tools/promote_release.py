@@ -61,6 +61,9 @@ sys.dont_write_bytecode = True
 #: dev to know or carry it.
 PIPELINE_STATE_PATH = ".github/release-pipeline-state.json"
 PIPELINE_STATE_SCHEMA = "copilot-extensions.release-pipeline-state"
+# Every promotion tag is `<PROMOTION_TAG_PREFIX>-<UTC ts>-<sha8>`; rollback and
+# CI find promotions by this prefix.
+PROMOTION_TAG_PREFIX = "promote"
 
 
 class PromotionError(RuntimeError):
@@ -619,7 +622,7 @@ def promote(
     main_ref: str = "origin/main",
     push: bool = False,
     force: bool = False,
-    tag_prefix: str = "promote",
+    tag_prefix: str = PROMOTION_TAG_PREFIX,
     candidate_branch: str | None = None,
     coverage_baselines_dir: Path | None = None,
     build_python_artifacts_dir: Path | None = None,

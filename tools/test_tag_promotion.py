@@ -112,3 +112,36 @@ def test_cli_reports_errors_with_nonzero_exit(repo, capsys):
     assert "::error::tag-promotion:" in capsys.readouterr().err
     assert tp.main(["--merge-sha", sha, "--dev-sha", DEV_SHA, "--repo", str(work)]) == 0
     assert f"pushed {STEM}-{sha[:8]}" in capsys.readouterr().out
+
+
+def test_retry_after_a_failed_push_pushes_the_existing_local_tag(repo):
+    work, origin = repo
+    sha = _commit_state(work, {"tag": STEM, "dev_head": DEV_SHA})
+    # A previous run created the tag locally, then its push failed.
+    _git(["tag", "-a", f"{STEM}-{sha[:8]}", "-m", "m", sha], work)
+    assert _tag(work, sha) == (f"{STEM}-{sha[:8]}", True)
+    assert _remote_tag(origin, f"{STEM}-{sha[:8]}") == sha
+
+
+def test_local_tag_on_another_commit_refuses(repo):
+    work, origin = repo
+    sha = _commit_state(work, {"tag": STEM, "dev_head": DEV_SHA})
+    other = _commit_state(work, {"tag": STEM, "dev_head": DEV_SHA})
+    _git(["tag", "-a", f"{STEM}-{sha[:8]}", "-m", "m", other], work)
+    with pytest.raises(tp.TagError, match="local tag"):
+        _tag(work, sha)
+    assert _remote_tag(origin, f"{STEM}-{sha[:8]}") == ""
+
+
+def test_unknown_commit_is_reported_as_unknown(repo):
+    work, _origin = repo
+    _commit_state(work, {"tag": STEM, "dev_head": DEV_SHA})
+    with pytest.raises(tp.TagError, match="not a known commit"):
+        _tag(work, "f" * 40)
+
+
+def test_prefix_is_shared_with_promote_release():
+    import promote_release
+
+    assert tp.TAG_PREFIX == f"{promote_release.PROMOTION_TAG_PREFIX}-"
+    assert promote_release.promote.__kwdefaults__["tag_prefix"] == promote_release.PROMOTION_TAG_PREFIX
