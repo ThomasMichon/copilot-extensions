@@ -1,7 +1,7 @@
 # Marketplace-Scoped Installations
 
 - **Slug:** `marketplace-scoped-installations`
-- **Repo:** copilot-extensions (PR-required `dev`; `main` is release-only)
+- **Repo:** copilot-extensions (PRs must target `dev`; `main` is release-only)
 - **Branch(es):** independent per-phase PRs; every implementation PR preserves
   Windows and POSIX compatibility or is an explicitly non-operative foundation
 - **Created:** 2026-08-25

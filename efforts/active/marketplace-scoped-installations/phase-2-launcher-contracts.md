@@ -10,8 +10,11 @@ The effort's reopened Phase 2 item and Phase 8 supersede claims of "zero open
 findings" or full completion. Default user-global placement remains supported;
 independent marketplace selection remains attributable and opt-in.
 
-The plugin-name-only `runtime-root` pointer cannot distinguish multiple source
-marketplaces, and a runtime/state root is not a callable command directory.
+The plugin-name-only durable pointer file named `runtime-root` stores the
+resolver's `runtimeRoot` value; these spellings identify the file and result
+field respectively, not separate resolution mechanisms. That pointer cannot
+distinguish multiple source marketplaces, and a runtime/state root is not a
+callable command directory.
 Its advisory existence check must not be promoted into an invocation contract.
 Phase 8 restores read-only diagnostics and uses existing sessionStart command
 catalogs for source-qualified exact `argv`; stable out-of-session launchers
