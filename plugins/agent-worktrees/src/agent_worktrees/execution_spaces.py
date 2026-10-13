@@ -51,6 +51,23 @@ def detect_legacy_machine(entries: dict[str, MachineEntry], hostname: str) -> st
     return hostname
 
 
+def canonicalize_legacy_config(config: Any) -> Any:
+    from . import config as cfg
+
+    repo = config.repos.get(config.repo_name)
+    if repo is None or not repo.anchor:
+        return config
+    try:
+        entries = cfg.load_machines_yaml(repo.anchor, config=config)
+    except FileNotFoundError:
+        return config
+    selected = find_machine_entry(
+        entries, config.machine, reject_ambiguous=True,
+        execution_platform=cfg.detect_platform(),
+    )
+    return replace(config, machine=selected.key) if selected and selected.legacy_key else config
+
+
 def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None, str, str | None]:
     from . import config as cfg, tracking
 

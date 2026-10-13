@@ -22,7 +22,7 @@ from typing import Any, Literal
 import yaml
 from machine_transport import MachineEntry, SSHEnvironment  # noqa: F401 (re-exported)
 from machine_transport import find_machine_entry as _mt_find_machine_entry
-from machine_transport import machine_name as _mt_machine_name
+from machine_transport import machine_name  # noqa: F401 (re-export)
 from machine_transport import merge_machines_yaml as _mt_merge_machines_yaml
 from machine_transport import normalize_machine_entries as _mt_normalize_machine_entries
 from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yaml_file
@@ -697,15 +697,6 @@ def load_machines_yaml(
     }
 
 
-def machine_name(entry: MachineEntry) -> str:
-    """Return the canonical name for a machine entry.
-
-    Returns the alias if one is defined (the colloquial multi-machine system name),
-    otherwise the key (which is the real hostname).
-    """
-    return _mt_machine_name(entry)
-
-
 def find_machine_entry(
     entries: dict[str, MachineEntry], name: str,
 ) -> MachineEntry | None:
@@ -1173,18 +1164,9 @@ def _load_config_uncached(
         ),
         copilot_identity_switch_enabled=bool(machine_raw.get("copilot_identity_switch_enabled", global_raw.get("copilot_identity_switch_enabled", False))),
     )
-    if repo_name not in repos or not repos[repo_name].anchor:
-        return config
-    try:
-        entries = load_machines_yaml(repos[repo_name].anchor, config=config)
-    except FileNotFoundError:
-        return config
-    selected = _mt_find_machine_entry(
-        entries, machine, reject_ambiguous=True, execution_platform=detect_platform(),
-    )
-    if selected is not None and selected.legacy_key:
-        return replace(config, machine=selected.key)
-    return config
+    from .execution_spaces import canonicalize_legacy_config
+
+    return canonicalize_legacy_config(config)
 
 
 def load_config(

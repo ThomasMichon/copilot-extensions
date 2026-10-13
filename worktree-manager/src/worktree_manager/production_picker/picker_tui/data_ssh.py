@@ -379,9 +379,7 @@ def _build_sources():
         elif m.execution_platform and not m.ssh_environments:
             elabel = _ENV_LABEL.get(m.execution_platform, m.execution_platform.title())
             out.append(Source(m.key, elabel, None, ready=False))
-        for source in out[first_source:]:
-            source.display_machine = roster.display_machine(m)
-            source.source_label = f"{source.display_machine} / {source.env}"
+        roster.apply_display_machine(out[first_source:], m)
 
     # Defensive fail-safe: guarantee a local source even when this machine is
     # entirely absent from machines.yaml (a freshly-provisioned box whose

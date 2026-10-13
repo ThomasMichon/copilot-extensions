@@ -61,6 +61,12 @@ def display_machine(entry):
     return entry.physical_host or entry.key
 
 
+def apply_display_machine(sources, entry):
+    for source in sources:
+        source.display_machine = display_machine(entry)
+        source.source_label = f"{source.display_machine} / {source.env}"
+
+
 def local_entry(entries, config_machine, hostname, execution_platform):
     """Resolve the running execution space, not every sibling on its host."""
     selected = find_machine_entry(entries, config_machine, reject_ambiguous=True)
