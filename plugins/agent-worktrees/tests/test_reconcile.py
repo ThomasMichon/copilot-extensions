@@ -27,6 +27,70 @@ INSTALLATION_CONTEXT_PS1 = (
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
 
+@pytest.mark.parametrize("pointer_exists", [False, True])
+def test_runtime_resolution_real_helper_read_only(env, monkeypatch, pointer_exists):
+    payload = env.install_payload("agent-worktrees", "2.0.0", scope="universal")
+    helper = reconcile._installation_context_helper("agent-worktrees", payload)
+    assert helper is not None
+    monkeypatch.setenv("HOME", str(env.home))
+    monkeypatch.setenv("USERPROFILE", str(env.home))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: env.home))
+    assert Path.home() == env.home
+    legacy = env.home / ".agent-worktrees"
+    legacy.mkdir()
+    (legacy / "retained-state.json").write_text('{"retained":true}\n', encoding="utf-8")
+    policy = env.home / "diagnostic-policy.json"
+    policy.write_text(json.dumps({
+        "schema": "copilot-extensions.installation-mode",
+        "version": 1,
+        "installationMode": {"enabled": False},
+    }), encoding="utf-8")
+    if pointer_exists:
+        pointer = env.home / ".copilot-extensions" / "agent-worktrees" / "runtime-root"
+        pointer.parent.mkdir(parents=True)
+        pointer.write_text("retained-foreign-pointer\n", encoding="utf-8")
+
+    calls = []
+    real_run = subprocess.run
+
+    def run_fixture_helper(command, **kwargs):
+        helper_index = command.index(str(helper))
+        assert command[helper_index + 1] == "probe-legacy"
+        calls.append(command)
+        # The CLI's explicit false policy cannot authorize a cell. Keep the
+        # actual subprocess while excluding the runner's personal policy.
+        flag = "-PolicyPath" if os.name == "nt" else "--policy-path"
+        return real_run([*command, flag, str(policy)], **kwargs)
+
+    monkeypatch.setattr(reconcile.subprocess, "run", run_fixture_helper)
+
+    def snapshot():
+        return {
+            path.relative_to(env.home).as_posix(): (
+                path.is_dir(), path.stat().st_mtime_ns,
+                path.read_bytes() if path.is_file() else None,
+            )
+            for path in env.home.rglob("*")
+        }
+
+    before = snapshot()
+    result = reconcile._run_installation_mode_helper(
+        "agent-worktrees", payload, helper, legacy, context=None,
+    )
+    assert result["schema"] == "copilot-extensions.installation-resolution"
+    assert result["actualMode"] == "legacy"
+    assert result["runtimeRoot"] == str(legacy)
+    assert result["context"] is None
+    selected = reconcile.resolve_runtime_installation(
+        "agent-worktrees", payload, home=env.home,
+    )
+    assert selected.actual_mode == "legacy"
+    assert selected.runtime_root == legacy
+    assert selected.context is None
+    assert len(calls) == 2
+    assert snapshot() == before
+
+
 @pytest.fixture
 def env(tmp_path: Path, monkeypatch):
     """Isolate HOME and the cache dir into tmp_path.

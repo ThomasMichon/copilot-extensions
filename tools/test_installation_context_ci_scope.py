@@ -33,6 +33,8 @@ SPEC.loader.exec_module(MODULE)
         "libs/peer-launch/peer_launch.py",
         "plugins/agent-bridge/src/agent_bridge/_peer_launch.py",
         "plugins/agent-dispatch/src/agent_dispatch/peer_launch.py",
+        "plugins/agent-worktrees/src/agent_worktrees/reconcile.py",
+        "plugins/agent-worktrees/tests/test_reconcile.py",
         "tools/sync-installation-context.py",
         ".github/workflows/ci.yml",
         "tools/installation_context_ci_scope.py",
@@ -108,3 +110,12 @@ def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     assert "runtime_inspection_uses_real_read_only_primitive" in manager["env"]["PYTEST_ADDOPTS"]
     assert "run-standalone-tests.py worktree-manager --prepare" in manager["run"]
     assert "--timeout 120" in manager["run"]
+    reconciliation = next(
+        step for step in steps
+        if step.get("name") == "Reconciliation read-only wrapper (Windows)"
+    )
+    assert reconciliation["if"] == smoke["if"]
+    assert reconciliation["timeout-minutes"] <= 2
+    assert "run-plugin-tests.py agent-worktrees" in reconciliation["run"]
+    assert "-k runtime_resolution_real_helper_read_only" in reconciliation["run"]
+    assert "--timeout 120" in reconciliation["run"]

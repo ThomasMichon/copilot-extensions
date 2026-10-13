@@ -1092,6 +1092,13 @@ jobs:
         run: >-
           python tools/run-standalone-tests.py worktree-manager --prepare
           --admission-wait 60 --timeout 120
+      - name: Reconciliation read-only wrapper (Windows)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          -k runtime_resolution_real_helper_read_only
+          --admission-wait 60 --timeout 120
       - id: runner-contracts
         name: Detect runner contract changes
         shell: bash
