@@ -224,3 +224,14 @@ configuration, arbitrary source editing, or automatic maintenance dispatch.
   venue is not applicable to this local-only configuration surface; remote
   configuration remains #6283's separately owned work. Installed local proof
   follows normal promotion and the unified update; it is still pending.
+
+### 2026-10-12 - Required CI size correction
+
+- Opened implementation PR #6427. Its first guards job rejected the expanded
+  rendering module's hard line cap. Mechanically extracted machine/section
+  navigation-band rendering into a focused mixin, preserving the existing
+  rendering class's inherited public methods and character-grid behavior.
+- Module-size and documentation guards now pass locally. Sixty-seven focused
+  Config/Profiles/region/navigation checks, including the thirteen walkthrough
+  captures and real provider round-trip, passed after reinstalling the changed
+  Manager test package. No publication gate was bypassed.

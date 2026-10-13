@@ -8,7 +8,10 @@ from textual.app import ComposeResult
 from .engine_helpers import C_BAND, C_BTN_SEL, C_DIM, C_DISABLED, C_ENV, C_FAINT, C_HINT, C_HINT_ON, C_LABEL, C_LOAD, C_META, C_PULSE, C_READY, C_SECTION, C_SPIN, C_TAB_ACTIVE, C_TAB_FOCUS_ON, C_TABOFF, C_WARN, VERSION, VRow, _size_mb
 from .engine_regions import _PickerButtons, _PickerMachine, _PickerNativeData, _PickerPivots, _PickerSegment, _PickerStickyHeader
 
-class PickerScreenRenderingMixin:
+from .engine_navigation_rendering import PickerNavigationRenderingMixin
+
+
+class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
     def build_body(self, width):
         vrows = []
         cur_band = None
@@ -340,54 +343,6 @@ class PickerScreenRenderingMixin:
             t.append(mk, style=self._hl(mkb, sel, focused))
         t.append(" ")
         return t
-    def tab_bar(self, width, focused):
-        if self._in_configuration():
-            return self._configuration_tabs(width, focused)
-        # Group consecutive flat entries by machine (the 'All' entry stands
-        # alone) so a multi-env machine renders its name once.
-        groups = []
-        prev = None
-        for i, (label, m, e, ok) in enumerate(self.machines):
-            tab = self.source_tabs[i] if self.source_tabs else {}
-            group_key = (
-                m
-                if tab.get("source_kind") in (None, "machine-ssh")
-                else tab.get("source_id")
-            )
-            if label != "All" and group_key == prev:
-                groups[-1].append(i)
-            else:
-                groups.append([i])
-            prev = group_key if label != "All" else None
-        blocks = [self._machine_group(g, focused) for g in groups]
-        blen = [b.cell_len for b in blocks]
-        ng = len(groups)
-        selg = next((gi for gi, g in enumerate(groups) if self.machine_idx in g), 0)
-        gap = 3
-        budget = width - 6   # reserve for ‹ / › overflow markers
-        lo = hi = selg
-        used = blen[selg]
-        while True:
-            grew = False
-            if hi + 1 < ng and used + gap + blen[hi + 1] <= budget:
-                hi += 1
-                used += gap + blen[hi]
-                grew = True
-            if lo - 1 >= 0 and used + gap + blen[lo - 1] <= budget:
-                lo -= 1
-                used += gap + blen[lo]
-                grew = True
-            if not grew:
-                break
-        t = Text(" ")
-        t.append("‹ " if lo > 0 else "  ", style=C_HINT)
-        for k in range(lo, hi + 1):
-            if k > lo:
-                t.append(" " * gap)
-            t.append_text(blocks[k])
-        t.append(" ›" if hi < ng - 1 else "  ", style=C_HINT)
-        t.append(" " * max(0, width - t.cell_len))
-        return t
     def status_text(self, compact=False):
         t = Text()
         if self._kind() == "config_section":
@@ -682,21 +637,6 @@ class PickerScreenRenderingMixin:
         t.append(arrow, style=C_HINT_ON if active else C_HINT)
         t.append(" ")
         t.append("─" * max(0, rightn), style=C_DIM)
-        return t
-    def _stats_row(self, W):
-        """Left: the region's sub-pivot hint (◀ machine ▶ etc). Right: the
-        section counts (with a glyph-compact fallback when narrow)."""
-        hint = ("Section  Ctrl ◀▶" if self._in_configuration()
-                else "Machine  Ctrl ◀▶")
-        use = self.status_text(False)
-        if 1 + len(hint) + 3 + use.cell_len + 1 > W:
-            use = self.status_text(True)
-        t = Text(" ")
-        t.append(hint, style=C_DIM)
-        gap = W - t.cell_len - use.cell_len - 1
-        t.append(" " * max(1, gap))
-        t.append_text(use)
-        t.append(" " * max(0, W - t.cell_len))
         return t
     def _hint_row(self, W, direction, active, count):
         arrow = "▲" if direction == "up" else "▼"
