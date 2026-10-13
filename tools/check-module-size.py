@@ -38,8 +38,8 @@ touched the grown file -- to carry an unrelated manual baseline-widening
 diff just to pass CI. ``--refresh-baseline --allow-widen`` additionally
 *raises* a ceiling up to a file's current size when it is over its recorded
 ceiling. This is still never silent: it is restricted by convention (see
-``.github/workflows/module-size-baseline-widen.yml``) to a scheduled/
-post-merge run directly against ``main`` after the fact, producing its own
+``.github/workflows/promote-trigger.yml``) to a trusted post-merge
+CI-completion run against committed ``dev``, producing its own dev-targeted
 reviewable PR -- **never** something a PR branch's own CI run does to its
 own diff, which would let a PR silently launder its own growth past review.
 
@@ -92,6 +92,11 @@ Usage::
                                                              # once the base branch has moved.
     python tools/check-module-size.py --refresh-baseline  # tighten after shrinking a file
     python tools/check-module-size.py --refresh-baseline --allow-widen  # post-merge only; see above
+    python -I trusted/tools/check-module-size.py --repository candidate --refresh-baseline --allow-widen
+
+``--repository`` selects a data checkout without importing or running its
+tooling. Automation pins the invoked script to the trusted workflow commit,
+uses isolated Python, and publishes only the baseline JSON through dev review.
 
 Exit code 0 = conformant, 1 = a file exceeds its cap/ceiling.
 """
@@ -190,7 +195,10 @@ def _changed_py_files(base_ref: str, head_ref: str = "HEAD") -> set[str]:
 
 
 def _line_count(path: str) -> int:
-    text = (REPO / path).read_text(encoding="utf-8", errors="replace")
+    source = REPO / path
+    if source.is_symlink() or not source.resolve().is_relative_to(REPO):
+        raise ValueError(f"{path}: source modules must be regular files inside the checkout")
+    text = source.read_text(encoding="utf-8", errors="replace")
     if not text:
         return 0
     # A trailing newline should not count as an extra, empty final line.
@@ -294,7 +302,7 @@ def refresh_baseline(
     newly grandfathers a file that has never been baselined before, even if
     that file now exceeds the cap. A brand-new offender is a genuinely new
     hard-cap violation (split it or, per the module docstring, a deliberate
-    manual JSON edit), never something the automated, main-only widen job
+    manual JSON edit), never something the automated, dev-only widen job
     should silently absorb; that would let ordinary (non-widen) growth past
     the cap sneak in through the automation's own back door. Plain
     ``refresh_baseline`` (``allow_widen=False``) keeps its prior behaviour of
@@ -320,7 +328,12 @@ def refresh_baseline(
 
 
 def main() -> int:
+    global REPO, BASELINE_PATH
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--repository", type=Path,
+        help="Read and update this checkout as data, using the invoked trusted tooling.",
+    )
     parser.add_argument(
         "--refresh-baseline",
         action="store_true",
@@ -331,7 +344,7 @@ def main() -> int:
         action="store_true",
         help=(
             "With --refresh-baseline, also raise a grown file's ceiling to its "
-            "current size. Post-merge/main-only by convention -- never run this "
+            "current size. Post-merge/dev-only by convention -- never run this "
             "against a PR branch's own diff (see module docstring)."
         ),
     )
@@ -362,6 +375,13 @@ def main() -> int:
         ),
     )
     args = parser.parse_args()
+    if args.repository is not None:
+        REPO = args.repository.resolve(strict=True)
+        if not REPO.is_dir():
+            parser.error("--repository must name a checkout directory")
+        BASELINE_PATH = REPO / "tools" / "module-size-baseline.json"
+        if BASELINE_PATH.is_symlink() or not BASELINE_PATH.resolve().is_relative_to(REPO):
+            parser.error("the target baseline must be a regular path inside the checkout")
     if args.allow_widen and not args.refresh_baseline:
         parser.error("--allow-widen requires --refresh-baseline")
     if args.changed_since and args.refresh_baseline:

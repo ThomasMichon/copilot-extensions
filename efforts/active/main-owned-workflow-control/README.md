@@ -435,3 +435,30 @@ credential changes, broad policy weakening or unreviewed releases.
 - A tightly coupled preflight follow-up rejects missing/non-string/empty rule
   discriminators rather than treating malformed policy as a non-status rule.
   Legitimate unrelated rule types remain unchanged.
+
+### 2026-10-13 - Dev-owned baseline correction and release queue recovery
+
+- #6426 merged as `fd73fdcff233` after current-head approval `5498079093`,
+  zero findings, both explicit requirements and the actual read-only preflight
+  passed. Malformed-policy behavior is dev-landed, not claimed deployed.
+- Generated promotion #6408 was conflicted despite green checks: main's only
+  intervening commit was automated baseline update #6071 (`53be0fa787d3`).
+  The operator identified main-targeted baseline maintenance as a bug and chose
+  a versioned baseline updated on dev, not a release-artifact redesign.
+- The operator explicitly authorized closing #6408. Only its recorded head
+  `c2e9bf25a7fe` was retired; branch and validation evidence were preserved.
+  Run `38324591183` ended with the expected closed-candidate failure, releasing
+  the queue. Replacement `38334102000` started; no new candidate is yet claimed
+  merged, and no CI or branch-policy bypass was used.
+- #6430 moves baseline maintenance into the existing trusted CI-completion
+  invocation. Pinned trusted tooling reads committed dev as data with isolated
+  Python and credential-free checkouts; publication is baseline-only to dev,
+  under ordinary CI/review. The release PAT is confined to publication.
+- The obsolete main-writing and manual-verification workflows are removed;
+  main admission no longer permits their baseline branch. Hard caps, existing
+  ceiling refresh and unrelated contribution scoping remain unchanged.
+  Sixty-one targeted tests passed, including poisoned candidate tooling/imports,
+  new-offender rejection, real stale-input/diff fencing and main rejection.
+- Activation/default-main proof remains pending review, CI and release. The
+  independent #6332 writer/attestation owner retains its files and open findings;
+  main validation is not pruned on the strength of this correction.

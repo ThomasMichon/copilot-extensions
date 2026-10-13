@@ -213,10 +213,9 @@ candidate. Other workflow refs cannot enter the signing job.
   target for ordinary contribution — a CI promotion pipeline wholesale-
   regenerates it from `dev`'s current tip on a green build (see
   [Promotion: dev → main](#promotion-dev--main) below). `main` is PR-gated,
-  not push-gated: direct pushes are blocked for everyone, and only three
+  not push-gated: direct pushes are blocked for everyone, and only four
   narrow, verified PR shapes are accepted — the promotion pipeline's own
-  PR, a workflow-file-ONLY bootstrap PR, or
-  `module-size-baseline-widen.yml`'s own automated PR (see
+  PR, a workflow-file-ONLY bootstrap PR, or rollback bookkeeping/revert PRs (see
   [Never admin-merge a PR into `main`](#never-admin-merge-a-pr-into-main)
   below for exactly what each shape requires).
 
@@ -518,7 +517,7 @@ targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `promote-trigger.yml` | `workflow_run: ["CI"]` | One trusted invocation hosts independent dev-ancestry dispatch and fork-safe identifier scanning jobs. PR CI completions never start the ancestry-filter runner: synthetic PR success is not committed dev advancement. Successful push/manual completions still prove ancestry rather than trusting branch metadata. Job-scoped permissions and independent concurrency preserve the original trust boundary; PR objects are inert data only. |
+| `promote-trigger.yml` | `workflow_run: ["CI"]` | One trusted invocation hosts independent dev-ancestry dispatch, fork-safe identifier scanning and committed-dev module baseline maintenance. Baseline PRs target dev only; pinned trusted tooling reads the completed dev input as data, with isolated Python, credential-free checkouts and baseline-only publication. Failure completions can repair existing ceilings without admitting new offenders; stale inputs skip. The release PAT is confined to PR publication. No extra verification dispatch is needed because that PAT triggers ordinary PR CI/review. |
 
 **The promotion pipeline (dev → main):**
 
@@ -527,14 +526,11 @@ targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
 | `validate-and-promote.yml` | `repository_dispatch: [dev-advanced]`, `workflow_dispatch` | The pipeline itself: `gate` (confirm the dispatch really reflects `dev`'s current tip) → full validation suite → `promote` (open a generated `release/promote-<run id>` PR against `main`, auto-merge via `APERTURE_RELEASE_TOKEN`). See [Promotion: dev → main](#promotion-dev--main). |
 | `purge-consumed-changefiles.yml` | `schedule` (daily), `repository_dispatch: [purge-changefiles-requested]` | Standalone daily (or on-demand) companion to the promotion pipeline: opens the "clear consumed changefiles on dev" housekeeping PR for whatever changefiles a promotion has already consumed by then -- pure housekeeping, not per-promotion and never load-bearing for promotion correctness. |
 
-**Scheduled sweeps and watchdogs** (not triggered by PR events — though
-`module-size-baseline-widen.yml` itself opens/updates a PR as its own
-output, and `stale-branch-sweep.yml` acts on already-merged PRs' branches):
+**Scheduled sweeps and watchdogs** (`stale-branch-sweep.yml` acts on
+already-merged PRs' branches):
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `module-size-baseline-widen.yml` | `push` → `main` | Post-merge, main-only companion to the module-size guard: widens the shrink-only baseline when a legitimate growth landed, via its own reviewable PR — never inside a PR branch's own CI run against its own diff. |
-| `module-size-baseline-widen-verify.yml` | `workflow_dispatch` | Manual verification harness for the above. |
 | `module-health-watchdog.yml` | `schedule` (daily), `workflow_dispatch` | Proactively finds the single worst module-size-ceiling offender (organic drift no PR-time gate catches) and files/updates one tracking issue for it. |
 | `stale-branch-sweep.yml` | `schedule` (weekly), `workflow_dispatch` | Deletes merged-PR branches still lingering on `origin` — the automated form of the one-time 3000+-branch cleanup. |
 | `installation-context-full.yml` | `schedule` (daily), `workflow_dispatch` | Full-sweep variant of the installation-context contract smoke check `ci.yml` runs per-PR. |
@@ -651,9 +647,9 @@ commit, then resume once `dev` has an actual fix) rather than hand-editing
 ## Never admin-merge a PR into `main`
 
 `main` only ever moves via a `release/promote-*` PR, a genuine
-workflow-file-ONLY bootstrap PR, or `module-size-baseline-widen.yml`'s own
-automated PR (see the `main-gate` job in `ci.yml`), and `main-gate`
-recognizes and passes **all three** of those on its own — unassisted, no
+workflow-file-ONLY bootstrap PR, or rollback bookkeeping/revert PRs
+(see the `main-gate` job in `ci.yml`), and `main-gate`
+recognizes and passes **all four** shapes on its own — unassisted, no
 override needed. That means `gh pr merge --admin` (or the
 equivalent `--admin` flag on any PR-merge tool) has **no legitimate use
 against an ordinary contribution or promotion PR** once this gate is in
@@ -696,9 +692,8 @@ never checks out or executes the PR's own code and never runs tests — its
 only effect is that one comment, so it adds no capability a
 non-collaborator didn't already have.
 
-It recognizes `main-gate`'s own five legitimate automated-PR shapes (the
-release pipeline's own PR, a workflow-only bootstrap PR,
-`module-size-baseline-widen.yml`'s automated PR, and `rollback_release.py`'s
+It recognizes `main-gate`'s own four legitimate automated-PR shapes (the
+release pipeline's own PR, a workflow-only bootstrap PR, and `rollback_release.py`'s
 own pause/resume state-commit PR and revert rollback PR) by the same
 branch-name and diff-content (or branch-name and commit-count, for the
 revert shape) signature `main-gate` itself checks, not merely by

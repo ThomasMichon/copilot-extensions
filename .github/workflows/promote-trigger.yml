@@ -1,10 +1,11 @@
 name: Promote trigger (dev-advancement filter)
 
-# One trusted CI-completion invocation hosts two independent jobs. The dev
+# One trusted CI-completion invocation hosts independent jobs. The dev
 # ancestry filter must remain outside validate-and-promote's concurrency group:
 # irrelevant PR completions must not evict real dev advancements. Do not infer
 # ancestry from workflow_run.head_branch or dispatch mutable workflow code.
-# The scanner reads PR objects as inert data; neither job depends on the other.
+# The scanner reads PR objects as inert data. Baseline maintenance updates dev
+# only, using trusted default-branch tooling; no job depends on another.
 
 # GitHub's documented fork-safe pattern for privileged PR follow-up is:
 #   (1) run untrusted build/test work under `pull_request`, then
@@ -55,6 +56,93 @@ permissions:
   contents: read
 
 jobs:
+  refresh-module-baseline:
+    name: refresh committed dev module baseline
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'dev' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.conclusion != 'cancelled'
+    environment: main-promotion
+    permissions:
+      contents: read
+      pull-requests: read
+    concurrency:
+      group: module-size-baseline-widen-dev
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out trusted workflow tooling without credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - name: Check out committed dev input as data without credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Refresh and validate using only trusted tooling
+        run: |
+          python -I trusted/tools/check-module-size.py --repository candidate --refresh-baseline --allow-widen
+          python -I trusted/tools/check-module-size.py --repository candidate
+      - id: baseline
+        name: Fence stale dev inputs and restrict the publication diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          INPUT_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          live_sha="$(gh api "repos/$REPO/git/ref/heads/dev" --jq '.object.sha')"
+          if [[ ! "$live_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Current dev identity is unavailable or invalid."
+            exit 1
+          fi
+          if [ "$live_sha" != "$INPUT_SHA" ]; then
+            echo "::notice::dev advanced; its latest CI completion owns baseline maintenance."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git -C candidate diff --name-only)"
+          if [ -z "$changed" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          elif [ "$changed" = "tools/module-size-baseline.json" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Baseline maintenance changed unexpected paths."
+            exit 1
+          fi
+      - name: Open a baseline-only PR against dev
+        if: steps.baseline.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+          path: candidate
+          base: dev
+          branch: automation/module-size-baseline-widen-dev
+          add-paths: tools/module-size-baseline.json
+          delete-branch: true
+          commit-message: "tools: refresh committed dev module-size baseline (automated)"
+          title: "tools: refresh committed dev module-size baseline (automated)"
+          body: |
+            Mechanical baseline-only refresh of committed dev, using trusted
+            default-branch tooling. Existing ceilings may widen to current
+            sizes; shrinking/graduated entries tighten. New offenders are
+            never automatically grandfathered.
+
+            This targets dev and requires ordinary current-head CI and review.
+            It never advances generated main or rebases a promotion candidate.
+
+            ## Documentation impact
+            None: baseline data only; no documented behavior changes.
+
   filter-and-dispatch:
     name: filter (dev-ancestry) and dispatch
     if: >-

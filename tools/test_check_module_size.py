@@ -82,6 +82,38 @@ def test_a_small_file_passes(repo: Path):
     assert "[OK]" in result.stdout
 
 
+def test_trusted_tooling_can_refresh_a_poisoned_target_checkout(repo: Path):
+    _write_lines(repo, "src/large.py", 1200)
+    _write_baseline(repo, {"src/large.py": 1100})
+    (repo / "tools" / SCRIPT.name).write_text("raise RuntimeError('candidate tooling executed')\n")
+    (repo / "json.py").write_text("raise RuntimeError('candidate import executed')\n")
+    _commit_all(repo)
+    result = subprocess.run(
+        [sys.executable, "-I", str(SCRIPT), "--repository", str(repo),
+         "--refresh-baseline", "--allow-widen"],
+        cwd=repo, capture_output=True, text=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads((repo / "tools/module-size-baseline.json").read_text()) == {
+        "src/large.py": 1200,
+    }
+
+
+def test_trusted_target_refresh_still_rejects_new_offenders(repo: Path):
+    _write_lines(repo, "src/new.py", 1200)
+    _write_baseline(repo, {})
+    _commit_all(repo)
+    for extra in [("--refresh-baseline", "--allow-widen"), ()]:
+        result = subprocess.run(
+            [sys.executable, "-I", str(SCRIPT), "--repository", str(repo), *extra],
+            capture_output=True, text=True, timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert result.returncode == (0 if extra else 1), result.stdout + result.stderr
+    assert json.loads((repo / "tools/module-size-baseline.json").read_text()) == {}
+
+
 def test_an_uncapped_new_file_over_the_cap_fails(repo: Path):
     _write_lines(repo, "src/huge.py", 1001)
     _commit_all(repo)
