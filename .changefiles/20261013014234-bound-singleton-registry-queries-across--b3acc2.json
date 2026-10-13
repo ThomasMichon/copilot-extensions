@@ -1,0 +1,9 @@
+{
+  "comment": "Bound singleton registry queries across Windows command-shim descendants while preserving the scrubbed child environment",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -12,6 +12,7 @@ from agent_procutil import no_window_flags, spawn_sync_in_kill_on_close_job
 
 def run_captured(
     argv: list[str], timeout: float, *, errors: str = "strict",
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Retain ownership of the command tree until its captured pipes close."""
     kwargs = {
@@ -20,6 +21,8 @@ def run_captured(
         "stderr": subprocess.PIPE,
         "creationflags": no_window_flags(),
     }
+    if env is not None:
+        kwargs["env"] = env
     if os.name != "nt":
         kwargs["start_new_session"] = True
     proc, job = spawn_sync_in_kill_on_close_job(

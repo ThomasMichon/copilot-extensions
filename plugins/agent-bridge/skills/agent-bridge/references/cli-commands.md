@@ -165,6 +165,13 @@ For a **singleton repo** (one anchor checkout, no worktree isolation),
 Use `resume <repo-or-agent>` to load/take over the anchor's current head, or
 `handoff <repo-or-agent>` to roll it forward deliberately.
 
+The singleton registry lookup is a finite, 15-second command probe. Its
+scrubbed child environment excludes the caller's Python/venv overrides.
+Captured command descendants remain owned through pipe closure, so a Windows
+shim's surviving children cannot extend a timed-out lookup indefinitely.
+A failed query emits a warning and retains the existing fail-open lookup behavior;
+it does not stop or restart the bridge service.
+
 ### Detached CLI-mode session on a CodeSpace, trusted container, or SSH target (observable, steerable)
 
 `create <venue-target> --cli` delivers a real interactive Copilot CLI session
