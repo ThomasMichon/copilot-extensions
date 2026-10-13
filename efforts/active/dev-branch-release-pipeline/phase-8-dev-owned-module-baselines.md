@@ -123,6 +123,14 @@ Read-only Git and provider evidence established the single-file baseline
 collision and the competing publication paths. No live release intervention
 was performed for this proposal.
 
+The plan's CI exposed a separate shared-library fixture defect: the
+cross-process dial-log test observed 239 of 240 lines. Its intended 30-second
+lock wait used `functools.partial`, but the production call's explicit
+two-second argument overrode that partial keyword. The fixture now sets the
+constant read by that call; production best-effort logging is unchanged. The
+named regression passed through the bounded supervisor on Windows. Required CI
+and plan review remain pending.
+
 ## See Also
 
 - [Parent effort](README.md)

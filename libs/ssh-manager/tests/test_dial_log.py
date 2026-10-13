@@ -258,9 +258,8 @@ def test_writers_in_separate_processes_never_interleave_a_line():
     paths = [str(here.parents[1]), str(here.parents[3] / "agent-procutil" / "src")]
     # Test serialization, not the production telemetry's permitted two-second drops.
     script = (f"import sys; sys.path[:0] = {paths!r}\n"
-              "from functools import partial\n"
               "from ssh_manager import dial_log\n"
-              "dial_log._locked = partial(dial_log._locked, wait=30.0)\n"
+              "dial_log.LOCK_WAIT_S = 30.0\n"
               "n = int(sys.argv[1])\n"
               "for i in range(40):\n"
               "    dial_log.record('cs-procs', kind='reconnect', outcome='ok', elapsed_s=0,"
