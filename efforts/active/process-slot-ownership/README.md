@@ -422,3 +422,14 @@ now classify both timeout classes consistently; a distinct-class regression
 proves ordinary join exhaustion remains pending rather than sampling failure.
 Windows visibility/focus counters are scoped to the owned parent/descendant
 PID set, not other applications. The focused selection passes 135 tests.
+
+Further review identified a late native completion after its join deadline
+and detached asyncio tasks whose eventual exceptions were not consumed.
+The provider now records sample completion through a native-future callback,
+with a conservative delivery-task fallback when the native future has already
+finished. A completion receipt blocks new sampling until its timestamp is
+known, then enforces the full one-second interval even across a later reader.
+Command and sampling task callbacks consume and explicitly log late failures
+without arguments or captured output; normal awaiters still receive errors.
+Late-completion cadence and cancelled-observer failure regressions pass, as
+does the complete focused selection (137 tests).

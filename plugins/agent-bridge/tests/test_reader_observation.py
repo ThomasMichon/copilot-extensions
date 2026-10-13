@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 import subprocess
 import sys
@@ -193,6 +194,113 @@ async def test_distinct_asyncio_timeout_remains_pending(
     assert issue is not None and issue.reason == "sample_pending"
     assert observer._sample_holder is not None
     await observer._sample_holder
+
+
+@pytest.mark.asyncio
+async def test_late_native_completion_sets_next_provider_sample_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+    events: list[dict],
+) -> None:
+    monkeypatch.setenv("AGENT_BRIDGE_NAMESPACE_LIST_TTL", "0")
+    now = [100.0]
+    monkeypatch.setattr(
+        reader_observation,
+        "time",
+        SimpleNamespace(monotonic=lambda: now[0]),
+    )
+    root = ProcessIdentity(123, 456.0)
+    _mock_command(monkeypatch, root)
+    release = threading.Event()
+    calls = 0
+
+    def sample(self: OwnedProcessCpuSampler) -> CpuObservation:
+        nonlocal calls
+        calls += 1
+        assert release.wait(10)
+        return CpuObservation(0.5, (root,), (), False)
+
+    monkeypatch.setattr(OwnedProcessCpuSampler, "_sample_sync", sample)
+    provider = CliNamespaceResolver("test", "unused", command=["fake"])
+    try:
+        await provider.list()
+        holder = provider.pending_cpu_sample_future
+        assert holder is not None
+        now[0] = 150.0
+        release.set()
+        await asyncio.wrap_future(holder)
+        async with asyncio.timeout(2):
+            while not provider._cpu_observation._sample_completed.done():
+                await asyncio.sleep(0)
+        now[0] = 150.5
+        await provider.list()
+        assert calls == 1
+        assert events[-1]["issues"] == [{"pid": 123, "reason": "sampling_rate_limited"}]
+        now[0] = 151.0
+        await provider.list()
+        assert calls == 2
+        assert events[-1]["observed_cpu_seconds"] == 0.5
+    finally:
+        release.set()
+        if provider.pending_cpu_sample_future is not None:
+            await asyncio.wrap_future(provider.pending_cpu_sample_future)
+
+
+@pytest.mark.asyncio
+async def test_detached_native_and_sample_failures_are_consumed(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    command_release, sample_release = threading.Event(), threading.Event()
+    sample_started = threading.Event()
+    root = ProcessIdentity(123, 456.0)
+
+    def run(
+        self: reader_command.OwnedReaderCommand,
+        cmd: list[str],
+        *,
+        timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        self.receipt.set_result(root)
+        assert command_release.wait(10)
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+    def sample(self: OwnedProcessCpuSampler) -> CpuObservation:
+        sample_started.set()
+        assert sample_release.wait(10)
+        raise RuntimeError("late sample error")
+
+    monkeypatch.setattr(reader_command.OwnedReaderCommand, "run", run)
+    monkeypatch.setattr(OwnedProcessCpuSampler, "_sample_sync", sample)
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    unhandled: list[dict] = []
+    loop.set_exception_handler(lambda loop, context: unhandled.append(context))
+    observer = reader_observation.ReaderCpuObservation("test")
+    read = asyncio.create_task(observer.run(["fake"], timeout=3))
+    try:
+        async with asyncio.timeout(2):
+            while not sample_started.is_set():
+                await asyncio.sleep(0.001)
+        read.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await read
+        command_release.set()
+        sample_release.set()
+        async with asyncio.timeout(2):
+            while not (
+                "command task failed (TimeoutExpired)" in caplog.text
+                and "sample task failed (RuntimeError)" in caplog.text
+            ):
+                await asyncio.sleep(0.001)
+        del read
+        observer._sample_holder = None
+        gc.collect()
+        await asyncio.sleep(0)
+        assert not unhandled
+    finally:
+        command_release.set()
+        sample_release.set()
+        loop.set_exception_handler(previous_handler)
 
 
 @pytest.mark.asyncio

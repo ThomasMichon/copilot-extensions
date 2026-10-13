@@ -8,6 +8,7 @@ import re
 import subprocess
 import time
 from concurrent.futures import Future
+from typing import TypeVar
 
 from agent_procutil.metrics import (
     CpuIssue,
@@ -23,6 +24,14 @@ log = logging.getLogger("agent-bridge")
 
 _SAMPLE_JOIN_SECONDS = 0.1
 _SAMPLE_INTERVAL_SECONDS = 1.0
+_TaskResult = TypeVar("_TaskResult")
+
+
+def _consume_task_failure(task: asyncio.Task[_TaskResult], label: str) -> None:
+    if not task.cancelled():
+        error = task.exception()
+        if error is not None:
+            log.warning("Owned namespace %s task failed (%s)", label, type(error).__name__)
 
 
 class ReaderCpuObservation:
@@ -32,12 +41,48 @@ class ReaderCpuObservation:
         self._namespace = namespace if re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", namespace) else "other"
         self._sampler: OwnedProcessCpuSampler | None = None
         self._sample_holder: asyncio.Task[CpuObservation] | None = None
+        self._sample_completed: Future[float] | None = None
         self._next_sample_at = 0.0
 
     @property
     def pending_sample_future(self) -> Future[CpuObservation] | None:
         sampler = self._sampler
         return sampler.pending_sample_future if sampler is not None else None
+
+    def _refresh_sample_completion(self) -> bool:
+        completed = self._sample_completed
+        if completed is None:
+            return True
+        if not completed.done():
+            return False
+        self._next_sample_at = max(
+            self._next_sample_at,
+            completed.result() + _SAMPLE_INTERVAL_SECONDS,
+        )
+        return True
+
+    def _track_sample_completion(
+        self,
+        sampler: OwnedProcessCpuSampler,
+        task: asyncio.Task[CpuObservation],
+        completed: Future[float],
+    ) -> None:
+        def record(future: object) -> None:
+            completed.set_result(time.monotonic())
+
+        pending = sampler.pending_sample_future
+        if pending is not None:
+            pending.add_done_callback(record)
+        else:
+
+            def task_completed(waiter: asyncio.Task[CpuObservation]) -> None:
+                pending = sampler.pending_sample_future
+                if pending is not None:
+                    pending.add_done_callback(record)
+                else:
+                    record(waiter)
+
+            task.add_done_callback(task_completed)
 
     async def _sample(
         self,
@@ -49,13 +94,22 @@ class ReaderCpuObservation:
     ) -> tuple[CpuObservation | None, CpuIssue | None]:
         holder = self._sample_holder
         if holder is None:
+            if not self._refresh_sample_completion():
+                return previous, CpuIssue(root.pid, "sample_pending")
             if time.monotonic() < self._next_sample_at:
                 return previous, (
                     CpuIssue(root.pid, "sampling_rate_limited") if previous is None else None
                 )
+            completed: Future[float] = Future()
+            completed.set_running_or_notify_cancel()
+            self._sample_completed = completed
             holder = asyncio.create_task(sampler.sample())
+            holder.add_done_callback(lambda task: _consume_task_failure(task, "sample"))
             self._sample_holder = holder
-            self._next_sample_at = time.monotonic() + _SAMPLE_INTERVAL_SECONDS
+            try:
+                await asyncio.sleep(0)
+            finally:
+                self._track_sample_completion(sampler, holder, completed)
         elif not holder.done() and not final:
             return previous, CpuIssue(root.pid, "sample_pending")
         try:
@@ -71,12 +125,11 @@ class ReaderCpuObservation:
         else:
             self._sample_holder = None
             return observation, None
-        finally:
-            self._next_sample_at = time.monotonic() + _SAMPLE_INTERVAL_SECONDS
 
     async def run(self, cmd: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
         owned = OwnedReaderCommand()
         command = asyncio.create_task(asyncio.to_thread(owned.run, cmd, timeout=timeout))
+        command.add_done_callback(lambda task: _consume_task_failure(task, "command"))
         receipt = asyncio.wrap_future(owned.receipt)
         root: ProcessIdentity | None = None
         observation: CpuObservation | None = None
@@ -87,7 +140,10 @@ class ReaderCpuObservation:
                 root = receipt.result()
             if root is not None:
                 try:
-                    if self.pending_sample_future is not None:
+                    if (
+                        self.pending_sample_future is not None
+                        or not self._refresh_sample_completion()
+                    ):
                         issue = CpuIssue(root.pid, "previous_sample_pending")
                     else:
                         delay = self._next_sample_at - time.monotonic()
