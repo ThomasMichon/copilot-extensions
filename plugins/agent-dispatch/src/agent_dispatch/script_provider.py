@@ -268,6 +268,20 @@ def validate_script_forge_config(
             "repository-issue-loop forge.backlog: expected a non-empty string"
         )
     validate_resource_arguments([*command, declared_cwd_value])
+    if (
+        "cwd" in inherited_script_fields
+        and declared_cwd_value is not None
+        and not is_repository_resource(declared_cwd_value)
+        and not Path(declared_cwd_value.replace("\\", "/")).is_absolute()
+    ):
+        raise RegistrarError(
+            "repository-issue-loop forge.cwd: inherited via `extends:` "
+            "from a different declaration -- a relative cwd cannot be "
+            "resolved against this declaration's own repo root, since it "
+            "may differ from the base's (unsupported cross-repo "
+            "inheritance shape). Use an absolute path, or declare "
+            "`forge.cwd` directly in this file instead of inheriting it."
+        )
     if not resolve_resources:
         return {
             "command": list(command), "cwd": declared_cwd_value,
@@ -312,19 +326,6 @@ def validate_script_forge_config(
         # unnormalized Windows-style `cwd` would otherwise resolve
         # differently than its own namespace-identity spelling.
         cwd = cwd.replace("\\", "/")
-    if (
-        "cwd" in inherited_script_fields
-        and cwd is not None
-        and not Path(cwd).is_absolute()
-    ):
-        raise RegistrarError(
-            "repository-issue-loop forge.cwd: inherited via `extends:` "
-            "from a different declaration -- a relative cwd cannot be "
-            "resolved against this declaration's own repo root, since it "
-            "may differ from the base's (unsupported cross-repo "
-            "inheritance shape). Use an absolute path, or declare "
-            "`forge.cwd` directly in this file instead of inheriting it."
-        )
     if base is None:
         if cwd is None or not Path(cwd).is_absolute():
             raise RegistrarError(

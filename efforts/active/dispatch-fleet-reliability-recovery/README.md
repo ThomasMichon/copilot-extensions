@@ -98,21 +98,21 @@ No private host, checkout, task or session identifiers are needed upstream.
   #6466, #6467, #6470 and #6471.
 - [x] Identify #6421 as the existing scalar writer/selected-repair implementation.
 - [x] Review and merge this proposal before runtime implementation.
-- [ ] Reconcile category-specific presentation to the existing dispatch vision;
+- [x] Reconcile category-specific presentation to the existing dispatch vision;
   land any needed standing-intent extension before realizing it.
 
 ### Phase 2 - Separate task categories without changing retention
 
-- [ ] Add an orthogonal category with compatible ordinary-work defaults and
+- [x] Add an orthogonal category with compatible ordinary-work defaults and
   explicit all-category API/CLI retrieval.
-- [ ] Carry explicit category through task creation and schedule templates without
+- [x] Carry explicit category through task creation and schedule templates without
   altering labels, routing, sources, deduplication or managed-create replay.
-- [ ] Filter before SQL limits across list/search/sweep and delegated presentation.
-- [ ] Make ordinary Tasks request work and provide a separate Maintenance
+- [x] Filter before SQL limits across list/search/sweep and delegated presentation.
+- [x] Make ordinary Tasks request work and provide a separate Maintenance
   contribution with failures, progress, results and attachment access.
-- [ ] Provide preview-first, exact-provenance, audited historical classification;
+- [x] Provide preview-first, exact-provenance, audited historical classification;
   leave ambiguous rows unchanged and never infer maintenance from worker kind.
-- [ ] Preserve IDs, timestamps, statuses, results, logs, events and associations.
+- [x] Preserve IDs, timestamps, statuses, results, logs, events and associations.
 
 ### Phase 3 - Bound supervision and preserve recoverable operations
 
@@ -192,6 +192,27 @@ named-resource resolution so an older peer cannot silently accept but ignore a
 requested contract.
 
 ## Journal
+
+### 2026-10-13 - Category source completion and inherited cwd admission
+
+- #6543 merged to dev as `e45220dc726b22c5aad147a23094796b582fe4b3`
+  after clean exact-head review, required CI and complete thread resolution.
+  Its standing-intent extension #6482 had already merged before realization;
+  the Phase 1 checkbox was stale. Phase 2 implementation items are resolved,
+  not their release or installed-consumer obligations.
+- Shape-only expansion introduced a coupled provenance gap: an inherited
+  relative script cwd could pass admission when its command was named, then
+  lose its defining-repository context in the generated held-tick declaration.
+  Six validator, expansion and real recipe-document regressions failed first.
+- The existing relative-cwd refusal now runs before the shape-only return,
+  without registry or execution-file lookup. Positive coverage preserves named
+  inherited cwd and directly declared leaf-relative cwd.
+- The affected resource, script-forge, issue-loop and registrar-context suites
+  pass 296 tests. This pure admission correction changes no installer, runtime
+  selection or provisioning contract. Fresh temporary recipe files exercise
+  the document boundary; native CI remains required before merge.
+- No historical classification, adopter installation, native watchdog custody
+  or scalar repair is claimed complete.
 
 ### 2026-10-13 - Category standing-intent prerequisite
 

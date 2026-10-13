@@ -751,6 +751,65 @@ def test_field_provenance_and_merge_share_named_snapshot(tmp_path, monkeypatch):
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("cwd", [".", "working"])
+@pytest.mark.parametrize("caller", ["validator", "expansion", "document"])
+def test_shape_admission_refuses_inherited_relative_script_cwd(tmp_path, monkeypatch, cwd, caller):
+    from agent_dispatch.registrar_document import expand_declaration_document
+    from agent_dispatch.repository_issue_loops import expand_repository_issue_loop
+    from agent_dispatch.script_provider import validate_script_forge_config
+    from tests.test_repository_issue_loops import _config
+
+    forge = {
+        "provider": "script", "producer_login": "fixture",
+        "command": ["repo:tools:backlog.py"], "cwd": cwd,
+    }
+    if caller == "document":
+        root = tmp_path / "tools"
+        root.mkdir()
+        (root / "recipe.json").write_text(json.dumps(_config(forge=forge)), encoding="utf-8")
+        _registry(monkeypatch, root)
+    else:
+        monkeypatch.setattr(
+            resources, "run_agent_worktrees_capture",
+            lambda *a, **k: pytest.fail("shape admission resolved execution resources"),
+        )
+    with pytest.raises(RegistrarError, match="forge.cwd: inherited"):
+        if caller == "validator":
+            validate_script_forge_config(
+                forge, provider="script", repo_root=tmp_path,
+                inherited_script_fields=frozenset({"cwd"}), resolve_resources=False,
+            )
+        elif caller == "expansion":
+            expand_repository_issue_loop(
+                _config(forge=forge), repo_root=tmp_path,
+                inherited_script_fields=frozenset({"cwd"}),
+            )
+        else:
+            expand_declaration_document(
+                {"extends": "repo:tools:recipe.json"},
+                directory=tmp_path / "leaf", repo_root=tmp_path / "leaf",
+            )
+
+
+@pytest.mark.parametrize("cwd,inherited", [
+    ("repo:tools:.", frozenset({"cwd"})),
+    (".", frozenset()),
+])
+def test_shape_admission_preserves_valid_script_cwd_without_resolution(monkeypatch, cwd, inherited):
+    from agent_dispatch.script_provider import validate_script_forge_config
+
+    monkeypatch.setattr(
+        resources, "run_agent_worktrees_capture",
+        lambda *a, **k: pytest.fail("shape admission resolved execution resources"),
+    )
+    result = validate_script_forge_config(
+        {"command": ["repo:tools:backlog.py"], "cwd": cwd},
+        provider="script", inherited_script_fields=inherited, resolve_resources=False,
+    )
+    assert result["cwd"] == cwd
+    assert result["command"] == ["repo:tools:backlog.py"]
+
+
 def test_documented_named_evaluator_is_a_valid_registration():
     from pathlib import Path
 

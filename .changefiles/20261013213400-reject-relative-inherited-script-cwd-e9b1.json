@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve cross-repository script cwd provenance checks during shape-only declaration admission without resolving execution resources",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
