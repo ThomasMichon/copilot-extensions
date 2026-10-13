@@ -96,6 +96,29 @@ def test_projected_explicit_empty_alias_is_not_replaced_by_a_default():
     assert machines["desk-wsl"].ssh_environments[0].alias == ""
 
 
+@pytest.mark.parametrize("strict", [False, True])
+@pytest.mark.parametrize("environments,keys", [
+    (None, {"desk"}),
+    (["windows"], {"desk"}),
+    ([None, 7, [], {"name": "wsl"}], {"desk", "desk-wsl"}),
+])
+def test_loader_keeps_tolerated_environment_shapes(tmp_path, strict, environments, keys):
+    import yaml
+
+    path = tmp_path / "machines.yaml"
+    path.write_text(yaml.safe_dump({"machines": {"desk": {
+        "ssh": {"environments": environments},
+    }}}), encoding="utf-8")
+    before = path.read_bytes()
+    machines = load_machines_yaml(path, strict=strict)
+    assert set(machines) == keys
+    if "desk-wsl" in machines:
+        assert machines["desk-wsl"].ssh_environments[0].alias == "desk-wsl"
+    else:
+        assert machines["desk"].ssh_environments == []
+    assert path.read_bytes() == before
+
+
 @pytest.mark.asyncio
 async def test_remote_carrier_acquisition_uses_each_logical_machine_profile(monkeypatch):
     from agent_bridge import carrier

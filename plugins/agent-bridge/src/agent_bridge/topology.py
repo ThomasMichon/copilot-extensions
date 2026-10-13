@@ -144,9 +144,10 @@ def parse_machines_yaml(
         # Shared identities are normalized; Bridge-only metadata stays at the edge.
         mdata = metadata[entry.legacy_key or key]
         ssh_block = mdata.get("ssh") or {}
-        missing_alias_names = {
-            env.get("name", "") for env in ssh_block.get("environments", []) if "alias" not in env
-        }
+        missing_alias_names = [
+            env.get("name", "") for env in (ssh_block.get("environments") or [])
+            if isinstance(env, dict) and "alias" not in env
+        ]
         ssh_envs = [
             SshEnvironment(
                 name=env.name,
