@@ -55,6 +55,12 @@ descriptors with required no-follow/nonblocking flags; Windows holds native
 ancestor handles denying directory rename while pathname reads run. Missing
 safety primitives fail explicitly, never degrade to an unprotected open.
 
+Entries and ZIP members are enumerated in filename order. Windows enumeration
+collects ZIP member observations under the same pinned directory boundary as
+the listing, then releases all native handles before yielding any reference.
+Pausing or abandoning that iterator does not prevent source directory or
+archive renames. Directory-fd read APIs explicitly reject Windows callers.
+
 The configured final root must be a real directory, not an alias. Pinning lasts
 for the operation, not across separate enumeration and read calls: references
 are observations, not immutable snapshots. Concurrent content writes remain

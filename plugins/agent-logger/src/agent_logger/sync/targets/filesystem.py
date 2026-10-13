@@ -403,7 +403,7 @@ def _copy_process_logs(
     with ExitStack() as stack:
         try:
             directory = stack.enter_context(archive_directory(source))
-        except ValueError as exc:
+        except (NotADirectoryError, ValueError) as exc:
             raise ValueError(f"process-log source is not a directory: {source}") from exc
         opened = (
             os.fstat(directory.fd) if directory.fd is not None else directory.path.stat()
@@ -1918,7 +1918,10 @@ class FilesystemTarget(Target):
                 not stat.S_ISDIR(source_identity.st_mode)
                 or is_link_or_reparse(log_root, source_identity.st_mode)
             ):
-                raise OSError("process-log source must be a real directory")
+                reason = "symlink/reparse" if is_link_or_reparse(
+                    log_root, source_identity.st_mode,
+                ) else "not a directory"
+                raise OSError(f"process-log source must be a real directory: {log_root} ({reason})")
         except OSError as exc:
             self._record_process_log_health(machine, "partial", reason="unsafe process-log source")
             return PushResult(ok=False, detail=f"unsafe process-log source: {exc}")

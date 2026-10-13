@@ -11,7 +11,10 @@ from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
+
+if TYPE_CHECKING:
+    from agent_logger.sync.archive_directory import ArchiveDirectory
 
 DEFAULT_MAX_LINE_BYTES = 1024 * 1024
 
@@ -48,10 +51,9 @@ def is_process_log_candidate(name: str) -> bool:
 
 @contextmanager
 def _open_regular(path: Path) -> Iterator[BinaryIO]:
-    from agent_logger.sync.archive_directory import archive_directory
     from agent_logger.sync.provenance import is_link_or_reparse
 
-    with archive_directory(path.parent) as directory:
+    with _process_log_directory(path.parent) as directory:
         before = directory.stat(path.name)
         if not stat.S_ISREG(before.st_mode) or is_link_or_reparse(
             directory.path / path.name, before.st_mode,
@@ -162,12 +164,8 @@ def supports_dir_fd() -> bool:
 
 
 @contextmanager
-def open_root_dir(log_root: Path) -> Iterator[int]:
-    """Pin every canonical ancestor before exposing a POSIX directory fd.
-
-    Intentional ancestor aliases resolve once; subsequent traversal is relative
-    to pinned descriptors. The configured final directory must remain real.
-    """
+def _process_log_directory(log_root: Path) -> Iterator[ArchiveDirectory]:
+    """Normalize opening failures without relabelling errors in the consumer."""
     from agent_logger.sync.archive_directory import archive_directory
 
     with ExitStack() as stack:
@@ -179,6 +177,13 @@ def open_root_dir(log_root: Path) -> Iterator[int]:
             if exc.errno == errno.ELOOP:
                 raise ValueError(f"process-log source is not a directory: {log_root}") from exc
             raise
+        yield directory
+
+
+@contextmanager
+def open_root_dir(log_root: Path) -> Iterator[int]:
+    """Pin canonical ancestors before exposing a POSIX directory fd."""
+    with _process_log_directory(log_root) as directory:
         if directory.fd is None:
             raise OSError(errno.ENOTSUP, "process-log directory fd requires POSIX")
         yield directory.fd
@@ -198,24 +203,20 @@ def open_regular_at(dir_fd: int, name: str) -> Iterator[BinaryIO]:
     this function exists to enforce, rather than relying on every caller
     to prefilter the value correctly.
     """
-    from agent_logger.sync.archive_directory import _posix_file_flags
+    from agent_logger.sync.archive_directory import ArchiveDirectory
 
     if name in ("", ".", "..") or "/" in name or "\\" in name or Path(name).is_absolute():
         raise ValueError(f"process-log evidence name must be a bare filename: {name!r}")
+    if not supports_dir_fd():
+        raise OSError(errno.ENOTSUP, "process-log directory fd requires POSIX")
     before = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
     if not stat.S_ISREG(before.st_mode):
         raise ValueError(f"process-log evidence is not a regular file: {name}")
-    fd = os.open(name, _posix_file_flags(), dir_fd=dir_fd)
-    try:
-        with os.fdopen(fd, "rb") as stream:
-            fd = -1
-            opened = os.fstat(stream.fileno())
-            if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
-                raise ValueError(f"process-log evidence changed while opening: {name}")
-            yield stream
-    finally:
-        if fd != -1:
-            os.close(fd)
+    with ArchiveDirectory(Path("."), dir_fd).open(name) as stream:
+        opened = os.fstat(stream.fileno())
+        if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+            raise ValueError(f"process-log evidence changed while opening: {name}")
+        yield stream
 
 
 def iter_process_log_refs(log_root: Path) -> Iterator[ProcessLogRef]:
@@ -258,10 +259,8 @@ def iter_process_log_refs(log_root: Path) -> Iterator[ProcessLogRef]:
                     for member in names:
                         yield ProcessLogRef(log_root / name, member, verified_root=log_root)
         return
-    from agent_logger.sync.archive_directory import archive_directory
-
     refs: list[ProcessLogRef] = []
-    with archive_directory(log_root) as directory:
+    with _process_log_directory(log_root) as directory:
         for name in directory.names():
             path = directory.path / name
             if _is_log_name(name.removesuffix(".gz")):

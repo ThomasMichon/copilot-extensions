@@ -1,5 +1,5 @@
 {
-  "comment": "Pin canonical process-log source ancestors during enumeration, reads and sync transfers; fail closed without required POSIX protections.",
+  "comment": "Pin canonical process-log source ancestors during enumeration, reads and sync transfers; release native enumeration handles before yielding, normalize source diagnostics, and fail closed without required POSIX protections.",
   "changes": [
     {
       "plugin": "agent-logger",

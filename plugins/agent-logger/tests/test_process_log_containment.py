@@ -8,6 +8,7 @@ import zipfile
 from contextlib import contextmanager
 from collections.abc import Iterator
 from pathlib import Path
+from typing import BinaryIO
 
 import pytest
 
@@ -118,13 +119,83 @@ def test_process_log_directory_body_errors_are_not_relabelled(tmp_path: Path) ->
             raise ValueError("consumer failure")
 
 
+@pytest.mark.parametrize("error", [NotADirectoryError, ValueError])
+def test_process_log_copy_normalizes_directory_entry_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: type[Exception],
+) -> None:
+    from agent_logger.sync.targets import filesystem
+
+    @contextmanager
+    def rejected_directory(path: Path) -> Iterator[None]:
+        raise error("directory rejected")
+        yield
+
+    monkeypatch.setattr(filesystem, "archive_directory", rejected_directory)
+    with pytest.raises(ValueError, match="not a directory") as caught:
+        filesystem._copy_process_logs(tmp_path, tmp_path / "destination")
+    assert type(caught.value.__cause__) is error
+
+
+def test_process_log_copy_preserves_consumer_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger.sync.targets import filesystem
+
+    def failed_copy(*args: object) -> None:
+        raise NotADirectoryError("consumer failure")
+
+    monkeypatch.setattr(filesystem, "_copy_process_logs_pinned", failed_copy)
+    with pytest.raises(NotADirectoryError, match="consumer failure"):
+        filesystem._copy_process_logs(tmp_path, tmp_path / "destination")
+
+
+def test_process_log_invalid_source_diagnostic_names_path(tmp_path: Path) -> None:
+    source = tmp_path / "not-a-directory"
+    source.write_bytes(b"not a directory")
+    result = LocalTarget({"path": str(tmp_path / "destination")}).push_process_logs(
+        source, "example",
+    )
+    assert not result.ok
+    assert str(source) in result.detail
+    assert "not a directory" in result.detail
+
+
+def test_process_log_enumeration_orders_entries_and_zip_members(tmp_path: Path) -> None:
+    root = tmp_path / "logs"
+    root.mkdir()
+    (root / "process-z.log").write_bytes(PAYLOAD)
+    with zipfile.ZipFile(root / "archive.zip", "w") as archive:
+        archive.writestr("process-z.log", PAYLOAD)
+        archive.writestr("process-a.log", PAYLOAD)
+    (root / "process-a.log.gz").write_bytes(gzip.compress(PAYLOAD))
+    from agent_logger.sync.archive_directory import archive_directory
+
+    with archive_directory(root) as directory:
+        assert directory.names() == ["archive.zip", "process-a.log.gz", "process-z.log"]
+    assert [(ref.path.name, ref.member) for ref in iter_process_log_refs(root)] == [
+        ("archive.zip", "process-a.log"),
+        ("archive.zip", "process-z.log"),
+        ("process-a.log.gz", None),
+        ("process-z.log", None),
+    ]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="directory fd API is unsupported on Windows")
+def test_process_log_directory_fd_read_refuses_unsupported_platform() -> None:
+    from agent_logger.process_logs import open_regular_at
+
+    with pytest.raises(OSError, match="requires POSIX"):
+        with open_regular_at(-1, NAME):
+            pytest.fail("unsupported directory fd read was admitted")
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX safety flag contract")
 @pytest.mark.parametrize("flag", ["O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK"])
 def test_process_log_missing_safety_flags_fail_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flag: str,
 ) -> None:
     ref = _evidence(tmp_path / "logs", "raw", PAYLOAD)
-    monkeypatch.delattr(os, flag)
+    monkeypatch.delattr(os, flag, raising=False)
     with pytest.raises(OSError, match=flag):
         list(ref.iter_lines())
 
@@ -175,6 +246,7 @@ def test_process_log_source_roots_native_enumeration_yield_releases_handles(
     ref = _evidence(root, codec, PAYLOAD)
     iterator = iter_process_log_refs(root)
     assert next(iterator) == ref
+    ref.path.rename(root / "parked-evidence")
     root.parent.rename(tmp_path / "renamed")
     iterator.close()
 
@@ -187,20 +259,20 @@ def test_process_log_source_roots_native_zip_scan_remains_pinned(
 
     root = tmp_path / "ancestor" / "logs"
     ref = _evidence(root, "zip", PAYLOAD)
-    original_names = ArchiveDirectory.names
-    checked = False
+    original_open = ArchiveDirectory.open
+    checked: list[str] = []
 
-    def names(directory: ArchiveDirectory) -> list[str]:
-        nonlocal checked
-        found = original_names(directory)
+    def opened(
+        directory: ArchiveDirectory, name: str, *, protected: bool = False,
+    ) -> BinaryIO:
         with pytest.raises(PermissionError):
             root.parent.rename(tmp_path / "renamed")
-        checked = True
-        return found
+        checked.append(name)
+        return original_open(directory, name, protected=protected)
 
-    monkeypatch.setattr(ArchiveDirectory, "names", names)
+    monkeypatch.setattr(ArchiveDirectory, "open", opened)
     iterator = iter_process_log_refs(root)
     assert next(iterator) == ref
-    assert checked
+    assert checked == ["logs.zip"]
     root.parent.rename(tmp_path / "renamed")
     iterator.close()
