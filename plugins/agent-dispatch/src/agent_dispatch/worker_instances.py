@@ -71,18 +71,39 @@ def _read(path: Path) -> dict:
         raise RegistrarError(f"{path}: corrupt or mismatched instance identity")
     if value.get("revision") != digest(value.get("configuration")):
         raise RegistrarError(f"{path}: corrupt instance revision")
+    configuration = value.get("configuration")
+    if (
+        not isinstance(configuration, dict)
+        or not isinstance(configuration.get("declaration"), dict)
+        or not isinstance(configuration.get("repo_root"), str)
+    ):
+        raise RegistrarError(f"{path}: corrupt instance configuration")
+    source = value.get("source")
+    if not isinstance(source, dict) or any(
+        not isinstance(source.get(key), str) or not source[key] for key in ("id", "revision")
+    ):
+        raise RegistrarError(f"{path}: corrupt instance source")
     return value
 
 
-def read_records() -> list[dict]:
+def read_records(*, errors: list[str] | None = None) -> list[dict]:
     root = instance_dir()
-    _regular(root, directory=True)
-    if not root.exists():
+    try:
+        _regular(root, directory=True)
+        paths = sorted(root.glob("*.json"))
+    except (RegistrarError, OSError) as exc:
+        if errors is None:
+            raise RegistrarError(f"{root}: cannot read instance directory: {exc}") from exc
+        errors.append(f"{root}: cannot read instance directory: {exc}")
         return []
     result = []
-    for path in sorted(root.glob("*.json")):
-        record = _read(path)
-        result.append(record)
+    for path in paths:
+        try:
+            result.append(_read(path))
+        except (RegistrarError, OSError) as exc:
+            if errors is None:
+                raise RegistrarError(f"{path}: cannot read instance: {exc}") from exc
+            errors.append(f"{path}: cannot read instance: {exc}")
     return result
 
 

@@ -213,6 +213,37 @@ def test_configuration_editor_restores_values_and_cancel_has_no_side_effects():
     asyncio.run(run())
 
 
+def test_configuration_editor_restores_custom_choice_and_multichoice_defaults():
+    from worktree_manager.production_picker.picker_tui.pivot_create_action import _parse_create_fields
+
+    fields = [
+        {"name": "host", "type": "choice", "options": ["listed"],
+         "allow_other": True, "default": "custom-host"},
+        {"name": "labels", "type": "multichoice", "options": ["listed", "unused"],
+         "allow_other": True, "default": ["listed", "custom-one", "custom-two"]},
+    ]
+    parsed = _parse_create_fields(fields, where="fixture.fields")
+    for field in fields:
+        with pytest.raises(pivots.ManifestError, match="default"):
+            _parse_create_fields([{**field, "allow_other": False}], where="fixture.fields")
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test() as pilot:
+            form = ConfigurationFormScreen("Edit custom values", parsed)
+            app.push_screen(form)
+            await pilot.pause()
+            assert form._collect() == {
+                "host": "custom-host", "labels": ["listed", "custom-one", "custom-two"],
+            }
+            assert all(record["other"].display for record in form._q)
+            form._q[1]["other"].text = "new custom\ncomma, member"
+            assert form._collect()["labels"] == ["listed", "new custom", "comma, member"]
+            await pilot.press("escape")
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("returncode", [0, 1])
 def test_configuration_receipt_preserves_real_child_output_even_on_partial_failure(returncode):
     receipt = json.dumps({

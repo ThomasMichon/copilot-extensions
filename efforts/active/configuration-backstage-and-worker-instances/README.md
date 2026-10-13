@@ -316,3 +316,30 @@ configuration, arbitrary source editing, or automatic maintenance dispatch.
   This proves the changed catalog/lifecycle code, not packaging against the
   new dependency floor. Required CI and final promoted installation still
   must pass their own declared dependencies; neither gate is waived.
+
+### 2026-10-12 - Required CI integration corrections
+
+- Required CI's Linux Manager suite exposed ten failures after 1,918 passes.
+  Corrected the real Profiles monolithic/split rendering mismatch by including
+  section chrome in both paths. Updated the isolated setup-race fixture's
+  local/config context and registered-pivot fixture's placement, and removed
+  an obsolete Configuration-dialog assertion while retaining Maintenance's
+  native OptionList contract. No failing check was waived or retried unchanged.
+- A fresh balanced review confirmed publication repair handling and identified
+  corrupt drafts, custom choice defaults, and behavioral tests in the guard
+  lane. Catalog browsing now retains healthy drafts/templates and emits repair
+  rows for malformed draft JSON, encoding, identity, revision, configuration
+  shape and source metadata. Mutation readers remain strict.
+- Custom `allow_other` defaults restore through the shared field restoration
+  mechanics. Configuration supports one custom multichoice value per line,
+  preserving multiple saved members and literal commas; ordinary create and
+  steering forms retain their existing Other semantics.
+- Removed the behavioral module's blanket guard marker. Only the inexpensive
+  inert catalog contract is a guard; real CLI and supervisor reconciliation
+  remain full-suite integration tests. That guard passed in 0.65 seconds.
+- Fifty-three provider checks passed in the existing governed dependency
+  environment. All 159 selected Manager checks passed, including the ten
+  Linux CI failure paths, Config round-trips, Profiles parity, setup reload
+  races and shared create/steering behavior. The FastAPI floor restore limitation
+  remains recorded above; fresh-head CI/review and final installed proof remain
+  release gates.

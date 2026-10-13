@@ -27,7 +27,7 @@ type rather than a caller-specific id.
 from __future__ import annotations
 
 from textual.css.query import NoMatches
-from textual.widgets import TabbedContent
+from textual.widgets import RadioButton, TabbedContent
 
 from .field_widgets import _OTHER_SENTINEL
 
@@ -41,6 +41,40 @@ class FieldQuestionsMixin:
     def _focus_final_control(self) -> None:
         """Focus whatever follows the last question (typically a button
         row) once Enter advances past it. No-op by default."""
+
+    def _restore(self, values: dict, *, multiple_other_values: bool = False) -> None:
+        for rec in self._q:
+            if rec["name"] not in values:
+                continue
+            value = values[rec["name"]]
+            options, primary, other = rec["options"], rec["primary"], rec["other"]
+            if rec["type"] == "text":
+                primary.value = str(value)
+            elif rec["type"] == "textarea":
+                primary.text = str(value)
+                primary.autosize()
+            elif rec["type"] == "choice":
+                target = options.index(str(value)) if str(value) in options else -1
+                if target == -1 and rec["allow_other"] and other is not None:
+                    target = len(options)
+                    other.text = str(value)
+                    other.display = True
+                    other.autosize()
+                for index, button in enumerate(primary.query(RadioButton)):
+                    button.value = index == target
+            elif rec["type"] == "multichoice":
+                members = value if isinstance(value, list) else [value]
+                extras = []
+                for member in members:
+                    if str(member) in options:
+                        primary.select(str(member))
+                    else:
+                        extras.append(str(member))
+                if rec["allow_other"] and other is not None and extras:
+                    other.text = ("\n" if multiple_other_values else ", ").join(extras)
+                    other.display = True
+                    other.autosize()
+                    primary.select(_OTHER_SENTINEL)
 
     # ---- dynamic "Other…" reveal --------------------------------------------
     def _rec_for(self, widget) -> dict | None:
@@ -197,7 +231,9 @@ class FieldQuestionsMixin:
         self._cycle_tab(-1)
 
     # ---- collect --------------------------------------------------------
-    def _collect(self, *, include_hidden: bool = False) -> dict:
+    def _collect(
+        self, *, include_hidden: bool = False, multiple_other_values: bool = False,
+    ) -> dict:
         values: dict = {}
         for rec in self._q:
             if not include_hidden and not rec.get("visible", True):
@@ -222,6 +258,9 @@ class FieldQuestionsMixin:
                 members = [s for s in selected if s != _OTHER_SENTINEL]
                 if (allow_other and _OTHER_SENTINEL in selected
                         and other and other.text.strip()):
-                    members.append(other.text.strip())
+                    if multiple_other_values:
+                        members.extend(line for line in other.text.splitlines() if line.strip())
+                    else:
+                        members.append(other.text.strip())
                 values[name] = members
         return values

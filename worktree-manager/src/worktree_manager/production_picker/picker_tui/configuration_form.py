@@ -5,7 +5,7 @@ from typing import ClassVar
 from textual.binding import Binding
 from textual.containers import HorizontalScroll, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, RadioButton, Static
+from textual.widgets import Button, Static
 
 from .create_action_screen import CreateActionFormMixin
 
@@ -52,22 +52,22 @@ class ConfigurationFormScreen(CreateActionFormMixin, Screen[dict | None]):
     def _foot(self):
         return super()._foot() + " · Changing section cancels unsaved edits"
 
+    @staticmethod
+    def _q_label(field):
+        label = CreateActionFormMixin._q_label(field)
+        if field["type"] == "multichoice" and field.get("allow_other"):
+            label += " One custom value per line."
+        return label
+
+    def _collect(self, *, include_hidden=False):
+        return super()._collect(
+            include_hidden=include_hidden, multiple_other_values=True,
+        )
+
     def on_mount(self):
-        for field, record in zip(self._fields, self._q):
-            if "default" not in field:
-                continue
-            value, widget = field["default"], record["primary"]
-            kind = field["type"]
-            if kind == "text":
-                widget.value = value
-            elif kind == "textarea":
-                widget.text = value
-            elif kind == "choice":
-                for button, option in zip(widget.query(RadioButton), record["options"]):
-                    button.value = option == value
-            elif kind == "multichoice":
-                for member in value:
-                    widget.select(member)
+        self._restore({
+            field["name"]: field["default"] for field in self._fields if "default" in field
+        }, multiple_other_values=True)
         super().on_mount()
 
 

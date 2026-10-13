@@ -69,6 +69,10 @@ Version-1 compatibility also covers the existing declarative fields:
   return a JSON array of non-blank strings; missing/failed/invalid/empty results
   stop this form with an explicit error, never an arbitrary free-text fallback.
   Unlike create forms, configuration forms do not force `allow_other: true`.
+  When explicitly allowed, custom choice defaults restore the Other control.
+  Configuration multichoice Other values use one custom value per line, so
+  multiple saved custom members restore and remain independently editable.
+  Ordinary create and steering forms retain their existing Other semantics.
   All nested commands receive the same attributable target resolution and
   validation as other contribution commands. The provider owns revalidation,
   local persistence and the meaning of removing an override; the Manager does

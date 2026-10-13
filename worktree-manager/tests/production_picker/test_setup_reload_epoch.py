@@ -174,6 +174,7 @@ class _SetupRaceScreen(
     def __init__(self):
         self.app = _ImmediateApp()
         self.src = SimpleNamespace(REPO="repo")
+        self._source_local = ("host", "Win")
         self._bg_cancel = threading.Event()
         self._bg_threads = set()
         self._setup_epoch = 0
@@ -217,6 +218,9 @@ class _SetupRaceScreen(
 
     def _pivot_machine_id(self):
         return "host"
+
+    def _in_configuration(self):
+        return False
 
     def post_message(self, message):
         """Mirrors ``_ImmediateApp.call_from_thread``'s old intent: apply

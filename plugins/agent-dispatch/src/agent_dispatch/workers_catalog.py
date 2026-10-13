@@ -117,9 +117,10 @@ def _cards(row: dict, body: str) -> dict:
 def catalog() -> dict:
     """No mkdir, network clients, mutation, service ensure, or task access."""
     from .overrides import load_overrides
-    records = read_records()
+    errors = []
+    records = read_records(errors=errors)
     report = rd.RegistrarSources().refresh(emit_warnings=False)
-    errors = [str(finding) for finding in report.combined.findings]
+    errors.extend(str(finding) for finding in report.combined.findings)
     if report.trusted_error:
         errors.append(report.trusted_error)
     overrides = overridden_off_ids(load_overrides(overrides_path()))

@@ -21,9 +21,6 @@ from agent_dispatch.worker_instances import (
 )
 from agent_dispatch.workers_catalog import catalog, _observation as real_observation
 
-pytestmark = pytest.mark.guard
-
-
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "install"))
@@ -59,6 +56,7 @@ def edit(receipt, *, activate=False, **changes):
     )
 
 
+@pytest.mark.guard
 def test_empty_catalog_is_read_only_and_lists_fragments():
     before = templates().copy()
     data = catalog()
@@ -414,6 +412,43 @@ def test_catalog_reports_bad_publication_without_hiding_other_resources(monkeypa
     assert "requires repair" in row["card"]["body"]
     assert any(r["id"] == "instance:healthy" for r in data["entries"])
     assert any(r["id"] == "template:worker-pool" for r in data["entries"])
+
+
+@pytest.mark.parametrize("failure", ["json", "encoding", "identity", "revision", "shape", "source"])
+def test_corrupt_draft_is_visible_without_hiding_healthy_resources(failure):
+    create("broken")
+    create("healthy")
+    path = instance_dir() / "broken.json"
+    if failure == "json":
+        path.write_text("not-json", encoding="utf-8")
+    elif failure == "encoding":
+        path.write_bytes(b"\xff")
+    else:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if failure == "shape":
+            record["configuration"] = []
+            record["revision"] = digest(record["configuration"])
+        elif failure == "source":
+            record["source"] = "corrupt"
+        else:
+            record["name" if failure == "identity" else "revision"] = "corrupt"
+        path.write_text(json.dumps(record), encoding="utf-8")
+    before = path.read_bytes()
+    data = catalog()
+    assert any(str(path) in error for error in data["summary"]["errors"])
+    assert any(
+        str(path) in row["description"] and row["validity"] == "error"
+        and row["editable"] == "false"
+        for row in data["entries"] if row["group"] == "Discovery errors"
+    )
+    assert any(row["id"] == "instance:healthy" for row in data["entries"])
+    assert any(row["id"] == "template:worker-pool" for row in data["entries"])
+    with pytest.raises(RegistrarError, match="cannot read instance"):
+        read_records()
+    with pytest.raises(RegistrarError, match="cannot read instance"):
+        create("third")
+    assert path.read_bytes() == before
+    assert not (instance_dir() / "third.json").exists()
 
 
 def test_missing_emitter_command_refused_before_effects():

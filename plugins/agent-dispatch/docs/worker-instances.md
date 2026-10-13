@@ -26,6 +26,9 @@ supervisor receipt supplies `observed-running`; an absent/stale receipt means
 `unknown`, not active. Statistics count expanded declarations, lane capacity,
 and observed running registrations, not fabricated task-throughput metrics.
 Registrar failures appear in `summary.errors`; unsafe mutations refuse them.
+Corrupt draft files appear as repair/error rows without hiding healthy drafts
+or available templates. Mutations still require every stored draft to be
+readable and internally consistent; partial browse results never authorize a save.
 For an instance with a newer Save-only draft, runtime state, capacity and
 enable/disable controls come from its still-published snapshot. Details expose
 `draft_state`, `draft_statistics`, the current edit revision and the published

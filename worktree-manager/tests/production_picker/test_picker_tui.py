@@ -2632,6 +2632,7 @@ def test_task_action_ctx_includes_provider_from_list_cmd():
     inst._pivot_machine_id = lambda: "host"
     reg = types.SimpleNamespace(
         id_field="id", title_field="title", worktree_field="worktree",
+        placement="left",
         list_cmd=("agent-codespaces", "pool", "--picker-json"),
     )
     rec = {"id": "my-codespace", "title": "my task", "worktree": "3bac"}
@@ -2952,37 +2953,9 @@ def test_maint_menu_no_actionable_selection_does_not_open():
     asyncio.run(run())
 
 
-def test_index_menus_use_native_optionlist():
-    """#88 NF1: the two simple index-menu modals (⚙ Configuration + Maintenance
-    actions) navigate via a native Textual ``OptionList`` -- the framework owns
-    focus + up/down + Enter -- not the former hand-rolled ``idx``/``on_key`` over
-    a static ``Panel``. Assert each modal composes a focused ``OptionList`` whose
-    options mirror the menu items, and that selecting through the real pipeline
-    still returns the chosen index."""
+def test_maintenance_menu_uses_native_optionlist():
+    """Maintenance actions retain native OptionList navigation and palette."""
     from textual.widgets import OptionList
-
-    # CfgMenuScreen: options mirror the item labels; the list is focused.
-    async def run_cfg():
-        app = PickerApp(_fixture_source(), live=False)
-        async with app.run_test(size=(118, 40)) as pilot:
-            scr = app.query_one(PickerScreen)
-            await pilot.pause()
-            scr.sel = ("CFG", 0)
-            scr._activate()
-            await pilot.pause()
-            menu = _cfg_menu(scr)
-            assert menu is not None
-            ol = menu.query_one(OptionList)
-            assert ol.has_focus
-            assert ol.option_count == len(menu._items)
-            # Palette consistency (regression guard for the "dark blue modal"):
-            # the native list adopts the picker's $surface base, not Textual's
-            # bluer default $panel -- so it matches the main screen behind it.
-            assert ol.styles.background == app.screen_stack[0].styles.background
-            # Enter selects the highlighted option through the native widget.
-            await pilot.press("enter")
-            await pilot.pause()
-            assert not _cfg_menu_open(scr)
 
     # MaintMenuScreen: options mirror the actions; description pane present.
     async def run_maint():
@@ -3003,7 +2976,6 @@ def test_index_menus_use_native_optionlist():
             assert ol.option_count == len(menu._actions)
             assert ol.styles.background == app.screen_stack[0].styles.background
 
-    asyncio.run(run_cfg())
     asyncio.run(run_maint())
 
 

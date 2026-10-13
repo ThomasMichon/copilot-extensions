@@ -113,12 +113,15 @@ def _parse_create_fields(
             default = item["default"]
             if ftype == "multichoice":
                 if not isinstance(default, list) or any(
-                    not isinstance(value, str) or value not in field.get("options", ())
+                    not isinstance(value, str) or (
+                        not allow_other and value not in field.get("options", ())
+                    )
                     for value in default
                 ):
                     raise ManifestError(f"{where}[{i}].default must name declared options")
             elif not isinstance(default, str) or (
-                ftype == "choice" and default not in field.get("options", ())
+                ftype == "choice" and not allow_other
+                and default not in field.get("options", ())
             ):
                 raise ManifestError(f"{where}[{i}].default is invalid for its field type")
             field["default"] = default
