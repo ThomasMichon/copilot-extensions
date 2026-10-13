@@ -409,11 +409,30 @@ class Run:
                     previous = json.loads(status_path.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     previous = None
+                newer = _newer_run(previous, self.run_id, self.started_at)
+                if newer:
+                    print(f"warning: update status left to newer run {newer}", file=sys.stderr)
+                    return
                 document = fold(events, run=meta, previous=previous, final=final,
                                       hint=hint, error_code=error_code, updated_at=now)
                 write_json_atomic(status_path, document)
         except Exception as exc:
             _warn(exc)
+
+
+def _newer_run(previous, run_id: str, started_at: str) -> str | None:
+    """The id of the run recorded in ``previous`` if it started after this one.
+
+    Runs are ordered by ``run.started_at`` (UTC, fixed-width ISO text), then by
+    run id, so an older overlapping run never overwrites a newer run's status.
+    """
+    run = previous.get("run") if isinstance(previous, dict) else None
+    if not isinstance(run, dict) or not isinstance(run.get("id"), str):
+        return None
+    other_id, other_start = run["id"], str(run.get("started_at") or "")
+    if other_id == run_id:
+        return None
+    return other_id if (other_start, other_id) > (started_at, run_id) else None
 
 
 def _prune_runs(runs_dir: Path, *, keep: int, current: str) -> None:

@@ -49,8 +49,10 @@ def classify_status(status: str) -> tuple[str, str | None]:
         return _ut.outcome_for_installer_exit(int(exited.group(1)))
     if "input/output error" in low or "i/o error" in low:
         return _ut.COMMAND_FAILED, _ut.IO_ERROR
-    if "os error 32" in low or "used by another process" in low:
-        return _ut.BLOCKED_BY_LOCK, "sharing_violation"
+    if any(k in low for k in ("os error 33", "winerror 33", "locked a portion of the file")):
+        return _ut.BLOCKED_BY_LOCK, "lock_violation"
+    if any(k in low for k in ("os error 32", "winerror 32", "used by another process")):
+        return _ut.BLOCKED_BY_LOCK, _ut.SHARING_VIOLATION
     if any(k in low for k in ("os error 5", "access is denied", "permission denied")):
         return _ut.COMMAND_FAILED, "permission_denied"
     if any(k in low for k in ("not found", "context invalid", "unsupported", "deadline")):

@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -482,3 +483,29 @@ def test_explicit_skipped_phase_stays_skipped(telemetry_env):
         result.outcome = ut.SKIPPED
     run.finish()
     assert _status(telemetry_env)["run"]["phases"][0]["outcome"] == ut.SKIPPED
+
+
+def test_older_overlapping_run_never_overwrites_newer_status(tmp_path):
+    home = str(tmp_path / "home")
+    run_a = ut.Run.from_env_or_new("engine", environ={ut.ENV_HOME: home})
+    time.sleep(0.01)
+    run_b = ut.Run.from_env_or_new("engine", environ={ut.ENV_HOME: home})
+    assert run_b.is_owner and run_b.run_id != run_a.run_id
+    run_b.target("runtime_reconcile", "b@m", ut.VERIFIED_CURRENT)
+    assert run_b.finish() == 0
+    run_a.target("runtime_reconcile", "a@m", ut.TIMEOUT)
+    assert run_a.finish() == 6, "the exit code is unaffected"
+    status = _status({ut.ENV_HOME: home})
+    assert status["run"]["id"] == run_b.run_id
+    assert status["last_success"]["run_id"] == run_b.run_id
+    assert status["last_failure"] is None
+
+
+def test_newer_run_ordering_tie_breaks_on_run_id():
+    started = "2026-01-01T00:00:00.000Z"
+    previous = {"run": {"id": "20260101T000000Z-2-bbbb", "started_at": started}}
+    assert run_mod._newer_run(previous, "20260101T000000Z-1-aaaa", started) == (
+        "20260101T000000Z-2-bbbb")
+    assert run_mod._newer_run(previous, "20260101T000000Z-3-cccc", started) is None
+    assert run_mod._newer_run(previous, "20260101T000000Z-2-bbbb", started) is None
+    assert run_mod._newer_run(None, "x", started) is None

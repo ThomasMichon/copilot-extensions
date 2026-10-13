@@ -391,6 +391,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         inst.reconcile_binstubs()
     except Exception as e:
         output.warn(f"Binstub reconcile skipped: {e}")
+        _events.record("binstubs", "binstubs", f"binstub reconcile failed: {e}", required=False)
 
     _events.enter("module_update")
     skip_modules = getattr(args, "skip_modules", None)
@@ -449,12 +450,14 @@ def _prune_stale_pivots_after_update() -> None:
         from .picker_support import pivots as pivot_registry
     except Exception as exc:
         output.warn(f"Pivot prune skipped (import failed): {exc}")
+        _events.record("prune", "pivots", f"pivot prune failed: {exc}", required=False)
         return
     try:
         report = pivot_registry.scan_pivot_registry(materialize=False)
         pruned = pivot_registry.prune_stale_entries(report, apply=True)
     except Exception as exc:
         output.warn(f"Pivot prune skipped: {exc}")
+        _events.record("prune", "pivots", f"pivot prune failed: {exc}", required=False)
         return
     removed = [item for item in pruned if item.get("removed")]
     if removed:

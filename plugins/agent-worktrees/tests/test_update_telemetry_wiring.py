@@ -258,6 +258,10 @@ def test_module_installer_timeout_is_timeout_whatever_the_slot(
     ("installer exited 75", (ut.BLOCKED_BY_LOCK, "installer_exit_75")),
     ("timed out", (ut.TIMEOUT, "timeout")),
     ("plugin update failed: [Errno 5] Input/output error", (ut.COMMAND_FAILED, ut.IO_ERROR)),
+    ("plugin update failed: [WinError 33] The process cannot access the file because "
+     "another process has locked a portion of the file", (ut.BLOCKED_BY_LOCK, "lock_violation")),
+    ("plugin update failed: (os error 33)", (ut.BLOCKED_BY_LOCK, "lock_violation")),
+    ("plugin update failed: [WinError 32] sharing", (ut.BLOCKED_BY_LOCK, ut.SHARING_VIOLATION)),
 ])
 def test_status_classification_needs_contention_evidence(status, expected):
     assert update_events.classify_status(status) == expected
@@ -294,3 +298,36 @@ def test_unreadable_modules_manifest_fails_module_update(wired, monkeypatch, tmp
     assert phases["module_update"] == ut.COMMAND_FAILED
     assert phases["engine_runtime"] == ut.VERIFIED_CURRENT
     assert _status(_update_home)["last_failure"]["summary"].startswith("modules.json")
+
+
+def _advisories(home: Path) -> dict[str, str]:
+    return {a["component"]: a["summary"] for a in _status(home)["advisories"]}
+
+
+def test_binstub_failure_is_an_advisory(wired, monkeypatch, _update_home):
+    def boom():
+        raise RuntimeError("binstub dir unwritable")
+
+    monkeypatch.setattr(update_cli.inst, "reconcile_binstubs", boom)
+    assert m.cmd_update(_args()) == 0
+    assert "binstub dir unwritable" in _advisories(_update_home)["binstubs"]
+
+
+@pytest.mark.parametrize("failure", ["import", "scan"])
+def test_prune_failure_is_an_advisory(wired, monkeypatch, _update_home, failure):
+    import sys
+
+    from agent_worktrees.picker_support import pivots
+
+    if failure == "import":
+        monkeypatch.setitem(sys.modules, "agent_worktrees.picker_support.pivots", None)
+        monkeypatch.delattr("agent_worktrees.picker_support.pivots", raising=False)
+    else:
+        def boom(**_kw):
+            raise RuntimeError("registry scan failed")
+
+        monkeypatch.setattr(pivots, "scan_pivot_registry", boom)
+    monkeypatch.setattr(m, "_prune_stale_pivots_after_update",
+                        update_cli._prune_stale_pivots_after_update)
+    assert m.cmd_update(_args(no_prune_pivots=False)) == 0
+    assert "pivot prune failed" in _advisories(_update_home)["pivots"]
