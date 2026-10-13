@@ -435,7 +435,8 @@ MACHINE_GATED_SKIP = "SKIPPED (not allowed on this machine)"
 
 
 class MachineDetectionError(Exception):
-    """Repository-aware machine detection failed, so the gate can't be decided."""
+    """The machine gate can't be decided: the enabling repository or the
+    machine identity could not be resolved."""
 
 
 def _machine_gate_blocks(name: str, scope: str, context: Path | None) -> bool:
@@ -454,12 +455,15 @@ def _machine_gate_blocks(name: str, scope: str, context: Path | None) -> bool:
 
     repo_dir = context
     if repo_dir is None:
+        # Resolve the active project's anchor directly: falling back to the
+        # current directory would let an unrelated checkout with no gate
+        # manifest authorize a machine-gated runtime.
         try:
-            repo_dir = _core_helper("_project_update_context", _project_update_context)()
-        except Exception:
-            repo_dir = None
-    if repo_dir is None:
-        repo_dir = Path.cwd()
+            repo_dir = Path(cfg.load_config().default_repo.anchor)
+        except Exception as error:
+            raise MachineDetectionError(
+                f"could not resolve the repository that enables {name}: {error}"
+            ) from error
     try:
         machine = cfg.detect_machine(repo_dir)
     except Exception as error:

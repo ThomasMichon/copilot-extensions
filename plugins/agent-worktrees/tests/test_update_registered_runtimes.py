@@ -949,6 +949,26 @@ def test_machine_detection_failure_blocks_instead_of_using_the_hostname(monkeypa
     assert calls == []
 
 
+def test_unresolvable_enabling_repo_blocks_instead_of_using_cwd(monkeypatch, tmp_path):
+    """Without a resolvable enabling repository, an unrelated working directory
+    with no gate manifest must not authorize a machine-gated runtime."""
+    _gated_codespaces(monkeypatch)
+    _gate(monkeypatch, allowed={}, present=False)
+
+    def _boom(*_a, **_k):
+        raise ValueError("no project configured")
+
+    monkeypatch.setattr(cfg, "load_config", _boom)
+    monkeypatch.chdir(tmp_path)
+    calls = _capture_installers(monkeypatch)
+
+    status = m._reconcile_one_runtime("agent-codespaces", "linux", force=False, gate_context=None)
+
+    assert status.startswith("machine detection failed")
+    assert "could not resolve the repository" in status
+    assert calls == []
+
+
 def test_gated_skip_is_reported_and_not_a_failure(monkeypatch, capsys):
     _gated_codespaces(monkeypatch)
     _gate(monkeypatch, allowed={"agent-codespaces": {"other-box"}}, present=True)
