@@ -75,7 +75,9 @@ def test_state_naming_another_dev_head_refuses(repo):
     assert _remote_tag(origin, f"{STEM}-{sha[:8]}") == ""
 
 
-@pytest.mark.parametrize("promotion", [None, {"dev_head": DEV_SHA}, {"tag": "v1", "dev_head": DEV_SHA}])
+@pytest.mark.parametrize(
+    "promotion", [None, "corrupt", ["x"], {"dev_head": DEV_SHA}, {"tag": "v1", "dev_head": DEV_SHA}]
+)
 def test_missing_or_foreign_stem_refuses(repo, promotion):
     work, _origin = repo
     sha = _commit_state(work, promotion)
@@ -177,3 +179,10 @@ def test_lightweight_remote_tag_on_another_commit_refuses(repo):
     _push_lightweight(work, f"{STEM}-{sha[:8]}", other)
     with pytest.raises(tp.TagError, match="already exists"):
         _tag(work, sha)
+
+def test_abbreviated_merge_sha_names_and_reruns_like_the_full_one(repo):
+    work, origin = repo
+    sha = _commit_state(work, {"tag": STEM, "dev_head": DEV_SHA})
+    assert _tag(work, sha[:10]) == (f"{STEM}-{sha[:8]}", True)
+    assert _tag(work, sha[:10]) == (f"{STEM}-{sha[:8]}", False)
+    assert _remote_tag(origin, f"{STEM}-{sha[:8]}") == sha

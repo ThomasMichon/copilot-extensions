@@ -55,9 +55,12 @@ def tag_promotion(
     """Create and push the promotion tag. Returns ``(tag_name, created)``;
     ``created`` is False when the tag already pointed at ``merge_sha``."""
     _git(["fetch", "-q", remote, main_branch], cwd=repo)
-    known = _git(["cat-file", "-e", f"{merge_sha}^{{commit}}"], cwd=repo, check=False)
+    known = _git(["rev-parse", "-q", "--verify", f"{merge_sha}^{{commit}}"], cwd=repo, check=False)
     if known.returncode != 0:
         raise TagError(f"{merge_sha} is not a known commit after fetching {remote}/{main_branch}")
+    # Name and compare with the full commit id, so an abbreviated --merge-sha
+    # yields the same tag and a re-run is still a no-op.
+    merge_sha = known.stdout.strip()
     on_main = _git(
         ["merge-base", "--is-ancestor", merge_sha, f"{remote}/{main_branch}"],
         cwd=repo, check=False,
@@ -72,6 +75,8 @@ def tag_promotion(
         promotion = json.loads(shown.stdout).get("last_promotion") or {}
     except (json.JSONDecodeError, AttributeError) as exc:
         raise TagError(f"{PIPELINE_STATE_PATH} at {merge_sha} is not valid state: {exc}") from exc
+    if not isinstance(promotion, dict):
+        raise TagError(f"{PIPELINE_STATE_PATH} at {merge_sha} has a non-object last_promotion")
 
     state_dev_head = promotion.get("dev_head")
     if state_dev_head != dev_sha:
