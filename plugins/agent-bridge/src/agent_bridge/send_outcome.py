@@ -22,6 +22,8 @@ exit with a distinct code, so a caller never parses text:
 - ``refused_unavailable`` (69): the target isn't a fresh, current live session
   (``not_found``, ``stale``, ``superseded``, ``expected_mismatch``).
 - ``refused_conflict`` (65): the idempotency key is bound to a different request.
+- ``refused_invalid`` (2): an active reply wait has an invalid timeout; no
+  message is submitted.
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ SEND_UNAVAILABLE_EXIT = 69
 SEND_CONFLICT_EXIT = 65
 
 _EXIT_CODES = {
+    "refused_invalid": 2,
     "refused_busy": SEND_BUSY_EXIT,
     "refused_unavailable": SEND_UNAVAILABLE_EXIT,
     "refused_conflict": SEND_CONFLICT_EXIT,

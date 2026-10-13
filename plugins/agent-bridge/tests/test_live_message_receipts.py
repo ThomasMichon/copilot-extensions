@@ -19,7 +19,13 @@ from agent_bridge.live_message_receipts import record_consumption
 from agent_bridge.live_representation import LiveEventStore, await_turn_reply
 from agent_bridge.models import SendMessageRequest
 from agent_bridge.routes import live_sessions
+from agent_bridge.send_outcome import run_send
 from agent_bridge.session_targeting_cli import _deliver_to_live_session
+
+INVALID_REPLY_TIMEOUTS = [
+    -1, -1000, 601, float("inf"), float("-inf"), float("nan"),
+    pytest.param(10**1000, id="overflow"),
+]
 
 
 @pytest.fixture
@@ -327,6 +333,66 @@ def test_retirement_between_admission_and_receipt_read_is_not_a_failed_send(api,
 def test_reply_wait_timeout_is_finite_and_bounded(timeout):
     with pytest.raises(ValueError):
         SendMessageRequest(sender="peer", body="update", wait_timeout=timeout)
+
+
+@pytest.mark.parametrize("timeout", INVALID_REPLY_TIMEOUTS)
+@pytest.mark.parametrize("as_json", [False, True])
+def test_cli_invalid_reply_wait_refuses_before_delivery(monkeypatch, capsys, timeout, as_json):
+    monkeypatch.setattr(cli, "_live_sender_label", lambda _args: pytest.fail("must not prepare delivery"))
+    args = argparse.Namespace(
+        json=as_json, target="live-1", no_wait=False, wait_reply=True, reply_timeout=timeout,
+    )
+    with pytest.raises(SystemExit) as error:
+        run_send(args, lambda actual: _deliver_to_live_session(None, actual, "live-1", "update"))
+    assert error.value.code == 2
+    output = capsys.readouterr()
+    assert "--reply-timeout must be a finite number of seconds between 0 and 600" in output.err
+    if as_json:
+        refusal = json.loads(output.out)
+        assert refusal["outcome"] == "refused_invalid"
+        assert refusal["reason"] == "reply_timeout" and refusal["retryable"] is False
+        assert refusal["target"] == "live-1"
+    else:
+        assert output.out == ""
+
+
+@pytest.mark.parametrize("timeout", INVALID_REPLY_TIMEOUTS)
+def test_client_invalid_reply_wait_makes_no_transport_request(monkeypatch, timeout):
+    client = BridgeClient("http://127.0.0.1:1", "test")
+    monkeypatch.setattr(client, "_request", lambda *_args, **_kwargs: pytest.fail("must not request"))
+    with pytest.raises(BridgeClientError, match="finite number of seconds") as error:
+        client.send_live_message("live-1", sender="peer", body="update", wait=True, wait_timeout=timeout)
+    assert error.value.status == 422
+
+
+@pytest.mark.parametrize("timeout,effective", [(None, 120.0), (0.0, 0.0), (600.0, 600.0)])
+def test_client_reply_wait_uses_validated_bound_plus_transport_margin(monkeypatch, timeout, effective):
+    client = BridgeClient("http://127.0.0.1:1", "test")
+    calls = []
+    monkeypatch.setattr(client, "_request", lambda *args, **kwargs: calls.append((args, kwargs)) or {})
+    client.send_live_message("live-1", sender="peer", body="update", wait=True, wait_timeout=timeout)
+    request, options = calls[0]
+    assert options["request_timeout"] == effective + 15
+    assert request[2]["wait"] is True
+    if timeout is None:
+        assert "wait_timeout" not in request[2]
+    else:
+        assert request[2]["wait_timeout"] == effective
+
+
+def test_receipt_only_send_does_not_use_ignored_reply_timeout(monkeypatch, capsys):
+    client = BridgeClient("http://127.0.0.1:1", "test")
+    calls = []
+    monkeypatch.setattr(client, "_request", lambda *args, **kwargs: calls.append((args, kwargs)) or {
+        "message_id": 7, "receipt": {"stage": "admitted"},
+    })
+    monkeypatch.setattr(cli, "_live_sender_label", lambda _args: "peer")
+    monkeypatch.setattr(cli, "_live_reply_to", lambda _args: None)
+    args = argparse.Namespace(json=True, no_wait=False, wait_reply=False, reply_timeout=float("nan"))
+    _deliver_to_live_session(client, args, "live-1", "update")
+    assert calls[0][1]["request_timeout"] is None
+    assert "wait_timeout" not in calls[0][0][2]
+    assert json.loads(capsys.readouterr().out)["outcome"] == "admitted"
 
 
 @pytest.mark.parametrize("stage,delivered", [("admitted", False), ("sdk_accepted", False), ("consumed", True)])

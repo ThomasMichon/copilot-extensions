@@ -764,11 +764,17 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
             payload["expected_session_id"] = expected_session_id
         request_timeout = None
         if wait:
+            from .live_message_models import validate_live_reply_timeout
+
+            try:
+                seconds = validate_live_reply_timeout(wait_timeout)
+            except ValueError as exc:
+                raise BridgeClientError(422, f"wait_timeout {exc}") from exc
             payload["wait"] = True
             if wait_timeout is not None:
-                payload["wait_timeout"] = wait_timeout
+                payload["wait_timeout"] = seconds
             # Give the HTTP read a margin beyond the server-side reply wait.
-            request_timeout = (wait_timeout or 120.0) + 15.0
+            request_timeout = seconds + 15.0
         return self._request(
             "POST", f"/api/v1/live-sessions/{session_id}/messages", payload,
             request_timeout=request_timeout,

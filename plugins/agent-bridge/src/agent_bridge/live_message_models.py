@@ -2,11 +2,26 @@
 
 from __future__ import annotations
 
+import math
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
 LiveMessageDelivery = Literal["queue", "steer", "interrupt"]
+DEFAULT_LIVE_REPLY_TIMEOUT = 120.0
+MAX_LIVE_REPLY_TIMEOUT = 600.0
+
+
+def validate_live_reply_timeout(timeout: float | None) -> float:
+    """Validate a reply wait before it can become a transport timeout."""
+    error = f"must be a finite number of seconds between 0 and {MAX_LIVE_REPLY_TIMEOUT:g}"
+    try:
+        seconds = float(DEFAULT_LIVE_REPLY_TIMEOUT if timeout is None else timeout)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(error) from None
+    if not math.isfinite(seconds) or not 0 <= seconds <= MAX_LIVE_REPLY_TIMEOUT:
+        raise ValueError(error)
+    return seconds
 
 
 class SendMessageRequest(BaseModel):
@@ -18,7 +33,9 @@ class SendMessageRequest(BaseModel):
     kind: str = "prompt"
     delivery: LiveMessageDelivery = "steer"
     wait: bool = False
-    wait_timeout: float = Field(default=120.0, ge=0.0, le=600.0, allow_inf_nan=False)
+    wait_timeout: float = Field(
+        default=DEFAULT_LIVE_REPLY_TIMEOUT, ge=0.0, le=MAX_LIVE_REPLY_TIMEOUT, allow_inf_nan=False,
+    )
     #: Freshness assertion: atomically refuse a changed target incarnation.
     expected_session_id: str | None = None
     #: Stable producer key: an identical retry returns the original message ID.

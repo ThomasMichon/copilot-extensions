@@ -313,15 +313,24 @@ def _live_message_delivery(args: argparse.Namespace) -> str:
 def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, prompt: str,
                              *, remote_address=None) -> None:
     from .client import BridgeClientError
-    from .send_outcome import emit, live_outcome, refusal_from_live_error
+    from .live_message_models import validate_live_reply_timeout
+    from .send_outcome import SendRefused, emit, live_outcome, refusal_from_live_error
 
     core = _core()
+    wait = getattr(args, "wait_reply", False) and not getattr(args, "no_wait", False)
+    wait_timeout = getattr(args, "reply_timeout", 120.0)
+    if wait:
+        try:
+            wait_timeout = validate_live_reply_timeout(wait_timeout)
+        except ValueError as exc:
+            raise SendRefused(
+                "refused_invalid", reason="reply_timeout", error=f"--reply-timeout {exc}",
+                retryable=False, target=session_id,
+            ) from exc
     sender = core._live_sender_label(args)
     reply_to = core._live_reply_to(args)
     kind = core._live_message_kind(args)
     delivery = core._live_message_delivery(args)
-    wait = getattr(args, "wait_reply", False) and not getattr(args, "no_wait", False)
-    wait_timeout = getattr(args, "reply_timeout", 120.0)
     idempotency = getattr(args, "idempotency_key", None)
     expected_session_id = getattr(args, "expected_session_id", None)
     delivery_options = {}

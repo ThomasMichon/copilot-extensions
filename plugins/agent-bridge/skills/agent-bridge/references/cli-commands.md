@@ -111,11 +111,14 @@ receipt/readback semantics. Refused, as `{outcome, target, retryable, reason, er
 distinct exit code: `refused_busy` (75: the target is running a turn),
 `refused_unavailable` (69: `not_found`, `stale`, `superseded` or
 `expected_mismatch`; `stale`/`superseded` are retryable after re-resolving),
-and `refused_conflict` (65: the idempotency key is bound to a different
-request). Without `--json` the same refusals keep their text and exit codes.
+`refused_conflict` (65: the idempotency key is bound to a different request),
+and `refused_invalid` (2: an active `--wait-reply` timeout is not finite or
+outside 0..600; no message is submitted). Without `--json` the same refusals
+keep their text and exit codes.
 Any other failure (an unexpected HTTP error, a daemon that can't be reached) is
 not a classified outcome: it prints its error to stderr, leaves stdout empty and
-exits 1, so a consumer reads stdout only after an exit of 0, 65, 69 or 75.
+exits 1, so classified payloads occur at exits 0, 2, 65, 69 or 75. Other parser
+or usage errors may also exit 2 with only stderr and no classified payload.
 
 When given an **agent name**, it never starts a *fresh* session on top of an
 existing one: it reuses this caller's session for that agent — keyed by
