@@ -77,5 +77,5 @@ The [marketplace manifest](../.github/plugin/marketplace.json) is the complete
 plugin roster. Standalone products such as
 [Worktree Manager](../worktree-manager/README.md),
 [fleet-manager](../fleet-manager/README.md), and
-[agent-dispatch-service](../agent-dispatch-service/README.md) have separate
+[agent-dispatch-service](../services/dispatch/README.md) have separate
 entry points and are not counted as marketplace plugins.

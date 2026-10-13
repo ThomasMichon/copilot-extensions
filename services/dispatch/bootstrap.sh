@@ -2,7 +2,7 @@
 # bootstrap.sh — fetch and install the copilot-extensions agent-dispatch
 # coordinator, with NO Copilot CLI and NO marketplace involved.
 #
-#   curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/agent-dispatch-service/bootstrap.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/services/dispatch/bootstrap.sh | bash
 #
 # This is delivered OUTSIDE the plugin pipe, mirroring
 # worktree-manager/bootstrap.sh's exact shape: it does not require any

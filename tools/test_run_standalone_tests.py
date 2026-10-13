@@ -59,14 +59,14 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
     python = tmp_path / ".test-venvs" / "service" / "bin" / "python"
     python.parent.parent.mkdir(parents=True)
 
-    runner.prepare("agent-index-service", python, smoke=smoke)
+    runner.prepare("services/index", python, smoke=smoke)
 
     assert calls[0] == ["uv", "venv", "--allow-existing", str(python.parent.parent)]
     assert calls[1][:5] == ["uv", "pip", "install", "--python", str(python)]
     core_extra = "" if smoke else "[store,server]"
     service_extra = "[test]" if smoke else "[native,test]"
     assert str(tmp_path / "plugins" / "agent-index") + core_extra in calls[1]
-    assert calls[1][-1] == str(tmp_path / "agent-index-service") + service_extra
+    assert calls[1][-1] == str(tmp_path / "services/index") + service_extra
     assert not Path(calls[1][calls[1].index("--override") + 1]).exists()
 
 
@@ -77,7 +77,7 @@ def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch
 
     with pytest.raises(SystemExit) as exc:
         runner.main([
-            "agent-index-service", "--prepare", "--python", str(tmp_path / "host" / "python")
+            "services/index", "--prepare", "--python", str(tmp_path / "host" / "python")
         ])
 
     assert exc.value.code == 2
@@ -86,7 +86,7 @@ def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch
 
 def test_prepare_rejects_managed_launcher_with_host_environment(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
-    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    (tmp_path / "services/index" / "tests").mkdir(parents=True)
     python = tmp_path / ".test-venvs" / "fake" / "bin" / "python"
     python.parent.mkdir(parents=True)
     python.touch()
@@ -99,14 +99,14 @@ def test_prepare_rejects_managed_launcher_with_host_environment(tmp_path, monkey
     monkeypatch.setattr(runner, "acquire", lambda *_: Lease())
     monkeypatch.setattr(runner, "prepare", lambda *_a, **_k: pytest.fail("unexpected preparation"))
     with pytest.raises(SystemExit) as exc:
-        runner.main(["agent-index-service", "--prepare", "--python", str(python)])
+        runner.main(["services/index", "--prepare", "--python", str(python)])
     assert exc.value.code == 2
     assert released == [True]
 
 
 @pytest.mark.parametrize("smoke", [False, True])
 def test_run_is_contained_and_releases_interpreter_environment_lease(tmp_path, monkeypatch, smoke):
-    root = tmp_path / "agent-index-service"
+    root = tmp_path / "services/index"
     (root / "tests").mkdir(parents=True)
     python = tmp_path / "test-python"
     python.touch()
@@ -150,7 +150,7 @@ def test_run_is_contained_and_releases_interpreter_environment_lease(tmp_path, m
 
     monkeypatch.setattr(runner, "run_contained", run)
     args = [
-        "agent-index-service", "--python", str(python),
+        "services/index", "--python", str(python),
         "--environment-root", str(environment_root),
     ]
     if smoke:
@@ -172,7 +172,7 @@ def test_smoke_rejects_undefined_component_before_admission(monkeypatch):
 def test_nonfinite_or_nonpositive_timeout_rejected_before_admission(monkeypatch, timeout):
     monkeypatch.setattr(runner, "acquire", lambda wait, root: pytest.fail("unexpected admission"))
     with pytest.raises(SystemExit) as exc:
-        runner.main(["agent-index-service", f"--timeout={timeout}"])
+        runner.main(["services/index", f"--timeout={timeout}"])
     assert exc.value.code == 2
 
 
@@ -181,19 +181,19 @@ def test_invalid_admission_wait_rejected_before_preparation(monkeypatch, wait):
     monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
     monkeypatch.setattr(runner, "prepare", lambda *_a, **_k: pytest.fail("unexpected preparation"))
     with pytest.raises(SystemExit) as exc:
-        runner.main(["agent-index-service", "--prepare", f"--admission-wait={wait}"])
+        runner.main(["services/index", "--prepare", f"--admission-wait={wait}"])
     assert exc.value.code == 2
 
 
 def test_nonstandard_custom_launcher_requires_explicit_root_without_execution(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
-    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    (tmp_path / "services/index" / "tests").mkdir(parents=True)
     python = tmp_path / "invalid-python"
     python.touch()
     monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
 
     monkeypatch.setattr(runner.subprocess, "run", lambda *_a, **_k: pytest.fail("candidate executed"))
-    assert runner.main(["agent-index-service", "--python", str(python)]) == 1
+    assert runner.main(["services/index", "--python", str(python)]) == 1
 
 
 @pytest.mark.parametrize("arguments", [
@@ -203,7 +203,7 @@ def test_nonstandard_custom_launcher_requires_explicit_root_without_execution(tm
 def test_explicit_root_does_not_bypass_preparation_guard(monkeypatch, arguments):
     monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
     with pytest.raises(SystemExit) as exc:
-        runner.main(["agent-index-service", *arguments])
+        runner.main(["services/index", *arguments])
     assert exc.value.code == 2
 
 
@@ -218,14 +218,14 @@ def test_standard_root_discovery_never_executes_candidate(tmp_path, monkeypatch)
 
 def test_explicit_root_cannot_override_discoverable_environment(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
-    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    (tmp_path / "services/index" / "tests").mkdir(parents=True)
     python = tmp_path / "environment" / "bin" / "python"
     python.parent.parent.mkdir()
     (python.parent.parent / "pyvenv.cfg").touch()
     monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
     with pytest.raises(SystemExit) as exc:
         runner.main([
-            "agent-index-service", "--python", str(python),
+            "services/index", "--python", str(python),
             "--environment-root", str(tmp_path / "wrong-environment"),
         ])
     assert exc.value.code == 2
@@ -234,7 +234,7 @@ def test_explicit_root_cannot_override_discoverable_environment(tmp_path, monkey
 @pytest.mark.parametrize("directory", ["bin", "Scripts"])
 def test_opaque_standard_named_launcher_accepts_explicit_environment(tmp_path, monkeypatch, directory):
     monkeypatch.setattr(runner, "REPO", tmp_path)
-    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    (tmp_path / "services/index" / "tests").mkdir(parents=True)
     python = tmp_path / "wrappers" / directory / "python"
     python.parent.mkdir(parents=True)
     python.touch()
@@ -250,22 +250,22 @@ def test_opaque_standard_named_launcher_accepts_explicit_environment(tmp_path, m
     monkeypatch.setattr(runner, "run_contained", lambda *_a, **_k: 0)
     monkeypatch.setattr(runner.subprocess, "run", lambda *_a, **_k: pytest.fail("candidate probed"))
     assert runner.main([
-        "agent-index-service", "--python", str(python), "--environment-root", str(actual),
+        "services/index", "--python", str(python), "--environment-root", str(actual),
     ]) == 0
     assert acquired == [actual]
     acquired.clear()
-    assert runner.main(["agent-index-service", "--python", str(python)]) == 1
+    assert runner.main(["services/index", "--python", str(python)]) == 1
     assert acquired == []
 
 
 def test_custom_absent_root_is_not_created(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
-    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    (tmp_path / "services/index" / "tests").mkdir(parents=True)
     root = tmp_path / "absent-custom-root"
     monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
     with pytest.raises(SystemExit) as exc:
         runner.main([
-            "agent-index-service", "--python", str(tmp_path / "launcher"),
+            "services/index", "--python", str(tmp_path / "launcher"),
             "--environment-root", str(root),
         ])
     assert exc.value.code == 2
@@ -299,7 +299,7 @@ def test_posix_owned_child_survives_worker_exit_only_until_outer_cleanup(tmp_pat
 import json,os,sys,subprocess
 from pathlib import Path
 sys.path[:0] = {[
-    str(repo / "agent-index-service" / "tests"),
+    str(repo / "services/index" / "tests"),
     str(repo / "libs" / "agent-procutil" / "src"),
 ]!r}
 from _service_process import owned_python
@@ -335,7 +335,7 @@ def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
         step["run"] for step in ci["checks"]["steps"] if step.get("id") == "version-bump-engine"
     )
     assert r"standalone_consumers\.py" in detector
-    for path in ("agent-index-service/", "plugins/agent-index/", "libs/", "tools/"):
+    for path in ("services/index/", "plugins/agent-index/", "libs/", "tools/"):
         assert path in discovery
     for name in ("agent-index-service-linux", "agent-index-service-windows"):
         assert ci[name]["needs"] == "discover"

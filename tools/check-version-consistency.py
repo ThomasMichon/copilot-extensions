@@ -49,6 +49,9 @@ WORKTREE_MANAGER = REPO / "worktree-manager"
 _PYPROJECT_VERSION = re.compile(
     r'^\s*version\s*=\s*"([^"]+)"', re.MULTILINE
 )
+_PYPROJECT_NAME = re.compile(
+    r'^\s*name\s*=\s*"([^"]+)"', re.MULTILINE
+)
 _VERSION_LITERAL = re.compile(r"^\d+\.\d+\.\d+(?:-dev\d+)?$")
 _MONITORED_FALLBACKS = frozenset({"__version__", "_FALLBACK_VERSION"})
 
@@ -100,6 +103,15 @@ def _pyproject_version(path: Path) -> str | None:
     except Exception:
         return None
     m = _PYPROJECT_VERSION.search(text)
+    return m.group(1) if m else None
+
+
+def _pyproject_name(path: Path) -> str | None:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception:
+        return None
+    m = _PYPROJECT_NAME.search(text)
     return m.group(1) if m else None
 
 
@@ -203,7 +215,25 @@ def _standalone_version_violations(package_dir: Path, component: str) -> list[st
             f"{component}: pyproject.toml has no [project].version"
         )
 
-    module = component.replace("-", "_")
+    # The importable module directory doesn't always hyphen-map cleanly from
+    # either the registry/directory key (e.g. services/dispatch) or the
+    # package's own declared distribution name (e.g. worktree-manager's
+    # dist name is "copilot-extensions-worktree-manager" but its real
+    # package is src/worktree_manager/ -- a genuine PyPI-name/import-name
+    # mismatch). Rather than guess via a single derivation, try every
+    # candidate module name derived from known identifiers (the component
+    # string and the declared distribution name) and use whichever one
+    # actually exists under src/ -- falling back to the component-derived
+    # path (prior behavior) when none resolve, so the violation message
+    # still points at a sensible location.
+    dist_name = _pyproject_name(pyproject)
+    candidates_tried = [component.replace("-", "_")]
+    if dist_name and dist_name != component:
+        candidates_tried.append(dist_name.replace("-", "_"))
+    module = next(
+        (m for m in candidates_tried if (package_dir / "src" / m / "__init__.py").is_file()),
+        candidates_tried[0],
+    )
     init_relative = f"src/{module}/__init__.py"
     init_path = package_dir / init_relative
     fallback_versions, fallback_errors = _source_fallback_versions(init_path)

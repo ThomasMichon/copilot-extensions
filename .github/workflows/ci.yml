@@ -940,7 +940,7 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Test agent-dispatch-service with installed plugin and host containment
-        run: python tools/run-standalone-tests.py agent-dispatch-service --prepare --admission-wait 60 --timeout 180
+        run: python tools/run-standalone-tests.py services/dispatch --prepare --admission-wait 60 --timeout 180
 
   test-runner-linux:
     name: test runner (ubuntu-latest)
@@ -1052,7 +1052,7 @@ jobs:
         run: |
           MODE="--smoke"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then MODE=""; fi
-          python tools/run-standalone-tests.py agent-index-service --prepare --admission-wait 60 $MODE
+          python tools/run-standalone-tests.py services/index --prepare --admission-wait 60 $MODE
 
   agent-index-service-windows:
     name: agent-index-service (windows-latest, out-of-plugin)
@@ -1071,7 +1071,7 @@ jobs:
         run: |
           MODE="--smoke"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then MODE=""; fi
-          python tools/run-standalone-tests.py agent-index-service --prepare --admission-wait 60 $MODE
+          python tools/run-standalone-tests.py services/index --prepare --admission-wait 60 $MODE
 
   test-runner-windows:
     name: test runner (windows-latest)
@@ -1204,7 +1204,7 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             MODE="--changed --base ${{ github.event.pull_request.base.sha }}"
             if git diff --quiet "${{ github.event.pull_request.base.sha }}" HEAD -- \
-              agent-index-service/ plugins/agent-index/ libs/ tools/ \
+              services/index/ plugins/agent-index/ libs/ tools/ \
               .github/workflows/ci.yml .github/workflows/validate-and-promote.yml; then
               echo "standalone_service=false" >> "$GITHUB_OUTPUT"
             else

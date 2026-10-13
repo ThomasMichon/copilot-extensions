@@ -26,9 +26,9 @@ def _project(tmp_path):
     )
     primitive = project.parent / "libs" / "versioned-runtime" / "versioned_runtime.py"
     primitive.parent.mkdir(parents=True)
-    shutil.copy2(source.parent / "libs" / "versioned-runtime" / "versioned_runtime.py", primitive)
+    shutil.copy2(source.parent.parent / "libs" / "versioned-runtime" / "versioned_runtime.py", primitive)
     shutil.copy2(
-        source.parent / "libs" / "versioned-runtime" / "standalone_build.py",
+        source.parent.parent / "libs" / "versioned-runtime" / "standalone_build.py",
         primitive.with_name("standalone_build.py"),
     )
     return project, primitive

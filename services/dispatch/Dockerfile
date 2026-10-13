@@ -14,7 +14,7 @@
 # flat `uv pip install` invocation instead, the same pattern
 # tools/run-standalone-tests.py's prepare() uses for local/CI testing.
 #
-#   docker build -f agent-dispatch-service/Dockerfile -t agent-dispatch-service .
+#   docker build -f services/dispatch/Dockerfile -t agent-dispatch-service .
 #   docker run --rm -p 8787:8787 -e AGENT_DISPATCH_PORT=8787 \
 #       -v agent-dispatch-data:/home/dispatch/.agent-dispatch \
 #       agent-dispatch-service
@@ -51,11 +51,11 @@ COPY libs/plugin-activation libs/plugin-activation
 COPY libs/plugin-resolve libs/plugin-resolve
 COPY libs/single-instance-lease libs/single-instance-lease
 COPY plugins/agent-dispatch plugins/agent-dispatch
-COPY agent-dispatch-service agent-dispatch-service
+COPY services/dispatch services/dispatch
 
 RUN uv venv /opt/venv \
     && uv pip install --no-editable --python /opt/venv/bin/python \
-         /src/plugins/agent-dispatch /src/agent-dispatch-service
+         /src/plugins/agent-dispatch /src/services/dispatch
 
 FROM python:3.12-slim
 

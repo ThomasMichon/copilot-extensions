@@ -214,7 +214,7 @@ The current proposal is not permission to migrate an existing live index.
 
 ## Initial implementation slice
 
-`agent-index-service/` is the first normal service distribution and executable.
+`services/index/` (`agent-index-service`) is the first normal service distribution and executable.
 It runs the existing API/master and local persistence/worker adapters through a
 normal `agent-index` Python-library dependency, with explicit standalone source,
 data/routing and external warm-engine configuration. It does not require plugin

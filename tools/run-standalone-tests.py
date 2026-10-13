@@ -91,26 +91,26 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
         if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
             raise ValueError("uv replaced the leased environment directory")
     sources: list[str] = []
-    if component == "agent-index-service":
+    if component == "services/index":
         sources = [
             str(REPO / "libs" / "zdd"),
             str(REPO / "libs" / "agent-procutil"),
             str(REPO / "plugins" / "agent-index" / "libs" / "dropin-registry"),
             str(REPO / "plugins" / "agent-index") + ("" if smoke else "[store,server]"),
         ]
-    elif component == "agent-dispatch-service":
-        # agent-dispatch-service depends on the agent-dispatch PLUGIN, not a
-        # shared libs/<lib> -- the same shape as agent-index-service's
+    elif component == "services/dispatch":
+        # services/dispatch depends on the agent-dispatch PLUGIN, not a
+        # shared libs/<lib> -- the same shape as services/index's
         # dependency on agent-index above. tools/materialize_main.py's
         # uv-editable materializer only ever vendors an escaping
         # libs/<lib> reference, by deliberate design (its own containment
         # check requires the resolved path be EXACTLY canonical_root/
         # libs/<lib>; a plugin tree is a different trust shape and is not
-        # safely vendorable the same way). So agent-dispatch-service's own
+        # safely vendorable the same way). So services/dispatch's own
         # pyproject.toml declares a plain versioned `agent-dispatch`
         # dependency with NO [tool.uv.sources] escape, and this harness
         # supplies the local path sources a real install needs, exactly
-        # like agent-index-service's own entry above.
+        # like services/index's own entry above.
         sources = [
             str(REPO / "libs" / "zdd"),
             str(REPO / "libs" / "agent-procutil"),
@@ -120,11 +120,11 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
             str(REPO / "libs" / "single-instance-lease"),
             str(REPO / "plugins" / "agent-dispatch"),
         ]
-    extra = ("test" if smoke else "native,test") if component == "agent-index-service" else "dev"
+    extra = ("test" if smoke else "native,test") if component == "services/index" else "dev"
     sources.append(str(REPO / component) + f"[{extra}]")
     with tempfile.TemporaryDirectory(prefix="standalone-dependencies-") as temporary:
         overrides: list[str] = []
-        if component == "agent-index-service":
+        if component == "services/index":
             # dev freezes source versions; test the local compatibility seam,
             # not an unrelated released wheel chosen to satisfy that floor.
             override = Path(temporary) / "overrides.txt"
@@ -136,9 +136,9 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
                 encoding="utf-8",
             )
             overrides = ["--override", str(override)]
-        elif component == "agent-dispatch-service":
-            # Same "dev freezes source versions" concern as agent-index-
-            # service above: force the agent-dispatch requirement to
+        elif component == "services/dispatch":
+            # Same "dev freezes source versions" concern as services/index
+            # above: force the agent-dispatch requirement to
             # resolve from this exact local checkout regardless of its
             # declared version, rather than a version-floor match that can
             # go stale.
@@ -173,8 +173,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--timeout must be finite and positive")
     if not math.isfinite(args.admission_wait) or args.admission_wait < 0:
         parser.error("--admission-wait must be a non-negative, finite number")
-    if args.smoke and args.component != "agent-index-service":
-        parser.error("--smoke is only defined for agent-index-service")
+    if args.smoke and args.component != "services/index":
+        parser.error("--smoke is only defined for services/index")
     if args.environment_root and not args.python:
         parser.error("--environment-root requires --python")
     if args.environment_root and args.prepare:
@@ -238,7 +238,14 @@ def main(argv: list[str] | None = None) -> int:
             prepare(args.component, python, smoke=args.smoke)
         elif not python.is_file():
             parser.error("a prepared interpreter is required; use --prepare")
-        temporary = tempfile.TemporaryDirectory(prefix=f"{args.component}-tests-")
+        # A component name may contain "/" (a nested consumer, e.g.
+        # "services/dispatch") -- safe as a REAL path component (REPO /
+        # component), but a tempfile prefix is a bare filename fragment, and
+        # an embedded "/" there is misread as a path separator (WinError 3 on
+        # Windows: it tries to create the temp dir under a nonexistent
+        # subdirectory). Sanitize for this use only.
+        safe_component = args.component.replace("/", "-")
+        temporary = tempfile.TemporaryDirectory(prefix=f"{safe_component}-tests-")
         try:
             sandbox = Path(temporary.name)
             env = isolated_environment(os.environ, sandbox)

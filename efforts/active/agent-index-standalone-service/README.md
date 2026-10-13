@@ -217,6 +217,25 @@ boundaries from implementation decisions and deployment-specific policy.
 
 ## Journal
 
+### 2026-10-12 - Package relocated: agent-index-service/ -> services/index/
+- Driven from the sibling `agent-dispatch-standalone-container` effort as a
+  cross-cutting migration under the new
+  `docs/patterns/standalone-service-layout.md` convention
+  (`agent-<topic>` reserved for plugins; standalone packages now live at
+  `services/<topic>`). Distribution name (`agent-index-service`),
+  console-script entry point, and Python package/module name
+  (`agent_index_service`) are unchanged -- only the top-level directory
+  moved.
+- Two real bugs surfaced and fixed by the move (not merely cosmetic): a
+  `parents[N]`-depth test fixture (`test_release_distribution.py`), and a
+  `project.parent`-based canonical-source lookup in the package's own
+  `setup.py` build hook (`_build_runtime_resource.py`) that only broke
+  under a REAL wheel build, not unit tests alone. See the full account,
+  every touched file, and the real end-to-end validation (`python
+  tools/run-standalone-tests.py services/index --prepare --smoke` -- 371
+  passed, 2 skipped) in the `agent-dispatch-standalone-container` effort's
+  own Journal entry for this date.
+
 ### 2026-10-12 - Candidate staging merged; fleet integration prioritized
 - Immutable native candidate staging #6074 merged into `dev` at
   `2026-10-12T13:13:08Z`, commit `2d4b613846a5bb70b6fd76bdc358ed22f0931835`.

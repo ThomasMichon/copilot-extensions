@@ -866,7 +866,7 @@ _adopted_projects() {
 # announcing (a human line + a machine-readable ::agent-provisioning:: signal so a
 # caller can extend its timeout), lock-serialized, fail-fast. The primary
 # first-use path fetches and runs the UPSTREAM installer
-# (agent-dispatch-service/bootstrap.sh on `main`, the same Copilot-independent
+# (services/dispatch/bootstrap.sh on `main`, the same Copilot-independent
 # entrypoint the standalone package uses) rather than relying on this plugin's
 # own already-staged payload -- a deliberate transition toward a single
 # installer source of truth (agent-dispatch-standalone-container effort,
@@ -944,10 +944,10 @@ printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/
 # this path is validated. AGENT_DISPATCH_PROVISION_OFFLINE=1 skips straight to
 # the fallback (e.g. an air-gapped host).
 _rc=1
-_boot_url="https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/agent-dispatch-service/bootstrap.sh"
+_boot_url="https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/services/dispatch/bootstrap.sh"
 if [ -z "${AGENT_DISPATCH_PROVISION_OFFLINE:-}" ]; then
     _boot_file="$(mktemp "${TMPDIR:-/tmp}/agent-dispatch-bootstrap.XXXXXX")"
-    printf '%s\n' "[$_name] fetching upstream installer (agent-dispatch-service/bootstrap.sh, main)..." >&2
+    printf '%s\n' "[$_name] fetching upstream installer (services/dispatch/bootstrap.sh, main)..." >&2
     if (command -v curl >/dev/null 2>&1 && curl -fsSL "$_boot_url" -o "$_boot_file") || \
        (command -v wget >/dev/null 2>&1 && wget -qO "$_boot_file" "$_boot_url"); then
         bash "$_boot_file" provision >&2

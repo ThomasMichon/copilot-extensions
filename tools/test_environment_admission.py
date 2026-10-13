@@ -213,8 +213,8 @@ def test_busy_main_names_environment_and_keeps_exit_code(cache, monkeypatch, cap
 def test_standalone_managed_environment_protects_prepare_and_use(cache, monkeypatch, failure):
     runner = load_runner("run-standalone-tests.py")
     monkeypatch.setattr(runner, "REPO", cache)
-    (cache / "agent-index-service" / "tests").mkdir(parents=True)
-    environment = cache / ".test-venvs" / sys.platform / "agent-index-service"
+    (cache / "services/index" / "tests").mkdir(parents=True)
+    environment = cache / ".test-venvs" / sys.platform / "services/index"
     environment.mkdir(parents=True)
     events = []
 
@@ -233,7 +233,7 @@ def test_standalone_managed_environment_protects_prepare_and_use(cache, monkeypa
 
     monkeypatch.setattr(runner, "prepare", prepare)
     monkeypatch.setattr(runner, "run_contained", run)
-    assert runner.main(["agent-index-service", "--prepare"]) == (1 if failure else 0)
+    assert runner.main(["services/index", "--prepare"]) == (1 if failure else 0)
     assert events == (["prepare"] if failure == "prepare" else ["prepare", "use"])
     assert probe(environment) == 0
 
@@ -249,7 +249,7 @@ def test_custom_venv_discovery_does_not_follow_launcher_to_base_interpreter(cach
     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     assert runner.interpreter_environment(python) == environment.resolve()
     monkeypatch.setattr(runner, "REPO", cache)
-    (cache / "agent-index-service" / "tests").mkdir(parents=True)
+    (cache / "services/index" / "tests").mkdir(parents=True)
     seen = []
 
     def run(command, **kwargs):
@@ -259,7 +259,7 @@ def test_custom_venv_discovery_does_not_follow_launcher_to_base_interpreter(cach
         return 0
 
     monkeypatch.setattr(runner, "run_contained", run)
-    assert runner.main(["agent-index-service", "--python", str(python)]) == 0
+    assert runner.main(["services/index", "--python", str(python)]) == 0
     assert seen == [True]
     assert probe(environment) == 0
 
@@ -267,7 +267,7 @@ def test_custom_venv_discovery_does_not_follow_launcher_to_base_interpreter(cach
 @pytest.mark.parametrize("custom", [False, pytest.param(True, marks=EXHAUSTIVE)], ids=["managed", "custom-venv"])
 @pytest.mark.parametrize("wait", [0, 3], ids=["busy", "bounded-wait"])
 def test_missing_interpreter_during_rebuild_obeys_environment_lease(cache, custom, wait):
-    environment = cache / ".test-venvs" / sys.platform / "agent-index-service"
+    environment = cache / ".test-venvs" / sys.platform / "services/index"
     environment.mkdir(parents=True)
     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     ready = cache / "holder-ready"
@@ -284,7 +284,7 @@ def test_missing_interpreter_during_rebuild_obeys_environment_lease(cache, custo
             time.sleep(0.02)
         assert ready.exists()
         assert not python.exists()
-        (cache / "agent-index-service" / "tests").mkdir(parents=True)
+        (cache / "services/index" / "tests").mkdir(parents=True)
         script = """
 import importlib.util, sys
 from pathlib import Path
@@ -302,7 +302,7 @@ def run(command, **kwargs):
 runner.run_contained = run
 runner.subprocess.run = lambda *a, **k: (_ for _ in ()).throw(AssertionError('candidate probed'))
 Path(ready).touch()
-arguments = ['agent-index-service', '--admission-wait', wait]
+arguments = ['services/index', '--admission-wait', wait]
 if custom == 'True':
     arguments += ['--python', python, '--environment-root', str(Path(python).parent.parent)]
 raise SystemExit(runner.main(arguments))
@@ -508,7 +508,7 @@ def test_standalone_real_uv_preparation_preserves_environment_identity(cache, mo
     monkeypatch.setattr(runner.subprocess, "run", run)
     lease = admission.acquire(0, root)
     try:
-        runner.prepare("agent-index-service", python, smoke=True)
+        runner.prepare("services/index", python, smoke=True)
         after = root.stat()
         assert (after.st_dev, after.st_ino) == (before.st_dev, before.st_ino)
         assert admission.admission_dir(root) == key

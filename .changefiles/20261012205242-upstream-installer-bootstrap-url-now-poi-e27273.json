@@ -1,0 +1,9 @@
+{
+  "comment": "Upstream-installer bootstrap URL now points at services/dispatch/ (the package moved from agent-dispatch-service/ -> services/dispatch/ under the new standalone-service-layout convention); no functional change.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

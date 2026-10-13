@@ -123,7 +123,7 @@ while source, engine or library edits publish a new immutable identity.
 Delayed same-version local stamps reject a superseded snapshot candidate before
 publishing markers or launchers. POSIX
 retains its owning-payload pointer. First use primarily fetches and runs the
-**upstream installer** (`agent-dispatch-service/bootstrap.{sh,ps1}` on `main`
+**upstream installer** (`services/dispatch/bootstrap.{sh,ps1}` on `main`
 -- the same Copilot-independent entrypoint the standalone package uses)
 rather than relying on the plugin's own already-staged payload; the locally
 stamped snapshot is a fallback for offline/network-restricted hosts

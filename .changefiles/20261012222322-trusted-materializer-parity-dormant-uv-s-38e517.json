@@ -1,0 +1,9 @@
+{
+  "comment": "Trusted-materializer parity: dormant uv.sources allowlist exception and its test fixtures updated for agent-dispatch's directory move (agent-dispatch-service/ -> services/dispatch/); no functional change to a live code path.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

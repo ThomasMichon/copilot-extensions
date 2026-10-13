@@ -20,7 +20,7 @@ def test_normal_wheel_metadata_and_console_program(tmp_path):
     build.mkdir()
     for name in ("pyproject.toml", "README.md", "setup.py", "_build_runtime_resource.py", "MANIFEST.in"):
         shutil.copy2(source / name, build / name)
-    canonical = source.parent / "libs" / "versioned-runtime" / "versioned_runtime.py"
+    canonical = source.parent.parent / "libs" / "versioned-runtime" / "versioned_runtime.py"
     primitive = tmp_path / "libs" / "versioned-runtime" / "versioned_runtime.py"
     primitive.parent.mkdir(parents=True)
     shutil.copy2(canonical, primitive)

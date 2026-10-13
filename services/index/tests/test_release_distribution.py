@@ -16,9 +16,9 @@ from agent_index_service.release import ReleaseError, build_descriptor, verify_d
 
 
 def test_real_wheels_verify_and_reject_frozen_pre_seam_core(tmp_path):
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(__file__).resolve().parents[3]
     sources = (
-        repo / "agent-index-service",
+        repo / "services" / "index",
         repo / "plugins" / "agent-index",
         repo / "libs" / "zdd",
         repo / "libs" / "agent-procutil",
@@ -32,7 +32,7 @@ def test_real_wheels_verify_and_reject_frozen_pre_seam_core(tmp_path):
         build.mkdir()
         for filename in ("pyproject.toml", "README.md"):
             shutil.copy2(source / filename, build / filename)
-        if source.name == "agent-index-service":
+        if source.name == "index":
             for filename in ("setup.py", "_build_runtime_resource.py", "MANIFEST.in"):
                 shutil.copy2(source / filename, build / filename)
             primitive = tmp_path / "libs" / "versioned-runtime" / "versioned_runtime.py"

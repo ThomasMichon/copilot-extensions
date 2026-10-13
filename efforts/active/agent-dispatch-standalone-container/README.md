@@ -6,10 +6,11 @@
 - **Created:** 2026-10-11
 - **Status:** Active; Phase 1 + Phase 2 landed; release-promotion regression
   fixed; Phase 3 interoperability proof done; Phase 4 (plugin consumes
-  upstream installer on demand) implemented -- fresh-machine bootstrap
-  validation, the plugin-delivered-flows-unaffected check, a live
-  on-demand-fetch exercise, and dropping the fallback installer copy all
-  remain open
+  upstream installer on demand) implemented; package relocated to
+  `services/dispatch/` under the `standalone-service-layout` convention --
+  fresh-machine bootstrap validation, the plugin-delivered-flows-unaffected
+  check, a live on-demand-fetch exercise, dropping the fallback installer
+  copy, and the public-install-surface indirection (#6419) all remain open
 - **Vision:** [machine-fleet](../../../visions/machine-fleet/README.md):
   `standalone-service-installation`, role deployments and container managers
   (role instances may run directly or in containers on explicitly admitted
@@ -229,15 +230,16 @@ for review before any implementation.
 - [ ] Once validated, remove `install.ps1`/`install.sh` from the plugin's
   own payload entirely (thin trigger only) -- the actual "drop the
   fallback" step named above.
-- [ ] **Naming/layout note (2026-10-12):** `agent-dispatch-service/` is
-  slated to move to `services/dispatch/` under the new
-  `docs/patterns/standalone-service-layout.md` convention (`agent-<topic>`
-  reserved for plugins; standalone packages live at `services/<topic>`).
-  Tracked separately in
-  [#6419](https://github.com/ThomasMichon/copilot-extensions/issues/6419),
-  which also covers updating the hardcoded upstream-installer URL this
-  phase just added. Do not hardcode further references to the current
-  `agent-dispatch-service/` path without checking that issue first.
+- [x] **Naming/layout note (2026-10-12):** `agent-dispatch-service/` moved to
+  `services/dispatch/` under `docs/patterns/standalone-service-layout.md`'s
+  convention (`agent-<topic>` reserved for plugins; standalone packages live
+  at `services/<topic>`), including the hardcoded upstream-installer URL
+  this phase added (now `.../main/services/dispatch/bootstrap.{ps1,sh}`).
+  Distribution name, console-script name, and Python package name are
+  unchanged -- only the top-level directory moved. See the Journal entry
+  below for the full reference sweep. [#6419](https://github.com/ThomasMichon/copilot-extensions/issues/6419)
+  tracks the still-open public-install-surface indirection (so a future
+  move doesn't require touching this hardcoded URL again).
 
 ## Validation Plan
 
@@ -548,3 +550,141 @@ _Pending._
   existing automated suites, not a live network provisioning run), and the
   actual removal of the fallback installer copy from the plugin payload
   once that's done.
+
+### 2026-10-12 -- services/<topic> migration: agent-dispatch-service -> services/dispatch
+- Operator instruction, following directly from the `standalone-service-layout`
+  pattern doc published earlier the same day: drive the actual rename now,
+  "while nothing uses the updated locations" -- i.e. before any more
+  references accumulate against the stuttering `agent-*-service` shape.
+  Confirmed scope at pattern-doc time: `services/<topic>` (bare topic, no
+  `agent-` prefix, no `-service` suffix); only the two `agent-*-service`
+  packages move (`worktree-manager`/`fleet-manager` are a distinct,
+  unscoped case, kept as top-level systems).
+- Moved `agent-dispatch-service/` -> `services/dispatch/` (and, same pass,
+  `agent-index-service/` -> `services/index/`, the owning effort being
+  `agent-index-standalone-service`). Distribution names
+  (`agent-dispatch-service`, `agent-index-service`), console-script entry
+  points, and Python package/module names (`agent_dispatch_service`,
+  `agent_index_service`) are all **unchanged** -- only the top-level
+  directory moved. This was a deliberate scope limit: renaming the
+  distribution/import names too would have multiplied the blast radius
+  (uv lock entries, wheel filenames, pip install commands) for no benefit
+  the directory move itself doesn't already deliver.
+- **Depth-sensitivity was the dominant risk, not the moves themselves.**
+  `agent-dispatch-service/` sat 1 path segment below repo root;
+  `services/dispatch/` sits 2. Every hardcoded `Path(__file__).resolve()
+  .parents[N]` computing a REPO-root reference (not a package-root
+  reference -- those stayed correct, since `tests/` is still exactly 1
+  level below the package root regardless of overall depth) needed `N+1`:
+  found and fixed in `test_launch_scripts_tracked_executable.py` (agent-
+  dispatch-service) and `test_release_distribution.py` (agent-index-
+  service). The same class of bug hit a relative TOML path: the
+  dormant `[tool.uv.sources]` allowlist exception in
+  `tools/materialize_main.py` and its by-hand-synced twin in
+  `worktree-manager/src/worktree_manager/_trusted_pointer_materializer.py`
+  hardcoded `raw_path == "../plugins/agent-dispatch"` (correct from the
+  OLD 1-level depth); fixed to `"../../plugins/agent-dispatch"` for the
+  new depth, plus the parametrized test fixtures
+  (`test_trusted_materializer_parity.py`) that assert against it.
+- **The registry key doubling as both a path AND an implicit Python-module
+  name was the second real risk.** `tools/check-version-consistency.py`'s
+  `_standalone_version_violations` derived the expected `src/<module>/
+  __init__.py` path via `component.replace("-", "_")` -- true by
+  coincidence for `agent-index-service` (module `agent_index_service`) but
+  nonsensical for a registry key containing a literal `/`
+  (`services/index` -> `services/index` unchanged, not a valid module
+  path). First fix attempt (prefer the package's own `pyproject.toml`
+  `[project].name` field, hyphen-mapped) introduced a REAL regression for
+  `worktree-manager`: its declared dist name is
+  `copilot-extensions-worktree-manager`, but its actual package is
+  `src/worktree_manager/` -- a genuine PyPI-name/import-name mismatch
+  neither derivation alone handles. Caught by actually running
+  `check-version-consistency.py` after the fix (not just the unit tests),
+  which immediately surfaced a real violation it shouldn't have. Final fix
+  tries every candidate (component-derived, then dist-name-derived) and
+  picks whichever one's `src/<candidate>/__init__.py` actually exists on
+  disk, falling back to the component-derived guess only when neither
+  resolves -- robust to both naming shapes, not just the one this move
+  exercised.
+- **A third, independently-discovered depth bug: `services/index`'s own
+  `setup.py` build hook.** `_build_runtime_resource.py` computed its
+  canonical `libs/versioned-runtime/versioned_runtime.py` source via
+  `project.parent / "libs" / ...` (correct at the old 1-level depth, wrong
+  at the new 2-level one) -- not caught by the earlier `parents[N]`/
+  `.parent` sweep because it used a single `.parent`, not `.parent.parent`
+  or `parents[N]`, and only surfaced when the REAL
+  `run-standalone-tests.py services/index --prepare --smoke` end-to-end
+  build actually ran (a real `uv pip install` triggering the real
+  setuptools build backend) -- unit tests alone, even the installer-
+  focused ones, never exercise a real wheel build. Same class of bug in
+  two of that package's OWN test fixtures
+  (`test_distribution.py`, `test_runtime_resource_distribution.py`),
+  caught by the same end-to-end run plus a repo-wide re-grep for every
+  `.parent`/`.parent.parent` chain (not just `parents[N]`) across both
+  moved trees. **Lesson generalized for future similar moves:** a
+  `parents[N]` sweep alone is insufficient; also grep for `.parent`
+  chains, and always run the REAL registered build/test entry point
+  (`run-standalone-tests.py <component> --prepare`), not only unit tests,
+  since only a real build exercises a package's own setup.py/build hooks.
+- Updated, in one pass: `tools/standalone_consumers.py` (the registry
+  itself), `tools/run-standalone-tests.py` (component-keyed source lists,
+  the `--smoke` guard, and a Windows-specific bug this move's own registry
+  value exposed: `tempfile.TemporaryDirectory(prefix=f"{component}-tests-")`
+  misreads an embedded `/` as a path separator on Windows -- `WinError 3,
+  cannot find the path specified` -- fixed by sanitizing the prefix
+  separately from the real `REPO / component` path use, which needs the
+  slash), `.github/workflows/ci.yml` and
+  `validate-and-promote.yml` (the `run-standalone-tests.py` invocations and
+  the `discover` job's path-filter list -- **deliberately left the CI job
+  IDs themselves unchanged**, e.g. `agent-index-service-linux:`, since
+  those are internal workflow identifiers describing the distribution,
+  not a path, and renaming them would only cascade into every `needs:`
+  reference for no behavioral benefit), `.dockerignore`, both Dockerfiles'
+  self-referencing `COPY`/build-context paths, both packages' own
+  `README.md`/`bootstrap.{sh,ps1}` (one-liner URLs, Docker build commands,
+  relative doc links -- which also needed a depth fix), the
+  `agent-dispatch` plugin's installer scripts and README (the Phase-4
+  bootstrap URL), `docs/reference-index.md`, `docs/capabilities.md`, and
+  `docs/patterns/standalone-service-layout.md`'s own Status section (now
+  "migrated" instead of "tracked separately").
+- Explicitly left unchanged (confirmed safe via the same component-by-
+  component audit): distribution-name prose and the console-script name in
+  both packages' own source (`__main__.py`, `composition.py`, `release.py`,
+  `staging.py`, their tests); the OS-level launcher binstub name
+  `agent-index-service(.ps1)` in `plugins/agent-index/scripts/cell-runtime.py`
+  and the clean-room scenario (the actual installed command users type,
+  unrelated to repo layout); historical prose in past Journal entries,
+  `.changefiles/`, and unrelated efforts' own historical mentions (not
+  rewriting history, consistent with not rewriting git log).
+- Validated: full-repo grep swept clean of remaining `agent-dispatch-
+  service/`/`agent-index-service/` (trailing-slash, i.e. directory-shaped)
+  references outside historical/`.changefiles` content.
+  `python tools/check-version-consistency.py`,
+  `check-changefile-presence.py`, and `check-docs-consistency.py` all pass.
+  Real, non-mocked end-to-end runs (not just unit tests) for both moved
+  packages: `python tools/run-standalone-tests.py services/index --prepare
+  --smoke` -- 371 passed, 2 skipped (a genuine `uv pip install` + real
+  setuptools wheel build, the path that caught the `_build_runtime_
+  resource.py` bug above); `services/dispatch`'s own 11 tests passed after
+  preparing its environment the same way (worked around this machine's
+  unrelated, pre-existing `fastapi>=0.143.0`/`<=0.142.2`-availability
+  environment conflict with a local `--override`, confirmed unrelated to
+  this change since it also blocks `plugins/agent-dispatch`'s own tests
+  identically). A real `docker build -f services/dispatch/Dockerfile`
+  reached its network-dependent `pip install uv` step (blocked by this
+  managed machine's known CFS egress policy, the same pre-existing,
+  already-documented Phase 2 limitation) -- confirmed the `COPY` path
+  resolution specifically (the part this move could have broken) with a
+  minimal smoke-test Dockerfile reusing the same `COPY` lines without the
+  network-dependent step: all paths resolved. Re-ran the installer-focused
+  test selection from the prior Journal entry after the move (still 86
+  passed, 13 skipped, 0 failed, via the same `fastapi` override
+  workaround) to confirm the depth-sensitivity fixes hold, plus
+  `worktree-manager`'s `test_trusted_materializer_parity.py` (18/18) and
+  the full `tools/` suite touched by this change (210 passed, 1 skipped,
+  5 deselected -- the known pre-existing, unrelated
+  `test_real_uv_rebuild_preserves_leased_directory_and_exclusion`
+  symlink-rmtree flake, confirmed unrelated: it exercises `run-plugin-
+  tests.py` with a synthetic `"alpha"` plugin name, nothing this change
+  touched).
+

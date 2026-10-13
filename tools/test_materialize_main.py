@@ -667,7 +667,7 @@ def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
             expected_lib = expected_consumer_dir / "libs" / lib
             if not expected_lib.exists():
                 source = repo / "libs" / lib
-                if consumer == "agent-dispatch-service" and name == lib == "agent-dispatch":
+                if consumer == "services/dispatch" and name == lib == "agent-dispatch":
                     source = repo / "plugins" / lib
                 shutil.copytree(source, expected_lib, ignore=mm._ignore)
                 _build_expected_vendored_tree(expected_lib, canonical_root=repo)

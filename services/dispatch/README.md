@@ -29,12 +29,12 @@ either way; it does not permit arbitrary plugin-to-plugin copying.
 
 ```bash
 # Linux / WSL / macOS:
-curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/agent-dispatch-service/bootstrap.sh | bash -s -- install
+curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/services/dispatch/bootstrap.sh | bash -s -- install
 ```
 
 ```powershell
 # Windows:
-iex (irm https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/agent-dispatch-service/bootstrap.ps1)
+iex (irm https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/services/dispatch/bootstrap.ps1)
 ```
 
 Both scripts fetch this repository (git clone/fetch when available, else a
@@ -74,7 +74,7 @@ this directory -- the image needs `plugins/agent-dispatch` plus the handful
 of shared `libs/*` it depends on, in their real relative positions:
 
 ```bash
-docker build -f agent-dispatch-service/Dockerfile -t agent-dispatch-service .
+docker build -f services/dispatch/Dockerfile -t agent-dispatch-service .
 ```
 
 Run it with a durable volume for its task database and rendezvous file:
@@ -126,7 +126,7 @@ machine), override the index at build time without changing the
 committed default:
 
 ```bash
-docker build -f agent-dispatch-service/Dockerfile \
+docker build -f services/dispatch/Dockerfile \
   --build-arg PYTHON_INDEX_URL=<your-approved-feed-index-url> \
   -t agent-dispatch-service .
 ```
@@ -134,7 +134,7 @@ docker build -f agent-dispatch-service/Dockerfile \
 
 ## Scope
 
-See [`efforts/active/agent-dispatch-standalone-container/README.md`](../efforts/active/agent-dispatch-standalone-container/README.md)
+See [`efforts/active/agent-dispatch-standalone-container/README.md`](../../efforts/active/agent-dispatch-standalone-container/README.md)
 for the full plan, validation requirements, and relationship to the
 similarly-shaped `agent-index-standalone-service` and
 `machine-fleet-routing-foundation` efforts.

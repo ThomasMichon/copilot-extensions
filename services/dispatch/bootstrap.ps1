@@ -1,7 +1,7 @@
 # bootstrap.ps1 — fetch and install the copilot-extensions agent-dispatch
 # coordinator, with NO Copilot CLI and NO marketplace involved.
 #
-#   iex (irm https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/agent-dispatch-service/bootstrap.ps1)
+#   iex (irm https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/services/dispatch/bootstrap.ps1)
 #
 # This is delivered OUTSIDE the plugin pipe, mirroring
 # worktree-manager/bootstrap.ps1's exact shape: it does not require any

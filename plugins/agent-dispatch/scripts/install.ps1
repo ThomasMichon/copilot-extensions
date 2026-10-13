@@ -1410,7 +1410,7 @@ function Deploy-SelfProvisioningBinstub {
        (#1393): fast-path the built versioned slot's python; if no slot is built
        yet (a `stamp` deferred the venv), provision on first use. The primary
        first-use path fetches and runs the UPSTREAM installer
-       (agent-dispatch-service/bootstrap.ps1 on `main`, the same Copilot-
+       (services/dispatch/bootstrap.ps1 on `main`, the same Copilot-
        independent entrypoint the standalone package uses) rather than relying
        on the plugin's own already-staged payload -- this is the transition
        toward a single installer source of truth (agent-dispatch-standalone-
@@ -1494,10 +1494,10 @@ $_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
 # the fallback (e.g. an air-gapped host).
 $_provisioned = $false
 if (-not $env:AGENT_DISPATCH_PROVISION_OFFLINE) {
-    $_bootUrl = 'https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/agent-dispatch-service/bootstrap.ps1'
+    $_bootUrl = 'https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/services/dispatch/bootstrap.ps1'
     $_bootFile = Join-Path ([IO.Path]::GetTempPath()) "agent-dispatch-bootstrap-$PID.ps1"
     try {
-        [Console]::Error.WriteLine('[agent-dispatch] fetching upstream installer (agent-dispatch-service/bootstrap.ps1, main)...')
+        [Console]::Error.WriteLine('[agent-dispatch] fetching upstream installer (services/dispatch/bootstrap.ps1, main)...')
         Invoke-WebRequest -Uri $_bootUrl -UseBasicParsing -TimeoutSec 20 -OutFile $_bootFile
         & $_exe -NoProfile -ExecutionPolicy Bypass -File $_bootFile provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
         if ($LASTEXITCODE -eq 0) { $_provisioned = $true }

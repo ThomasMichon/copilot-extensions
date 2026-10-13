@@ -11,11 +11,11 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[3]
 
 
 def test_posix_bootstrap_is_tracked_executable() -> None:
-    path = "agent-dispatch-service/bootstrap.sh"
+    path = "services/dispatch/bootstrap.sh"
     result = subprocess.run(
         ["git", "-C", str(REPO), "ls-files", "--stage", "--", path],
         capture_output=True,

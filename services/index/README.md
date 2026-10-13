@@ -241,8 +241,8 @@ core, shared-library, runner/release-tool or CI changes. Real hosted/deployment
 cycles stay in the exhaustive promotion and manual lanes:
 
 ```console
-python tools/run-standalone-tests.py agent-index-service --prepare --smoke
-python tools/run-standalone-tests.py agent-index-service --prepare
+python tools/run-standalone-tests.py services/index --prepare --smoke
+python tools/run-standalone-tests.py services/index --prepare
 ```
 
 Released installs require `agent-index>=0.10.12.dev1`; earlier released cores
@@ -273,7 +273,7 @@ isolated interpreter; a source-only import intentionally lacks the built resourc
 In an already provisioned test environment:
 
 ```console
-python -m pytest agent-index-service/tests plugins/agent-index/tests/test_standalone_explicit_sources.py -q
+python -m pytest services/index/tests plugins/agent-index/tests/test_standalone_explicit_sources.py -q
 ```
 
 POSIX hosted/deployment tests require the contained runner above; their children
