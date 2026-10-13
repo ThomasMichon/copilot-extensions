@@ -184,10 +184,11 @@ does not close those native gates. The effort remains **Active**.
 
 **Scope:** publish the existing generic test/evidence tranche, not a runtime fix
 or a passing acceptance claim. Relative to journal base `f926f234a`, the tranche
-changes ten files: this effort README/design plus the scenario's README,
+changes twelve files: this effort README/design plus the scenario's README,
 manifest, setup shell, controller, read-only validator, deterministic tests and
 unpaid OS-permission probe and focused CLI-diagnostic tests
-under `tools/clean-room/scenarios/context-handoff-native-cli/`. No plugin payload,
+and no-follow snapshot helper/tests under
+`tools/clean-room/scenarios/context-handoff-native-cli/`. No plugin payload,
 runtime, catalog, installed settings or changefile is changed. Preparation reconciles final documentation and evidence-integrity checks;
 managed publication/review/merge
 belongs to the coordinator.
@@ -207,7 +208,7 @@ Reproduce the source checks from the repository root:
 Push-Location tools\clean-room\scenarios\context-handoff-native-cli
 $env:PYTHONDONTWRITEBYTECODE = '1'
 python -m unittest discover -p 'test_*.py'
-ruff check --no-cache --select F,E9 controller.py validation.py test_validation.py test_cli_diagnostics.py os_permission_smoke.py
+ruff check --no-cache --select F,E9 controller.py validation.py snapshot_io.py test_snapshot_io.py test_validation.py test_cli_diagnostics.py os_permission_smoke.py
 Pop-Location
 python tools\check-effort-vision-structure.py efforts\active\native-context-handoff-compatibility\README.md
 git diff --check f926f234a..HEAD
@@ -222,7 +223,7 @@ test or ACP substitute. Release version/blob checks fail closed if current
 `main` no longer carries the recorded payload. No new eval was run or authorized
 by this preparation slice.
 
-**Safety and sanitization:** the reviewed ten-file tranche contains only
+**Safety and sanitization:** the reviewed twelve-file tranche contains only
 generic tooling, synthetic fixture data/session identifiers and declared
 in-container paths. No real operator/machine/private checkout path, credential
 literal, private URL or raw run artifact is included. Raw judge packets/logs stay
@@ -395,6 +396,27 @@ below-altitude evidence/tooling documentation, with no new rollout claim.
   module-budget checks pass, including actual analyzer ownership fixtures and
   valid absolute-reader commands. These source-only corrections await renewed
   current-head review and required CI; the effort remains Active.
+- The following full Balanced review resolved ownership/absolute readers and
+  identified source/destination symlink traversal in snapshot/redaction plus a
+  stale positive packet status after parser quarantine. Added Linux
+  descriptor-relative no-follow I/O, singly-linked regular-file guards,
+  atomic output replacement and explicit unsafe-entry diagnostics. Current
+  parser quarantine now overrides an earlier captured export receipt in the
+  regenerated judge packet. All seventy-four source tests pass in an unpaid,
+  network-disconnected Linux container with read-only source, including actual
+  export/redaction consumers, root/nested/source/destination links, linked path
+  ancestors, hardlinks and a source-link swap. Outside canaries stay unchanged
+  and absent from regular exported evidence. `F,E9`, module budgets and effort
+  structure also pass. Independent verification closed the no-follow paths
+  but reproduced missing live events replaced by a stale regular destination
+  and reanalysis clearing an invalid redaction receipt. Export now requires
+  proof that this invocation copied live events, and guarded redaction
+  diagnostics remain part of regenerated packet validity. Actual consumer
+  regressions preserve stale bytes uncredited and retain invalid status after
+  reanalysis. Independent actual Linux consumer verification closed both
+  residuals, including a subsequent export and valid checked-receipt positives.
+  Renewed current-head review and required CI remain publication gates;
+  no native verdict is being changed.
 - The corrections affect source evidence validation only. All four historical
   independent FAIL verdicts and their original packets remain unchanged.
   No paid trial, native deployment claim or runtime change is authorized by

@@ -3,6 +3,7 @@ from contextlib import redirect_stdout
 import hashlib
 import io
 import json
+import os
 import shlex
 from pathlib import Path
 import tempfile
@@ -41,6 +42,109 @@ def recovery_event_errors(events, root):
 
 
 class ValidationTests(unittest.TestCase):
+    def test_parser_corruption_overrides_earlier_captured_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            evaluation, state, events = self.analyzer_fixture(Path(temporary))
+            (evaluation / "export-errors.json").write_text(json.dumps({"status": "captured", "errors": []}))
+            events.append({"type": "invalid-row"})
+            report = self.run_analyzer(evaluation, state, events)
+            self.assertFalse(report["root_clear_events"])
+            self.assertTrue(report["event_parser_errors"])
+            self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"],
+                             "INVALID_EXPORT")
+
+    @unittest.skipUnless(os.name == "posix", "no-follow export proof requires the Linux fixture")
+    def test_export_quarantines_links_at_actual_consumer_boundaries(self):
+        for kind in ("session", "destination", "logs", "workspace", "config", "missing-events"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                base = Path(temporary)
+                original, state, events = self.analyzer_fixture(base / "original")
+                capsule = TEST_SEEDS[str(original / "workspace")]
+                capsule.chmod(0o755)
+                (capsule / "venue-seal.json").write_text(json.dumps({
+                    "session_id": "root-fixture", "operator_sudo_denied": True,
+                    "sudo_elevation_bits_removed": True,
+                }))
+                home = base / "home"
+                session = home / ".copilot/session-state/root-fixture"
+                session.mkdir(parents=True)
+                (session / "events.jsonl").write_text("".join(json.dumps(event) + "\n" for event in events))
+                evaluation = base / "export/eval"
+                evaluation.mkdir(parents=True)
+                outside = base / "outside"
+                canary = b"synthetic-" + os.urandom(16).hex().encode("ascii")
+                outside.write_bytes(canary)
+                locations = {"session": session / "linked.txt",
+                             "destination": evaluation / "session/unmatched.txt",
+                             "logs": home / ".copilot/logs/linked.txt",
+                             "workspace": original / "workspace/linked.txt",
+                             "config": original / "workspace/.context-handoff/config.yaml"}
+                if kind == "missing-events":
+                    (session / "events.jsonl").unlink()
+                    (evaluation / "session").mkdir()
+                    stale = evaluation / "session/events.jsonl"
+                    stale.write_text("".join(json.dumps(event) + "\n" for event in events))
+                    previous = stale.read_bytes()
+                else:
+                    link = locations[kind]
+                    link.parent.mkdir(parents=True, exist_ok=True)
+                    if link.exists():
+                        link.unlink()
+                    link.symlink_to(outside)
+                with patch.object(controller, "BASELINE", capsule), patch.object(controller, "EVAL", evaluation), \
+                        patch.object(controller, "STATE", state), \
+                        patch.object(controller, "OUT", evaluation.parent), \
+                        patch.object(controller, "REPO", original / "workspace"), \
+                        patch.object(controller, "SCENARIO", Path(__file__).parent), \
+                        patch.object(Path, "home", return_value=home), patch.object(controller, "run", return_value="true"), \
+                        patch.object(controller.subprocess, "run", return_value=type("Result", (), {"returncode": 1})()), \
+                        redirect_stdout(io.StringIO()):
+                    result = controller.export()
+                    if kind == "missing-events":
+                        controller.analyze()
+                        observed = json.loads((evaluation / "observed-evidence.json").read_text())
+                        self.assertEqual(observed["root_clear_events"], [])
+                        self.assertEqual(stale.read_bytes(), previous)
+                self.assertTrue(result["export_errors"])
+                self.assertEqual(result["event_export_status"], "INVALID_EXPORT")
+                self.assertEqual(outside.read_bytes(), canary)
+                for path in evaluation.rglob("*"):
+                    if path.is_file() and not path.is_symlink():
+                        self.assertNotIn(canary, path.read_bytes())
+
+    @unittest.skipUnless(os.name == "posix", "no-follow redaction proof requires the Linux fixture")
+    def test_redaction_consumer_invalidates_packet_without_touching_link_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            evaluation = root / "out/eval"
+            evaluation.mkdir(parents=True)
+            outside = root / "outside"
+            outside.write_bytes(b"synthetic-secret")
+            (evaluation / "link").symlink_to(outside)
+            with patch.object(controller, "OUT", evaluation.parent), patch.object(controller, "EVAL", evaluation), \
+                    patch.dict(os.environ, {"COPILOT_GITHUB_TOKEN": "synthetic-secret"}), redirect_stdout(io.StringIO()):
+                self.assertTrue(controller.redact())
+            self.assertEqual(outside.read_bytes(), b"synthetic-secret")
+            self.assertEqual(json.loads((evaluation / "credential-redaction.json").read_text())["status"],
+                             "INVALID_EXPORT")
+            self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"],
+                             "INVALID_EXPORT")
+
+    def test_reanalysis_does_not_clear_invalid_redaction_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            evaluation, state, events = self.analyzer_fixture(Path(temporary))
+            (evaluation / "export-errors.json").write_text(json.dumps({"status": "captured", "errors": []}))
+            receipt = evaluation / "credential-redaction.json"
+            for document in ({"status": "INVALID_EXPORT", "errors": [{"error": "unsafe entry"}]},
+                             {"status": "checked", "errors": "invalid-shape"}, []):
+                receipt.write_text(json.dumps(document))
+                self.run_analyzer(evaluation, state, events)
+                self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"],
+                                 "INVALID_EXPORT")
+            receipt.write_text(json.dumps({"status": "checked", "errors": []}))
+            self.run_analyzer(evaluation, state, events)
+            self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"], "captured")
+
     def test_only_absent_or_null_ownership_markers_are_root(self):
         for marker in ("", 0, False, [], {}):
             self.assertFalse(validation.root_event({"agentId": marker, "data": {}}))
@@ -355,6 +459,7 @@ class ValidationTests(unittest.TestCase):
                 self.assertEqual(len(report["root_clear_events"]), 2)
                 self.assertFalse(report["event_parser_errors"])
 
+    @unittest.skipUnless(os.name == "posix", "snapshot export requires the Linux fixture")
     def test_completion_without_id_exports_as_negative_row_not_crash(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
@@ -383,6 +488,7 @@ class ValidationTests(unittest.TestCase):
                 controller.export()
             self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"], "INVALID_EXPORT")
 
+    @unittest.skipUnless(os.name == "posix", "snapshot export requires the Linux fixture")
     def test_failed_event_snapshot_copy_quarantines_previous_root_clears(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
@@ -402,19 +508,19 @@ class ValidationTests(unittest.TestCase):
             prior = evaluation / "session/events.jsonl"
             prior.write_text("".join(json.dumps(e) + "\n" for e in events))
             before = prior.read_bytes()
-            copy = controller.shutil.copy2
+            copy = controller.snapshot_io.write_at
 
-            def fail_events(source, destination, *args, **kwargs):
-                if Path(source).name == "events.jsonl":
+            def fail_events(parent, name, content):
+                if name == "events.jsonl":
                     raise PermissionError("fixture copy denied")
-                return copy(source, destination, *args, **kwargs)
+                return copy(parent, name, content)
 
             with patch.object(controller, "BASELINE", capsule), patch.object(controller, "EVAL", evaluation), \
                     patch.object(controller, "STATE", state), patch.object(controller, "OUT", evaluation.parent), \
                     patch.object(controller, "REPO", original / "workspace"), \
                     patch.object(controller, "SCENARIO", Path(__file__).parent), \
                     patch.object(Path, "home", return_value=home), patch.object(controller, "run", return_value="true"), \
-                    patch.object(controller.shutil, "copy2", side_effect=fail_events), \
+                    patch.object(controller.snapshot_io, "write_at", side_effect=fail_events), \
                     patch.object(controller.subprocess, "run", return_value=type("Result", (), {"returncode": 1})()), \
                     redirect_stdout(io.StringIO()):
                 controller.export()
@@ -426,6 +532,7 @@ class ValidationTests(unittest.TestCase):
             self.assertEqual(prior.read_bytes(), before)
             self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"], "INVALID_EXPORT")
 
+    @unittest.skipUnless(os.name == "posix", "snapshot export requires the Linux fixture")
     def test_export_keeps_diagnostic_packet_for_invalid_event_stream(self):
         for kind in ("missing", "unreadable", "bad-row", "empty", "invalid-object"):
             with tempfile.TemporaryDirectory() as temp:

@@ -1,6 +1,7 @@
 """Contained real-CLI setup and evidence capture; never an eval judge."""
 
 import hashlib
+from io import StringIO
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import time
 import uuid
+import snapshot_io
 from validation import (
     checkpoint_errors, checkpoint_readback_errors, event_stream, execution_status, measurement_result, object_result,
     pressure_events, recovery_event_errors, root_event, seed_baseline, workspace_seed_errors, witness_errors,
@@ -31,13 +33,18 @@ def run(*args, **kwargs):
 
 
 def write(path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2) + "\n")
+    content = (json.dumps(value, indent=2) + "\n").encode("utf-8")
+    if os.name == "posix":
+        snapshot_io.write_bytes(path, content)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
 
 
 def metadata(path, label, errors):
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(snapshot_io.read_bytes(path).decode("utf-8") if os.name == "posix"
+                           else path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         errors.append({"source": label, "error": "metadata unavailable or invalid JSON"})
         return None
@@ -88,7 +95,7 @@ def verify_tmux_server():
 
 def capture(label):
     text = tmux("capture-pane", "-t", TMUX, "-p", "-S", "-100000")
-    (EVAL / f"{label}.txt").write_text(text)
+    snapshot_io.write_bytes(EVAL / f"{label}.txt", text.encode("utf-8"))
     return text
 
 
@@ -350,41 +357,39 @@ to the coordinator, not to this worker. All fixture input is already provisioned
 def export():
     state, seed = trusted_identity()
     session = Path.home() / ".copilot/session-state" / state["session_id"]
-    events, export_errors = event_stream(session / "events.jsonl")
+    export_errors = []
     target = EVAL / "session"
-    target.mkdir(exist_ok=True)
-    for path in session.rglob("*"):
-        if path.is_file() and path.suffix not in (".lock", ".hold"):
-            destination = target / path.relative_to(session)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                shutil.copy2(path, destination)
-            except OSError:
-                export_errors.append({"source": "session snapshot", "path": path.relative_to(session).as_posix(),
-                                      "error": "snapshot file unavailable or unreadable"})
+    copied = snapshot_io.snapshot(session, target, export_errors, "session snapshot")
+    if "events.jsonl" not in copied:
+        export_errors.append({"source": "session snapshot",
+                              "error": "live events were not copied; previous snapshot is uncredited"})
+    events, parser_errors = event_stream(snapshot_io.EventPath(target / "events.jsonl"))
+    export_errors.extend(parser_errors)
     logs = Path.home() / ".copilot/logs"
     if logs.exists():
-        shutil.copytree(logs, OUT / "cr-logs/cli", dirs_exist_ok=True)
-    shutil.copytree(Path(state["workspace"]), EVAL / "workspace", ignore=shutil.ignore_patterns(".git"), dirs_exist_ok=True)
+        snapshot_io.snapshot(logs, OUT / "cr-logs/cli", export_errors, "CLI logs")
+    snapshot_io.snapshot(Path(state["workspace"]), EVAL / "workspace", export_errors,
+                         "workspace snapshot", excluded=(".git",))
     archived = EVAL / "seed-baseline"
     if archived.exists():
-        existing, errors = seed_baseline(archived)
-        if errors or existing["manifest"] != seed["manifest"]:
-            raise RuntimeError("archived seed baseline differs from the protected setup capsule")
+        existing = metadata(archived / "manifest.json", "archived seed manifest", export_errors)
+        if existing != seed["manifest"]:
+            export_errors.append({"source": "seed snapshot",
+                                  "error": "archived seed baseline differs from the protected setup capsule"})
     else:
-        shutil.copytree(seed["directory"], archived)
+        snapshot_io.snapshot(seed["directory"], archived, export_errors, "seed snapshot")
     write(EVAL / "baseline-provenance.json", {
         "source": "setup-owned capsule outside driven workspace",
         "manifest_sha256": hashlib.sha256((BASELINE / "manifest.json").read_bytes()).hexdigest(),
         "workspace_seed_errors": workspace_seed_errors(Path(state["workspace"]), seed),
     })
     scenario = SCENARIO
-    (EVAL / "scenario-source").mkdir(exist_ok=True)
+    snapshot_io.snapshot(scenario, EVAL / "scenario-source", export_errors,
+                         "scenario source", excluded=("__pycache__",))
     source_fingerprints = {}
     for path in scenario.iterdir():
         if path.is_file():
-            shutil.copy2(path, EVAL / "scenario-source" / path.name)
-            source_fingerprints[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
+            source_fingerprints[path.name] = hashlib.sha256(snapshot_io.read_bytes(path)).hexdigest()
     write(EVAL / "scenario-source-fingerprint.json", source_fingerprints)
     live = subprocess.run(["setpriv", "--no-new-privs", "tmux", "-S", str(TMUX_SOCKET),
                            "has-session", "-t", TMUX], capture_output=True).returncode == 0
@@ -395,7 +400,7 @@ def export():
         write(EVAL / "process-identity.json", {"pane": process, "session_id": state["session_id"]})
     names = {event["data"]["toolCallId"]: event["data"]["toolName"] for event in events
              if event["type"] == "tool.execution_start"}
-    with (EVAL / "transcript.txt").open("w") as transcript:
+    with StringIO() as transcript:
         if export_errors:
             transcript.write("INVALID event export: diagnostic/partial rows only, not a valid empty run. See export-errors.json.\n")
             for error in export_errors:
@@ -415,9 +420,15 @@ def export():
                 row["data"]["result_excerpt"] = str(event["data"].get("result"))[:512]
                 row["data"]["full_result_event_id"] = event["id"]
             transcript.write(json.dumps(row) + "\n")
+        snapshot_io.write_bytes(EVAL / "transcript.txt", transcript.getvalue().encode("utf-8"))
+    try:
+        plugin_config = snapshot_io.read_bytes(REPO / ".context-handoff/config.yaml").decode("utf-8")
+    except (OSError, UnicodeError):
+        plugin_config = None
+        export_errors.append({"source": "plugin config", "error": "configuration unavailable or unsafe"})
     write(EVAL / "effective-settings.json", {
         "contextManagementTools": run("copilot", "config", "contextManagementTools").strip(),
-        "plugin_config": (REPO / ".context-handoff/config.yaml").read_text(),
+        "plugin_config": plugin_config,
         "caps_changed_by_fixture": False,
         "cli_alive_at_export": live,
     })
@@ -430,10 +441,16 @@ def export():
     return summary
 
 
-def write_judge_packet():
+def write_judge_packet(invalid_analysis=False):
     diagnostics = []
     export_note = metadata(EVAL / "export-errors.json", "export diagnostics", diagnostics) \
         if (EVAL / "export-errors.json").exists() else None
+    redaction_path = EVAL / "credential-redaction.json"
+    if redaction_path.exists() or redaction_path.is_symlink():
+        redaction = metadata(redaction_path, "redaction diagnostics", diagnostics)
+        if (redaction is None or redaction.get("status") != "checked"
+                or redaction.get("errors") != []):
+            invalid_analysis = True
     write(EVAL / "judge-packet.json", {
         "transport": "interactive-cli-tmux", "verdict": "NOT-JUDGED",
         "manifest": "manifest.json", "transcript": "transcript.txt",
@@ -447,14 +464,18 @@ def write_judge_packet():
         "semantic_recovery_validation": "observed-evidence.json#semantic_recovery_validation",
         "acceptance_contract": "semantic-content-refresh-before-task",
         "export_diagnostics": "export-errors.json",
-        "event_export_status": export_note.get("status") if export_note else "not-established",
+        "redaction_diagnostics": "credential-redaction.json",
+        "event_export_status": "INVALID_EXPORT" if invalid_analysis or diagnostics
+            else export_note.get("status") if export_note else "not-established",
         "note": "Setup telemetry is not a Tier-E verdict. Read judge_attention and unexercised gates literally.",
     })
 def analyze():
-    events, evidence_errors = event_stream(EVAL / "session/events.jsonl")
+    event_path = EVAL / "session/events.jsonl"
+    events, evidence_errors = event_stream(snapshot_io.EventPath(event_path) if os.name == "posix" else event_path)
     child_activity = [event for event in events if not root_event(event)]
     quarantined = []
     parser_errors = list(evidence_errors)
+    invalid_analysis = bool(parser_errors)
     if parser_errors:
         quarantined.extend(events)
         events = []
@@ -467,6 +488,7 @@ def analyze():
         unreliable = (export_note is None or export_note.get("status") != "captured"
                       or not isinstance(export_errors, list) or bool(export_errors))
         if unreliable:
+            invalid_analysis = True
             evidence_errors.append({"source": "export diagnostics",
                                     "error": "unreliable exported event snapshot excluded from affirmative evidence"})
             if isinstance(export_errors, list):
@@ -657,7 +679,7 @@ def analyze():
             "Pre-acceptance setup may write an artifact; it is retained with its phase and not presented as a rollover checkpoint.",
         ],
     })
-    write_judge_packet()
+    write_judge_packet(invalid_analysis)
     print(json.dumps({"clear_count": len(clears), "custom_handoff_calls": len(custom),
                       "failed_tools": sum(row["success"] is False for row in calls),
                       "pressure_messages": len(pressure),
@@ -667,17 +689,15 @@ def analyze():
 
 def redact():
     token = os.environ.get("COPILOT_GITHUB_TOKEN")
-    touched = []
-    if token:
-        secret = token.encode()
-        for path in OUT.rglob("*"):
-            if path.is_file():
-                content = path.read_bytes()
-                if secret in content:
-                    path.write_bytes(content.replace(secret, b"[REDACTED]"))
-                    touched.append(str(path.relative_to(OUT)))
-    write(EVAL / "credential-redaction.json", {"borrowed_token_checked": bool(token), "redacted_files": touched})
-    print(json.dumps({"redacted_files": len(touched)}))
+    errors = []
+    touched = snapshot_io.redact_tree(OUT, token.encode() if token else None, errors)
+    write(EVAL / "credential-redaction.json", {"borrowed_token_checked": bool(token),
+                                            "redacted_files": touched, "errors": errors,
+                                            "status": "INVALID_EXPORT" if errors else "checked"})
+    if errors:
+        write_judge_packet(invalid_analysis=True)
+    print(json.dumps({"redacted_files": len(touched), "errors": errors}))
+    return errors
 
 
 if __name__ == "__main__":
@@ -713,6 +733,7 @@ if __name__ == "__main__":
     elif action == "analyze":
         analyze()
     elif action == "redact":
-        redact()
+        if redact():
+            sys.exit(1)
     else:
         raise ValueError(f"Unknown action: {action}")

@@ -185,6 +185,18 @@ Export likewise records missing, unreadable, empty or malformed event streams
 in `export-errors.json`, keeps valid rows only as explicitly diagnostic/partial
 evidence, and writes a judge packet with `INVALID_EXPORT` status. Its CLI exits
 nonzero after preserving diagnostics; it never invents an empty valid run.
+Linux snapshot and redaction I/O uses descriptor-relative no-follow access,
+including path ancestors and existing destination entries. Symlinks, hardlinks
+and nonregular files are quarantined rather than copied or redacted through.
+Output files are replaced atomically without overwriting a linked target.
+The same guards cover session, workspace, logs, source snapshots and generated
+export/configuration outputs. Redaction errors retain explicit diagnostics and
+an invalid packet status with a nonzero CLI result. These guards belong to the
+Linux fixture, not a Windows/macOS containment claim.
+Export requires proof that this invocation copied the live event file;
+an older regular destination is never a substitute for missing source events.
+Regenerated packet validity retains an invalid redaction receipt across later
+analysis/export calls until an actual successful redaction check replaces it.
 Event row validation is shared by export, analysis and the direct
 `recovery-events` CLI. Invalid raw streams return structured observations and
 nonzero status, without crediting partial rows. Checkpoint/witness stdin must
@@ -206,6 +218,8 @@ The same quarantine applies to **any** event-parser error in direct analysis,
 even without an export receipt. Partial valid rows remain inspection-only;
 the unchanged raw stream and row diagnostics preserve invalid rows, and no
 clear/measurement/artifact or semantic-recovery credit is computed from it.
+Regenerated judge packets also become `INVALID_EXPORT` when current analysis
+quarantines the stream, even if an earlier export receipt said `captured`.
 Process substitutions (`<(...)` and `>(...)`) remain potential substantive
 mutations, including nested writers hidden behind an otherwise read-only command.
 Conservative work detection also tracks literal corpus file/directory operands
