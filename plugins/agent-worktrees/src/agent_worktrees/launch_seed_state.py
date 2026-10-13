@@ -201,8 +201,9 @@ def _remove_record_state(path: Path, target: Path, receipt: Path) -> None:
     snapshots = {file: file.read_bytes().decode("utf-8") for file in files if file.exists()}
     try:
         target.unlink(missing_ok=True)
-        path.unlink(missing_ok=True)
         receipt.unlink(missing_ok=True)
+        # Keep authorization available across interrupted sidecar teardown.
+        path.unlink(missing_ok=True)
     except OSError:
         # Retain the authorized record and its evidence for a normal retry,
         # without reserializing through a separate record writer.

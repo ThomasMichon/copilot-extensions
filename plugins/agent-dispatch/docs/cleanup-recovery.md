@@ -94,13 +94,20 @@ records and the receipt with the ordinary pair-preservation reason.
 Managed garbage collection remains the deletion authority.
 
 The owned terminal-pair receipt follows its worktree record's lifetime. The
-authoritative launch-seed/record removal deletes that exact sidecar only after
-deleting the authorized YAML record, under the same record lock. Seed-only
+authoritative launch-seed/record removal deletes the owned seed and exact pair
+receipt first, then deletes the authorized YAML record **last**, under the same
+record lock. The YAML remains available to authorize normal retry if teardown
+is interrupted at either sidecar boundary. Once YAML deletion has happened,
+both owned sidecars are already absent, so repeated removal is idempotent rather
+than stranding an orphan receipt. Seed-only
 removal and preserved/live records retain pair evidence; unrelated sidecars and
 task history are untouched. Caught deletion failures restore the previously
 retained UTF-8 state snapshots through the existing atomic-write primitive, then
 surface the error so the normal removal can retry. Missing record authority and
 symbolic-file ambiguity preserve state rather than authorizing orphan pruning.
+An abrupt process interruption may leave sidecar teardown partially complete;
+it does not remove YAML authority before that teardown finishes. Retry addresses
+only that exact record, never a newer worktree identity or foreign artifact.
 This is owned-artifact teardown, not a retention sweep or record-writer repair.
 
 ## API

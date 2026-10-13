@@ -291,7 +291,7 @@ def test_terminal_pair_sidecar_removal_preserves_unknown_owner(tmp_path):
     assert pair_receipt.read_bytes() == before
 
 
-@pytest.mark.parametrize("failure", ["record", "receipt"])
+@pytest.mark.parametrize("failure", ["seed", "record", "receipt"])
 def test_terminal_pair_sidecar_removal_failure_retains_and_retries(tmp_path, monkeypatch, failure):
     path = _record(tmp_path)
     state.stage(path, kind="resume", text="retain on failed removal")
@@ -299,7 +299,7 @@ def test_terminal_pair_sidecar_removal_failure_retains_and_retries(tmp_path, mon
     pair_receipt = path.with_suffix(".terminal-pair.json")
     pair_receipt.write_text('{"version":1}', encoding="utf-8")
     before = {file: file.read_bytes() for file in (path, target, pair_receipt)}
-    failed_path = path if failure == "record" else pair_receipt
+    failed_path = {"record": path, "receipt": pair_receipt, "seed": target}[failure]
     unlink = Path.unlink
 
     def fail(file, *args, **kwargs):
@@ -315,6 +315,63 @@ def test_terminal_pair_sidecar_removal_failure_retains_and_retries(tmp_path, mon
     assert state.remove(path, remove_record=True)["record_removed"] is True
     assert not any(file.exists() for file in before)
     assert state.remove(path, remove_record=True)["record_removed"] is True
+
+
+@pytest.mark.parametrize("boundary", ["seed", "receipt", "record"])
+@pytest.mark.parametrize("position", ["before", "after"])
+def test_terminal_pair_sidecar_removal_crash_keeps_authority_until_last(
+    tmp_path, monkeypatch, boundary, position,
+):
+    class InterruptedRemoval(BaseException):
+        pass
+
+    path = _record(tmp_path)
+    state.stage(path, kind="resume", text="old allocation")
+    seed_path = state.state_path(path)
+    pair_receipt = path.with_suffix(".terminal-pair.json")
+    pair_receipt.write_text('{"version":1}', encoding="utf-8")
+    before_record = path.read_bytes()
+    newer = tracking.create_new_record(
+        "wt-newer", "worktree/wt-newer", str(tmp_path / "newer-checkout"),
+        "demo", "test", "windows", tmp_path,
+    ).yaml_path
+    state.stage(newer, kind="new", text="newer allocation stays owned")
+    newer_receipt = newer.with_suffix(".terminal-pair.json")
+    newer_receipt.write_text('{"version":1,"owner":"newer"}', encoding="utf-8")
+    foreign = tmp_path / "foreign-state.txt"
+    foreign.write_text("foreign evidence", encoding="utf-8")
+    untouched = {file: file.read_bytes() for file in
+                 (newer, state.state_path(newer), newer_receipt, foreign)}
+    targets = {"seed": seed_path, "receipt": pair_receipt, "record": path}
+    failed_path = targets[boundary]
+    unlink = Path.unlink
+    order = []
+
+    def interrupt(file, *args, **kwargs):
+        if file not in targets.values():
+            return unlink(file, *args, **kwargs)
+        name = next(name for name, target in targets.items() if target == file)
+        order.append(name)
+        if file == failed_path and position == "before":
+            raise InterruptedRemoval()
+        result = unlink(file, *args, **kwargs)
+        if file == failed_path:
+            raise InterruptedRemoval()
+        return result
+
+    monkeypatch.setattr(Path, "unlink", interrupt)
+    with pytest.raises(InterruptedRemoval):
+        state.remove(path, remove_record=True)
+    assert order == ["seed", "receipt", "record"][:len(order)]
+    if boundary == "record" and position == "after":
+        assert not any(file.exists() for file in targets.values())
+    else:
+        assert path.read_bytes() == before_record
+    assert {file: file.read_bytes() for file in untouched} == untouched
+    monkeypatch.setattr(Path, "unlink", unlink)
+    assert state.remove(path, remove_record=True)["record_removed"] is True
+    assert not any(file.exists() for file in targets.values())
+    assert {file: file.read_bytes() for file in untouched} == untouched
 
 
 def test_terminal_pair_sidecar_removal_preserves_rejected_authority(tmp_path, monkeypatch):

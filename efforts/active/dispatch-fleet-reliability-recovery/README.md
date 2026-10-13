@@ -485,3 +485,19 @@ requested contract.
 - No task history is pruned and no schema writer is replaced. Unrelated CI repair
   remains with its existing owners; integration, review and deployment custody
   remain with the coordinator.
+
+### 2026-10-13 - #6542 authority-last teardown correction
+
+- Reproduced abrupt interruption before/after each owned removal boundary;
+  deleting YAML before its receipt stranded retry without authorization.
+- Kept the existing removal transaction and error rollback, but ordered owned
+  seed and receipt deletion before deleting YAML authority last. Interrupted
+  sidecar removal retains YAML for supported retry; interruption after the final
+  deletion has no owned sidecars left to strand.
+- Added six crash-window cases and seed/receipt/YAML error injection. Retries
+  finish only the exact old record while newer worktree identities and foreign
+  artifacts remain byte-for-byte unchanged. Native authority-removal, pair and
+  leased session-consumer contracts remain validation gates.
+- No teardown marker, actor takeover, schema change, timeout increase or process
+  killing is introduced. Review, CI, integration and release remain coordinator
+  custody.
