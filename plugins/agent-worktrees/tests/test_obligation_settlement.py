@@ -59,12 +59,11 @@ def test_settle_persists_and_reloads(tmp_path):
 # ── _settle_parent_obligation hook ───────────────────────────────────────────
 
 def _child(project_root: Path, owner_ref: str = "") -> WorktreeRecord:
-    child = tracking.create_new_record(
+    return tracking.create_new_record(
         "wt-child", "worktree/wt-child", str(project_root / "wt-child"),
         "childproj", "machine-x", "windows", project_root,
+        owner_ref=owner_ref,
     )
-    child.owner_ref = owner_ref
-    return child
 
 
 def _write_parent(project_root: Path, project: str, parent_id: str,
@@ -103,6 +102,11 @@ def test_parent_claim_settled_on_child_finalize(_project_root, monkeypatch):
 
     child = _child(_project_root, parent_ref)
     config = SimpleNamespace(machine="machine-x", repo_name="childproj")
+    persisted_child = tracking.load_record(_project_root / "wt-child.yaml")
+    assert persisted_child.owner_ref == parent_ref
+    assert len(persisted_child.controllers) == 1
+    assert persisted_child.controllers[0].controller_ref == parent_ref
+    assert persisted_child.controllers[0].source == "owner-ref"
 
     _settle_parent_obligation(child, config, child_id)
 
