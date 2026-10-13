@@ -30,7 +30,7 @@ $catalog = [ordered]@{
     payload = [ordered]@{ provenance = 'payload-local' }
     commands = $commands
 }
-$catalogJson = $catalog | ConvertTo-Json -Compress -Depth 6
+@@CATALOG_BINDING_POWERSHELL@@$catalogJson = $catalog | ConvertTo-Json -Compress -Depth 6
 $fence = '```'
 $context = @(
     '## @@PLUGIN@@ session command catalog'

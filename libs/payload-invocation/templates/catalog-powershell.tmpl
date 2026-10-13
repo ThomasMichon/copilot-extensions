@@ -26,7 +26,7 @@ $catalog = [ordered]@{
         }
     )
 }
-$catalogJson = $catalog | ConvertTo-Json -Compress -Depth 6
+@@CATALOG_BINDING_POWERSHELL@@$catalogJson = $catalog | ConvertTo-Json -Compress -Depth 6
 $fence = '```'
 $context = @(
     '## @@COMMAND@@ session command catalog'

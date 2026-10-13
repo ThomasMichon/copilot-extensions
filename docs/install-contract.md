@@ -2309,7 +2309,11 @@ vision).
 - A separate `sessionStart` command hook runs
   `scripts/emit-command-catalog.{ps1,sh}` from `COPILOT_PLUGIN_ROOT` and emits
   exact payload-local `argv` plus `availability`. It never snapshots dynamic
-  runtime state or falls through to the legacy global wrapper.
+  runtime state or falls through to the legacy global wrapper. Agent Worktrees
+  additionally reports a read-only, source-qualified ownership binding from
+  lifecycle metadata or validated cell receipts; this is not runtime health.
+  The [shared catalog binding contract](../libs/payload-invocation/README.md#source-qualified-command-binding)
+  owns its schema, compatibility, and refusal rules.
 - Roster-wide tests run every runtime `agent-*` plugin's cheap stamp in an
   isolated profile with no installation-mode policy and require all declared
   commands to have a `~/.local/bin` fallback. This protects legacy/default

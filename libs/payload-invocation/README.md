@@ -46,6 +46,44 @@ which must preserve legacy behavior for absent/false policy and fail closed
 instead of falling back when namespaced evidence is requested, malformed, or
 blocked.
 
+### Source-qualified command binding
+
+`catalogBinding: true` opts a required-context runtime into the additive
+`binding` field of the existing version-1 session catalog. Agent Worktrees is
+the first adopter. Other manifests retain byte-identical catalogs. The optional
+`catalogBindingModule` vendors the same pure ownership code into the runtime
+package for its existing deploy-manifest publisher.
+
+The binding contains normalized source identity/fingerprint, plugin identity,
+and a selected installation only when its ownership has been validated.
+`status` is `selected`, `unresolved`, or `blocked`; refusal includes a reason.
+Legacy ownership is the `commandBinding` record in the existing schema-3
+deploy manifest, published by the Python, POSIX, and PowerShell installer
+boundaries. A payload path, display name, repository field, or old manifest
+without that record is not ownership. Publication refuses a conflicting
+incumbent. Validation and atomic manifest replacement share the installation
+primitive's token-owned lifecycle lock, so two publishers cannot both claim an
+unowned manifest. An unavailable source on an unowned legacy installation is reported
+without breaking its existing command.
+
+Namespaced selection validates the active install receipt, exact payload,
+source fingerprint, and governance, and carries install/activation generations.
+Legacy selection validates source, plugin, payload, runtime root, and operating
+environment against the lifecycle record. Its installation id remains stable
+across an authorized payload refresh; the old payload cannot use the refreshed
+owner's binding. Discovery never writes metadata, repairs ownership, provisions,
+or activates a cell.
+
+The exact `commands[].argv`, shell convention, and availability remain unchanged.
+Availability means the payload shim and installer exist, not that a runtime is
+provisioned or healthy. Binding selection proves ownership/governance, not build
+completion or liveness. Existing consumers remain compatible; a source-qualified
+consumer must require `binding.status == "selected"` and retain the catalog's
+argument vector rather than deriving an executable from the runtime root.
+Missing Python on Windows reports an unresolved binding while retaining the
+supported payload command. Stable out-of-session launchers and other runtime
+adopters remain separate migration work.
+
 ## Usage
 
 ```bash

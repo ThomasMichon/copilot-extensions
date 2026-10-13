@@ -356,6 +356,23 @@ def _ensure_ado_pr_cli(pr_cfg) -> None:
         output.warn(f"Could not verify Azure DevOps CLI setup: {e}")
 
 
+def _write_install_manifest(repo_dir: Path, machine: str) -> bool:
+    from . import _command_binding, _installation_context
+
+    try:
+        inst.write_deploy_manifest(repo_dir, machine)
+    except (
+        _command_binding.CommandOwnershipConflict,
+        _installation_context.InstallationContextError,
+        inst.BinstubOwnershipError,
+        OSError,
+        ValueError,
+    ) as error:
+        output.err(f"Deploy manifest publication refused: {error}")
+        return False
+    return True
+
+
 def cmd_install(args: argparse.Namespace) -> int:
     """Deploy the worktree manager shared runtime + register current project."""
     project = cfg.project_name()
@@ -496,7 +513,8 @@ def cmd_install(args: argparse.Namespace) -> int:
         pass  # hook is optional
 
     # Deploy manifest (shared runtime)
-    inst.write_deploy_manifest(repo_dir, machine)
+    if not _write_install_manifest(repo_dir, machine):
+        return 1
 
     # PR-workflow git hooks are an ADOPT concern (register), NOT install.
     # install/update are machine-local and read-only w.r.t. the repo's git: if
@@ -919,4 +937,3 @@ def cmd_unregister(args: argparse.Namespace) -> int:
     from . import unregister_cli
 
     return unregister_cli.cmd_unregister(args)
-

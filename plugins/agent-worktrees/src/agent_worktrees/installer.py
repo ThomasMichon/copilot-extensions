@@ -1403,6 +1403,20 @@ def write_deploy_manifest(repo_dir: str | Path, machine: str) -> None:
         "venv": str(venv_dir()).replace("\\", "/"),
         "runtime": "python",
     }
+    if registry_paths.installation_context() is None:
+        from . import _command_binding, _installation_context
+
+        publication = _command_binding.write_legacy_manifest(
+            _installation_context, manifest,
+            payload_root=_payload_root(repo_dir),
+            plugin_id="agent-worktrees",
+            legacy_root=install_dir(),
+            project_root=Path(repo_dir),
+        )
+        if publication["status"] == "unresolved":
+            output.warn(f"Command ownership was not published: {publication['reason']}")
+        output.ok(f"Deploy manifest: {manifest_path} (source: {kind})")
+        return
 
     tmp = manifest_path.with_name(manifest_path.name + ".tmp")
     tmp.write_text(json.dumps(manifest, indent=2))

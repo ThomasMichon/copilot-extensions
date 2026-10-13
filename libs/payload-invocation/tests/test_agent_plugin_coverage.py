@@ -213,7 +213,7 @@ def test_default_legacy_stamp_publishes_every_payload_command(
             pytest.skip("OS-profile installation-mode policy is present")
     installer = str(manifest["installer"])
     home = tmp_path / name
-    home.mkdir()
+    home.mkdir(mode=0o700)
     env = os.environ.copy()
     env.update(
         {

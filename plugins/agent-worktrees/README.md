@@ -45,6 +45,14 @@ Agent Worktrees has three shipped pieces:
 - **Project binstubs** -- one launcher per registered project, plus the global
   `agent-worktrees` CLI
 
+The existing session command catalog also reports a source-qualified
+installation binding. Its legacy owner is published in the existing deploy
+manifest; its namespaced owner is the validated active installation receipt.
+Old or unattributed installations retain their command but report unresolved
+ownership, not invented readiness. See the
+[shared binding contract](../../libs/payload-invocation/README.md#source-qualified-command-binding)
+for selection/refusal semantics and consumer compatibility.
+
 Project launchers are attributable global entry points. Each launcher invokes
 the absolute payload-local agent-worktrees command that created it and carries
 an ownership receipt under `~/.agent-worktrees/binstub-receipts/`. Routine

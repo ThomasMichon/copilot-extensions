@@ -1,0 +1,9 @@
+{
+  "comment": "Bind session catalogs to source-qualified lifecycle ownership without changing legacy command paths",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

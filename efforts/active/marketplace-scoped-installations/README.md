@@ -495,6 +495,39 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-10-13 — Source foundation landed; lifecycle-bound catalog adoption
+
+- [#6539](https://github.com/ThomasMichon/copilot-extensions/pull/6539)
+  merged after a corrected-head Copilot approval with zero open findings and
+  successful required aggregate/lockdown checks.
+  [Native Windows job 115373906641](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38418486165/job/115373906641)
+  actually executed 163 source/diagnostic cases with three POSIX-only skips,
+  both Manager cases, and both real reconciliation cases. The coupled step-name
+  guard was corrected before merge; source-only resolution was not installation
+  acceptance.
+- Added opt-in binding publication to the existing shared catalog generator,
+  with Agent Worktrees as the first adopter. Its existing Python, POSIX, and
+  PowerShell deploy-manifest writers publish normalized legacy ownership.
+  Discovery validates that record or the active namespaced receipt and reports
+  selected, unresolved, or blocked ownership without provisioning or activation.
+  Registration-reused and fallback guidance use the same generated emitter.
+- Existing exact payload `argv`, shell conventions, shim availability, and
+  supported legacy commands remain intact. Old manifests cannot establish
+  source-qualified ownership from their path alone. A conflicting manifest
+  owner refuses publication; an authorized same-source payload refresh preserves
+  installation identity. Binding selection does not claim runtime health.
+- Local acceptance passed 159 generator/catalog/scope cases with 14 platform
+  or tool-availability skips, including two real concurrent lifecycle publishers
+  with one winner. The network-disconnected Python lifecycle selection passed
+  five cases. An independent correctness review found no blocking bugs; its
+  receipt-layout and Python error-boundary observations were addressed. Native
+  Windows/current-head provider acceptance is still required before merge.
+- Other catalog adopters, stable lifecycle launchers, source metadata for
+  owner-resolved marketplace declarations, consumer migration, wider diagnostic
+  acceptance, and release/installed-copy proof remain open. No Phase 8 or
+  original Validation Plan checkbox is closed; persistent-host restrictions
+  remain unchanged.
+
 ### 2026-10-13 — Reconciliation acceptance landed; separate source provenance from cell selection
 
 - [#6532](https://github.com/ThomasMichon/copilot-extensions/pull/6532)

@@ -1734,14 +1734,23 @@ function Write-V3Manifest {
         venv           = ($LinkDir -replace '\\', '/')
         runtime        = 'python'
     }
-    $tmp = "$manifestPath.tmp"
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText(
-        $tmp,
-        ($manifest | ConvertTo-Json -Depth 4),
-        $utf8NoBom
-    )
-    Move-Item -Force -Path $tmp -Destination $manifestPath
+    if (-not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
+        throw 'Runtime interpreter required for owned deploy-manifest publication.'
+    }
+    $bindingHelper = Join-Path $PluginDir 'scripts\command_binding.py'
+    $previousOutputEncoding = $OutputEncoding
+    try {
+        $OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+        $manifest | ConvertTo-Json -Depth 8 | & $VenvPython -B -E -X utf8 $bindingHelper `
+            --payload-root $PluginDir --plugin-id agent-worktrees --legacy-root $InstallDir `
+            --publish-legacy --write-manifest --source-payload-root $pluginPath | Out-Null
+        $bindingExit = $LASTEXITCODE
+    } finally {
+        $OutputEncoding = $previousOutputEncoding
+    }
+    if ($bindingExit -ne 0) {
+        throw 'Command ownership validation refused deploy-manifest publication.'
+    }
     Write-ServiceOk "Deploy manifest written (source: $kind)"
 }
 

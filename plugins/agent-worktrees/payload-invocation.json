@@ -5,6 +5,8 @@
   "module": "agent_worktrees",
   "legacyRuntimeRoot": ".agent-worktrees",
   "installationContext": "required",
+  "catalogBinding": true,
+  "catalogBindingModule": "src/agent_worktrees/_command_binding.py",
   "noSelfProvisionEnv": "AGENT_WORKTREES_NO_SELFPROVISION",
   "payloadRootEnv": "AGENT_WORKTREES_PAYLOAD_ROOT",
   "bootTraceLogFile": "logs/activity.jsonl",

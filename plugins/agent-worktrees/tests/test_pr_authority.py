@@ -193,6 +193,7 @@ def test_registry_install_manifest_git_probes_remain_headless(authority_state, m
     monkeypatch.setattr(installer, "install_dir", lambda: root)
     monkeypatch.setattr(installer, "find_package_source", lambda *a: root / "plugin" / "src" / "agent_worktrees")
     monkeypatch.setattr(installer, "_source_kind", lambda *a: "local")
+    monkeypatch.setattr(installer, "_payload_root", lambda *a: root / "missing-payload")
     observed = []
 
     def run(args, **kwargs):

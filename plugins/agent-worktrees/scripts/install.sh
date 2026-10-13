@@ -2272,8 +2272,13 @@ print(fingerprint(Path('$stable_plugin')))
         [[ -n "$fp" ]] && payload_fingerprint="\"$fp\""
     fi
 
-    local tmp="$manifest_path.tmp"
-    cat > "$tmp" <<EOF
+    if [[ ! -x "$VENV_PYTHON" ]]; then
+        err "Runtime interpreter required for owned deploy-manifest publication."
+        return 1
+    fi
+    if ! "$VENV_PYTHON" -B -E -X utf8 "$PLUGIN_DIR/scripts/command_binding.py" \
+        --payload-root "$PLUGIN_DIR" --plugin-id agent-worktrees --legacy-root "$INSTALL_DIR" \
+        --publish-legacy --write-manifest --source-payload-root "$stable_plugin" >/dev/null <<EOF
 {
   "schema_version": 3,
   "service": "agent-worktrees",
@@ -2294,7 +2299,10 @@ print(fingerprint(Path('$stable_plugin')))
   "runtime": "python"
 }
 EOF
-    mv -f "$tmp" "$manifest_path"
+    then
+        err "Command ownership validation refused deploy-manifest publication."
+        return 1
+    fi
     ok "Deploy manifest written (source: $kind)"
 }
 

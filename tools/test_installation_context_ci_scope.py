@@ -35,6 +35,18 @@ SPEC.loader.exec_module(MODULE)
         "plugins/agent-dispatch/src/agent_dispatch/peer_launch.py",
         "plugins/agent-worktrees/src/agent_worktrees/reconcile.py",
         "plugins/agent-worktrees/tests/test_reconcile.py",
+        "plugins/agent-worktrees/src/agent_worktrees/installer.py",
+        "plugins/agent-worktrees/src/agent_worktrees/installation_cli.py",
+        "plugins/agent-worktrees/tests/test_installer_command_binding.py",
+        "plugins/agent-worktrees/scripts/install.sh",
+        "plugins/agent-worktrees/scripts/install.ps1",
+        "plugins/agent-worktrees/scripts/command_binding.py",
+        "plugins/agent-worktrees/src/agent_worktrees/_command_binding.py",
+        "plugins/agent-worktrees/scripts/emit-command-catalog.sh",
+        "plugins/agent-worktrees/scripts/emit-command-catalog.ps1",
+        "plugins/agent-worktrees/payload-invocation.json",
+        "libs/payload-invocation/command_binding.py",
+        "libs/payload-invocation/templates/catalog-posix.tmpl",
         "tools/sync-installation-context.py",
         ".github/workflows/ci.yml",
         "tools/installation_context_ci_scope.py",
@@ -107,6 +119,8 @@ def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     assert "peer_governance_wrapper_read_only" in smoke["run"]
     assert "libs/installation-context/tests/test_payload_source.py" in smoke["run"]
     assert 'payload_source or installation_context_ci_scope' in smoke["run"]
+    assert "libs/payload-invocation/tests/test_command_binding.py" in smoke["run"]
+    assert "or command_binding" in smoke["run"]
     manager = next(
         step for step in steps if step.get("name") == "Manager read-only wrapper (Windows)"
     )
@@ -122,5 +136,6 @@ def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     assert reconciliation["if"] == smoke["if"]
     assert reconciliation["timeout-minutes"] <= 2
     assert "run-plugin-tests.py agent-worktrees" in reconciliation["run"]
-    assert "-k runtime_resolution_real_helper_read_only" in reconciliation["run"]
+    assert '-k "runtime_resolution_real_helper_read_only or command_binding"' in reconciliation["run"]
+    assert "or command_binding" in reconciliation["run"]
     assert "--timeout 120" in reconciliation["run"]

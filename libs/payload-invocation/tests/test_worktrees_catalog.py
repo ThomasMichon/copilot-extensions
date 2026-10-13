@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from test_command_binding import _catalog_environment
+
 REPO = Path(__file__).resolve().parents[3]
 PLUGIN = REPO / "plugins" / "agent-worktrees"
 
@@ -21,9 +23,11 @@ def _catalog(context: str) -> dict:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX catalog test")
-def test_posix_catalog_uses_nested_payload_command() -> None:
-    env = os.environ.copy()
-    env["COPILOT_PLUGIN_ROOT"] = str(PLUGIN)
+def test_posix_catalog_uses_nested_payload_command(tmp_path: Path) -> None:
+    env = _catalog_environment({
+        "home": tmp_path, "payload": PLUGIN,
+        "environment": {"HOME": str(tmp_path), "USERPROFILE": str(tmp_path)},
+    })
     result = subprocess.run(
         ["bash", str(PLUGIN / "scripts" / "emit-command-catalog.sh")],
         check=True,
@@ -40,11 +44,13 @@ def test_posix_catalog_uses_nested_payload_command() -> None:
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
-def test_powershell_catalog_uses_nested_payload_command() -> None:
+def test_powershell_catalog_uses_nested_payload_command(tmp_path: Path) -> None:
     pwsh = shutil.which("pwsh")
     assert pwsh
-    env = os.environ.copy()
-    env["COPILOT_PLUGIN_ROOT"] = str(PLUGIN)
+    env = _catalog_environment({
+        "home": tmp_path, "payload": PLUGIN,
+        "environment": {"HOME": str(tmp_path), "USERPROFILE": str(tmp_path)},
+    })
     result = subprocess.run(
         [
             pwsh,
