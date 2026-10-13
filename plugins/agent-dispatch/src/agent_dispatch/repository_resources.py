@@ -1,0 +1,144 @@
+"""Optional registered-repository resources, resolved only at their use boundary."""
+
+from __future__ import annotations
+
+import json
+import re
+from collections.abc import Sequence
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from time import monotonic
+
+from .procutil import run_agent_worktrees_capture
+from .registrar import RegistrarError
+
+_PREFIX = "repo:"
+_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+
+
+def is_repository_resource(value: object) -> bool:
+    return isinstance(value, str) and value.startswith(_PREFIX)
+
+
+def split_repository_resource(value: str) -> tuple[str, str]:
+    name, separator, relative = value[len(_PREFIX):].partition(":")
+    if not value.startswith(_PREFIX) or not _NAME.fullmatch(name) or not separator:
+        raise RegistrarError("repository resource must be repo:<registered-name>:<relative-path>")
+    posix = PurePosixPath(relative.replace("\\", "/"))
+    windows = PureWindowsPath(relative)
+    if (
+        not relative or posix.is_absolute() or windows.anchor
+        or ".." in posix.parts or "\0" in relative
+    ):
+        raise RegistrarError(
+            f"repository resource {value!r} must stay within its registered root"
+        )
+    return name, str(posix)
+
+
+def registered_repository_root(
+    name: str, *, execution: bool = False, timeout: float = 15,
+) -> Path:
+    if not isinstance(name, str) or not _NAME.fullmatch(name):
+        raise RegistrarError("registered repository name must use letters, digits, '.', '_' or '-'")
+    result = run_agent_worktrees_capture(
+        "repos", "find", name, "--registered-only", "--json", timeout=timeout
+    )
+    if result is None:
+        raise RegistrarError(
+            f"registered repository {name!r} resolution is unavailable or timed out; "
+            "the agent-worktrees registry integration is required"
+        )
+    if result.returncode:
+        detail = (result.stderr or result.stdout or "").strip()[:1000]
+        raise RegistrarError(f"registered repository {name!r} resolution failed: {detail}")
+    try:
+        data = json.loads(result.stdout)
+    except (ValueError, TypeError) as exc:
+        raise RegistrarError("registered repository resolution returned invalid JSON") from exc
+    if not isinstance(data, dict) or data.get("registration") != "ready":
+        raise RegistrarError(
+            "agent-worktrees lacks the required registered-only repository resolution contract"
+        )
+    if (
+        data.get("name") != name or not isinstance(data.get("class"), str)
+        or data["class"] not in {"reference", "singleton", "worktree", "knowledge"}
+    ):
+        raise RegistrarError("registered repository resolution returned an invalid identity or class")
+    if execution and data["class"] == "reference":
+        raise RegistrarError(f"registered repository {name!r} is reference-only; execution is refused")
+    raw = data.get("path")
+    if not isinstance(raw, str) or not Path(raw).is_absolute():
+        raise RegistrarError("registered repository resolution did not return an absolute local root")
+    try:
+        root = Path(raw).resolve(strict=True)
+        if not root.is_dir():
+            raise RegistrarError(f"registered repository {name!r} local root is not a directory")
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise RegistrarError(f"registered repository {name!r} local root is unavailable: {exc}") from exc
+    return root
+
+
+def resolve_repository_resource(
+    value: str, *, execution: bool = False, directory: bool = False,
+) -> Path:
+    name, relative = split_repository_resource(value)
+    root = registered_repository_root(name, execution=execution)
+    resource = _resource_at_root(value, root, relative)
+    if directory and not resource.is_dir():
+        raise RegistrarError(f"repository resource {value!r} must be a directory")
+    return resource
+
+
+def _resource_at_root(value: str, root: Path, relative: str) -> Path:
+    try:
+        candidate = (root / relative).resolve(strict=True)
+        candidate.relative_to(root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise RegistrarError(
+            f"repository resource {value!r} is unavailable or escapes its registered root: {exc}"
+        ) from exc
+    return candidate
+
+
+def resolve_resource_argument(
+    value: str, *, execution: bool = False, directory: bool = False,
+) -> str:
+    if not is_repository_resource(value):
+        return value
+    return str(resolve_repository_resource(value, execution=execution, directory=directory))
+
+
+def execution_root(repository: object, cwd: str | Path | None) -> str | Path | None:
+    if repository is not None:
+        if not isinstance(repository, str):
+            raise RegistrarError("execution_repo must be a registered repository name")
+        return registered_repository_root(repository, execution=True)
+    if isinstance(cwd, str) and is_repository_resource(cwd):
+        return resolve_repository_resource(cwd, execution=True, directory=True)
+    return cwd
+
+
+def resolve_execution_resources(
+    argv: Sequence[str], cwd: str | None,
+) -> tuple[list[str], str | None]:
+    """Use one transient registered-root snapshot for a single invocation."""
+    roots: dict[str, Path] = {}
+    deadline = monotonic() + 15
+
+    def resolve(value: str) -> str:
+        if not is_repository_resource(value):
+            return value
+        name, relative = split_repository_resource(value)
+        if name not in roots:
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise RegistrarError("repository resource resolution exceeded its shared 15s budget")
+            roots[name] = registered_repository_root(name, execution=True, timeout=remaining)
+        root = roots[name]
+        return str(_resource_at_root(value, root, relative))
+
+    resolved_argv = [resolve(part) for part in argv]
+    resolved_cwd = resolve(cwd) if cwd is not None else None
+    if resolved_cwd is not None and is_repository_resource(cwd) and not Path(resolved_cwd).is_dir():
+        raise RegistrarError(f"execution cwd resource {cwd!r} must be a directory")
+    return resolved_argv, resolved_cwd

@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent implementation worktrees; sequential merges.
 - **Created:** 2026-10-12
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** agent-dispatch durable results, task/session attachment history and
   recoverable goals; plugin-services bounded work and single-owner lifecycle;
   registry-resolved configuration.
@@ -97,7 +97,7 @@ No private host, checkout, task or session identifiers are needed upstream.
 - [x] Deduplicate category, supervisor and registered-resource scopes and claim
   #6466, #6467, #6470 and #6471.
 - [x] Identify #6421 as the existing scalar writer/selected-repair implementation.
-- [ ] Review and merge this proposal before runtime implementation.
+- [x] Review and merge this proposal before runtime implementation.
 - [ ] Reconcile category-specific presentation to the existing dispatch vision;
   land any needed standing-intent extension before realizing it.
 
@@ -201,3 +201,14 @@ requested contract.
   legacy repair; cooperation replaces a competing implementation.
 - Opened the distinct coordination issues above. No runtime implementation,
   retention change, service update or worktree removal is part of this proposal.
+
+### 2026-10-13 - Reviewed proposal and implementation ownership
+
+- Proposal #6472 merged after an actual owner-authored clean `COMMENTED`
+  Copilot review and passing required CI. The full agentic review lane reported
+  a runner-start timeout; the available Lite review reported zero findings.
+- Began isolated category-intent reconciliation, bounded-supervisor and
+  registered-resource slices. Each implementation uses its own source worktree;
+  the coordinator retains serial merge and deployment obligations.
+- Existing #6421 scalar-repair ownership and the lifecycle owners remain intact.
+  Category realization remains gated on standing-intent reconciliation.

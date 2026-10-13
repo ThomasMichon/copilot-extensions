@@ -56,7 +56,7 @@ _KNOWN_KEYS = frozenset(
         "task_label", "forge", "reservation", "pool", "filters", "owner",
         "description", "worker_guidance", "worker_identity",
         "allow_self_config_changes", "require_verification",
-        "evaluator_ref", "task_contract", "rehearsal_mode",
+        "evaluator_ref", "task_contract", "rehearsal_mode", "execution_repo",
     }
 )
 _FORGE_KEYS = (
@@ -174,6 +174,8 @@ def validate_config(
     ``validate_script_forge_config``'s own handling."""
     if not isinstance(data, Mapping):
         raise RegistrarError("repository-issue-loop: expected a mapping")
+    from .repository_resources import execution_root
+
     extra = sorted(set(data) - _KNOWN_KEYS)
     if extra:
         raise RegistrarError(
@@ -182,6 +184,7 @@ def validate_config(
         )
     if data.get("kind") != "repository-issue-loop":
         raise RegistrarError("repository-issue-loop kind must be 'repository-issue-loop'")
+    cwd = execution_root(data.get("execution_repo"), cwd)
     name = _string(data, "name")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
         raise RegistrarError("repository-issue-loop name: use letters, digits, '.', '_' or '-'")
@@ -437,6 +440,7 @@ def validate_config(
         "allow_self_config_changes": allow_self_config,
         "task_contract": task_contract,
         "rehearsal_mode": rehearsal_mode,
+        **({"execution_repo": data["execution_repo"]} if "execution_repo" in data else {}),
     }
 
 def expand_repository_issue_loop(
@@ -460,7 +464,9 @@ def expand_repository_issue_loop(
         "lease_scope": f"repository-issue-loop:{config['name']}",
         "repository_issue_loop": dict(data),
     }
-    if repo_root is not None:
+    if data.get("execution_repo") is not None:
+        spec["cwd"] = f"repo:{data['execution_repo']}:."
+    elif repo_root is not None:
         # Absolute: a relative path would resolve wrong (registrar dir, not repo root).
         spec["cwd"] = str(Path(repo_root).resolve())
     common = {

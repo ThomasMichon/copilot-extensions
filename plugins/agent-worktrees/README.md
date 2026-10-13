@@ -84,6 +84,16 @@ reached over a process boundary. The small `packaging` dependency is explicit
 so reconciliation preserves version ordering and downgrade protection without
 relying on UI dependencies.
 
+## Authoritative Repository Roots
+
+Consumers requiring authoritative repository roots use
+`agent-worktrees repos find <name> --registered-only --json`. This read-only
+contract returns `registration: ready`, the registered name/class/remote and
+current platform's existing local root. Unlike ordinary `repos find`, it never
+uses a source-root discovery fallback. Invalid or duplicate registry mappings,
+missing registrations and unavailable checkouts are explicit errors. Acquisition
+and adoption remain separate owner operations; this read never clones a repo.
+
 ## Independent Execution Spaces
 
 Native Windows and WSL can register independent execution-space keys without

@@ -791,6 +791,56 @@ declaration, repository, or template is edited, and no daemon is started.
 surface used by the supervised child. Normal deployments declare the emitter
 rather than wiring cron, a Scheduled Task, or another external timer.
 
+### Registered repository resources
+
+Repository-owned declarations can refer to `repo:<registered-name>:<relative-path>`
+for emitter/evaluator argv resources and execution `cwd`, script-forge
+`command`/`cwd`, effort-driver `state_root`, and recipe `extends:`. These
+references remain unchanged in declarations and generated emitter specs; the
+concrete root is derived at use time from the owning repository registry.
+Paths must remain within that root, including after symlink resolution.
+One script invocation uses a transient root snapshot shared by argv and cwd;
+its registry lookups share a 15-second budget instead of receiving a new full
+budget for each argument. This is separate from the script execution timeout.
+
+Repository and effort loops may set `execution_repo: tools` to bind their
+script/worker-identity context to a registered repository. This is independent
+of `repo`, which continues to identify the forge/task lane. For example:
+
+```yaml
+kind: evaluator
+name: verify-work
+spec:
+  cwd: "repo:tools:."
+  scripts:
+    verify-work: ["python", "repo:tools:scripts/verify.py"]
+  timeout_seconds: 30
+```
+
+An identity-only discovery pointer uses the same registration:
+
+```bash
+agent-dispatch registrar add-pointer tools --kind repo --repository tools
+```
+
+The stored pointer contains `repository`, not a second checkout `location`.
+Explicitly migrating an existing repo pointer to the same registered root
+preserves its owner and lane aliases. A different target remains a retarget,
+not an inferred migration; an unavailable legacy target requires provenance
+verification before replacement. Legacy setup writers cannot downgrade a named
+pointer back to a checkout path; changing a named target requires an explicit
+registered repository name.
+
+Named resources require the optional agent-worktrees integration's
+`repos find <name> --registered-only --json` contract. Missing, malformed or
+duplicate registrations, absent local checkouts and older peers fail explicitly;
+no PATH/ancestor/srcroot discovery substitutes for registration. Acquire or
+adopt an absent checkout through its owner's standard `repos clone`/adoption
+flow before retrying. Read-only discovery never clones or registers it.
+Reference-class checkouts may supply read-only recipe/declaration content but
+cannot execute scripts. Existing standalone non-repository commands and legacy
+path declarations remain compatible; migration is explicit, not a startup rewrite.
+
 ### Repository reviewer loops (`agent-dispatch reviewer-loop`)
 
 A repository can compose its review source, lifecycle evaluator, and bounded

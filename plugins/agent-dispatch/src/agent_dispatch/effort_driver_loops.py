@@ -27,6 +27,7 @@ from .registrar import (
     load_declaration,
 )
 from .worker_identities import load_worker_identity
+from .repository_resources import execution_root, is_repository_resource, resolve_resource_argument
 
 _TERMINAL = frozenset({"completed", "abandoned", "dead_letter"})
 _ACTIVE_STATUSES = "proposed,queued,claimed,started,suspended,submitted"
@@ -40,6 +41,7 @@ _KNOWN_KEYS = frozenset(
         "tick_interval_seconds",
         "effort_slugs",
         "state_root",
+        "execution_repo",
         "task_label",
         "pool",
         "filters",
@@ -112,6 +114,8 @@ def _resolve_state_root(
         if cwd is None:
             return str(Path.cwd().resolve())
         return str(Path(cwd).resolve())
+    if is_repository_resource(state_root):
+        return resolve_resource_argument(state_root, execution=True, directory=True)
     root = Path(state_root)
     if not root.is_absolute():
         if cwd is None:
@@ -138,6 +142,7 @@ def validate_config(
         )
     if data.get("kind") != "effort-driver-loop":
         raise RegistrarError("effort-driver-loop kind must be 'effort-driver-loop'")
+    cwd = execution_root(data.get("execution_repo"), cwd)
     name = _string(data, "name")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
         raise RegistrarError("effort-driver-loop name: use letters, digits, '.', '_' or '-'")
@@ -287,6 +292,7 @@ def validate_config(
         "tick_interval_seconds": tick_interval,
         "effort_slugs": list(effort_slugs),
         "state_root": state_root,
+        **({"execution_repo": data["execution_repo"]} if "execution_repo" in data else {}),
         "task_label": task_label,
         "pool": pool,
         "filters": filters_payload(placement),
@@ -315,7 +321,9 @@ def expand_effort_driver_loop(
         "lease_scope": f"effort-driver-loop:{config['name']}",
         "effort_driver_loop": dict(data),
     }
-    if repo_root is not None:
+    if data.get("execution_repo") is not None:
+        spec["cwd"] = f"repo:{data['execution_repo']}:."
+    elif repo_root is not None:
         spec["cwd"] = str(Path(repo_root).resolve())
     common = {
         "owner": config["owner"],

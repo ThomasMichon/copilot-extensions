@@ -17,7 +17,8 @@ def register_registrar_commands(sub) -> None:
     reg_sub = p.add_subparsers(dest="registrar_command", required=True)
     rp = reg_sub.add_parser("add-pointer", help="record (or replace) a pointer to a location of declaration documents")
     rp.add_argument("name", help="unique pointer name (letters, digits, '-', '_')")
-    rp.add_argument("location", help="directory of declaration docs, or (with --kind repo) a repo root whose .copilot-extensions/agent-dispatch/registrar/ (legacy .agent-dispatch/registrar/) is read")
+    rp.add_argument("location", nargs="?", help="directory of declaration docs, or legacy repo root; omit with --repository")
+    rp.add_argument("--repository", help="registered repository name; requires --kind repo and resolves its root at use time")
     rp.add_argument("--kind", choices=["dir", "repo"], default="dir")
     rp.add_argument("--owner", help="provenance stamped on declarations read here")
     rp.add_argument(

@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve named repository resources at execution and discovery boundaries without persisting checkout roots.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

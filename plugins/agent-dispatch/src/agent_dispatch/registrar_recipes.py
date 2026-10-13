@@ -652,6 +652,10 @@ def resolve_recipe_ref(ref: object, *, base_dir: Path) -> Mapping[str, Any]:
             ) from None
     if ref.startswith(_PLUGIN_REF_PREFIX):
         return _load_plugin_recipe_document(ref)
+    if ref.startswith("repo:"):
+        from .repository_resources import resolve_repository_resource
+
+        return _read_recipe_document(resolve_repository_resource(ref), ref=ref)
     return _load_recipe_document(ref, base_dir=base_dir)
 
 
@@ -733,6 +737,11 @@ def _ref_identity(ref: str, *, base_dir: Path) -> tuple[str, Path | None]:
     if ref.startswith(_PLUGIN_REF_PREFIX):
         path = _resolve_plugin_ref_path(ref)
         return str(path), path
+    if ref.startswith("repo:"):
+        from .repository_resources import resolve_repository_resource
+
+        path = resolve_repository_resource(ref)
+        return str(path), path
     path = Path(ref)
     if not path.is_absolute():
         path = base_dir / path
@@ -783,6 +792,8 @@ def _absolutize_emitter_cwd(template: Mapping[str, Any], *, directory: Path) -> 
         return dict(template)
     cwd = spec.get("cwd")
     if not isinstance(cwd, str) or not cwd:
+        return dict(template)
+    if cwd.startswith("repo:"):
         return dict(template)
     if _PLACEHOLDER_RE.search(cwd):
         # Still has an unresolved {placeholder} -- not yet a real path;

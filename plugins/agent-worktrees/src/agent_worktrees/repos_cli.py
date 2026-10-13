@@ -32,7 +32,8 @@ def _repos_usage() -> None:
     print()
     print("Commands:")
     print("  list [--class reference|singleton|worktree|knowledge]   List known repositories")
-    print("  find <name>                         Resolve a repo to its local path")
+    print("  find <name> [--registered-only]      Resolve a repo to its local path")
+    print("                                      --registered-only refuses discovery fallback")
     print("  add <name> <path>                   Register a repo at a known path")
     print("     [--class C] [--remote URL] [--default-branch B]")
     print("     [--account LOGIN] [--tags a,b] [--contributing PATH]")
@@ -220,6 +221,25 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             return 1
         name = rest[0]
         json_out = "--json" in rest
+        if "--registered-only" in rest:
+            try:
+                entry, root = repos.resolve_registered_repo(name)
+            except repos.RepositoryResolutionError as exc:
+                if json_out:
+                    return output._json_error(str(exc))
+                output.err(str(exc))
+                return 1
+            if json_out:
+                output._json_output({
+                    "registration": "ready",
+                    "name": entry.name,
+                    "class": entry.repo_class,
+                    "remote": entry.remote,
+                    "path": str(root),
+                })
+            else:
+                print(root)
+            return 0
         path = repos.resolve_path(name)
         if path:
             if json_out:

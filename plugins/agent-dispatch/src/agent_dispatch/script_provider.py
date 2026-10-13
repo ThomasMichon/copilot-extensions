@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any, NoReturn
 
 from .issue_loop_markers import validate_marker_payload
 from .registrar import RegistrarError
+from .repository_resources import is_repository_resource, resolve_execution_resources
 
 if TYPE_CHECKING:
     from .repository_issue_loops import Issue
@@ -218,7 +219,11 @@ def validate_script_forge_config(
             "forge.provider 'script' -- expected a non-empty list of "
             "non-empty strings"
         )
-    if "command" in inherited_script_fields and not Path(command[0]).is_absolute():
+    named_command = is_repository_resource(command[0])
+    if (
+        "command" in inherited_script_fields and not named_command
+        and not Path(command[0]).is_absolute()
+    ):
         raise RegistrarError(
             "repository-issue-loop forge.command: inherited via `extends:` "
             "from a different declaration -- a relative script path cannot "
@@ -232,7 +237,12 @@ def validate_script_forge_config(
         if repo_root is not None
         else None
     )
-    resolved_command = [str(part) for part in command]
+    declared_cwd_value = forge.get("cwd")
+    if declared_cwd_value is not None and (
+        not isinstance(declared_cwd_value, str) or not declared_cwd_value
+    ):
+        raise RegistrarError("repository-issue-loop forge.cwd: expected a non-empty string")
+    resolved_command, resource_cwd = resolve_execution_resources(command, declared_cwd_value)
     # Normalize Windows-style separators before constructing `Path`: POSIX
     # treats a literal backslash as an ordinary filename character, not a
     # separator, so `scripts\poller.py` authored on Windows would
@@ -256,11 +266,8 @@ def validate_script_forge_config(
     script_path_resolved = resolved_command[0]
     resolved_command = _portable_script_prefix(resolved_command[0]) + resolved_command[1:]
 
-    cwd = forge.get("cwd")
-    if cwd is not None and (not isinstance(cwd, str) or not cwd):
-        raise RegistrarError(
-            "repository-issue-loop forge.cwd: expected a non-empty string"
-        )
+    cwd = resource_cwd
+    declared_cwd = _normalize_declared_path(declared_cwd_value) if declared_cwd_value else None
     if cwd is not None:
         # Same normalization as `command[0]` above -- POSIX treats a
         # literal backslash as an ordinary filename character, so an
@@ -335,7 +342,6 @@ def validate_script_forge_config(
         )
     declared_command = [str(part) for part in command]
     declared_command[0] = _normalize_declared_path(declared_command[0])
-    declared_cwd = _normalize_declared_path(cwd) if cwd else cwd
     return {
         "command": resolved_command,
         "cwd": resolved_cwd,

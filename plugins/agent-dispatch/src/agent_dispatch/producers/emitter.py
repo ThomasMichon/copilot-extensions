@@ -23,6 +23,7 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from ..client import DispatchClient
+from ..repository_resources import resolve_execution_resources, resolve_resource_argument
 
 
 class EmitterError(ValueError):
@@ -427,9 +428,12 @@ def run_side_load(
     side_load = spec.get("side_load")
     if not side_load:
         raise EmitterError(f"emitter {spec['id']!r} does not declare side_load")
+    command, cwd = resolve_execution_resources(
+        _render_command(side_load["command"], change_ref=change_ref), spec.get("cwd"),
+    )
     completed = runner(
-        _render_command(side_load["command"], change_ref=change_ref),
-        cwd=spec.get("cwd"),
+        command,
+        cwd=cwd,
         env={
             **os.environ,
             **(spec.get("env") or {}),
@@ -466,6 +470,7 @@ def run_tick(
 ) -> dict[str, Any]:
     """Acquire/renew the emitter lease and invoke one command tick when held."""
     validate_spec(spec)
+    cwd = resolve_resource_argument(spec["cwd"], execution=True) if spec.get("cwd") else None
     scope = lease_scope(spec)
     lease = client.acquire_schedule_lease(
         scope,
@@ -495,7 +500,7 @@ def run_tick(
                 ci_config = dict(spec["ci_repair"])
                 for key in ("source_command", "admission_command"):
                     ci_config[key] = _render_command(ci_config[key])
-                result = run_ci_tick(client, ci_config, runner=runner, cwd=spec.get("cwd"))
+                result = run_ci_tick(client, ci_config, runner=runner, cwd=cwd)
             except AdmissionRefused as exc:
                 return {
                     "held": True, "lease": lease.get("lease"), "scope": scope,
@@ -516,7 +521,7 @@ def run_tick(
                 client,
                 spec["repository_issue_loop"],
                 clock=clock,
-                cwd=spec.get("cwd"),
+                cwd=cwd,
             )
             return {
                 "held": True,
@@ -535,7 +540,7 @@ def run_tick(
                 client,
                 spec["effort_driver_loop"],
                 clock=clock,
-                cwd=spec.get("cwd"),
+                cwd=cwd,
             )
             return {
                 "held": True,
@@ -548,9 +553,12 @@ def run_tick(
                 "duration_seconds": max(0.0, clock() - started_at),
             }
         task_output_json = spec.get("task_output") == "json"
+        command, command_cwd = resolve_execution_resources(
+            _render_command(spec["command"]), spec.get("cwd"),
+        )
         completed = runner(
-            _render_command(spec["command"]),
-            cwd=spec.get("cwd"),
+            command,
+            cwd=command_cwd,
             env=env,
             timeout=spec.get("timeout_seconds"),
             check=False,
