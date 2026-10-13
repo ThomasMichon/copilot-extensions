@@ -11,7 +11,9 @@ PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000
 
 
 def reject_links(path: Path) -> None:
-    """Inspect directory entries, including dangling links, before creating state."""
+    """Inspect the path and its ancestors for symlink/reparse indirection,
+    including dangling links.
+    """
     import stat
 
     for candidate in (path, *path.parents):

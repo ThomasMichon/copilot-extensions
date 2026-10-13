@@ -372,6 +372,80 @@ def test_unsupported_launch_never_requests_engine_staging(monkeypatch, options, 
     assert calls == []
 
 
+@pytest.mark.parametrize("target", [None, ""])
+@pytest.mark.parametrize("no_mux", [False, True])
+def test_prompted_resume_missing_id_refuses_before_history_or_engine_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str | None, no_mux: bool,
+) -> None:
+    from worktree_manager import __main__ as entrypoint, engine_client, seed_launch
+    from worktree_manager.picker_app import LaunchRequest
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid seeded resume must refuse before history, leg lookup, or resolve")
+    monkeypatch.setattr(seed_history.SeedHistory, "remember", forbidden)
+    monkeypatch.setattr(engine_client, "execution_leg_get", forbidden)
+    monkeypatch.setattr(engine_client, "resolve_launch_plan", forbidden)
+    request = LaunchRequest(
+        project="demo", worktree_id=target, mode="resume", seed_prompt="draft", no_mux=no_mux,
+    )
+    with pytest.raises(seed_launch.UnsupportedSeedPrompt, match="worktree id"):
+        seed_launch.require_supported_seed(request)
+    assert entrypoint._run_launch(request) == 1
+
+
+@pytest.mark.parametrize("prompt", [None, ""])
+def test_missing_resume_id_seedless_guard_retains_existing_behavior(
+    monkeypatch: pytest.MonkeyPatch, prompt: str | None,
+) -> None:
+    from worktree_manager import engine_client, seed_launch
+    from worktree_manager.picker_app import LaunchRequest
+
+    monkeypatch.setattr(engine_client, "execution_leg_get", lambda *a: pytest.fail("unexpected probe"))
+    seed_launch.require_supported_seed(LaunchRequest(
+        project="demo", worktree_id=None, mode="resume", seed_prompt=prompt,
+    ))
+
+
+@pytest.mark.parametrize("target", [None, ""])
+def test_missing_resume_id_ui_refuses_before_history_composer(
+    monkeypatch: pytest.MonkeyPatch, target: str | None,
+) -> None:
+    from types import SimpleNamespace
+    from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
+        PickerScreenWorktreeActionsMixin,
+    )
+    from worktree_manager.production_picker.picker_tui.resume_prompt_actions import open_resume_prompt
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("missing resume target must not open or read/write a history composer")
+    monkeypatch.setattr(seed_history.SeedHistory, "entries", forbidden)
+    monkeypatch.setattr(seed_history.SeedHistory, "remember", forbidden)
+    record = {"raw": {"id": target}}
+    screen = SimpleNamespace(
+        data=[record], debug="", app=SimpleNamespace(push_screen=forbidden),
+        _session_action_verbs=forbidden,
+    )
+    screen._find_internal_worktree = (
+        lambda *args: PickerScreenWorktreeActionsMixin._find_internal_worktree(screen, *args)
+    )
+    open_resume_prompt(screen, record)
+    assert "cold-start-only" in screen.debug
+
+
+def test_new_no_mux_seed_keeps_raw_whitespace_and_requires_no_resume_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from worktree_manager import engine_client, seed_launch
+    from worktree_manager.picker_app import LaunchRequest
+
+    monkeypatch.setattr(engine_client, "execution_leg_get", lambda *a: pytest.fail("unexpected probe"))
+    request = LaunchRequest(
+        project="demo", worktree_id=None, mode="new", seed_prompt=" \n ", no_mux=True,
+    )
+    seed_launch.require_supported_seed(request)
+    assert request.seed_prompt == " \n " and request.no_mux
+
+
 @pytest.mark.parametrize("error_type", [EngineError, EngineFeatureUnavailable])
 def test_execution_leg_probe_failure_precedes_staging(monkeypatch, error_type):
     from worktree_manager import __main__ as entrypoint, engine_client

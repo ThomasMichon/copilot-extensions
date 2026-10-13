@@ -15,6 +15,34 @@ class SeedHistoryError(RuntimeError):
     """Prompt recovery storage is unavailable; never include prompt contents."""
 
 
+def _has_history_schema(conn: sqlite3.Connection) -> bool:
+    # One snapshot avoids mixed observations when another first writer creates the schema.
+    objects, seeds, pages, free, version, application = conn.execute(
+        "SELECT (SELECT count(*) FROM sqlite_master), "
+        "(SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'seeds'), "
+        "(SELECT page_count FROM pragma_page_count), "
+        "(SELECT freelist_count FROM pragma_freelist_count), "
+        "(SELECT user_version FROM pragma_user_version), "
+        "(SELECT application_id FROM pragma_application_id)"
+    ).fetchone()
+    if objects == 0:
+        if pages in (0, 1) and free == version == application == 0:
+            return False
+        raise SeedHistoryError("Local seed history is not an uninitialized database.")
+    columns = {
+        row[1]: (row[2].upper(), row[3], row[5])
+        for row in conn.execute("PRAGMA table_info(seeds)")
+    }
+    if seeds != 1 or columns != {
+        "id": ("INTEGER", 0, 1),
+        "project": ("TEXT", 1, 0),
+        "prompt": ("TEXT", 1, 0),
+        "submitted_at": ("REAL", 1, 0),
+    }:
+        raise SeedHistoryError("Local seed history has an incompatible database schema.")
+    return True
+
+
 class SeedHistory:
     def __init__(self, project: str, root: Path | None = None) -> None:
         self.project = project
@@ -39,7 +67,10 @@ class SeedHistory:
             if not self.path.exists():
                 return []
             self._protect()
-            with closing(sqlite3.connect(self.path, timeout=5)) as conn:
+            uri = self.path.absolute().as_uri() + "?mode=ro"
+            with closing(sqlite3.connect(uri, timeout=5, uri=True)) as conn:
+                if not _has_history_schema(conn):
+                    return []
                 return [
                     row[0] for row in conn.execute(
                         "SELECT prompt FROM seeds WHERE project = ? ORDER BY id DESC",
@@ -58,11 +89,13 @@ class SeedHistory:
             self._protect()
             with closing(sqlite3.connect(self.path, timeout=5)) as conn, conn:
                 protect(self.path)
+                _has_history_schema(conn)
                 conn.execute(
                     "CREATE TABLE IF NOT EXISTS seeds "
                     "(id INTEGER PRIMARY KEY, project TEXT NOT NULL, "
                     "prompt TEXT NOT NULL, submitted_at REAL NOT NULL)"
                 )
+                # Serialize the latest-prompt read and insert; the context commits or rolls back.
                 conn.execute("BEGIN IMMEDIATE")
                 previous = conn.execute(
                     "SELECT prompt FROM seeds WHERE project = ? ORDER BY id DESC LIMIT 1",

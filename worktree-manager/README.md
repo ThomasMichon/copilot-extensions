@@ -197,6 +197,10 @@ stays open with its text and an error rather than launching an unprotected
 request. This recovery history is separate from the engine's pending launch
 intent and never retries an allocation automatically.
 
+History reads open SQLite in read-only mode. A valid uninitialized empty database
+is treated as empty history without creating its schema. Corrupt, foreign, or
+incompatible stores refuse access instead of being silently repaired or migrated.
+
 Nonempty prompts with Anchor, Bare, AHP, or Local model selected refuse
 confirmation visibly and keep the draft open without recording it. Clear the
 prompt or change the options to continue. Remote and cross-environment
@@ -205,6 +209,8 @@ prompt requests for those transports, Bare resume, or active/uncertain execution
 legs refuse before engine staging. Seedless launches are unchanged. No Mux is a
 supported prompt launch modifier. History retains the exact paste buffer;
 launch submission retains the composer's existing surrounding-whitespace trimming.
+Programmatic seeded Resume requests must identify an existing worktree; missing
+or empty worktree ids refuse before any execution-leg lookup or launch resolution.
 
 Sessionless workspaces retained by another controller appear separately under
 **Owned**, not as ordinary resumable conversations. Use **Go to controller**
