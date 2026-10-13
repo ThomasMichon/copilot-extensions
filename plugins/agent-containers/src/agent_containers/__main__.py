@@ -30,7 +30,7 @@ import sys
 from dataclasses import asdict
 from pathlib import Path, PurePosixPath
 
-from agent_procutil import no_window_flags
+from agent_procutil import no_window_flags as _creation_flags
 
 from . import claim_provider_cli, rescue_capture_cli
 from . import copilot_process_auth as process_auth
@@ -60,10 +60,6 @@ from .ssh_transport import (
 
 log = logging.getLogger("agent-containers")
 _BUSY_EXIT = 75
-
-
-def _creation_flags() -> int:
-    return no_window_flags()
 
 
 def main(argv: list[str] | None = None) -> int:
