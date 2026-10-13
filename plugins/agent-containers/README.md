@@ -267,7 +267,14 @@ one-use launch file is consumed by a narrow executable wrapper, not sourced
 into the Session Host, `embody`, tmux, container, or session environment.
 Successful CLI startup must confirm the native child consumed its file before
 cleanup removes the executable wrapper; an `embody` return alone is not proof
-of native startup. Copilot receives `--secret-env-vars=COPILOT_GITHUB_TOKEN`, which strips that
+of native startup. Explicit create-or-resume receipts distinguish a new native
+child from rejoining a running session: a rejoin cleans unused launch inputs
+without claiming the existing process's authentication was refreshed.
+The attended CLI writes that nonsecret result before attaching.
+Session Host authentication lives in the existing launch handle's companion
+directory, so the original `session-host-cleanup --remote-env` call removes it
+even when an older bridge knows no additional authentication response fields.
+Copilot receives `--secret-env-vars=COPILOT_GITHUB_TOKEN`, which strips that
 value from its normal shell and MCP child environments. Existing `GH_TOKEN`,
 `GITHUB_TOKEN`, Git credential helpers, and relay identities are independent
 and remain available to downstream tools.

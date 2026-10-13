@@ -94,6 +94,35 @@ def test_process_launcher_refuses_unknown_template_missing_file_and_custom_path(
         m._build_launch_cmd(config, args, str(tmp_path))
 
 
+@pytest.mark.guard
+def test_normalized_setup_path_as_data_cannot_bypass_executable_validation(tmp_path):
+    from agent_worktrees import installer
+
+    launcher = tmp_path / "copilot"
+    launcher.write_text("#!/bin/sh\nexit 0\n")
+    launcher.chmod(0o700)
+    args = _args([])
+    args.copilot_process_launcher = str(launcher)
+    command = ["custom-agent", str(installer.install_dir() / "scripts" / "default-setup.sh")]
+    with pytest.raises(m.LaunchPreflightError, match="direct copilot"):
+        m._build_launch_cmd(_config({"linux": command}), args, str(tmp_path))
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("created", [True, False])
+def test_attached_launch_result_is_nonsecret_and_exclusive(tmp_path, created):
+    from agent_worktrees.process_launcher import write_launch_result
+
+    path = tmp_path / "result.json"
+    args = argparse.Namespace(
+        launch_result_file=str(path), copilot_process_launcher=str(tmp_path / "copilot"),
+    )
+    write_launch_result(args, {"created": created, "resumed": not created, "token": "not-copied"})
+    assert json.loads(path.read_text()) == {"version": 1, "created": created, "resumed": not created}
+    with pytest.raises(FileExistsError):
+        write_launch_result(args, {"created": created, "resumed": not created})
+
+
 def test_plain_launch_does_not_append_removed_no_sandbox_flag():
     # Copilot CLI 1.0.81-9 removed --no-sandbox. Auto-appending the retired flag
     # makes every new interactive worktree and handoff successor exit at launch.

@@ -78,6 +78,11 @@ def add_copilot_parser(sub) -> None:
         "tmux/psmux, same resolution as the rest of agent-worktrees)",
     )
     handoff_cli.add_launch_passthrough_args(p)
+    p.add_argument(
+        "--launch-result-file", default=None, metavar="PATH",
+        help="Write a nonsecret create-or-resume receipt beside the selected "
+        "process launcher before attaching; the filename must be result.json.",
+    )
 
 
 def cmd_copilot(args: argparse.Namespace) -> int:
@@ -122,6 +127,13 @@ def cmd_copilot(args: argparse.Namespace) -> int:
     session_name = result.get("session")
     if not session_name:
         output.err("copilot: embodiment result had no session name")
+        return 1
+    from .process_launcher import write_launch_result
+
+    try:
+        write_launch_result(args, result)
+    except (OSError, ValueError) as exc:
+        output.err(f"copilot: could not publish the launch result: {exc}")
         return 1
 
     mux_bin = sessions._mux_bin(getattr(args, "mux", None))

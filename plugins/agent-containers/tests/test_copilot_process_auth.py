@@ -18,6 +18,7 @@ from agent_containers import copilot_process_auth as auth
 from agent_containers import copilot_venue, resolver
 from agent_containers.config import ContainersConfig, FleetConfig
 from agent_containers.session_host_context import TrustedContext
+from agent_containers.ssh_transport import cleanup_remote_env as real_cleanup_remote_env
 
 
 @pytest.fixture
@@ -26,7 +27,7 @@ def launch_seams(monkeypatch):
     fleet = FleetConfig(copilot_cli_account="inference-user")
     target = SimpleNamespace(config=config, fleet=fleet, user="vscode",
                              actual_profile="trusted", workspace_folder="/workspace")
-    seen = SimpleNamespace(staged=[], commands=[], cleaned=[], native=[])
+    seen = SimpleNamespace(staged=[], commands=[], cleaned=[], native=[], created=True)
     tokens = iter(("inference-one", "inference-two"))
     monkeypatch.setattr(resolver, "host_copilot_cli_token", lambda account: next(tokens))
     monkeypatch.setattr(cli, "host_gh_token", lambda: "git-only")
@@ -51,6 +52,9 @@ def launch_seams(monkeypatch):
             seen.native.append(kwargs["input_text"])
         if "COPILOT_AUTH_CONSUMED" in argv[-1]:
             return subprocess.CompletedProcess(argv, 0, "COPILOT_AUTH_CONSUMED\n", "")
+        if argv[-1].endswith("/result.json"):
+            payload = {"version": 1, "created": seen.created, "resumed": not seen.created}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(payload), "")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     monkeypatch.setattr(auth.transport, "_run", run)
@@ -61,7 +65,9 @@ def launch_seams(monkeypatch):
     monkeypatch.setattr(cli, "build_ssh_command", lambda cfg, command, **kw: ["ssh", command])
     monkeypatch.setattr(auth.transport, "build_ssh_command", lambda cfg, command, **kw: ["ssh", command])
     monkeypatch.setattr(cli.subprocess, "run", lambda argv, **kw:
-        seen.commands.append((argv, kw)) or subprocess.CompletedProcess(argv, 0, "", ""))
+        seen.commands.append((argv, kw)) or subprocess.CompletedProcess(
+            argv, 0, json.dumps({"created": seen.created, "resumed": not seen.created}), "",
+        ))
     monkeypatch.setattr(cli, "_exec_stdio", lambda argv, env:
         seen.commands.append((argv, {"env": env})) or 0)
     return target, seen
@@ -111,7 +117,7 @@ def test_each_actual_launch_reads_updated_source_without_manager_token(
             assert cli._cmd_session_host_prepare(args) == 0
             prepared = json.loads(capsys.readouterr().out)
             assert ".env.d" in prepared["acp_command"]
-            assert prepared["copilot_auth_env"]
+            assert "copilot_auth_env" not in prepared
             assert expected not in json.dumps(prepared)
         elif boundary == "detached":
             assert adapter.launch("agent-worktrees embody --detach", timeout=30)[0] == 0
@@ -219,6 +225,70 @@ def test_missing_consumption_receipt_refuses_success(monkeypatch):
         subprocess.CompletedProcess(argv, 0, "", ""))
     with pytest.raises(RuntimeError, match="did not confirm consuming"):
         auth.wait_for_consumption("example-1", "vscode", "/launch/auth.env", timeout=1)
+
+
+@pytest.mark.guard
+def test_detached_rejoin_does_not_wait_or_claim_refresh(launch_seams, monkeypatch):
+    target, seen = launch_seams
+    seen.created = False
+    monkeypatch.setattr(auth, "wait_for_consumption", lambda *a, **k: pytest.fail("not a new child"))
+    adapter = detach._ContainerAdapter(
+        name="example-1", ssh_config=None, hold_id="scope", remote_env=None,
+        relay_port=None, host_relay_port=None, target=target,
+    )
+    assert adapter.launch("agent-worktrees embody --detach", timeout=30)[0] == 0
+    assert seen.cleaned
+
+
+@pytest.mark.guard
+def test_attached_rejoin_receipt_is_not_consumption(launch_seams, monkeypatch):
+    target, seen = launch_seams
+    seen.created = False
+    assert auth.attached_created_child("example-1", "vscode", "/launch/auth.env") is False
+    assert auth.created_child({"created": False, "resumed": True}) is False
+    with pytest.raises(RuntimeError, match="no explicit create-or-resume"):
+        auth.created_child({"created": False, "resumed": False})
+
+
+@pytest.mark.guard
+def test_original_session_host_cleanup_handle_removes_companion_auth(launch_seams, monkeypatch):
+    target, _ = launch_seams
+    owner = "/home/user/.agent-containers/launch/" + "a" * 32 + ".env"
+    commands = []
+    monkeypatch.setattr(auth.transport, "_run", lambda argv, **kw:
+        commands.append(argv) or subprocess.CompletedProcess(argv, 0, "", ""))
+    monkeypatch.setattr(cli, "cleanup_remote_env", real_cleanup_remote_env)
+    monkeypatch.setattr(cli, "_trusted_session_host_context", lambda *a:
+        TrustedContext(target.config, target.fleet, "vscode", "/workspace", ""))
+    assert cli.main(["session-host-cleanup", "example-1", "--remote-env", owner]) == 0
+    assert owner + ".d/auth.env" in commands[0]
+    assert owner + ".d/copilot" in commands[0]
+
+
+@pytest.mark.guard
+def test_empty_general_environment_still_has_a_backwards_compatible_owner():
+    staged = []
+    owner = auth.stage_env("example-1", "vscode", {},
+                           lambda name, user, values: staged.append(values) or "/launch/owner.env",
+                           require_owner=True)
+    assert owner == "/launch/owner.env"
+    assert staged == [{"AGENT_CONTAINERS_LAUNCH_INPUTS": "1"}]
+
+
+@pytest.mark.guard
+def test_wrapper_transport_failure_cleans_staged_token_and_owner(launch_seams, monkeypatch):
+    target, seen = launch_seams
+
+    def run(argv, **kwargs):
+        if "--secret-env-vars" in argv[-1]:
+            return subprocess.CompletedProcess(argv, 0, "/usr/bin/copilot\n", "")
+        raise RuntimeError("synthetic wrapper transport failure")
+
+    monkeypatch.setattr(auth.transport, "_run", run)
+    with pytest.raises(RuntimeError, match="synthetic wrapper transport failure"):
+        auth.prepare_launch(target.config, target.fleet, "example-1", "vscode",
+                            cleanup_owner="/launch/owner.env")
+    assert "/launch/1.env" in seen.cleaned and "/launch/owner.env" in seen.cleaned
 
 
 def test_native_launcher_consumes_token_restores_path_and_keeps_git_identity(tmp_path):

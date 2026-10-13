@@ -497,7 +497,8 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
             f"{config.relay_port}:127.0.0.1:{args.host_relay_port}"
         )
 
-    remote_env = process_auth.stage_env(projection_target, user, launch_env, write_remote_env)
+    remote_env = process_auth.stage_env(projection_target, user, launch_env, write_remote_env,
+                                        require_owner=True)
     copilot_auth_env, acp_command = process_auth.prepare_acp_launch(
         config, fleet, projection_target, user, acp_command, remote_env,
     )
@@ -514,7 +515,6 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
         "acp_command": acp_command,
         "remote_command": remote_command,
         "remote_env": remote_env,
-        "copilot_auth_env": copilot_auth_env,
         "execution_instance": instance_id or None,
         "preference_wrapper": (
             {"version": 1, "launcher": launcher_token} if token_count else None

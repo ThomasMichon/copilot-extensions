@@ -139,6 +139,24 @@ def _call(
     return rc, seen
 
 
+@pytest.mark.guard
+def test_attached_existing_session_cleans_unused_auth_without_waiting(monkeypatch):
+    from agent_containers import copilot_process_auth as auth
+    from agent_containers import ssh_transport
+
+    target = _target()
+    target.fleet.copilot_cli_account = "inference-user"
+    cleaned = []
+    monkeypatch.setattr(auth, "prepare_launch", lambda *a, **k: "/launch/auth.env")
+    monkeypatch.setattr(auth, "attached_created_child", lambda *a: False)
+    monkeypatch.setattr(auth, "wait_for_consumption", lambda *a: pytest.fail("existing child"))
+    monkeypatch.setattr(ssh_transport, "container_environment", lambda *a: {"PATH": "/bin"})
+    monkeypatch.setattr(ssh_transport, "write_remote_env", lambda *a: "/launch/general.env")
+    monkeypatch.setattr(ssh_transport, "cleanup_remote_env", lambda *a: cleaned.append(a[-1]))
+    assert _call(_args(no_relay=True), target=target, monkeypatch=monkeypatch)[0] == 0
+    assert "/launch/auth.env" in cleaned
+
+
 class TestCmdCopilotAnchorDefault:
     """Omitting --worktree-id defaults to anchor mode: a trusted container is
     conventionally anchor-only (its fleet image already clones the repo

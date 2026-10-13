@@ -255,9 +255,12 @@ def test_session_host_prepare_uses_process_auth_not_host_environment(capsys):
     staged = write_env.call_args.args[2]
     assert staged["GH_TOKEN"] == "github-secret"
     assert "COPILOT_GITHUB_TOKEN" not in staged
-    assert result["copilot_auth_env"] == "/launch/auth.env"
+    assert "copilot_auth_env" not in result
     assert "/launch/auth.env.d" in result["acp_command"]
-    auth.assert_called_once_with(config, fleet, "instance-fixture", "vscode")
+    auth.assert_called_once_with(
+        config, fleet, "instance-fixture", "vscode",
+        cleanup_owner="/tmp/agent-containers/env-123",
+    )
 
 
 def test_session_host_prepare_fails_closed_with_no_matching_copilot_cli_login(capsys):

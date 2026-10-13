@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shlex
 
 from . import ssh_transport as transport
@@ -14,8 +15,17 @@ def without_inference_token(environment: dict[str, str]) -> dict[str, str]:
     return {key: value for key, value in environment.items() if key != TOKEN_VARIABLE}
 
 
-def stage_env(container, user, values, writer):
-    return writer(container, user, without_inference_token(values))
+def launcher_directory(auth_env: str) -> str:
+    if auth_env.endswith(".d/auth.env"):
+        return auth_env.rsplit("/", 1)[0]
+    return auth_env + ".d"
+
+
+def stage_env(container, user, values, writer, *, require_owner=False):
+    values = without_inference_token(values)
+    if require_owner and not values:
+        values = {"AGENT_CONTAINERS_LAUNCH_INPUTS": "1"}
+    return writer(container, user, values)
 
 
 def wrap_command(command: str, auth_env: str | None, *, manager: bool = False) -> str:
@@ -45,9 +55,9 @@ def wrap_command(command: str, auth_env: str | None, *, manager: bool = False) -
         )
     # PATH selects the narrow executable only; neither the Host nor embody gets
     # the inference token. The executable restores PATH before starting Copilot.
-    directory = shlex.quote(auth_env + ".d")
+    directory = shlex.quote(launcher_directory(auth_env))
     if manager:
-        launcher = shlex.quote("--copilot-process-launcher=" + auth_env + ".d/copilot")
+        launcher = shlex.quote("--copilot-process-launcher=" + launcher_directory(auth_env) + "/copilot")
         return (
             f"unset {TOKEN_VARIABLE}; {command} {launcher}"
         )
@@ -58,7 +68,36 @@ def wrap_manager_shell(command: str, auth_env: str | None, remote_env: str | Non
     words = shlex.split(command)
     if len(words) == 3 and words[:2] == ["bash", "-lc"]:
         command = words[2]
+    if auth_env:
+        command += " " + shlex.quote("--launch-result-file=" + launcher_directory(auth_env) + "/result.json")
     return transport.build_remote_command(wrap_command(command, auth_env, manager=True), remote_env)
+
+
+def created_child(result: object) -> bool:
+    if (
+        not isinstance(result, dict)
+        or type(result.get("created")) is not bool
+        or type(result.get("resumed")) is not bool
+        or result["created"] == result["resumed"]
+    ):
+        raise RuntimeError("Copilot launch returned no explicit create-or-resume receipt")
+    return result["created"]
+
+
+def attached_created_child(container: str, user: str, auth_env: str) -> bool:
+    result = transport._run([
+        "docker", "exec", "-u", user, container,
+        "cat", launcher_directory(auth_env) + "/result.json",
+    ])
+    if result.returncode:
+        raise RuntimeError("Copilot attach returned no create-or-resume receipt")
+    try:
+        payload = json.loads(result.stdout)
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError("Copilot attach returned an invalid launch receipt") from exc
+    if not isinstance(payload, dict) or type(payload.get("version")) is not int or payload["version"] != 1:
+        raise RuntimeError("Copilot attach returned an unsupported launch receipt")
+    return created_child(payload)
 
 
 def wait_for_consumption(
@@ -78,7 +117,9 @@ def wait_for_consumption(
         raise RuntimeError("Copilot child did not confirm consuming its launch credential")
 
 
-def prepare_launch(config, fleet, container: str, user: str) -> str | None:
+def prepare_launch(
+    config, fleet, container: str, user: str, *, cleanup_owner: str | None = None,
+) -> str | None:
     """Re-read the existing account source immediately before a launch."""
     token = resolve_copilot_cli_token_or_raise(config, fleet, container)
     if token is None:
@@ -100,24 +141,32 @@ def prepare_launch(config, fleet, container: str, user: str) -> str | None:
     auth_env = transport.write_remote_env(container, user, {TOKEN_VARIABLE: token})
     if not auth_env:
         raise RuntimeError("could not stage process-only Copilot authentication")
-    directory = auth_env + ".d"
+    staged_auth = auth_env
+    if cleanup_owner:
+        auth_env = cleanup_owner + ".d/auth.env"
+    directory = launcher_directory(auth_env)
     script = launcher_script(native, auth_env)
-    result = transport._run([
-        "docker", "exec", "-i", "-u", user, container, "sh", "-c",
-        f"umask 077; mkdir {shlex.quote(directory)} && "
-        f"cat > {shlex.quote(directory + '/copilot')} && "
-        f"chmod 700 {shlex.quote(directory + '/copilot')}",
-    ], input_text=script)
-    if result.returncode:
-        transport.cleanup_remote_env(container, user, auth_env)
-        raise RuntimeError("could not stage process-only Copilot launcher")
+    move = f"mv -- {shlex.quote(staged_auth)} {shlex.quote(auth_env)} && " if cleanup_owner else ""
+    try:
+        result = transport._run([
+            "docker", "exec", "-i", "-u", user, container, "sh", "-c",
+            f"umask 077; mkdir {shlex.quote(directory)} && {move}"
+            f"cat > {shlex.quote(directory + '/copilot')} && "
+            f"chmod 700 {shlex.quote(directory + '/copilot')}",
+        ], input_text=script)
+        if result.returncode:
+            raise RuntimeError("could not stage process-only Copilot launcher")
+    except BaseException:
+        transport.cleanup_remote_env(container, user, staged_auth)
+        transport.cleanup_remote_env(container, user, cleanup_owner)
+        raise
     return auth_env
 
 
 def prepare_acp_launch(config, fleet, container, user, command, remote_env):
     auth_env = None
     try:
-        auth_env = prepare_launch(config, fleet, container, user)
+        auth_env = prepare_launch(config, fleet, container, user, cleanup_owner=remote_env)
         return auth_env, wrap_command(command, auth_env)
     except Exception:
         transport.cleanup_remote_env(container, user, remote_env)
@@ -129,7 +178,7 @@ def launcher_script(native: str, auth_env: str) -> str:
     """Help/version remain credential-free; the real child consumes one token."""
     return (
         "#!/bin/sh\nset -eu\n"
-        f"PATH=${{PATH#{shlex.quote(auth_env + '.d')}:}}\nexport PATH\n"
+        f"PATH=${{PATH#{shlex.quote(launcher_directory(auth_env))}:}}\nexport PATH\n"
         f"unset {TOKEN_VARIABLE}\n"
         'case "${1:-}" in --help|--version) '
         f'exec {shlex.quote(native)} "$@";; esac\n'

@@ -452,6 +452,7 @@ def cleanup_remote_env(container: str, user: str, remote_path: str | None) -> bo
             "docker", "exec", "-u", user, container,
             "rm", "-f", remote_path,
             remote_path + ".d/copilot",
+            remote_path + ".d/auth.env", remote_path + ".d/result.json",
         ])
         _run([
             "docker", "exec", "-u", user, container,

@@ -248,7 +248,7 @@ def cmd_copilot(
                 rc = subprocess.run(
                     spawn_cmd, env=env, creationflags=creation_flags()
                 ).returncode
-                if rc == 0:
+                if rc == 0 and auth_env and auth.attached_created_child(args.name, user, auth_env):
                     auth.wait_for_consumption(args.name, user, auth_env)
                 return rc
             finally:
