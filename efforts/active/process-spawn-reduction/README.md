@@ -167,6 +167,31 @@ small and explicit while unit policy tests remain in-process.
 
 ## Journal
 
+### 2026-10-13 - Explicit native shell admission
+
+- Claimed #6087 after checking for an existing owner and competing PR.
+  Three test modules probed real Bash during collection, including unrelated
+  `-k` selections. Moved their native behavior tests behind explicit T3
+  session fixtures, retaining the real installer and background-prune bodies.
+- Shared test-only admission rejects WindowsApps/System32 WSL launchers before
+  a probe, prefers native Git Bash on Windows, and bounds headless exit-code,
+  pipefail and cygpath probes. Direct pytest fails closed without explicit
+  tier admission. PowerShell command-resolution execution is explicit too;
+  the pipefail source drift guard stays in the ordinary selection.
+- Fresh-import and admission policy tests mock all subprocess boundaries.
+  The contained default selection passed 27 tests and skipped 11 native cases;
+  the explicit lane passed all 38, including real Git Bash and PowerShell
+  consumers, at unchanged runner limits.
+- Temporary subprocess instrumentation rejected every real process attempt
+  during full collection: 8,890 tests collected, zero attempted children.
+  A separate unrelated one-test selection also collected the complete suite
+  with zero attempted children. Instrumentation was removed afterward.
+- These are fresh temporary consumer fixtures, not a first-install change.
+  No external venue is required for this test-only Windows/native-shell
+  boundary; no production installer or runtime behavior changed. Review,
+  merge and normal promotion remain outstanding. The broader campaign stays
+  Active and this slice does not settle its workload/lifecycle obligations.
+
 ### 2026-10-13 - Released list-warm coalescing and real-clock validation
 
 - #6431 passed its current-head review and CI gates, merged, and was included

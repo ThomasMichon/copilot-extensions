@@ -100,6 +100,22 @@ python tools/run-plugin-tests.py agent-dispatch \
 Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
 than repeatedly importing file groups that contain no selected tests.
 
+Agent-worktrees installer command resolution, pipefail execution and POSIX
+background-prune tests are explicit T3 native contracts. Collection never probes
+Bash or PowerShell. A lazy session fixture admits native shells only after
+`--allow-explicit-tiers`; direct pytest also requires
+`COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS=1`. Windows admission prefers Git
+Bash and rejects WindowsApps/System32 WSL launchers before executing anything.
+The exit-code, pipefail and Windows cygpath probes run once per admitted session,
+headlessly with five-second bounds. Native semantic tests and path conversion
+remain real; ordinary tests mock the admission policy and forbid process
+creation during fresh imports. The pipefail text drift guard remains default.
+
+```powershell
+python tools\run-plugin-tests.py agent-worktrees -k native_shell_collection
+python tools\run-plugin-tests.py agent-worktrees --allow-explicit-tiers -k 'installer_copilot_resolution or installer_pipefail or invoke_payload_runtime_posix'
+```
+
 Resident list-warm snapshot policy tests keep process calls mocked and verify
 exact output shapes, filter/project separation, next-pass freshness, unavailable
 classification, and unchanged standalone reads. Their bounded native companion

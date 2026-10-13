@@ -1,0 +1,9 @@
+{
+  "comment": "Keep native shell probes out of unit collection and admit retained shell contracts explicitly",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
