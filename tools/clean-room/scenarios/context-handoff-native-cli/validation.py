@@ -10,6 +10,9 @@ import shlex
 import stat
 import subprocess
 import sys
+from fractions import Fraction
+
+from checkpoint_binding import readback_errors, recovered_checkpoint
 
 BASELINE_DIR = Path("/opt/copilot-cleanroom/native-cli-baseline")
 RECOVERY_PREREQUISITES = [
@@ -239,52 +242,18 @@ def measurement_result(completion):
             or not finite_number(left) or not 0 <= left <= limit
             or not finite_number(fraction) or not 0 <= fraction <= 1):
         return None, "native measurement lacks valid captured window/token fields"
+    # CLI 1.0.92 captured ratios (e.g. 173839/200000 -> .869195) serialize
+    # the exact binary result. No additional decimal-rounding tolerance exists
+    # in the observed format. Fraction keeps huge integer inputs overflow-safe.
+    ratio = float(Fraction(left) / Fraction(limit))
+    if fraction != ratio:
+        return None, "native fraction_remaining differs from tokens_left/promptTokenLimit"
     return payload, None
 
 
-def checkpoint_readback_errors(write_row, read_row, clear, owner):
-    """Use captured path, owner/scope, revision, source window and history binding."""
-    errors = []
-    for label, row in (("write", write_row), ("read", read_row)):
-        if not root_event(row["start"]) or not root_event(row["complete"]):
-            errors.append(f"{label} is not root-owned")
-    written, write_error = object_result(write_row["complete"])
-    read, read_error = object_result(read_row["complete"])
-    if write_error:
-        errors.append(f"write: {write_error}")
-    if read_error:
-        errors.append(f"read: {read_error}")
-    wargs, rargs = write_row["start"]["data"]["arguments"], read_row["start"]["data"]["arguments"]
-    if (wargs.get("operation"), wargs.get("path")) != ("write", "checkpoint.md"):
-        errors.append("write does not identify checkpoint.md")
-    if (rargs.get("operation"), rargs.get("path")) != ("read", "checkpoint.md"):
-        errors.append("read does not identify the written checkpoint")
-    if not (clear and root_event(clear)
-            and write_row["complete"]["timestamp"] < read_row["start"]["timestamp"]
-            and read_row["complete"]["timestamp"] < clear["timestamp"]):
-        errors.append("read-back is not between the successful write and root clear")
-    if written is not None and read is not None:
-        if written.get("operation") not in ("create", "update"):
-            errors.append("write result does not acknowledge a captured create/update operation")
-        for key in ("agent_session_id", "memory_scope_id", "revision", "source_window"):
-            if key not in written or key not in read or written[key] != read[key]:
-                errors.append(f"missing or mismatched captured {key}")
-        if not isinstance(owner, str) or not owner or written.get("agent_session_id") != owner or read.get("agent_session_id") != owner:
-            errors.append("artifact owner differs from root session")
-        if not isinstance(written.get("memory_scope_id"), str) or not written["memory_scope_id"]:
-            errors.append("artifact memory scope is absent")
-        if type(written.get("revision")) is not int or written["revision"] < 1:
-            errors.append("write revision is absent or invalid")
-        if type(written.get("source_window")) is not int or written["source_window"] < 0:
-            errors.append("write source window is absent or invalid")
-        if type(read.get("revision")) is not int or type(read.get("source_window")) is not int:
-            errors.append("read revision/source window types are invalid")
-        if not write_row["start"].get("id") or read.get("history_position") != write_row["start"]["id"]:
-            errors.append("read history position does not bind to the write event")
-        if (not isinstance(wargs.get("content"), str) or not isinstance(read.get("content"), str)
-                or read["content"] != wargs["content"]):
-            errors.append("read content differs from written content")
-    return errors
+def checkpoint_readback_errors(write_row, read_row, clear, owner, *, after_clear=False):
+    return readback_errors(write_row, read_row, clear, owner, root_event=root_event,
+                           object_result=object_result, after_clear=after_clear)
 
 
 def normalized_content(text):
@@ -651,6 +620,8 @@ def recovery_event_errors(events, root, workspace=None, baseline=None):
     for index, position in enumerate(clears):
         end = clears[index + 1] if index + 1 < len(clears) else len(events)
         window = [event for event in events[position + 1:end] if root_event(event)]
+        previous = clears[index - 1] + 1 if index else 0
+        preclear = events[previous:position]
         tools = [event for event in window if event["type"] == "tool.execution_start"
                  and root_event(event)]
         completions = {event["data"]["toolCallId"]: event for event in window
@@ -667,16 +638,14 @@ def recovery_event_errors(events, root, workspace=None, baseline=None):
             name, args = data["toolName"], data.get("arguments", {})
             completion = completions.get(data["toolCallId"])
             if name == "session_artifacts" and args.get("operation") == "read" and args.get("path") == "checkpoint.md":
-                if successful(completion) and checkpoint is None:
-                    artifact, error = object_result(completion)
-                    try:
-                        checkpoint = json.loads(artifact["content"]) if not error else None
-                    except (KeyError, TypeError, json.JSONDecodeError):
-                        checkpoint = None
-                    if not isinstance(checkpoint, dict):
-                        errors.append("bound checkpoint read did not return valid content")
-                        checkpoint = None
-                    else:
+                if checkpoint is None:
+                    checkpoint, binding_errors = recovered_checkpoint(
+                        preclear, events[position], {"start": event, "complete": completion},
+                        seed["manifest"]["session_id"], index, root_event=root_event,
+                        object_result=object_result, check_readback=checkpoint_readback_errors)
+                    if binding_errors:
+                        errors.extend(binding_errors)
+                    elif checkpoint is not None:
                         checkpoint_time = completion["timestamp"]
             if content_read(event, completion, str(Path(workspace) / "AGENTS.md"), guidance, workspace):
                 guidance_reads.append(completion)

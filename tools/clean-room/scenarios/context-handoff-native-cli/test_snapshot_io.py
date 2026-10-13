@@ -1,3 +1,6 @@
+from contextlib import ExitStack, redirect_stdout
+import io
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -5,10 +8,94 @@ import unittest
 from unittest.mock import patch
 
 import snapshot_io
+import controller
+import test_validation
 
 
 @unittest.skipUnless(os.name == "posix", "descriptor no-follow proof requires the Linux fixture")
 class SnapshotTests(unittest.TestCase):
+    def export_fixture(self, root, stack):
+        fixture = test_validation.ValidationTests()
+        stack.callback(fixture.doCleanups)
+        original, state, events = fixture.analyzer_fixture(root / "original")
+        capsule = test_validation.TEST_SEEDS[str(original / "workspace")]
+        capsule.chmod(0o755)
+        (capsule / "venue-seal.json").write_text(json.dumps({
+            "session_id": "root-fixture", "operator_sudo_denied": True, "sudo_elevation_bits_removed": True,
+        }))
+        home = root / "home"
+        session = home / ".copilot/session-state/root-fixture"
+        session.mkdir(parents=True)
+        (session / "events.jsonl").write_text("".join(json.dumps(event) + "\n" for event in events))
+        evaluation = root / "export/eval"
+        evaluation.mkdir(parents=True)
+        for name, value in {"BASELINE": capsule, "EVAL": evaluation, "OUT": evaluation.parent,
+                            "STATE": state, "REPO": original / "workspace",
+                            "SCENARIO": Path(__file__).parent}.items():
+            stack.enter_context(patch.object(controller, name, value))
+        stack.enter_context(patch.object(Path, "home", return_value=home))
+        stack.enter_context(patch.object(controller, "run", return_value="true"))
+        stack.enter_context(patch.object(controller.subprocess, "run",
+                                        return_value=type("Result", (), {"returncode": 1})()))
+        stack.enter_context(redirect_stdout(io.StringIO()))
+        return original, evaluation, capsule
+
+    def test_export_recopies_every_protected_seed_file_and_seal(self):
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+            original, evaluation, capsule = self.export_fixture(Path(temporary), stack)
+            archive = evaluation / "seed-baseline"
+            errors = []
+            snapshot_io.snapshot(capsule, archive, errors, "fixture")
+            self.assertFalse(errors)
+            guidance = next(capsule.rglob("AGENTS.md")).relative_to(capsule)
+            (archive / guidance).write_bytes(b"altered fixture guidance")
+            (archive / "venue-seal.json").write_bytes(b"{}")
+            result = controller.export()
+            self.assertEqual(result["export_errors"], [])
+            self.assertEqual((archive / guidance).read_bytes(), (capsule / guidance).read_bytes())
+            self.assertEqual((archive / "venue-seal.json").read_bytes(), (capsule / "venue-seal.json").read_bytes())
+            receipt = json.loads((evaluation / "export-errors.json").read_text())
+            self.assertIn(guidance.as_posix(), receipt["seed_copied"])
+            self.assertIn("venue-seal.json", receipt["seed_copied"])
+
+    def test_uncopied_workspace_witness_is_preserved_without_credit(self):
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+            original, evaluation, capsule = self.export_fixture(Path(temporary), stack)
+            (evaluation / "workspace").mkdir()
+            witness = evaluation / "workspace/witness.json"
+            witness.write_text('{"synthetic": "stale witness"}')
+            previous = witness.read_bytes()
+            result = controller.export()
+            self.assertEqual(result["event_export_status"], "INVALID_EXPORT")
+            self.assertNotIn("witness.json", json.loads((evaluation / "export-errors.json").read_text())["workspace_copied"])
+            controller.analyze()
+            observed = json.loads((evaluation / "observed-evidence.json").read_text())
+            self.assertEqual(witness.read_bytes(), previous)
+            self.assertNotIn("document", observed["witness_contract_observation"])
+            self.assertTrue(observed["witness_contract_observation"]["errors"])
+            self.assertFalse(observed["root_clear_events"])
+
+    def test_missing_protected_copy_invalidates_archive_even_with_genuine_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+            original, evaluation, capsule = self.export_fixture(Path(temporary), stack)
+            archive = evaluation / "seed-baseline"
+            errors = []
+            snapshot_io.snapshot(capsule, archive, errors, "fixture")
+            guidance = next(capsule.rglob("AGENTS.md")).relative_to(capsule)
+            previous = (archive / guidance).read_bytes()
+            copy = snapshot_io.write_at
+
+            def deny_guidance(parent, name, content):
+                if name == "AGENTS.md":
+                    raise PermissionError("fixture denied")
+                return copy(parent, name, content)
+
+            with patch.object(snapshot_io, "write_at", side_effect=deny_guidance):
+                result = controller.export()
+            self.assertEqual(result["event_export_status"], "INVALID_EXPORT")
+            self.assertTrue(any(error.get("path") == guidance.as_posix() for error in result["export_errors"]))
+            self.assertEqual((archive / guidance).read_bytes(), previous)
+
     def test_regular_snapshot_and_redaction(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

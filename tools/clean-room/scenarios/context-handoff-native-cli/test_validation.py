@@ -42,6 +42,118 @@ def recovery_event_errors(events, root):
 
 
 class ValidationTests(unittest.TestCase):
+    def semantic_bound_events(self, root):
+        return self.semantic_events(root)
+
+    def with_semantic_bindings(self, events):
+        result = []
+        for window in (1, 2):
+            clear = next(event for event in events if event.get("id") == f"clear-{window}")
+            recovered = next(event for event in events if event.get("id") == f"complete-{window}-0")
+            document = json.loads(json.loads(recovered["data"]["result"]["content"])["content"])
+            document["session_id"] = "root-fixture"
+            content = json.dumps(document)
+            binding = {"agent_session_id": "root-fixture", "memory_scope_id": "scope-fixture",
+                       "revision": window, "source_window": window - 1}
+            result.extend([
+                {"type": "tool.execution_start", "id": f"prewrite-{window}", "timestamp": f"{window}--a",
+                 "data": {"toolCallId": f"prewrite-{window}", "toolName": "session_artifacts",
+                          "arguments": {"operation": "write", "path": "checkpoint.md", "content": content}}},
+                {"type": "tool.execution_complete", "id": f"prewrite-complete-{window}", "timestamp": f"{window}--b",
+                 "data": {"toolCallId": f"prewrite-{window}", "success": True,
+                          "result": {"content": json.dumps(dict(binding, operation="create" if window == 1 else "update"))}}},
+                {"type": "tool.execution_start", "id": f"preread-{window}", "timestamp": f"{window}--c",
+                 "data": {"toolCallId": f"preread-{window}", "toolName": "session_artifacts",
+                          "arguments": {"operation": "read", "path": "checkpoint.md"}}},
+                {"type": "tool.execution_complete", "id": f"preread-complete-{window}", "timestamp": f"{window}--d",
+                 "data": {"toolCallId": f"preread-{window}", "success": True, "result": {
+                     "content": json.dumps(dict(binding, history_position=f"prewrite-{window}", content=content))}}},
+            ])
+            clear["timestamp"] = f"{window}--e"
+            recovered["data"]["result"]["content"] = json.dumps(dict(
+                binding, history_position=f"prewrite-{window}", content=content))
+            begin = events.index(clear)
+            end = next((i for i in range(begin + 1, len(events))
+                        if events[i]["type"] == "session.context_cleared"), len(events))
+            result.extend(events[begin:end])
+        return result
+
+    def insert_before_guidance(self, events, additions):
+        position = next(i for i, event in enumerate(events) if event.get("id") == "complete-1-0") + 1
+        events[position:position] = additions
+
+    def test_recovered_checkpoint_requires_authoritative_preclear_binding(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            events = self.semantic_bound_events(root)
+            self.assertTrue(all(not row["errors"] for row in recovery_event_errors(events, root)))
+            mutations = [("agent_session_id", "other-owner"), ("memory_scope_id", "other-scope"),
+                         ("revision", 7), ("source_window", 7), ("revision", None),
+                         ("revision", True), ("source_window", 1.0), ("memory_scope_id", None)]
+            for key, value in mutations:
+                bad = copy.deepcopy(events)
+                completion = next(event for event in bad if event.get("id") == "complete-1-0")
+                payload = json.loads(completion["data"]["result"]["content"])
+                payload[key] = value
+                completion["data"]["result"]["content"] = json.dumps(payload)
+                self.assertTrue(recovery_event_errors(bad, root)[0]["errors"], (key, value))
+            for missing in ("agent_session_id", "memory_scope_id", "revision", "source_window", "history_position"):
+                bad = copy.deepcopy(events)
+                completion = next(event for event in bad if event.get("id") == "complete-1-0")
+                payload = json.loads(completion["data"]["result"]["content"])
+                del payload[missing]
+                completion["data"]["result"]["content"] = json.dumps(payload)
+                self.assertTrue(recovery_event_errors(bad, root)[0]["errors"], missing)
+
+    def test_recovered_checkpoint_child_or_arbitrary_content_is_uncredited(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            events = self.semantic_bound_events(root)
+            for form in ("child", "denial", "wrong-document", "unverified-preclear"):
+                bad = copy.deepcopy(events)
+                completion = next(event for event in bad if event.get("id") == "complete-1-0")
+                if form == "child":
+                    completion["agentId"] = "child-fixture"
+                elif form == "denial":
+                    completion["data"]["result"]["content"] = "Arbitrary read denial"
+                elif form == "wrong-document":
+                    # Correlated bytes/metadata still cannot adopt another
+                    # session's document as the trusted root checkpoint.
+                    for event in bad:
+                        if event.get("id") == "prewrite-1":
+                            document = json.loads(event["data"]["arguments"]["content"])
+                            document["session_id"] = "other-session"
+                            event["data"]["arguments"]["content"] = json.dumps(document)
+                        elif event.get("id") in ("preread-complete-1", "complete-1-0"):
+                            payload = json.loads(event["data"]["result"]["content"])
+                            document = json.loads(payload["content"])
+                            document["session_id"] = "other-session"
+                            payload["content"] = json.dumps(document)
+                            event["data"]["result"]["content"] = json.dumps(payload)
+                else:
+                    next(event for event in bad if event.get("id") == "preread-complete-1")["data"]["success"] = False
+                report = recovery_event_errors(bad, root)[0]
+                self.assertTrue(report["errors"], form)
+                self.assertTrue(any("checkpoint" in error or "session" in error or "read" in error
+                                    for error in report["errors"]), form)
+
+    def test_native_measurement_requires_exact_evidenced_ratio(self):
+        def read(left, limit, fraction):
+            payload = self.full_measurement(1)
+            payload.update(tokens_left=left, fraction_remaining=fraction)
+            payload["context_info"]["promptTokenLimit"] = limit
+            return validation.measurement_result({"data": {"success": True,
+                                                          "result": {"content": json.dumps(payload)}}})
+        # Captured CLI 1.0.92 records serialize the exact binary ratio, including
+        # these finite decimal forms; no extra decimal truncation is evidenced.
+        for left, limit, fraction in ((0, 200000, 0), (200000, 200000, 1),
+                                     (173839, 200000, .869195), (79576, 200000, .39788),
+                                     (1, 3, 1 / 3)):
+            self.assertIsNone(read(left, limit, fraction)[1])
+        for left, limit, fraction in ((0, 200000, .35), (70000, 200000, .34),
+                                     (1, 3, round(1 / 3, 6)), (1, 3, .3333333)):
+            self.assertIsNotNone(read(left, limit, fraction)[1])
+
     def test_parser_corruption_overrides_earlier_captured_receipt(self):
         with tempfile.TemporaryDirectory() as temporary:
             evaluation, state, events = self.analyzer_fixture(Path(temporary))
@@ -192,12 +304,12 @@ class ValidationTests(unittest.TestCase):
             root = Path(temp)
             events = self.semantic_events(root)
             command = template.format(path=shlex.quote(str(root / "corpus/shard-003.txt")))
-            events[3:3] = [
+            self.insert_before_guidance(events, [
                 {"type": "tool.execution_start", "id": "option-reader", "timestamp": "1-0a",
                  "data": {"toolCallId": "option-reader", "toolName": "bash", "arguments": {"command": command}}},
                 {"type": "tool.execution_complete", "id": "option-reader-complete", "timestamp": "1-0b",
                  "data": {"toolCallId": "option-reader", "success": True, "result": {"content": "reader output"}}},
-            ]
+            ])
             observed = recovery_event_errors(events, root)[0]
             self.assertEqual(observed["first_substantive_work"], "option-reader" if should_be_work else "1-4", command)
             self.assertEqual(bool(observed["errors"]), should_be_work, command)
@@ -264,12 +376,12 @@ class ValidationTests(unittest.TestCase):
                         f"stat '{path}'", f"ls '{root / 'corpus'}'"]
             for command in commands:
                 events = self.semantic_events(root)
-                events[3:3] = [
+                self.insert_before_guidance(events, [
                     {"type": "tool.execution_start", "id": "opaque-reader", "timestamp": "1-0a",
                      "data": {"toolCallId": "opaque-reader", "toolName": "bash", "arguments": {"command": command}}},
                     {"type": "tool.execution_complete", "id": "opaque-reader-complete", "timestamp": "1-0b",
                      "data": {"toolCallId": "opaque-reader", "success": True, "result": {"content": "opaque output"}}},
-                ]
+                ])
                 observed = recovery_event_errors(events, root)[0]
                 self.assertTrue(observed["errors"], command)
                 self.assertEqual(observed["first_substantive_work"], "opaque-reader", command)
@@ -314,18 +426,19 @@ class ValidationTests(unittest.TestCase):
                             "rg -n -e 'corpus/shard-003.txt' audit-contract.md",
                             "rg --glob '*.md' 'corpus/' audit-contract.md"):
                 events = self.semantic_events(root)
-                events[3:3] = [
+                self.insert_before_guidance(events, [
                     {"type": "tool.execution_start", "id": "prerequisite-reader", "timestamp": "1-0a",
                      "data": {"toolCallId": "prerequisite-reader", "toolName": "bash", "arguments": {"command": command}}},
                     {"type": "tool.execution_complete", "id": "prerequisite-reader-complete", "timestamp": "1-0b",
                      "data": {"toolCallId": "prerequisite-reader", "success": True, "result": {"content": "contract excerpt"}}},
-                ]
+                ])
                 observed = recovery_event_errors(events, root)[0]
                 self.assertFalse(observed["errors"], command)
                 self.assertEqual(observed["first_substantive_work"], "1-4", command)
                 path = str(root / "corpus/shard-003.txt")
                 fake = {"data": {"success": True, "result": {"content": "record=60\n"}}}
-                self.assertFalse(content_read(events[3], fake, path, "record=60\n", str(root), [61, 61]))
+                reader = next(event for event in events if event.get("id") == "prerequisite-reader")
+                self.assertFalse(content_read(reader, fake, path, "record=60\n", str(root), [61, 61]))
 
     def test_direct_analyze_parser_error_quarantines_all_supporting_rows(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -363,12 +476,12 @@ class ValidationTests(unittest.TestCase):
             for command in (f"cat <(touch '{root / 'witness.json'}')",
                             f"cat >({root / 'unknown-writer'})"):
                 events = self.semantic_events(root)
-                events[3:3] = [
+                self.insert_before_guidance(events, [
                     {"type": "tool.execution_start", "id": "process-substitution", "timestamp": "1-0a",
                      "data": {"toolCallId": "process-substitution", "toolName": "bash", "arguments": {"command": command}}},
                     {"type": "tool.execution_complete", "id": "process-substitution-complete", "timestamp": "1-0b",
                      "data": {"toolCallId": "process-substitution", "success": True, "result": {"content": ""}}},
-                ]
+                ])
                 report = recovery_event_errors(events, root)[0]
                 self.assertTrue(report["errors"])
                 self.assertEqual(report["first_substantive_work"], "process-substitution")
@@ -746,7 +859,7 @@ class ValidationTests(unittest.TestCase):
                 {"type": "tool.execution_complete", "id": "stderr-writer-complete", "timestamp": "1-0b",
                  "data": {"toolCallId": "stderr-writer", "success": True, "result": {"content": ""}}},
             ]
-            events[3:3] = mutation
+            self.insert_before_guidance(events, mutation)
             report = recovery_event_errors(events, root)[0]
             self.assertEqual(report["first_substantive_work"], "stderr-writer")
             duplication = {"data": {"toolName": "bash", "arguments": {"command": "printf '{}' 2>&1"}}}
@@ -1077,7 +1190,7 @@ class ValidationTests(unittest.TestCase):
                                    "timestamp": f"{window}-{step}-2",
                                    "data": {"source": "skill-context-handoff", "interactionId": call,
                                             "prefix": "Base directory: /release/plugins/context-handoff/skills/context-handoff"}})
-        return events
+        return self.with_semantic_bindings(events)
 
     def test_semantic_view_and_combined_bash_content_success(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -1173,7 +1286,7 @@ class ValidationTests(unittest.TestCase):
                     {"type": "tool.execution_complete", "id": "early-writer-complete", "timestamp": "1-0b",
                      "data": {"toolCallId": "early-writer", "success": True, "result": {"content": "{}"}}},
                 ]
-                events[3:3] = mutation
+                self.insert_before_guidance(events, mutation)
                 observation = recovery_event_errors(events, root)[0]
                 self.assertTrue(observation["errors"], command)
                 self.assertEqual(observation["first_substantive_work"], "early-writer", command)

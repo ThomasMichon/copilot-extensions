@@ -368,16 +368,15 @@ def export():
     logs = Path.home() / ".copilot/logs"
     if logs.exists():
         snapshot_io.snapshot(logs, OUT / "cr-logs/cli", export_errors, "CLI logs")
-    snapshot_io.snapshot(Path(state["workspace"]), EVAL / "workspace", export_errors,
-                         "workspace snapshot", excluded=(".git",))
+    workspace_copied = snapshot_io.snapshot(Path(state["workspace"]), EVAL / "workspace", export_errors,
+                                           "workspace snapshot", excluded=(".git",))
     archived = EVAL / "seed-baseline"
-    if archived.exists():
-        existing = metadata(archived / "manifest.json", "archived seed manifest", export_errors)
-        if existing != seed["manifest"]:
-            export_errors.append({"source": "seed snapshot",
-                                  "error": "archived seed baseline differs from the protected setup capsule"})
-    else:
-        snapshot_io.snapshot(seed["directory"], archived, export_errors, "seed snapshot")
+    seed_copied = snapshot_io.snapshot(seed["directory"], archived, export_errors, "seed snapshot")
+    required_seed = {"manifest.json", "venue-seal.json"}
+    required_seed.update(seed["manifest"]["files_sha256"])
+    for name in sorted(required_seed - seed_copied):
+        export_errors.append({"source": "seed snapshot", "path": name,
+                              "error": "protected capsule file not copied in this invocation"})
     write(EVAL / "baseline-provenance.json", {
         "source": "setup-owned capsule outside driven workspace",
         "manifest_sha256": hashlib.sha256((BASELINE / "manifest.json").read_bytes()).hexdigest(),
@@ -433,7 +432,9 @@ def export():
         "cli_alive_at_export": live,
     })
     write(EVAL / "export-errors.json", {"status": "INVALID_EXPORT" if export_errors else "captured",
-                                      "errors": export_errors, "valid_rows": len(events)})
+                                      "errors": export_errors, "valid_rows": len(events),
+                                      "workspace_copied": sorted(workspace_copied),
+                                      "seed_copied": sorted(seed_copied)})
     write_judge_packet()
     summary = {"identity": state, "event_export_status": "INVALID_EXPORT" if export_errors else "captured",
                "export_errors": export_errors}
@@ -482,9 +483,14 @@ def analyze():
         evidence_errors.append({"source": "events",
                                 "error": "parser-invalid event stream excluded from all affirmative evidence"})
     export_path = EVAL / "export-errors.json"
+    workspace_copied = []
     if export_path.exists():
         export_note = metadata(export_path, "export diagnostics", evidence_errors)
         export_errors = export_note.get("errors") if export_note else None
+        workspace_copied = export_note.get("workspace_copied", []) if export_note else []
+        if not isinstance(workspace_copied, list) or any(not isinstance(path, str) for path in workspace_copied):
+            workspace_copied = []
+            evidence_errors.append({"source": "workspace snapshot", "error": "invalid copied-file receipt"})
         unreliable = (export_note is None or export_note.get("status") != "captured"
                       or not isinstance(export_errors, list) or bool(export_errors))
         if unreliable:
@@ -606,7 +612,9 @@ def analyze():
                                 "clear_event": clear["id"] if clear else None})
     report = EVAL / "workspace/witness.json"
     witness_validation = {"errors": ["witness.json absent"]}
-    if report.exists():
+    if report.exists() and "witness.json" not in workspace_copied:
+        witness_validation = {"errors": ["witness.json was not copied in the current export"]}
+    elif report.exists():
         document = metadata(report, "witness", evidence_errors)
         if document is None:
             witness_validation = {"errors": ["witness content unavailable or invalid"]}

@@ -81,6 +81,7 @@ class EventPath:
 
 def snapshot(source, destination, errors, label, excluded=()):
     copied = set()
+    previous = set()
     def inspect_destination(parent, relative):
         for name in os.listdir(parent):
             path = relative / name
@@ -94,6 +95,8 @@ def snapshot(source, destination, errors, label, excluded=()):
                         os.close(child)
                 elif not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                     raise OSError("unsupported destination entry")
+                else:
+                    previous.add(path.as_posix())
             except OSError:
                 errors.append({"source": label, "path": path.as_posix(),
                                "error": "existing snapshot entry unavailable or unsafe; quarantined"})
@@ -132,6 +135,9 @@ def snapshot(source, destination, errors, label, excluded=()):
         with directory(source) as source_fd, directory(destination, create=True) as destination_fd:
             inspect_destination(destination_fd, Path())
             visit(source_fd, destination_fd, Path())
+            for path in sorted(previous - copied):
+                errors.append({"source": label, "path": path,
+                               "error": "previous snapshot entry not copied in this invocation; quarantined"})
     except OSError:
         errors.append({"source": label, "error": "snapshot root unavailable or unsafe; quarantined"})
     return copied

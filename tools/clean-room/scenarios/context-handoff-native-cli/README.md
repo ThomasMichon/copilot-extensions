@@ -148,6 +148,10 @@ identity; abbreviated limit/fraction/number summaries are not full measurements.
 Prompt capacity, tokens-left and fraction values must be finite; remaining tokens
 must stay within the positive prompt capacity. Non-finite JSON numeric constants
 cannot supply a valid native measurement.
+The fraction must equal the binary result of tokens-left divided by prompt
+capacity. The captured CLI 1.0.92 format retains that result exactly (68
+recorded measurements checked); the fixture does not invent an additional
+decimal-rounding tolerance or accept manually truncated checkpoint values.
 
 Evidence-integrity checks are conservative. A witness-write claim must identify
 the **first** substantive action's actual destination, not a quoted filename or
@@ -173,6 +177,11 @@ Checkpoint read-back requires successful root-owned write/read calls, the same
 checkpoint path, matching captured owner/memory-scope/revision/source-window
 metadata, and the read's history position bound to the write event. Missing,
 failed, stale or mismatched evidence cannot earn a positive read-back.
+Recovered checkpoint reads reuse those same binding checks against the latest
+authoritative root write and its verified pre-clear read-back. The recovered
+response must match owner, scope, revision, source window, history and content,
+and its document must identify the protected seed session. Merely parsing a
+successful read's JSON is not sufficient to adopt it as the bound checkpoint.
 
 Analyzer failures remain evidence: unsuccessful or malformed native tool
 results are retained as structured error observations, excluded from affirmative
@@ -195,6 +204,12 @@ an invalid packet status with a nonzero CLI result. These guards belong to the
 Linux fixture, not a Windows/macOS containment claim.
 Export requires proof that this invocation copied the live event file;
 an older regular destination is never a substitute for missing source events.
+Every export recopies the protected seed capsule, including all manifest-bound
+inputs and its venue seal, and records the successfully copied paths. Existing
+regular destination files not recopied in that invocation remain diagnostic,
+uncredited bytes. Analysis reads a witness only when the current workspace
+copy receipt includes it; pre-created or subsequently deleted witnesses cannot
+be recovered from a stale destination.
 Regenerated packet validity retains an invalid redaction receipt across later
 analysis/export calls until an actual successful redaction check replaces it.
 Event row validation is shared by export, analysis and the direct
