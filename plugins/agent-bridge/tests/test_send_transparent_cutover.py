@@ -55,8 +55,8 @@ class _FakeResp:
 def test_send_cli_survives_connection_refused_mid_delivery(monkeypatch, capsys):
     """A clean ECONNREFUSED against the retired generation's port (post-#3179
     shutdown, not mid-drain) is followed to the successor and retried, even
-    for `send`'s non-idempotent delivery POST -- and the CLI prints a normal
-    delivery confirmation, never a traceback or hard failure."""
+    for `send`'s non-idempotent delivery POST -- and the CLI confirms admission
+    without inventing delivery evidence, never a traceback or hard failure."""
     old_base = "http://127.0.0.1:57585"
     new_base = "http://127.0.0.1:47000"
     client = BridgeClient(
@@ -101,7 +101,9 @@ def test_send_cli_survives_connection_refused_mid_delivery(monkeypatch, capsys):
     m._cmd_send(args)
 
     out = capsys.readouterr().out
-    assert "Delivered to live session sess1" in out
+    assert "Accepted by live session inbox sess1" in out
+    assert "delivery evidence unavailable" in out
+    assert "Delivered to" not in out
     # The retired generation's dead port was tried first, then the routing
     # table's successor -- exactly the sequence `send` must follow to look
     # like a brief buffered pause, never a hard error, across a cutover.
@@ -204,7 +206,10 @@ def test_a_protocol_floor_still_retries_a_restart_that_keeps_the_protocol(monkey
     posted: list[str] = []
     _floor_send(monkeypatch, client, _floor_daemon({base: [20, 20]}, posted))
     assert posted == [f"{base}/api/v1/live-sessions/sess1/messages"] * 2
-    assert "Delivered to live session sess1" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Accepted by live session inbox sess1" in out
+    assert "delivery evidence unavailable" in out
+    assert "Delivered to" not in out
 
 
 @pytest.mark.parametrize("failure", [

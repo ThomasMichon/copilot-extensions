@@ -612,16 +612,34 @@ class _ReplyingLiveClient(_LiveFakeClient):
                 "stop_reason": "end_turn"}
 
 
-def test_cmd_send_waits_and_prints_reply(monkeypatch, capsys):
-    # By default (no --no-wait) a live send waits for the reply turn and prints
-    # the receiver's assistant output.
+@pytest.mark.parametrize("no_wait", [False, True])
+def test_cmd_send_returns_receipt_without_waiting(monkeypatch, capsys, no_wait):
     client = _ReplyingLiveClient(resolved={"session_id": "live-sess-1"})
     monkeypatch.setattr(m, "_get_client", lambda: client)
     monkeypatch.setattr(m, "_live_sender_label", lambda args: "peer")
     monkeypatch.setattr(m, "_live_reply_to", lambda args: "wt-caller")
     args = argparse.Namespace(
         target="wt-target", prompt="rebase please", new=False, json=False,
-        no_wait=False, reply_timeout=90.0,
+        no_wait=no_wait, reply_timeout=90.0,
+    )
+    m._cmd_send(args)
+    assert client.delivered == [{"wait": False, "wait_timeout": 90.0}]
+    out = capsys.readouterr().out
+    assert "Accepted by live session inbox live-sess-1 (message 7" in out
+    assert "delivery evidence unavailable" in out
+    assert "read live-sess-1 --message-id 7 --json" in out
+    assert "Reply from" not in out
+    assert "done - rebased" not in out
+
+
+def test_cmd_send_explicitly_waits_and_prints_reply(monkeypatch, capsys):
+    client = _ReplyingLiveClient(resolved={"session_id": "live-sess-1"})
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_live_sender_label", lambda args: "peer")
+    monkeypatch.setattr(m, "_live_reply_to", lambda args: "wt-caller")
+    args = argparse.Namespace(
+        target="wt-target", prompt="rebase please", new=False, json=False,
+        no_wait=False, wait_reply=True, reply_timeout=90.0,
     )
     m._cmd_send(args)
     assert client.delivered == [{"wait": True, "wait_timeout": 90.0}]
@@ -708,7 +726,7 @@ def test_cmd_send_passes_status_check_kind(monkeypatch):
         notify=False, status_check=True, kind="prompt",
     )
     m._cmd_send(args)
-    assert client.delivered == [{"kind": "status-check", "wait": True}]
+    assert client.delivered == [{"kind": "status-check", "wait": False}]
 
 
 def test_a_bare_dash_prompt_reads_stdin(monkeypatch):
