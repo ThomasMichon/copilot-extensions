@@ -39,7 +39,7 @@ def check_run_evidence_from_pages(raw: str) -> CheckRunPages:
             valid = False
             continue
         totals.add(count)
-    complete = bool(pages and valid and len(totals) == 1 and len(runs) >= max(totals))
+    complete = bool(pages and valid and len(totals) == 1 and len(runs) == max(totals))
     return CheckRunPages(tuple(runs), complete)
 
 

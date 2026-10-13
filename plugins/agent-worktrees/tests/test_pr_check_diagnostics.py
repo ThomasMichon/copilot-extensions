@@ -214,6 +214,30 @@ def test_check_diagnostics_incomplete_page_cannot_claim_success(conclusion: str)
     assert report.state == "" and not report.complete
 
 
+@pytest.mark.guard
+@pytest.mark.parametrize("conclusion", ["success", "failure"])
+@pytest.mark.parametrize("page_count", [1, 2])
+def test_check_diagnostics_excess_runs_are_incomplete(
+    conclusion: str, page_count: int,
+) -> None:
+    from agent_worktrees.providers.github_check_pages import (
+        check_run_evidence_from_pages, check_runs_from_pages,
+    )
+    fixture = CheckFixture()
+    fixture.pages = [
+        {"check_runs": [_run(conclusion=conclusion)], "total_count": page_count - 1}
+        for _ in range(page_count)
+    ]
+    raw = "\n".join(json.dumps(page) for page in fixture.pages)
+    evidence = check_run_evidence_from_pages(raw)
+    assert len(evidence.runs) == page_count and not evidence.complete
+    assert check_runs_from_pages(raw) is None
+    report = fixture.read()
+    assert not report.complete
+    assert report.state == ("failure" if conclusion == "failure" else "")
+    assert len(report.failures) == (page_count if conclusion == "failure" else 0)
+
+
 def test_check_diagnostics_partial_failed_command_retains_evidence() -> None:
     fixture = CheckFixture([_run()])
     fixture.unreadable = "runs"
