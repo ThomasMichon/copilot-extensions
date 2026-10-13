@@ -93,6 +93,7 @@ Usage::
     python tools/check-module-size.py --refresh-baseline  # tighten after shrinking a file
     python tools/check-module-size.py --refresh-baseline --allow-widen  # post-merge only; see above
     python -I trusted/tools/check-module-size.py --repository candidate --refresh-baseline --allow-widen
+    python tools/check-module-size.py --check-automatic-baseline  # read-only PR canonicality
 
 ``--repository`` selects a data checkout without importing or running its
 tooling. Automation pins the invoked script to the trusted workflow commit,
@@ -340,6 +341,11 @@ def main() -> int:
         help="Rewrite the baseline, tightening any shrunk entries (never widens).",
     )
     parser.add_argument(
+        "--check-automatic-baseline",
+        action="store_true",
+        help="Require the automated refresh to match this tree, without changing any file.",
+    )
+    parser.add_argument(
         "--allow-widen",
         action="store_true",
         help=(
@@ -386,8 +392,15 @@ def main() -> int:
         parser.error("--allow-widen requires --refresh-baseline")
     if args.changed_since and args.refresh_baseline:
         parser.error("--changed-since is incompatible with --refresh-baseline")
+    if args.check_automatic_baseline and (args.refresh_baseline or args.changed_since):
+        parser.error("--check-automatic-baseline is incompatible with refresh or diff scoping")
 
     baseline = _load_baseline()
+
+    if args.check_automatic_baseline:
+        if refresh_baseline(baseline, allow_widen=True) != baseline:
+            print("[FAIL] automatic baseline is stale for this tree; regenerate against current dev.")
+            return 1
 
     if args.refresh_baseline:
         updated = refresh_baseline(baseline, allow_widen=args.allow_widen)

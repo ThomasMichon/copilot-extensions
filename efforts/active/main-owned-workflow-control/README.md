@@ -462,3 +462,25 @@ credential changes, broad policy weakening or unreviewed releases.
 - Activation/default-main proof remains pending review, CI and release. The
   independent #6332 writer/attestation owner retains its files and open findings;
   main validation is not pruned on the strength of this correction.
+
+### 2026-10-13 - Replacement release and baseline review follow-through
+
+- Replacement #6441 merged at `03:25:21Z` as `9539eda8f9b3`; promotion
+  `38334102000` completed successfully, including its exact-candidate waiter
+  and post-merge tag `promote-20261013032543-9539eda8`. The recorded validated dev input
+  `a27d57dc2ddc83fc1a8e92a0a026e5f64b5cb7b2` covers #6402 and #6414 by
+  Git ancestry, but not later #6426 or the still-open #6438. Runtime adoption
+  and the later covering release remain separate obligations.
+- Current-head review of #6438 found a real stale-baseline gap after the
+  pre-publication SHA fence: a subsequent dev shrink could leave an excessive
+  ceiling that the ordinary upper-bound check accepted.
+- The existing required PR guards now run read-only automatic-baseline
+  canonicality on the automation branch's merged dev tree. Recomputing the
+  refresh must produce the same baseline; a stale result fails without
+  rewriting the PR. Ordinary reviewed manual ceilings remain unchanged.
+  This validates the tree CI exercises, not a claim of atomic merge-time CAS.
+- Fifty-three focused tests passed, including an actual Git merge after dev
+  shrinks beyond the publication fence, refusal without file mutation,
+  successful regenerated policy, new-offender rejection and required-job
+  wiring. Focused lint and documentation consistency passed.
+  No new workflow, required check or credential was introduced.

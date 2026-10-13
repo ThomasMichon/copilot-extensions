@@ -879,7 +879,13 @@ binstub in `~/.local/bin/`.
   (`.github/workflows/promote-trigger.yml`), which additionally
   ratchets a grown file's ceiling up to its current size and opens its own
   small, reviewable PR targeting `dev` — never something a PR branch's own CI run applies to
-  its own diff. A separate `--changed-since REF` flag scopes the ordinary
+  its own diff. Automated baseline PRs also run read-only
+  `--check-automatic-baseline` in the existing required guards job: their
+  baseline must equal the refresh of the merged dev tree exercised by CI.
+  A stale ceiling left by an intervening shrink fails rather than passing
+  merely because the file remains below that ceiling. Ordinary manual
+  baseline edits retain their reviewed-ceiling behavior.
+  A separate `--changed-since REF` flag scopes the ordinary
   (non-widening) check to files this branch's own commits actually touch
   (used by CI on `pull_request` events) — this repo's high concurrent-PR
   volume otherwise let one already-merged PR's growth in a shared,

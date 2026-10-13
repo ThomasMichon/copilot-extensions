@@ -358,6 +358,12 @@ jobs:
         # into what looks like this PR's own diff.
         if: github.event_name == 'pull_request'
         run: python tools/check-module-size.py --changed-since ${{ github.event.pull_request.base.sha }} --head ${{ github.event.pull_request.head.sha }}
+      - name: Automated baseline must match the merged dev tree
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.base.ref == 'dev' &&
+          github.event.pull_request.head.ref == 'automation/module-size-baseline-widen-dev'
+        run: python tools/check-module-size.py --check-automatic-baseline
       - name: Module size (hard cap + shrink-only baseline, full sweep)
         # Every tracked, non-test source module must stay within its line-count
         # cap, or its grandfathered ceiling for pre-existing offenders -- the

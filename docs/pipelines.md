@@ -517,7 +517,7 @@ targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `promote-trigger.yml` | `workflow_run: ["CI"]` | One trusted invocation hosts independent dev-ancestry dispatch, fork-safe identifier scanning and committed-dev module baseline maintenance. Baseline PRs target dev only; pinned trusted tooling reads the completed dev input as data, with isolated Python, credential-free checkouts and baseline-only publication. Failure completions can repair existing ceilings without admitting new offenders; stale inputs skip. The release PAT is confined to PR publication. No extra verification dispatch is needed because that PAT triggers ordinary PR CI/review. |
+| `promote-trigger.yml` | `workflow_run: ["CI"]` | One trusted invocation hosts independent dev-ancestry dispatch, fork-safe identifier scanning and committed-dev module baseline maintenance. Baseline PRs target dev only; pinned trusted tooling reads the completed dev input as data, with isolated Python, credential-free checkouts and baseline-only publication. Failure completions can repair existing ceilings without admitting new offenders; stale inputs skip. The existing required PR guards additionally check canonicality against the merged dev tree exercised by CI, rejecting stale ceilings after a dev shrink without rewriting the PR. The release PAT is confined to PR publication. No extra verification dispatch is needed because that PAT triggers ordinary PR CI/review. |
 
 **The promotion pipeline (dev → main):**
 

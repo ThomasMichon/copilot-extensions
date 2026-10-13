@@ -78,6 +78,21 @@ def test_baseline_is_dev_owned_without_extra_workflow_or_verify_dispatch():
     assert "workflow run" not in "\n".join(step.get("run", "") for step in job["steps"])
 
 
+def test_automatic_baseline_canonicality_reuses_required_pr_guards():
+    workflow = yaml.safe_load((WORKFLOW.parent / "ci.yml").read_text(encoding="utf-8"))
+    guards = workflow["jobs"]["checks"]
+    step = next(
+        step for step in guards["steps"]
+        if step.get("run") == "python tools/check-module-size.py --check-automatic-baseline"
+    )
+    assert "github.event_name == 'pull_request'" in step["if"]
+    assert "github.event.pull_request.base.ref == 'dev'" in step["if"]
+    assert "automation/module-size-baseline-widen-dev" in step["if"]
+    checkout = next(step for step in guards["steps"] if step.get("uses") == "actions/checkout@v4")
+    assert "ref" not in checkout.get("with", {})
+    assert "checks" in workflow["jobs"]["pr-gate"]["needs"]
+
+
 @pytest.mark.parametrize("event,branch,same_repo,conclusion,expected", [
     ("push", "dev", True, "success", True),
     ("push", "dev", True, "failure", True),
