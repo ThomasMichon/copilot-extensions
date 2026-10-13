@@ -6,7 +6,8 @@
   (promoted to `main` by the CI pipeline); Phase 7 work branches off `dev`
   per the current contributor flow.
 - **Created:** 2026-09-22
-- **Status:** Active (reopened 2026-10-02 for Phase 7 — see Journal)
+- **Status:** Active (reopened 2026-10-02 for Phase 7; Phase 8 proposed
+  2026-10-12 — see Journal)
 - **Vision:** none yet for the pipeline itself — this effort may spawn a
   `visions/release-pipeline` entry once the design settles; revisit at
   Phase 2/3 boundary. It is, however, the named realization vehicle for the
@@ -2665,7 +2666,6 @@ than fully pre-solved in the plan — operator direction: land the plan now
 and resolve those with tests during implementation.
 
 Phase 7 implementation can now begin.
-
 
 
 
