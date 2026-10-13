@@ -16,17 +16,17 @@ field respectively, not separate resolution mechanisms. That pointer cannot
 distinguish multiple source marketplaces, and a runtime/state root is not a
 callable command directory.
 Its advisory existence check must not be promoted into an invocation contract.
-Phase 8 restores read-only diagnostics and uses existing sessionStart command
+Phase 8 restores read-only diagnostics and uses existing `sessionStart` command
 catalogs for source-qualified exact `argv`; stable out-of-session launchers
 retain their own explicit installation identity.
 
-**Current invocation contract (2026-10-11):** session consumers use
+**Current invocation contract (2026-10-11):** the target terms are defined in
+[Architecture: Selection terms](design.md#selection-terms). Session consumers use
 source-qualified exact command `argv`; out-of-session consumers use stable
 launchers bound to explicit installation ownership. Both preserve the
 selected installation regardless of legacy or cell placement. A runtime/state
-root is not an executable path. The Phase 8 diagnostic prerequisite forbids
-known pointer-writing resolution paths on persistent hosts until their
-non-mutating behavior is restored and verified.
+root is not an executable path. Persistent-host inspection follows the single
+[Phase 8 diagnostic prerequisite](installation-mode-governance.md#phase-8-diagnostic-prerequisite).
 
 <details>
 <summary>Historical 2026-09-27 framing (superseded; not an active gate)</summary>

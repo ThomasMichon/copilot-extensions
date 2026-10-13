@@ -1,7 +1,7 @@
 # Marketplace-Scoped Installations
 
 - **Slug:** `marketplace-scoped-installations`
-- **Repo:** copilot-extensions (PRs must target `dev`; `main` is release-only)
+- **Repo:** copilot-extensions ([contribution branch policy](../../../CONTRIBUTING.md#contribution-flow-pr-required))
 - **Branch(es):** independent per-phase PRs; every implementation PR preserves
   Windows and POSIX compatibility or is an explicitly non-operative foundation
 - **Created:** 2026-08-25
@@ -134,13 +134,9 @@ The original clean-room-only activation restriction remains in force.
   reconciliation, or first use must never enable namespaced mode.
 - **Clean-room only:** namespaced cells may be created, activated, run, updated,
   rolled back, repaired, migrated, or removed only inside disposable clean-room
-  environments while this effort is active. Until Phase 8 restores and tests
-  non-mutating diagnostics, do not invoke the known pointer-writing `status`
-  or `probe-legacy` resolution paths on persistent hosts, including through
-  doctor wrappers. During that interim, inspect existing evidence without
-  executing those paths; exercise them only in disposable environments.
-  After that prerequisite lands, verified read-only status/doctor checks
-  are permitted, but persistent cells must remain locally unused.
+  environments while this effort is active. Persistent-host inspection follows
+  the single [Phase 8 diagnostic prerequisite](installation-mode-governance.md#phase-8-diagnostic-prerequisite),
+  including its interim restriction and required verification evidence.
 - **Suite-private scope:** only runtime-bearing core plugins shipped by the
   `copilot-extensions` suite participate. A second source marketplace may carry
   those plugin identities for isolation proof; payload-only plugins and every
@@ -414,8 +410,8 @@ direction reconciliation; coordinated under #1096 and #1103._
   canonical installation-context implementations and their derived copies.
   Publish discovery data at explicit lifecycle boundaries, not as a
   diagnostic side effect; preserve existing callers until their replacement
-  is tested.
-- [ ] Extend the existing sessionStart command-catalog writer, not a new
+  is tested. Apply the [diagnostic acceptance criteria](installation-mode-governance.md#phase-8-diagnostic-prerequisite).
+- [ ] Extend the existing `sessionStart` command-catalog writer, not a new
   daemon or global active-marketplace registry. Publish exact callable
   `argv` with plugin, source, and selected installation identity in the
   current session's state. Preserve existing payload-local catalog commands
@@ -457,9 +453,8 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 - [ ] At each operative phase boundary, use read-only status/doctor checks to
   confirm every persistent development and production machine remains in legacy
   mode with no namespaced activation or cell-owned runtime/service state.
-  Prerequisite: Phase 8 must first restore and verify non-mutating diagnostic
-  paths. Until then, do not execute known pointer-writing resolution paths
-  on persistent hosts; use non-executing evidence inspection instead.
+  Apply the [Phase 8 diagnostic prerequisite](installation-mode-governance.md#phase-8-diagnostic-prerequisite)
+  before executing these checks.
 - [ ] Exercise every namespaced install, activation, runtime use, service start,
   update, rollback, repair, migration, and uninstall path only in disposable
   clean-room environments. Unit fixtures may model cells but may not create
@@ -5016,3 +5011,19 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 - `#1109` is now complete and closed. Phase 5 complete; Phase 6 (Migration,
   enforcement, and cleanup, [#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110))
   is next.
+
+### 2026-10-12 — Diagnostic prerequisite and invocation definitions
+
+- Consolidated the Phase 8 persistent-host diagnostic prerequisite and its
+  verification evidence in
+  [Installation-Mode Governance](installation-mode-governance.md#phase-8-diagnostic-prerequisite).
+  Other active contract sections link there rather than duplicating the
+  restriction. Historical journal entries remain historical evidence, not
+  permission to invoke pointer-writing diagnostics.
+- Defined the target source-qualified command, exact `argv`, and stable
+  out-of-session launcher terms in [Architecture](design.md#selection-terms).
+  The durable `runtime-root` filename and resolver `runtimeRoot` result field
+  remain distinct names for file and value, not executable-path contracts.
+- Linked the repository's contribution branch policy to `CONTRIBUTING.md`.
+  This is documentation clarification only: no diagnostic implementation,
+  discovery publication, runtime activation, or phase completion is claimed.

@@ -14,11 +14,9 @@ create, validate, expose, or depend on these installation cells.
 Namespaced mode is explicit opt-in and default-off. While this effort is active,
 all namespaced installation and lifecycle execution occurs only in disposable
 clean-room environments. Persistent development and production machines remain
-in legacy mode and may inspect the model only through verified read-only
-diagnostics after Phase 8 restores and tests non-mutating resolution. Until
-then, do not invoke known pointer-writing `status` or `probe-legacy` paths on
-persistent hosts, including through doctor wrappers; inspect existing evidence
-without executing those paths.
+in legacy mode. Their inspection follows the canonical
+[Phase 8 diagnostic prerequisite](installation-mode-governance.md#phase-8-diagnostic-prerequisite),
+including the interim restriction and acceptance evidence.
 
 ## Decisions
 
@@ -90,6 +88,28 @@ The normalized marketplace source is the identity input. The transient Copilot
 cache path is evidence of provenance, not by itself the portable identity.
 
 ## Invocation chain
+
+### Selection terms
+
+These are the effort's target invocation terms, not a claim that the
+extended discovery contract is already implemented:
+
+- **Source-qualified:** the selected command is bound to the normalized
+  marketplace source identity and plugin identity, plus the selected
+  installation identity. A display name, plugin name/version, ambient `PATH`,
+  or plugin-name-only pointer cannot establish that binding.
+- **Exact command `argv`:** the selected installation's command catalog supplies
+  the complete executable/launcher path and any fixed arguments as an argument
+  vector, together with its shell convention and availability. Consumers retain
+  that vector and append request arguments; they do not derive an executable
+  from `runtimeRoot` or rebuild the path from a marketplace name.
+- **Stable launcher:** an out-of-session entry point whose owning lifecycle
+  publishes its explicit source, plugin, and installation binding independently
+  of any session catalog. That binding persists across sessions and is validated
+  when resolving the current callable command; payload replacement must preserve
+  ownership, not a stale payload path. Missing, stale, or foreign ownership
+  refuses invocation rather than selecting another installation. This uses
+  existing lifecycle launchers, not a new global registry or daemon.
 
 ```text
 loaded skill / hook / injected command catalog

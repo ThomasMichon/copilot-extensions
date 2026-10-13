@@ -16,16 +16,50 @@ effective-mode contracts are normative only in
 
 During this effort, namespaced installation and usage are clean-room-only.
 Persistent development and production machines remain in legacy mode with no
-namespaced activation, runtime, state, service, or migration. Verified read-only
-status/doctor inspection is permitted after Phase 8 restores and tests
-non-mutating diagnostic resolution. Until then, known pointer-writing `status`
-and `probe-legacy` paths, including wrappers that reach them, must not execute
-on persistent hosts; inspect existing evidence without invoking those paths.
+namespaced activation, runtime, state, service, or migration. Inspection follows
+the [Phase 8 diagnostic prerequisite](#phase-8-diagnostic-prerequisite).
 The policy applies only to
 runtime-bearing core plugin identities from the `copilot-extensions` suite.
 Independent marketplaces may carry those identities for source-isolation proof;
 payload-only plugins and unrelated plugins remain out of scope, including
 plugins that expose tools or services.
+
+## Phase 8 diagnostic prerequisite
+
+This section is the single source for the effort's persistent-host diagnostic
+restriction and its acceptance criteria. It does not change the normative
+installation-mode contract or authorize namespaced use on persistent hosts.
+
+Until the prerequisite is met, do not execute the known pointer-writing `status`
+or `probe-legacy` resolution paths on persistent hosts, including doctor wrappers
+that reach them. Inspect existing evidence without executing those paths;
+exercise the diagnostic implementations only in disposable environments.
+
+**Verified read-only** means all of the following evidence exists for the
+implementation being invoked:
+
+1. Regression tests exercise the actual `status`, `probe-legacy`, and affected
+   doctor entry points in disposable fixtures, not only mocked resolver results.
+   Cover canonical Python, PowerShell, no-Python POSIX, and their derived copies.
+2. Before/after fixture manifests prove diagnostic calls do not create, replace,
+   or modify installation/discovery pointers, policy, ownership receipts,
+   activation records, runtime/state files or directories, or service/task
+   registrations. Guard mutation entry points so an attempted publication,
+   provisioning, or service ensure/start fails the test even if it would be
+   idempotent. Existing discovery evidence and absent evidence are both covered.
+3. Tests preserve the established result shape, reason/status precedence,
+   missing/stale/foreign ownership refusal, and existing caller behavior.
+   Explicit lifecycle publication is tested separately, never as a diagnostic
+   side effect.
+4. The fix is merged, and the effort journal links its implementation PR,
+   covered entry-point/copy inventory, test commands, and passing Windows and
+   native POSIX evidence. A report-only scan, successful status output, or a
+   single-platform result does not satisfy this prerequisite.
+
+After that evidence is recorded, the verified entry points may perform
+read-only status/doctor inspection on persistent hosts. The namespaced
+activation and usage restriction remains unchanged; passing this prerequisite
+does not complete Phase 8 or the effort.
 
 ## Decision and rationale
 
@@ -100,9 +134,9 @@ can be placed under one cell plugin root for scoped surgery.
 
 Marker existence wins even when the sidecar cannot be parsed. Ownerless, dead,
 or otherwise stale maintenance is reported and never automatically cleared.
-Verified read-only status and doctor remain available subject to the Phase 8
-diagnostic prerequisite above; the known pointer-writing paths are not
-read-only inspection. Mutation during maintenance
+Status and doctor inspection during maintenance follows the
+[Phase 8 diagnostic prerequisite](#phase-8-diagnostic-prerequisite).
+Mutation during maintenance
 requires a management command's explicit authorization flag; an environment
 variable or inherited process context is not authorization.
 
