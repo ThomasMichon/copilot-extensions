@@ -163,6 +163,110 @@ def test_apply_session_register_rejects_a_terminal_managed_worktree(
     assert record.session_entry("sess-1") is None
 
 
+def test_session_register_uses_knowledge_backed_receiving_authority(
+    tmp_path: Path, monkeypatch,
+):
+    """The real bounded loader accepts the local registered space and rejects
+    a foreign one without mutating its worktree record."""
+    from agent_worktrees import repos as repos_mod
+
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    cfg.inrepo_config_path(harness).parent.mkdir(parents=True)
+    cfg.inrepo_config_path(harness).write_text(
+        "stateless: true\nrequires_external_state_root: true\n",
+        encoding="utf-8",
+    )
+    (knowledge / ".agent-worktrees").mkdir(parents=True)
+    (knowledge / ".agent-worktrees" / "machines.yaml").write_text(
+        "machines:\n"
+        "  workstation-windows:\n"
+        "    execution_platform: windows\n"
+        "    physical_host: workstation\n"
+        "  workstation-wsl:\n"
+        "    execution_platform: wsl\n"
+        "    physical_host: workstation\n",
+        encoding="utf-8",
+    )
+    registry = repos_mod.ReposRegistry(
+        repos={
+            name: repos_mod.RepoEntry(
+                name=name,
+                repo_class="worktree",
+                paths={
+                    "windows": str(anchor),
+                    "wsl": str(anchor),
+                    "linux": str(anchor),
+                },
+            )
+            for name, anchor in (
+                ("harness", harness),
+                ("knowledge", knowledge),
+            )
+        }
+    )
+    monkeypatch.setattr(repos_mod, "read_registry", lambda: registry)
+    project_root = tmp_path / ".harness"
+    project_root.mkdir()
+    (project_root / "config.yaml").write_text(
+        "machine: workstation-windows\n"
+        "platform: windows\n"
+        "knowledge_repo: knowledge\n"
+        f"repos:\n  harness:\n    anchor: {harness}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: project_root)
+    monkeypatch.setattr(
+        cfg, "global_config_path", lambda: tmp_path / "missing-global.yaml",
+    )
+
+    local_path = tmp_path / "local.yaml"
+    foreign_path = tmp_path / "foreign.yaml"
+    for path, worktree_id, machine, platform in (
+        (local_path, "local", "workstation-windows", "windows"),
+        (foreign_path, "foreign", "workstation-wsl", "wsl"),
+    ):
+        save_record(
+            WorktreeRecord(
+                worktree_id=worktree_id,
+                branch=f"worktree/{worktree_id}",
+                worktree_path=str(tmp_path / worktree_id),
+                repo="harness",
+                machine=machine,
+                platform=platform,
+                started_at="2026-10-13T12:00:00",
+                last_resumed_at="2026-10-13T12:00:00",
+                resume_count=0,
+                title=None,
+                status="active",
+                completed_at=None,
+                sessions=[],
+            ),
+            path,
+        )
+
+    accepted = tracking_session_registration_write.apply_session_register(
+        {
+            "worktree_id": "local",
+            "yaml_path": str(local_path),
+            "session_id": "sess-local",
+        }
+    )
+    assert accepted == {"ok": True, "linked_handoff": None}
+    assert tracking.load_record(local_path).session_entry("sess-local") is not None
+
+    before = foreign_path.read_bytes()
+    rejected = tracking_session_registration_write.apply_session_register(
+        {
+            "worktree_id": "foreign",
+            "yaml_path": str(foreign_path),
+            "session_id": "sess-foreign",
+        }
+    )
+    assert rejected["error"] == "execution_space"
+    assert foreign_path.read_bytes() == before
+
+
 def test_register_session_reaches_a_live_daemon(record_path, monkeypatch, monkeypatch_config):
     """End-to-end: proves ``tracking.register_session`` reaches
     ``apply_session_register`` via an actual ``CoalescingServer`` (the
