@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from . import workspace_creation_cli
+from .client_protocol_floor import connection_refused, protocol_floored_request
+
+_connection_refused = connection_refused
 
 _COMPANION_SEED_HEADS_UP = (
     "Heads-up: you are an agent-bridge companion agent, not an agent-dispatch "
@@ -66,21 +69,6 @@ def _resolve_prompt(args: argparse.Namespace, *, required: bool) -> str | None:
     return None
 
 
-def _connection_refused(exc: BaseException) -> bool:
-    """True when the error chain proves the connection was refused (nothing
-    was sent), as opposed to a reset, timeout or broken pipe that may have
-    delivered the request."""
-    seen: set[int] = set()
-    cur: BaseException | None = exc
-    while cur is not None and id(cur) not in seen:
-        seen.add(id(cur))
-        if isinstance(cur, ConnectionRefusedError) or isinstance(getattr(cur, "reason", None),
-                                                                   ConnectionRefusedError):
-            return True
-        cur = cur.__cause__ or cur.__context__
-    return False
-
-
 def _hold_protocol_floor(client: Any, floor: int) -> None:
     """Keep ``--min-daemon-protocol`` true for every request attempt.
 
@@ -93,76 +81,7 @@ def _hold_protocol_floor(client: Any, floor: int) -> None:
     skipped. The probe-to-request window left is milliseconds; closing it fully
     needs the daemon itself to refuse, which an older daemon can't do.
     """
-    import time
-
-    from .client import BridgeClientError, BridgeConnectionError
-
-    request, resolve = client._request, getattr(client, "_reresolve", None)
-    grace = getattr(client, "_connect_grace", 0.0)
-
-    def _attempt(*a: Any, **k: Any) -> Any:
-        # The client's own retries would skip the probe, so they're off for each
-        # protocol-checked attempt -- and only then: between attempts (a stream's
-        # endpoint refresh after a cutover) its resolver must still work.
-        saved = client._reresolve, client._connect_grace
-        client._reresolve, client._connect_grace = None, 0.0
-        try:
-            return request(*a, **k)
-        finally:
-            client._reresolve, client._connect_grace = saved
-
-    def _floored(method: str, path: str, *a: Any, **k: Any) -> Any:
-        deadline = time.monotonic() + grace
-        retrying = False
-        last_error: Exception | None = None
-        while True:
-            if retrying:
-                time.sleep(0.5)
-                base = resolve() if resolve else None
-                if base:
-                    client._base = base.rstrip("/")
-            try:
-                version = int((_attempt("GET", "/health") or {}).get("protocol_version") or 0)
-            except (BridgeConnectionError, OSError, TypeError, ValueError):
-                # OSError: a read timeout (TimeoutError) after connecting
-                # escapes the client's own wrapping; the probe is unanswered.
-                unanswered = BridgeConnectionError(
-                    f"the bridge daemon at {client._base} didn't answer a protocol check in time; "
-                    "the request was not sent")
-                if time.monotonic() >= deadline:
-                    raise unanswered from None
-                retrying, last_error = True, last_error or unanswered
-                continue
-            if version < floor:
-                raise BridgeClientError(426, f"the bridge daemon now at {client._base} predates protocol "
-                                             f"{floor}; not sending the request there")
-            if last_error is not None and time.monotonic() >= deadline:
-                raise last_error  # a slow re-probe spent the budget: never send late
-            try:
-                return _attempt(method, path, *a, **k)
-            except BridgeConnectionError as exc:
-                # A request that may have reached the daemon (a reset, a timeout,
-                # a broken pipe) may have been accepted: resend only an
-                # idempotent one, or one whose connection was refused outright.
-                if time.monotonic() >= deadline or (
-                        method not in ("GET", "HEAD") and not _connection_refused(exc)):
-                    raise
-                retrying, last_error = True, exc
-            except BridgeClientError as exc:
-                # The daemon refused the request outright (it was not
-                # accepted): a retiring one ("draining") hands over to its
-                # replacement, and a starting one ("initializing") answers
-                # /health before its session paths are ready. Retry either
-                # within the same deadline, re-probing the protocol first
-                # (client.py's own retries are off: they would skip the probe).
-                # Any other HTTP error is the answer.
-                detail = str(exc.detail).lower()
-                if exc.status != 503 or not ("drain" in detail or "initializing" in detail) \
-                        or time.monotonic() >= deadline:
-                    raise
-                retrying, last_error = True, exc
-
-    client._request = _floored
+    client._request = protocol_floored_request(client, floor)
 
 
 def _companion_seed_prompt(prompt: str | None) -> str | None:
@@ -387,11 +306,14 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
     print(f"    receipt: {receipt.get('stage') or 'unavailable (delivery evidence unavailable)'}")
     if result.get("receipt_error"):
         print(f"    receipt evidence unavailable: {result['receipt_error']}", file=sys.stderr)
-    if receipt.get("stage"):
+    if receipt.get("stage") and result.get("receipt_current") is True:
         print(f"    observe: agent-bridge read {session_id} --message-id {mid} --json")
     else:
         print(f"    observe: agent-bridge read {session_id} --json")
-        print("    (message receipt observation requires daemon protocol 33 or newer)")
+        if receipt.get("stage"):
+            print("    (message receipt observation is unavailable; inspect session state instead)")
+        else:
+            print("    (message receipt observation requires daemon protocol 33 or newer)")
     if reply_to:
         print(f"    reply-to: {reply_to}")
     else:

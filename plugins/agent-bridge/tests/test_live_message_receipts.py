@@ -374,7 +374,10 @@ def test_retirement_during_reply_wait_preserves_admission_and_reports_lost_evide
     assert result["receipt_error"] == "live-message receipt is no longer retained"
 
 
-def test_retirement_between_admission_and_receipt_read_is_not_a_failed_send(api, tmp_db, monkeypatch):
+def test_retirement_between_admission_and_receipt_read_is_not_a_failed_send(
+    api: TestClient, tmp_db: Database, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     original = tmp_db.enqueue_live_message_if_fresh
 
     def retired(*args, **kwargs):
@@ -387,6 +390,23 @@ def test_retirement_between_admission_and_receipt_read_is_not_a_failed_send(api,
     assert result["ok"] and result["message_id"] > 0
     assert result["receipt"]["stage"] == "admitted"
     assert result["receipt_current"] is False and result["receipt_error"]
+    assert api.get(f"/api/v1/live-sessions/live-1/messages/{result['message_id']}/receipt").status_code == 404
+
+    class Client:
+        def send_live_message(self, _session_id: str, **_kwargs: object) -> dict[str, object]:
+            return result
+
+    monkeypatch.setattr(cli, "_live_sender_label", lambda _args: "peer")
+    monkeypatch.setattr(cli, "_live_reply_to", lambda _args: None)
+    _deliver_to_live_session(
+        Client(), argparse.Namespace(json=False, no_wait=True), "live-1", "update",
+    )
+    output = capsys.readouterr()
+    assert "receipt: admitted" in output.out
+    assert "observe: agent-bridge read live-1 --json" in output.out
+    assert "--message-id" not in output.out
+    assert "receipt observation is unavailable" in output.out
+    assert "receipt is no longer retained" in output.err
 
 
 @pytest.mark.parametrize("timeout", [-1, 601, float("inf"), float("nan")])
@@ -430,9 +450,18 @@ def test_client_reply_wait_uses_validated_bound_plus_transport_margin(monkeypatc
     client = BridgeClient("http://127.0.0.1:1", "test")
     monkeypatch.setattr(client, "daemon_supports", lambda version: version == 33)
     calls = []
-    monkeypatch.setattr(client, "_request", lambda *args, **kwargs: calls.append((args, kwargs)) or {})
+
+    def request(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"protocol_version": 33} if args[:2] == ("GET", "/health") else {}
+
+    monkeypatch.setattr(client, "_request", request)
     client.send_live_message("live-1", sender="peer", body="update", wait=True, wait_timeout=timeout)
-    request, options = calls[0]
+    request, options = calls[-1]
+    assert [args[:2] for args, _kwargs in calls] == [
+        ("GET", "/health"), ("POST", "/api/v1/live-sessions/live-1/messages"),
+    ]
+    assert all(options["allow_retry"] is False for _args, options in calls)
     assert options["request_timeout"] == effective + 15
     assert request[2]["wait"] is True
     if timeout is None:
@@ -481,7 +510,7 @@ def test_reply_wait_requires_receipt_protocol_before_message_submission(
         result = client.send_live_message("live-1", sender="peer", body="update",
                                           wait=wait, wait_timeout=0)
         assert result["message_id"] == 7
-        assert calls == ([("GET", "/health")] if wait else []) + [
+        assert calls == ([("GET", "/health")] * 2 if wait else []) + [
             ("POST", "/api/v1/live-sessions/live-1/messages"),
         ]
 
@@ -564,16 +593,26 @@ def test_cli_missing_receipt_stage_does_not_invent_admission(monkeypatch, capsys
 
 
 @pytest.mark.parametrize("stage", ["admitted", "sdk_accepted", "consumed"])
-def test_cli_observation_hint_uses_message_id_when_receipt_stage_is_available(monkeypatch, capsys, stage):
+@pytest.mark.parametrize("current", [None, False, True])
+def test_cli_observation_hint_uses_message_id_only_for_current_receipt_evidence(
+    monkeypatch, capsys, stage, current,
+):
     class Client:
         def send_live_message(self, sid, **kwargs):
-            return {"message_id": 7, "session_id": sid, "receipt": {"stage": stage}}
+            return {"message_id": 7, "session_id": sid, "receipt": {"stage": stage},
+                    "receipt_current": current}
 
     monkeypatch.setattr(cli, "_live_sender_label", lambda _args: "peer")
     monkeypatch.setattr(cli, "_live_reply_to", lambda _args: None)
     _deliver_to_live_session(Client(), argparse.Namespace(json=False, no_wait=False), "live-1", "update")
     output = capsys.readouterr().out
-    assert "observe: agent-bridge read live-1 --message-id 7 --json" in output
+    if current:
+        assert "observe: agent-bridge read live-1 --message-id 7 --json" in output
+        assert "receipt observation is unavailable" not in output
+    else:
+        assert "observe: agent-bridge read live-1 --json" in output
+        assert "--message-id" not in output
+        assert "receipt observation is unavailable" in output
     assert "receipt observation requires" not in output
 
 
@@ -585,10 +624,12 @@ def test_cli_wait_output_distinguishes_duplicate_and_uses_current_identity(
 ) -> None:
     client = BridgeClient("http://127.0.0.1:1", "test")
     monkeypatch.setattr(client, "daemon_supports", lambda version: version == 33)
-    monkeypatch.setattr(client, "_request", lambda *_args, **_kwargs: {
-        "message_id": 7, "session_id": "live-renamed", "duplicate": duplicate,
-        "receipt": {"stage": "admitted"}, "replied": False,
-    })
+    monkeypatch.setattr(client, "_request", lambda method, path, *_args, **_kwargs: (
+        {"protocol_version": 33} if (method, path) == ("GET", "/health") else {
+            "message_id": 7, "session_id": "live-renamed", "duplicate": duplicate,
+            "receipt": {"stage": "admitted"}, "receipt_current": True, "replied": False,
+        }
+    ))
     monkeypatch.setattr(cli, "_live_sender_label", lambda _args: "peer")
     monkeypatch.setattr(cli, "_live_reply_to", lambda _args: None)
     args = argparse.Namespace(

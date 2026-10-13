@@ -616,6 +616,7 @@ class _ReplyingLiveClient(_LiveFakeClient):
                   "stop_reason": "end_turn"}
         if self.receipt_stage is not None:
             result["receipt"] = {"stage": self.receipt_stage}
+            result["receipt_current"] = True
         return result
 
 

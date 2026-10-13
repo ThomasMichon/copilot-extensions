@@ -316,6 +316,7 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
         *,
         params: dict[str, Any] | list[tuple[str, Any]] | None = None,
         request_timeout: float | None = None,
+        allow_retry: bool = True,
     ) -> dict[str, Any] | None:
         """Make an authenticated HTTP request. Returns parsed JSON or None for 204."""
         data = json.dumps(body).encode() if body else None
@@ -380,7 +381,9 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
                 except Exception:
                     detail = str(exc)
                 detail_text = str(detail).lower()
-                if exc.code == 503 and any(w in detail_text for w in ("initializing", "merging")):
+                if allow_retry and exc.code == 503 and any(
+                    w in detail_text for w in ("initializing", "merging")
+                ):
                     if readiness_deadline is None:
                         readiness_deadline = (
                             _time.monotonic() + self._connect_grace
@@ -400,7 +403,7 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
                 # unhandled BridgeClientError here previously escaped as a raw
                 # traceback from CLI commands like `create` that do not wrap
                 # every internal call in their own try/except).
-                if exc.code == 503 and "draining" in detail_text:
+                if allow_retry and exc.code == 503 and "draining" in detail_text:
                     if drain_deadline is None:
                         drain_deadline = _time.monotonic() + self._connect_grace
                         backoff = 0.25
@@ -417,7 +420,7 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
                 # daemon that adopted the session. Follow discovery immediately,
                 # then keep checking within the same bounded restart grace.
                 session_resource = path.startswith("/api/v1/sessions/")
-                if exc.code == 404 and session_resource and self._reresolve is not None:
+                if allow_retry and exc.code == 404 and session_resource and self._reresolve is not None:
                     if session_deadline is None:
                         session_deadline = (
                             _time.monotonic() + self._session_settle_grace
@@ -444,6 +447,10 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
                     raise BridgeConnectionError(
                         f"Connection to agent-bridge at {self._base} reset "
                         f"during non-idempotent {method}; request was not retried"
+                    ) from exc
+                if not allow_retry:
+                    raise BridgeConnectionError(
+                        f"Cannot connect to agent-bridge at {self._base}: {exc}"
                     ) from exc
                 if self._outage_deadline is None:
                     self._outage_deadline = (
@@ -762,21 +769,25 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
             payload["idempotency_key"] = idempotency_key
         if expected_session_id:
             payload["expected_session_id"] = expected_session_id
+        request = self._request
         request_timeout = None
         if wait:
+            from .client_protocol_floor import protocol_floored_request
             from .live_message_models import validate_live_reply_timeout
+            from .protocol import LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
 
             try:
                 seconds = validate_live_reply_timeout(wait_timeout)
             except ValueError as exc:
                 raise BridgeClientError(422, f"wait_timeout {exc}") from exc
             self._require_live_message_receipts()
+            request = protocol_floored_request(self, LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION)
             payload["wait"] = True
             if wait_timeout is not None:
                 payload["wait_timeout"] = seconds
             # Give the HTTP read a margin beyond the server-side reply wait.
             request_timeout = seconds + 15.0
-        return self._request(
+        return request(
             "POST", f"/api/v1/live-sessions/{session_id}/messages", payload,
             request_timeout=request_timeout,
         ) or {}

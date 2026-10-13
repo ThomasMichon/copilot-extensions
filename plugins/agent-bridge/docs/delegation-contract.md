@@ -61,6 +61,10 @@ Against older daemons, receipt-only sends retain legacy outcomes without
 receipt evidence. Explicit reply waiting refuses before submitting a message
 (`refused_unavailable`, reason `unsupported_protocol`, exit 69), rather than
 reporting an unrelated completed turn as a reply.
+Versioned receipt, reply-wait and represented-result requests re-probe their
+protocol floor before every attempt, including cutover retries. A synthetic
+admission receipt whose evidence is no longer current does not advertise a
+message-specific receipt read; the CLI instead offers session-state inspection.
 
 Represented-message consumption removes the input from delivery polling even
 when its separate SDK acknowledgement is lost; it never fabricates that
