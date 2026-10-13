@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 from pathlib import Path
 
@@ -68,14 +69,14 @@ def shell_policy(monkeypatch):
     ],
 )
 def test_native_shell_collection_rejects_wsl_before_probe(monkeypatch, shell_policy, candidate):
-    monkeypatch.setattr(shells.shutil, "which", lambda _: candidate)
+    monkeypatch.setattr(shells.shutil, "which", lambda *args, **kwargs: candidate)
     monkeypatch.setattr(subprocess, "run", _forbid_process)
     with pytest.raises(shells.ShellUnavailable, match="WSL launcher"):
         shells.resolve_native_bash()
 
 
 def test_native_shell_collection_unavailable(monkeypatch, shell_policy):
-    monkeypatch.setattr(shells.shutil, "which", lambda _: None)
+    monkeypatch.setattr(shells.shutil, "which", lambda *args, **kwargs: None)
     monkeypatch.setattr(subprocess, "run", _forbid_process)
     with pytest.raises(shells.ShellUnavailable, match="unavailable"):
         shells.resolve_native_bash()
@@ -111,7 +112,7 @@ def test_native_shell_collection_success_headless_bounded(monkeypatch, shell_pol
 @pytest.mark.parametrize("failure", ["nonzero", "timeout", "oserror"])
 def test_native_shell_collection_probe_failure(monkeypatch, shell_policy, probe, failure):
     calls = []
-    monkeypatch.setattr(shells.shutil, "which", lambda _: "native-bash")
+    monkeypatch.setattr(shells.shutil, "which", lambda *args, **kwargs: "native-bash")
 
     def run(argv, **kwargs):
         index = len(calls)
@@ -131,6 +132,38 @@ def test_native_shell_collection_probe_failure(monkeypatch, shell_policy, probe,
     ):
         shells.resolve_native_bash()
     assert len(calls) == probe + 1
+
+
+def test_native_shell_collection_path_lookup_skips_wsl_shadows(monkeypatch, shell_policy):
+    shadow_paths = [
+        r"C:\WINDOWS\SYSTEM32\\",
+        r"C:\Users\example\AppData\Local\microsoft\windowsapps",
+    ]
+    native_dir = r"C:\portable\Git\bin"
+    other_dir = r"C:\tools"
+    monkeypatch.setattr(
+        shells.os, "get_exec_path", lambda: [*shadow_paths, native_dir, other_dir],
+    )
+    lookups = []
+    probes = []
+
+    def which(command, *, path):
+        lookups.append((command, path))
+        assert path == os.pathsep.join([native_dir, other_dir])
+        return native_dir + r"\bash.exe"
+
+    def run(argv, **kwargs):
+        probes.append(argv)
+        return subprocess.CompletedProcess(
+            argv, 7 if len(probes) == 1 else 1 if len(probes) == 2 else 0, "/\n", ""
+        )
+
+    monkeypatch.setattr(shells.shutil, "which", which)
+    monkeypatch.setattr(subprocess, "run", run)
+    assert shells.resolve_native_bash() == native_dir + r"\bash.exe"
+    assert len(lookups) == 1
+    assert len(probes) == 3
+    assert all(argv[0] == native_dir + r"\bash.exe" for argv in probes)
 
 
 @pytest.mark.parametrize("windows", [False, True])

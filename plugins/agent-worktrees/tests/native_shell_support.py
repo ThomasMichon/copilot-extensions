@@ -35,7 +35,17 @@ def resolve_native_bash() -> str:
     require_native_tier()
     windows = sys.platform == "win32"
     git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
-    candidate = str(git_bash) if windows and git_bash.is_file() else shutil.which("bash")
+    if windows and git_bash.is_file():
+        candidate = str(git_bash)
+    elif windows:
+        search_path = os.pathsep.join(
+            part
+            for part in os.get_exec_path()
+            if not _is_wsl_launcher(part.rstrip("\\/") + "/bash.exe")
+        )
+        candidate = shutil.which("bash", path=search_path)
+    else:
+        candidate = shutil.which("bash")
     if candidate is None:
         raise ShellUnavailable("Bash is unavailable")
     if windows and _is_wsl_launcher(candidate):

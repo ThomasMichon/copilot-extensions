@@ -191,6 +191,11 @@ small and explicit while unit policy tests remain in-process.
   boundary; no production installer or runtime behavior changed. Review,
   merge and normal promotion remain outstanding. The broader campaign stays
   Active and this slice does not settle its workload/lifecycle obligations.
+- Review found that an earlier WSL launcher on PATH could hide a portable
+  Git Bash when the usual installation path is absent. Filtered known launcher
+  directories before fallback lookup and retained post-resolution refusal.
+  Added the ordered-PATH policy regression; all 39 focused tests, including
+  the retained native consumers, passed at unchanged limits.
 
 ### 2026-10-13 - Released list-warm coalescing and real-clock validation
 

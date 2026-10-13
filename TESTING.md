@@ -106,6 +106,8 @@ Bash or PowerShell. A lazy session fixture admits native shells only after
 `--allow-explicit-tiers`; direct pytest also requires
 `COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS=1`. Windows admission prefers Git
 Bash and rejects WindowsApps/System32 WSL launchers before executing anything.
+Fallback lookup removes those launcher directories before searching PATH, so
+an earlier WSL shadow cannot hide a later portable Git Bash.
 The exit-code, pipefail and Windows cygpath probes run once per admitted session,
 headlessly with five-second bounds. Native semantic tests and path conversion
 remain real; ordinary tests mock the admission policy and forbid process
