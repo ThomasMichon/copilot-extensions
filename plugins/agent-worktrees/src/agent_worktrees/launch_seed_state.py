@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Literal
 
 from . import locks, status_monitor_runtime, tracking, tracking_write
+from . import terminal_pair_progress
 from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
 from .worktree_status_daemon import _is_safe_identity_token
 
@@ -193,19 +194,39 @@ def _apply_finish(args: dict) -> dict:
         return {"finished": True}
 
 
+def _remove_record_state(path: Path, target: Path, receipt: Path) -> None:
+    files = (path, target, receipt)
+    if any(file.is_symlink() for file in files):
+        raise ExecutionSpaceError("cannot authorize record-state removal through a symbolic link")
+    snapshots = {file: file.read_bytes().decode("utf-8") for file in files if file.exists()}
+    try:
+        target.unlink(missing_ok=True)
+        path.unlink(missing_ok=True)
+        receipt.unlink(missing_ok=True)
+    except OSError:
+        # Retain the authorized record and its evidence for a normal retry,
+        # without reserializing through a separate record writer.
+        for file, content in snapshots.items():
+            if not file.exists():
+                tracking._atomic_write(file, content)
+        raise
+
+
 def _apply_remove(args: dict) -> dict:
     path = Path(args["yaml_path"])
     target = state_path(path)
+    receipt = terminal_pair_progress._receipt_path(path)
     if args.get("worktree_id") != path.stem:
         raise ValueError("Launch-seed removal identity mismatch")
     with tracking._RecordLock(path, require_sidecar=True):
         if path.exists():
             _record(args)
-        elif target.exists():
+        elif target.exists() or (args.get("remove_record") and receipt.exists()):
             raise ExecutionSpaceError("cannot authorize launch-seed removal without its worktree record")
-        target.unlink(missing_ok=True)
         if args.get("remove_record"):
-            path.unlink(missing_ok=True)
+            _remove_record_state(path, target, receipt)
+        else:
+            target.unlink(missing_ok=True)
     return {"removed": True, "record_removed": bool(args.get("remove_record"))}
 
 

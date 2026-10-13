@@ -469,3 +469,19 @@ requested contract.
   fields preserving both records and the unchanged receipt.
 - Existing release authority, immutable allocation fences, one-shot newer-owner
   preservation, native consumer proof and coordinator deployment custody remain.
+
+### 2026-10-13 - #6542 owned-receipt lifetime correction
+
+- Reproduced successful managed/daemon removal leaving terminal-pair receipts,
+  missing-record removal acknowledging unproven ownership, and failed deletion
+  losing the staged seed or not surfacing receipt-cleanup errors.
+- Extended the existing authoritative launch-seed/record removal transaction to
+  remove only the exact record-owned receipt after YAML deletion. Under its
+  existing record lock, caught deletion errors restore retained raw UTF-8 state
+  via the existing atomic writer and surface the failure for a normal retry.
+- Covered seed-only paired-record audit retention, unknown/rejected authority,
+  symbolic ambiguity, record/receipt failure and retry, real daemon success /
+  repeated removal, and native managed reap success/live/failure paths.
+- No task history is pruned and no schema writer is replaced. Unrelated CI repair
+  remains with its existing owners; integration, review and deployment custody
+  remain with the coordinator.

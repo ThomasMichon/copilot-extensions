@@ -239,6 +239,10 @@ def test_successful_managed_reap_removes_only_owned_seed_state(tmp_path, monkeyp
 
     path = _record(tmp_path)
     state.stage(path, kind="resume", text="private pending prompt")
+    pair_receipt = path.with_suffix(".terminal-pair.json")
+    pair_receipt.write_text('{"version":1}', encoding="utf-8")
+    other_receipt = tmp_path / "other.terminal-pair.json"
+    other_receipt.write_text("retain other record evidence", encoding="utf-8")
     other = state.state_path(path).parent / "unrelated-state.txt"
     other.write_text("keep me", encoding="utf-8")
     record = tracking.load_record(path)
@@ -256,7 +260,155 @@ def test_successful_managed_reap_removes_only_owned_seed_state(tmp_path, monkeyp
     )
     assert removed and not warnings
     assert not path.exists() and not state.state_path(path).exists()
+    assert not pair_receipt.exists()
+    assert other_receipt.read_text(encoding="utf-8") == "retain other record evidence"
     assert other.read_text(encoding="utf-8") == "keep me"
+
+
+def test_terminal_pair_sidecar_removal_preserves_receipt_when_record_retained(tmp_path):
+    path = _record(tmp_path)
+    state.stage(path, kind="resume", text="seed only")
+    record = tracking.load_record(path)
+    record.pair_id, record.pair_role, record.pair_kind = "fixture-pair", "harness", "worktree"
+    record.pair_ref = tracking.format_claim_ref("test", "demo", "wt-sibling")
+    tracking.save_record(record, path)
+    pair_receipt = path.with_suffix(".terminal-pair.json")
+    pair_receipt.write_text('{"version":1}', encoding="utf-8")
+    before = path.read_bytes(), pair_receipt.read_bytes()
+    result = state.remove(path)
+    assert result["record_removed"] is False
+    assert (path.read_bytes(), pair_receipt.read_bytes()) == before
+
+
+def test_terminal_pair_sidecar_removal_preserves_unknown_owner(tmp_path):
+    path = _record(tmp_path)
+    pair_receipt = path.with_suffix(".terminal-pair.json")
+    pair_receipt.write_text('{"version":1}', encoding="utf-8")
+    path.unlink()
+    before = pair_receipt.read_bytes()
+    with pytest.raises(ValueError, match="without its worktree record"):
+        state.remove(path, remove_record=True)
+    assert pair_receipt.read_bytes() == before
+
+
+@pytest.mark.parametrize("failure", ["record", "receipt"])
+def test_terminal_pair_sidecar_removal_failure_retains_and_retries(tmp_path, monkeypatch, failure):
+    path = _record(tmp_path)
+    state.stage(path, kind="resume", text="retain on failed removal")
+    target = state.state_path(path)
+    pair_receipt = path.with_suffix(".terminal-pair.json")
+    pair_receipt.write_text('{"version":1}', encoding="utf-8")
+    before = {file: file.read_bytes() for file in (path, target, pair_receipt)}
+    failed_path = path if failure == "record" else pair_receipt
+    unlink = Path.unlink
+
+    def fail(file, *args, **kwargs):
+        if file == failed_path:
+            raise OSError("injected owned-state deletion failure")
+        return unlink(file, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail)
+    with pytest.raises(OSError, match="injected owned-state"):
+        state.remove(path, remove_record=True)
+    assert {file: file.read_bytes() for file in before} == before
+    monkeypatch.setattr(Path, "unlink", unlink)
+    assert state.remove(path, remove_record=True)["record_removed"] is True
+    assert not any(file.exists() for file in before)
+    assert state.remove(path, remove_record=True)["record_removed"] is True
+
+
+def test_terminal_pair_sidecar_removal_preserves_rejected_authority(tmp_path, monkeypatch):
+    from agent_worktrees.execution_spaces import ExecutionSpaceError
+
+    path = _record(tmp_path)
+    state.stage(path, kind="resume", text="retain unproven state")
+    pair_receipt = path.with_suffix(".terminal-pair.json")
+    pair_receipt.write_text('{"version":1}', encoding="utf-8")
+    before = {file: file.read_bytes() for file in (path, state.state_path(path), pair_receipt)}
+
+    def reject(*args):
+        raise ExecutionSpaceError("fixture authority unavailable")
+
+    monkeypatch.setattr(state, "require_project_record_mutation", reject)
+    with pytest.raises(ValueError, match="authority unavailable"):
+        state.remove(path, remove_record=True)
+    assert {file: file.read_bytes() for file in before} == before
+
+
+def test_terminal_pair_sidecar_removal_preserves_unproven_symbolic_state(tmp_path, monkeypatch):
+    path = _record(tmp_path)
+    state.stage(path, kind="resume", text="retain linked state")
+    pair_receipt = path.with_suffix(".terminal-pair.json")
+    pair_receipt.write_text('{"version":1}', encoding="utf-8")
+    before = {file: file.read_bytes() for file in (path, state.state_path(path), pair_receipt)}
+    symbolic = Path.is_symlink
+    monkeypatch.setattr(Path, "is_symlink", lambda file: file == pair_receipt or symbolic(file))
+    with pytest.raises(ValueError, match="symbolic link"):
+        state.remove(path, remove_record=True)
+    assert {file: file.read_bytes() for file in before} == before
+
+
+def test_real_daemon_terminal_pair_sidecar_removal_is_complete_and_repeatable(tmp_path, monkeypatch):
+    path = _record(tmp_path)
+    state.stage(path, kind="resume", text="fixture seed")
+    pair_receipt = path.with_suffix(".terminal-pair.json")
+    pair_receipt.write_text('{"version":1}', encoding="utf-8")
+    server = tracking_write.start_server(tracking_write.compute)
+    server.start()
+    endpoint = tracking_write.rendezvous_fields(server)
+
+    def dispatch(verb, args, **kwargs):
+        return tracking_write.dispatch(
+            verb, args, read_lock_data=lambda: endpoint, ensure_monitor=None,
+            boot_wait_s=0, min_version=kwargs.get("min_version", 2),
+        )
+
+    monkeypatch.setattr(state, "_dispatch", dispatch)
+    monkeypatch.setattr(tracking_write, "run_direct", lambda *a, **kw: pytest.fail("must use real daemon"))
+    try:
+        assert state.remove(path, remove_record=True)["record_removed"] is True
+        assert not path.exists() and not state.state_path(path).exists() and not pair_receipt.exists()
+        assert state.remove(path, remove_record=True)["record_removed"] is True
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize("failure", ["live", "receipt"])
+def test_native_reap_terminal_pair_sidecar_failure_preserves_evidence(tmp_path, monkeypatch, failure):
+    from agent_worktrees import reap_cli
+
+    path = _record(tmp_path)
+    state.stage(path, kind="resume", text="retain native retry")
+    pair_receipt = path.with_suffix(".terminal-pair.json")
+    pair_receipt.write_text('{"version":1}', encoding="utf-8")
+    before = {file: file.read_bytes() for file in (path, state.state_path(path), pair_receipt)}
+    record = tracking.load_record(path)
+    record.branch = record.worktree_path = ""
+    monkeypatch.setattr(reap_cli.sessions, "has_mux_session", lambda *a: failure == "live")
+    monkeypatch.setattr(reap_cli.sessions, "scan_sessions_fast", lambda *a: SimpleNamespace(active_sessions=set()))
+    monkeypatch.setattr(reap_cli.disposition_history, "remove", lambda *a: None)
+    monkeypatch.setattr(reap_cli.handoff_trace, "remove_trace", lambda *a: None)
+    unlink = Path.unlink
+
+    def fail(file, *args, **kwargs):
+        if file == pair_receipt:
+            raise OSError("injected native receipt failure")
+        return unlink(file, *args, **kwargs)
+
+    if failure == "receipt":
+        monkeypatch.setattr(Path, "unlink", fail)
+    removed, warnings = reap_cli._remove_managed_worktree(
+        record, SimpleNamespace(anchor=str(tmp_path)), tmp_path,
+    )
+    assert removed is False
+    assert warnings and ("live mux" if failure == "live" else "injected native receipt") in warnings[0]
+    assert {file: file.read_bytes() for file in before} == before
+    if failure == "receipt":
+        monkeypatch.setattr(Path, "unlink", unlink)
+        assert reap_cli._remove_managed_worktree(
+            record, SimpleNamespace(anchor=str(tmp_path)), tmp_path,
+        ) == (True, [])
+        assert not any(file.exists() for file in before)
 
 
 def test_atomic_removal_prevents_concurrent_seed_recreation(tmp_path, monkeypatch):
