@@ -92,6 +92,8 @@ workflow versions do not substitute for this distinct requirement.
 GitHub attaches check results to commits, not individual PRs. Multiple open
 `dev` PRs sharing one head commit therefore fail this check, even when each
 description is valid. Publish a distinct head commit for each PR before retrying.
+When a peer moves, closes, or retargets away from `dev`, its departure refreshes
+the remaining PRs on the old head; they need no unrelated description edit.
 
 **PRs target `dev`, not `main`.** `main` is regenerated wholesale by a CI
 promotion pipeline (`.github/workflows/validate-and-promote.yml`,

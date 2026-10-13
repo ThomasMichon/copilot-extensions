@@ -52,6 +52,24 @@ def test_existing_heads_are_refreshed_from_only_the_default_branch():
     assert "unlabeled" in workflow["jobs"]["request-review"]["if"]
 
 
+def test_departures_observe_retargets_without_skipped_required_contexts():
+    workflow = load("source-attribution-departures.yml")
+    trigger = workflow["on"]["pull_request_target"]
+    assert "branches" not in trigger
+    assert set(trigger["types"]) == {"synchronize", "closed", "edited"}
+    assert set(workflow["jobs"]) == {"refresh-departed-source-attribution"}
+    job = workflow["jobs"]["refresh-departed-source-attribution"]
+    assert "github.event.changes.base.ref.from == 'dev'" in job["if"]
+    assert job["permissions"] == {"contents": "read", "pull-requests": "read", "checks": "write"}
+    assert job["concurrency"]["cancel-in-progress"] == "false"
+    assert job["steps"][0]["uses"] == "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
+    assert job["steps"][0]["with"] == {"ref": "${{ github.workflow_sha }}", "persist-credentials": "false"}
+    assert job["steps"][1]["run"] == "npm ci --ignore-scripts --no-audit --no-fund"
+    assert job["steps"][2]["with"]["retries"] == "0"
+    assert ".departed(" in job["steps"][2]["with"]["script"]
+
+
+
 def test_contract_tests_are_wired_and_dev_cleanup_has_a_workflow_origin():
     steps = load("ci.yml")["jobs"]["checks"]["steps"]
     assert any("required-pr-attribution.test.cjs" in step.get("run", "") for step in steps)

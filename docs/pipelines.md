@@ -316,7 +316,7 @@ Backfill also enforces a 950-request per-run budget, including every pagination
 page, metadata read, check write and retry. It reserves failure-fencing requests
 before inspecting a head, including deduplication of an existing result, so
 exhaustion cannot strand a pending check or leave an inspected but unverifiable
-completed success as the latest result. Transport retries are disabled in both
+completed success as the latest result. Transport retries are disabled in all
 trusted metadata script steps; policy retries consume the same budget. A larger or
 unstable batch stops with an explicit incomplete-refresh error instead of
 hammering the exhausted quota or reporting that every PR was checked.
@@ -326,11 +326,20 @@ The trusted checkout's integrity-locked CommonMark and HTML parsers identify
 actual HTML comments, excluding fenced/indented code and quoted examples even
 inside continuation list items. HTML containers cannot conceal additional
 source comments; attribute strings and raw-text elements are not comments.
-Both metadata jobs install these pinned dependencies
+All metadata jobs install these pinned dependencies
 with `npm ci --ignore-scripts`; no PR-head package or lifecycle script runs.
 CONTRIBUTING.md and failure output publish the accepted codename, workflow and
 native gh-aw origin forms and concrete manual repair steps. Encryption remains
 optional, and syntax validation is not proof of actual source ownership.
+
+`source-attribution-departures.yml` reevaluates remaining dev PRs on a head
+that another PR leaves by pushing, closing, or retargeting away from dev.
+Its trusted, checks-writing job has a distinct non-required name and publishes
+the actual source context only for current dev peers. It is not branch-filtered,
+so a retarget away from dev is observable; it never creates a skipped
+`source-attribution` or `workflow-lockdown-guard` result that could bless a peer.
+This clears collision failures without requiring an unrelated edit to the
+remaining PR. It uses the same validator, freshness checks and request budget.
 
 Pushes to the default release branch and trusted manual dispatches refresh the
 distinct context on current open dev PR heads without editing their descriptions
@@ -394,6 +403,7 @@ targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
 |----------|---------|---------|
 | `ci.yml` | `pull_request`, `push` (`main`/`dev`), `workflow_dispatch` | The fast smoke-CI suite (guards, lint, per-plugin tests) that gates every PR. Contains `main-gate` (rejects a non-promotion PR against `main`) and the `PR gate` fixed-name required-check aggregate, including native Windows archive-source/chronicler smoke when `agent-logger` is selected. |
 | `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` (including body/label edits), `push` → `main`, `workflow_dispatch` | Independent trusted jobs host the existing required `workflow-lockdown-guard` check, the separate `source-attribution` metadata check, and the Maintainer-only review fallback. Default-branch push/manual runs refresh source-attribution checks for already-open `dev` PRs; job-scoped permissions/concurrency preserve the review boundary. No PR code executes. |
+| `source-attribution-departures.yml` | `pull_request_target` (`synchronize`, `closed`, `edited`) | Trusted metadata-only refresh of remaining dev PRs on a departed shared head, including retargets away from dev. Publishes no required-context skipped jobs and never executes PR content. |
 | `base-branch-reminder.yml` | `pull_request_target` → `main` | Posts a one-time comment asking a non-owner author to retarget a PR against `main` to `dev` (see [If you opened a PR against `main` by mistake](#if-you-opened-a-pr-against-main-by-mistake)). Never checks out or executes PR code. |
 | `trusted-ci.yml` | `pull_request_target`, paths-scoped to `.github/workflows/trusted-ci.yml`/`libs/**`/`agent-bridge`/`tools/**` | Opt-in (`vars.TRUSTED_SELF_HOSTED_CI`), collaborator-gated self-hosted CI lane for paths too sensitive/expensive for the standard runner pool; includes its own file so a change to the gate itself also re-runs it. |
 

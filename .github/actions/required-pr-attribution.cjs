@@ -228,16 +228,19 @@ function snapshot(pr, peers) {
   })).digest("hex");
 }
 
-async function backfill({ github, context, core, requestLimit = 950,
+async function backfill({ github, context, core, head, requestLimit = 950,
   pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
+  if (head !== undefined && (typeof head !== "string" || !/^[a-f0-9]{40}$/.test(head))) {
+    throw new Error("Invalid departed head metadata.");
+  }
   const budget = new RefreshBudget(requestLimit);
   const prs = await paginate(budget, github, github.rest.pulls.list, {
     ...context.repo, state: "open", base: "dev", per_page: 100,
   });
   const failed = [];
-  for (const listed of prs) {
+  for (const listed of prs.filter((pr) => head === undefined || pr.head.sha === head)) {
     try {
-      await refreshPR(github, context, listed, pause, budget);
+      await refreshPR(github, context, listed, pause, budget, head);
     } catch (error) {
       if (error instanceof RefreshLimitError) throw error;
       const number = Number.isSafeInteger(listed.number) && listed.number > 0 ? listed.number : "unknown";
@@ -246,10 +249,23 @@ async function backfill({ github, context, core, requestLimit = 950,
     }
   }
   if (failed.length) throw new Error(`Source metadata refresh failed for ${failed.length} PR(s) (${failed.join(", ")}); retry the check.`);
-  core.info("Current dev pull request metadata checks refreshed.");
+  core.info(head ? "Current dev pull requests on the departed head refreshed." :
+    "Current dev pull request metadata checks refreshed.");
 }
 
-async function refreshPR(github, context, listed, pause, budget) {
+async function departed({ github, context, core, ...options }) {
+  const { action, pull_request: pr, changes, before } = context.payload;
+  let head;
+  if (action === "synchronize" && pr.base.ref === "dev") head = before;
+  else if (action === "closed" && pr.base.ref === "dev") head = pr.head.sha;
+  else if (action === "edited" && changes?.base?.ref?.from === "dev" && pr.base.ref !== "dev") {
+    head = pr.head.sha;
+  } else return;
+  if (head === undefined) throw new Error("Missing departed head metadata.");
+  await backfill({ github, context, core, ...options, head });
+}
+
+async function refreshPR(github, context, listed, pause, budget, head) {
   let stable = false;
   for (let attempt = 0; attempt < 3; attempt++) {
     budget.protectPending();
@@ -260,7 +276,8 @@ async function refreshPR(github, context, listed, pause, budget) {
       const observed = await headPolicy(github, context, listed.number, listed.head.sha, budget);
       pr = observed.pr;
       externalId = observed.snapshot;
-      if (pr.state !== "open" || pr.base.ref !== "dev") { stable = true; break; }
+      if (pr.state !== "open" || pr.base.ref !== "dev" ||
+          (head !== undefined && pr.head.sha !== head)) { stable = true; break; }
       const { data } = await invoke(budget, () => github.rest.checks.listForRef({
         ...context.repo, ref: pr.head.sha, check_name: CONTEXT, per_page: 100,
       }));
@@ -325,4 +342,4 @@ async function refreshPR(github, context, listed, pause, budget) {
   if (!stable) throw new Error("Source metadata changed too often to validate; retry the check.");
 }
 
-module.exports = { validate, decision, enforce, backfill, REPAIR };
+module.exports = { validate, decision, enforce, backfill, departed, REPAIR };

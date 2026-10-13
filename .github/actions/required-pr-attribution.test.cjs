@@ -240,14 +240,14 @@ test("current description is reread and body-only repairs change the verdict", a
 function headFixture(values) {
   const created = [];
   const github = {
-    paginate: paged(async (_method, options) => values.filter((value) =>
+    paginate: paged(async (_method, options) => structuredClone(values.filter((value) =>
       value.state === "open" && value.base.ref === "dev" &&
       (!options.commit_sha || value.head.sha === options.commit_sha),
-    )),
+    ))),
     rest: {
       repos: { listPullRequestsAssociatedWithCommit() {} },
       pulls: { list() {}, get: async ({ pull_number }) => ({
-        data: values.find((value) => value.number === pull_number),
+        data: structuredClone(values.find((value) => value.number === pull_number)),
       }) },
       checks: {
         listForRef: async ({ ref }) => ({ data: { check_runs: created
@@ -364,6 +364,80 @@ test("native enforcement refuses stale event heads and changing membership", asy
     await gate.enforce({ github, context, core: output });
     assert.ok(output.messages.join("\n").includes("metadata changed or could not be verified"));
   }
+});
+
+test("separate departure events recover remaining peers without an edit to their PR", async () => {
+  for (const action of ["synchronize", "closed", "edited"]) {
+    for (const validPeer of [false, true]) {
+      const old = "a".repeat(40);
+      const next = "b".repeat(40);
+      const values = [
+        { ...pr(validPeer ? marker : ""), number: 1, head: { sha: old } },
+        { ...pr(marker), number: 2, head: { sha: old } },
+      ];
+      const { github, created } = headFixture(values);
+      const event = { ...context, payload: {
+        action, before: old,
+        pull_request: { ...values[1], head: { sha: old } },
+      } };
+      const collision = core();
+      await gate.enforce({ github, context: event, core: collision });
+      assert.ok(collision.messages.join("\n").includes("Multiple open dev pull requests"));
+      created.push({ name: "source-attribution", head_sha: old, status: "completed",
+        conclusion: "failure", external_id: "native-collision" });
+      if (action === "synchronize") {
+        values[1].head = { sha: next };
+        event.payload.pull_request = values[1];
+      } else if (action === "closed") {
+        values[1].state = "closed";
+      } else {
+        values[1].base = { ref: "main" };
+        event.payload.pull_request = values[1];
+        event.payload.changes = { base: { ref: { from: "dev" } } };
+      }
+      const unchangedPeer = JSON.stringify(values[0]);
+      await gate.departed({ github, context: event, core: core(), pause: async () => {} });
+      assert.equal(created.filter((check) => check.head_sha === old).at(-1).conclusion,
+                   validPeer ? "success" : "failure");
+      assert.equal(JSON.stringify(values[0]), unchangedPeer);
+      assert.ok(created.every((check) => check.head_sha === old), "only the departed head is refreshed");
+      if (action === "synchronize") {
+        const ownResult = core();
+        await gate.enforce({ github, context: event, core: ownResult });
+        assert.deepEqual(ownResult.messages, []);
+      }
+    }
+  }
+});
+
+test("non-departure events have no check writes and missing or invalid heads fail explicitly", async () => {
+  for (const action of ["opened", "reopened", "labeled", "unlabeled", "edited", "closed", "synchronize"]) {
+    const payload = { action, pull_request: { ...pr(marker), number: 2, base: { ref: "main" } } };
+    await gate.departed({ github: {}, context: { ...context, payload }, core: core() });
+  }
+  const payload = { action: "synchronize", pull_request: { ...pr(marker), number: 2 } };
+  await assert.rejects(gate.departed({ github: {}, context: { ...context, payload }, core: core() }),
+                       /Missing departed head metadata/);
+  payload.before = "unsafe/private-head";
+  await assert.rejects(gate.departed({ github: {}, context: { ...context, payload }, core: core() }),
+                       /Invalid departed head metadata/);
+});
+
+test("a remaining peer moving during departure refresh cannot redirect writes to its new head", async () => {
+  const old = "a".repeat(40);
+  const next = "b".repeat(40);
+  const values = [{ ...pr(marker), number: 1, head: { sha: old } }];
+  const { github, created } = headFixture(values);
+  const event = { ...context, payload: {
+    action: "closed", pull_request: { ...pr(marker), number: 2, head: { sha: old } },
+  } };
+  await gate.departed({
+    github, context: event, core: core(),
+    pause: async () => { values[0].head = { sha: next }; },
+  });
+  assert.ok(created.length);
+  assert.ok(created.every((check) => check.head_sha === old));
+  assert.equal(created.at(-1).conclusion, "failure");
 });
 
 test("a peer leaving during publication supersedes the old collision snapshot", async () => {
