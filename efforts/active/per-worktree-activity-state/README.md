@@ -86,7 +86,7 @@ Also already correct and NOT in scope to change:
 
 ## Request
 
-2026-10-12 read-side clarification, verbatim:
+2026-10-12 read-side clarification, verbatim; original spelling is retained:
 
 > We need as a durable goal that reading worktree state to report daemon-cached status must still itself be O(1), where the 1 here is simply the size of the *schema* for a worktree state, but not be of any journal, ledger, or list (the computed claims graph is something which should be pushed to this state, not computed on-the-fly). The handoff squence is only interesting when repairing a workflow, but only the current handoff-head should be read directly from a slot for each worktree.
 

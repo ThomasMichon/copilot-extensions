@@ -10,7 +10,8 @@ enrichment implementation is not taken over by this amendment.
 ## Operator direction
 
 The [effort Request](README.md#request) captures the schema-bounded read
-clarification verbatim. The preceding diagnostic/monitoring direction was:
+clarification verbatim. The preceding diagnostic/monitoring direction is also
+quoted verbatim, with its original spelling and grammar retained:
 
 > agent-dispatch created a ton of runaway worktrees which are slowing down this machine, to the point where I can to killswitch-disable all the background tasks. While the worktrees are being cleaned up by an anchor-repo agent, take this opportunity to use pyspy and other analysis to see where CPU usage is going. Sweeping the status of all these abandoned worktrees is likely costing us a lot. And we don't even really want to monitoring worktrees that aren't active, or in the claims graph of active worktrees anyway.
 

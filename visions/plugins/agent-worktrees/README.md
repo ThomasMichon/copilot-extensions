@@ -291,8 +291,8 @@ confirmed is marked as such in the rendered result — never silently reported
 as certain, and never given a separate, whole state of its own standing in
 for "unverified."
 
-The derived-status projection is a read surface of the worktree-lifetime
-authority, not a competing owner of the underlying observations. *The
+The schema-bounded current-state projection is the read surface for derived
+status, not a competing owner of the underlying observations. *The
 resident daemon as the authoritative live-state database* below owns coherent
 current state and its publication. Projection freshness never grants a reader
 authority to reconstruct or overwrite it.
