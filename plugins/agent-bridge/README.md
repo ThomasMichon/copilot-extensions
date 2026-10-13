@@ -30,6 +30,10 @@ An incomplete lookup explicitly clears the registration's prior targeting
 metadata atomically. Ordinary id-only heartbeats still retain metadata;
 `clear_targeting_metadata: true` opts into session-only addressing until the
 complete logical machine/project/worktree tuple is available again.
+Exact registered session IDs retain lookup precedence, including legacy IDs
+beginning with `live:`. Only a handle without an exact registered match is
+interpreted as a qualified peer address; the prefix does not rename or reserve
+previously accepted session IDs.
 
 [Session preference authority](docs/session-preferences.md) documents optional
 execution-user defaults, the unchanged caller-settings default, and the

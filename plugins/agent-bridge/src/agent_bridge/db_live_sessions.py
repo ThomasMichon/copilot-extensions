@@ -667,12 +667,12 @@ class _LiveSessionsMixin:
         """
         from .live_peer_address import LivePeerAddress, resolve_qualified_peer
 
-        address = LivePeerAddress.parse(handle)
-        if address is not None:
-            return resolve_qualified_peer(self, address, now=now, stale_seconds=stale_seconds)
         exact = self.get_live_session(handle)
         if exact is not None:
             return exact
+        address = LivePeerAddress.parse(handle)
+        if address is not None:
+            return resolve_qualified_peer(self, address, now=now, stale_seconds=stale_seconds)
         cutoff = now - stale_seconds
         rows = self.execute_read(
             "SELECT * FROM live_sessions "

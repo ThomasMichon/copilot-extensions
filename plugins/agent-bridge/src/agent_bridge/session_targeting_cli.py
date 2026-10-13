@@ -211,14 +211,14 @@ def _send(args: argparse.Namespace) -> None:
         return
 
     from .live_peer_address import LivePeerAddress
+    live = client.resolve_live_session(target)
     try:
-        address = LivePeerAddress.parse(target)
+        address = None if live else LivePeerAddress.parse(target)
     except ValueError as exc:
         raise SendRefused(
             "refused_unavailable", reason="invalid_address", retryable=False,
             target=target, error=str(exc),
         ) from exc
-    live = client.resolve_live_session(target)
     if live:
         expected_session_id = getattr(args, "expected_session_id", None)
         # The delivery carries expected_session_id, which an alias-aware daemon checks

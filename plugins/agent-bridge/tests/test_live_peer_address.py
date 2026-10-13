@@ -75,11 +75,32 @@ def test_qualified_handle_survives_turnover_and_database_reopen(tmp_path, projec
 
 
 @pytest.mark.parametrize("handle", [
+    "live:host:project:wt", "live:host", "live:host:project:wt:extra",
+])
+def test_exact_live_namespace_session_ids_keep_precedence_through_http_and_cli(
+    tmp_db, monkeypatch, capsys, handle,
+):
+    _register(tmp_db, handle, "other-host", project="other-project", worktree="exact-wt")
+    _register(tmp_db, "qualified-peer", "host", project="project", worktree="wt")
+    assert tmp_db.resolve_live_session(handle, now=time.time())["session_id"] == handle
+    _app, client = _bridge(tmp_db)
+    assert client.resolve_live_session(handle)["session_id"] == handle
+    monkeypatch.setattr(cli, "_get_client", lambda: client)
+    monkeypatch.setattr(cli, "_live_reply_to", lambda _: None)
+    monkeypatch.setattr(cli, "_live_sender_label", lambda _: "sender")
+    monkeypatch.setattr(cli, "_resolve_target", lambda *_a, **_k: pytest.fail("agent fallback"))
+    cli._cmd_send(argparse.Namespace(target=handle, prompt="exact recipient", no_wait=True, json=True))
+    assert json.loads(capsys.readouterr().out)["target"] == handle
+    assert tmp_db.list_pending_live_messages(handle)[0]["body"] == "exact recipient"
+    assert tmp_db.list_pending_live_messages("qualified-peer") == []
+
+
+@pytest.mark.parametrize("handle", [
     "live:", "live:a:b", "live:a:b:c:d", "live:a:b:../c", "live:a/b:c:d",
     "live:a:b:c/d", "live:a:/b:c", "live:a:b/:c", "live:a:b//c:d", "live:a:b/../c:d",
 ])
 def test_invalid_explicit_address_never_spawns(monkeypatch, capsys, handle):
-    monkeypatch.setattr(cli, "_get_client", lambda: SimpleNamespace())
+    monkeypatch.setattr(cli, "_get_client", lambda: SimpleNamespace(resolve_live_session=lambda _: None))
     monkeypatch.setattr(cli, "_resolve_target", lambda *_a, **_k: pytest.fail("agent fallback"))
     with pytest.raises(SystemExit) as refused:
         cli._cmd_send(argparse.Namespace(target=handle, prompt="hello", json=False))
