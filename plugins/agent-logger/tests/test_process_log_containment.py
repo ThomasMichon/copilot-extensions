@@ -172,6 +172,7 @@ def test_process_log_copy_uses_pinned_directory_after_root_swap(
         assert directory.fd is not None
         root.rename(tmp_path / "retained")
         root.symlink_to(outside, target_is_directory=True)
+        assert directory.stat(NAME).st_ino == (tmp_path / "retained" / NAME).stat().st_ino
         swapped = True
         return found
 
@@ -183,8 +184,65 @@ def test_process_log_copy_uses_pinned_directory_after_root_swap(
     with pytest.raises(filesystem._SourceChangedDuringCopy, match="root changed during copy"):
         filesystem._copy_process_logs(root, dest)
     assert swapped
-    assert (dest / NAME).read_bytes() == PAYLOAD
+    assert list(dest.iterdir()) == []
+    assert (tmp_path / "retained" / NAME).read_bytes() == PAYLOAD
     assert (outside / NAME).read_bytes() == b"outside evidence\n"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="real POSIX root churn during an admitted transfer")
+@pytest.mark.parametrize("timing", ["before_open", "before_commit"])
+def test_process_log_copy_root_churn_stops_before_further_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, timing: str,
+) -> None:
+    from agent_logger.sync.archive_directory import ArchiveDirectory
+    from agent_logger.sync.targets import filesystem
+
+    root = tmp_path / "logs"
+    _evidence(root, "raw", PAYLOAD)
+    (root / "process-z.log").write_bytes(PAYLOAD)
+    outside = tmp_path / "outside"
+    _evidence(outside, "raw", b"outside\n")
+    dest = tmp_path / "destination"
+    dest.mkdir()
+    (dest / NAME).write_bytes(b"previously landed evidence\n")
+    original_needs_copy = filesystem._needs_copy_from_stat
+    original_copy = filesystem.shutil.copyfileobj
+    original_open = ArchiveDirectory.open
+    opened: list[str] = []
+    swapped = False
+
+    def swap() -> None:
+        nonlocal swapped
+        root.rename(tmp_path / "retained")
+        root.symlink_to(outside, target_is_directory=True)
+        swapped = True
+
+    def needs_copy(before: os.stat_result, path: Path) -> bool:
+        result = original_needs_copy(before, path)
+        if timing == "before_open" and not swapped:
+            swap()
+        return result
+
+    def copied(source: BinaryIO, target: BinaryIO, length: int) -> None:
+        original_copy(source, target, length)
+        if timing == "before_commit" and not swapped:
+            swap()
+
+    def observed_open(
+        directory: ArchiveDirectory, name: str, *, protected: bool = False,
+    ) -> BinaryIO:
+        opened.append(name)
+        return original_open(directory, name, protected=protected)
+
+    monkeypatch.setattr(filesystem, "_needs_copy_from_stat", needs_copy)
+    monkeypatch.setattr(filesystem.shutil, "copyfileobj", copied)
+    monkeypatch.setattr(ArchiveDirectory, "open", observed_open)
+    with pytest.raises(filesystem._SourceChangedDuringCopy, match="root changed during copy"):
+        filesystem._copy_process_logs(root, dest)
+    assert swapped
+    assert opened == ([] if timing == "before_open" else [NAME])
+    assert (dest / NAME).read_bytes() == b"previously landed evidence\n"
+    assert sorted(path.name for path in dest.iterdir()) == [NAME]
 
 
 def test_process_log_copy_hands_off_same_live_directory(
@@ -449,6 +507,82 @@ def test_process_log_zip_replacement_between_validation_and_open_is_refused(
     with pytest.raises(ValueError, match="changed while opening"):
         list(iter_process_log_refs(root))
     assert replaced
+
+
+@pytest.mark.parametrize("codec", ["raw", "gzip", "zip"])
+def test_process_log_configured_path_identity_does_not_redirect_reader_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, codec: str,
+) -> None:
+    from agent_logger import process_logs
+
+    monkeypatch.setattr(process_logs, "supports_dir_fd", lambda: False)
+    original = _evidence(tmp_path / "original" / "logs", codec, PAYLOAD)
+    _evidence(tmp_path / "outside" / "logs", codec, b"outside\n")
+    alias = tmp_path / "configured"
+    try:
+        alias.symlink_to(tmp_path / "original", target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    requested = alias / "logs"
+    refs = list(iter_process_log_refs(requested))
+    assert refs == [ProcessLogRef(requested / original.path.name, original.member)]
+    assert str(refs[0].path) == str(requested / original.path.name)
+    assert refs[0].verified_root == original.path.parent.resolve()
+    alias.rename(tmp_path / "retained-alias")
+    alias.symlink_to(tmp_path / "outside", target_is_directory=True)
+    assert "".join(refs[0].iter_lines()).encode() == PAYLOAD
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows case-alias reference identity")
+@pytest.mark.parametrize("codec", ["raw", "gzip", "zip"])
+def test_process_log_source_roots_native_preserves_configured_path_spelling(
+    tmp_path: Path, codec: str,
+) -> None:
+    original = _evidence(tmp_path / "logs", codec, PAYLOAD)
+    requested = tmp_path / "LOGS"
+    canonical = requested.resolve(strict=True)
+    assert str(canonical) != str(requested)
+    refs = list(iter_process_log_refs(requested))
+    assert str(refs[0].path) == str(requested / original.path.name)
+    assert refs[0].verified_root == canonical
+    assert "".join(refs[0].iter_lines()).encode() == PAYLOAD
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows single ancestor-pin operation")
+def test_process_log_zip_enumeration_reuses_one_native_directory_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger.sync import archive_directory as directory_module
+
+    root = tmp_path / "logs"
+    first = _evidence(root, "zip", PAYLOAD)
+    with zipfile.ZipFile(root / "second.zip", "w") as archive:
+        archive.writestr(NAME, PAYLOAD)
+    original_directory = directory_module.archive_directory
+    original_open = directory_module.ArchiveDirectory.open
+    pins: list[Path] = []
+    protections: list[bool] = []
+
+    @contextmanager
+    def observed_directory(path: Path) -> Iterator[directory_module.ArchiveDirectory]:
+        pins.append(path)
+        with original_directory(path) as directory:
+            yield directory
+
+    def opened(
+        directory: directory_module.ArchiveDirectory, name: str, *, protected: bool = False,
+    ) -> BinaryIO:
+        protections.append(protected)
+        return original_open(directory, name, protected=protected)
+
+    monkeypatch.setattr(directory_module, "archive_directory", observed_directory)
+    monkeypatch.setattr(directory_module.ArchiveDirectory, "open", opened)
+    iterator = iter_process_log_refs(root)
+    assert next(iterator) == first
+    assert pins == [root]
+    assert protections == [True, True]
+    root.rename(tmp_path / "retained")
+    iterator.close()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows listing-to-ZIP boundary")

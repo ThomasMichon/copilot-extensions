@@ -503,6 +503,7 @@ def _copy_process_logs_pinned(
                 ) -> bool:
                     # A renamed inode keeps its fd identity; revalidate the
                     # directory entry before landing any destination bytes.
+                    _revalidate_root(source_identity)
                     try:
                         after = directory.stat(name)
                     except FileNotFoundError:
@@ -510,6 +511,7 @@ def _copy_process_logs_pinned(
                     return (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
 
                 try:
+                    _revalidate_root(source_identity)
                     with directory.open(name) as stream:
                         opened = os.fstat(stream.fileno())
                         if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
@@ -518,6 +520,7 @@ def _copy_process_logs_pinned(
                 except (FileNotFoundError, ValueError):
                     continue
                 if size is None:
+                    _revalidate_root(source_identity)
                     locked.append(source / name)
                     continue
                 copied += 1

@@ -51,19 +51,26 @@ def is_process_log_candidate(name: str) -> bool:
 
 @contextmanager
 def _open_regular(path: Path) -> Iterator[BinaryIO]:
+    with _process_log_directory(path.parent) as directory:
+        with _open_regular_in(directory, path.name) as stream:
+            yield stream
+
+
+@contextmanager
+def _open_regular_in(
+    directory: ArchiveDirectory, name: str, *, protected: bool = False,
+) -> Iterator[BinaryIO]:
     from agent_logger.sync.provenance import is_link_or_reparse
 
-    with _process_log_directory(path.parent) as directory:
-        before = directory.stat(path.name)
-        if not stat.S_ISREG(before.st_mode) or is_link_or_reparse(
-            directory.path / path.name, before.st_mode,
-        ):
-            raise ValueError(f"process-log evidence is not a regular file: {path}")
-        with directory.open(path.name) as stream:
-            opened = os.fstat(stream.fileno())
-            if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
-                raise ValueError(f"process-log evidence changed while opening: {path}")
-            yield stream
+    path = directory.path / name
+    before = directory.stat(name)
+    if not stat.S_ISREG(before.st_mode) or is_link_or_reparse(path, before.st_mode):
+        raise ValueError(f"process-log evidence is not a regular file: {path}")
+    with directory.open(name, protected=protected) as stream:
+        opened = os.fstat(stream.fileno())
+        if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+            raise ValueError(f"process-log evidence changed while opening: {path}")
+        yield stream
 
 
 def _zip_logs(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
@@ -92,11 +99,9 @@ class ProcessLogRef:
 
     path: Path
     member: str | None = None
-    # Set by `iter_process_log_refs` on POSIX: the directory this ref's
-    # `path` was discovered directly under, re-opened with O_NOFOLLOW at read
-    # time instead of trusting `path`'s parent component by name. Excluded
-    # from equality/repr so refs built directly (as every existing caller and
-    # test does) keep comparing solely on `(path, member)`.
+    # Reader root, excluded from reference equality/repr. POSIX retains the
+    # configured root; Windows retains its canonical I/O root independently
+    # of the configured path used for display and reference identity.
     verified_root: Path | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -123,7 +128,8 @@ class ProcessLogRef:
             ):
                 yield from self._read_opened(raw, max_line_bytes)
         else:
-            with _open_regular(self.path) as raw:
+            path = self.verified_root / self.path.name if self.verified_root else self.path
+            with _open_regular(path) as raw:
                 yield from self._read_opened(raw, max_line_bytes)
 
     def _read_opened(self, raw: BinaryIO, max_line_bytes: int) -> Iterator[str]:
@@ -264,12 +270,16 @@ def iter_process_log_refs(log_root: Path) -> Iterator[ProcessLogRef]:
     refs: list[ProcessLogRef] = []
     with _process_log_directory(log_root) as directory:
         for name in directory.names():
-            path = directory.path / name
+            path = log_root / name
             if _is_log_name(name.removesuffix(".gz")):
-                refs.append(ProcessLogRef(path))
+                refs.append(ProcessLogRef(path, verified_root=directory.path))
             elif path.suffix == ".zip":
-                with _open_regular(path) as raw, zipfile.ZipFile(raw) as archive:
+                with (
+                    _open_regular_in(directory, name, protected=True) as raw,
+                    zipfile.ZipFile(raw) as archive,
+                ):
                     refs.extend(
-                        ProcessLogRef(path, info.filename) for info in _zip_logs(archive)
+                        ProcessLogRef(path, info.filename, verified_root=directory.path)
+                        for info in _zip_logs(archive)
                     )
     yield from refs

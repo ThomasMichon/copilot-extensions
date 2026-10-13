@@ -57,13 +57,23 @@ safety primitives fail explicitly, never degrade to an unprotected open.
 
 Entries and ZIP members are enumerated in filename order. Windows enumeration
 collects ZIP member observations under the same pinned directory boundary as
-the listing, then releases all native handles before yielding any reference.
+the listing, without repinning ancestors for each archive. ZIP entry identity
+is checked against the opened file, and native ZIP read handles deny writes.
+Enumeration releases all native handles before yielding any reference.
 Pausing or abandoning that iterator does not prevent source directory or
 archive renames. Directory-fd read APIs explicitly reject Windows callers.
 POSIX enumeration yields references incrementally without collecting all archive
 observations before the first yield. POSIX transfers reuse the already-pinned
 directory for listing, entry validation and reads; they do not reopen its pathname.
 Source-root changes still report a partial transfer rather than clearing health.
+Transfers check root identity before each candidate open and before its durable
+publication, stopping on root churn without reopening the pinned directory.
+
+References retain the absolute configured path for display and reference
+identity. Windows references additionally retain the canonical reader root,
+independent of that display path: retargeting an intentional ancestor alias
+cannot redirect later `iter_lines()` calls. Directly constructed references
+continue to resolve their own reader boundary at read time.
 
 The configured final root must be a real directory, not an alias. Pinning lasts
 for the operation, not across separate enumeration and read calls: references
