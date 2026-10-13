@@ -17,7 +17,9 @@ reading the selected JSON file.
 
 `external_reader.py` acquires inert external references using invocation-owned
 operator grants, then passes ordinary readings to the same pure resolution.
-It does not execute repository commands or acquire credentials.
+Repository/configuration data cannot grant execution authority, and the plugin
+does not acquire credentials. An explicit operator grant may authorize a
+repository executable; its location is not itself a trust guarantee.
 The [external-reader contract](external-readers.md) owns bounds and failures.
 
 The fast installer stamp copies the exact owning payload into an immutable

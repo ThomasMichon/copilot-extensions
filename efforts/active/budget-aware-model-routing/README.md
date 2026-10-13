@@ -129,9 +129,9 @@ timestamp is not proof that the provider metadata was refreshed.
   network access or another service.
 - [ ] Add a provider API adapter for available personal or organization
   AI-usage reports, preserving empty, unauthorized, and unsupported results.
-- [ ] Add a bounded external-command adapter contract for account surfaces or
+- [x] Add a bounded external-command adapter contract for account surfaces or
   organization-specific readers that cannot live in the public plugin.
-- [ ] Make adapter order and field authority configurable without allowing
+- [x] Make adapter order and field authority configurable without allowing
   repository data to override operator-owned credentials or safety policy.
 - [ ] Ensure no adapter failure becomes a zero-consumption success.
 
@@ -255,6 +255,25 @@ resilience. It does not become a historical billing ledger, model benchmark,
 promotion authority, task queue, or dashboard.
 
 ## Journal
+
+### 2026-10-13 - Bounded external-reader implementation
+
+- Implemented the Phase 2 external-command contract: configuration holds only
+  adapter ID, source, and field authority; execution requires an invocation-owned
+  operator grant. Acquired readings reuse the existing resolver and arithmetic.
+- Kept output/deadline limits, unavailable/error states, source and capture
+  validation, diagnostic redaction, and owned process cleanup explicit. Review
+  regressions cover option-presence validation, host-interpreter refusal, missing
+  configuration, and preservation of primary failures alongside cleanup errors.
+- The full contained plugin suite reports 253 passed and four platform skips.
+  Linux-native lifecycle evidence is recorded; Windows and macOS native lifecycle
+  validation remain open, with unsupported capabilities refusing execution.
+- Implementation is complete for this contract, not for the provider API
+  adapter, publication gate, live-account identity, release, or authorized rollout.
+  The effort remains Active; the merge receipt will be recorded after landing.
+- Next: continue provider acquisition and requesting-account proof, then current
+  session guidance and routing integration. Do not grant repository data command
+  authority or treat captures as live provider refresh evidence.
 
 ### 2026-10-12 - Same-period cycle-average pacing
 
