@@ -262,6 +262,38 @@ adoption on both entrypoints, and portfolio validation remain open. No Plan
 or Validation Plan checkbox is completed by this prerequisite; this effort
 remains Active.
 
+### 2026-10-13 -- Retention released and installed primitive verified
+
+Normal promotion #6441 merged as
+`9539eda8f9b34003a3ddcfcc59d09f02bafa5eb6`. Its pinned dev snapshot
+`a27d57dc2ddc83fc1a8e92a0a026e5f64b5cb7b2` contains retention #6381, and the
+released Worktrees helper is byte-identical to that retention commit's
+canonical helper. This promotion does not yet contain publication #6425.
+
+The authorized ordinary unified updater selected agent-worktrees
+`1.24.56-dev1`. An isolated probe used that installed interpreter and helper,
+verified installed module provenance and the exact released Git blob, and
+proved native GC/toss/slot exclusion, unchanged slot mtime, normal retention
+release and process-death release, construction-to-retention handoff, and dev
+rollback-reference transfer. Temporary fixture slots and child processes were
+cleaned up; no source-checkout helper substituted for the installed one.
+
+Whole-update convergence is not successful: the updater exited 1 when the
+configured index could not resolve agent-dispatch's released FastAPI minimum.
+That distinct blocker is tracked in #6454. Successful payload and other runtime
+phases do not erase it. No alternate index, dependency override, installed-file
+patch, or service restart was used to bypass the refusal.
+
+Shared retention release/installed primitive proof is complete; the
+retention-only workspace is finalized. First-adopter and portfolio gates
+remain unchecked. The operator selected Python ownership of construction and
+the full runtime lifecycle for the complete Worktrees adopter, using the
+existing installer-engine home rather than a parallel framework. Native
+pre-Python bootstrap and OS integration remain initially; signed-Python policy,
+configured indexes, frozen inputs, installation-cell authority, subprocess
+ownership and actual cutover/drain or rollback lifetimes must be preserved and
+validated. This decision is not an implementation or deployment claim.
+
 ### 2026-10-13 -- Create-once completion publication merged
 
 #6425 merged into `dev` as

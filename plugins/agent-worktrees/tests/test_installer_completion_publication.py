@@ -26,8 +26,12 @@ DIGEST = "a" * 64
 
 
 def _ps_function(text: str, name: str) -> str:
-    start = text.index(f"\nfunction {name} {{")
-    return text[start:text.index("\n}\n", start) + 3]
+    match = re.search(
+        rf"^function\s+{re.escape(name)}\s*\{{.*?^\}}[ \t]*\r?$",
+        text, re.MULTILINE | re.DOTALL,
+    )
+    assert match is not None, f"top-level installer function unavailable: {name}"
+    return match.group()
 
 
 def _ps_quote(value: str | Path) -> str:
@@ -154,6 +158,49 @@ echo UNEXPECTED
     assert "UNEXPECTED" not in result.stdout
 
 
+@pytest.mark.skipif(_BASH is None, reason="bash unavailable")
+def test_posix_publication_refuses_formatter_failure(tmp_path: Path):
+    shutil.copyfile(SCRIPTS / "versioned_runtime.py", tmp_path / "versioned_runtime.py")
+    function = _function_body(
+        (SCRIPTS / "install.sh").read_text(encoding="utf-8"),
+        "_versioned_mark_complete",
+    ) + "\n}\n"
+    root = tmp_path / "runtime"
+    script = f"""
+set -euo pipefail
+SCRIPT_DIR={shlex.quote(_bash_path(tmp_path))}
+INSTALL_DIR={shlex.quote(_bash_path(root))}
+LINK_DIR="$INSTALL_DIR/.venv"
+SRC_VERSION=1.2.3
+VERSIONED_RUNTIME=1
+err() {{ echo "$*" >&2; }}
+sed() {{ command sed "$@"; return 9; }}
+_bootstrap_python() {{ printf '%s' {shlex.quote(_bash_path(Path(sys.executable)))}; }}
+_payload_hash() {{ printf '%s' {shlex.quote(DIGEST)}; }}
+{function}
+if _versioned_mark_complete; then echo UNEXPECTED; else echo RESULT=$?; fi
+"""
+    result = _run("bash", _BASH, script, tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "RESULT=9" in result.stdout
+    assert "Completion publication failed" in result.stderr
+    assert (root / "versions" / "1.2.3" / ".install-complete.json").is_file()
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_ps_extraction_preserves_nested_body_with_either_line_ending(newline):
+    text = newline.join([
+        "function Probe {",
+        "    if ($true) { '}' }",
+        "}   ",
+        "function Other { }",
+    ])
+    body = _ps_function(text, "Probe")
+    assert "if ($true) { '}' }" in body
+    assert "Other" not in body
+
+
 @pytest.mark.parametrize("shell,executable", SHELLS)
 def test_activation_stops_at_failed_publication(
     tmp_path: Path, shell: str, executable: str | None,
@@ -164,7 +211,6 @@ def test_activation_stops_at_failed_publication(
         text = (SCRIPTS / "install.sh").read_text(encoding="utf-8")
         body = _function_body(text, "_versioned_activate_inner")
         body = body[body.index("    _versioned_mark_complete"):]
-        assert body.index("_versioned_mark_complete || return $?") < body.index(" activate ")
         script = f"""
 set -euo pipefail
 _versioned_mark_complete() {{ return 7; }}
@@ -178,7 +224,6 @@ if probe; then echo UNEXPECTED; else echo RESULT=$?; fi
         text = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
         body = _ps_function(text, "Invoke-VersionedActivateInner")
         body = body[body.index("    if (-not (Invoke-VersionedMarkComplete))"):]
-        assert body.index("return $false") < body.index(" activate ")
         script = f"""
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'

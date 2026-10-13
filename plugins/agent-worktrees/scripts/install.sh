@@ -1564,7 +1564,9 @@ _versioned_mark_complete() {
     if "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'; then
         rc=0
     else
-        rc="${PIPESTATUS[0]}"
+        local -a pipeline_status=("${PIPESTATUS[@]}")
+        rc="${pipeline_status[0]}"
+        if [[ "$rc" -eq 0 ]]; then rc="${pipeline_status[1]}"; fi
     fi
     if [[ "$rc" -ne 0 ]]; then
         err "Completion publication failed for versions/$SRC_VERSION -- refusing activation"
