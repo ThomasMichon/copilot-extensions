@@ -8,7 +8,7 @@ from collections.abc import Callable
 from urllib.parse import urlparse
 
 from ..pr_checks import CheckFailure, ChecksReport
-from .github_check_pages import check_runs_from_pages
+from .github_check_pages import check_run_evidence_from_pages
 
 MAX_FAILURES = 64
 MAX_TEXT_CHARS = 2048
@@ -105,31 +105,30 @@ def read_checks(
         "gh", "api", "--paginate", "--hostname", host,
         f"/repos/{repo}/commits/{sha}/check-runs",
     ])
-    runs = check_runs_from_pages(proc.stdout or "") if proc.returncode == 0 else None
-    if isinstance(runs, list):
-        runs_readable = True
-        any_signal = any_signal or bool(runs)
-        for run in runs:
-            if not isinstance(run, dict):
-                runs_readable = False
-                continue
-            if str(run.get("status", "")).strip().lower() != "completed":
-                pending = True
-                continue
-            conclusion = str(run.get("conclusion", "")).strip().lower()
-            if conclusion in FAILED_CONCLUSIONS:
-                failure = True
-                output = run.get("output")
-                output = output if isinstance(output, dict) else {}
-                description = output.get("summary") or output.get("title") or ""
-                add(CheckFailure(
-                    _text(run.get("name")) or "(unnamed check run)",
-                    conclusion, "check-run",
-                    _url(run.get("details_url")) or _url(run.get("html_url")),
-                    _text(description),
-                ))
-            elif conclusion not in ("success", "neutral", "skipped"):
-                runs_readable = False
+    evidence = check_run_evidence_from_pages(proc.stdout or "")
+    runs_readable = evidence.complete and proc.returncode == 0
+    any_signal = any_signal or bool(evidence.runs)
+    for run in evidence.runs:
+        if not isinstance(run, dict):
+            runs_readable = False
+            continue
+        if str(run.get("status", "")).strip().lower() != "completed":
+            pending = True
+            continue
+        conclusion = str(run.get("conclusion", "")).strip().lower()
+        if conclusion in FAILED_CONCLUSIONS:
+            failure = True
+            output = run.get("output")
+            output = output if isinstance(output, dict) else {}
+            description = output.get("summary") or output.get("title") or ""
+            add(CheckFailure(
+                _text(run.get("name")) or "(unnamed check run)",
+                conclusion, "check-run",
+                _url(run.get("details_url")) or _url(run.get("html_url")),
+                _text(description),
+            ))
+        elif conclusion not in ("success", "neutral", "skipped"):
+            runs_readable = False
 
     complete = status_readable and runs_readable
     state = (

@@ -87,11 +87,39 @@ def test_check_diagnostics_preserve_later_page_failure() -> None:
     assert fixture.read().failures[0].name == "optional-reviewer"
 
 
-def test_check_diagnostics_incomplete_page_stays_unknown() -> None:
+def test_check_diagnostics_incomplete_page_retains_observed_failure() -> None:
     fixture = CheckFixture()
     fixture.pages = [{"check_runs": [_run()], "total_count": 2}]
     report = fixture.read()
+    assert report.state == "failure" and not report.complete
+    assert report.failures[0].name == "optional-reviewer"
+
+
+@pytest.mark.parametrize("conclusion", ["success", "skipped", "neutral"])
+def test_check_diagnostics_incomplete_page_cannot_claim_success(conclusion: str) -> None:
+    fixture = CheckFixture()
+    fixture.pages = [{"check_runs": [_run(conclusion=conclusion)], "total_count": 2}]
+    report = fixture.read()
     assert report.state == "" and not report.complete
+
+
+def test_check_diagnostics_partial_failed_command_retains_evidence() -> None:
+    fixture = CheckFixture([_run()])
+    fixture.unreadable = "runs"
+    report = fixture.read()
+    assert report.state == "failure" and not report.complete
+    assert report.failures[0].url == "https://example.com/jobs/17"
+
+
+def test_check_diagnostics_malformed_later_page_retains_evidence() -> None:
+    from agent_worktrees.providers.github_check_pages import (
+        check_run_evidence_from_pages, check_runs_from_pages,
+    )
+    raw = json.dumps({"check_runs": [_run()], "total_count": 2}) + "\n{"
+    evidence = check_run_evidence_from_pages(raw)
+    assert not evidence.complete and isinstance(evidence.runs[0], dict)
+    assert evidence.runs[0]["name"] == "optional-reviewer"
+    assert check_runs_from_pages(raw) is None
 
 
 def test_check_diagnostics_failed_source_does_not_erase_other_failure() -> None:

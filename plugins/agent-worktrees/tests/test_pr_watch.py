@@ -207,6 +207,7 @@ class TestRunWait:
 
 
 class TestDecorateEvents:
+    @pytest.mark.guard
     def test_payload_shape(self):
         snap = _snap(pr_state="open", merged=False, mergeable=True,
                      head_sha="abc", base_ref="master",
@@ -218,6 +219,8 @@ class TestDecorateEvents:
             "transitions": ["approved"], "pr_state": "open", "merged": False,
             "mergeable": True, "head_sha": "abc", "base_ref": "master",
             "checks_state": "",
+            "checks_scope": "observed", "checks_complete": None,
+            "check_failures": [], "check_failures_omitted": 0,
             "cursor": "r3..habc",
             # Additive merge-readiness block. No consent label bound here, so it
             # degrades to a verdict/merge-state readout with no action to take.

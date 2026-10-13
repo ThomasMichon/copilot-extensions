@@ -346,6 +346,9 @@ admin merge boundary; these diagnostics neither weaken nor replace that gate.
 `checks_complete` reports whether both observed sources were readable/complete,
 or is null for providers that do not supply diagnostic coverage. An empty
 failure list from an unsupported provider is not proof that no failure exists.
+Known decoded failures survive missing or malformed later pages and a failed
+paginated command, with `checks_complete: false`; incomplete evidence cannot
+produce a success/none rollup.
 
 Diagnostics retain at most 64 failures per snapshot and 2,048 characters per
 text field. `check_failures_omitted` reports any additional failures; shortened
