@@ -9,6 +9,12 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+The standalone runner accepts the legacy `agent-index-service` component name
+as an alias for `services/index`. It normalizes the alias before environment
+admission, dependency preparation, and smoke/full selection, so a released
+promotion workflow can validate a development snapshot after the service move.
+New invocations should use `services/index`.
+
 The review-request workflow's fast contract uses
 `node --test tools/test_copilot_review_gate.cjs`. To exercise its exact script
 against the bundled `actions/github-script` runtime as well, download

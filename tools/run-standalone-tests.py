@@ -18,6 +18,7 @@ from plugin_test_containment import ContainmentError, Limits, isolated_environme
 from standalone_consumers import STANDALONE_CONSUMERS
 
 REPO = Path(__file__).resolve().parent.parent
+COMPONENT_ALIASES = {"agent-index-service": "services/index"}
 
 
 def extended_windows_path(path: str) -> str:
@@ -162,7 +163,11 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("component", choices=STANDALONE_CONSUMERS)
+    parser.add_argument(
+        "component",
+        type=lambda component: COMPONENT_ALIASES.get(component, component),
+        choices=STANDALONE_CONSUMERS,
+    )
     parser.add_argument("--python", type=Path, help="test interpreter (default: managed venv)")
     parser.add_argument(
         "--environment-root", type=Path,

@@ -117,7 +117,10 @@ def test_prepare_rejects_managed_launcher_with_host_environment(tmp_path, monkey
 
 
 @pytest.mark.parametrize("smoke", [False, True])
-def test_run_is_contained_and_releases_interpreter_environment_lease(tmp_path, monkeypatch, smoke):
+@pytest.mark.parametrize("component", ["services/index", "agent-index-service"])
+def test_run_is_contained_and_releases_interpreter_environment_lease(
+    tmp_path, monkeypatch, smoke, component,
+):
     root = tmp_path / "services/index"
     (root / "tests").mkdir(parents=True)
     python = tmp_path / "test-python"
@@ -162,7 +165,7 @@ def test_run_is_contained_and_releases_interpreter_environment_lease(tmp_path, m
 
     monkeypatch.setattr(runner, "run_contained", run)
     args = [
-        "services/index", "--python", str(python),
+        component, "--python", str(python),
         "--environment-root", str(environment_root),
     ]
     if smoke:
@@ -171,6 +174,38 @@ def test_run_is_contained_and_releases_interpreter_environment_lease(tmp_path, m
     assert captured["cwd"] == root
     assert released == [True]
     assert acquisitions == [(0.0, environment_root)]
+
+
+def test_legacy_index_name_prepares_canonical_component(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    (tmp_path / "services/index" / "tests").mkdir(parents=True)
+    python = runner.default_python("services/index")
+    python.parent.mkdir(parents=True)
+    (python.parent.parent / "pyvenv.cfg").write_text("home = fixture-base\n")
+    python.touch()
+    prepared = []
+    released = []
+
+    class Lease:
+        def release(self):
+            released.append(True)
+
+    monkeypatch.setattr(runner, "acquire", lambda *_: Lease())
+    monkeypatch.setattr(
+        runner, "prepare",
+        lambda component, interpreter, **kwargs: prepared.append((component, interpreter, kwargs)),
+    )
+    monkeypatch.setattr(runner, "run_contained", lambda *_a, **_k: 0)
+    assert runner.main(["agent-index-service", "--prepare", "--admission-wait", "60"]) == 0
+    assert prepared == [("services/index", python, {"smoke": False})]
+    assert released == [True]
+
+
+def test_unknown_component_is_rejected_before_admission(monkeypatch):
+    monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
+    with pytest.raises(SystemExit) as exc:
+        runner.main(["unknown-service"])
+    assert exc.value.code == 2
 
 
 def test_smoke_rejects_undefined_component_before_admission(monkeypatch):
