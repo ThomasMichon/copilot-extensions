@@ -15,7 +15,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import promotion_python_artifacts as artifacts
 import publish_python_artifacts as publisher
-from test_promotion_python_artifacts import _complete_manifest, _publish_fixture, _wheel_bytes, _write_index
+from test_promotion_python_artifacts import (
+    _STATIC_BUILD, _complete_manifest, _publish_fixture, _wheel_bytes, _write_index,
+)
 
 
 @pytest.mark.parametrize("case", [
@@ -24,6 +26,8 @@ from test_promotion_python_artifacts import _complete_manifest, _publish_fixture
     "forged-entry-points", "valid-top-level", "forged-top-level", "unsupported-layout",
     "undeclared-data", "undeclared-pth", "undeclared-script", "multiple-data",
     "wildcard-data", "excluded-data", "data-files",
+    "missing-backend", "custom-backend", "backend-path", "setup-py", "setup-cfg",
+    "cmdclass", "dynamic-config",
 ])
 def test_wheel_source_mapping_requires_exact_candidate_bytes(tmp_path, monkeypatch, case):
     directory, entry = _publish_fixture(tmp_path, monkeypatch)
@@ -80,6 +84,18 @@ def test_wheel_source_mapping_requires_exact_candidate_bytes(tmp_path, monkeypat
         )
     elif case == "unsupported-layout":
         project.write_text(project.read_text() + '\n[tool.setuptools.packages.find]\nwhere = ["generated"]\n')
+    elif case == "missing-backend":
+        project.write_text(project.read_text().replace(_STATIC_BUILD, ""))
+    elif case == "custom-backend":
+        project.write_text(project.read_text().replace("setuptools.build_meta", "untrusted_backend"))
+    elif case == "backend-path":
+        project.write_text(project.read_text().replace('[build-system]\n', '[build-system]\nbackend-path = ["."]\n'))
+    elif case in ("setup-py", "setup-cfg"):
+        (source / case.replace("-", ".")).write_text("raise RuntimeError('candidate build hook')\n")
+    elif case == "cmdclass":
+        project.write_text(project.read_text() + '\n[tool.setuptools.cmdclass]\nbuild = "demo.CustomBuild"\n')
+    elif case == "dynamic-config":
+        project.write_text(project.read_text() + '\n[tool.setuptools.dynamic]\nversion = {attr = "demo.version"}\n')
     archive = io.BytesIO(_wheel_bytes("demo", "1.0", payload=payload, members=members))
     if case in ("match", "valid-data", "multiple-data", "wildcard-data", "valid-entry-points", "valid-top-level"):
         artifacts.validate_wheel(archive, wheel, source_dir=source)
@@ -122,12 +138,50 @@ def test_declared_flat_python_modules_bind_to_root_source(tmp_path, monkeypatch)
     source = tmp_path / "flat"
     source.mkdir()
     (source / "pyproject.toml").write_text(
-        '[project]\nname = "demo"\nversion = "1.0"\n[tool.setuptools]\npy-modules = ["demo"]\n'
+        _STATIC_BUILD + '[project]\nname = "demo"\nversion = "1.0"\n[tool.setuptools]\npy-modules = ["demo"]\n'
     )
     (source / "demo.py").write_bytes(b"VALUE = 'first-party fixture'\n")
     artifacts.validate_wheel(
         io.BytesIO(_wheel_bytes("demo", "1.0", flat=True)), manifest["wheels"][0], source_dir=source,
     )
+
+
+@pytest.mark.parametrize("hook", [
+    "custom-backend", "backend-path", "setup.py", "setup.cfg", "cmdclass",
+    "setuptools", "setuptools.py", "sitecustomize.py", "json.py",
+])
+def test_unvalidated_build_hooks_fail_before_toolchain_resolution(tmp_path, monkeypatch, hook):
+    import build_toolchain_lock
+    _publish_fixture(tmp_path, monkeypatch)
+    source = tmp_path / "plugins" / "demo"
+    project = source / "pyproject.toml"
+    if hook == "custom-backend":
+        project.write_text(project.read_text().replace("setuptools.build_meta", "untrusted_backend"))
+    elif hook == "backend-path":
+        project.write_text(project.read_text().replace('[build-system]\n', '[build-system]\nbackend-path = ["."]\n'))
+    elif hook == "cmdclass":
+        project.write_text(project.read_text() + '\n[tool.setuptools.cmdclass]\nbuild = "demo.CustomBuild"\n')
+    elif hook == "setuptools":
+        (source / hook).mkdir()
+        (source / hook / "__init__.py").write_text("raise RuntimeError('candidate shadowed build tool')\n")
+    else:
+        (source / hook).write_text("raise RuntimeError('candidate build hook')\n")
+    calls = []
+    monkeypatch.setattr(build_toolchain_lock, "resolve_toolchain_lock", lambda *a, **kw: calls.append(a))
+    directory = tmp_path / "unsigned"
+    directory.mkdir()
+    with pytest.raises(artifacts.PromotionArtifactError, match="unsupported|shadows"):
+        artifacts.build_candidate_bundles(tmp_path, directory, source_policy="seasoned-public", min_age_days=7)
+    assert not calls
+    assert not list(directory.iterdir())
+
+
+def test_current_repository_packages_satisfy_static_build_admission():
+    root = Path(artifacts.__file__).resolve().parent.parent
+    projects = [path for tree in ("plugins", "libs") for path in (root / tree).rglob("pyproject.toml")]
+    assert projects
+    for project in projects:
+        artifacts.validate_static_build(project.parent)
 
 
 @pytest.mark.parametrize("case", [
@@ -174,7 +228,7 @@ def test_runtime_metadata_cannot_change_candidate_install_behavior(tmp_path, mon
     elif case == "ambiguous-extras":
         optional["dev-tools"] = []
     (source / "pyproject.toml").write_text(
-        '[project]\nname = "demo"\nversion = "1.0"\nrequires-python = ">=3.10,<4"\n'
+        _STATIC_BUILD + '[project]\nname = "demo"\nversion = "1.0"\nrequires-python = ">=3.10,<4"\n'
         + ('dynamic = ["dependencies"]\n' if case == "dynamic" else "")
         + "dependencies = " + json.dumps(dependencies) + "\n[project.optional-dependencies]\n"
         + "\n".join(json.dumps(extra) + " = " + json.dumps(values) for extra, values in optional.items())

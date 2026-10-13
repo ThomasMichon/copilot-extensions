@@ -66,6 +66,12 @@ Export executes the pinned trusted driver and builder against that disposable
 candidate's source data, never its copies of promotion or toolchain code.
 The signer requires every bundle to share one lock and enforces the hosted
 `seasoned-public` source policy with the configured seven-day floor.
+Build admission and source mapping both require the exact static
+`setuptools.build_meta` contract. Custom backends, `backend-path`, `setup.py`,
+`setup.cfg`, dynamic metadata and custom setuptools commands/extensions fail
+before any candidate build or trusted attestation.
+Candidate-root modules that shadow the standard library, locked tooling or
+Python startup customization hooks are rejected as well.
 This candidate-executing job has only `contents: read`, no OIDC or attestation
 permissions, and no persisted checkout credentials. Every Python plugin
 shares one toolchain venv; every bundle contains only its

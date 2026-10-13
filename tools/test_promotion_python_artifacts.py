@@ -31,6 +31,7 @@ repo = _repo_fixture
 no_ambient_git_identity = _identity_fixture
 
 DEV, MAIN, TREE = "a" * 40, "b" * 40, "c" * 40
+_STATIC_BUILD = '[build-system]\nrequires = ["setuptools>=68"]\nbuild-backend = "setuptools.build_meta"\n'
 
 
 def _wheel_bytes(
@@ -606,7 +607,7 @@ def test_signer_requires_configured_policy_and_one_shared_lock(tmp_path, case):
 
 def _fake_builder(repo: Path, monkeypatch) -> None:
     project = repo / "plugins" / "demo-plugin" / "pyproject.toml"
-    project.write_text('[project]\nname = "demo"\nversion = "0.1.0-dev1"\n', encoding="utf-8")
+    project.write_text(_STATIC_BUILD + '[project]\nname = "demo"\nversion = "0.1.0-dev1"\n', encoding="utf-8")
     package = project.parent / "src" / "demo"
     package.mkdir(parents=True, exist_ok=True)
     (package / "__init__.py").write_bytes(b"VALUE = 'first-party fixture'\n")
@@ -619,6 +620,8 @@ try:
     import tomllib
 except ModuleNotFoundError:
     import tomli as tomllib
+def resolve_vendored_libs(directory):
+    return []
 def build_plugin_artifacts(plugin, *, out_dir, toolchain):
     assert toolchain.record == TEMPLATE['build_toolchain']
     project = tomllib.loads((REPO / 'plugins' / plugin / 'pyproject.toml').read_text())['project']
@@ -692,7 +695,7 @@ def test_real_export_subprocess_uses_bumped_candidate_without_polluting_it(repo,
         json.dumps({"name": "other-plugin", "version": "1.0"}), encoding="utf-8",
     )
     (other / "pyproject.toml").write_text(
-        '[project]\nname = "other"\nversion = "1.0"\n', encoding="utf-8",
+        _STATIC_BUILD + '[project]\nname = "other"\nversion = "1.0"\n', encoding="utf-8",
     )
     (other / "src" / "other").mkdir(parents=True)
     (other / "src" / "other" / "__init__.py").write_bytes(b"VALUE = 'first-party fixture'\n")
@@ -844,7 +847,7 @@ def _publish_fixture(tmp_path, monkeypatch):
     directory = tmp_path / "export"
     plugin_dir = tmp_path / "plugins" / "demo"
     plugin_dir.mkdir(parents=True)
-    (plugin_dir / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "1.0"\n')
+    (plugin_dir / "pyproject.toml").write_text(_STATIC_BUILD + '[project]\nname = "demo"\nversion = "1.0"\n')
     (plugin_dir / "src" / "demo").mkdir(parents=True)
     (plugin_dir / "src" / "demo" / "__init__.py").write_bytes(b"VALUE = 'first-party fixture'\n")
     index = _index(directory, candidate_root=tmp_path)
@@ -1035,7 +1038,7 @@ def test_changed_candidate_source_blocks_publication_before_any_release_write(tm
 def test_first_party_label_does_not_substitute_for_candidate_closure(tmp_path):
     plugin_dir = tmp_path / "plugins" / "demo"
     plugin_dir.mkdir(parents=True)
-    (plugin_dir / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "1.0"\n')
+    (plugin_dir / "pyproject.toml").write_text(_STATIC_BUILD + '[project]\nname = "demo"\nversion = "1.0"\n')
     manifest = _manifest(tmp_path / "wheels", candidate_root=tmp_path)
     manifest["wheels"].append({
         "filename": "library-1.0-py3-none-any.whl", "role": "vendored-lib",
