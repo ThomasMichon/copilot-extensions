@@ -21,7 +21,7 @@ from zdd import breadcrumb
 from zdd import routing
 from zdd.cutover import CutoverOrchestrator
 
-from . import locks, procs
+from . import locks
 from .status_monitor_python import direct_monitor_python
 
 _BIND = "127.0.0.1"
@@ -373,8 +373,13 @@ def _reap_abandoned_passive(record: dict | None) -> dict:
         return pid in _iter_status_monitor_pids()
 
     def _terminate(pid: int) -> bool:
-        return bool(
-            procs.terminate_pid_if_identity(pid, locks.process_start_time(pid)).get("killed")
+        from zdd.diagnostics import terminate_pid_if_identity
+
+        result = terminate_pid_if_identity(
+            pid, (record or {}).get("new_process_start_time"), exit_timeout=5.0,
+        )
+        return all(
+            result.get(key) is True for key in ("killed", "identity_verified", "exit_confirmed")
         )
 
     return breadcrumb.reap_abandoned_passive(

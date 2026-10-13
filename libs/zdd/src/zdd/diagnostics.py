@@ -154,7 +154,9 @@ def lock_data_is_live(data: dict | None) -> bool:
     return str(recorded) == str(current)
 
 
-def _terminate_windows_if_identity(pid: int, expected_start_time: str) -> dict:
+def _terminate_windows_if_identity(
+    pid: int, expected_start_time: str, exit_timeout: float | None = None,
+) -> dict:
     import ctypes
     from ctypes import wintypes
 
@@ -177,7 +179,8 @@ def _terminate_windows_if_identity(pid: int, expected_start_time: str) -> dict:
     k32.GetProcessTimes.restype = wintypes.BOOL
 
     handle = k32.OpenProcess(
-        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE, False, pid
+        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE
+        | (0x00100000 if exit_timeout is not None else 0), False, pid,
     )
     if not handle:
         return {
@@ -210,16 +213,24 @@ def _terminate_windows_if_identity(pid: int, expected_start_time: str) -> dict:
                 "identity_verified": False,
                 "method": "windows-handle-identity-mismatch",
             }
-        return {
-            "killed": bool(k32.TerminateProcess(handle, 1)),
+        killed = bool(k32.TerminateProcess(handle, 1))
+        result = {
+            "killed": killed,
             "identity_verified": True,
             "method": "windows-verified-handle",
         }
+        if exit_timeout is not None:
+            from .diagnostic_exit import wait_windows
+
+            result["exit_confirmed"] = killed and wait_windows(k32, handle, exit_timeout)
+        return result
     finally:
         k32.CloseHandle(handle)
 
 
-def _terminate_posix_if_identity(pid: int, expected_start_time: str) -> dict:
+def _terminate_posix_if_identity(
+    pid: int, expected_start_time: str, exit_timeout: float | None = None,
+) -> dict:
     import signal
 
     pidfd_open = getattr(os, "pidfd_open", None)
@@ -264,17 +275,27 @@ def _terminate_posix_if_identity(pid: int, expected_start_time: str) -> dict:
                 "identity_verified": True,
                 "method": "pidfd-signal-failed",
             }
-        return {
+        result = {
             "killed": True,
             "identity_verified": True,
             "method": "pidfd",
         }
+        if exit_timeout is not None:
+            from .diagnostic_exit import wait_posix
+
+            result["exit_confirmed"] = wait_posix(fd, exit_timeout)
+        return result
     finally:
         os.close(fd)
 
 
-def terminate_pid_if_identity(pid: int, expected_start_time: str | None) -> dict:
+def terminate_pid_if_identity(
+    pid: int, expected_start_time: str | None, *, exit_timeout: float | None = None,
+) -> dict:
     """Terminate only through an OS object bound to the verified process."""
+    from .diagnostic_exit import validate_timeout
+
+    validate_timeout(exit_timeout)
     if pid <= 0 or not expected_start_time:
         return {
             "killed": False,
@@ -282,8 +303,12 @@ def terminate_pid_if_identity(pid: int, expected_start_time: str | None) -> dict
             "method": "identity-unavailable",
         }
     if platform.system() == "Windows":
-        return _terminate_windows_if_identity(pid, str(expected_start_time))
-    return _terminate_posix_if_identity(pid, str(expected_start_time))
+        terminate = _terminate_windows_if_identity
+    else:
+        terminate = _terminate_posix_if_identity
+    if exit_timeout is None:
+        return terminate(pid, str(expected_start_time))
+    return terminate(pid, str(expected_start_time), exit_timeout)
 
 
 @dataclass(frozen=True)

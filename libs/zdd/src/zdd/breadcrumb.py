@@ -518,9 +518,15 @@ def _reap_abandoned_passive_locked(
         log.error(reason)
         return {"reaped": False, "refused": True, "reason": reason, "pid": new_pid}
     try:
-        ok = bool(terminate(new_pid))
+        ok = terminate(new_pid)
+        if type(ok) is not bool:
+            reason = "candidate termination returned invalid exit evidence; reap refused"
+            log.error(reason)
+            return {"reaped": False, "refused": True, "reason": reason, "pid": new_pid}
     except Exception as exc:  # noqa: BLE001 -- reap is best-effort, never raised
-        return {"reaped": False, "reason": f"terminate failed: {exc}", "pid": new_pid}
+        reason = f"identity-bound candidate termination failed ({type(exc).__name__})"
+        log.error(reason)
+        return {"reaped": False, "refused": True, "reason": reason, "pid": new_pid}
     if ok:
         log.warning(
             "Reaped abandoned passive pid=%d from a cutover started %s (age=%.0fs, "
@@ -528,6 +534,7 @@ def _reap_abandoned_passive_locked(
         )
     return {
         "reaped": ok,
+        **({"refused": True} if not ok else {}),
         "reason": "terminated" if ok else "terminate reported failure",
         "pid": new_pid,
     }

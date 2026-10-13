@@ -569,48 +569,7 @@ def _acquire_install_cutover_lease(root: Path):
     return lease, mux_daemon_cutover
 
 
-def _reap_stranded_cutover_passive(root: Path, mux_daemon_cutover) -> None:
-    """Best-effort: clear a passive mux-daemon stranded by an aborted cutover.
-
-    Must be called ONLY while the caller already holds the cutover lease
-    from :func:`_acquire_install_cutover_lease` for the same ``root`` --
-    this performs no locking of its own.
-
-    ``mux_daemon_cutover.spawn_passive`` spawns a new version's mux-daemon
-    with its ``cwd`` pinned INSIDE the version slot being cut over to, so it
-    can be health-checked before promotion. If the orchestrator driving that
-    cutover (``self_update()`` -> ``activate_after_update()``) dies before
-    the passive is ever promoted or terminated -- a crash, a killed
-    terminal, an interrupted upgrade -- the passive lingers indefinitely,
-    its open ``cwd`` handle preventing that slot from ever being deleted on
-    Windows (``WinError 32``).
-
-    ``activate_after_update()`` already reaps exactly this (via the durable
-    cutover breadcrumb + :func:`mux_daemon_cutover._reap_abandoned_passive`)
-    -- but only when IT runs. A bare ``self_install(dry_run=False)`` (the
-    ``self-install`` CLI command, or any retry after a crashed self-update)
-    calls :func:`_copy_payload` directly and never goes through that
-    recovery, so a stranded passive pinned inside the slot about to be
-    ``rmtree``'d is never cleared first, and the delete fails.
-
-    This reuses the SAME breadcrumb-driven reap (never a new cwd-hunting
-    mechanism -- that would need a new OS-specific dependency this
-    deliberately dependency-free installer does not carry). Deliberately
-    does NOT touch the breadcrumb file itself (no clearing, no rewriting):
-    the SAME breadcrumb may still name an ``old`` endpoint that a later,
-    full ``activate_after_update()`` -> ``recover_stale_cutover()`` needs to
-    undrain -- clearing it here, even after a successful reap, would
-    silently discard that other half of recovery. Leaving the file
-    untouched is always safe: a later real cutover re-reads it and finds
-    the reaped pid simply no longer alive (a clean no-op on its side).
-    """
-    try:
-        from zdd import breadcrumb
-
-        record = breadcrumb.read_breadcrumb(mux_daemon_cutover.routing_dir(root))
-        mux_daemon_cutover._reap_abandoned_passive(root, record)
-    except Exception:  # noqa: BLE001, S110 -- reap is best-effort, never fatal to install
-        pass
+from .self_install_recovery import reap_stranded_cutover_passive as _reap_stranded_cutover_passive
 
 
 # ── legacy artifact recognition + cleanup ────────────────────────────────
@@ -860,7 +819,10 @@ def self_install(
             return SelfInstallResult(version=version, action="already-current", root=str(r),
                                      slot=str(slot), marker=current_version(r),
                                      reason=reason, cleaned=cleaned)
-        _reap_stranded_cutover_passive(r, mux_daemon_cutover)
+        refusal = _reap_stranded_cutover_passive(r, slot, mux_daemon_cutover)
+        if refusal is not None:
+            return SelfInstallResult(version=version, action="error", root=str(r),
+                                     slot=str(slot), reason=refusal, cleaned=cleaned)
         try:
             _copy_payload(pd, slot)
         except RuntimeError as e:

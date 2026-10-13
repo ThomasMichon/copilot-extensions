@@ -446,10 +446,17 @@ def test_reap_abandoned_passive_backstop_reaps_stranded_pid(tmp_path, monkeypatc
     monkeypatch.setattr(
         "agent_dispatch.cutover_process.verified_pair", lambda pid, _token: {pid: "1"},
     )
-    from zdd import breadcrumb
+    from zdd import breadcrumb, diagnostics, routing
+    import time
+
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda _: "1")
 
     breadcrumb.write_breadcrumb(
         tmp_path, state="started", old=None, new_port=9290, new_pid=4321,
+        new_process_start_time="1",
+        publication_witness=routing.publication_witness(
+            tmp_path, deadline=time.monotonic() + 1,
+        ),
     )
     # Age the breadcrumb well past the grace window without waiting.
     import json
@@ -461,20 +468,20 @@ def test_reap_abandoned_passive_backstop_reaps_stranded_pid(tmp_path, monkeypatc
     ).isoformat()
     (tmp_path / "cutover.json").write_text(json.dumps(record), encoding="utf-8")
 
-    from zdd import routing
-
     routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=111,
                            version="1.0")
 
     terminated = []
-    # is_live_coordinator_pid / terminate_pid are the real (module-default)
-    # implementations here; monkeypatch them to keep this test hermetic.
+    # Keep process discovery and native handle termination hermetic.
     import agent_dispatch.reap as reap_mod
 
     monkeypatch.setattr(reap_mod, "is_live_coordinator_pid", lambda pid: True)
-    monkeypatch.setattr(
-        reap_mod, "terminate_pid", lambda pid: terminated.append(pid) or True,
-    )
+    def terminate(pid, start, *, exit_timeout):
+        assert start == "1" and exit_timeout == 5.0
+        terminated.append(pid)
+        return {"killed": True, "identity_verified": True, "exit_confirmed": True}
+
+    monkeypatch.setattr(diagnostics, "terminate_pid_if_identity", terminate)
     result = reap_abandoned_passive_backstop(
         tmp_path, record=record, grace_seconds=1.0,
     )

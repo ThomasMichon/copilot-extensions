@@ -468,16 +468,30 @@ def reap_abandoned_passive_backstop(
         kwargs: dict = {}
         if grace_seconds is not None:
             kwargs["grace_seconds"] = grace_seconds
+        def terminate_candidate(pid):
+            from zdd.diagnostics import terminate_pid_if_identity
+
+            result = terminate_pid_if_identity(
+                pid, (record or {}).get("new_process_start_time"), exit_timeout=5.0,
+            )
+            return all(
+                result.get(key) is True for key in ("killed", "identity_verified", "exit_confirmed")
+            )
+
         return reap_abandoned_passive(
             config_dir,
             pid_alive=is_live_coordinator_pid,
-            terminate=terminate_pid,
+            terminate=terminate_candidate,
             active_pid=int(active_pid) if active_pid else None,
             record=record,
             **kwargs,
         )
     except Exception as exc:  # best-effort: reap must never raise into a caller
+        import logging
+
+        reason = f"native passive recovery unavailable ({type(exc).__name__}); reap refused"
+        logging.getLogger("zdd").error(reason)
         return {
-            "reaped": False, "reason": f"reap skipped: {exc}",
+            "reaped": False, "refused": True, "reason": reason,
             "pid": record.get("new_pid") if isinstance(record, dict) else None,
         }

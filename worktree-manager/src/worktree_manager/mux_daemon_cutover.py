@@ -408,7 +408,9 @@ def _ps_env_without_width_override() -> dict[str, str]:
     return env
 
 
-def _terminate_mux_daemon_pid(pid: int, *, root: Path) -> bool:
+def _terminate_mux_daemon_pid(
+    pid: int, *, root: Path, expected_start_time: str | None = None,
+) -> bool:
     """Terminate ``pid`` after verifying it is a mux-daemon bound to ``root``.
 
     This is the ONE legitimate PID-kill fallback this module uses: the
@@ -433,9 +435,16 @@ def _terminate_mux_daemon_pid(pid: int, *, root: Path) -> bool:
     if pid not in _iter_mux_daemon_pids() or not _pid_matches_root(pid, root=root):
         return False
     start_time = diagnostics.process_start_time(pid)
-    if start_time is None:
+    if start_time is None or (
+        expected_start_time is not None and start_time != expected_start_time
+    ):
         return False
-    return bool(diagnostics.terminate_pid_if_identity(pid, start_time).get("killed"))
+    if expected_start_time is None:
+        return bool(diagnostics.terminate_pid_if_identity(pid, start_time).get("killed"))
+    result = diagnostics.terminate_pid_if_identity(pid, expected_start_time, exit_timeout=5.0)
+    return all(
+        result.get(key) is True for key in ("killed", "identity_verified", "exit_confirmed")
+    )
 
 
 def _reap_abandoned_passive(root: Path, record: dict | None) -> dict:
@@ -445,7 +454,9 @@ def _reap_abandoned_passive(root: Path, record: dict | None) -> dict:
     return breadcrumb.reap_abandoned_passive(
         routing_dir(root),
         pid_alive=lambda pid: pid in _iter_mux_daemon_pids(),
-        terminate=lambda pid: _terminate_mux_daemon_pid(pid, root=root),
+        terminate=lambda pid: _terminate_mux_daemon_pid(
+            pid, root=root, expected_start_time=(record or {}).get("new_process_start_time"),
+        ),
         active_pid=int(active_pid) if active_pid else None,
         record=record,
         grace_seconds=0.0,

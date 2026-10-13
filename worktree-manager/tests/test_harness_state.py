@@ -22,7 +22,7 @@ from worktree_manager.harness_state import (
 from worktree_manager.__main__ import main
 
 
-def _make_home(tmp: Path) -> Path:
+def _make_home(tmp: Path, *, include_wsl: bool = True) -> Path:
     # user-global Copilot settings
     copilot = tmp / ".copilot"
     copilot.mkdir(parents=True)
@@ -64,6 +64,7 @@ def _make_home(tmp: Path) -> Path:
         "      ready: false\n"
     )
     win = str(checkout).replace("\\", "\\\\")
+    wsl_path = "    wsl: \"" + str(checkout).replace("\\", "/") + "\"\n" if include_wsl else ""
     (awt / "repos.yaml").write_text(
         "schema_version: 1\n"
         "account_map:\n  example-operator: example-operator\n"
@@ -73,7 +74,8 @@ def _make_home(tmp: Path) -> Path:
         "    remote: \"https://github.com/example-operator/dotfiles.git\"\n"
         f"    windows: \"{win}\"\n"
         "    linux: \"" + str(checkout).replace("\\", "/") + "\"\n"
-        "    tags: [control-plane]\n"
+        + wsl_path
+        + "    tags: [control-plane]\n"
         "  some-lib:\n"
         "    class: singleton\n"
         "    agent: false\n"
@@ -225,8 +227,8 @@ def test_mis_registered_repos_uses_exact_platform_not_fallback(tmp_path: Path, m
     ``build_repos()``'s deliberate cross-platform fallback chain)."""
     from worktree_manager import harness_state
 
-    home = _make_home(tmp_path)
-    # `_make_home`'s `dotfiles` entry has no `wsl:` key at all.
+    home = _make_home(tmp_path, include_wsl=False)
+    # Deliberately omit this platform while retaining the sibling paths.
     monkeypatch.setattr(harness_state, "_exact_platform_key", lambda: "wsl")
     problems = {name: (status, detail) for name, status, detail in mis_registered_repos(home)}
     assert "dotfiles" not in problems

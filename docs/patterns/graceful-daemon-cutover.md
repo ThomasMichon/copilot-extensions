@@ -341,14 +341,18 @@ The fix mirrors the existing old-survivor recovery, but for the *new* side:
 - `zdd.breadcrumb.reap_abandoned_passive` is the matching pure decision: it
   terminates `new_pid` only when the breadcrumb is non-terminal
   (`is_stale`), aged past a grace window (so a cutover still genuinely in
-  flight -- especially mid-drain -- is never disturbed), and `new_pid` does
-  **not** match the caller's confirmed-live routing-table `active` pid (i.e.
-  it was truly never promoted). Every ambiguous case is a no-op.
+  flight -- especially mid-drain -- is never disturbed), and routing-owned
+  durable evidence proves it was never promoted. Absence from current rows
+  alone is not proof. Missing custody, reused identity or unconfirmed exit
+  refuses cleanup; the installer retains an occupied slot rather than replacing
+  it. The [canonical custody contract](../../libs/zdd/README.md#zddrouting--the-routing-table-no-proxy)
+  owns evidence, capacity and native-exit details.
 - Each consumer composes it with its own identity-verified liveness check and
   termination: agent-dispatch's `reap.reap_abandoned_passive_backstop` reuses
   its coordinator-process enumeration (`is_live_coordinator_pid`); agent-bridge's
-  `_reap_abandoned_passive` reuses its own `_pid_is_agent_bridge` +
-  `_ensure_retired_daemon_exited`. Both run it once at the top of the next
+  `_reap_abandoned_passive` reuses its own `_pid_is_agent_bridge`. Termination
+  binds the original birth token and confirms exit through the same native
+  handle, never a raw process-tree fallback. Both run it once at the top of the next
   `deploy`/cutover attempt (alongside `recover_stale_cutover`, using the
   breadcrumb read *before* that call rewrites it to a terminal state).
   agent-dispatch additionally arms a **periodic** sweep in the coordinator

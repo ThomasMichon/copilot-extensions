@@ -86,6 +86,18 @@ An unreadable/corrupt routing table is a typed `ActivePublicationRefused` for
 writers and a failed result before spawn for ordinary cutover. Read-only
 client fallback remains tolerant; mutation must not infer an empty namespace
 from unavailable custody evidence.
+Passive adapters bind termination to the breadcrumb's original process token,
+not a newly sampled token. Their five-second exit confirmation waits on the
+same pidfd/Windows handle used to signal; acceptance alone is not successful
+reaping. Unconfirmed exit and termination errors are explicit refusals.
+The standalone installer retains the version slot and marker when passive
+custody, recovery or exit cannot be verified rather than recopying an occupied
+slot. Fresh absent slots require no unrelated retirement and can still be
+materialized without touching the existing generation or its recovery record;
+this does not assert activation succeeded. `terminate_pid_if_identity(...,
+exit_timeout=...)` exposes this optional
+native wait with a finite zero-to-30-second budget; existing signal-only callers
+retain their original result shape.
 
 ### `zdd.cutover` -- the cutover orchestrator
 

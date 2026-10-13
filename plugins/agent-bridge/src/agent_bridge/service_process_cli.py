@@ -285,8 +285,14 @@ def _reap_abandoned_passive(config_dir_path, record: dict | None) -> dict:
         active_pid = active.get("pid") if isinstance(active, dict) else None
 
         def _terminate(pid: int) -> bool:
-            exited, _forced = core._ensure_retired_daemon_exited(pid)
-            return exited
+            from zdd.diagnostics import terminate_pid_if_identity
+
+            result = terminate_pid_if_identity(
+                pid, (record or {}).get("new_process_start_time"), exit_timeout=5.0,
+            )
+            return all(
+                result.get(key) is True for key in ("killed", "identity_verified", "exit_confirmed")
+            )
 
         return reap_abandoned_passive(
             config_dir_path,
@@ -296,7 +302,11 @@ def _reap_abandoned_passive(config_dir_path, record: dict | None) -> dict:
             record=record,
         )
     except Exception as exc:
-        return {"reaped": False, "reason": f"reap skipped: {exc}", "pid": None}
+        import logging
+
+        reason = f"native passive recovery unavailable ({type(exc).__name__}); reap refused"
+        logging.getLogger("zdd").error(reason)
+        return {"reaped": False, "refused": True, "reason": reason, "pid": None}
 
 
 def _pid_from_lock(port: int) -> int | None:

@@ -170,7 +170,7 @@ def test_reap_abandoned_passive_terminate_failure_is_reported(tmp_path: Path):
         tmp_path, pid_alive=lambda pid: True, terminate=boom, record=record,
     )
     assert result["reaped"] is False
-    assert "terminate failed" in result["reason"]
+    assert "termination failed" in result["reason"] and result["refused"]
 
 
 def test_recovery_preserves_original_transition_identity_for_fresh_guarded_reap(tmp_path):
@@ -214,3 +214,11 @@ def test_legacy_recovery_and_reap_preserve_unverifiable_custody(tmp_path, conten
     )
     assert recovered["refused"] and reaped["refused"]
     assert path.read_text() == content
+
+
+def test_reap_refuses_truthy_nonboolean_exit_evidence(tmp_path):
+    record = _write_aged_breadcrumb(tmp_path, new_pid=4321, age_s=9999)
+    result = breadcrumb.reap_abandoned_passive(
+        tmp_path, record=record, pid_alive=lambda _: True, terminate=lambda _: "false",
+    )
+    assert not result["reaped"] and result["refused"]
