@@ -126,6 +126,22 @@ def test_get_pull_preserves_full_source(
     assert result.merged is False
 
 
+@pytest.mark.guard
+@pytest.mark.parametrize("owner", ("user_team", "service_account_enterprise"))
+def test_github_enterprise_managed_user_preserves_merged_source(
+    monkeypatch: pytest.MonkeyPatch, owner: str,
+) -> None:
+    data = _payload("github")
+    data["state"] = "MERGED"
+    data["headRepository"]["nameWithOwner"] = f"{owner}/project"
+    result = _get_pull(monkeypatch, "github", data)
+    assert result.state == "merged"
+    assert result.merged is True
+    assert result.head_sha == HEAD_SHA
+    assert result.head_ref == SOURCE_REF
+    assert result.head_url == f"https://github.example/{owner}/project.git"
+
+
 @pytest.mark.parametrize("provider", PROVIDERS)
 def test_get_pull_missing_source_does_not_invent_identity(
     monkeypatch: pytest.MonkeyPatch, provider: str,
@@ -231,7 +247,12 @@ def test_github_missing_source_owner_does_not_use_destination(
     assert result.head_sha == HEAD_SHA
 
 
-@pytest.mark.parametrize("name", ("project", "owner/project/extra", "owner /project", "../project"))
+@pytest.mark.parametrize("name", (
+    "project", "owner/project/extra", "owner /project", "../project",
+    "emu_owner/../project", "emu_owner/.", "emu_owner/..",
+    "emu_owner/project%2Fextra", "emu_owner/project\\extra",
+    "emu_owner /project", "emu_owner@other/project", "emu_owner/project?query",
+))
 def test_github_malformed_repository_name_is_rejected(
     monkeypatch: pytest.MonkeyPatch, name: str,
 ) -> None:

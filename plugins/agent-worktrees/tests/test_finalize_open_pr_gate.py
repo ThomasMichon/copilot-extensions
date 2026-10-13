@@ -10,6 +10,10 @@ refuses finalize while any of them is still genuinely open.
 
 from __future__ import annotations
 
+import json
+import subprocess
+from dataclasses import replace
+
 import pytest
 
 from agent_worktrees import config as cfg
@@ -78,6 +82,46 @@ def _patch_provider(monkeypatch, fake):
 
     monkeypatch.setattr(prov, "get_provider", lambda name: fake)
     monkeypatch.setattr(prov, "account_token_for_slug", lambda slug, prcfg: "t")
+
+
+@pytest.mark.guard
+def test_github_emu_prs_heal_through_real_source_parser(tmp_path, monkeypatch):
+    from agent_worktrees import providers
+    from agent_worktrees.providers import github
+
+    config = _config()
+    config.repos["ext"] = replace(
+        config.repos["ext"],
+        pr=cfg.PRConfig(enabled=True, provider="github", api_base="https://github.example"),
+    )
+    repo = "user_team/project"
+    records = [
+        tracking.PRRecord(
+            state="open", number=number, branch=f"pr/topic-{number}",
+            provider="github", repo=repo,
+            url=f"https://github.example/{repo}/pull/{number}",
+        )
+        for number in (17, 18)
+    ]
+    record = _record(tmp_path, monkeypatch, "wt-emu", prs=records, repo=repo)
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
+
+    def transport(args, **kwargs):
+        assert args[:3] == ["gh", "pr", "view"]
+        number = int(args[3])
+        data = {
+            "url": f"https://github.example/{repo}/pull/{number}",
+            "number": number, "state": "MERGED",
+            "headRefOid": "a" * 40, "baseRefName": "main",
+            "headRefName": f"pr/topic-{number}",
+            "headRepository": {"nameWithOwner": repo},
+        }
+        return subprocess.CompletedProcess(args, 0, stdout=json.dumps(data), stderr="")
+
+    monkeypatch.setattr(github, "run_cli", transport)
+    assert _assert_no_live_pr(record, config, "wt-emu") is True
+    assert all(pr.state == "merged" for pr in record.prs)
+    assert all(pr.closed_at for pr in record.prs)
 
 
 class TestAssertNoLivePr:
