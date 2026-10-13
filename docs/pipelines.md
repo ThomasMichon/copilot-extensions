@@ -591,12 +591,14 @@ waiting for its exact generated PR to merge. Enabling auto-merge alone is not
 delivery: the waiter verifies the PR identity and reports a bounded timeout,
 closed-unmerged state or provider error as a failure. The release tag uses that
 PR's actual merge commit, even if `main` advances again before tagging.
-`tools/tag_promotion.py` names that tag `<stem>-<merge sha8>`, where the stem
-(`promote-<UTC timestamp>`) is the `last_promotion.tag` recorded in the merged
-commit's own `.github/release-pipeline-state.json`, so a tag and the state it
-releases always agree. It refuses to tag when that state names a different
-promoted `dev` commit or the tag already points elsewhere, and a re-run on the
-same commit is a no-op.
+`tools/tag_promotion.py` provides the intended naming for that tag:
+`<stem>-<merge sha8>`, where the stem (`promote-<UTC timestamp>`) is the
+`last_promotion.tag` recorded in the merged commit's own
+`.github/release-pipeline-state.json`, so a tag and the state it releases
+agree. It refuses to tag when that state names a different promoted `dev`
+commit or the tag already points elsewhere, and a re-run on the same commit is
+a no-op. Until the workflow's tag step calls it, that step still names the tag
+from a fresh `date -u` timestamp plus the merge sha.
 
 ```bash
 gh pr list --repo ThomasMichon/copilot-extensions --search "is:merged head:release/promote-" --limit 5

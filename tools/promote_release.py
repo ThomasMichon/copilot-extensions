@@ -805,6 +805,10 @@ def promote(
         else:
             if build_python_artifacts_dir is None:
                 _git(["tag", "-a", tag_name, "-m", message, commit], cwd=scratch)
+            else:
+                # Artifact preparation never tags (and never pushes; see the
+                # guard at the top), so there is no tag name to report.
+                tag_name = None
             if push:
                 _git(["push", "origin", f"{commit}:refs/heads/main"], cwd=scratch)
                 _git(["push", "origin", tag_name], cwd=scratch)
@@ -899,6 +903,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if report["tag"]:
         print(f"promote-release: generated commit {report['commit']} (tag {report['tag']})")
+    elif report.get("python_artifacts_exported"):
+        print(
+            f"promote-release: prepared commit {report['commit']} for artifact export "
+            f"(not tagged; tag stem {report['tag_stem']})"
+        )
     else:
         print(
             f"promote-release: generated commit {report['commit']} "

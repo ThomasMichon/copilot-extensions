@@ -763,6 +763,8 @@ def test_real_export_subprocess_uses_bumped_candidate_without_polluting_it(repo,
     assert [entry["plugin"] for entry in index["artifacts"]] == ["demo-plugin", "other-plugin"]
     assert "backend-residue.txt" not in _git(["ls-tree", "-r", "--name-only", prepared["commit"]], repo)
     assert _git(["tag", "--points-at", prepared["commit"]], repo) == ""
+    assert prepared["tag"] is None
+    assert prepared["tag_stem"].startswith(f"{promotion.PROMOTION_TAG_PREFIX}-")
     assert len(_git(["worktree", "list"], repo).splitlines()) == 1
     promoted = promotion.promote(
         repo=repo, dev_ref="dev", main_ref="main", python_artifacts_dir=directory,
