@@ -1736,7 +1736,7 @@ function Write-V3Manifest {
     }
     if ($ContextualInstall) {
         $temporaryManifest = "$manifestPath.tmp-$PID"
-        [IO.File]::WriteAllText(
+        [System.IO.File]::WriteAllText(
             $temporaryManifest, ($manifest | ConvertTo-Json -Depth 8),
             (New-Object System.Text.UTF8Encoding($false))
         )

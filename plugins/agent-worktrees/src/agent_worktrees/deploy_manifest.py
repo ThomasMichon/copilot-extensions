@@ -8,7 +8,7 @@ from pathlib import Path
 
 from agent_procutil import no_window_kwargs
 
-from . import config as cfg, installer as inst, output, registry_paths
+from . import config as cfg, git_ops, installer as inst, output, registry_paths
 
 
 def write_deploy_manifest(repo_dir: str | Path, machine: str) -> None:
@@ -30,12 +30,14 @@ def write_deploy_manifest(repo_dir: str | Path, machine: str) -> None:
         result = subprocess.run(
             ["git", "-C", str(repo_dir), "rev-parse", "--short", "HEAD"],
             capture_output=True, text=True, **no_window_kwargs(),
+            env=git_ops.repository_identity_env(),
         )
         if result.returncode == 0:
             commit = result.stdout.strip()
         result = subprocess.run(
             ["git", "-C", str(repo_dir), "rev-parse", "--abbrev-ref", "HEAD"],
             capture_output=True, text=True, **no_window_kwargs(),
+            env=git_ops.repository_identity_env(),
         )
         if result.returncode == 0:
             branch = result.stdout.strip()
@@ -43,6 +45,7 @@ def write_deploy_manifest(repo_dir: str | Path, machine: str) -> None:
             ["git", "-C", str(repo_dir), "status", "--porcelain", "--",
              "plugins/agent-worktrees/"],
             capture_output=True, text=True, **no_window_kwargs(),
+            env=git_ops.repository_identity_env(),
         )
         if result.returncode == 0:
             dirty = bool(result.stdout.strip())

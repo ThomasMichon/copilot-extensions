@@ -296,8 +296,9 @@ def _catalog_environment(fixture: dict) -> dict[str, str]:
     environment = {
         **os.environ, **fixture["environment"],
         "COPILOT_PLUGIN_ROOT": str(fixture["payload"]),
-        "DOTNET_MultiCoreJitNoProfileGather": "1",
-        "COMPlus_MultiCoreJitNoProfileGather": "1",
+        # Retail CLR AutoStartProfile parses "(d)" to disable JIT profiling.
+        "DOTNET_MultiCoreJitProfile": "(d)",
+        "COMPlus_MultiCoreJitProfile": "(d)",
         "POWERSHELL_TELEMETRY_OPTOUT": "1",
         "POWERSHELL_UPDATECHECK": "Off",
         "PYTHONDONTWRITEBYTECODE": "1",

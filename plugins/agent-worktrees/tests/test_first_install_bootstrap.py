@@ -595,6 +595,8 @@ def _assert_posix_namespace_slot_rejected(
         "plugin.json",
         "pyproject.toml",
         "scripts/install.sh",
+        "scripts/command_binding.py",
+        "scripts/command_lifecycle.py",
         "scripts/versioned_runtime.py",
         "scripts/resolve-runtime.sh",
         "scripts/resolve-runtime.ps1",
@@ -602,6 +604,10 @@ def _assert_posix_namespace_slot_rejected(
         destination = payload / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(PLUGIN / relative, destination)
+    shutil.copytree(
+        PLUGIN / "scripts" / "installation-context",
+        payload / "scripts" / "installation-context",
+    )
     assert not (payload / "src").exists()
     assert not (payload / "libs").exists()
 

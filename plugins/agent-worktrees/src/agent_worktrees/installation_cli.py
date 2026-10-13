@@ -312,6 +312,7 @@ def _prepare_namespaced_project_state(
             text=True,
             timeout=5,
             **no_window_kwargs(),
+            env=git_ops.repository_identity_env(),
         )
         if result.returncode == 0:
             remote = result.stdout.strip()
@@ -492,6 +493,7 @@ def _install_project(
                 text=True,
                 timeout=5,
                 **no_window_kwargs(),
+                env=git_ops.repository_identity_env(),
             )
             if _remote_result.returncode == 0:
                 _remote = _remote_result.stdout.strip()
@@ -619,6 +621,7 @@ def cmd_register(args: argparse.Namespace) -> int:
                 text=True,
                 timeout=5,
                 **no_window_kwargs(),
+                env=git_ops.repository_identity_env(),
             )
             if r.returncode == 0 and r.stdout.strip():
                 # Normalize through resolve_to_anchor so that running from
@@ -767,6 +770,7 @@ def cmd_register(args: argparse.Namespace) -> int:
                 text=True,
                 timeout=5,
                 **no_window_kwargs(),
+                env=git_ops.repository_identity_env(),
             )
             if _rru.returncode == 0:
                 _reg_remote_url = _rru.stdout.strip()
@@ -811,6 +815,7 @@ def cmd_register(args: argparse.Namespace) -> int:
             text=True,
             timeout=5,
             **no_window_kwargs(),
+            env=git_ops.repository_identity_env(),
         )
         if _rr.returncode == 0:
             _reg_remote = _rr.stdout.strip()

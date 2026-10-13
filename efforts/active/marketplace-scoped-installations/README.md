@@ -495,6 +495,31 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-10-13 — Native host controls and source-footprint review follow-up
+
+- Current-head review resolved the earlier lifecycle/contextual findings but
+  identified ambient Git selectors in the extracted footprint publisher.
+  All three probes now use the established repository-identity environment;
+  the coupled install/register probes use it too. The headless regression
+  injects foreign `GIT_DIR`/`GIT_WORK_TREE` values and checks every child.
+- Native Windows host-only controls demonstrated that warming classic
+  PowerShell does not stop its startup profile rewrites. The fixture now
+  requests the retail CLR AutoStartProfile `(d)` option through
+  `MultiCoreJitProfile`, rather than relying on an unverified gather-only
+  switch. The host-only control and whole-profile comparisons remain intact;
+  native confirmation is still required, with no exclusions or policy bypass.
+- Updated the partial-package health fixture to include the new admission
+  helpers, preserving its actual staging and rejection path. Restored the
+  established full .NET type spelling in contextual manifest publication.
+  The disconnected targeted installer suite passed eight cases.
+- Synchronized through the backed worktree flow after the base advanced.
+  Its new bridge telemetry assertion failed only on binary floating-point
+  accumulation order; an atomic test-only correction uses a tight tolerance
+  without changing accounting, identity, or lower-bound assertions.
+  The disconnected native telemetry case passed.
+- None of these local results substitutes for current-head native/aggregate
+  gates, effort completion, release, or installed-copy proof.
+
 ### 2026-10-13 — Catalog review correction: admit ownership before runtime mutation
 
 - The first catalog-adopter review identified a real lifecycle boundary gap:
