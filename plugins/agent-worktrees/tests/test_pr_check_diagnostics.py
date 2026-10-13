@@ -78,6 +78,33 @@ def test_check_diagnostics_legacy_status_and_pending_run() -> None:
     assert report.failures[0].source == "commit-status"
 
 
+@pytest.mark.parametrize("latest", ["success", "pending"])
+@pytest.mark.guard
+def test_check_diagnostics_legacy_rerun_supersedes_failed_context(latest: str) -> None:
+    report = CheckFixture(status={
+        "state": latest, "statuses": [
+            {"context": "Build", "state": latest},
+            {"context": "build", "state": "failure", "description": "Old attempt"},
+        ],
+    }).read()
+    assert report.state == latest and report.complete
+    assert report.failures == ()
+
+
+def test_check_diagnostics_legacy_rerun_keeps_other_failed_context() -> None:
+    report = CheckFixture(status={
+        "state": "failure", "statuses": [
+            {"context": "build", "state": "success"},
+            {"context": "lint", "state": "error", "description": "Latest lint"},
+            {"context": "build", "state": "failure"},
+            {"context": "lint", "state": "failure", "description": "Old lint"},
+        ],
+    }).read()
+    assert report.state == "failure"
+    assert [failure.name for failure in report.failures] == ["lint"]
+    assert report.failures[0].description == "Latest lint"
+
+
 def test_check_diagnostics_preserve_later_page_failure() -> None:
     fixture = CheckFixture()
     fixture.pages = [

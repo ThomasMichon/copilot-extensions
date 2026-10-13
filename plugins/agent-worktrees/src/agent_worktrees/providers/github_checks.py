@@ -80,10 +80,18 @@ def read_checks(
                 pending = raw == "pending"
                 if raw not in ("failure", "error", "pending", "success"):
                     status_readable = False
+                seen_contexts: set[str] = set()
                 for status in statuses:
                     if not isinstance(status, dict):
                         status_readable = False
                         continue
+                    context = status.get("context")
+                    if isinstance(context, str) and context:
+                        # Status arrays are newest-first; a rerun supersedes older context entries.
+                        key = context.casefold()
+                        if key in seen_contexts:
+                            continue
+                        seen_contexts.add(key)
                     state = str(status.get("state", "")).strip().lower()
                     if state in ("failure", "error"):
                         failure = True
