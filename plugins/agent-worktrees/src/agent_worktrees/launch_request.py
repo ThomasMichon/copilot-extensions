@@ -35,7 +35,7 @@ def decode(encoded: str) -> dict:
                 raise ValueError("Duplicate launch-request field")
             result[key] = value
         return result
-    request = json.loads(raw, object_pairs_hook=unique_object)
+    request = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object)
     if (
         not isinstance(request, dict) or type(request.get("version")) is not int or request["version"] != 1
         or set(request) != {"version", "request_id", "kind", "worktree_id", "text", "no_mux"}

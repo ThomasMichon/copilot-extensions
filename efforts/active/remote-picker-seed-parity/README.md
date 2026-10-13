@@ -320,3 +320,10 @@ hiding the problem or silently dropping text.
   worktree directory, and its exact prompt/provenance/discard assertions pass
   through real PowerShell. No cold-check or receiving-authority guard was
   weakened. Required current-head review/CI and delivered rollout remain open.
+- **2026-10-13** -- Review found JSON's byte-input parser also accepts UTF-16
+  and UTF-32, contradicting the specified UTF-8 envelope. Decode UTF-8 strictly
+  before JSON parsing. Five focused regressions pass, including rejection of
+  both alternate encodings, structured invalid-UTF-8 refusal and unchanged
+  arbitrary-text round-trip. The rebased POSIX admission/recovery portfolio
+  passed all 95 applicable cases (one PowerShell skip). No new backend or
+  transport path was introduced; current-head review/CI remain required.

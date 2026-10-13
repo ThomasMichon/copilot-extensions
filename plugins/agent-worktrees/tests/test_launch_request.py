@@ -163,6 +163,26 @@ def test_decode_round_trip_preserves_shell_metacharacters():
         request.decode(encoded + "!")
 
 
+@pytest.mark.parametrize("encoding", ["utf-16", "utf-32"])
+def test_non_utf8_envelope_is_rejected_before_admission(encoding):
+    encoded = base64.b64encode(json.dumps(_intent()).encode(encoding)).decode()
+    with pytest.raises(UnicodeDecodeError):
+        request.decode(encoded)
+
+
+def test_invalid_utf8_returns_structured_cli_error():
+    import argparse
+    from agent_worktrees import output, resolve_cli
+
+    parsers = argparse.ArgumentParser().add_subparsers()
+    resolve_cli.add_parsers(parsers)
+    encoded = base64.b64encode(b"\xff" + json.dumps(_intent()).encode()).decode()
+    args = parsers.choices["resolve"].parse_args(["--json", "--launch-request-b64", encoded])
+    with output.capture_json_output() as captured:
+        assert resolve_cli.cmd_resolve(args) == 3
+    assert "Launch request <invalid> failed" in json.loads(captured.getvalue())["error"]
+
+
 def test_changed_request_cannot_reuse_an_admitted_identity(tmp_path, authority):
     tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
                                "demo", "test", "windows", tmp_path)
