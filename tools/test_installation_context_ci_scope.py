@@ -90,7 +90,10 @@ def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     assert job["timeout-minutes"] == 5
     steps = job["steps"]
     detection = next(step for step in steps if step.get("id") == "installation-context")
-    smoke = next(step for step in steps if step.get("name") == "Read-only diagnostics (Windows)")
+    smoke = next(
+        step for step in steps
+        if step.get("name") == "Source provenance and read-only diagnostics (Windows)"
+    )
     assert "installation_context_ci_scope.py" in detection["run"]
     assert smoke["if"] == "steps.installation-context.outputs.run == 'true'"
     assert smoke["timeout-minutes"] <= 3
@@ -102,6 +105,8 @@ def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     assert "test_diagnostic_consumers.py" in smoke["run"]
     assert "derived_diagnostic_api_read_only" in smoke["run"]
     assert "peer_governance_wrapper_read_only" in smoke["run"]
+    assert "libs/installation-context/tests/test_payload_source.py" in smoke["run"]
+    assert 'payload_source or installation_context_ci_scope' in smoke["run"]
     manager = next(
         step for step in steps if step.get("name") == "Manager read-only wrapper (Windows)"
     )
