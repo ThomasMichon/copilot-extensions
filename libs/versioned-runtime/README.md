@@ -150,14 +150,40 @@ ordinary builders release construction before joining cutover. Retention does
 not grant installation-cell provenance or transaction authority. The cell
 `release_runtime_slot` operation remains narrower: it can remove only an exact
 receipt-only reservation, never an owned runtime candidate or rollback slot.
-Shell-installer adoption and publication create-once behavior remain separate
-Phase 3 work; old installers that do not hold construction or retention do not
+Shell-installer adoption remains separate Phase 3 work; old installers that
+do not hold construction or retention do not
 gain protection merely because this primitive ships.
 
 Focused native-process tests:
 `python tools/run-plugin-tests.py agent-bridge -k runtime_retention`.
 Five smoke cases run in the existing changed-plugin guard lane; the broader
 process, death, and ordering matrix runs in the full/manual promotion portfolio.
+
+## Create-once completion publication
+
+`mark_complete(root, version, *, payload_hash=None, pid=None)` publishes a
+numbered marker only after the caller's isolated health gate. Exact reuse keeps
+the original bytes, file identity, timestamp and PID; requesting a different
+hash (including adding/removing a hash on legacy evidence) refuses. Existing
+malformed or linked evidence requires explicit distinct-generation repair.
+`read_marker` returns `None` only for absent/malformed evidence; actual storage
+failures propagate, never masquerading as permission to rebuild.
+
+Publication holds shared retention before selector-publication ownership.
+A unique, flushed temporary file is linked atomically to the absent marker;
+the numbered destination is never replaced. Unsupported hardlinks/storage
+failures refuse publication without an overwrite fallback. Temporary files
+are removed on normal/error paths. A crash before publication leaves no
+completion assertion; a crash after linking leaves the complete marker intact.
+Only an explicitly claimed `dev` slot permits atomic marker replacement.
+Completion publication does not itself authorize package writers or retain a
+candidate after the call returns: adopting installers still need admission
+before construction and retention through their promotion/drain lifecycle.
+
+Focused native-process tests:
+`python tools/run-plugin-tests.py agent-bridge -k completion_publication`.
+The executable install-contract probe also checks unchanged exact reuse and
+conflicting-content refusal in the canonical helper, plus byte-identical fanout.
 
 ## Editing — one source of truth
 
