@@ -1,0 +1,9 @@
+{
+  "comment": "Refuse runtime activation when completion publication or its prerequisites fail",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

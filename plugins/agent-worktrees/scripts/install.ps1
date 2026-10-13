@@ -690,7 +690,10 @@ function Invoke-VersionedActivateInner {
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    if (-not (Test-Path $py)) { return $true }
+    if (-not (Test-Path $py)) {
+        Write-ServiceErr "Runtime interpreter missing for versions/$SrcVersion -- refusing activation"
+        return $false
+    }
     # A bare `import agent_worktrees` is NOT a sufficient health check: the
     # `agent_worktrees` directory merely EXISTING makes it importable as a
     # PEP 420 namespace package even when it holds zero `.py` files (e.g. an
@@ -774,7 +777,7 @@ function Invoke-VersionedActivateInner {
     } finally {
         $env:AGENT_RT_ROOT = $savedRtRoot
     }
-    Invoke-VersionedMarkComplete
+    if (-not (Invoke-VersionedMarkComplete)) { return $false }
     # Touch the just-superseded slot's mtime IMMEDIATELY after resolving it,
     # BEFORE activate() runs (see #4451): installs run
     # concurrently by design, so a delay here (activate + status-monitor-
@@ -1561,14 +1564,27 @@ function Invoke-VersionedMarkComplete {
        so "marker present" == "healthy, complete build". A crashed / watchdog-
        killed install never reaches here, leaving its slot markerless and thus
        tossable + retryable (#935). No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return }
+    if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) { return }
+    if (-not $py) {
+        Write-ServiceErr "Completion publication requires bootstrap Python -- refusing activation"
+        return $false
+    }
     $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
     $ph = Get-PayloadHash
-    if ($ph) { $mcArgs += @('--payload-hash', $ph) }
-    & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
+    if (-not $ph) {
+        Write-ServiceErr "Runtime input fingerprint unavailable -- refusing completion publication"
+        return $false
+    }
+    $mcArgs += @('--payload-hash', $ph)
+    $result = Invoke-NativeCapture { & $py @mcArgs }
+    if ($result.Output) { Write-Host "  ...    $($result.Output)" }
+    if ($result.ExitCode -ne 0) {
+        Write-ServiceErr "Completion publication failed for versions/$SrcVersion -- refusing activation"
+        return $false
+    }
+    return $true
 }
 
 function Test-SlotAlreadyComplete {

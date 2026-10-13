@@ -262,6 +262,26 @@ adoption on both entrypoints, and portfolio validation remain open. No Plan
 or Validation Plan checkbox is completed by this prerequisite; this effort
 remains Active.
 
+### 2026-10-13 -- Create-once completion publication merged
+
+#6425 merged into `dev` as
+`84d42eb1c6dfd690d49d46458fe19cc0d3b452b4` after current-head approval with
+zero open findings and all 30 applicable CI checks successful. Numbered
+completion publication now preserves exact existing evidence and refuses
+conflicting or malformed evidence. Only explicitly claimed dev slots permit
+replacement. The canonical helper and all 13 copies preserve the standalone
+offline contract. The contained native Windows selection passed 223 tests
+with five platform skips; the executable contracts passed for all 13 plugins.
+
+This remains a shared-core milestone, not completed installer adoption.
+Normal promotion and authorized installed proof remain pending. The first
+complete adopter remains agent-worktrees on both entrypoints. Its publication
+callers currently discard helper failure, so propagation of publication and
+prerequisite failures is the next integration prerequisite, before descriptor
+lifetime, dev/release, and distinct-generation repair integration. Existing
+host/WSL source ownership and release-pipeline recovery ownership are preserved.
+The effort and all full-adopter validation checkboxes remain Active.
+
 ### 2026-10-13 — Canonical candidate and rollback retention merged
 
 #6381 merged into `dev` as

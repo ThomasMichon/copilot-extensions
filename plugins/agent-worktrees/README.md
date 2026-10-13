@@ -31,6 +31,10 @@ without erasing completion evidence. The resolver no longer sees a ready
 marker, and subsequent installer admission still refuses rebuilding that slot.
 Repair of a broken completed slot requires a distinct, health-checked generation,
 not an in-place dependency reinstall into a running CLI/monitor's files.
+Both installer entrypoints require successful completion publication before
+activation. Missing bootstrap Python, an unavailable input fingerprint, or a
+publication refusal stops before selector, last-known-good, monitor, and GC
+changes. A successful health probe alone does not authorize activation.
 
 Agent Worktrees has three shipped pieces:
 
