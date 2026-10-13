@@ -116,7 +116,7 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "c581b21d1f0dc27207854dfa7210a3355d47f5043ac8c459196e5884f90b376e",
+          "sha256": "ffb8a0624abedc810559a34bee124fa43e07240dc9be28be5d8e54093035da39",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -424,7 +424,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-34.json",
-          "sha256": "74ac48c21c522c20b78d54828523cafb424d9da64c1d1f3d9bc540d325b8221f",
+          "sha256": "86ab41b3081402b50c6126b2b9c0d69df96767c78b27580643a4cc89d428cbec",
           "role": "Generation-34 keyed workspace evidence",
           "generation": 34
         },
@@ -1291,6 +1291,14 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
           "source_git_blob": "971b3654f4d8ad49d2ed67c779cf173e080c45e5",
           "capture_method": "Preserved independent fixture assertions and keyed native-owner regressions; exact normalized source bytes verified against the published candidate commit."
+        },
+        {
+          "commit": "d71e32e30579861195468acdddd3ac9e36e8bb0b",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 34,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "2007b3898cd0ac376ae6447f672528c801598b3a",
+          "capture_method": "Keyed endpoint and direct session helper regressions; exact normalized source verified against the owning fix commit."
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",
