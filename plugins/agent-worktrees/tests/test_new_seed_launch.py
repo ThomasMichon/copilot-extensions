@@ -38,6 +38,7 @@ def registered_demo_project(tmp_path):
     }), encoding="utf-8")
 
 
+@pytest.mark.guard
 @pytest.mark.parametrize("explicit", [False, True])
 def test_resolve_parser_preserves_deferred_option_presence(explicit):
     parser = argparse.ArgumentParser()
@@ -49,6 +50,7 @@ def test_resolve_parser_preserves_deferred_option_presence(explicit):
     assert args.defer_new_seed is (True if explicit else None)
 
 
+@pytest.mark.guard
 @pytest.mark.parametrize("explicit", [False, True])
 def test_ordinary_resolve_defaults_to_deferred_new_ownership(monkeypatch, explicit):
     parser = argparse.ArgumentParser()
