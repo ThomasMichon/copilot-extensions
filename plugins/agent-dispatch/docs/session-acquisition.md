@@ -158,7 +158,7 @@ The cross-layer
 distinguishes queue lane, selected execution project, and code target. The
 workspace owner-returned execution identity must be preserved across
 preparation, bridge acquisition, recovery, and cleanup. The
-[workspace continuity effort](../../../efforts/active/workspace-acquisition-continuity/README.md)
+[workspace continuity effort](../../../efforts/2026/10/13%20workspace-acquisition-continuity/README.md)
 tracks correction of independent project derivation and adds stable creation
 identity across attempts. This is not authorization to weaken the historical
 first-conversation or fresh-recovery checks below.

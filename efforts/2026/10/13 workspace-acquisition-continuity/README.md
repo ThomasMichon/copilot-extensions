@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase isolated worktrees and PRs to `dev`
 - **Created:** 2026-10-12
-- **Status:** Active
+- **Status:** Done
 - **Vision:** worktrees `replay-safe-workspace-allocation`, bridge workspace
   allocation/embodiment, dispatch execution continuity and bounded refusal.
 - **Umbrella issue:** #6440
@@ -99,11 +99,11 @@ distinguishes deliberate replacement.
 
 ### Phase 4 - Validate, land, and close ownership
 
-- [ ] Resolve targeted regression failures and update the reality docs to the
+- [x] Resolve targeted regression failures and update the reality docs to the
   implemented contract. Add per-plugin changefiles and steward PRs to merge.
-- [ ] Record release/rollout state accurately; automatic registrars stay
+- [x] Record release/rollout state accurately; automatic registrars stay
   disabled unless separately authorized.
-- [ ] Resolve every Plan/Validation item or explicitly transfer any remaining
+- [x] Resolve every Plan/Validation item or explicitly transfer any remaining
   obligation to a named tracked objective, then archive and release this effort.
 
 ## Validation Plan
@@ -118,7 +118,7 @@ distinguishes deliberate replacement.
   permits a separately authorized allocation.
 - [x] Existing positively sessionless worktree admits its first conversation;
   foreign/live holders, missing legacy proof, and uncertain launch still refuse.
-- [ ] Existing unkeyed creation, CLI/ACP mode, task/lane authority, retirement,
+- [x] Existing unkeyed creation, CLI/ACP mode, task/lane authority, retirement,
   source-control ownership, and installation-cell isolation stay compatible.
 - [x] Native Windows and portable contained tests exercise real CLI/process
   boundaries; clean-room first-touch checks cover new creation persistence.
@@ -433,6 +433,34 @@ takeover, blanket freshness authorization, or parallel session owner is proposed
   configuration immutability. Ground/native/seed selection: 32 passed. Connected
   bridge creation/drain selection: 28 passed/one platform skip. Lint, module-size
   and patch guards remain green.
+
+### 2026-10-13 - Runtime implementation merged
+
+- Runtime PR #6517 merged to `dev` as
+  `04a86e29e33f22fbba0eba0705dbe5414c7aef57`. The final published head had a
+  Copilot Comment with zero open findings and all required CI successful.
+  Its advisory request for final human review does not change this repository's
+  explicit owner-authored clean-Comment merge policy.
+- Required CI exercised the complete bridge and dispatch lanes plus ground
+  collection/guard and Windows launch lanes; compatibility validation is
+  resolved. Reality docs and both per-plugin changefiles landed with the fix.
+- At merge verification, dev CI run `38414877752` was queued and release
+  promotion had not yet proved this snapshot on `main`. A dev merge is not a
+  release. No installed host runtime was changed, and no rollout or automatic
+  registrar restart is authorized.
+- Continued effort closure records the automatic release result separately;
+  it does not reopen runtime implementation or claim production installation.
+- Post-merge dev CI completed with a failure in the unchanged agent-mcp
+  subprocess cutover readiness test. A separate preceding full release gate
+  failed the unchanged mux stale-breadcrumb recovery test, tracked by #6538.
+  The next release run `38415015627` passed both affected full lanes while
+  other full lanes were still running. These observations establish neither
+  a fix nor a completed promotion of this runtime snapshot.
+- Automatic promotion and any release-pipeline repair remain owned by #3336
+  and its existing failure tracking; this runtime implementation effort does
+  not replace that owner or bypass a failed gate. It closes with the tested
+  dev implementation merged and main publication explicitly unconfirmed.
+  Host rollout is outside this completed effort and remains unauthorized.
 
 ### 2026-10-13 - Full holder revalidation before keyed native start
 

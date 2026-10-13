@@ -13,7 +13,6 @@ that pattern to this repository.
 | [Seasoned Dependencies and Transactional Installs](active/seasoned-dependencies-and-transactional-installs/README.md) | Draft; seven-day declarations/resolution and failed-build cleanup | #6476 |
 | [Dispatch Fleet Reliability and Recovery](active/dispatch-fleet-reliability-recovery/README.md) | Draft; maintenance categories, bounded supervision and registry-rooted recovery | #6466, #6467, #6470, #6471; existing #6407/#6421 repair owner retained |
 | [Runtime Operational Contracts](active/review-pipeline-operational-contracts/README.md) | Draft; proposal review before implementation | #6274; existing Windows regression #6266 |
-| [Workspace Acquisition Continuity](active/workspace-acquisition-continuity/README.md) | Draft; one execution workspace and replay-safe creation proposal | #6440 |
 | [Configuration Backstage and Worker Instances](active/configuration-backstage-and-worker-instances/README.md) | Active; proposal reviewed, section and instance contracts | #6379 |
 | [Main-Owned Workflow Control](active/main-owned-workflow-control/README.md) | Active; first wave live, validation consolidation open | #6237; run/check consolidation primary, ownership enabling |
 | [Fleet Control V2](active/fleet-control-v2/README.md) | Active; pinned-key verifier landed, role lifecycle next; GitHub proof deferred | #6236, #6240, #6241, #6443; existing #5789/#6030/#6424 owners retained |
@@ -106,6 +105,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Workspace Acquisition Continuity](2026/10/13%20workspace-acquisition-continuity/README.md) | Done; runtime merged to dev, main publication unconfirmed, no host rollout | #6440; automatic promotion remains #3336 |
 | [agent-bridge Attention Waits](2026/09/03%20agent-bridge-attention-waits/README.md) | Done; archived | #1450 |
 | [Plugin Process Hygiene](2026/09/13%20plugin-process-hygiene/README.md) | Done; archived | #736 |
 | [agent-dispatch Workers Configuration Section](2026/10/12%20agent-dispatch-workers-config-section/README.md) | Done; local controls and native override proof landed | #6282; remote UI/validation transferred to #6283 |

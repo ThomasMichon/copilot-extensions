@@ -7,7 +7,7 @@ the bridge vision's
 and dispatch's
 [execution workspace continuity](../../visions/plugins/agent-dispatch/README.md#execution-workspace-continuity).
 The implementation campaign is
-[workspace-acquisition-continuity](../../efforts/active/workspace-acquisition-continuity/README.md).
+[workspace-acquisition-continuity](../../efforts/2026/10/13%20workspace-acquisition-continuity/README.md).
 
 ## One workspace, distinct owners
 
