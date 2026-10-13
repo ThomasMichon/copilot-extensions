@@ -155,28 +155,35 @@ def test_legacy_service_names_use_canonical_preparation_lease_and_tests(
     assert legacy not in runner.STANDALONE_CONSUMERS
 
 
-def test_native_legacy_service_cli_runs_canonical_tests_without_separate_environments(tmp_path):
+def fixture_python(environment):
+    venv.EnvBuilder(with_pip=False).create(environment)
+    site = Path(sysconfig.get_path(
+        "purelib", vars={"base": str(environment), "platbase": str(environment)},
+    ))
+    dependency_paths = list(dict.fromkeys([
+        str(Path(pytest.__file__).resolve().parent.parent),
+        sysconfig.get_path("purelib"), sysconfig.get_path("platlib"),
+    ]))
+    (site / "test-harness.pth").write_text(
+        "\n".join(dependency_paths) + "\n", encoding="utf-8",
+    )
+    return environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def exercise_native_legacy_service_cli(tmp_path):
     pairs = runner.COMPONENT_ALIASES
     for canonical in pairs.values():
         root = tmp_path / canonical
         tests = root / "tests"
         tests.mkdir(parents=True)
         environment = tmp_path / ".test-venvs" / sys.platform / canonical
-        venv.EnvBuilder(with_pip=False).create(environment)
-        site = Path(sysconfig.get_path(
-            "purelib", vars={"base": str(environment), "platbase": str(environment)},
-        ))
-        dependency_paths = {sysconfig.get_path("purelib"), sysconfig.get_path("platlib")}
-        (site / "test-harness.pth").write_text(
-            "\n".join(sorted(dependency_paths)) + "\n", encoding="utf-8",
-        )
+        fixture_python(environment)
         (tests / "test_contract.py").write_text(
             "import os, sys, pytest\nfrom pathlib import Path\n"
             "def test_contract():\n"
             f"    assert Path.cwd() == Path({str(root)!r})\n"
             f"    assert Path(sys.prefix).resolve() == Path({str(environment.resolve())!r})\n"
-            f"    assert Path(pytest.__file__).resolve().parent.parent in "
-            f"{{Path(path).resolve() for path in {sorted(dependency_paths)!r}}}\n"
+            f"    assert Path(pytest.__file__).resolve() == Path({str(Path(pytest.__file__).resolve())!r})\n"
             "    assert os.environ['COPILOT_EXTENSIONS_TEST_CONTAINED'] == '1'\n"
             "    Path('executed.txt').write_text('canonical')\n",
             encoding="utf-8",
@@ -199,6 +206,25 @@ def test_native_legacy_service_cli_runs_canonical_tests_without_separate_environ
     for legacy, canonical in pairs.items():
         assert (tmp_path / canonical / "executed.txt").read_text() == "canonical"
         assert not (tmp_path / ".test-venvs" / sys.platform / legacy).exists()
+
+
+def test_native_legacy_service_cli_runs_canonical_tests_without_separate_environments(tmp_path):
+    python = fixture_python(tmp_path / "harness")
+    script = (
+        "import importlib.util, sys, sysconfig, pytest\nfrom pathlib import Path\n"
+        f"sys.path.insert(0, {str(SCRIPT.parent)!r})\n"
+        "assert Path(pytest.__file__).resolve().parent.parent != "
+        "Path(sysconfig.get_path('purelib')).resolve()\n"
+        f"spec = importlib.util.spec_from_file_location('fixture_tests', {str(Path(__file__).resolve())!r})\n"
+        "fixture = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(fixture)\n"
+        f"fixture.exercise_native_legacy_service_cli(Path({str(tmp_path)!r}))\n"
+    )
+    result = subprocess.run(
+        [str(python), "-I", "-c", script], capture_output=True, text=True, timeout=30,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_prepare_rejects_managed_launcher_with_host_environment(tmp_path, monkeypatch):
