@@ -269,3 +269,18 @@ requested contract.
   failure (#6266, owned by #6274) and a distinct MCP routing-publication failure.
   Existing owners have been contacted before any overlapping implementation.
   No merge, release, deployment, or recovery-record mutation is claimed.
+
+### 2026-10-13 - MCP cutover CI readiness prerequisite
+
+- Traced #6548 to the integration fixture accepting `active.json` existence.
+  Routing intentionally writes conservative custody history before the new
+  active route, so file existence does not prove control-endpoint publication.
+- The fixture now waits within its original startup deadline for the exact
+  spawned daemon's routing endpoint. Real cutover, predecessor exit, handle
+  flip, and data-plane assertions remain unchanged; production routing and
+  the separate #6533 orphan-watchdog investigation remain untouched.
+- Windows cutover coverage passes 27 tests, with eight native POSIX skips;
+  fatal lint passes. Native Linux CI must exercise the changed real-process
+  test before merge. No installation behavior changes, so a fresh-machine
+  installer scenario is not applicable. No admitted external Linux venue is
+  available; the existing native Linux CI lane is the integration witness.

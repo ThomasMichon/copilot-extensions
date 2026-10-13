@@ -688,7 +688,9 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
 - **agent-containers:** config, lifecycle, the lease broker, and the resolver.
 - **agent-mcp:** config loading, auth injectors, transports, bridge framing, the
   decorator pipeline; the code-mode Node tests skip automatically when `node` is
-  absent.
+  absent. The native POSIX cutover integration waits for the exact spawned
+  daemon's published control endpoint, not just `active.json` existence:
+  conservative custody history may precede publication of the active route.
 - **agent-ssh:** transport rendering, managed OpenSSH fragment source identity,
   tri-state reconciliation, stale/duplicate quarantine, bounded warnings,
   report-only doctor parity, and reachability-vs-hygiene separation.

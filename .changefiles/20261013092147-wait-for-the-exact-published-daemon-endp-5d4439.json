@@ -1,0 +1,9 @@
+{
+  "comment": "Wait for the exact published daemon endpoint before real cutover integration validation",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

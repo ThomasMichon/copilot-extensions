@@ -22,6 +22,7 @@ import sys
 import time
 
 import pytest
+from zdd import routing
 
 from agent_mcp import cutover as _cutover
 from agent_mcp.serve import (
@@ -683,11 +684,14 @@ def test_end_to_end_cutover_retires_old_and_flips_fixed_handle(tmp_path, monkeyp
         while time.monotonic() < deadline and not fixed.exists():
             time.sleep(0.05)
         assert fixed.exists(), "old daemon never bound the fixed handle"
-        # Let it finish publishing its control endpoint too.
-        active_json = tmp_path / "active.json"
-        while time.monotonic() < deadline and not active_json.exists():
+        # Custody history can exist before the active endpoint is published.
+        active = routing.read_active_endpoint(tmp_path)
+        while time.monotonic() < deadline and (active is None or active.pid != old.pid):
             time.sleep(0.05)
-        assert active_json.exists()
+            active = routing.read_active_endpoint(tmp_path)
+        assert active is not None and active.pid == old.pid, (
+            "old daemon never published its control endpoint"
+        )
 
         result = _cutover.run_cutover(health_timeout=15, drain_timeout=15)
         assert result["ok"] is True, result
