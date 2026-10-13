@@ -75,7 +75,7 @@ _START_ANCHOR = (
     "$prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'\n"
     "    $prevHealthPP = $env:PYTHONPATH"
 )
-_END_ANCHOR = "\n    Invoke-VersionedMarkComplete"
+_END_ANCHOR = "\n    if (-not (Invoke-VersionedMarkComplete))"
 
 
 def _extract_health_gate_snippet() -> str:
