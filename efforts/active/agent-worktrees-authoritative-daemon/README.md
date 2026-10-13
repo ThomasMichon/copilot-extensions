@@ -62,6 +62,16 @@
 
 ## Guiding Intent
 
+**Read-side bound (operator clarification, 2026-10-12):** ordinary reporting of
+daemon-cached worktree status is O(state-schema), not O(journal, ledger, list,
+claims graph, or fleet). The authoritative writer pushes claims-derived facts
+and monitoring membership into independently readable current-state
+projections; readers select the current handoff head directly rather than
+walking succession history. The exact request and proposed acceptance live in
+the coupled [per-worktree read contract](../per-worktree-activity-state/schema-bounded-read-contract.md).
+This strengthens the existing authority direction; an in-memory cache of a
+growing record alone does not satisfy it.
+
 Today, worktree-lifetime state (identity, claims, lineage, disposition,
 session bindings) is durably owned by agent-worktrees' YAML tracking
 records, read and written directly by `tracking.py` from dozens of call
@@ -913,6 +923,12 @@ than hypothetical:
       caller-side session/mux enrichment, and Group C reconcile overlays.
       The execution detail is agent-recommended and must clear review before
       implementation; live-daemon errors never authorize direct computation.
+- [ ] **Schema-bounded read-side acceptance:** integrate the coupled
+      [current-state contract](../per-worktree-activity-state/schema-bounded-read-contract.md)
+      into 6d. Push claims-derived state through the existing write authority;
+      no ordinary reader or advisory fallback reconstructs it from ledgers,
+      historical arrays, journals, or a fleet scan. Preserve independent
+      explicit graph/repair APIs and the staged lifecycle producer gate.
 - [x] Update `classify_daemon.py`'s and `worktree_status_compute.py`'s own
       module docstrings to describe the consolidated architecture, so a
       future reader doesn't rediscover this effort's own "two daemons, one
@@ -920,6 +936,10 @@ than hypothetical:
 
 ## Validation Plan
 
+- [ ] Meet the coupled [O(state-schema) validation](../per-worktree-activity-state/schema-bounded-read-contract.md#validation-plan)
+      while ledger, history, graph and fleet cardinalities grow independently.
+      A shared compute implementation, TTL or small returned payload alone is
+      not a pass for this read-side requirement.
 - [ ] Phase 1: this design reviewed (operator + this repo's automated PR
       review) before Phase 2 code lands.
 - [ ] Phase 2: unit tests proving in-memory-first consistency (a write's
@@ -958,6 +978,16 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-10-12 — Materialized schema-bounded read-side goal
+
+The operator explicitly requires constant-schema current-state reads, pushed
+claims-derived state and direct current handoff-head selection. The canonical
+agent-worktrees vision and the coupled per-worktree-activity-state amendment
+record that goal and the proposed scaling proof. Phase 6d retains authority and
+consumer integration; #5664 retains handoff/lifecycle slot migration.
+No implementation, new daemon, live rollout or cleanup is performed by this
+documentation amendment, and neither effort is complete.
 
 ### 2026-10-08 — Phase 6d: scoped the remaining authority/stream cutover
 

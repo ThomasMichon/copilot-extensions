@@ -248,9 +248,12 @@ Overall status is a reduction over independently owned facts: source-control
 state, claims and obligations, asserted disposition, effort focus, relationships,
 and fresh provider observations. No observer writes the aggregate verdict.
 Stale or absent execution observations reduce fidelity without erasing durable
-responsibility. Computing this reduction is always available **on demand** —
-direct, in-process computation is a correct degrade path, never a failure — but
-it is not the steady-state target: whenever a resident accelerator is
+responsibility. Owning producers materialize this reduction into an independently
+readable, schema-bounded current-state projection. An ordinary status read
+consumes that projection; it does not reconstruct the facts from journals,
+ledgers, lists, or a growing worktree record. Explicit refresh and workflow
+repair remain available, but a cold or missing projection is reported honestly
+rather than silently turning the read into reconstruction. Whenever a resident accelerator is
 reachable, a reader is a **thin, ref-counted subscriber** of it rather than an
 independent computer of the same facts. A reader that finds none running boots
 one on demand, waits for it to publish its reachable address, subscribes, reads
@@ -309,13 +312,13 @@ sync of its in-memory state, never independently opened, parsed, or
 hand-written by a CLI command, a script, or a sibling plugin as a side door
 around it.
 
-This is a deliberate reversal, not an extension: today, a CLI invocation that
-finds no daemon reachable degrades to direct file computation as a
-**correct, coequal** path (*Derived status* above). Under this direction, a
-read degrade to direct file access remains available for resilience — the
+Under this direction, a read degrade to direct access to the same bounded
+current-state projection remains available for resilience — the
 daemon being unreachable must never wedge worktree state shut — but it stops
 being coequal: it is a **degraded, advisory-only** path, clearly marked as
-such to whatever surfaced it. A *write* degrades differently, deliberately:
+such to whatever surfaced it. Absence or unreadiness of that projection does
+not authorize journal replay, ledger traversal, or a fleet scan inside the
+read. A *write* degrades differently, deliberately:
 when no daemon is reachable, a mutation runs the **exact same underlying
 write logic the daemon itself would have called** — imported and invoked
 in-process, never a second, forked implementation that could quietly drift
@@ -539,6 +542,31 @@ independently named facts — activity since the last checkpoint,
 upstream-containment, local dirtiness, open claims, and pending handoff —
 never a hand-authored combined enum that grows a new case per situation.
 
+### schema-bounded-status-read
+
+Reading one worktree's daemon-cached status costs **O(state-schema)**: the
+fixed schema and its bounded field sizes, not the cardinality or byte size of
+any journal, ledger, list, handoff sequence, claims graph, or registered fleet.
+The current-state projection is independently addressable; loading a growing
+record and returning only a small part of it does not satisfy this guarantee.
+Cold, warm, restart, and advisory-degrade reads retain the same boundary.
+
+### pushed-claims-state
+
+The owning write authority computes claims relationships and their derived
+status, then pushes the relevant graph state into each affected worktree's
+current-state projection. Ordinary readers never traverse the graph to obtain
+it. Growing graph and ledger views remain separately, explicitly inspectable;
+they are not unbounded collections hidden inside the bounded status schema.
+
+### direct-current-handoff-head
+
+Each worktree exposes its current handoff head through a directly readable
+current-state slot. Ordinary status and monitoring read that head, not the
+sequence that led to it. Historical succession and handoff reconstruction are
+explicit workflow-repair operations, never prerequisites for reporting current
+status.
+
 ### continuously-revalidated-freshness
 
 The costliest fact — whether a worktree's content is contained in its
@@ -627,6 +655,25 @@ current — a periodic background sweep plus operation-triggered
 recomputation — so an ordinary reader benefits from freshness without
 personally requesting it.
 
+### active-claims-closure-monitoring
+
+Recurring monitoring follows authoritative active worktree and anchor roots
+and the transitive claims closure of their unsettled responsibilities. An
+inactive child in that closure remains accountable; an unrelated inactive
+worktree does not acquire recurring monitoring merely because its durable
+record exists or a historical listing once displayed it. Membership is pushed
+with the owning lifecycle and claims state, not rediscovered by every reader.
+Unavailable observations are marked as unknown without silently abandoning
+custody or expanding ordinary monitoring into an unbounded historical sweep.
+
+### history-is-repair-not-status
+
+Journals, ledgers, and historical lists remain available to explicit
+inspection, repair, migration, and archival workflows. They never supply an
+ordinary current-status read, including a cache miss or degraded response.
+Necessary producer-side derivation is distinct from serving the materialized
+answer, and its cost is never hidden in that read.
+
 ### force-refresh-is-opt-in-not-implicit
 
 A caller may force the resident accelerator to recompute a specific fact
@@ -687,11 +734,12 @@ speed.
 
 ### direct-read-is-a-degrade-not-a-peer
 
-Direct file/computation access remains available for resilience — the
+Direct access to bounded current-state projections remains available for resilience — the
 daemon being unreachable must never wedge worktree state shut — but it is
 strictly a **degraded, read-only** path, not a coequal one: it never writes,
 and whatever surfaced it marks the answer as degraded rather than presenting
-it with the same confidence as a daemon-mediated read.
+it with the same confidence as a daemon-mediated read. A missing projection
+returns explicit unavailable or unready state, not a hidden replay or scan.
 
 ### contribution-posture-degrades-honestly
 
