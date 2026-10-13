@@ -469,7 +469,7 @@ jobs:
       - name: Promotion exact-PR merge wait regression tests
         run: python -m pytest -q tools/test_promotion_merge_wait.py
       - name: Trusted PR policy contract tests
-        run: python -m pytest -q tools/test_trusted_pr_policy.py tools/test_post_ci_policy.py
+        run: python -m pytest -q tools/test_trusted_pr_policy.py tools/test_post_ci_policy.py tools/test_identifier_guard_workflow.py
       - name: Payload invocation generated files
         run: python libs/payload-invocation/generate.py --all --check
       - name: Payload invocation foundation tests

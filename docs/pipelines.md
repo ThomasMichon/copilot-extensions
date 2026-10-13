@@ -593,7 +593,7 @@ targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
 | `ci.yml` | `pull_request`, `push` (`main`/`dev`), `workflow_dispatch` | The fast smoke-CI suite (guards, lint, per-plugin tests) that gates every PR. Contains `main-gate` (rejects a non-promotion PR against `main`) and the `PR gate` fixed-name required-check aggregate, including native Windows archive-source/chronicler smoke when `agent-logger` is selected. |
 | `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` (including body/label edits), `push` → `main`, `workflow_dispatch` | Independent trusted jobs host the existing required `workflow-lockdown-guard` check, the separate `source-attribution` metadata check, and the Maintainer-only review fallback. Default-branch push/manual runs refresh source-attribution checks for already-open `dev` PRs; job-scoped permissions/concurrency preserve the review boundary. No PR code executes. |
 | `source-attribution-departures.yml` | `pull_request_target` (`synchronize`, `closed`, `edited`) | Trusted metadata-only refresh of remaining dev PRs on a departed shared head, including retargets away from dev. Publishes no required-context skipped jobs and never executes PR content. |
-| `base-branch-reminder.yml` | `pull_request_target` → `main` | Hosts the trusted `main source gate` and the existing one-time retarget reminder. Gate permissions are contents-read only; any checkout is pinned trusted main, and owner PR commits are fetched only as Git data. No PR code executes. Legacy CI admission remains until the replacement producer is released and proven. |
+| `base-branch-reminder.yml` | `pull_request_target` → `main` | Hosts the trusted `main source gate`, the existing one-time retarget reminder, and staged identifier reporting for owner-authored PRs that pass admission. Gate permissions are contents-read only; any checkout is pinned trusted main, and PR commits are fetched only as Git data. No PR code executes. Legacy CI admission/scanner callers remain until the replacement producers are released and proven. |
 | `trusted-ci.yml` | `pull_request_target`, paths-scoped to `.github/workflows/trusted-ci.yml`/`libs/**`/`agent-bridge`/`tools/**` | Opt-in (`vars.TRUSTED_SELF_HOSTED_CI`), collaborator-gated self-hosted CI lane for paths too sensitive/expensive for the standard runner pool; includes its own file so a change to the gate itself also re-runs it. |
 
 **Reactive, post-CI (triggered by `ci.yml` completing):**
@@ -803,9 +803,18 @@ removing legacy CI before a covering promotion would strand that very promotion
 behind a missing required context. Only after live producer proof may main PRs
 stop allocating CI. Full main-push validation, contributor CI, fork approval and
 deep/platform lanes are not removed by this staging change.
-Cutover must also retain the trusted identifier scan of generated main-PR
-content: that scan currently follows the CI completion and is not replaced by
-main-push CI. Its caller must migrate and be proven before disabling main-PR CI.
+The existing post-CI caller and an admitted-owner-only job in this host share
+`.github/actions/identifier-leak-guard/`: the same trusted scanner reads changed,
+non-removed PR blobs without checking out PR code, and the same reporter publishes
+the `identifier leak guard` context with full match details. It fences stale heads
+before scanning and again before reporting. Only a working but unconfigured guard
+is neutral; infrastructure failures fail, including checkout/action-loading
+failures reported by thin caller-side steps independent of local files.
+Non-owner and rejected main PRs do not enter this secret-backed scan; the existing
+fork approval boundary is not widened. The legacy post-CI caller remains during
+staging. Prove the default-main admission and scanner producers on a covering
+promotion before removing main-PR CI; full main-push CI is not a substitute for
+the generated-content scan.
 
 ### If you opened a PR against `main` by mistake
 
@@ -821,8 +830,8 @@ to `dev`, for any PR against `main` not authored by the repo owner. It
 never checks out or executes the PR's own code and never runs tests or requests
 review. The independent contents-read gate in the same trusted invocation can
 report the existing admission decision without approving a fork's code execution.
-On `synchronize`, only admission runs; the reminder retains its original event
-scope and one-time-comment behavior.
+On `synchronize`, admission and the admitted-owner scan run; the reminder retains
+its original event scope and one-time-comment behavior.
 
 It recognizes `main-gate`'s own four legitimate automated-PR shapes (the
 release pipeline's own PR, a workflow-only bootstrap PR, and `rollback_release.py`'s

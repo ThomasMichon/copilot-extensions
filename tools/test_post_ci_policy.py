@@ -40,11 +40,13 @@ def test_one_trusted_followup_keeps_jobs_and_credentials_independent():
     }
     assert "github.event.workflow_run.event == 'pull_request'" in scan["if"]
     assert "github.event.workflow_run.conclusion != 'cancelled'" in scan["if"]
-    assert scan["steps"][0]["with"] == {"fetch-depth": 1}
+    assert scan["steps"][0]["with"] == {
+        "ref": "${{ github.workflow_sha }}", "fetch-depth": 1,
+    }
     assert "git checkout" not in "\n".join(step.get("run", "") for step in scan["steps"])
     publish = scan["steps"][-1]
-    assert publish["if"] == "always()"
-    assert publish["env"]["CHECK_NAME"] == "identifier leak guard"
+    assert publish["if"].startswith("always() &&")
+    assert 'name: "identifier leak guard"' in publish["with"]["script"]
     assert "github.rest.checks.create" in publish["with"]["script"]
     assert "repository_dispatch" not in "\n".join(step.get("run", "") for step in scan["steps"])
 

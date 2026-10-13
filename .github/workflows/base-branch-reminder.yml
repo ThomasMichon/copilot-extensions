@@ -33,7 +33,9 @@
 # main source gate from trusted default-branch code. ci.yml temporarily keeps
 # its legacy producer until this copy is released and proven; only then can
 # main PRs stop allocating the redundant CI invocation. Main-push validation
-# and contributor CI remain unchanged.
+# and contributor CI remain unchanged. The identifier scan below is also staged:
+# only owner-authored, admitted main PRs enter it; uninvited PRs gain no secret
+# denylist oracle outside their existing CI approval boundary.
 name: Base branch reminder
 
 on:
@@ -196,6 +198,63 @@ jobs:
           fi
           echo "Workflow-file-only bootstrap PR by the repo owner -- OK. Files:"
           echo "$changed"
+
+  scan-and-report:
+    name: scan + report
+    needs: main-gate
+    if: >-
+      needs.main-gate.result == 'success' &&
+      github.event.pull_request.user.login == github.repository_owner
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+      checks: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - id: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        continue-on-error: true
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - id: guard
+        if: steps.checkout.outcome == 'success'
+        uses: ./.github/actions/identifier-leak-guard
+        continue-on-error: true
+        with:
+          pr-number: ${{ github.event.pull_request.number }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          facility-identifiers: ${{ secrets.FORBIDDEN_IDS_FACILITY }}
+          work-identifiers: ${{ secrets.FORBIDDEN_IDS_WORK }}
+      # Must survive failure to load any checked-out local action.
+      - name: Report unavailable trusted scanner
+        if: always() && (steps.checkout.outcome != 'success' || steps.guard.outcome != 'success')
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
+          GUARD_OUTCOME: ${{ steps.guard.outcome }}
+        with:
+          script: |
+            const {data: pr} = await github.rest.pulls.get({
+              ...context.repo, pull_number: Number(process.env.PR_NUMBER),
+            });
+            if (pr.head.sha !== process.env.PR_HEAD_SHA) {
+              core.notice("PR head moved on; skipping stale infrastructure reporting.");
+              return;
+            }
+            await github.rest.checks.create({
+              ...context.repo, name: "identifier leak guard",
+              head_sha: process.env.PR_HEAD_SHA, status: "completed", conclusion: "failure",
+              output: {
+                title: "Identifier leak guard unavailable",
+                summary: "Trusted checkout or scanner action failed; no scan result is available.",
+                text: `Checkout: ${process.env.CHECKOUT_OUTCOME}; action: ${process.env.GUARD_OUTCOME}.`,
+              },
+            });
 
   remind:
     name: remind-to-target-dev
