@@ -257,6 +257,40 @@ def test_module_installer_timeout_is_timeout_whatever_the_slot(
      "used by another process. (os error 32)", (ut.BLOCKED_BY_LOCK, ut.SHARING_VIOLATION)),
     ("installer exited 75", (ut.BLOCKED_BY_LOCK, "installer_exit_75")),
     ("timed out", (ut.TIMEOUT, "timeout")),
+    ("plugin update failed: [Errno 5] Input/output error", (ut.COMMAND_FAILED, ut.IO_ERROR)),
 ])
 def test_status_classification_needs_contention_evidence(status, expected):
     assert update_events.classify_status(status) == expected
+
+
+def _phase_outcomes(home: Path) -> dict[str, str]:
+    return {p["phase"]: p["outcome"] for p in _status(home)["run"]["phases"]}
+
+
+def test_missing_engine_installer_is_configuration_exit_3(wired, tmp_path, _update_home):
+    (tmp_path / "agent-worktrees" / "scripts" / "install.sh").unlink()
+    assert m.cmd_update(_args()) == 3
+    assert _phase_outcomes(_update_home)["engine_runtime"] == ut.CONFIGURATION_LIMITATION
+
+
+def test_invalid_engine_deadline_is_configuration_exit_3(wired, monkeypatch, _update_home):
+    monkeypatch.setenv("AGENT_WORKTREES_INSTALL_DEADLINE_SEC", "not-a-number")
+    assert m.cmd_update(_args()) == 3
+    assert _phase_outcomes(_update_home)["engine_runtime"] == ut.CONFIGURATION_LIMITATION
+
+
+def test_missing_installed_payload_fails_its_phase(wired, monkeypatch, _update_home):
+    monkeypatch.setattr(m, "_find_installed_plugin_dir", lambda: None)
+    assert m.cmd_update(_args()) == 1
+    assert _phase_outcomes(_update_home)["payload_refresh"] == ut.COMMAND_FAILED
+
+
+def test_unreadable_modules_manifest_fails_module_update(wired, monkeypatch, tmp_path,
+                                                         _update_home):
+    (tmp_path / "agent-worktrees" / "modules.json").write_text("{not json")
+    monkeypatch.setattr(m, "_update_modules", runtime._update_modules)
+    assert m.cmd_update(_args()) == 1
+    phases = _phase_outcomes(_update_home)
+    assert phases["module_update"] == ut.COMMAND_FAILED
+    assert phases["engine_runtime"] == ut.VERIFIED_CURRENT
+    assert _status(_update_home)["last_failure"]["summary"].startswith("modules.json")

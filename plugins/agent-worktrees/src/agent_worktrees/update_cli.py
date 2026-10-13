@@ -298,6 +298,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
     if not plugin_dir:
         output.err("Cannot find installed plugin directory")
         output.err("Expected at ~/.copilot/installed-plugins/copilot-extensions/agent-worktrees/")
+        _events.record("payload_refresh", plugin_ref, "installed payload missing")
         return 1
 
     output.info(f"Plugin source: {plugin_dir}")
@@ -372,12 +373,14 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
 
         if not installer.exists():
             output.err(f"Installer not found: {installer}")
+            _events.record("engine_runtime", plugin_ref, "installer not found")
             return 1
 
         try:
             installer_timeout = max(600, _installer_timeout("agent-worktrees", aw_runtime_env, plugin_dir))
         except (OSError, ValueError) as error:
             output.err(str(error))
+            _events.record("engine_runtime", plugin_ref, f"invalid installer deadline: {error}")
             return 1
         rc = _run_engine_installer(argv, plugin_dir, installer_timeout, aw_runtime_env)
         if rc != 0:

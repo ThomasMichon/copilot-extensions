@@ -112,7 +112,8 @@ def test_update_engine_absent_hints_setup(monkeypatch):
     buf = io.StringIO()
     with redirect_stdout(buf):
         rc = wm._cmd_update([])
-    assert rc == 1
+    # An absent engine is a configuration problem (exit 3 in the update table).
+    assert rc == 3
     assert "worktree-manager setup" in buf.getvalue()
 
 
@@ -821,3 +822,23 @@ def test_safe_extract_never_uses_the_filter_kwarg(tmp_path):
             self_install._safe_extract(tf, dest)
 
     assert (dest / "stuff" / "a.txt").read_text() == "hello\n"
+
+
+@pytest.mark.parametrize(("install_hint", "expected", "outcome"), [
+    (True, 3, "configuration_limitation"),
+    (False, 1, "command_failed"),
+])
+def test_engine_error_is_recorded(monkeypatch, update_home, install_hint, expected, outcome):
+    from worktree_manager.self_install import SelfUpdateResult
+    monkeypatch.setattr(self_install, "self_update",
+                        lambda **kw: SelfUpdateResult(action="already-current", version="1"))
+
+    def boom(project, args, **kw):
+        raise ec.EngineError("engine unavailable", install_hint=install_hint)
+
+    monkeypatch.setattr(ec, "run_engine_passthrough", boom)
+    with redirect_stdout(io.StringIO()):
+        assert wm._cmd_update([]) == expected
+    status = _telemetry_status(update_home)
+    assert status["run"]["outcome"] == outcome
+    assert status["last_failure"]["summary"].startswith(f"engine: {outcome}")

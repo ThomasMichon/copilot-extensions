@@ -458,3 +458,27 @@ def test_written_lines_never_exceed_the_limit(telemetry_env):
     data = run.events_path.read_bytes()
     assert b"\r" not in data, "events are written byte-exact (no newline translation)"
     assert all(len(line) <= run_mod.MAX_LINE for line in data.splitlines(keepends=True))
+
+
+@pytest.mark.parametrize(("outcome", "target", "expected"), [
+    (ut.COMMAND_FAILED, None, ut.COMMAND_FAILED),
+    (ut.VERIFIED_CURRENT, None, ut.VERIFIED_CURRENT),
+    (ut.VERIFIED_CURRENT, ut.TIMEOUT, ut.TIMEOUT),
+    (None, ut.BLOCKED_BY_LOCK, ut.BLOCKED_BY_LOCK),
+])
+def test_finish_outcome_reaches_the_open_step(telemetry_env, outcome, target, expected):
+    run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
+    run.enter("prune")
+    if target:
+        run.target("prune", "a@m", target)
+    run.finish(outcome)
+    phases = _status(telemetry_env)["run"]["phases"]
+    assert [(p["phase"], p["outcome"]) for p in phases] == [("prune", expected)]
+
+
+def test_explicit_skipped_phase_stays_skipped(telemetry_env):
+    run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
+    with run.phase("verify") as result:
+        result.outcome = ut.SKIPPED
+    run.finish()
+    assert _status(telemetry_env)["run"]["phases"][0]["outcome"] == ut.SKIPPED

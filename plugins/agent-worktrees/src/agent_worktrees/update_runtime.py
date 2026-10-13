@@ -774,6 +774,7 @@ def _update_modules(
         data = json.loads(manifest.read_text())
     except Exception as exc:
         output.warn(f"Failed to parse modules.json: {exc}")
+        update_events.record("module_update", "modules.json", f"unreadable: {exc}")
         return False
 
     modules = data.get("modules", [])

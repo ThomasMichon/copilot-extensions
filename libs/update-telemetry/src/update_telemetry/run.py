@@ -319,7 +319,8 @@ class Run:
     def _end(self, phase: str, component: str, started: float, *, outcome: str | None,
              **fields) -> None:
         seen = self._open.pop(phase, []) if component == RUN_COMPONENT else []
-        self.emit(phase, component, "end", outcome=outcome or oc.worst(seen),
+        final = outcome if outcome == oc.SKIPPED and not seen else oc.worst([outcome, *seen])
+        self.emit(phase, component, "end", outcome=final,
                   duration_ms=int((time.monotonic() - started) * 1000), **fields)
 
     @contextmanager
@@ -346,8 +347,7 @@ class Run:
         if self._step is not None:
             phase, started = self._step
             self._step = None
-            self._end(phase, RUN_COMPONENT, started,
-                      outcome=outcome if error is not None else None, error=error)
+            self._end(phase, RUN_COMPONENT, started, outcome=outcome, error=error)
 
     def target(self, phase: str, component: str, outcome: str, *, required: bool = True,
                changed: bool | None = None, detail: str | None = None,

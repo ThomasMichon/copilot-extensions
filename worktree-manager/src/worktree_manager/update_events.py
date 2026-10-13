@@ -43,11 +43,25 @@ class UpdateRun:
         self._run.target("manager_self_update", "manager", outcome, required=required,
                          changed=action == "updated", detail=detail, error=error)
 
+    def record_engine_error(self, message: str, *, missing: bool) -> None:
+        """The engine could not be run at all (absent, or failed to start)."""
+        if self._run is None:
+            return
+        outcome = _ut.CONFIGURATION_LIMITATION if missing else _ut.COMMAND_FAILED
+        code = "engine_missing" if missing else "engine_error"
+        self._run.target("runtime_reconcile", "engine", outcome, detail=message,
+                         error={"code": code, "message": message})
+
     def finish(self, rc: int) -> int:
-        """Close the run; ``rc`` is mapped through the shared exit-code table."""
+        """Close the run; ``rc`` is mapped through the shared exit-code table.
+
+        A generic failure (1) defers to a more specific recorded outcome.
+        """
         if self._run is None:
             return rc
         outcome, code = _ut.outcome_for_exit_code(rc)
+        if rc == 1 and _ut.is_failure(self._run.outcome):
+            outcome = None
         return self._run.finish(outcome, error={"code": code} if code else None)
 
     def abort(self, exc: BaseException) -> None:
