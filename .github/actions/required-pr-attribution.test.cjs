@@ -358,15 +358,24 @@ test("normal refreshes list all open PRs once and query only associated heads th
   const paginate = github.paginate;
   let fullLists = 0;
   let associations = 0;
+  let requests = 0;
+  for (const endpoints of Object.values(github.rest)) {
+    for (const [name, invoke] of Object.entries(endpoints)) {
+      endpoints[name] = async (...params) => { requests++; return invoke(...params); };
+    }
+  }
   github.paginate = async (method, options) => {
     if (method === github.rest.pulls.list) { fullLists++; assert.equal(options.commit_sha, undefined); }
     else { associations++; assert.ok(options.commit_sha); }
-    return paginate(method, options);
+    const result = await paginate(method, options);
+    requests += Math.max(1, Math.ceil(result.length / options.per_page));
+    return result;
   };
   await gate.backfill({ github, context, core: core(), pause: async () => {} });
   assert.equal(fullLists, 1);
   assert.equal(created.length, values.length);
-  assert.equal(associations, values.length * 4);
+  assert.equal(associations, values.length * 3);
+  assert.equal(requests, 902, "all read/write/page requests fit the standard 1000-request Actions quota");
   assert.ok(created.every((check) => check.conclusion === "success"));
 });
 
@@ -404,7 +413,9 @@ test("associated ancestor commits, non-dev and closed PRs do not create head col
 test("existing PR heads receive distinct current metadata results", async () => {
   const created = [];
   const github = {
-    paginate: async () => [1, 2].map((number) => ({ ...pr(marker), number, head: { sha: `head-${number}` } })),
+    paginate: async () => [1, 2].map((number) => ({
+      ...pr(number === 1 ? marker : ""), number, head: { sha: `head-${number}` },
+    })),
     rest: {
       repos: { listPullRequestsAssociatedWithCommit() {} },
       pulls: {
@@ -512,7 +523,10 @@ test("unverifiable publication is failed closed without exposing metadata", asyn
   let published = false;
   const created = [];
   const github = {
-    paginate: async () => [{ ...pr(marker), number: 1 }],
+    paginate: async () => {
+      if (published) throw new Error("metadata unavailable");
+      return [{ ...pr(marker), number: 1 }];
+    },
     rest: {
       repos: { listPullRequestsAssociatedWithCommit() {} },
       pulls: { list() {}, get: async () => {
@@ -539,7 +553,14 @@ test("unverifiable or unstable PRs do not starve later current heads", async () 
     let reads = 0;
     const output = core();
     const github = {
-      paginate: async () => [1, 2].map((number) => ({ ...pr(marker), number, head: { sha: `head-${number}` } })),
+      paginate: async (_method, options) => {
+        const number = options.commit_sha === "head-1" ? 1 : 2;
+        if (options.commit_sha && number === 1 && unavailable) throw new Error("private diagnostic");
+        return [1, 2].map((value) => ({
+          ...pr(marker), number: value, head: { sha: `head-${value}` },
+          ...(options.commit_sha && value === 1 ? { body: marker + "\n" + (++reads) } : {}),
+        }));
+      },
       rest: {
         repos: { listPullRequestsAssociatedWithCommit() {} },
         pulls: { list() {}, get: async ({ pull_number }) => {

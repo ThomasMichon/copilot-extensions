@@ -307,6 +307,11 @@ Freshness rereads normally query only PRs associated with that head commit,
 not the entire repository's open-PR list. If this endpoint omits the current
 PR (as it can for a commit already on the default branch), a full current
 listing is required rather than assuming a unique head.
+The association response supplies current PR metadata too; normal refreshes
+do not add a separate per-PR GET to each freshness read. New checks remain
+pending during pacing and are completed only after a fresh matching snapshot.
+The 150-distinct-head contract counts every read, write and pagination request
+(902 total), below the standard 1,000-request Actions quota for that pass.
 The trusted checkout's integrity-locked CommonMark and HTML parsers identify
 actual HTML comments, excluding fenced/indented code and quoted examples even
 inside continuation list items. HTML containers cannot conceal additional

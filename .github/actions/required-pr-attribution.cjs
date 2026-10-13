@@ -167,22 +167,26 @@ async function currentPR(github, context, number) {
   return { ...(await github.rest.pulls.get({ ...context.repo, pull_number: number })).data, number };
 }
 
-async function headPolicy(github, context, number) {
-  const pr = await currentPR(github, context, number);
+async function headPolicy(github, context, number, expectedHead) {
+  let pr = expectedHead ? null : await currentPR(github, context, number);
+  const head = expectedHead || pr.head.sha;
   let listed = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
-    ...context.repo, commit_sha: pr.head.sha, per_page: 100,
+    ...context.repo, commit_sha: head, per_page: 100,
   });
-  const peersForHead = (items) => items.filter((item) =>
-    item.state === "open" && item.base.ref === "dev" && item.head.sha === pr.head.sha,
-  ).map((item) => item.number).sort((a, b) => a - b);
-  let peers = peersForHead(listed);
-  if (pr.state === "open" && pr.base.ref === "dev" && !peers.includes(number)) {
+  const associated = listed.find((item) => item.number === number &&
+    item.state === "open" && item.base.ref === "dev" && item.head.sha === head);
+  if (associated) pr = associated;
+  else {
     // Commits already on the default branch can omit open PRs from the association API.
     listed = await github.paginate(github.rest.pulls.list, {
       ...context.repo, state: "open", base: "dev", per_page: 100,
     });
-    peers = peersForHead(listed);
+    pr = listed.find((item) => item.number === number) || await currentPR(github, context, number);
   }
+  const peersForHead = (items) => items.filter((item) =>
+    item.state === "open" && item.base.ref === "dev" && item.head.sha === pr.head.sha,
+  ).map((item) => item.number).sort((a, b) => a - b);
+  const peers = peersForHead(listed);
   if (pr.state === "open" && pr.base.ref === "dev" && !peers.includes(number)) {
     throw new Error("Current dev pull request membership could not be verified.");
   }
@@ -240,8 +244,8 @@ async function backfill({ github, context, core, pause = (ms) => new Promise((re
 async function refreshPR(github, context, listed, pause) {
     let stable = false;
     for (let attempt = 0; attempt < 3; attempt++) {
-      let observed = await headPolicy(github, context, listed.number);
-      let { pr } = observed;
+      const observed = await headPolicy(github, context, listed.number, listed.head.sha);
+      const { pr } = observed;
       if (pr.state !== "open" || pr.base.ref !== "dev") { stable = true; break; }
       const { data } = await github.rest.checks.listForRef({
         ...context.repo, ref: pr.head.sha, check_name: CONTEXT, per_page: 100,
@@ -250,13 +254,10 @@ async function refreshPR(github, context, listed, pause) {
         .sort((a, b) => b.id - a.id)[0];
       if (latest?.external_id === observed.snapshot && latest.status === "completed" &&
           latest.conclusion === (observed.error ? "failure" : "success")) {
-        if ((await headPolicy(github, context, listed.number)).snapshot === observed.snapshot) { stable = true; break; }
+        if ((await headPolicy(github, context, listed.number, pr.head.sha)).snapshot === observed.snapshot) { stable = true; break; }
         continue;
       }
       await pause(1000);
-      observed = await headPolicy(github, context, listed.number);
-      pr = observed.pr;
-      if (pr.state !== "open" || pr.base.ref !== "dev") { stable = true; break; }
       const externalId = observed.snapshot;
       const error = observed.error;
       const created = await github.rest.checks.create({
@@ -270,7 +271,7 @@ async function refreshPR(github, context, listed, pause) {
         },
       });
       try {
-        if ((await headPolicy(github, context, listed.number)).snapshot === externalId) {
+        if ((await headPolicy(github, context, listed.number, pr.head.sha)).snapshot === externalId) {
           await github.rest.checks.update({
             ...context.repo, check_run_id: created.data.id, status: "completed",
             conclusion: error ? "failure" : "success",
@@ -279,7 +280,7 @@ async function refreshPR(github, context, listed, pause) {
               summary: error ? `${error}\n\n${REPAIR}` : "Required source metadata check completed.",
             },
           });
-          stable = (await headPolicy(github, context, listed.number)).snapshot === externalId;
+          stable = (await headPolicy(github, context, listed.number, pr.head.sha)).snapshot === externalId;
         }
       } finally {
         if (!stable) {
