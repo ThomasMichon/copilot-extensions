@@ -6,7 +6,7 @@ agent-worktrees <subcommand> [options]
 
 ## Disposable producer ownership
 
-`resource-producer <capabilities|reserve|bind|inspect|close> --json
+`resource-producer <capabilities|reserve|begin|complete|bind|inspect|close> --json
 [--owner-ref REF]` exposes version-1 provider-neutral disposable ownership.
 Except for capabilities, operations read exactly one JSON object from stdin.
 See [the exact ABI and callback contract](resource-producer.md). These claims

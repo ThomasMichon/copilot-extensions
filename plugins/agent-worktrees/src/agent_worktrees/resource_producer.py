@@ -49,7 +49,11 @@ def canonical_json(value: object) -> str:
 def claim_ref(metadata: dict) -> str:
     """Encode an opaque callback envelope; terminal receipts retain its subject."""
     envelope = {key: metadata[key] for key in ("version", "token", "creator", "recovery")}
-    envelope["phase"] = "bound" if "identity" in metadata else "pending"
+    envelope["phase"] = "allocating" if metadata["phase"] == "allocating" else (
+        "bound" if "identity" in metadata else "pending"
+    )
+    if "allocation_epoch" in metadata:
+        envelope["allocation_epoch"] = metadata["allocation_epoch"]
     if "identity" in metadata:
         envelope["identity"] = metadata["identity"]
     encoded = base64.urlsafe_b64encode(canonical_json(envelope).encode("ascii")).decode("ascii").rstrip("=")
@@ -82,12 +86,14 @@ def decode_ref(ref: str) -> dict:
 
 def valid_metadata(value: object) -> bool:
     """Unknown/malformed metadata is never interpreted as safely discharged."""
-    from . import claim_providers, tracking
+    from . import claim_providers, producer_allocation, tracking
 
     if not isinstance(value, dict):
         return False
     required = {"version", "lifetime", "token", "namespace", "phase", "creator", "recovery"}
-    if not required.issubset(value) or set(value) - (required | {"identity", "closeout", "transfer"}):
+    if not required.issubset(value) or set(value) - (
+        required | {"identity", "closeout", "transfer", "allocation_epoch", "allocation_completion"}
+    ):
         return False
     if type(value["version"]) is not int or value["version"] != VERSION or value["lifetime"] != "disposable-owned":
         return False
@@ -103,17 +109,23 @@ def valid_metadata(value: object) -> bool:
     if parsed is None or not parsed.is_qualified or parsed.session or parsed.canonical() != creator:
         return False
     phase = value["phase"]
-    if phase not in ("pending", "bound", "closed", "transferred") or not isinstance(value["recovery"], dict):
+    if phase not in ("pending", "allocating", "bound", "closed", "transferred") or not isinstance(value["recovery"], dict):
         return False
     if phase in ("bound", "transferred") and not isinstance(value.get("identity"), dict):
         return False
-    if phase == "pending" and "identity" in value:
+    if phase in {"pending", "allocating"} and "identity" in value:
+        return False
+    if ("allocation_epoch" in value and not producer_allocation.valid_epoch(value["allocation_epoch"])) or (
+        phase == "allocating" and "allocation_epoch" not in value
+    ):
         return False
     if "identity" in value and not isinstance(value["identity"], dict):
         return False
     try:
         canonical_json(value)
         ref = claim_ref(value)
+        if not producer_allocation.valid_completion(value):
+            return False
     except (ValueError, TypeError, UnicodeError, RecursionError):
         return False
     if phase == "closed":
@@ -173,10 +185,17 @@ def preserve_claims(record, current, path: Path) -> None:
     """Fence generic full-record writers, including stale saves and repairs."""
     for claims in (record.resources, current.resources if current is not None else []):
         seen: dict[str, bool] = {}
+        tokens: set[str] = set()
         for claim in claims:
             if claim.ref in seen and (seen[claim.ref] or claim.has_producer):
                 raise ValueError("ambiguous duplicate producer reference")
             seen[claim.ref] = seen.get(claim.ref, False) or claim.has_producer
+            if claim.has_producer and isinstance(claim.producer, dict):
+                token = claim.producer.get("token")
+                if isinstance(token, str):
+                    if token in tokens:
+                        raise ValueError("ambiguous duplicate producer token")
+                    tokens.add(token)
     if str(path.resolve()) in _write_paths.get():
         return
     authoritative = {

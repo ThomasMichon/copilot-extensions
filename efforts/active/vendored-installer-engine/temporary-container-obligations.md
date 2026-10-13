@@ -1,6 +1,7 @@
 # Temporary Docker resource obligations
 
-**Status:** Plan reviewed in PR #6116; implementation and validation pending.
+**Status:** Original plan reviewed in PR #6116; review-directed allocation-fence
+amendment awaits the normal review gate; Docker integration and validation pending.
 **Coordination:** #6109.
 **Canonical effort:** [Vendored Installer Engine](README.md).
 
@@ -126,6 +127,15 @@ to bypass its invariants or the live cleanup confirmation gate.
 
 ## Transaction and failure requirements
 
+- **Review-directed amendment, agent-recommended and operator accepted
+  2026-10-12:** the generic allocation-in-progress transition must precede
+  external creation. The allocator completes or binds only its attempt-specific
+  fence; the retained monotonic epoch prevents stale absence through
+  pending/allocating/pending ABA. Unknown or interrupted allocation stays owned.
+  The exact ABI and authoritative quiescence-recovery contract are maintained
+  in [the producer reference](../../../plugins/agent-worktrees/docs/resource-producer.md).
+  This corrects the reviewed preallocation invariant; it does not authorize
+  live allocation, cleanup, provider bootstrap or a second ledger.
 - Reserve under the same ownership lock as finalize before the first Docker
   allocation. Persist endpoint/producer recovery evidence in the existing
   claim. Failure to reserve means no Docker allocation.
@@ -153,6 +163,11 @@ to bypass its invariants or the live cleanup confirmation gate.
 
 ## Validation plan
 
+- [ ] Verify begin/close serialization, in-progress refusal, generation-fenced
+      completion/binding, stale absence through ABA, lost-fence quiescence
+      recovery and interruption retention before enabling integrated producers.
+- [ ] Verify accepted retry after source reaping, recipient/incoming token
+      uniqueness and preservation of already closed/transferred recipients.
 - [ ] Prove the real finalize entrypoint refuses an initially empty owner after
       reservation but before allocation; prove its final locked check rejects a
       concurrent producer or the producer refuses an already-finalizing owner.
@@ -193,3 +208,19 @@ Plan publication and review belong to the parent integrator. Implementation,
 live cleanup authority and native proofs remain pending. After implementation,
 update worktree obligation docs, clean-room architecture/operator docs and
 the test-flow docs to describe only the guarantees actually delivered.
+
+## Allocation-fence clarification
+
+The agent recommended mandatory allocation begin/completion fencing after review
+identified that absence could be observed before a creator allocated and bound
+its resource. The operator asked, verbatim:
+
+> What's the subject here? Close/handoff of what?
+
+The clarification was resource cleanup responsibility in the worktree ledger:
+close settles verified removal/no allocation; handoff transfers that
+responsibility to an accepting worktree. Neither operation closes a Copilot
+session, a conversation or a service. No physical cleanup was requested.
+The operator then approved the proposed generic fence amendment, verbatim:
+
+> Sounds good. Proceed

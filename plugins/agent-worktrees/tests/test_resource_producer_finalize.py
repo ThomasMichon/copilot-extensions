@@ -35,12 +35,16 @@ def _reserve(path, config):
 
 @pytest.mark.parametrize("mode", ["off", "warn", "block"])
 @pytest.mark.parametrize("abandon", [False, True])
-def test_real_finalize_blocks_initially_empty_owner_after_reserve(final_owner, monkeypatch, mode, abandon):
+@pytest.mark.parametrize("allocation_started", [False, True])
+def test_real_finalize_blocks_initially_empty_owner_after_reserve(final_owner, monkeypatch, mode, abandon, allocation_started):
     _, path, config = final_owner
     assert tracking.load_record(path).resources == []
     monkeypatch.setenv("AGENT_WORKTREES_OBLIGATION_GATE", mode)
     result = _reserve(path, config)
     assert result["phase"] == "pending"
+    if allocation_started:
+        armed = call(path, "begin", {"token": result["token"]}, ref=result["owner"])
+        assert armed["phase"] == "allocating"
     assert finalize.validate_and_finalize("owner", config, abandon=abandon, handoff_to="recipient" if abandon else None) is False
     current = tracking.load_record(path)
     assert current.status == "active" and current.resources[0].is_unsettled

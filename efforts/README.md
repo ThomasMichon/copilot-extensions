@@ -86,7 +86,7 @@ that pattern to this repository.
 | [Windows Launch Hardening](active/windows-launch-hardening/README.md) | Active | #786 |
 | [Worktree Manager Control Plane](active/worktree-manager-control-plane/README.md) | Active | #352 |
 | [agent-index Engine Daemon](active/agent-index-engine-daemon/README.md) | Active | See effort |
-| [Vendored Installer Engine](active/vendored-installer-engine/README.md) | Draft | See effort |
+| [Vendored Installer Engine](active/vendored-installer-engine/README.md) | Active | See effort |
 | [Module Componentization Discipline](active/module-componentization-discipline/README.md) | Active | #2805 |
 | [Componentization Campaign Auto-Worker](active/componentization-campaign-auto-worker/README.md) | Draft | #3372 |
 | [Authoritative Write-Through Daemon](active/agent-worktrees-authoritative-daemon/README.md) | Active | #3761 |

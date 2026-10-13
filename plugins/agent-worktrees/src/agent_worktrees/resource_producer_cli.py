@@ -11,8 +11,8 @@ from . import tracking, worktree_ops_cli
 
 def add_parsers(sub) -> None:
     """Register the producer ABI without provider imports or provisioning."""
-    parser = sub.add_parser("resource-producer", help="Reserve/bind/inspect/verify-close disposable ownership; JSON stdin/stdout")
-    parser.add_argument("operation", choices=("capabilities", "reserve", "bind", "inspect", "close"))
+    parser = sub.add_parser("resource-producer", help="Reserve/fence/bind/inspect/verify-close disposable ownership; JSON stdin/stdout")
+    parser.add_argument("operation", choices=("capabilities", "reserve", "begin", "complete", "bind", "inspect", "close"))
     parser.add_argument("--json", action="store_true", required=True)
     parser.add_argument("--owner-ref", help="Qualified local owner; omitted, resolve current worktree/supported anchor")
 
@@ -23,7 +23,8 @@ def cmd_resource_producer(args) -> int:
         if args.operation == "capabilities":
             output._json_output({
                 "schema": producer.SCHEMA, "version": 1,
-                "operations": ["reserve", "bind", "inspect", "close"],
+                "operations": ["reserve", "begin", "complete", "bind", "inspect", "close"],
+                "allocation_fencing": 1,
                 "lifetime": "disposable-owned", "ref_encoding": "namespace:r1.base64url",
                 "max_ref_bytes": producer.MAX_REF_BYTES, "max_input_bytes": producer.MAX_INPUT_BYTES,
             })

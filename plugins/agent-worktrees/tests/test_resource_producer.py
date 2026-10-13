@@ -48,7 +48,15 @@ def reserve(path):
 
 
 def bind(path, reservation):
-    result = call(path, "bind", {"token": reservation["token"], "identity": {"immutable_id": "full-id", "daemon": "opaque"}})
+    inspected = call(path, "inspect", {"token": reservation["token"]})
+    payload = {"token": reservation["token"], "identity": {"immutable_id": "full-id", "daemon": "opaque"}}
+    if inspected["phase"] == "pending":
+        permit = call(path, "begin", {"token": reservation["token"]})
+        assert permit.get("ok"), permit
+        payload["allocation_fence"] = permit["allocation_fence"]
+    elif inspected["phase"] == "allocating":
+        payload["allocation_fence"] = reservation["allocation_fence"]
+    result = call(path, "bind", payload)
     assert result.get("ok"), result
     return result
 
@@ -161,18 +169,19 @@ def test_bind_immutable_idempotent_and_does_not_allocate(owner, monkeypatch):
     assert current.resources[0].producer["identity"] == result["producer"]["identity"]
 
 
-def test_failed_bind_retains_pending_and_rejects_ref_collision(owner):
+def test_failed_bind_retains_allocation_and_rejects_ref_collision(owner):
     path, _ = owner
     pending = reserve(path)
+    permit = call(path, "begin", {"token": pending["token"]})
     identity = {"immutable_id": "full-id", "daemon": "opaque"}
-    collision = producer.claim_ref({**pending["producer"], "phase": "bound", "identity": identity})
+    collision = producer.claim_ref({**permit["producer"], "phase": "bound", "identity": identity})
     record = tracking.load_record(path)
     tracking.add_resource_claim(record, tracking.ResourceClaim(kind="container", ref=collision), save=False)
     tracking.save_record(record, path)
     before = path.read_bytes()
-    result = call(path, "bind", {"token": pending["token"], "identity": identity})
+    result = call(path, "bind", {"token": pending["token"], "identity": identity, "allocation_fence": permit["allocation_fence"]})
     assert result["error"] and path.read_bytes() == before
-    assert tracking.load_record(path).resources[0].producer["phase"] == "pending"
+    assert tracking.load_record(path).resources[0].producer["phase"] == "allocating"
 
 
 @pytest.mark.parametrize("status", ["finalized", "finalizing", "orphaned", "archived", "complete", "completed"])

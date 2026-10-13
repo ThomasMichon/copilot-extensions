@@ -597,6 +597,19 @@ installs, no service-specific config needed for this class of plugin.
 
 ### 2026-10-12 — Generic disposable producer ledger implemented and validated
 
+- Further review identified pending-close allocation races, per-owner token
+  ambiguity and accepted-retry dependence on a source that may already be
+  reaped. The operator accepted the review-directed allocation-fence amendment
+  after [clarifying resource close/handoff scope](temporary-container-obligations.md#allocation-fence-clarification).
+  This does not authorize physical cleanup or deployment.
+- The proposed source now requires begin before creation, validates private
+  generation-specific fences for bind/completion, retains the epoch against
+  stale absence through ABA, and requires separate authoritative quiescence
+  evidence for lost-fence recovery. Transfer rejection preserves all records;
+  accepted retry repairs the recipient without loading the source or
+  resurrecting closed/transferred responsibility. These changes still await
+  the normal review gate; Docker integration and native updated-ABI proof remain
+  pending.
 - The first ownership implementation slice adds a provider-neutral
   `resource-producer` ABI to the existing ledger: durable pending reservation,
   immutable identity binding, exact-subject provider-verified close-out and

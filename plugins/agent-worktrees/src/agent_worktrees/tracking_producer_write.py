@@ -1,4 +1,4 @@
-"""Registered reserve/bind/inspect/close transactions on the existing ledger."""
+"""Registered reservation, allocation-fence and close transactions."""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from pathlib import Path
 
 import yaml
 
-from . import activity, claim_history, claim_providers, resource_producer as producer
+from . import activity, claim_history, claim_providers, producer_allocation as allocation
+from . import resource_producer as producer
 from . import tracking, tracking_write
 from .execution_spaces import (
     ExecutionSpaceError, project_record_config, require_owner_identity, require_record_mutation,
@@ -29,9 +30,13 @@ def _response(record, claim) -> dict:
 def _input(operation: str, payload: object) -> dict:
     keys = {
         "reserve": {"kind", "namespace", "recovery"},
+        "begin": {"token"}, "complete": {"token"},
         "bind": {"token", "identity"}, "inspect": {"token"}, "close": {"token"},
     }
-    if operation not in keys or not isinstance(payload, dict) or set(payload) != keys[operation]:
+    allowed = [keys[operation]] if operation in keys else []
+    if operation in {"bind", "complete"}:
+        allowed.append(keys[operation] | {"allocation_fence"})
+    if not isinstance(payload, dict) or set(payload) not in allowed:
         raise ValueError(f"{operation}: expected exactly {sorted(keys.get(operation, set()))}")
     producer.canonical_json(payload)
     if operation == "reserve":
@@ -46,6 +51,8 @@ def _input(operation: str, payload: object) -> dict:
             raise ValueError("invalid producer token")
         if operation == "bind" and not isinstance(payload["identity"], dict):
             raise ValueError("bind: identity must be a JSON object")
+        if "allocation_fence" in payload:
+            allocation.parse_fence(payload["allocation_fence"])
     return payload
 
 
@@ -87,19 +94,27 @@ def apply_resource_producer(args: dict) -> dict:
         operation = args["operation"]
         payload = _input(operation, args["input"])
         path = Path(args["yaml_path"])
-        close_subject, close_result = None, None
-        if operation == "close":
+        probe_subject, probe_result, granted_fence = None, None, None
+        if operation in {"close", "begin", "bind", "complete"}:
             with tracking._RecordLock(path, require_sidecar=True):
                 snapshot, _ = _owned_record(args, path)
                 candidate = _matched_claim(snapshot, payload["token"])
-                if candidate.producer["phase"] in {"pending", "bound"}:
+                phase = candidate.producer["phase"]
+                if operation == "close" and phase == "allocating":
+                    raise ValueError("allocation is in progress; complete or recover it before close")
+                if (
+                    operation == "close" and phase in {"pending", "bound"}
+                    or operation == "begin" and phase == "pending" and "allocation_epoch" in candidate.producer
+                    or operation == "bind" and phase in {"pending", "allocating"} and "allocation_fence" not in payload
+                    or operation == "complete" and phase == "allocating" and "allocation_fence" not in payload
+                ):
                     if tracking.claim_handoff_reservation(snapshot, candidate):
                         raise ValueError("producer claim is reserved by an offered handoff")
-                    close_subject = candidate.ref
-            if close_subject is not None:
+                    probe_subject = candidate.ref
+            if probe_subject is not None:
                 # Provider I/O is outside RecordLock; the final RMW validates
-                # that its exact immutable subject is still owned and unchanged.
-                close_result = claim_providers.resolve_claim_status(close_subject)
+                # the subject including phase and non-repeating allocation epoch.
+                probe_result = claim_providers.resolve_claim_status(probe_subject)
         with tracking._RecordLock(path, require_sidecar=True):
             record, owner = _owned_record(args, path, mutable=operation != "inspect")
             if operation == "reserve":
@@ -126,22 +141,43 @@ def apply_resource_producer(args: dict) -> dict:
                 phase = claim.producer["phase"]
                 if phase == "closed" and operation == "close":
                     return _response(record, claim)
-                if phase not in {"pending", "bound"}:
+                if phase not in {"pending", "allocating", "bound"}:
                     raise ValueError(f"producer claim is {phase}; mutation refused")
-                if operation == "bind":
+                if operation == "begin":
+                    if "allocation_epoch" in claim.producer and (
+                        claim.ref != probe_subject or not isinstance(probe_result, dict)
+                        or probe_result.get("available") is not True
+                        or not producer.verified_absence(probe_result, claim.ref)
+                    ):
+                        raise ValueError("provider did not verify no allocation before retry; obligation retained")
+                    granted_fence = allocation.begin(claim)
+                elif operation == "bind":
                     identity = copy.deepcopy(payload["identity"])
                     if phase == "bound":
+                        if "allocation_fence" in payload and not allocation.matches_fence(claim.producer, payload["allocation_fence"]):
+                            raise ValueError("allocation fence does not match the current attempt")
                         if producer.canonical_json(claim.producer["identity"]) != producer.canonical_json(identity):
                             raise ValueError("bound producer identity is immutable")
                         return _response(record, claim)
-                    metadata = {**claim.producer, "phase": "bound", "identity": identity}
-                    ref = producer.claim_ref(metadata)
-                    if any(c is not claim and c.ref == ref for c in record.resources):
+                    if "allocation_fence" not in payload and claim.ref != probe_subject:
+                        raise ValueError("allocation recovery subject changed; obligation retained")
+                    allocation.bind(
+                        claim, identity, fence=payload.get("allocation_fence"), result=probe_result,
+                    )
+                    if any(c is not claim and c.ref == claim.ref for c in record.resources):
                         raise ValueError("producer namespace/ref collision")
-                    claim.ref, claim.producer = ref, metadata
+                elif operation == "complete":
+                    if "allocation_fence" not in payload and phase == "allocating" and claim.ref != probe_subject:
+                        raise ValueError("allocation recovery subject changed; obligation retained")
+                    if not allocation.complete(
+                        claim, fence=payload.get("allocation_fence"), result=copy.deepcopy(probe_result),
+                    ):
+                        return _response(record, claim)
                 else:
-                    result = close_result
-                    if claim.ref != close_subject or not isinstance(result, dict) or result.get("available") is not True or not producer.verified_absence(result, claim.ref):
+                    result = probe_result
+                    if phase == "allocating":
+                        raise ValueError("allocation is in progress; obligation retained")
+                    if claim.ref != probe_subject or not isinstance(result, dict) or result.get("available") is not True or not producer.verified_absence(result, claim.ref):
                         raise ValueError("registered provider did not verify exact producer absence; obligation retained")
                     claim.producer = {**claim.producer, "phase": "closed", "closeout": copy.deepcopy(result)}
                     claim.state = "released"
@@ -158,7 +194,10 @@ def apply_resource_producer(args: dict) -> dict:
             machine=record.machine, event="claimed" if operation == "reserve" else operation,
             project=record.repo,
         )
-        return _response(record, claim)
+        response = _response(record, claim)
+        if granted_fence is not None:
+            response["allocation_fence"] = granted_fence.to_dict()
+        return response
     except (ValueError, TypeError, KeyError, OSError, ExecutionSpaceError, yaml.YAMLError, RecursionError) as exc:
         logging.getLogger(__name__).warning("Resource producer transaction refused: %s", exc)
         return {"schema": producer.SCHEMA, "version": 1, "error": "rejected", "message": str(exc)}

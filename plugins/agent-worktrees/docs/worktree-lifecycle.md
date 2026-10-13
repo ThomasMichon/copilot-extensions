@@ -312,7 +312,7 @@ unsettled outbound legacy claim either blocks it outright, or `--abandon
 --handoff-to <recipient>` re-homes the *entire* unsettled set elsewhere.
 Disposable-owned producer claims are stricter: verified close or an explicitly
 accepted bound-claim handoff is required, and abandon, sweep, disconnect, generic
-release and gate-mode overrides cannot discharge them. Pending/unknown producer
+release and gate-mode overrides cannot discharge them. Pending/allocating/unknown producer
 claims always block. See [the producer ABI](resource-producer.md).
 Neither fits "sync and tidy everything that's actually done, but leave this
 one claim open on purpose" — e.g. a deliberate pending `context-handoff` task

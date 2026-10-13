@@ -17,6 +17,26 @@ def snapshot_claim(claim: ResourceClaim) -> dict:
     return copy.deepcopy(snapshot)
 
 
+def validate_producer_uniqueness(
+    claims: Sequence[dict], *, error_type: type[Exception],
+) -> None:
+    """Reject ambiguous producer references and tokens without collapsing claims."""
+    refs: dict[str, bool] = {}
+    tokens: set[str] = set()
+    for claim in claims:
+        ref = claim["ref"]
+        present = "producer" in claim
+        if ref in refs and (refs[ref] or present):
+            raise error_type("ambiguous duplicate producer reference")
+        refs[ref] = refs.get(ref, False) or present
+        metadata = claim.get("producer")
+        token = metadata.get("token") if isinstance(metadata, dict) else None
+        if present and isinstance(token, str):
+            if token in tokens:
+                raise error_type("ambiguous duplicate producer token")
+            tokens.add(token)
+
+
 def validate_producer_offer(
     claims: Sequence[ResourceClaim], source: ClaimRef, consumer: ClaimRef,
     *, error_type: type[Exception],
@@ -32,6 +52,9 @@ def validate_producer_offer(
     if any(not resource_producer.valid_metadata(claim.producer) or claim.producer["phase"] != "bound"
            or resource_producer.claim_ref(claim.producer) != claim.ref for claim in producers):
         raise error_type("only valid bound producer claims can be offered; pending obligations remain owned")
+    validate_producer_uniqueness(
+        [snapshot_claim(claim) for claim in claims], error_type=error_type,
+    )
 
 
 def validate_supported_claims(
@@ -48,6 +71,7 @@ def validate_supported_claims(
         if any(not resource_producer.valid_metadata(c["producer"]) or c["producer"]["phase"] != "bound"
                or resource_producer.claim_ref(c["producer"]) != c["ref"] for c in producer_claims):
             raise error_type("only valid bound producer claims can be transferred; pending obligations remain owned")
+        validate_producer_uniqueness(bundle.claims, error_type=error_type)
         return
     unsupported = sorted(
         snapshot["kind"]
