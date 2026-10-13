@@ -10,15 +10,17 @@ The effort's reopened Phase 2 item and Phase 8 supersede claims of "zero open
 findings" or full completion. Default user-global placement remains supported;
 independent marketplace selection remains attributable and opt-in.
 
-The plugin-name-only durable pointer file named `runtime-root` stores the
-resolver's `runtimeRoot` value; these spellings identify the file and result
-field respectively, not separate resolution mechanisms. That pointer cannot
-distinguish multiple source marketplaces, and a runtime/state root is not a
-callable command directory.
-Its advisory existence check must not be promoted into an invocation contract.
-Phase 8 restores read-only diagnostics and uses existing `sessionStart` command
-catalogs for source-qualified exact `argv`; stable out-of-session launchers
-retain their own explicit installation identity.
+The obsolete plugin-name-only `runtime-root` file stored the resolver's
+`runtimeRoot` value, not a callable command directory. The Phase 8 correction
+removes diagnostic publication and onboarding's pointer read; existing files
+remain untouched. Onboarding checks its own payload command and installer,
+then directs the user to that payload's exact session-catalog command. If the
+payload command is unavailable, it stays silent even when a supported legacy
+command exists. No command is executed by that availability check.
+
+Source-qualified catalog acceptance and explicit ownership-bound out-of-session
+launchers remain separate Phase 8 work. Removing the pointer heuristic does
+not complete that broader invocation contract.
 
 **Current invocation contract (2026-10-11):** the target terms are defined in
 [Architecture: Selection terms](design.md#selection-terms). Session consumers use
@@ -196,29 +198,20 @@ confirming two things the prior partial audits could only guess at:
 | Generic wrapper publication and plugin-specific PATH guidance | 45 | **Own-payload placement — accepted, conditional on marketplace-cell.** Each plugin's own installer declaring where *it* writes *its own* global binstub/PATH. Not Phase 6 retirement work; not this item's gate. | all 13 plugins below except `agent-worktrees`'s own project-command lines |
 | Mixed project-command directory and PATH use | 11 | **Own-payload placement — permanent, accepted.** `agent-worktrees`'s attributable project-command surface. | `agent-worktrees` only |
 | Third-party tool PATH bootstrap (**reclassified 2026-09-27**, was "remote transport selection") | 2 → **0, converted this pass** | **Guard false positive, not agent-* consumption at all.** Read the actual code: these lines install and PATH-expose `dtssh`/`devtunnel-ssh`, an unrelated third-party CLI — nothing to do with any `agent-*` binstub or marketplace path. Annotated `allow third-party-installer-path` in [#4336](https://github.com/ThomasMichon/copilot-extensions/pull/4336) (same underlying concern the sibling `.ps1` files' `$InstallRelease` URL already carries as `allow third-party-installer-url`). | `agent-ssh` `dtssh` `install-{client,host}.sh` |
-| Operator, bootstrap, and nudge launchers | 4 | **Resolved 2026-09-27**: `agent-machines`'s `bootstrap-check.{sh,ps1}` (2) already calls the installation-context resolver a few lines above and only falls through to the legacy `Binstub` path when that resolution says legacy — own-payload, accepted, no action needed. `agent-worktrees`'s `register-nudge.{sh,ps1}` (2) now also consults a durable, resolver-free marketplace-cell pointer (see the new [install-contract.md § Durable runtime-root pointer](../../../docs/install-contract.md#durable-runtime-root-pointer-resolver-free-consumers)) before falling back to its existing legacy-path check — closing the real functional gap (marketplace-cell availability was previously undetectable) without depending on the heavy resolver `register-nudge.sh` deliberately avoids. The guard still (correctly) flags the retained legacy-path text — that fallback is permanent, own-payload, accepted, exactly like `bootstrap-check.sh`'s. | `agent-machines` (2, accepted), `agent-worktrees` (2, accepted — functional gap closed, legacy fallback text remains and is expected) |
+| Operator, bootstrap, and nudge launchers | 4 (September snapshot) | `agent-machines` bootstrap checks remain governed by their installation context. **Phase 8 correction:** `agent-worktrees` onboarding no longer reads the shared pointer or falls back to ambient/global availability for catalog guidance. It checks only the owning payload command and installer, without invoking them. A legacy-only state produces no nudge and leaves the legacy command usable. | Historical count, not current invocation acceptance |
 | Readiness legacy fallback | 3 | **Verified: self-probe, own-payload, accepted.** `agent-codespaces`'s `readiness-context.{sh,ps1}` only *checks existence* of its own legacy binstub for a session-start readiness report — it never invokes anything at that path. Harmless, and naturally disappears only if/when this plugin's legacy wrapper itself retires (a placement question, not a consumption one). | `agent-codespaces` (`readiness-context.{sh,ps1}`, 3) |
 | `payload-invocation.json` legacy-footprint declarations | 2 | **Own-payload placement — accepted, no code change.** Declares each plugin's own historical legacy paths; metadata, not a live call. | `agent-index` (line 22), `agent-machines` (line 20) |
 | Credential and askpass integration | 2 | **Verified: currently correct, premature to convert.** `agent-vault`'s own `install.sh`/`init.ps1` has **zero** installation-context integration anywhere (confirmed by direct grep) — unlike `agent-machines`/`agent-index`, `agent-vault` was never one of Phase 3's cell-aware exemplars, so it always runs legacy-only regardless of host marketplace-cell config today. Its `vault-askpass` helper hardcoding `$HOME/.local/bin/agent-vault` is therefore **currently correct, not a bug** — there is no cell path it could resolve to yet. Converting this helper now, before `agent-vault` itself gains cell-awareness, would add complexity to a `sudo -A` elevation-critical path with zero present benefit and real risk. **Do not touch this file** until/unless `agent-vault` becomes a cell-aware plugin in its own right (a Phase-3-scale undertaking, not a quick patch). | `agent-vault` `install.sh` (askpash exec + `SUDO_ASKPASS` guidance) |
 | Descriptive skills, help, and generated package metadata | 1 | Documentation only; revise with the owning slice, not a separate gate. | `agent-vault-setup/SKILL.md` |
 | **Total** | **68** (post-conversion) | | |
 
-**Disposition summary (final, code-verified, 2026-09-27)**: of the original 70
-findings, **2 were guard false positives** (converted this pass). Of the
-remaining 68: **62 are own-payload placement** (45 + 11 + 2 + 2 + 2, the
-`agent-machines` bootstrap-check pair and `agent-worktrees`'s
-`register-nudge` pair, now that both are confirmed correctly gated, plus the
-`agent-codespaces` readiness probes) — no further action needed, permanently
-out of this item's scope. **2 are credential-askpass, verified
-currently-correct and explicitly deferred** (blocked on `agent-vault`
-gaining cell-awareness — do not attempt a standalone patch). **Zero findings
-remain genuinely open.** `agent-worktrees`'s `register-nudge.{sh,ps1}` was
-the last one: fixed by adding a genuinely lightweight (no `awk`/bash-4.4)
-durable-pointer read (see [install-contract.md § Durable runtime-root
-pointer](../../../docs/install-contract.md#durable-runtime-root-pointer-resolver-free-consumers)),
-landed in the canonical `libs/installation-context` library (Python, bash,
-and PowerShell parity) and synced to all 11 vendoring plugins, rather than
-copying `bootstrap-check.sh`'s heavier resolver dependency.
+**Historical disposition summary (2026-09-27, superseded):** the 70-finding
+snapshot and its original 68-remaining categorization were syntactic triage,
+not behavioral acceptance. Their "zero open" conclusion was reopened by
+#6140. The pointer mechanism introduced in that pass is now retired, not a
+current solution to command discovery. The payload/catalog readiness
+correction above replaces onboarding's heuristic; the current completion
+rule and Phase 8 still require broader consumer and platform acceptance.
 
 
 
