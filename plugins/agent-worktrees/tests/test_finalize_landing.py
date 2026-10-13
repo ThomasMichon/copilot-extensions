@@ -439,8 +439,9 @@ def test_explain_with_an_empty_worktree_path_reads_the_anchor(env, provider):
     assert report["content_ref"] and report["bases"][0] == "origin/main"
 
 
+@pytest.mark.parametrize("operation", ["explain", "finalize"])
 def test_a_pr_tracked_without_its_branch_finalizes_where_explain_says_it_landed(
-        env, provider, monkeypatch):
+        env, provider, monkeypatch, operation):
     """The work was committed on a hand-made branch (the tracked ``worktree/<id>``
     never moved) and the PR recorded by URL and number only, so its ``branch`` is
     empty; it squash-merged into dev while main is behind. ``--explain-landing``
@@ -449,6 +450,7 @@ def test_a_pr_tracked_without_its_branch_finalizes_where_explain_says_it_landed(
     from agent_worktrees import config as cfg
     from agent_worktrees import tracking
 
+    monkeypatch.setattr(finalize, "_warn_of_codespace_claims_for_worktree", lambda *_: None)
     tracking_d = env.tmp_path / "tracking"
     tracking_d.mkdir()
     monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda: tracking_d)
@@ -473,10 +475,11 @@ def test_a_pr_tracked_without_its_branch_finalizes_where_explain_says_it_landed(
                         repo_name="repo", repos={"repo": repo_cfg})
 
     assert finalize_landing.tracks_pr(record, repo_cfg)
-    report = finalize_landing.explain(record, repo_cfg, str(env.clone), str(env.seed))
-    assert (report["content_ref"], report["landed"]) == ("pr/hand-made", True)
-
-    assert finalize.validate_and_finalize(env.worktree_id, config) is True
+    if operation == "explain":
+        report = finalize_landing.explain(record, repo_cfg, str(env.clone), str(env.seed))
+        assert (report["content_ref"], report["landed"]) == ("pr/hand-made", True)
+    else:
+        assert finalize.validate_and_finalize(env.worktree_id, config) is True
 
 
 def test_a_pr_is_tracked_by_its_branch_or_its_number_and_only_with_prs_enabled(env):

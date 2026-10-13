@@ -136,6 +136,17 @@ keyword-only overlay selection while retaining synthetic receiving-side
 configuration; they never discover installed project or plugin registries.
 Both explicit overlay values also run in the required PR guard lane.
 
+Execution-space registry tests retain the supplied receiving configuration
+through the real YAML overlay reader and reject malformed registries. A fresh
+Python subprocess also exercises the machine getter's missing-registry path
+and verifies that configuration is loaded exactly once. Packaged-wrapper
+previews use the actual wrapper manifest and canonical assets, without copying
+unrelated runtime sources or reading the checkout's pending changefiles.
+Native landing tests exercise explain and finalize separately against the same
+repository scenario, retaining both real Git contracts within each item budget.
+The landing fixture isolates the unrelated CodeSpace-claim warning; that
+provider adapter has its own dedicated tests.
+
 Agent-worktrees installer command resolution, pipefail execution and POSIX
 background-prune tests are explicit T3 native contracts. Collection never probes
 Bash or PowerShell. A lazy session fixture admits native shells only after

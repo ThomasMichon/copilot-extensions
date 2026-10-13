@@ -1,0 +1,9 @@
+{
+  "comment": "Add native machine-scalar coverage and bound wrapper and landing fixtures",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

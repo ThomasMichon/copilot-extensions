@@ -16,6 +16,7 @@ from agent_worktrees import installer
 PLUGIN = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN.parents[1]))
 from tools import preview_release
+import changefile
 
 RETIRED_ASSETS = (
     "session-ext-reload.ps1",
@@ -134,7 +135,19 @@ def test_locked_retired_asset_warns_without_failing_update(
 def test_packaged_preview_deploy_wrappers_uses_only_packaged_assets(
     tmp_path: Path, monkeypatch, system: str,
 ) -> None:
+    source_plugins = tmp_path / "source" / "plugins"
+    source_plugin = source_plugins / "agent-worktrees"
+    source_plugin.mkdir(parents=True)
+    for name in ("plugin.json", _WRAPPER_MANIFEST):
+        shutil.copy2(PLUGIN / name, source_plugin / name)
+    monkeypatch.setattr(preview_release, "PLUGINS_DIR", source_plugins)
+    monkeypatch.setattr(changefile, "CHANGEFILES_DIR", tmp_path / ".changefiles")
     preview = preview_release.build("agent-worktrees", tmp_path / "work")
+    wrappers = json.loads((PLUGIN / _WRAPPER_MANIFEST).read_text("utf-8"))
+    for name in wrappers["files"]:
+        assert (preview / "bin" / name).read_bytes() == (
+            PLUGIN.parents[1] / "worktree-manager" / "bin" / name
+        ).read_bytes()
     packaged_root = tmp_path / "packaged-root"
     packaged_plugin = packaged_root / "plugins" / "agent-worktrees"
     packaged_plugin.parent.mkdir(parents=True, exist_ok=True)
