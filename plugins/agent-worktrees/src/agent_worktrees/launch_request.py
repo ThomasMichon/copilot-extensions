@@ -119,6 +119,12 @@ def execute(config, request: dict) -> dict:
                 )
             if request["kind"] != "new":
                 raise ValueError("Requested Resume worktree does not exist")
+            expected_wid = f"{config.machine}-{platform}-{receipt['timestamp']}-{receipt['suffix']}"
+            if wid != expected_wid:
+                raise ValueError(
+                    "Stored New allocation no longer matches this machine/platform; "
+                    "inspect its original worktree identity instead of creating another"
+                )
             work_dir = Path(config.default_repo.worktree_root) / wid
             if work_dir.exists():
                 raise RuntimeError(
@@ -220,15 +226,22 @@ def cmd_request(args) -> int:
     try:
         protocol_options = {"command", "json", "launch_request_b64", "launch_request_status"}
         if not args.json or any(
-            value for key, value in vars(args).items() if key not in protocol_options
+            value is not None and value is not False and value != []
+            for key, value in vars(args).items() if key not in protocol_options
         ):
             raise ValueError("Structured launch requests require local --json execution")
-        if args.launch_request_status:
+        admission_present = args.launch_request_b64 is not None
+        status_present = args.launch_request_status is not None
+        if admission_present == status_present:
+            raise ValueError("Specify admission or status, not both")
+        if status_present:
+            if not args.launch_request_status:
+                raise ValueError("Launch request identity must not be empty")
             request_id = args.launch_request_status
-            if args.launch_request_b64:
-                raise ValueError("Specify admission or status, not both")
             print(json.dumps(inspect(args.launch_request_status)))
             return 0
+        if not args.launch_request_b64:
+            raise ValueError("Launch request envelope must not be empty")
         request = decode(args.launch_request_b64)
         request_id = request["request_id"]
         config = cfg.load_config()

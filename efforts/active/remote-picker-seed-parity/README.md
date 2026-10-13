@@ -327,3 +327,13 @@ hiding the problem or silently dropping text.
   arbitrary-text round-trip. The rebased POSIX admission/recovery portfolio
   passed all 95 applicable cases (one PowerShell skip). No new backend or
   transport path was introduced; current-head review/CI remain required.
+- **2026-10-13** -- Review identified two remaining malformed/recovery boundaries.
+  Explicitly empty protocol options now select structured mode and refuse,
+  including a valid request paired with an empty status option; none can fall
+  into ordinary New creation. Unsupported empty-string modifiers also refuse.
+  Recovery validates the exact persisted New identity against the creator's
+  machine/platform prefix before recording creation start or invoking side
+  effects. A changed identity refuses rather than creating an orphan under a
+  different prefix. The complete contained admission portfolio passes 116
+  cases (one native POSIX skip), including lost-admission-response recovery,
+  machine/platform drift and empty-option dispatch guards.

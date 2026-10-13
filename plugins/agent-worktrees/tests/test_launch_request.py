@@ -127,6 +127,43 @@ def test_unaccepted_new_cannot_recreate_removed_worktree(tmp_path, authority, mo
         request.execute(authority, _intent("new"))
 
 
+@pytest.mark.parametrize("changed", ["machine", "platform"])
+def test_new_recovery_never_creates_a_different_persisted_allocation(
+    tmp_path, authority, monkeypatch, changed,
+):
+    from agent_worktrees import worktree_creation
+
+    dispatch = request._dispatch
+
+    def lose_response(verb, args):
+        result = dispatch(verb, args)
+        if verb == "launch_request_admit":
+            raise OSError("admission response lost before creation")
+        return result
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("changed allocation reached creation side effects")
+
+    monkeypatch.setattr(request, "_dispatch", lose_response)
+    monkeypatch.setattr(worktree_creation, "_create_worktree_core", forbidden)
+    intent = _intent("new")
+    with pytest.raises(OSError, match="response lost"):
+        request.execute(authority, intent)
+    admission = request._admission_path(tmp_path, intent["request_id"])
+    before = admission.read_bytes()
+    monkeypatch.setattr(request, "_dispatch", dispatch)
+    if changed == "machine":
+        authority.machine = "renamed"
+    else:
+        monkeypatch.setattr(request.cfg, "detect_platform", lambda: "wsl")
+    with pytest.raises(ValueError, match="Stored New allocation"):
+        request.execute(authority, intent)
+    assert admission.read_bytes() == before
+    assert not json.loads(before).get("creation_started")
+    assert not tracking.list_records(tmp_path)
+    assert not authority.default_repo.worktree_root.exists()
+
+
 @pytest.mark.parametrize("finished", [False, True])
 def test_interrupted_replacement_seed_revision_fences_old_admission(tmp_path, authority, finished):
     record = tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
@@ -405,6 +442,7 @@ def test_structured_request_rejects_ordinary_selector_before_mutation(selector):
     ["--recovery"], ["--seed", "task"], ["--seed-id", "intent"],
     ["--machine", "target"], ["--dry-run"], ["--auto"], ["--bare-resume"],
     ["--restore"], ["copilot-positional-argument"],
+    ["--profile", ""], ["--seed", ""], ["--owner-ref", ""],
 ])
 def test_structured_request_rejects_all_nonprotocol_modifiers(
     mode, modifier, monkeypatch,
@@ -428,6 +466,36 @@ def test_structured_request_rejects_all_nonprotocol_modifiers(
     with output.capture_json_output() as captured:
         assert resolve_cli.cmd_resolve(args) == 3
     assert "Structured launch requests require" in json.loads(captured.getvalue())["error"]
+
+
+@pytest.mark.parametrize("selector", [[], ["--new"]])
+@pytest.mark.parametrize("protocol", [
+    ["--launch-request-b64", ""],
+    ["--launch-request-status", ""],
+    ["--launch-request-b64", "", "--launch-request-status", ""],
+    ["--launch-request-b64", "valid", "--launch-request-status", ""],
+    ["--launch-request-b64", "", "--launch-request-status", "a" * 32],
+])
+def test_empty_protocol_options_never_fall_through_to_ordinary_resolve(
+    selector, protocol, monkeypatch,
+):
+    import argparse
+    from agent_worktrees import output, resolve_cli
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("malformed protocol reached ordinary resolve or target state")
+
+    monkeypatch.setattr(resolve_cli.ResolveCommandState, "from_args", forbidden)
+    monkeypatch.setattr(request, "execute", forbidden)
+    monkeypatch.setattr(request, "inspect", forbidden)
+    parsers = argparse.ArgumentParser().add_subparsers()
+    resolve_cli.add_parsers(parsers)
+    encoded = base64.b64encode(json.dumps(_intent("new")).encode()).decode()
+    protocol = [encoded if value == "valid" else value for value in protocol]
+    args = parsers.choices["resolve"].parse_args(["--json", *selector, *protocol])
+    with output.capture_json_output() as captured:
+        assert resolve_cli.cmd_resolve(args) == 3
+    assert "Launch request <invalid> failed" in json.loads(captured.getvalue())["error"]
 
 
 def test_malformed_base64_returns_structured_cli_error():

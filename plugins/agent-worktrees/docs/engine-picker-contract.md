@@ -18,7 +18,8 @@ and Boolean `no_mux`. POSIX shell arguments are quoted; PowerShell commands
 are encoded. Prompt text never enters the interactive SSH launch string.
 Structured admission/status accepts only its protocol options and `--json`;
 ordinary resolve selectors, modifiers and positional Copilot arguments are
-rejected before reading or mutating target launch state.
+rejected before reading or mutating target launch state. Exactly one nonempty
+protocol option is required; an empty value never enters ordinary resolve.
 
 The target's existing tracking-write daemon owns admission and seed staging.
 Admission retains a text-free fingerprint and allocated worktree/intent IDs
@@ -35,6 +36,8 @@ It returns `staged`, `handoff-unconfirmed`, `creation-incomplete`,
 request cannot allocate another New worktree or restore a completed/replaced
 prompt. A matching durable seed is recoverable even if acceptance-receipt
 publication was interrupted, but an incomplete New creation is never ready.
+A machine/platform change that cannot honor the persisted New allocation
+refuses before creation rather than allocating a differently prefixed worktree.
 A target without the request capability rejects before mutation.
 
 ## Provider-backed source registry

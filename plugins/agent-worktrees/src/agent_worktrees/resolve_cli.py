@@ -361,7 +361,10 @@ def add_parsers(sub) -> None:
 
 def cmd_resolve(args: argparse.Namespace) -> int:
     """Resolve a launch plan and emit it as JSON."""
-    if getattr(args, "launch_request_b64", None) or getattr(args, "launch_request_status", None):
+    if (
+        getattr(args, "launch_request_b64", None) is not None
+        or getattr(args, "launch_request_status", None) is not None
+    ):
         from .launch_request import cmd_request
 
         return cmd_request(args)
