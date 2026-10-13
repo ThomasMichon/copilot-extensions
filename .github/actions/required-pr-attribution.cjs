@@ -171,7 +171,21 @@ async function backfill({ github, context, core, pause = (ms) => new Promise((re
   const prs = await github.paginate(github.rest.pulls.list, {
     ...context.repo, state: "open", base: "dev", per_page: 100,
   });
+  const failed = [];
   for (const listed of prs) {
+    try {
+      await refreshPR(github, context, listed, pause);
+    } catch {
+      const number = Number.isSafeInteger(listed.number) && listed.number > 0 ? listed.number : "unknown";
+      failed.push(number);
+      core.warning(`Source metadata refresh failed for PR ${number}; continuing other PRs.`);
+    }
+  }
+  if (failed.length) throw new Error(`Source metadata refresh failed for ${failed.length} PR(s) (${failed.join(", ")}); retry the check.`);
+  core.info("Current dev pull request metadata checks refreshed.");
+}
+
+async function refreshPR(github, context, listed, pause) {
     let stable = false;
     for (let attempt = 0; attempt < 3; attempt++) {
       let pr = await currentPR(github, context, listed.number);
@@ -241,8 +255,6 @@ async function backfill({ github, context, core, pause = (ms) => new Promise((re
       if (stable) break;
     }
     if (!stable) throw new Error("Source metadata changed too often to validate; retry the check.");
-  }
-  core.info("Current dev pull request metadata checks refreshed.");
 }
 
 module.exports = { validate, decision, enforce, backfill, REPAIR };

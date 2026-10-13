@@ -17,7 +17,10 @@ function core() {
     addRaw(value) { messages.push(value); return this; },
     async write() {},
   };
-  return { messages, summary, setFailed: (value) => messages.push(value), info: (value) => messages.push(value) };
+  return {
+    messages, summary, setFailed: (value) => messages.push(value),
+    info: (value) => messages.push(value), warning: (value) => messages.push(value),
+  };
 }
 
 test("public source and workflow forms use the existing envelope", () => {
@@ -277,9 +280,41 @@ test("unverifiable publication is failed closed without exposing metadata", asyn
     },
   };
   await assert.rejects(gate.backfill({ github, context, core: core(), pause: async () => {} }),
-                       /metadata unavailable/);
+                       /Source metadata refresh failed for 1 PR/);
   assert.equal(created[0].conclusion, "failure");
   assert.ok(!JSON.stringify(created).includes("attribution-exempt"));
+});
+
+test("unverifiable or unstable PRs do not starve later current heads", async () => {
+  for (const unavailable of [false, true]) {
+    const created = [];
+    let reads = 0;
+    const output = core();
+    const github = {
+      paginate: async () => [{ number: 1 }, { number: 2 }],
+      rest: {
+        pulls: { list() {}, get: async ({ pull_number }) => {
+          if (pull_number === 1 && unavailable) throw new Error("private diagnostic");
+          return { data: {
+            ...pr(marker), head: { sha: `head-${pull_number}` },
+            ...(pull_number === 1 ? { body: marker + "\n" + (++reads) } : {}),
+          } };
+        } },
+        checks: {
+          listForRef: async () => ({ data: { check_runs: [] } }),
+          create: async (check) => { created.push(check); return { data: { id: created.length } }; },
+          get: async ({ check_run_id }) => ({ data: created[check_run_id - 1] }),
+          update: async (check) => Object.assign(created[check.check_run_id - 1], check),
+        },
+      },
+    };
+    await assert.rejects(gate.backfill({ github, context, core: output, pause: async () => {} }),
+                         /Source metadata refresh failed for 1 PR/);
+    assert.equal(created.at(-1).head_sha, "head-2");
+    assert.equal(created.at(-1).conclusion, "success");
+    assert.ok(output.messages.some((message) => message.includes("continuing other PRs")));
+    assert.ok(!output.messages.some((message) => message.includes("private diagnostic")));
+  }
 });
 
 test("the existing compiler-owned native workflow origin needs no artifact rewrite", () => {
