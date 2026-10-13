@@ -674,6 +674,22 @@ def windowless_daemon_kwargs(*, breakaway: bool = False) -> dict:
 
 _PAYLOAD_DIR_MARKER = "installed-plugins"
 
+# The only creation flags a spawn_daemon caller may add: process priority
+# classes and CREATE_DEFAULT_ERROR_MODE. Console, process-group, Job, session,
+# debug and suspend flags belong to spawn_daemon's own windowless and lifetime
+# contract (CREATE_NEW_CONSOLE, for instance, makes Windows ignore
+# CREATE_NO_WINDOW, and CREATE_BREAKAWAY_FROM_JOB defeats ``breakaway=False``
+# and contained test mode), so an allowlist rather than a denylist.
+_DAEMON_EXTRA_CREATIONFLAGS = (
+    0x00000020  # NORMAL_PRIORITY_CLASS
+    | 0x00000040  # IDLE_PRIORITY_CLASS
+    | 0x00000080  # HIGH_PRIORITY_CLASS
+    | 0x00000100  # REALTIME_PRIORITY_CLASS
+    | 0x00004000  # BELOW_NORMAL_PRIORITY_CLASS
+    | 0x00008000  # ABOVE_NORMAL_PRIORITY_CLASS
+    | 0x04000000  # CREATE_DEFAULT_ERROR_MODE
+)
+
 
 class DaemonSpawnError(OSError):
     """:func:`spawn_daemon` could not give the daemon its own lifetime."""
@@ -709,6 +725,56 @@ def _validated_daemon_cwd(cwd: str | os.PathLike[str] | None) -> str:
 def _is_inside_payload(path: str) -> bool:
     parts = {part.lower() for part in os.path.normpath(path).replace("\\", "/").split("/")}
     return _PAYLOAD_DIR_MARKER in parts
+
+
+def _validated_daemon_log_path(log_path: str | os.PathLike[str] | None) -> str:
+    """Reject a log path that is missing, relative, or inside a plugin payload.
+
+    The daemon holds its log open for its whole life, so a log inside a
+    payload directory pins that directory exactly like a payload cwd would.
+    """
+    if log_path is None:
+        raise ValueError("spawn_daemon requires a log_path")
+    path = os.fspath(log_path)
+    if not path or not os.path.isabs(path):
+        # Never resolved against ``cwd``: a caller-relative path would silently
+        # land somewhere else once the daemon's cwd differs from the caller's.
+        raise ValueError(f"spawn_daemon log_path must be an absolute path, got {path!r}")
+    for candidate in (path, os.path.realpath(path)):
+        if _is_inside_payload(candidate):
+            raise ValueError(
+                f"spawn_daemon log_path is inside a plugin payload ({path}"
+                + (f" -> {candidate}" if candidate != path else "")
+                + "); keep the daemon log under its runtime root or home directory"
+            )
+    return path
+
+
+def _validated_daemon_argv(argv: object) -> list[str]:
+    # A bare string (or path) is itself a Sequence: iterating it would launch
+    # its first character as the executable.
+    if isinstance(argv, (str, bytes, bytearray, os.PathLike)):
+        raise TypeError(
+            "spawn_daemon argv must be a sequence of arguments, not a single "
+            f"{type(argv).__name__}; pass [executable, *args]"
+        )
+    command = [os.fspath(part) for part in argv]  # type: ignore[union-attr]
+    if not command:
+        raise ValueError("spawn_daemon requires a non-empty argv")
+    return command
+
+
+def _validated_extra_creationflags(flags: object) -> int:
+    if isinstance(flags, bool) or not isinstance(flags, int):
+        raise TypeError(f"spawn_daemon extra_creationflags must be an int, got {flags!r}")
+    owned = flags & ~_DAEMON_EXTRA_CREATIONFLAGS
+    if owned:
+        raise ValueError(
+            f"spawn_daemon extra_creationflags {owned:#x} are not permitted: console, "
+            "process-group, Job and session flags belong to spawn_daemon itself; "
+            "only priority classes and CREATE_DEFAULT_ERROR_MODE may be added"
+        )
+    return flags
 
 
 def _daemon_popen_kwargs(
@@ -773,6 +839,8 @@ def spawn_daemon(
       inside the caller's Job anyway, and for which that degraded lifetime is
       still better than no daemon, passes ``contained_fallback=True`` to start
       it inside the Job instead (logged as a warning and in the daemon log).
+      That daemon then does **not** outlive the caller's Job; neither does one
+      started with ``breakaway=False`` or in contained test mode.
     * **Explicit cwd.** ``cwd`` is required, must be absolute and existing,
       and must not be inside an ``installed-plugins`` payload, either
       lexically or once symlinks/junctions are resolved -- use the daemon's
@@ -780,8 +848,9 @@ def spawn_daemon(
       daemon runs from ``cwd`` rather than the caller's directory, any path
       the caller passes in ``argv`` or the environment should be absolute.
     * **Logged.** stdin is ``DEVNULL``; stdout and stderr are appended to
-      ``log_path`` (must be absolute; parent directories are created), after a
-      one-line launch
+      ``log_path`` (must be absolute and, like ``cwd``, outside a plugin
+      payload, since the daemon holds it open; parent directories are
+      created), after a one-line launch
       header. The parent closes its copy of the log handle before returning.
       The header names the cwd and the executable (``argv[0]``) only, plus
       ``display`` when given: the remaining argv and the environment are never
@@ -789,29 +858,26 @@ def spawn_daemon(
       caller that wants more context in the log passes an already-redacted
       ``display`` label.
 
-    ``env`` defaults to a copy of ``os.environ``; ``env_overrides`` is layered
-    on top. ``extra_creationflags`` is OR'd into the Windows creation flags
-    (for example a priority class). Contained test mode suppresses breakaway
-    and the new session exactly as the underlying helpers do. Interpreter
-    selection stays with the caller (:func:`windowless_python` and
-    :func:`windowless_python_env`). Never waits for the child.
+    ``argv`` is a sequence of arguments; a bare ``str``/``bytes``/path raises
+    :class:`TypeError` rather than being split into characters. ``env``
+    defaults to a copy of ``os.environ``; ``env_overrides`` is layered on top.
+    ``extra_creationflags`` may add only a priority class or
+    ``CREATE_DEFAULT_ERROR_MODE`` to the Windows creation flags; any flag this
+    primitive owns (console, process-group, Job or session) raises
+    :class:`ValueError` on every platform. Contained test mode suppresses
+    breakaway and the new session exactly as the underlying helpers do.
+    Interpreter selection stays with the caller (:func:`windowless_python`
+    and :func:`windowless_python_env`). Never waits for the child.
     """
-    if not argv:
-        raise ValueError("spawn_daemon requires a non-empty argv")
+    command = _validated_daemon_argv(argv)
+    extra_creationflags = _validated_extra_creationflags(extra_creationflags)
     cwd_path = _validated_daemon_cwd(cwd)
-    if log_path is None:
-        raise ValueError("spawn_daemon requires a log_path")
-    log_file = os.fspath(log_path)
-    if not log_file or not os.path.isabs(log_file):
-        # Never resolved against ``cwd``: a caller-relative path would silently
-        # land somewhere else once the daemon's cwd differs from the caller's.
-        raise ValueError(f"spawn_daemon log_path must be an absolute path, got {log_file!r}")
+    log_file = _validated_daemon_log_path(log_path)
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
 
     child_env = dict(os.environ if env is None else env)
     if env_overrides:
         child_env.update(env_overrides)
-    command = [os.fspath(part) for part in argv]
     kwargs = _daemon_popen_kwargs(
         console_children=console_children,
         breakaway=breakaway,

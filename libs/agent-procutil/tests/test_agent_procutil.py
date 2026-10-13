@@ -968,3 +968,144 @@ def test_spawn_daemon_real_child_writes_to_log_from_cwd(tmp_path):
     assert "spawn_daemon cwd=" in text
     reported = text.splitlines()[-1].strip().removeprefix("cwd=")
     assert os.path.samefile(reported, workdir)
+
+
+@pytest.mark.parametrize(
+    "argv", ["python", b"python", Path("python")], ids=["str", "bytes", "path"],
+)
+def test_spawn_daemon_rejects_a_bare_string_or_path_argv(tmp_path, fake_popen, argv):
+    # A str is itself a Sequence[str]: iterating it would launch "p" as the
+    # executable with the remaining characters as its arguments.
+    with pytest.raises(TypeError, match="sequence of arguments"):
+        pu.spawn_daemon(argv, cwd=tmp_path, log_path=tmp_path / "d.log")
+    assert fake_popen.calls == []
+    assert not (tmp_path / "d.log").exists()
+
+
+def test_spawn_daemon_rejects_an_empty_argv(tmp_path, fake_popen):
+    with pytest.raises(ValueError, match="non-empty argv"):
+        pu.spawn_daemon([], cwd=tmp_path, log_path=tmp_path / "d.log")
+    assert fake_popen.calls == []
+
+
+# Every flag spawn_daemon's windowless/lifetime contract owns, plus other
+# console, session, Job, debug and suspend flags a caller must not add.
+_CONTRACT_OWNED_FLAGS = {
+    "CREATE_NEW_CONSOLE": 0x00000010,
+    "DETACHED_PROCESS": 0x00000008,
+    "CREATE_NO_WINDOW": 0x08000000,
+    "CREATE_NEW_PROCESS_GROUP": 0x00000200,
+    "CREATE_BREAKAWAY_FROM_JOB": 0x01000000,
+    "CREATE_SUSPENDED": 0x00000004,
+    "DEBUG_PROCESS": 0x00000001,
+    "DEBUG_ONLY_THIS_PROCESS": 0x00000002,
+    "CREATE_PRESERVE_CODE_AUTHZ_LEVEL": 0x02000000,
+    "CREATE_PROTECTED_PROCESS": 0x00040000,
+    "EXTENDED_STARTUPINFO_PRESENT": 0x00080000,
+    "CREATE_SECURE_PROCESS": 0x00400000,
+    "INHERIT_PARENT_AFFINITY": 0x00010000,
+}
+
+
+@pytest.mark.parametrize("console_children", [False, True], ids=["detached", "console-children"])
+@pytest.mark.parametrize("flag", list(_CONTRACT_OWNED_FLAGS.values()), ids=list(_CONTRACT_OWNED_FLAGS))
+def test_spawn_daemon_rejects_contract_owned_creationflags(
+    tmp_path, monkeypatch, fake_popen, flag, console_children
+):
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    with pytest.raises(ValueError, match="extra_creationflags"):
+        pu.spawn_daemon(
+            ["py"], cwd=tmp_path, log_path=tmp_path / "d.log",
+            console_children=console_children, extra_creationflags=flag,
+        )
+    assert fake_popen.calls == []
+
+
+def test_spawn_daemon_rejects_owned_flag_mixed_with_a_priority_class(
+    tmp_path, monkeypatch, fake_popen
+):
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    with pytest.raises(ValueError, match="0x10 are not permitted"):
+        pu.spawn_daemon(
+            ["py"], cwd=tmp_path, log_path=tmp_path / "d.log",
+            console_children=True, extra_creationflags=0x00004000 | 0x00000010,
+        )
+    assert fake_popen.calls == []
+
+
+def test_spawn_daemon_rejects_owned_creationflags_off_windows_too(
+    tmp_path, monkeypatch, fake_popen
+):
+    monkeypatch.setattr(pu, "_is_windows", lambda: False)
+    with pytest.raises(ValueError, match="extra_creationflags"):
+        pu.spawn_daemon(
+            ["py"], cwd=tmp_path, log_path=tmp_path / "d.log",
+            extra_creationflags=0x01000000,
+        )
+    assert fake_popen.calls == []
+
+
+@pytest.mark.parametrize("flags", [True, "0x20", 0x20 * 1.0])
+def test_spawn_daemon_rejects_non_int_creationflags(tmp_path, fake_popen, flags):
+    with pytest.raises(TypeError, match="must be an int"):
+        pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log",
+                        extra_creationflags=flags)
+    assert fake_popen.calls == []
+
+
+@pytest.mark.parametrize(
+    "flag",
+    [0x00000020, 0x00000040, 0x00000080, 0x00004000, 0x00008000, 0x04000000,
+     0x00004000 | 0x04000000],
+    ids=["normal", "idle", "high", "below-normal", "above-normal",
+         "default-error-mode", "below-normal+default-error-mode"],
+)
+def test_spawn_daemon_passes_allowed_creationflags_through(
+    tmp_path, monkeypatch, fake_popen, flag
+):
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log", extra_creationflags=flag)
+    (_, kwargs), = fake_popen.calls
+    assert kwargs["creationflags"] == (
+        pu._DETACHED_PROCESS | pu._CREATE_NEW_PROCESS_GROUP | pu._CREATE_BREAKAWAY_FROM_JOB | flag
+    )
+
+
+def test_spawn_daemon_allowed_flags_keep_contained_mode_contained(
+    tmp_path, monkeypatch, fake_popen
+):
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log",
+                    console_children=True, extra_creationflags=0x00004000)
+    (_, kwargs), = fake_popen.calls
+    assert kwargs["creationflags"] == pu._CREATE_NO_WINDOW | 0x00004000
+
+
+def test_spawn_daemon_rejects_log_path_inside_payload(tmp_path, fake_popen):
+    # The daemon holds its log open for life: inside a payload it would pin
+    # the payload directory exactly like a payload cwd.
+    payload = tmp_path / "installed-plugins" / "market" / "plugin"
+    log_path = payload / "logs" / "d.log"
+    with pytest.raises(ValueError, match="log_path is inside a plugin payload"):
+        pu.spawn_daemon(["x"], cwd=tmp_path, log_path=log_path)
+    assert fake_popen.calls == []
+    assert not payload.exists()
+
+
+def test_spawn_daemon_rejects_log_path_that_resolves_into_payload(
+    tmp_path, monkeypatch, fake_popen
+):
+    payload, link = _payload_and_link(tmp_path)
+    link.mkdir()
+    log_path = link / "d.log"
+    real = pu.os.path.realpath
+    monkeypatch.setattr(
+        pu.os.path, "realpath",
+        lambda p, *a, **k: (
+            str(payload / "d.log") if os.fspath(p) == str(log_path) else real(p, *a, **k)
+        ),
+    )
+    with pytest.raises(ValueError, match="log_path is inside a plugin payload"):
+        pu.spawn_daemon(["x"], cwd=tmp_path, log_path=log_path)
+    assert fake_popen.calls == []
