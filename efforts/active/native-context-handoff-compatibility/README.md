@@ -8,7 +8,9 @@
 - **Umbrella issue:** #6028
 - **Branch(es):** independent implementation branches off `dev`; coordinator owns publication.
 - **Implementation:** native selection, checkpoint guidance and pressure backoff
-  implemented in the open implementation PR; review, release and live acceptance pending.
+  merged through #6066 and released as context-handoff 0.5.12-dev1; bounded real
+  CLI mechanics proved, all four independent evals FAIL; full acceptance and
+  native deployment/matrix validation remain incomplete.
 
 ## Guiding Intent
 
@@ -24,7 +26,7 @@ Compaction remains emergency recovery rather than the planned continuity path.
 | Participant | Role | Reached via |
 |-------------|------|-------------|
 | coordinator | Plan, evidence, integration, and publication | Managed planning worktree |
-| compatibility worker | Future isolated implementation and validation | Dedicated worktree after plan review |
+| compatibility worker | Contained source tests and bounded clean-room evidence | Dedicated native evidence worktree |
 
 ## Coordination
 
@@ -37,8 +39,8 @@ Compaction remains emergency recovery rather than the planned continuity path.
 
 ## Context
 
-The plugin owns continuity policy, not terminal/process lifecycle. Its current
-pressure response assumes a successor-session handoff. Native runtimes can
+The plugin owns continuity policy, not terminal/process lifecycle. Its original
+custom pressure response assumed a successor-session handoff. Native runtimes can
 instead expose `get_context_remaining`, `session_artifacts`, `session_history`,
 and terminal `new_context`, retaining session/workspace identity.
 
@@ -77,7 +79,7 @@ Unrelated repository lifecycle work is intentionally outside this scope.
 
 ### Phase 2 - Native-aware guidance and checkpoints
 
-- [ ] Update ambient instructions, targeted skills, templates, and writer output
+- [x] Update ambient instructions, targeted skills, templates, and writer output
   together so native-first guidance replaces unconditional pressure handoff.
 - [ ] Preserve original objective, parent completion gate, current slice,
   unresolved requests, settled evidence, and background/external obligations
@@ -86,34 +88,34 @@ Unrelated repository lifecycle work is intentionally outside this scope.
   guards. Do not write guessed internal artifact files.
 - [ ] Refresh relevant durable guidance after rollover; do not rely on wiped
   conversational skill or one-shot startup context.
-- [ ] _(agent-recommended)_ Start with guidance-first checkpoint generation.
+- [x] _(agent-recommended)_ Start with guidance-first checkpoint generation.
   Add a scoped artifact argument modifier only if validation demonstrates a
   concrete completeness gap; preserve complete arguments and agent work state.
 
 ### Phase 3 - Pressure behavior and fallback
 
-- [ ] Select native pressure behavior from explicit settings-file enablement
+- [x] Select native pressure behavior from explicit settings-file enablement
   or a complete current offered-tool set unless support/availability is confirmed
   unavailable. Replace custom soft/hard session-transfer prompts with native
   checkpoint prompts; suppress custom force action/tool blocking. Unknown
   metadata does not undo explicit opt-in or silence diagnostic pressure guidance;
   bound re-evaluation and never block native checkpoint writes.
-- [ ] Reset per-window pressure accounting after confirmed native transitions
+- [x] Reset per-window pressure accounting after confirmed native transitions
   without changing worktree/session ownership.
-- [ ] Retain explicit save/trigger/consume and real new-owner/process recovery.
+- [x] Retain explicit save/trigger/consume and real new-owner/process recovery.
   Preserve existing consent and automatic/manual/off-mode semantics.
-- [ ] Retain diagnostic, authorized fallback for unavailable native support.
+- [x] Retain diagnostic, authorized fallback for unavailable native support.
   Confirmed unsupported/unavailable support overrides a true flag; policy caps
   and partial persistence failure are not permission for automatic cutover.
   Unknown capability retains diagnostics/explicit recovery, not silent suppression.
-- [ ] Preserve emergency compaction. Do not invoke low-level context clearing
+- [x] Preserve emergency compaction. Do not invoke low-level context clearing
   opportunistically from a timer or non-terminal hook.
 
 ### Phase 4 - Acceptance and deployment
 
 - [ ] Run focused contained tests and an isolated CLI/ACP capability,
   checkpoint, rollover, and resume proof where available.
-- [ ] Reconcile docs, declare a context-handoff changefile for implementation,
+- [x] Reconcile docs, declare a context-handoff changefile for implementation,
   clear contribution review/CI, and drive implementation through release.
 - [ ] Verify deployed behavior through the supported update flow and retain
   explicitly documented unsupported-venue fallback.
@@ -151,7 +153,405 @@ its declared matrix, required review/release/deployment are complete, and every
 Plan/Validation Plan item is resolved or transferred by name. Planning publication
 alone does not complete the update.
 
+## Final Independent Evidence
+
+All four `eval/cr-eval.json` files have final independent **FAIL** verdicts.
+Original packets, transcripts and artifact revisions remain unchanged; later
+semantic acceptance did not retroactively regrade an earlier contract.
+
+| Rig run | Final verdict | Proven evidence | Acceptance deficit |
+|---|---|---|---|
+| `20261011-141039` | FAIL | Two genuine same-owner root clears; measured shorter CLI prompt limit | Stale/compound successor actions, wrong cursor, incomplete witness and omitted warning extraction |
+| `20261011-144243` | FAIL | Two root clears; both boundary contents read back; correct cursor/report fields | Required durable refresh/measurement omitted or performed after task work |
+| `20261011-152720` | FAIL | One root clear; successful combined sequential AGENTS read | Exact-tool fixture exceeded plugin contract; targeted skill, task action, second clear and witness absent |
+| `20261012-004340` | FAIL | Two root clears; first semantic recovery refreshed content and owning skill before work; stable ownership | Later worker-authored checkpoint decisions/cursor/measurements/action corrupted, second pre-clear validation skipped, final recovery/report incomplete |
+
+The live lane actually ran CLI 1.0.92 with offered `claude-sonnet-5` and measured
+`promptTokenLimit=200000`, using released context-handoff 0.5.12-dev1 with native
+blob `9e733a6cf4809c9985238bc552722d7a936da3d7`. These are genuine native
+mechanics and first-recovery proofs, **not** end-to-end acceptance or evidence
+that the native plugin/storage corrupted data. The later bad content was
+authored by the driven worker before persistence.
+
+Still unresolved: checkpoint fidelity/adherence across all windows, hard/force
+suppression at actual boundaries, denial/cap/filter/fallback and adverse
+recovery, real live-resource survival, ACP/subagent admission/isolation and
+native deployed acceptance. Separate worktree-manager rollout/admission success
+does not close those native gates. The effort remains **Active**.
+
+## Publication Preparation Summary
+
+**Scope:** publish the existing generic test/evidence tranche, not a runtime fix
+or a passing acceptance claim. Relative to journal base `f926f234a`, the tranche
+changes eight files: this effort README/design plus the scenario's README,
+manifest, setup shell, controller, read-only validator and deterministic tests
+under `tools/clean-room/scenarios/context-handoff-native-cli/`. No plugin payload,
+runtime, catalog, installed settings or changefile is changed. Preparation reconciles final documentation and evidence-integrity checks;
+managed publication/review/merge
+belongs to the coordinator.
+
+**Source validation:** eleven focused unittests, touched-Python Ruff `F,E9`, Python
+syntax, manifest JSON, effort structure and diff-whitespace checks. The tests
+exercise warning extraction, cursor/action/report completeness, successful
+view/bash content attribution, owning-skill delivery, failed/skipped/bogus
+refresh, native window evidence and refresh-before-work. Additional regressions
+reject unrelated or option-bearing copy destinations, failed or mismatched
+artifact read-back, malformed native results and child-owned clears. Real eval results
+remain four FAILs; passing source tests cannot replace those verdicts.
+
+Reproduce the source checks from the repository root:
+
+```powershell
+Push-Location tools\clean-room\scenarios\context-handoff-native-cli
+$env:PYTHONDONTWRITEBYTECODE = '1'
+python -m unittest test_validation
+ruff check --no-cache --select F,E9 controller.py validation.py test_validation.py
+Pop-Location
+python tools\check-effort-vision-structure.py efforts\active\native-context-handoff-compatibility\README.md
+git diff --check f926f234a..HEAD
+```
+
+Historical real-CLI reproduction is documented in the scenario README:
+`run.ps1 -Mode run -Scenario context-handoff-native-cli -NameSuffix <unique-suffix>`
+establishes the disposable venue; controller `launch`, actual `/model` discovery
+and setup measurement precede `pressure`, `export`, `analyze` and `redact`.
+`pressure` is a paid, explicitly authorized literal-mode witness, not a source
+test or ACP substitute. Release version/blob checks fail closed if current
+`main` no longer carries the recorded payload. No new eval was run or authorized
+by this preparation slice.
+
+**Safety and sanitization:** the reviewed eight-file tranche contains only
+generic tooling, synthetic fixture data/session identifiers and declared
+in-container paths. No real operator/machine/private checkout path, credential
+literal, private URL or raw run artifact is included. Raw judge packets/logs stay
+in the rig-owned out-of-tree store; do not attach them publicly without a
+separate content review. No private-string publication blocker was found.
+The declared Linux container paths, release pin and current offered-model/auth
+prerequisites are reproduction limitations, not machine-local configuration.
+
+**Documentation impact:** this README records final verdicts and remaining
+gates; `design.md` distinguishes native mechanics from worker checkpoint
+noncompliance; the scenario README documents the opt-in real-CLI lane, semantic
+validator and final results. Runtime behavior, vision intent, install contract,
+resident-daemon lifecycle and platform support are unchanged. This is
+below-altitude evidence/tooling documentation, with no new rollout claim.
+
 ## Journal
+
+### 2026-10-12 - Final verdict persistence and publication preparation
+
+- Read all four independent judge files and confirmed final FAIL verdicts;
+  replaced stale pending-verdict labels in the canonical effort/design. The semantic
+  packet's final judge SHA-256 is
+  `c0d53805104dff335bc4180149d6a9312888bb3470c66a9786d2c5c82c331e10`.
+  No packet, fixture contract, source implementation or prior result was altered
+  to obtain a pass. Native mechanics and first semantic recovery remain proved;
+  worker checkpoint fidelity and the unresolved acceptance matrix remain open.
+- Prepared the public-safe summary above and reviewed the cumulative owned
+  tranche for real host paths, operator/machine markers, credential literals and
+  private URLs. A prose separator was clarified to avoid resembling a host path;
+  no real private string was found. Raw artifacts remain outside the repository.
+- Coordinator-reported worktree-manager rollout/admission side objectives
+  (#6095 and #6299, agent-worktrees 1.24.52) are closed separately. This slice
+  neither repeats those checks nor treats them as native deployed acceptance.
+- Ran source/static documentation checks only. No paid CLI/ACP trial, runtime
+  or plugin edit, installed-payload update, child agent, PR operation, rebase,
+  reset, squash or push was performed. Existing journal/evidence commits and
+  backup refs are preserved. The effort remains Active for the coordinator's
+  managed publication and remaining objective gates.
+
+### 2026-10-12 - Operator-selected prospective semantic acceptance
+
+- The third independent verdict on run `20261011-152720` remains FAIL, with
+  SHA-256 `d76289d310f2d72c5610038dc788c4e54373117c79074bad96849183e0eae202`.
+  It found the exact-five-tools/isolated-view fixture stricter than the released
+  plugin contract: the combined bash read actually refreshed AGENTS content
+  sequentially, not in parallel. Missing targeted skill, task execution, second
+  transition and final report still prevented acceptance. No plugin defect
+  was established. All three prior FAIL packets remain immutable.
+- The operator explicitly selected semantic acceptance for one new fresh run.
+  This is a prospective scope decision, not retroactive regrading or silent
+  loosening of prior results. Guidance content and owning targeted skill must
+  refresh successfully before substantive recorded task work. Valid view/bash
+  reads and combined sequential prerequisite reads are allowed; task-contract
+  recovery reads may precede the one successor TASK action. Actual native
+  measurement must evidence each recovered window without an artificial exact
+  tool position/count.
+- Revised generic manifest, prompt and event evidence checks accordingly.
+  Content proof requires actual successful output matching the unchanged
+  guidance bytes and an attributable proper file read operand, not a tool-name
+  proxy, title mention or success-shaped claim. Owning skill must have successful
+  invocation and attributable native context-delivery evidence. Work before
+  completed refresh, failed/skipped/bogus content, missing native measurement
+  or incorrect task content is rejected; validators never self-heal the witness.
+- Six focused deterministic tests cover view and combined sequential bash
+  success, missing guidance/skill/measurement, wrong path/bogus returned content,
+  failed read, falsely quoted read commands and work-before-refresh. Measurement
+  after the first task action is permitted when the actual recovered window is
+  evidenced. Existing parent/task/checkpoint identity, read-back/revision,
+  cursor, report and literal no-self-heal requirements are retained.
+- No runtime source or installed-host setting/plugin/session mutation,
+  child agent, publication or candidate-payload substitution is part of this
+  semantic acceptance slice. The parent effort remains Active; hard/force,
+  adverse/fallback, ACP/subagent and live-resource matrices remain separate.
+- Fresh semantic rig run `20261012-004340`: CLI 1.0.92, actually offered and
+  selected `claude-sonnet-5`, measured prompt limit 200000 (full limit 264000).
+  Released snapshot `7781113adb37e6fbf775ff5cec4ea92505861052` carries
+  context-handoff 0.5.12-dev1 and native blob
+  `9e733a6cf4809c9985238bc552722d7a936da3d7`. Every plugin file SHA-256
+  matches the first released run. A delayed folder-trust/model-picker startup
+  left unsubmitted input, which was cleared before any paid model turn;
+  no witness repair or host-setting change occurred.
+- **Final independent verdict: FAIL; two real native transitions, then STOP.**
+  Root clears at `07:52:56.013Z` and `07:54:27.038Z`, windows
+  `v2:0 -> v2:1 -> v2:2`, stable session/artifact scope
+  `8dda10da-fcb5-4682-9b6a-925e1a21194f`, same synthetic workspace.
+  First trigger result was 79576/200000 remaining (60.212% used);
+  second actual measurement was 79436/200000 (60.282% used).
+  Preparation notifications at 55% and 57% were captured; final usage
+  sidecar was 17%. No custom handoff was invoked.
+- First boundary revision 1 retained full facts/measurement, exact atomic
+  read `shard-006.txt:[80,80]`, revision-bound content read-back and successful
+  pre-clear validation. First recovered window has semantic content proof:
+  actual guidance read plus owning-skill delivery completed before substantive
+  recorded read, and native window measurement is evidenced. This is observed
+  contract evidence, not a worker-issued Tier-E pass.
+- **Exact remaining blocker:** the agent wrote an invalid interim revision 2
+  with approximate cursor, extra decision text, abbreviated measurements and
+  a compound rollover-looking action, then wrote revision 3 before the second
+  clear. Revision 3 still altered authoritative decisions, put record 1427 at
+  line 69 instead of actual line 68, abbreviated both native results and
+  retained a corpus-read action rather than the required final witness action.
+  Although revision 3 was read back, the agent skipped its pre-clear
+  content validation and cleared anyway. In the second recovery it read
+  AGENTS/task/contract, discovered the invalid artifact and ran the validator,
+  which exited 1. It STOPPED without repair or witness. Second recovery has
+  no owning-skill refresh, native measurement or recorded task action.
+- New semantic event evidence rejects the missing second recovery gates.
+  Derived checkpoint evidence independently records revisions 2/3 defects
+  and the absent report. Native RPC `success: true` can carry a shell
+  `exitCode: 1`; the analyzer now uses the actual `shellExecution` and telemetry
+  exit code so that the failed validation command is not mislabeled successful.
+  Tests also reject such success-shaped shell failures and wrong skill delivery.
+- New `eval/judge-packet.json` points to the raw events/transcript, actual
+  checkpoints/read-backs, semantic content/ordering evidence, validator exit-1
+  output, literal fixture, immutable payload fingerprint and configuration.
+  The independent judge finalized this prospective semantic run as FAIL;
+  all three prior FAIL hashes were rechecked unchanged. No further attempt or
+  retroactive regrading was performed.
+- Final packet capture occurred after CLI exit. The sole semantic-run container
+  was removed using its verified immutable identity; no owned background
+  process/container/provider/schedule/claim remains. No artifact matched the
+  borrowed credential. The worktree remains local and the parent Active;
+  no PR, publication, host repair or runtime edit was performed.
+
+### 2026-10-11 - Final bounded recovery-adherence attempt (final FAIL)
+
+- Final independent FAIL: the exact-five-tools/isolated-view fixture was stricter
+  than released guidance. The combined AGENTS bash read was sequential and
+  successful, but owning skill, task action, second transition and witness were
+  absent. No native plugin defect was established; the original packet is intact.
+- Preserved both independent FAIL packets and their recorded hashes unchanged.
+  This was the one authorized final narrower attempt, not an unbounded retry.
+  No plugin defect was established; released guidance/runtime remained byte
+  identical to both prior runs. The parent effort remains Active.
+- Added an explicit ordered checklist of existing requirements to the acceptance
+  prompt and separate checkpoint recovery prerequisites: checkpoint read ->
+  AGENTS refresh -> owning targeted skill refresh -> native recovered-window
+  measurement -> exact recorded task action. No relaxed requirement, fake
+  checkpoint writer, private API, child agent or runtime patch was introduced.
+- Deterministic event validation now requires successful sequential completion,
+  rejects missing/failed/overlapping/out-of-order refresh or measurement, checks
+  the recorded task action, and exits nonzero rather than repairing the witness.
+  Four focused unittest cases passed, including mutations of both recovery
+  windows. The validator also rejected the second prior run's actual failed
+  event evidence without altering that packet.
+- Fresh rig run `20261011-152720`: CLI 1.0.92, actually offered and selected
+  `claude-sonnet-5`, measured prompt limit 200000, full limit 264000. Released
+  snapshot `3bd09511840d4ebb7d02ebd5d76879b4246d0d26`, context-handoff
+  0.5.12-dev1, native Git blob `9e733a6cf4809c9985238bc552722d7a936da3d7`.
+  Per-file plugin hashes match the first run exactly; host installation,
+  settings, real sessions/claims/queues and all policy caps remained untouched.
+- **Actual outcome: one native transition, then literal STOP.** Trigger remaining
+  tokens 79201/200000 (60.3995% used); confirmed root clear
+  `e55a3636` at `22:34:41.831Z`, same session/artifact scope
+  `c3a1549f-688c-421e-ba4c-842545dddbd1`, same synthetic workspace.
+  The rollout checkpoint retained exact task facts, atomic corpus read
+  `shard-005.txt:[54,80]`, measured result and the separate recovery checklist;
+  it was read back and validated before terminal clear. Setup had earlier
+  written a non-rollover note in the artifact; this remains visible as a
+  pre-acceptance write, not an acceptance checkpoint or a runtime defect.
+- **Exact blocker:** after native checkpoint read `d74b9771`, the witness
+  misclassified the authorized synthetic fixture as suspicious, then issued
+  bash event `b95dfeb1` combining AGENTS/task/contract/ledger reads instead of
+  the prescribed isolated `view AGENTS.md`. It recognized the ordering
+  violation and STOPPED without retroactive repair, skill refresh, measurement,
+  corpus action or second transition. No follow-up prompt was sent to repair it.
+  `witness.json` is absent. Event-validator exit 1 records wrong second step,
+  missing remaining prerequisites/action and fewer than two root clears.
+- One native preparation notification at 56% was captured; final plugin
+  usage sidecar returned to 14%. There were no failed native/tool results or
+  custom handoff calls. These facts do not close the adherence or hard/force
+  acceptance gates. The independent judge finalized the packet as FAIL.
+- `eval/judge-packet.json`, ordered recovery observations, raw events/transcript,
+  checkpoint read-back, source/payload fingerprints, configuration and exact
+  validator-failure output are preserved under rig-owned run `20261011-152720`.
+  No additional attempt or publication is authorized by this slice. Remaining
+  hard/force, ACP/subagent, adverse/fallback and live-resource matrices remain
+  separate and unaccepted.
+- Final capture retained the exact STOP and event-validation failure after CLI
+  exit. The sole final-attempt container was removed by verified immutable ID;
+  no owned process/container/provider/schedule/claim remains. Both prior FAIL
+  hashes were rechecked unchanged, and no artifact matched the borrowed token.
+
+### 2026-10-11 - Narrower fixture repair and released CLI rerun (final FAIL)
+
+- **Subsequent independent verdict: FAIL.** Run `20261011-144243` proved both
+  genuine transitions and corrected checkpoint/cursor/witness fields, but neither
+  recovery window read AGENTS, the second omitted owning-skill refresh and native
+  measurement, and first recovered-window measurement occurred after task
+  execution. The judge established no plugin defect. Its `eval/cr-eval.json`
+  is preserved with SHA-256
+  `84bc6f32a3885d41c78b40ec5b6a69dcf6aed99b17c69f4b56b33fdc5a4d45cc`.
+  A separately authorized final attempt exposes the existing recovery order,
+  not a weakened acceptance gate or an unbounded rerun loop.
+- Preserved the first run's independent FAIL and original artifacts unchanged;
+  verdict SHA-256 remains
+  `2bb988aab5f8285fe9f6635254e4c81428c29e5495180af4914c8f56a1829f82`.
+  Corrected the journal's omitted warning evidence and initial-create claim:
+  raw preparation notifications existed at 64% and 55%, and revision-zero
+  creation without an explicit expected revision was host-accepted.
+- Responsibility diagnosis: released skill already separates native rollover,
+  checkpoint recovery/durable refresh and the one successor action. The first
+  fixture lacked precise atomic audit/report semantics and content read-back
+  validation. No plugin/runtime candidate was necessary or tested. Only the
+  generic scenario fixture/controller/validator/tests and effort docs changed.
+- Added a synthetic data contract defining one atomic post-recovery read or
+  report action, exact 1-based cursor offsets, both full trigger measurements,
+  session/workspace and required task/report fields. It contains no authored
+  checkpoint or replacement native flow. The driven agent still invokes the
+  unchanged released plugin skill and native tools. A read-only validator checks
+  actual persisted content read-back before each terminal clear; invalid content
+  is a literal STOP, never a repair. Deterministic unittest coverage rejects
+  stale/compound actions, record01714 at line36, omitted report fields and missing
+  first measurement, and extracts `session.warning`.
+- Fresh rig run `20261011-144243`, CLI 1.0.92, offered and actually selected
+  `claude-sonnet-5`, measured prompt limit 200000. Released snapshot
+  `3bd09511840d4ebb7d02ebd5d76879b4246d0d26` carries context-handoff 0.5.12-dev1
+  and native blob `9e733a6cf4809c9985238bc552722d7a936da3d7`. Every plugin
+  per-file SHA-256 matches the first released run despite a newer main snapshot.
+- Exactly two real root clears at `21:49:33.273Z` and `21:51:52.830Z`, windows
+  `v2:0 -> v2:1 -> v2:2`, same root/artifact scope
+  `33dd3aa6-bb64-467e-8690-3538fe1defbe`, workspace
+  `/home/operator/native-cli-repo`. Trigger measurements retained verbatim:
+  74537/200000 tokens remaining (62.7315% used) and 78245/200000 (60.8775%
+  used). Revisions 1 and 2 both had content read-back before clear; post-clear
+  native reads retained matching identity/scope.
+- Native preparation notifications at 58% and 56% are now included in both
+  transcript and derived evidence. Final plugin sidecar returned to 15%.
+  Zero failed driven tool results and zero custom handoff calls. Both checkpoints
+  have structurally atomic next actions and exact valid cursor data; witness
+  retains both full measurements, cursor and actual workspace/session fields.
+  This is narrower fixture observation, not a Tier-E pass.
+- **Remaining literal concerns for the judge:** neither recovery window
+  explicitly reread AGENTS.md; only the first reloaded the context-handoff skill.
+  The second window omitted that targeted refresh, made prerequisite reads and
+  used a temporary report draft. No witness repair or follow-up prompt was sent
+  to conceal these gaps. Actual recovery/tool evidence is preserved in
+  `recovery_observations`; correct report fields do not satisfy the refresh gate.
+- New `eval/judge-packet.json` points to raw session/checkpoint/tool/notification
+  evidence, transcript, observed contract checks, fingerprints and configuration.
+  The independent judge finalized this run as FAIL. Parent remains Active; no publication,
+  host plugin/settings/session mutation, ACP substitution or private lifecycle
+  expansion occurred. Hard/force, adverse fallback and live-resource matrices
+  remain separate.
+- Final capture retained the source evidence after CLI exit; the later judge
+  verdict is final FAIL. All owned rerun
+  resources were removed using the exact verified container identity; no owned
+  process, container, provider, schedule or claim remains. The prior FAIL hash
+  was rechecked unchanged. No captured artifact matched the borrowed credential.
+
+### 2026-10-11 - Bounded real CLI clean-room witness (final FAIL)
+
+- **Subsequent independent verdict: FAIL.** The original run's
+  `eval/cr-eval.json` and all original evidence remain unchanged. Two genuine
+  transitions were proved, but compound/stale next actions, an off-by-one
+  revision-2 cursor, incomplete witness output and missing second content
+  read-back failed the literal acceptance contract. The derived pressure
+  extraction incorrectly excluded `session.warning`; the corrected facts below
+  do not revise or supersede that persisted FAIL packet.
+- Executed directly as a testing slice, without child agents, host plugin/settings
+  updates, publication, bridge registration or real queue/claim mutation.
+  Parent effort remains Active; no completion gate is closed by this run alone.
+- Added the generic opt-in `tools/clean-room/scenarios/context-handoff-native-cli`
+  scenario. Deterministic setup used a fresh Linux Docker venue and synthetic
+  repository, home, settings and state, the rig's literal fixture and real interactive
+  CLI under tmux, not ACP. Default plugin thresholds and host policy caps were
+  not lowered. Two pre-eval setup defects (CRLF shell text and redundant
+  marketplace registration) were corrected in separate fresh venues; neither
+  required driven-witness self-repair. The setting editor was not used as proof:
+  its toggle was restored using the documented config command before paid setup
+  measurement; final selected setting was true.
+- Released `main` snapshot `9d5631fa86f698efd3169e98e33849d42b302ce4`
+  carried context-handoff `0.5.12-dev1`; `native-context.mjs` Git blob was
+  `9e733a6cf4809c9985238bc552722d7a936da3d7`. Recorded per-file SHA-256
+  fingerprints. Host installed payload remained untouched.
+- CLI `1.0.92` offered and actually ran `claude-sonnet-5`, with measured
+  `promptTokenLimit=200000`, full limit `264000`, compaction threshold `160000`
+  and no native window cap. This is materially shorter than reference
+  coordinator prompt limit `922000`, not an inferred picker label.
+- Exactly two successful `new_context` calls matched two root
+  `session.context_cleared` events at `21:21:27.124Z` and `21:22:49.198Z`.
+  Window IDs advanced `v2:0 -> v2:1 -> v2:2` under one root session/workspace
+  and one native artifact memory scope. Trigger measurements were
+  `69070/200000` tokens remaining (65.465% used) and `73230/200000`
+  remaining (63.385% used). Post-second-clear remaining tokens were `171646`.
+  Artifact create/update revisions, bound source windows/history positions,
+  read-after-clear and AGENTS/skill refresh evidence were captured.
+- No failed tool result or custom handoff tool call occurred. Final plugin
+  usage sidecar retained the same session identity and reported
+  `40584/200000` tokens (20%) after rollover. This supports bookkeeping reset,
+  **not** force-boundary acceptance: hard/force boundaries were not exercised.
+  Correction: raw `session.warning` events `1a2c1272` and `17993779` contain
+  native preparation notifications at 64% and 55%; the first analyzer wrongly
+  omitted that event type. Preparation notifications were captured, but
+  agent-facing idle nudge delivery and hard/force suppression are not inferred.
+- The independent judge found literal fidelity failures. First checkpoint's
+  purported single next action includes an already-executed `new_context` plus
+  compound recovery instructions. Initial creation without explicit
+  `expected_revision` is host-accepted and is **not** a demonstrated violation;
+  the host requires expected revision for replacement (updates supplied
+  revisions 1 and 2). Preserve those tool-event revisions, not only revision 3.
+  Revision 2 cursor named record 01714 at line 36 instead of actual line 35.
+  Its pre-clear verification was stat-only, not content read-back. The witness
+  omitted first measurement, cursor and workspace identity and overclaimed
+  fidelity. These are independent judge findings, not a worker-issued pass.
+- Rig-owned run `20261011-141039` holds `cr-report.json` (setup only),
+  `eval/judge-packet.json`, `observed-evidence.json`, event transcript, raw
+  session events/checkpoints, literal fixture, payload/source fingerprints,
+  model/limits, configuration and synthetic workspace results. Coordinator
+  owns the Tier-E judge and final decision.
+- Exited the driven CLI and removed only the three identity-verified containers
+  owned by this slice after final capture. No owned background resource remains;
+  rig artifacts remain available for the coordinator. The borrowed credential
+  was checked against captured artifacts without exposing it; no matches needed
+  redaction. Existing journal commit and backup refs were preserved.
+- Still unexercised: agent-facing idle nudge delivery; actual hard/force
+  mutating-denial suppression; denial/caps/tool-filter/fallback matrix; stale
+  checkpoint rejection and partial-persistence/double-clear recovery; live
+  worker/watch/claim survival (ledger only synthetic); ACP/subagent isolation;
+  operator-host update/deployment. No private lifecycle or #6095 publication
+  work was performed.
+
+### 2026-10-11 - Implementation reviewed and merged
+
+- #6066 merged at 18:00:20Z with current-head approval, zero open findings and
+  passing required CI; squash commit `d429864991c89a8efd96ee4d0493a439cc87cc86`.
+- Closed the implemented guidance-selection and pressure/fallback plan items.
+  Checkpoint semantic fidelity, actual CLI/ACP continuation, release and deployed
+  acceptance remain open rather than inferred from synthetic tests or a merge.
+- Re-read the parent completion gate after merge. This effort remains Active;
+  no workspace lifecycle product implementation or public posting is authorized.
 
 ### 2026-10-10 - Native compatibility implementation slice
 
