@@ -46,6 +46,7 @@ class _LiveSessionsMixin:
         driven_by: str | None = None,
         venue: str | None = None,
         process_started_at: float | None = None,
+        clear_targeting_metadata: bool = False,
     ) -> str:
         """Insert or refresh a live interactive-session registration (upsert).
 
@@ -86,6 +87,7 @@ class _LiveSessionsMixin:
             self, session_id, machine=machine, cwd=cwd, worktree_id=worktree_id,
             repo=repo, branch=branch, pid=pid, role=role, now=now, driven_by=driven_by,
             venue=venue, process_started_at=process_started_at,
+            clear_targeting_metadata=clear_targeting_metadata,
         )
 
     def create_cli_mode_reservation(

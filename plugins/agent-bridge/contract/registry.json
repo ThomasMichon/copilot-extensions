@@ -111,6 +111,12 @@
           "non_semantic_reason": "Preserves public model imports through re-exports; session start schemas now live in the registered session_start_models.py owner."
         },
         {
+          "path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "sha256": "212ba2f30dfc0c1cdfe788b379f473620b48a1e5a4f6fd5b20fb211074e1f88d",
+          "semantic": false,
+          "non_semantic_reason": "RegisterLiveSessionRequest is extracted from models.py and re-exported there without changing existing fields. Its optional clear_targeting_metadata flag defaults to false, preserving ordinary null-metadata heartbeats; the bundled generation-33 extension opts in to atomic session-only registration while its qualified peer identity is unresolved. Existing representative wire fixtures remain unchanged."
+        },
+        {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
           "sha256": "df5f2392d27d20be304fc978c86a16a6f6f7fd8d47062e2f95f4770d921c9727",
           "semantic": false,

@@ -235,9 +235,21 @@ test("an unresolved machine cannot register an unqualified worktree lineage", ()
   const meta = { machine: null, worktree_id: "shared-name", repo: "proj", cwd: "/fixture" };
   assert.deepEqual(registrationMetadata(meta), {
     machine: null, worktree_id: null, repo: null, cwd: "/fixture",
+    clear_targeting_metadata: true,
   });
   assert.equal(meta.worktree_id, "shared-name");
-  assert.deepEqual(registrationMetadata(null), {});
+  assert.deepEqual(registrationMetadata(null), {
+    machine: null, worktree_id: null, repo: null, clear_targeting_metadata: true,
+  });
   const resolved = { ...meta, machine: "host-wsl" };
   assert.equal(registrationMetadata(resolved), resolved);
+});
+
+test("incomplete project or worktree metadata also clears the old lineage", () => {
+  for (const key of ["repo", "worktree_id"]) {
+    const meta = { machine: "host-wsl", repo: "proj", worktree_id: "wt", [key]: null };
+    assert.deepEqual(registrationMetadata(meta), {
+      machine: null, repo: null, worktree_id: null, clear_targeting_metadata: true,
+    });
+  }
 });

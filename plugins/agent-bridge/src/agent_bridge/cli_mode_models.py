@@ -1,4 +1,4 @@
-"""CLI-mode Session Host reservation + remote-venue descriptor models.
+"""Live CLI registration, Session Host reservation and venue descriptor models.
 
 Split out of ``models.py`` (module-size guard); re-exported from there, so
 ``from agent_bridge.models import LiveSessionVenue`` keeps working.
@@ -45,6 +45,23 @@ class CreateCliModeReservationRequest(BaseModel):
     worktree_id: str
     ttl_seconds: float = 300.0
     venue: LiveSessionVenue | None = None  # inherited by the claiming live session
+
+
+class RegisterLiveSessionRequest(BaseModel):
+    """Registration payload from the bundled agent-bridge extension."""
+
+    session_id: str
+    clear_targeting_metadata: bool = False
+    machine: str | None = None
+    cwd: str | None = None
+    worktree_id: str | None = None
+    repo: str | None = None
+    branch: str | None = None
+    pid: int | None = None
+    role: str | None = None
+    driven_by: str | None = None
+    venue: LiveSessionVenue | None = None
+    process_started_at: float | None = None  # with pid: one process instance; routes refuse non-finite
 
 
 class CliModeReservationInfo(BaseModel):

@@ -150,6 +150,7 @@ def register_live_session_atomic(
     worktree_id: str | None, repo: str | None, branch: str | None, pid: int | None,
     role: str | None, now: float, driven_by: str | None, venue: str | None,
     process_started_at: float | None,
+    clear_targeting_metadata: bool = False,
 ) -> str:
     """Upsert a registration, claim a pending CLI-mode reservation and fold in a
     same-process predecessor in **one** write transaction, so a concurrent
@@ -157,6 +158,8 @@ def register_live_session_atomic(
     successor without its claim, venue or the predecessor's handle. Returns
     ``'live'``, ``'taken-over'`` or ``'reserved'``
     (see ``register_live_session``)."""
+    if clear_targeting_metadata:
+        machine = worktree_id = repo = None
     conn = db._get_conn()
     with db._write_lock:
         conn.execute("BEGIN IMMEDIATE")
@@ -184,6 +187,13 @@ def register_live_session_atomic(
                 conn.rollback()
                 taken = existing is not None and (existing["status"] or "live") == "taken-over"
                 return "taken-over" if taken else "reserved"
+            if clear_targeting_metadata:
+                # Admission still checks the retained worktree before clearing;
+                # the transaction exposes no stale or partially cleared lineage.
+                conn.execute(
+                    "UPDATE live_sessions SET machine=NULL, worktree_id=NULL, repo=NULL "
+                    "WHERE session_id=?", (session_id,),
+                )
             if worktree_id is not None:
                 # Bookkeeping, never an admission gate: claim a pending CLI-mode
                 # reservation (its trusted venue too), then fold in a same-process

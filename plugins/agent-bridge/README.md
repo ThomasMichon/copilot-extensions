@@ -26,6 +26,10 @@ is not transport, session or ownership identity.
 The live-session extension obtains the machine key from Agent Worktrees.
 A failed owner lookup remains incomplete and is retried with bounded backoff;
 it never freezes a physical hostname as a guessed logical machine.
+An incomplete lookup explicitly clears the registration's prior targeting
+metadata atomically. Ordinary id-only heartbeats still retain metadata;
+`clear_targeting_metadata: true` opts into session-only addressing until the
+complete logical machine/project/worktree tuple is available again.
 
 [Session preference authority](docs/session-preferences.md) documents optional
 execution-user defaults, the unchanged caller-settings default, and the

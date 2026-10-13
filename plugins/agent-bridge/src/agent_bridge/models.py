@@ -12,6 +12,7 @@ from .cli_mode_models import (  # noqa: F401 -- re-exported public models
     CliModeReservationInfo,
     CreateCliModeReservationRequest,
     LiveSessionVenue,
+    RegisterLiveSessionRequest,
 )
 from .install_paths import effective_config_dir
 from .protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
@@ -417,22 +418,6 @@ class SessionListResponse(BaseModel):
 
 
 # -- Live interactive-session registry (extension-backed) --------------------
-
-
-class RegisterLiveSessionRequest(BaseModel):
-    """Registration payload from the bundled agent-bridge extension."""
-
-    session_id: str
-    machine: str | None = None
-    cwd: str | None = None
-    worktree_id: str | None = None
-    repo: str | None = None
-    branch: str | None = None
-    pid: int | None = None
-    role: str | None = None
-    driven_by: str | None = None
-    venue: LiveSessionVenue | None = None
-    process_started_at: float | None = None  # with pid: one process instance; routes refuse non-finite
 
 
 class LiveSessionInfo(BaseModel):

@@ -110,8 +110,11 @@ export const METADATA_RETRY_MIN_MS = 30_000;
 export const METADATA_RETRY_MAX_MS = 10 * 60_000;
 
 export function registrationMetadata(meta) {
-  if (!meta) return {};
-  return meta.machine ? meta : { ...meta, worktree_id: null, repo: null };
+  if (IDENTITY_FIELDS.every((key) => meta?.[key])) return meta;
+  return {
+    ...meta, machine: null, worktree_id: null, repo: null,
+    clear_targeting_metadata: true,
+  };
 }
 
 // ``refresh()`` re-resolves the metadata while a field above is still missing,

@@ -253,6 +253,7 @@ async def register_live_session(
         driven_by=body.driven_by,
         venue=body.venue.model_dump_json() if body.venue is not None else None,
         process_started_at=body.process_started_at,
+        clear_targeting_metadata=body.clear_targeting_metadata,
         now=now,
     )
     if status != "live":
