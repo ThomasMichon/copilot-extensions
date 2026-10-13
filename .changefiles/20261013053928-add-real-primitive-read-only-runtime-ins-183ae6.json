@@ -1,0 +1,9 @@
+{
+  "comment": "Add real-primitive read-only runtime inspection regression coverage.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
