@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from time import monotonic
 
-from .procutil import run_agent_worktrees_capture
+from .repository_resource_capture import run_agent_worktrees_capture
 from .registrar import RegistrarError
 
 _PREFIX = "repo:"
@@ -108,37 +108,54 @@ def resolve_resource_argument(
     return str(resolve_repository_resource(value, execution=execution, directory=directory))
 
 
-def execution_root(repository: object, cwd: str | Path | None) -> str | Path | None:
+class RepositoryResourceSnapshot:
+    """One operation's transient roots and shared registry lookup deadline."""
+
+    def __init__(self, *, execution: bool = True):
+        self._execution = execution
+        self._roots: dict[str, Path] = {}
+        self._deadline = monotonic() + 15
+
+    def root(self, name: str) -> Path:
+        if name not in self._roots:
+            remaining = self._deadline - monotonic()
+            if remaining <= 0:
+                raise RegistrarError("repository resource resolution exceeded its shared 15s budget")
+            self._roots[name] = registered_repository_root(
+                name, execution=self._execution, timeout=remaining,
+            )
+        return self._roots[name]
+
+    def resolve(self, value: str, *, directory: bool = False) -> str:
+        if not is_repository_resource(value):
+            return value
+        name, relative = split_repository_resource(value)
+        path = _resource_at_root(value, self.root(name), relative)
+        if directory and not path.is_dir():
+            raise RegistrarError(f"repository resource {value!r} must be a directory")
+        return str(path)
+
+
+def execution_root(
+    repository: object, cwd: str | Path | None, *,
+    snapshot: RepositoryResourceSnapshot | None = None,
+) -> str | Path | None:
+    snapshot = snapshot or RepositoryResourceSnapshot()
     if repository is not None:
         if not isinstance(repository, str):
             raise RegistrarError("execution_repo must be a registered repository name")
-        return registered_repository_root(repository, execution=True)
+        return snapshot.root(repository)
     if isinstance(cwd, str) and is_repository_resource(cwd):
-        return resolve_repository_resource(cwd, execution=True, directory=True)
+        return snapshot.resolve(cwd, directory=True)
     return cwd
 
 
 def resolve_execution_resources(
-    argv: Sequence[str], cwd: str | None,
+    argv: Sequence[str], cwd: str | None, *,
+    snapshot: RepositoryResourceSnapshot | None = None,
 ) -> tuple[list[str], str | None]:
     """Use one transient registered-root snapshot for a single invocation."""
-    roots: dict[str, Path] = {}
-    deadline = monotonic() + 15
-
-    def resolve(value: str) -> str:
-        if not is_repository_resource(value):
-            return value
-        name, relative = split_repository_resource(value)
-        if name not in roots:
-            remaining = deadline - monotonic()
-            if remaining <= 0:
-                raise RegistrarError("repository resource resolution exceeded its shared 15s budget")
-            roots[name] = registered_repository_root(name, execution=True, timeout=remaining)
-        root = roots[name]
-        return str(_resource_at_root(value, root, relative))
-
-    resolved_argv = [resolve(part) for part in argv]
-    resolved_cwd = resolve(cwd) if cwd is not None else None
-    if resolved_cwd is not None and is_repository_resource(cwd) and not Path(resolved_cwd).is_dir():
-        raise RegistrarError(f"execution cwd resource {cwd!r} must be a directory")
+    snapshot = snapshot or RepositoryResourceSnapshot()
+    resolved_argv = [snapshot.resolve(part) for part in argv]
+    resolved_cwd = snapshot.resolve(cwd, directory=True) if cwd is not None else None
     return resolved_argv, resolved_cwd

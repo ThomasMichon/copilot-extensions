@@ -470,7 +470,7 @@ def run_tick(
 ) -> dict[str, Any]:
     """Acquire/renew the emitter lease and invoke one command tick when held."""
     validate_spec(spec)
-    cwd = resolve_resource_argument(spec["cwd"], execution=True) if spec.get("cwd") else None
+    cwd = spec.get("cwd")
     scope = lease_scope(spec)
     lease = client.acquire_schedule_lease(
         scope,
@@ -497,6 +497,7 @@ def run_tick(
             from .ci_repair import AdmissionRefused, run_tick as run_ci_tick
 
             try:
+                cwd = resolve_resource_argument(cwd, execution=True, directory=True) if cwd else None
                 ci_config = dict(spec["ci_repair"])
                 for key in ("source_command", "admission_command"):
                     ci_config[key] = _render_command(ci_config[key])

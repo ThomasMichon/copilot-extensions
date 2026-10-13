@@ -30,16 +30,15 @@ from .gitea_connection import validate_gitea_connection
 from .gitea_provider import GiteaProvider
 from .issue_loop_markers import _marker, _marker_plain, _parse_marker
 from .repository_issue_selection import eligible_issues, validate_issue_numbers
+from .repository_issue_declarations import expand_repository_issue_loop as expand_repository_issue_loop
 from .repository_issue_task_contracts import (
     build_task_contract,
     validate_task_contract,
 )
 from .registrar import (
     Filters,
-    ProfileDeclaration,
     RegistrarError,
     _load_filters,
-    load_declaration,
 )
 from .script_provider import (
     SCRIPT_FORGE_KEYS, _backlog_identifier, build_provider, script_resource_namespace,
@@ -174,7 +173,7 @@ def validate_config(
     ``validate_script_forge_config``'s own handling."""
     if not isinstance(data, Mapping):
         raise RegistrarError("repository-issue-loop: expected a mapping")
-    from .repository_resources import execution_root
+    from .repository_resources import RepositoryResourceSnapshot, execution_root
 
     extra = sorted(set(data) - _KNOWN_KEYS)
     if extra:
@@ -184,7 +183,8 @@ def validate_config(
         )
     if data.get("kind") != "repository-issue-loop":
         raise RegistrarError("repository-issue-loop kind must be 'repository-issue-loop'")
-    cwd = execution_root(data.get("execution_repo"), cwd)
+    snapshot = RepositoryResourceSnapshot()
+    cwd = execution_root(data.get("execution_repo"), cwd, snapshot=snapshot)
     name = _string(data, "name")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
         raise RegistrarError("repository-issue-loop name: use letters, digits, '.', '_' or '-'")
@@ -247,6 +247,7 @@ def validate_config(
         provider=provider_name,
         repo_root=cwd,
         inherited_script_fields=inherited_script_fields,
+        snapshot=snapshot,
     )
     validate_repo_field(repo, provider=provider_name)
 
@@ -442,52 +443,6 @@ def validate_config(
         "rehearsal_mode": rehearsal_mode,
         **({"execution_repo": data["execution_repo"]} if "execution_repo" in data else {}),
     }
-
-def expand_repository_issue_loop(
-    data: Mapping[str, Any],
-    *,
-    repo_root: str | Path | None = None,
-    inherited_script_fields: frozenset[str] = frozenset(),
-) -> tuple[ProfileDeclaration, ...]:
-    """Expand an emitter and worker lane with cwd for worker-identity revalidation.
-    Inherited script fields are checked at registration before source stamping."""
-    config = validate_config(data, cwd=repo_root, inherited_script_fields=inherited_script_fields)
-    spec: dict[str, Any] = {
-        "id": f"{config['name']}-source",
-        "interval_seconds": config["tick_interval_seconds"],
-        "lease_scope": f"repository-issue-loop:{config['name']}",
-        "repository_issue_loop": dict(data),
-    }
-    if data.get("execution_repo") is not None:
-        spec["cwd"] = f"repo:{data['execution_repo']}:."
-    elif repo_root is not None:
-        # Absolute: a relative path would resolve wrong (registrar dir, not repo root).
-        spec["cwd"] = str(Path(repo_root).resolve())
-    common = {
-        "owner": config["owner"],
-        "description": config["description"],
-    }
-    source = load_declaration(
-        {
-            "name": f"{config['name']}-source",
-            "kind": "emitter",
-            "spec": spec,
-            "filters": config["filters"],
-            **common,
-        }
-    )
-    pool = load_declaration(
-        {
-            "name": f"{config['name']}-workers",
-            "labels": [config["task_label"]],
-            "repos": config["repo"],
-            **config["pool"],
-            "concurrency": 1,
-            "filters": config["worker_filters"],
-            **common,
-        }
-    )
-    return source, pool
 
 def occurrence_epoch(now: float, cadence_seconds: float) -> int:
     """Return the stable Unix-epoch-anchored occurrence for ``now``."""

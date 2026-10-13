@@ -12,7 +12,6 @@ zero changes -- this module's only job is that one resolution step.
 from __future__ import annotations
 
 import os
-import re
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
@@ -21,6 +20,12 @@ from plugin_activation import ActivationReport, resolve_active_plugins
 
 from .recipes import EXTERNAL_AUTHOR_CLAUSE, RESOLUTION_CLAUSE, STAGNATION_CLAUSE, SUSPEND_CLAUSE
 from .registrar import RegistrarError
+from .registrar_recipe_values import (
+    _PLACEHOLDER_RE,
+    deep_merge as deep_merge,
+    substitute_placeholders as substitute_placeholders,
+)
+from .repository_resources import RepositoryResourceSnapshot
 
 #: Shared, generalized standing-loop charters for the reviewer and
 #: conflict-resolution archetypes (Sub-PR 2, ThomasMichon/copilot-extensions
@@ -342,82 +347,6 @@ _RECIPE_SUFFIXES = (".yaml", ".yml", ".json")
 #: (``{{name}}``) from matching -- that's a literal-brace escaping
 #: convention (mirroring ``str.format``'s own ``{{``/``}}`` escape), not a
 #: placeholder, and must be left completely untouched.
-_PLACEHOLDER_RE = re.compile(r"(?<!\{)\{([a-zA-Z_][a-zA-Z0-9_]*)\}(?!\})")
-
-
-def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
-    """Recursively merge ``override`` over ``base``.
-
-    A nested mapping present on both sides is merged key-by-key (recursing);
-    every other value -- including a list -- is replaced wholesale by
-    ``override``'s value when ``override`` sets it. ``override`` always wins
-    on conflict; a key only ``base`` sets passes through unchanged.
-    """
-    merged: dict[str, Any] = dict(base)
-    for key, value in override.items():
-        existing = merged.get(key)
-        if isinstance(existing, Mapping) and isinstance(value, Mapping):
-            merged[key] = deep_merge(existing, value)
-        else:
-            merged[key] = value
-    return merged
-
-
-def _fill(value: str, params: Mapping[str, Any]) -> str:
-    def _replace(match: re.Match[str]) -> str:
-        key = match.group(1)
-        return str(params[key]) if key in params else match.group(0)
-
-    return _PLACEHOLDER_RE.sub(_replace, value)
-
-
-def substitute_placeholders(
-    value: Any, params: Mapping[str, Any], *, _ancestors: frozenset[int] = frozenset()
-) -> Any:
-    """Recursively fill ``{param}``-style placeholders in every string leaf
-    of ``value`` (a recipe template's field, which may be a nested mapping
-    or list) from ``params``. Only scalar (``str``/``int``/``float``/``bool``)
-    param values are usable as substitutions -- a nested structure can't
-    sensibly fill a string placeholder. An unresolved placeholder, or any
-    other brace content a narrow identifier pattern doesn't match, is left
-    completely intact -- never an error (see :data:`_PLACEHOLDER_RE`).
-
-    ``_ancestors`` tracks the object ids currently on the recursion stack
-    (not every object ever seen), so a YAML document's self-referential
-    alias -- a mapping/list that (directly or transitively) contains
-    itself -- raises a clear ``RegistrarError`` instead of recursing
-    forever (``RecursionError`` is not a ``RegistrarError`` and would abort
-    the whole registrar scan, not just this one malformed recipe). A
-    *non*-cyclic shared alias (the same sub-object reachable from two
-    different sibling branches, never from itself) is unaffected: each
-    branch's ``_ancestors`` only tracks its own chain of parents.
-    """
-    if isinstance(value, str):
-        return _fill(value, params)
-    if isinstance(value, (Mapping, list)):
-        marker = id(value)
-        if marker in _ancestors:
-            raise RegistrarError(
-                "extends: recipe template contains a cyclic reference "
-                "(a mapping/list that contains itself)"
-            )
-        child_ancestors = _ancestors | {marker}
-        if isinstance(value, Mapping):
-            return {
-                key: substitute_placeholders(v, params, _ancestors=child_ancestors)
-                for key, v in value.items()
-            }
-        return [
-            substitute_placeholders(v, params, _ancestors=child_ancestors)
-            for v in value
-        ]
-    if isinstance(value, tuple):
-        return tuple(
-            substitute_placeholders(v, params, _ancestors=_ancestors) for v in value
-        )
-    return value
-
-
 def _safe_resolve_ref_path(path: Path, *, ref: str) -> Path:
     """Canonicalize ``path`` (``Path.resolve()``), converting a resolution
     failure into the same ``RegistrarError``/``RegistrarIndeterminateError``
@@ -717,7 +646,9 @@ def _plugin_payload_root() -> Path:
 _MAX_CHAIN_DEPTH = 50
 
 
-def _ref_identity(ref: str, *, base_dir: Path) -> tuple[str, Path | None]:
+def _ref_identity(
+    ref: str, *, base_dir: Path, snapshot: RepositoryResourceSnapshot | None = None,
+) -> tuple[str, Path | None]:
     """Resolve ``ref``'s stable, canonical identity (for cycle detection
     across a chain) -- a fully-resolved absolute path for a repo-local or
     cross-repo ref, or the literal ``global:<name>`` string for a global
@@ -738,9 +669,7 @@ def _ref_identity(ref: str, *, base_dir: Path) -> tuple[str, Path | None]:
         path = _resolve_plugin_ref_path(ref)
         return str(path), path
     if ref.startswith("repo:"):
-        from .repository_resources import resolve_repository_resource
-
-        path = resolve_repository_resource(ref)
+        path = Path((snapshot or RepositoryResourceSnapshot(execution=False)).resolve(ref))
         return str(path), path
     path = Path(ref)
     if not path.is_absolute():
@@ -867,7 +796,8 @@ def resolve_extends(
 
 
 def _resolve_extends_tracking_cwd_origin(
-    data: Mapping[str, Any], *, base_dir: Path, _chain: tuple[str, ...]
+    data: Mapping[str, Any], *, base_dir: Path, _chain: tuple[str, ...],
+    _snapshot: RepositoryResourceSnapshot | None = None,
 ) -> tuple[dict[str, Any], Path | None]:
     """:func:`resolve_extends`'s actual implementation, additionally
     returning the directory a still-unresolved inherited ``spec.cwd``
@@ -906,7 +836,8 @@ def _resolve_extends_tracking_cwd_origin(
     ref = data["extends"]
     if not isinstance(ref, str) or not ref:
         raise RegistrarError(f"extends: expected a non-empty string ref, got {ref!r}")
-    identity, resolved_path = _ref_identity(ref, base_dir=base_dir)
+    snapshot = _snapshot or RepositoryResourceSnapshot(execution=False)
+    identity, resolved_path = _ref_identity(ref, base_dir=base_dir, snapshot=snapshot)
     if identity in _chain:
         chain_display = " -> ".join((*_chain, identity))
         raise RegistrarError(
@@ -918,7 +849,10 @@ def _resolve_extends_tracking_cwd_origin(
             f"extends: reference chain exceeds the maximum depth of "
             f"{_MAX_CHAIN_DEPTH} (chain: {chain_display})"
         )
-    template = resolve_recipe_ref(ref, base_dir=base_dir)
+    template = (
+        _read_recipe_document(resolved_path, ref=ref)
+        if resolved_path is not None else resolve_recipe_ref(ref, base_dir=base_dir)
+    )
     if not isinstance(template, Mapping):
         raise RegistrarError(
             f"extends: recipe {ref!r} resolved to a non-mapping "
@@ -943,7 +877,7 @@ def _resolve_extends_tracking_cwd_origin(
     pending_cwd_origin: Path | None = None
     if "extends" in template:
         template, pending_cwd_origin = _resolve_extends_tracking_cwd_origin(
-            template, base_dir=next_base_dir, _chain=(*_chain, identity)
+            template, base_dir=next_base_dir, _chain=(*_chain, identity), _snapshot=snapshot,
         )
     if pending_cwd_origin is None and next_base_dir is not None:
         # This hop's own (non-inherited, or no-longer-pending) template

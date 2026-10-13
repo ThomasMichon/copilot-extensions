@@ -110,3 +110,20 @@ def test_registered_only_native_cli_first_touch(tmp_path):
     assert payload["class"] == "worktree"
     assert payload["path"] == str(root)
     assert registry.read_bytes() == before
+
+
+def test_registry_git_probe_uses_canonical_headless_options(monkeypatch):
+    options = {"creationflags": 123}
+    calls = []
+    monkeypatch.setattr(repos, "no_window_kwargs", lambda: options)
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, "main\n", "")
+
+    monkeypatch.setattr(repos.subprocess, "run", run)
+    assert repos._git("fixture", "branch", "--show-current").stdout == "main\n"
+    assert calls == [(
+        ["git", "-C", "fixture", "branch", "--show-current"],
+        {"capture_output": True, "text": True, "timeout": 60, **options},
+    )]

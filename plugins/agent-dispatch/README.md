@@ -799,9 +799,15 @@ for emitter/evaluator argv resources and execution `cwd`, script-forge
 references remain unchanged in declarations and generated emitter specs; the
 concrete root is derived at use time from the owning repository registry.
 Paths must remain within that root, including after symlink resolution.
-One script invocation uses a transient root snapshot shared by argv and cwd;
-its registry lookups share a 15-second budget instead of receiving a new full
-budget for each argument. This is separate from the script execution timeout.
+One validation or script invocation uses a transient root snapshot shared by
+execution context, argv, cwd and effort state. A recipe chain likewise shares
+its resolved roots for identity, document reads and nested references.
+Registry lookups share a 15-second execution budget rather than receiving a
+new full budget per field. Finite probes own a non-breakaway Windows Job or
+POSIX process group; timeout teardown gets at most one additional second and
+unconfirmed teardown is an explicit error. These bounds are separate from
+the script execution timeout. A standby emitter does no resource lookup before
+acquiring its schedule lease.
 
 Repository and effort loops may set `execution_repo: tools` to bind their
 script/worker-identity context to a registered repository. This is independent

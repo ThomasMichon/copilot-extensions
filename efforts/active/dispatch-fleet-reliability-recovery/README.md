@@ -212,3 +212,24 @@ requested contract.
   the coordinator retains serial merge and deployment obligations.
 - Existing #6421 scalar-repair ownership and the lifecycle owners remain intact.
   Category realization remains gated on standing-intent reconciliation.
+
+### 2026-10-13 - Registered-resource review corrections
+
+- #6531's first implementation review identified separate root lookups across
+  validation fields, pre-lease emitter resolution and recipe identity/document
+  reads. Five failing regressions reproduced those boundaries under a moving
+  registry before the fixes.
+- One transient resolution context now binds each validation/invocation and
+  recipe chain to cached roots and a shared lookup budget. A standby emitter
+  performs no lookup before acquiring its lease. Preserved public recipe and
+  declaration seams while extracting focused modules, without raising size
+  ceilings.
+- Finite metadata probes now hold native process-tree custody through captured
+  pipe EOF. A real Windows test exercises a leader that exits while its
+  descendant retains the pipes; timeout closes the non-breakaway Job and proves
+  the descendant has exited. This is finite-command custody, not independent
+  master-watchdog delivery.
+- Validation includes 421 dispatch compatibility tests, 19 repository-owner/
+  clone tests and 42 resource/capture tests after the finite-probe correction.
+  Native headless, module-size and fatal-lint gates pass. Review, promotion,
+  authorized rollout and actual adopter migration remain outstanding.

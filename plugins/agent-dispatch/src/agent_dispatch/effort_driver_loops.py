@@ -27,7 +27,7 @@ from .registrar import (
     load_declaration,
 )
 from .worker_identities import load_worker_identity
-from .repository_resources import execution_root, is_repository_resource, resolve_resource_argument
+from .repository_resources import RepositoryResourceSnapshot, execution_root, is_repository_resource
 
 _TERMINAL = frozenset({"completed", "abandoned", "dead_letter"})
 _ACTIVE_STATUSES = "proposed,queued,claimed,started,suspended,submitted"
@@ -109,13 +109,14 @@ def _resolve_state_root(
     state_root: str | None,
     *,
     cwd: str | Path | None,
+    snapshot: RepositoryResourceSnapshot | None = None,
 ) -> str:
     if state_root is None:
         if cwd is None:
             return str(Path.cwd().resolve())
         return str(Path(cwd).resolve())
     if is_repository_resource(state_root):
-        return resolve_resource_argument(state_root, execution=True, directory=True)
+        return (snapshot or RepositoryResourceSnapshot()).resolve(state_root, directory=True)
     root = Path(state_root)
     if not root.is_absolute():
         if cwd is None:
@@ -142,7 +143,8 @@ def validate_config(
         )
     if data.get("kind") != "effort-driver-loop":
         raise RegistrarError("effort-driver-loop kind must be 'effort-driver-loop'")
-    cwd = execution_root(data.get("execution_repo"), cwd)
+    snapshot = RepositoryResourceSnapshot()
+    cwd = execution_root(data.get("execution_repo"), cwd, snapshot=snapshot)
     name = _string(data, "name")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
         raise RegistrarError("effort-driver-loop name: use letters, digits, '.', '_' or '-'")
@@ -174,7 +176,7 @@ def validate_config(
         not isinstance(raw_state_root, str) or not raw_state_root
     ):
         raise RegistrarError("effort-driver-loop state_root: expected a non-empty string")
-    state_root = _resolve_state_root(raw_state_root, cwd=cwd)
+    state_root = _resolve_state_root(raw_state_root, cwd=cwd, snapshot=snapshot)
 
     pool = data.get("pool")
     if not isinstance(pool, Mapping):

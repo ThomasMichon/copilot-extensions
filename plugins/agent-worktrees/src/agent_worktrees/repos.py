@@ -38,6 +38,8 @@ from pathlib import Path
 
 import yaml
 
+from agent_procutil import no_window_kwargs
+
 from . import bare_anchor_sync, git_ops, output, registry_paths
 from .repos_registry_reader import RepositoryResolutionError, read_registry as _read_registry
 
@@ -970,12 +972,12 @@ def clone_repo(
         try:
             current = subprocess.run(
                 ["git", "-C", str(target_path), "branch", "--show-current"],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True, timeout=30, **no_window_kwargs(),
             ).stdout.strip()
             if current != declared_branch:
                 checkout = subprocess.run(
                     ["git", "-C", str(target_path), "checkout", declared_branch],
-                    capture_output=True, text=True, timeout=30,
+                    capture_output=True, text=True, timeout=30, **no_window_kwargs(),
                 )
                 if checkout.returncode == 0:
                     output.ok(f"Checked out declared default branch '{declared_branch}'")
@@ -1293,6 +1295,7 @@ def _git(path: str, *args: str, timeout: int = 60) -> subprocess.CompletedProces
         capture_output=True,
         text=True,
         timeout=timeout,
+        **no_window_kwargs(),
     )
 
 

@@ -326,3 +326,122 @@ def test_explicit_same_root_pointer_migration_preserves_provenance(tmp_path, mon
     with pytest.raises(RegistrarError, match="repository name"):
         discovery.add_pointer("tools", unrelated, kind="repo", base=base)
     assert discovery.pointers_file(base).read_bytes() == before
+
+
+def _moving_registry(monkeypatch, tmp_path):
+    roots = [tmp_path / name for name in ("first", "second")]
+    for root in roots:
+        root.mkdir()
+        (root / "backlog.py").write_text("print('ok')", encoding="utf-8")
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, json.dumps({
+            "registration": "ready", "name": "tools", "class": "worktree",
+            "path": str(roots[min(len(calls) - 1, 1)]),
+        }), "")
+
+    monkeypatch.setattr(resources, "run_agent_worktrees_capture", run)
+    return roots, calls
+
+
+def test_effort_validation_shares_execution_and_state_snapshot(tmp_path, monkeypatch):
+    from agent_dispatch.effort_driver_loops import validate_config
+    from tests.test_effort_driver_loops import _config
+
+    roots, calls = _moving_registry(monkeypatch, tmp_path)
+    config = validate_config(_config(
+        tmp_path, execution_repo="tools", state_root="repo:tools:.",
+        effort_slugs=["unfinished"],
+    ))
+    assert config["state_root"] == str(roots[0])
+    assert len(calls) == 1
+
+
+def test_issue_validation_shares_execution_and_script_snapshot(tmp_path, monkeypatch):
+    from agent_dispatch.repository_issue_loops import validate_config
+    from tests.test_repository_issue_loops import _config
+
+    roots, calls = _moving_registry(monkeypatch, tmp_path)
+    config = validate_config(_config(
+        execution_repo="tools",
+        forge={"provider": "script", "producer_login": "fixture",
+               "command": ["repo:tools:backlog.py"], "cwd": "repo:tools:."},
+    ))
+    assert config["forge"]["cwd"] == str(roots[0])
+    assert config["forge"]["command"] == [sys.executable, str(roots[0] / "backlog.py")]
+    assert len(calls) == 1
+
+
+def test_standby_emitter_does_not_resolve_registered_cwd(tmp_path, monkeypatch):
+    from agent_dispatch.producers.emitter import run_tick
+    from tests.test_producers_emitter import FakeClient
+
+    monkeypatch.setattr(
+        resources, "run_agent_worktrees_capture",
+        lambda *a, **k: pytest.fail("standby performed registry lookup"),
+    )
+    client = FakeClient()
+    monkeypatch.setattr(client, "acquire_schedule_lease", lambda *a, **k: {"granted": False})
+    result = run_tick(client, {
+        "id": "standby", "interval_seconds": 60, "command": ["python"],
+        "cwd": "repo:tools:.",
+    }, holder="fixture")
+    assert result["held"] is False
+
+
+def test_command_emitter_uses_one_snapshot_after_lease(tmp_path, monkeypatch):
+    from agent_dispatch.producers.emitter import run_tick
+    from tests.test_producers_emitter import FakeClient
+
+    roots, calls = _moving_registry(monkeypatch, tmp_path)
+    executed = []
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "dispatch"))
+
+    def runner(argv, **kwargs):
+        executed.append((argv, kwargs["cwd"]))
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    result = run_tick(FakeClient(), {
+        "id": "snapshot", "interval_seconds": 60,
+        "command": ["{python}", "repo:tools:backlog.py"], "cwd": "repo:tools:.",
+    }, holder="fixture", runner=runner)
+    assert result["returncode"] == 0
+    assert executed == [([sys.executable, str(roots[0] / "backlog.py")], str(roots[0]))]
+    assert len(calls) == 1
+
+
+def test_named_recipe_reads_same_snapshot_as_nested_base(tmp_path, monkeypatch):
+    from agent_dispatch.registrar_recipes import resolve_extends
+
+    roots, calls = _moving_registry(monkeypatch, tmp_path)
+    for root in roots:
+        (root / "recipe.json").write_text(json.dumps({
+            "extends": "base.json", "description": root.name,
+        }), encoding="utf-8")
+        (root / "base.json").write_text(json.dumps({
+            "kind": "emitter", "name": "fixture",
+            "spec": {"command": ["python"], "cwd": ".", "interval_seconds": 60},
+        }), encoding="utf-8")
+    result = resolve_extends({"extends": "repo:tools:recipe.json"}, base_dir=tmp_path)
+    assert result["description"] == "first"
+    assert result["spec"]["cwd"] == str(roots[0])
+    assert len(calls) == 1
+
+
+def test_named_nested_recipe_chain_shares_registry_snapshot(tmp_path, monkeypatch):
+    from agent_dispatch.registrar_recipes import resolve_extends
+
+    roots, calls = _moving_registry(monkeypatch, tmp_path)
+    for root in roots:
+        (root / "recipe.json").write_text(json.dumps({
+            "extends": "repo:tools:base.json",
+        }), encoding="utf-8")
+        (root / "base.json").write_text(json.dumps({
+            "kind": "emitter", "name": "fixture", "description": root.name,
+            "spec": {"command": ["python"], "interval_seconds": 60},
+        }), encoding="utf-8")
+    result = resolve_extends({"extends": "repo:tools:recipe.json"}, base_dir=tmp_path)
+    assert result["description"] == "first"
+    assert len(calls) == 1

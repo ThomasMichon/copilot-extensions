@@ -11,7 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Seasoned Dependencies and Transactional Installs](active/seasoned-dependencies-and-transactional-installs/README.md) | Draft; seven-day declarations/resolution and failed-build cleanup | #6476 |
-| [Dispatch Fleet Reliability and Recovery](active/dispatch-fleet-reliability-recovery/README.md) | Draft; maintenance categories, bounded supervision and registry-rooted recovery | #6466, #6467, #6470, #6471; existing #6407/#6421 repair owner retained |
+| [Dispatch Fleet Reliability and Recovery](active/dispatch-fleet-reliability-recovery/README.md) | Active; maintenance categories, bounded supervision and registry-rooted recovery | #6466, #6467, #6470, #6471; existing #6407/#6421 repair owner retained |
 | [Runtime Operational Contracts](active/review-pipeline-operational-contracts/README.md) | Draft; proposal review before implementation | #6274; existing Windows regression #6266 |
 | [Workspace Acquisition Continuity](active/workspace-acquisition-continuity/README.md) | Draft; one execution workspace and replay-safe creation proposal | #6440 |
 | [Configuration Backstage and Worker Instances](active/configuration-backstage-and-worker-instances/README.md) | Active; proposal reviewed, section and instance contracts | #6379 |

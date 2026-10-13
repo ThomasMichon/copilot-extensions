@@ -29,7 +29,9 @@ from typing import TYPE_CHECKING, Any, NoReturn
 
 from .issue_loop_markers import validate_marker_payload
 from .registrar import RegistrarError
-from .repository_resources import is_repository_resource, resolve_execution_resources
+from .repository_resources import (
+    RepositoryResourceSnapshot, is_repository_resource, resolve_execution_resources,
+)
 
 if TYPE_CHECKING:
     from .repository_issue_loops import Issue
@@ -166,6 +168,7 @@ def validate_script_forge_config(
     provider: Any,
     repo_root: str | Path | None = None,
     inherited_script_fields: frozenset[str] = frozenset(),
+    snapshot: RepositoryResourceSnapshot | None = None,
 ) -> dict[str, Any] | None:
     """Validate the ``script``-only ``forge.command``/``forge.cwd``/
     ``forge.timeout_seconds`` fields, mirroring
@@ -242,7 +245,9 @@ def validate_script_forge_config(
         not isinstance(declared_cwd_value, str) or not declared_cwd_value
     ):
         raise RegistrarError("repository-issue-loop forge.cwd: expected a non-empty string")
-    resolved_command, resource_cwd = resolve_execution_resources(command, declared_cwd_value)
+    resolved_command, resource_cwd = resolve_execution_resources(
+        command, declared_cwd_value, snapshot=snapshot,
+    )
     # Normalize Windows-style separators before constructing `Path`: POSIX
     # treats a literal backslash as an ordinary filename character, not a
     # separator, so `scripts\poller.py` authored on Windows would
