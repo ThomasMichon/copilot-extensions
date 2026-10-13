@@ -234,6 +234,53 @@ operator directive to remove the explicit claimed-dev exception.
 
 ## Journal
 
+### 2026-10-13 -- Codespaces module-launch health prerequisite merged
+
+#6565 merged into `dev` as
+`1ed68902d3b50999368c7e3f3eda0d14e1447330` after exact-head Copilot approval
+with zero open findings and every required check successful. Both Codespaces
+installers now gate ordinary and claimed-dev publication on the actual isolated
+`python -I -m agent_codespaces --help` entrypoint. Successful package import is
+not sufficient: a partial namespace package can import while its CLI entrypoint
+is absent or broken. A completed numbered slot that fails launch is refused
+before venv/package construction, including forced updates. Completion evidence
+and selection remain unchanged; no published identity is repaired in place.
+
+The relevant contained Windows installer/development lanes passed 65 tests with
+21 platform skips. The final launch matrix passed six native cases with six
+platform skips, covering healthy launch admission, namespace packages, broken
+entrypoint imports, source/PYTHONPATH shadowing, invalid interpreters and
+pre-construction refusal. All 13 install contracts and touched Python lint
+passed. Two existing recovery fixtures now prove the already-landed canonical
+selected-incomplete distinct-generation refusal and preservation, rather than
+expecting a selected/rollback-pinned identity to be rebuilt in place.
+
+The exact-candidate, agent-free Linux clean-room scenario passed all five
+assertions: fresh real provisioning, installed module origin/content matching
+the candidate, importable but unlaunchable namespace evidence, actual forced
+update refusal, and byte-identical completion/selection evidence. The runner
+removed the disposable container. Earlier attempts failed on CRLF fixture
+bytes, public-index TLS and build-backend writes against a read-only development
+mount; they are not passing evidence. The successful scenario uses LF, the
+explicitly supplied configured index and the established writable,
+byte-identical candidate-copy pattern, without dependency-floor overrides or
+deployed-runtime patches. Exhaustive activation cases remain opt-in T3.
+
+Normal promotion and authorized installed proof are still pending. The
+separately driven #6454 update acceptance remains blocked on normal release
+gates, with the latest observed receiving-side configuration repair already
+owned under #6556. This journal does not authorize a second updater or
+claim the merged health correction is deployed.
+
+First-adopter publication-result propagation #6447 is also merged, but neither
+that milestone nor the Codespaces health prerequisite completes an adopter.
+Healthy completed-slot content admission, real construction/coalescing and
+retention descriptor lifetimes, dev/release, distinct-generation repair and
+generation propagation remain open. The Python-owned installer-engine lifecycle
+and existing bridge refusal slice retain their current owners. The next stretch
+is complete first-adopter integration and its actual lifecycle validation;
+all full-adopter Plan/Validation checkboxes and the parent Status remain Active.
+
 ### 2026-10-13 - Finite-provider deadline prerequisite delivered
 
 The finite-profile probe correction #6404 merged as
