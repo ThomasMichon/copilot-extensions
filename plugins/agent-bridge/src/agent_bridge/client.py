@@ -1498,7 +1498,9 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
     ) -> dict[str, Any]:
         """Deliver to a represented remote session through the carrier."""
         self._require_remote_commands()
+        from .live_peer_address import peer_operation_timeout
         from .protocol import QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
+        timeout = peer_operation_timeout(timeout, wait=wait, wait_timeout=wait_timeout)
         if (target.startswith("live:") or reply_to is not None or wait):
             if not self.daemon_supports(QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
                 raise BridgeClientError(426, "remote peer replies require HTTP protocol 33")
@@ -1520,7 +1522,7 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
                 "timeout": timeout,
                 "reply_to": reply_to,
                 "wait": wait,
-                "wait_timeout": wait_timeout,
+                "wait_timeout": wait_timeout if wait else 120.0,
             },
             request_timeout=timeout + 15.0,
         ) or {}

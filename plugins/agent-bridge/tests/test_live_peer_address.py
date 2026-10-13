@@ -113,6 +113,9 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
         b_app, b_client = _bridge(b_db)
         _register(a_db, "a-old", "host-a", project=project)
         _register(b_db, "b-current", "host-b", project=project, worktree="wt-b")
+        _register(a_db, "a-other-machine", "host-c", project=project, now=time.time() + 3)
+        _register(b_db, "b-other-project", "host-b", project="project-b",
+                  worktree="wt-b", now=time.time() + 3)
 
         class Carrier:
             def __init__(self, client):
@@ -165,6 +168,7 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
         assert {key: observed[key] for key in expected} == expected
         received = b_db.list_pending_live_messages("b-current")
         assert received[0]["reply_to"] == f"live:host-a:{project}:wt-a"
+        assert b_db.list_pending_live_messages("b-other-project") == []
         _register(a_db, "a-new", "host-a", project=project, now=time.time() + 1)
         monkeypatch.setattr(cli, "_get_client", lambda: b_client)
         monkeypatch.setattr(cli, "_live_sender_label", lambda _: "wt-b")
@@ -175,6 +179,7 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
         output = capsys.readouterr().out
         assert '"replied": true' in output and '"reply": "peer response"' in output
         assert a_db.list_pending_live_messages("a-old") == []
+        assert a_db.list_pending_live_messages("a-other-machine") == []
         assert a_db.list_pending_live_messages("a-new")[0]["body"] == "reverse reply"
         if idempotency_key:
             cli._cmd_send(args)
@@ -256,3 +261,49 @@ def test_unrepresented_hosted_caller_keeps_legacy_bridge_handle(monkeypatch):
     monkeypatch.setenv("AGENT_BRIDGE_SESSION_ID", "bridge-session")
     monkeypatch.setattr(cli, "_get_client", lambda: SimpleNamespace(resolve_live_session=lambda _: {}))
     assert cli._live_reply_to(argparse.Namespace()) == "bridge-session"
+
+
+@pytest.mark.parametrize("wait_timeout,timeout", [(120.0, 135.0), (600.0, 615.0), (1.0, 20.0)])
+def test_waited_client_defaults_cover_operation_and_read_deadlines(monkeypatch, wait_timeout, timeout):
+    captured = {}
+    client = BridgeClient.__new__(BridgeClient)
+    monkeypatch.setattr(client, "daemon_supports", lambda _: True)
+
+    def request(method, path, data, *, request_timeout):
+        captured.update(data=data, read_timeout=request_timeout)
+        return {"message_id": 1}
+
+    monkeypatch.setattr(client, "_request", request)
+    client.send_remote_live_message(
+        "host-b", "live:host-b:project-a:wt-b", sender="peer",
+        message="call", wait=True, wait_timeout=wait_timeout,
+    )
+    assert captured["data"]["timeout"] == timeout
+    assert captured["read_timeout"] == timeout + 15.0
+
+
+@pytest.mark.parametrize("wait_timeout,timeout", [(None, 135.0), (600.0, 615.0), (1.0, 20.0)])
+def test_waited_http_defaults_cover_carrier_deadline(tmp_path, wait_timeout, timeout):
+    db = Database(tmp_path / "http.db")
+    try:
+        app, client = _bridge(db)
+        service = RemoteOperationService(SimpleNamespace())
+        app.state.remote_operations = service
+        captured = {}
+
+        async def request(host, payload, *, timeout):
+            captured.update(timeout=timeout, payload=payload)
+            return {"result": {"message_id": 1}}
+
+        service._request = request
+        body = {"sender": "peer", "message": "call", "wait": True}
+        if wait_timeout is not None:
+            body["wait_timeout"] = wait_timeout
+        response = client.http.post(
+            "/api/v1/remote/host-b/live-sessions/live:host-b:project-a:wt-b/messages", json=body,
+        )
+        assert response.status_code == 200, response.text
+        assert captured["timeout"] == timeout
+        assert captured["payload"]["wait_timeout"] == (wait_timeout or 120.0)
+    finally:
+        db.close()

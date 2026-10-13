@@ -686,26 +686,15 @@ class _LiveSessionsMixin:
         *,
         now: float,
         stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
+        machine: str | None = None,
+        project: str | None = None,
     ) -> str | None:
-        """The session id of the **current** live incarnation for a worktree.
-
-        Unlike :meth:`resolve_live_session` (which exact-matches a session id
-        first and ignores ``status``), this is a worktree-only lookup that
-        considers **only fresh ``live`` rows** and orders by ``registered_at``
-        (the immutable per-incarnation start) so a later heartbeat on an older
-        incarnation can't make it re-win "current", and a take-over-expired row
-        (``status!='live'``, even with a bumped ``updated_at``) never counts.
-        This is the load-bearing supersession check for the inbox lease
-        (#2906). Returns None when no fresh live session holds the worktree.
-        """
-        cutoff = now - stale_seconds
-        rows = self.execute_read(
-            "SELECT session_id FROM live_sessions "
-            "WHERE worktree_id=? AND status='live' AND updated_at>=? "
-            "ORDER BY registered_at DESC, updated_at DESC LIMIT 1",
-            (worktree_id, cutoff),
+        """Current fresh live incarnation, optionally scoped by machine/project."""
+        from .live_peer_address import current_worktree_session
+        return current_worktree_session(
+            self, worktree_id, now=now, stale_seconds=stale_seconds,
+            machine=machine, project=project,
         )
-        return rows[0]["session_id"] if rows else None
 
     def current_represented_session_for_worktree(
         self,
@@ -720,15 +709,10 @@ class _LiveSessionsMixin:
         retain them because the process is still known alive and its represented
         tail remains useful.
         """
-        cutoff = now - stale_seconds
-        rows = self.execute_read(
-            "SELECT session_id FROM live_sessions "
-            "WHERE worktree_id=? AND (status='wedged' OR "
-            "(status='live' AND updated_at>=?)) "
-            "ORDER BY registered_at DESC, updated_at DESC LIMIT 1",
-            (worktree_id, cutoff),
+        from .live_peer_address import current_worktree_session
+        return current_worktree_session(
+            self, worktree_id, now=now, stale_seconds=stale_seconds, include_wedged=True,
         )
-        return rows[0]["session_id"] if rows else None
 
     def enqueue_live_message(
         self, session_id: str, sender: str, body: str, now: float,
@@ -782,6 +766,8 @@ class _LiveSessionsMixin:
         registration that is also the **current** incarnation for its worktree
         (the row with the greatest ``registered_at`` among fresh live rows --
         immune to heartbeat timing), and any ``expected_session_id`` matches it.
+        Represented machine/project identities scope that incarnation atomically;
+        incomplete legacy registrations retain the unqualified worktree check.
 
         Returns ``(message_id, None)`` on success, or ``(None, reason)`` when
         rejected. ``reason`` is one of ``not_found`` (map to 404), ``stale``,
@@ -806,6 +792,8 @@ class _LiveSessionsMixin:
             "      ls.worktree_id IS NULL OR ls.session_id = ("
             "        SELECT session_id FROM live_sessions "
             "        WHERE worktree_id = ls.worktree_id AND status = 'live' "
+            "          AND (ls.machine IS NULL OR ls.repo IS NULL OR "
+            "            (machine = ls.machine COLLATE NOCASE AND repo = ls.repo COLLATE NOCASE)) "
             "          AND updated_at >= ? "
             "        ORDER BY registered_at DESC, updated_at DESC LIMIT 1"
             "      )"
@@ -867,9 +855,12 @@ class _LiveSessionsMixin:
         worktree_id = row.get("worktree_id")
         current_sid = session_id
         if worktree_id:
+            scoped = row.get("machine") is not None and row.get("repo") is not None
             current_sid = (
                 self.current_live_session_for_worktree(
-                    worktree_id, now=now, stale_seconds=stale_seconds
+                    worktree_id, now=now, stale_seconds=stale_seconds,
+                    machine=row.get("machine") if scoped else None,
+                    project=row.get("repo") if scoped else None,
                 )
                 or session_id
             )

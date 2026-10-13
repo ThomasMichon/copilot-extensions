@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from ssh_manager import (
     CarrierBackpressure,
     CarrierRemoteError,
@@ -22,6 +22,7 @@ from ..remote_operations import (
     RemoteOperationService,
     validate_caller_id,
 )
+from ..live_peer_address import peer_operation_timeout
 
 router = APIRouter(prefix="/api/v1/remote", tags=["remote"])
 
@@ -88,6 +89,13 @@ class RemoteLiveMessageRequest(BaseModel):
     reply_to: str | None = Field(default=None, min_length=1, max_length=256)
     wait: bool = False
     wait_timeout: float = Field(default=120.0, ge=1.0, le=600.0)
+
+    @model_validator(mode="after")
+    def cover_reply_wait(self) -> RemoteLiveMessageRequest:
+        self.timeout = peer_operation_timeout(
+            self.timeout, wait=self.wait, wait_timeout=self.wait_timeout,
+        )
+        return self
 
 
 def _service(request: Request) -> RemoteOperationService:

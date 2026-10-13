@@ -58,6 +58,10 @@ def validate_live_handle(value: Any, *, field: str) -> str:
     return validate_session_id(value, field=field)
 
 
+def peer_operation_timeout(timeout: float, *, wait: bool, wait_timeout: float) -> float:
+    return max(timeout, wait_timeout + 15.0) if wait else timeout
+
+
 def send_remote_peer(client: BridgeClient, args: Namespace, address: LivePeerAddress, *, sender: str,
                      reply_to: str | None, kind: str, delivery: str, prompt: str) -> dict[str, Any]:
     """Explicit peer targets never fall through to agent creation."""
@@ -71,7 +75,7 @@ def send_remote_peer(client: BridgeClient, args: Namespace, address: LivePeerAdd
         wait_timeout=wait_timeout,
         expected_session_id=getattr(args, "expected_session_id", None),
         idempotency_key=getattr(args, "idempotency_key", None),
-        timeout=max(20.0, wait_timeout + 15.0) if wait else 20.0,
+        timeout=peer_operation_timeout(20.0, wait=wait, wait_timeout=wait_timeout),
     )
     if not result.get("message_id"):
         raise SendRefused(
@@ -90,6 +94,28 @@ def resolve_qualified_peer(db: Database, address: LivePeerAddress, *, now: float
         (address.machine, address.project, address.worktree, now - stale_seconds),
     )
     return dict(rows[0]) if rows else None
+
+
+def current_worktree_session(db: Database, worktree: str, *, now: float, stale_seconds: float,
+                             machine: str | None = None, project: str | None = None,
+                             include_wedged: bool = False) -> str | None:
+    """Order incarnations by registration, never by a later old-head heartbeat.
+
+    Fresh live rows serve messaging; wedged rows are readable only when explicitly
+    requested for result inspection. Expired takeover rows never regain current.
+    Missing identity scope retains the legacy unqualified worktree lookup.
+    """
+    status = "(status='live' AND updated_at>=?)"
+    if include_wedged:
+        status = f"(status='wedged' OR {status})"
+    rows = db.execute_read(
+        f"SELECT session_id FROM live_sessions WHERE worktree_id=? AND {status} "
+        "AND (? IS NULL OR machine=? COLLATE NOCASE) "
+        "AND (? IS NULL OR repo=? COLLATE NOCASE) "
+        "ORDER BY registered_at DESC, updated_at DESC LIMIT 1",
+        (worktree, now - stale_seconds, machine, machine, project, project),
+    )
+    return rows[0]["session_id"] if rows else None
 
 
 def peer_reply_requested(payload: dict[str, Any]) -> bool:

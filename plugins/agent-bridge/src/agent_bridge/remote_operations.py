@@ -33,6 +33,7 @@ from .live_peer_address import (
     deliver_remote_peer,
     peer_reply_requested as _peer_reply_requested,
     peer_wait_timeout as _peer_wait_timeout,
+    peer_operation_timeout as _peer_operation_timeout,
     require_peer_reply_protocol as _require_peer_reply_protocol,
     validate_live_handle as _validate_live_handle,
 )
@@ -1075,6 +1076,7 @@ class RemoteOperationService:
             raise RemoteBridgeError(
                 400, "invalid_request", "delivery is not supported"
             )
+        timeout = _peer_operation_timeout(timeout, wait=wait, wait_timeout=wait_timeout)
         response = await self._request(
             host,
             {
@@ -1096,7 +1098,7 @@ class RemoteOperationService:
                 ),
                 "reply_to": _validate_live_handle(reply_to, field="reply_to") if reply_to is not None else None,
                 "wait": wait,
-                "wait_timeout": _peer_wait_timeout(wait_timeout),
+                "wait_timeout": _peer_wait_timeout(wait_timeout) if wait else 120.0,
             },
             timeout=timeout,
         )
