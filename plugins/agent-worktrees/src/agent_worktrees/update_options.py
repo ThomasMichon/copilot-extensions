@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Collection, Mapping
+import json
+from collections.abc import Mapping
+from pathlib import Path
 
 from . import output, update_events
 
@@ -31,26 +33,70 @@ def forwarded_flags(args: argparse.Namespace) -> list[str]:
     return flags
 
 
+def _module_dirs(plugin_dir: Path) -> dict[str, Path]:
+    """``modules.json`` modules and their payload directories."""
+    try:
+        data = json.loads((plugin_dir / "modules.json").read_text(encoding="utf-8"))
+        modules = data.get("modules", []) or []
+    except Exception:
+        return {}
+    return {
+        str(mod["name"]): plugin_dir.parent / str(mod.get("source", mod["name"]))
+        for mod in modules
+        if isinstance(mod, dict) and mod.get("name")
+    }
+
+
+def _deployable(name: str, payload_dir: Path | None, context: Path | None) -> bool:
+    """Whether the reconcilers would run *name*'s installer (scope + machine gate)."""
+    from . import reconcile
+    from .update_gate import MachineDetectionError, _machine_gate_blocks
+
+    scope = reconcile.manifest_runtime_scope(payload_dir) if payload_dir is not None else None
+    if scope in (None, "none"):
+        return False
+    try:
+        return not _machine_gate_blocks(name, scope, context)
+    except MachineDetectionError:
+        return True  # the reconciler itself reports the detection failure
+
+
 def eligible_runtimes(args: argparse.Namespace, targets: Mapping[str, object],
-                      module_names: Collection[str]) -> set[str]:
-    """Runtimes this update would deploy: itself, modules and active registrations."""
+                      plugin_dir: Path) -> set[str]:
+    """Runtimes this update would deploy, from the reconcilers' own plan.
+
+    agent-worktrees itself, plus every active target (``modules.json`` module or
+    registered plugin) that is not skipped, has a runtime scope other than
+    ``none`` and is allowed on this machine.
+    """
+    eligible = {"agent-worktrees"}
     skip = getattr(args, "skip_modules", None)
     if skip is not None and len(skip) == 0:
-        return {"agent-worktrees"}
-    names = set(module_names)
-    names |= {name for name, target in targets.items() if getattr(target, "required", True)}
-    names -= set(skip or ())
-    return names | {"agent-worktrees"}
+        return eligible
+    from . import reconcile
+
+    modules = _module_dirs(plugin_dir)
+    for name, target in targets.items():
+        if name in eligible or name in (skip or ()) or not getattr(target, "required", False):
+            continue
+        payload = modules[name] if name in modules else reconcile.core_installed_payload_dir(name)
+        if _deployable(name, payload, getattr(target, "context", None)):
+            eligible.add(name)
+    return eligible
 
 
 def check_forced_runtimes(args: argparse.Namespace, targets: Mapping[str, object],
-                          module_names: Collection[str]) -> bool:
+                          plugin_dir: Path) -> bool:
     """Refuse ``--force-runtime`` names this update would never deploy.
 
     Records a configuration failure (exit 3) naming them, so a typo or an
-    inactive runtime never turns into a silent success.
+    inactive, payload-only or machine-gated runtime never turns into a silent
+    success.
     """
-    unknown = sorted(forced_runtimes(args) - eligible_runtimes(args, targets, module_names))
+    forced = forced_runtimes(args)
+    if not forced:
+        return True
+    unknown = sorted(forced - eligible_runtimes(args, targets, plugin_dir))
     if not unknown:
         return True
     names = ", ".join(unknown)

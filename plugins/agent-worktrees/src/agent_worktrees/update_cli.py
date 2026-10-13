@@ -303,8 +303,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
 
     output.info(f"Plugin source: {plugin_dir}")
     _events.enter("engine_runtime")
-    modules = _core_helper("_module_names", _module_names)(plugin_dir)
-    if not update_options.check_forced_runtimes(args, registered_targets, modules):
+    if not update_options.check_forced_runtimes(args, registered_targets, plugin_dir):
         return 1
 
     from . import reconcile as _reconcile
@@ -642,13 +641,14 @@ def _update_one_plugin_payload(name: str, marketplace: str, *, cwd: Path | None 
         output.info(f"Plugin install for {name} returned non-zero -- retrying")
     try:
         r2 = _run("install")
-    except (
-        FileNotFoundError,
-        subprocess.TimeoutExpired,
-        PluginStateError,
-    ) as exc:
+    except subprocess.TimeoutExpired:
+        output.warn(f"Plugin install retry for {name} timed out")
+        return "timed out"
+    except (FileNotFoundError, PluginStateError) as exc:
         output.warn(f"Plugin install retry for {name} failed: {exc}")
-        return "install retry failed"
+        if isinstance(exc, PluginStateError):
+            return f"plugin state error: {exc}"
+        return _describe_copilot_spawn_error(exc, cwd=cwd)
     if r2.returncode == 0:
         for line in r2.stdout.strip().splitlines():
             output.ok(line)
@@ -661,7 +661,7 @@ def _update_one_plugin_payload(name: str, marketplace: str, *, cwd: Path | None 
     else:
         output.warn(f"Plugin install for {name} returned non-zero")
     detail = "\n".join(x for x in [r2.stdout.strip(), r2.stderr.strip()] if x)
-    return detail or f"install exited {r2.returncode}"
+    return detail or f"plugin install exited {r2.returncode}"
 
 
 from . import update_runtime

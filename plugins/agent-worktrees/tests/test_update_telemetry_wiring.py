@@ -14,7 +14,7 @@ import update_telemetry as ut
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
-from agent_worktrees import reconcile, update_cli, update_events, update_options
+from agent_worktrees import reconcile, update_cli, update_events, update_gate, update_options
 from agent_worktrees import update_runtime as runtime
 
 
@@ -407,14 +407,104 @@ def test_eligible_force_runtime_redeploys(wired, monkeypatch, _update_home):
     assert aw["changed"] is True
 
 
-def test_eligible_runtimes_cover_modules_and_active_registrations():
+def _payload(root: Path, name: str, scope: str | None) -> Path:
+    path = root / name
+    path.mkdir(parents=True)
+    manifest = {"name": name} if scope is None else {"name": name, "runtimeScope": scope}
+    (path / "plugin.json").write_text(json.dumps(manifest))
+    return path
+
+
+@pytest.fixture
+def eligibility(tmp_path, monkeypatch):
+    plugin = tmp_path / "plugins" / "agent-worktrees"
+    plugin.mkdir(parents=True)
+    modules = ["mod-active", "mod-inactive", "mod-noscope", "mod-payload-only", "mod-gated"]
+    (plugin / "modules.json").write_text(json.dumps(
+        {"modules": [{"name": n, "source": n} for n in modules]}))
+    for name, scope in (("mod-active", "universal"), ("mod-inactive", "universal"),
+                        ("mod-noscope", None), ("mod-payload-only", "none"),
+                        ("mod-gated", "machine-gated")):
+        _payload(tmp_path / "plugins", name, scope)
+    installed = {name: _payload(tmp_path / "installed", name, scope)
+                 for name, scope in (("reg-active", "universal"), ("reg-payload-only", "none"),
+                                     ("reg-inactive", "universal"))}
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", installed.get)
+    monkeypatch.setattr(update_gate, "_machine_gate_blocks",
+                        lambda name, scope, context: scope == "machine-gated")
     active = runtime._RegisteredPluginTarget(None, runtime._PluginActivation.ACTIVE)
     inactive = runtime._RegisteredPluginTarget(None, runtime._PluginActivation.INACTIVE)
-    targets = {"agent-a": active, "agent-off": inactive}
-    args = _args(force_runtime=["agent-a"])
-    assert update_options.eligible_runtimes(args, targets, {"agent-mod"}) == {
-        "agent-worktrees", "agent-a", "agent-mod"}
-    skipped = _args(skip_modules=["agent-mod"])
-    assert "agent-mod" not in update_options.eligible_runtimes(skipped, targets, {"agent-mod"})
-    assert update_options.eligible_runtimes(_args(skip_modules=[]), targets, {"agent-mod"}) == {
+    targets = {
+        "mod-active": active, "mod-inactive": inactive, "mod-noscope": active,
+        "mod-payload-only": active, "mod-gated": active, "reg-active": active,
+        "reg-payload-only": active, "reg-inactive": inactive, "reg-missing": active,
+    }
+    return plugin, targets
+
+
+def test_eligible_runtimes_follow_the_reconcile_plan(eligibility):
+    plugin, targets = eligibility
+    assert update_options.eligible_runtimes(_args(), targets, plugin) == {
+        "agent-worktrees", "mod-active", "reg-active"}
+    skipped = _args(skip_modules=["mod-active"])
+    assert "mod-active" not in update_options.eligible_runtimes(skipped, targets, plugin)
+    assert update_options.eligible_runtimes(_args(skip_modules=[]), targets, plugin) == {
         "agent-worktrees"}
+
+
+@pytest.mark.parametrize("name", [
+    "mod-inactive", "mod-noscope", "mod-payload-only", "mod-gated",
+    "reg-payload-only", "reg-inactive", "reg-missing",
+])
+def test_force_runtime_that_would_be_skipped_is_exit_3(eligibility, _update_home, name):
+    plugin, targets = eligibility
+    update_events.start("engine")
+    assert not update_options.check_forced_runtimes(
+        _args(force_runtime=[name]), targets, plugin)
+    assert update_events.finish(1) == 3
+    assert name in _status(_update_home)["last_failure"]["summary"]
+
+
+def test_force_runtime_for_a_deployable_target_passes(eligibility):
+    plugin, targets = eligibility
+    assert update_options.check_forced_runtimes(
+        _args(force_runtime=["mod-active", "reg-active"]), targets, plugin)
+
+
+@pytest.mark.parametrize(("status", "expected"), [
+    ("agent-x: invalid installer deadline 'x'; expected integer seconds",
+     (ut.CONFIGURATION_LIMITATION, "configuration")),
+    ("installation context invalid: bad receipt", (ut.CONFIGURATION_LIMITATION, "configuration")),
+    ("machine detection failed: no registry", (ut.CONFIGURATION_LIMITATION, "configuration")),
+    ("machine detection failed", (ut.CONFIGURATION_LIMITATION, "configuration")),
+    ("invalid runtimeScope", (ut.CONFIGURATION_LIMITATION, "configuration")),
+    ("'copilot' CLI not found on PATH (x)", (ut.CONFIGURATION_LIMITATION, "configuration")),
+    ("agent-x: something unexpected", (ut.COMMAND_FAILED, None)),
+    ("uninstall timed out", (ut.TIMEOUT, "timeout")),
+    ("install exited 75", (ut.BLOCKED_BY_LOCK, "installer_exit_75")),
+    ("plugin install exited 75", (ut.COMMAND_FAILED, None)),
+    ("update exited 3", (ut.COMMAND_FAILED, None)),
+    ("uninstall exited 1", (ut.COMMAND_FAILED, None)),
+    ("payload not installed", (ut.COMMAND_FAILED, None)),
+    ("SKIPPED (not allowed on this machine)", (ut.SKIPPED, None)),
+])
+def test_every_produced_status_has_its_documented_outcome(status, expected):
+    assert update_events.classify_status(status) == expected
+
+
+def test_payload_install_retry_timeout_is_a_timeout(monkeypatch):
+    from agent_worktrees import activation_preservation
+
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: Path("/inst/x"))
+    monkeypatch.setattr(subprocess, "run",
+                        lambda argv, **kw: subprocess.CompletedProcess(argv, 3, "", "boom"))
+
+    def timeout(argv, identity, **kw):
+        raise subprocess.TimeoutExpired(argv, kw.get("timeout"))
+
+    monkeypatch.setattr(activation_preservation, "run_install_preserving_activation", timeout)
+    status = m._update_one_plugin_payload("agent-x", "copilot-extensions")
+    assert status == "timed out"
+    assert update_events.classify_status(status) == (ut.TIMEOUT, "timeout")
+
+

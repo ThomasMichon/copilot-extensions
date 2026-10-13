@@ -35,15 +35,19 @@ def enter(phase: str) -> None:
 
 _WINDOWS = os.name == "nt"
 
-# Statuses this update produces itself for a configuration problem (anchored, so
-# arbitrary tool output that merely contains "not found" is not reclassified).
+# Statuses this update produces itself for a configuration problem, optionally
+# behind a stable ``<plugin>: `` prefix (anchored, so arbitrary tool output that
+# merely contains "not found" is not reclassified).
 _CONFIGURATION = re.compile(
-    r"(?:installer|powershell|source dir) not found|--force-runtime target not found"
+    r"(?:plugin update failed: |[\w.@-]+: )?"
+    r"(?:(?:installer|powershell|source dir) not found|--force-runtime target not found"
     r"|installation context invalid|invalid installer deadline|invalid runtimescope"
-    r"|forced namespaced runtime reconciliation is unsupported"
-    r"|plugin update failed: 'copilot' cli not found"
+    r"|machine detection failed|forced namespaced runtime reconciliation is unsupported"
+    r"|'copilot' cli not found)"
 )
+# A runtime or module installer's own exit (not a ``copilot plugin`` command's).
 _EXITED = re.compile(r"(?:installer|install) exited (-?\d+)\b")
+_TIMED_OUT = re.compile(r"(?:uninstall )?timed out\b")
 
 
 _WINERROR, _ERRNO, _OSERROR = r"\bwinerror", r"\[errno", r"\bos error"
@@ -74,7 +78,7 @@ def classify_status(status: str) -> tuple[str, str | None]:
         return _ut.VERIFIED_CURRENT, None
     if text.startswith("SKIPPED") or text == "payload-only":
         return _ut.SKIPPED, None
-    if low.startswith("timed out"):
+    if _TIMED_OUT.match(low):
         return _ut.TIMEOUT, "timeout"
     exited = _EXITED.match(low)
     if exited:
