@@ -100,7 +100,12 @@ def _quota(args: argparse.Namespace) -> int:
         path = Path(args.capture)
         if not path.is_file():
             raise ModelError("quota capture must be a regular file")
-        capture = load_json(path, max_bytes=65536)
+        try:
+            capture = load_json(path, max_bytes=65536)
+        except ModelError:
+            raise ModelError(
+                "quota capture must be valid UTF-8 JSON with unique keys within 65536 bytes"
+            ) from None
         if capture.get("schema") != "copilot-extensions.copilot-quota-capture":
             raise ModelError("unsupported quota capture schema")
         if not isinstance(capture.get("version"), Decimal) or capture["version"] != 1:
@@ -117,6 +122,12 @@ def _quota(args: argparse.Namespace) -> int:
             runtime_version=capture["runtime_version"],
             acquired_at=parse_instant(capture["acquired_at"], "capture.acquired_at"),
             category=args.category,
+            provider_id=args.provider_id, quota_id=args.quota_id,
+            evaluated_at=(
+                parse_instant(args.at, "--at") if args.at is not None
+                else datetime.now(timezone.utc)
+            ),
+            max_age_seconds=args.max_age_seconds,
         )
     except OSError as exc:
         return _emit_model_error(
@@ -130,10 +141,10 @@ def _quota(args: argparse.Namespace) -> int:
         print(
             f"Session quota: {result['availability']}; "
             f"quantity {result['quantity_kind']}; allowance {result['allowance']}; "
-            f"used {result['consumption']}; provider freshness unknown; "
+            f"used {result['consumption']}; provider freshness {result['freshness']}; "
             f"diagnostics {', '.join(result['diagnostics'])}"
         )
-    return 0 if result["availability"] in {"cached", "unlimited"} else 1
+    return 0 if result["availability"] in {"available", "cached", "unlimited"} else 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -150,6 +161,10 @@ def build_parser() -> argparse.ArgumentParser:
     quota.add_argument("--capture", required=True, help="allowlisted JSON capture, at most 64 KiB")
     quota.add_argument("--session-id", required=True, help="expected requesting SDK session")
     quota.add_argument("--category", default="premium_interactions")
+    quota.add_argument("--provider-id", help="opt in to one SDK provider's quota evidence")
+    quota.add_argument("--quota-id", help="select a quota within the explicit provider")
+    quota.add_argument("--at", help="evaluate provider freshness at an RFC 3339 instant")
+    quota.add_argument("--max-age-seconds", type=int, default=300)
     quota.add_argument("--json", action="store_true")
     quota.set_defaults(handler=_quota)
     version = subparsers.add_parser("version", help="print the budget-guidance version and exit")

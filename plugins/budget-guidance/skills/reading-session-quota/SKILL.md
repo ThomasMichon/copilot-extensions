@@ -29,6 +29,10 @@ description: |
    freshness, and reset diagnostics. A matching capture ID is a caller claim,
    not independent account verification. Cached quota is not a fresh provider
    read and cannot supply confident run-rate or fleet concurrency advice.
+   When the host exposes provider-owned quota evidence, read
+   `docs/provider-quota.md` in the same plugin root and opt in only to the exact
+   provider/quota IDs. Provider read time is not a charge-settlement watermark;
+   a capture file cannot authenticate itself or enable live arithmetic.
 5. Preserve explicit unavailable/error states and finish with the actual result.
    Do not refresh provider state, consume warnings, change workers, or block an
    operator-directed launch. Never commit captures with real account data.

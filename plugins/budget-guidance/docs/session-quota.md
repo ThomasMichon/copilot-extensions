@@ -96,7 +96,7 @@ proof that provider observations are fresh.
 
 ## Deliberate limits
 
-The SDK getter does not supply provider-observation time. Output therefore
+The compatibility snapshots do not supply provider-observation time. Output therefore
 reports `availability: cached`, `freshness: unknown`, and
 `provider_observed_at: null`, separately from `acquired_at`. It may show cached
 balances and a future non-estimated reset, but **does not** feed them into a
@@ -104,9 +104,13 @@ confident forecast or concurrency recommendation. `calculated` and advice
 `concurrency` remain null. Advice never blocks an operator launch or changes a
 worker.
 
-Raw account reset reconciliation, attributable same-period rate history,
-verified provider freshness, routing integration, and launch warnings remain
-subsequent effort slices. Unsupported hosts must report unavailable rather
+The opt-in [provider evidence mode](provider-quota.md) evaluates provider-owned
+observation time and raw budget reset metadata when that SDK surface is
+available. It does not relabel compatibility snapshots as fresh.
+
+Raw legacy account reset reconciliation, attributable same-period rate history,
+routing integration, and launch warnings remain subsequent effort slices.
+Unsupported hosts must report unavailable rather
 than starting a new global-default client to fabricate requesting-account
 evidence.
 

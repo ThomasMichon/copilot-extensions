@@ -32,6 +32,9 @@ See [Configuration](docs/configuration.md) and
 
 The [session quota reader](docs/session-quota.md) adds a bounded helper over an
 existing Copilot SDK session and a credential-filtered offline capture command.
-It preserves requesting-session attribution and labels cached provider
-freshness unknown. It does not yet supply live provider adapters, forecasting
-from runtime quota, or session-start injection.
+It preserves requesting-session attribution and labels cached compatibility
+freshness unknown. Opt-in [provider evidence](docs/provider-quota.md) evaluates
+one provider's observation, units, business state, and raw reset separately.
+Qualified incumbent readings reuse posture arithmetic for sustainable pace.
+Rate-based projections, provider refresh adapters, and session-start injection
+remain later slices.

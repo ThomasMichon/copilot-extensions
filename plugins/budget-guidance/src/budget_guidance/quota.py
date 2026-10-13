@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Protocol
 
-from .models import MAX_BUDGET_VALUE, ModelError, decimal_text, instant_text
+from .models import ModelError, decimal_text, instant_text
+from .quota_values import epoch_instant, quantity as _quantity
 
 QUOTA_SCHEMA = "copilot-extensions.session-quota-reading"
 
@@ -28,15 +29,6 @@ class SessionRpc(Protocol):
 class QuotaSession(Protocol):
     session_id: str
     rpc: SessionRpc
-
-
-def _quantity(value: Any, field: str) -> Decimal:
-    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
-        raise ModelError(f"quota.{field} must be a finite non-negative number")
-    number = Decimal(str(value))
-    if not number.is_finite() or number < 0 or number > MAX_BUDGET_VALUE:
-        raise ModelError(f"quota.{field} must be between zero and 1e18")
-    return number
 
 
 def _base(
@@ -88,6 +80,10 @@ def normalize_quota(
     acquired_at: datetime,
     category: str = "premium_interactions",
     session_owned: bool = False,
+    provider_id: str | None = None,
+    quota_id: str | None = None,
+    evaluated_at: datetime | None = None,
+    max_age_seconds: int = 300,
 ) -> dict[str, Any]:
     """Allowlist cached SDK quota; never present read time as provider freshness."""
     result = _base(
@@ -105,6 +101,16 @@ def normalize_quota(
         return result
     if not session_owned:
         diagnostics.append("capture-attribution-not-independently-verified")
+    if provider_id is not None:
+        from .provider_quota import normalize_provider_quota
+
+        return normalize_provider_quota(
+            projection, result=result, provider_id=provider_id, quota_id=quota_id,
+            category=category, at=evaluated_at or acquired_at,
+            max_age_seconds=max_age_seconds, session_owned=session_owned,
+        )
+    if quota_id is not None:
+        raise ModelError("quota id requires an explicit provider id")
     diagnostics.append("cached-provider-state-observation-time-unknown")
     snapshots = projection.get("snapshots")
     if snapshots is not None and not isinstance(snapshots, Mapping):
@@ -155,15 +161,7 @@ def normalize_quota(
     if epoch_ms is None:
         diagnostics.append("reset-unknown")
     else:
-        milliseconds = _quantity(epoch_ms, "resetDateEpochMs")
-        if milliseconds != milliseconds.to_integral_value():
-            raise ModelError("quota.resetDateEpochMs must be an integer")
-        try:
-            reset = datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(
-                milliseconds=int(milliseconds)
-            )
-        except OverflowError as exc:
-            raise ModelError("quota.resetDateEpochMs is out of range") from exc
+        reset = epoch_instant(epoch_ms, "resetDateEpochMs")
         estimated = snapshot.get("resetDateEstimated", False)
         if not isinstance(estimated, bool):
             raise ModelError("quota.resetDateEstimated must be a boolean")
@@ -187,6 +185,9 @@ async def acquire_session_quota(
     runtime_version: str,
     timeout: float = 10,
     category: str = "premium_interactions",
+    provider_id: str | None = None,
+    quota_id: str | None = None,
+    max_age_seconds: int = 300,
 ) -> dict[str, Any]:
     """Use the caller's existing SDK session; do not resume, refresh, or stop it."""
     if isinstance(timeout, bool) or not 0 < timeout <= 30:
@@ -223,4 +224,5 @@ async def acquire_session_quota(
         projection, session_id=session_id, expected_session_id=expected_session_id,
         runtime_version=runtime_version, acquired_at=datetime.now(timezone.utc),
         category=category, session_owned=True,
+        provider_id=provider_id, quota_id=quota_id, max_age_seconds=max_age_seconds,
     )

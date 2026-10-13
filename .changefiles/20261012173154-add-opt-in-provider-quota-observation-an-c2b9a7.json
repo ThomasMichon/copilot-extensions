@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in provider quota observation and reset evidence without global-account fallback",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}

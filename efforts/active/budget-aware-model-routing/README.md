@@ -172,14 +172,14 @@ timestamp is not proof that the provider metadata was refreshed.
 
 ### Phase 6 - Agent-owned quota helper and pacing advice
 
-- [ ] Add a reusable helper and discoverable on-demand skill for Copilot runtime
+- [x] Add a reusable helper and discoverable on-demand skill for Copilot runtime
   quota acquisition on behalf of the requesting session.
 - [ ] Preserve exact session/account attribution; report missing session context,
   mismatched account, unsupported RPCs, and cached provider metadata explicitly.
 - [ ] Read raw account next-reset metadata separately from normalized category
   snapshots. Reject missing, zero-epoch, or past reset values for current
   forecasting; diagnose disagreements instead of silently selecting a date.
-- [ ] Distinguish token-based credits from premium-request quantities and
+- [x] Distinguish token-based credits from premium-request quantities and
   unlimited entitlements before interpreting numeric values.
 - [ ] Calculate sustainable remaining pace and projection from attributable
   same-period rate evidence. Label assumed period starts and cycle-average
@@ -202,9 +202,9 @@ timestamp is not proof that the provider metadata was refreshed.
 
 - [ ] The quota skill/helper identifies the requesting session's account rather
   than silently reading a fresh runtime's global default.
-- [ ] Acquisition time and provider-observation freshness are distinct; cached
+- [x] Acquisition time and provider-observation freshness are distinct; cached
   metadata is not advertised as a confirmed fresh provider reading.
-- [ ] Monthly allocations are read per period, not carried forward as constants.
+- [x] Monthly allocations are read per period, not carried forward as constants.
 - [ ] Advice neither blocks operator work nor sleeps, suspends, or changes
   autonomous workers.
 
@@ -256,8 +256,26 @@ promotion authority, task queue, or dashboard.
 
 ## Journal
 
+### 2026-10-12 - Provider observation and reset evidence
+
+- Added explicit provider/quota selection over the incumbent SDK projection.
+  Provider acquisition, access, capacity, observation kind, quantity authority,
+  and units remain independent; unsupported or ambiguous evidence does not
+  fall back to compatibility counters.
+- Compared raw provider budget reset metadata against compatibility snapshots.
+  Missing, estimated, past, synthetic, or conflicting dates remain diagnostic
+  states rather than inferred billing-cycle boundaries.
+- Qualified incumbent account observations reuse existing posture arithmetic
+  for sustainable pace. Capture files stay unverified and cannot enable that
+  calculation. Same-period rate evidence, forecast, routing, and launch delivery
+  still remain open.
+
 ### 2026-10-12 - Session-owned quota acquisition slice
 
+- PR #6384 merged as `f693b4dae60638906dfd0a8c59a003b5edb7c222` after an
+  exact-head Copilot approval with zero open findings and successful required
+  checks. This lands the acquisition contract and skill, not a live provider
+  forecast or deployment. The effort remains Active.
 - Added an on-demand skill, bounded incumbent-session SDK quota helper, and
   allowlisted capture-inspection CLI. The helper refuses mismatched requesting
   sessions before RPC and never creates, refreshes, resumes, or stops a client.
@@ -274,6 +292,9 @@ promotion authority, task queue, or dashboard.
   budget values on denial, including conflicting unlimited entitlements; the
   new regressions fail against the original normalization before passing with
   the correction.
+- Next: evaluate provider-owned observation and reset evidence separately from
+  compatibility snapshots, retaining explicit partial/unsupported results and
+  the read-only pacing boundary.
 
 ### 2026-10-10 - Quota helper planning and publication reliability
 
