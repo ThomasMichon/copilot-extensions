@@ -1,0 +1,9 @@
+{
+  "comment": "Compare native collector aggregate witnesses with tight floating-point tolerance while preserving exact samples and contribution accounting",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
