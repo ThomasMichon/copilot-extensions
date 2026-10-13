@@ -7,6 +7,7 @@ import time
 import pytest
 
 from agent_bridge import agent_registry_relay as relay
+from agent_bridge import provider_process
 from agent_bridge.provider_process import run_captured
 
 
@@ -15,6 +16,22 @@ def test_captured_provider_output_refuses_invalid_utf8():
     with pytest.raises(UnicodeDecodeError):
         run_captured(command, timeout=10)
     assert run_captured(command, timeout=10, errors="replace").stdout == "\ufffd"
+
+
+def test_provider_command_requires_non_breakaway_tree_ownership(monkeypatch):
+    spawn = provider_process.spawn_sync_in_kill_on_close_job
+    calls = []
+
+    def tracked_spawn(argv, **kwargs):
+        calls.append(kwargs)
+        return spawn(argv, **kwargs)
+
+    monkeypatch.setattr(provider_process, "spawn_sync_in_kill_on_close_job", tracked_spawn)
+    result = run_captured([sys.executable, "-c", "print('profile')"], timeout=10)
+
+    assert result.stdout.strip() == "profile"
+    assert calls[0]["require_job"] is True
+    assert calls[0]["allow_breakaway"] is False
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows subprocess.run pipe-drain regression")

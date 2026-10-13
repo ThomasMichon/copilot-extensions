@@ -22,7 +22,9 @@ def run_captured(
     }
     if os.name != "nt":
         kwargs["start_new_session"] = True
-    proc, job = spawn_sync_in_kill_on_close_job(argv, require_job=True, **kwargs)
+    proc, job = spawn_sync_in_kill_on_close_job(
+        argv, require_job=True, allow_breakaway=False, **kwargs,
+    )
     try:
         out, err = proc.communicate(timeout=timeout)
     except BaseException:
