@@ -376,6 +376,16 @@ below-altitude evidence/tooling documentation, with no new rollout claim.
   roles and `--` without widening strict output attribution. All sixty source
   tests and `F,E9`/module-budget checks pass; the named parser correction is
   awaiting independent confirmation before publication.
+- Published the successor/reader correction after independent confirmation; the
+  transient provider-head warning resolved to the exact pushed PR and branch
+  ref through normal status refresh. The following full Balanced review
+  resolved the cursor finding, then identified file-valued reader filters and
+  malformed optional model metadata. Filters now remain reads without consuming
+  the search-pattern position, and model metadata is checked before aggregation
+  so malformed rows retain diagnostic packets rather than crashing analysis.
+  Explicit reader preprocessing is also classified as potentially mutating
+  work, without mistaking disabled/quoted options for execution. All sixty-two
+  source tests and `F,E9`/module-budget checks pass; no historical verdict changes.
 - The corrections affect source evidence validation only. All four historical
   independent FAIL verdicts and their original packets remain unchanged.
   No paid trial, native deployment claim or runtime change is authorized by

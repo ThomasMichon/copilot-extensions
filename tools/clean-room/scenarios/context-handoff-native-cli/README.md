@@ -194,7 +194,8 @@ unreadable known sudo grant with an actionable error before any policy/binary
 mutation. Validator APIs have no task override argument: only the trusted seed
 defines expected task values.
 Event rows must contain nonempty id/type/time strings and an explicit data
-object; tool identifiers/argument objects and consumed message/delivery fields
+object; optional model metadata must be text or null before model aggregation.
+Tool identifiers/argument objects and consumed message/delivery fields
 are validated before downstream access. Incomplete rows become line-specific
 diagnostics, not invented defaults. Analysis propagates export diagnostics and
 quarantines an unreliable exported event snapshot, including a pre-existing
@@ -214,6 +215,9 @@ patterns in unrelated task-contract reads are not treated as corpus file reads
 or allowed to produce read credit.
 Work-operand parsing accounts for grep/rg short-option clusters, attached or
 separate pattern/pattern-file/value arguments, long `=value` forms and `--`.
+File-valued `--ignore-file`/`--exclude-from` filters are input reads, not search
+patterns. Explicit reader preprocessing is substantive potentially mutating
+work; disabling it or quoting its option as a pattern does not invent execution.
 Pattern files remain actual reads; regex, glob and option values are not shifted
 into file roles. This broader work classification does not expand shell-output
 attribution or permit opaque readers to earn unverified content credit.

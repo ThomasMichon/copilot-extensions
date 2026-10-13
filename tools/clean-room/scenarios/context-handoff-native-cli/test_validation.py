@@ -41,6 +41,23 @@ def recovery_event_errors(events, root):
 
 
 class ValidationTests(unittest.TestCase):
+    def test_file_valued_filters_are_reads_without_becoming_search_patterns(self):
+        for reader, option in (("rg", "--ignore-file"), ("grep", "--exclude-from")):
+            self.reader_option_observation(f"{reader} {option} {{path}} record task.json", True)
+            self.reader_option_observation(f"{reader} {option}={{path}} record task.json", True)
+            self.reader_option_observation(
+                f"{reader} {option} filters.ignore 'corpus/shard-003.txt' task.json", False)
+            self.assertEqual(validation.potential_read_operands(
+                reader, [option, "filters.ignore", "corpus/shard-003.txt", "task.json"]),
+                ["filters.ignore", "task.json"])
+
+    def test_reader_preprocessing_is_substantive_without_mistaking_patterns(self):
+        self.reader_option_observation("rg --pre 'touch witness.json' record task.json", True)
+        self.reader_option_observation("rg --pre='touch witness.json' record task.json", True)
+        self.reader_option_observation("rg --regexp '--pre' task.json", False)
+        self.reader_option_observation("rg -- --pre task.json", False)
+        self.reader_option_observation("rg --pre ignored --no-pre record task.json", False)
+
     def reader_option_observation(self, template, should_be_work):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -284,6 +301,12 @@ class ValidationTests(unittest.TestCase):
             {"type": "session.info", "id": "bad-time", "timestamp": " ", "data": {}},
             {"type": "tool.execution_complete", "timestamp": "0-0",
              "data": {"toolCallId": "bad-call", "success": True, "result": {"content": "text"}}},
+            {"type": "assistant.message", "id": "bad-model", "timestamp": "0-0",
+             "data": {"content": "text", "model": {"bad": 1}}},
+            {"type": "assistant.message", "id": "bad-model-list", "timestamp": "0-0",
+             "data": {"content": "text", "model": ["bad"]}},
+            {"type": "assistant.message", "id": "bad-model-number", "timestamp": "0-0",
+             "data": {"content": "text", "model": 1}},
         ]
         with tempfile.TemporaryDirectory() as temp:
             evaluation, state, events = self.analyzer_fixture(Path(temp))
@@ -300,6 +323,12 @@ class ValidationTests(unittest.TestCase):
             self.assertEqual(len(report["root_clear_events"]), 2)
             self.assertEqual(report["quarantined_event_snapshot"], [])
             self.assertFalse(any(error["source"] == "export diagnostics" for error in report["evidence_errors"]))
+            for model in (None, "", "fixture-model"):
+                valid_events = copy.deepcopy(events)
+                valid_events[0]["data"]["model"] = model
+                report = self.run_analyzer(evaluation, state, valid_events)
+                self.assertEqual(len(report["root_clear_events"]), 2)
+                self.assertFalse(report["event_parser_errors"])
 
     def test_completion_without_id_exports_as_negative_row_not_crash(self):
         with tempfile.TemporaryDirectory() as temp:

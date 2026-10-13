@@ -151,6 +151,10 @@ def event_stream(path):
                        for key in ("id", "type", "timestamp"))):
             errors.append({"source": "events", "line": number, "error": "invalid event object"})
             continue
+        model = event["data"].get("model")
+        if model is not None and not isinstance(model, str):
+            errors.append({"source": "events", "line": number, "error": "invalid optional model metadata"})
+            continue
         if event["type"] in ("tool.execution_start", "tool.execution_complete"):
             data = event["data"]
             if (not isinstance(data.get("toolCallId"), str) or not data["toolCallId"].strip()
@@ -331,11 +335,15 @@ def resolved_read_paths(start, workspace):
 
 
 def potential_read_operands(reader, words):
-    """Distinguish grep/rg patterns from file operands without granting read credit."""
+    return reader_inputs(reader, words)[0]
+
+
+def reader_inputs(reader, words):
+    """Return potential input files and preprocessing risk, never content-read credit."""
     if reader not in ("grep", "rg"):
-        return [word for word in words if not word.startswith("-")
-                and (reader not in ("head", "tail", "sed") or "/" in word or word.endswith((".md", ".txt")))]
-    files, index, has_pattern, options = [], 0, False, True
+        return ([word for word in words if not word.startswith("-")
+                 and (reader not in ("head", "tail", "sed") or "/" in word or word.endswith((".md", ".txt")))], False)
+    files, index, has_pattern, options, executes = [], 0, False, True, False
     long_values = set(("after-context before-context context max-count binary-files directories devices "
                        "exclude exclude-dir include label").split())
     if reader == "rg":
@@ -351,7 +359,11 @@ def potential_read_operands(reader, words):
         kind, attached = None, None
         if options and word.startswith("--"):
             name, separator, value = word[2:].partition("=")
-            if name in ("regexp", "file"):
+            if name == "no-pre" and reader == "rg":
+                executes = False
+            elif name == ("ignore-file" if reader == "rg" else "exclude-from"):
+                kind = "filter-file"
+            elif name in ("regexp", "file"):
                 kind = "pattern" if name == "regexp" else "file"
             elif name in long_values:
                 kind = "value"
@@ -371,15 +383,17 @@ def potential_read_operands(reader, words):
                 attached = words[index]
             if kind in ("pattern", "file"):
                 has_pattern = True
-            if kind == "file" and attached:
+            if kind in ("file", "filter-file") and attached:
                 files.append(attached)
+            if reader == "rg" and word.partition("=")[0] == "--pre":
+                executes = bool(attached)
         elif not options or not word.startswith("-") or word == "-":
             if not has_pattern:
                 has_pattern = True
             else:
                 files.append(word)
         index += 1
-    return files
+    return files, executes
 
 
 def valid_read_range(bounds, upper=None):
@@ -503,11 +517,15 @@ def task_write(start):
                 continue
             at_start = False
             executable = Path(token).name
-            if executable == "sed":
+            if executable in ("sed", "rg"):
                 end = index + 1
                 while end < len(tokens) and tokens[end] not in (";", "&&", "||", "|", "&"):
                     end += 1
                 operands = tokens[index + 1:end]
+                if executable == "rg":
+                    if reader_inputs("rg", operands)[1]:
+                        return True
+                    continue
                 # Only the fixture's simple bounded-print form is proven
                 # read-only; other scripts can write or execute without -i.
                 if (len(operands) != 3 or operands[0] != "-n"
