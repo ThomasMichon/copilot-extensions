@@ -534,6 +534,18 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   reconciliation selection still passed both cases. Content hashes replace
   raw-byte assertion values to preserve byte-change detection without
   enormous failure logs. Corrected-head native evidence remains pending.
+- Review still identified a medium-severity POSIX profile escape despite
+  the API approval state: the child resolves its account home through
+  `pwd.getpwuid`, not the parent process's `Path.home` patch. Kept the merge
+  gate closed. The test now pins only that account-directory lookup inside
+  the child and executes the unchanged owned helper CLI through `runpy`.
+  Other passwd fields and real resolver results remain intact.
+- Removed the injected false policy. The real helper now reports the
+  fixture's canonical policy path, authoritative policy evidence, and the
+  established `missing` state for the implicit legacy default. The contained
+  selection passed both cases again. The earlier native profiling fix
+  passed its actual Windows step, but final acceptance still requires
+  fresh evidence and a review clearing the profile-escape finding.
 
 ### 2026-10-13 — Native Windows proof landed; wrapper acceptance remains scoped
 

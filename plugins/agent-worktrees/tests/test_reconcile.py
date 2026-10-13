@@ -49,12 +49,6 @@ def test_runtime_resolution_real_helper_read_only(env, monkeypatch, pointer_exis
     legacy = env.home / ".agent-worktrees"
     legacy.mkdir()
     (legacy / "retained-state.json").write_text('{"retained":true}\n', encoding="utf-8")
-    policy = env.home / "diagnostic-policy.json"
-    policy.write_text(json.dumps({
-        "schema": "copilot-extensions.installation-mode",
-        "version": 1,
-        "installationMode": {"enabled": False},
-    }), encoding="utf-8")
     if pointer_exists:
         pointer = env.home / ".copilot-extensions" / "agent-worktrees" / "runtime-root"
         pointer.parent.mkdir(parents=True)
@@ -67,10 +61,25 @@ def test_runtime_resolution_real_helper_read_only(env, monkeypatch, pointer_exis
         helper_index = command.index(str(helper))
         assert command[helper_index + 1] == "probe-legacy"
         calls.append(command)
-        # The CLI's explicit false policy cannot authorize a cell. Keep the
-        # actual subprocess while excluding the runner's personal policy.
-        flag = "-PolicyPath" if os.name == "nt" else "--policy-path"
-        return real_run([*command, flag, str(policy)], **kwargs)
+        if os.name == "nt":
+            return real_run(command, **kwargs)
+        # HOME cannot redirect the POSIX account profile. Pin only that OS
+        # lookup in the child, then execute the unchanged owned helper CLI.
+        bootstrap = (
+            "import pwd,runpy,sys\n"
+            "home=sys.argv[1]\n"
+            "original=pwd.getpwuid\n"
+            "def getpwuid(uid):\n"
+            "    record=original(uid)\n"
+            "    return pwd.struct_passwd((*record[:5],home,record.pw_shell))\n"
+            "pwd.getpwuid=getpwuid\n"
+            "sys.argv=sys.argv[2:]\n"
+            "runpy.run_path(sys.argv[0],run_name='__main__')\n"
+        )
+        return real_run(
+            [command[0], "-c", bootstrap, str(env.home), *command[1:]],
+            **kwargs,
+        )
 
     monkeypatch.setattr(reconcile.subprocess, "run", run_fixture_helper)
 
@@ -91,6 +100,11 @@ def test_runtime_resolution_real_helper_read_only(env, monkeypatch, pointer_exis
     assert result["actualMode"] == "legacy"
     assert result["runtimeRoot"] == str(legacy)
     assert result["context"] is None
+    assert result["policy"]["path"] == str(
+        env.home / ".copilot-extensions" / "installation-mode.json"
+    )
+    assert result["policy"]["authoritative"] is True
+    assert result["policy"]["state"] == "missing"
     selected = reconcile.resolve_runtime_installation(
         "agent-worktrees", payload, home=env.home,
     )
