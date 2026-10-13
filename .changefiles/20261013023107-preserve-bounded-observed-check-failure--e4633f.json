@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve bounded observed check failure names, conclusions and diagnostic links in PR watch and status output without weakening required CI.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

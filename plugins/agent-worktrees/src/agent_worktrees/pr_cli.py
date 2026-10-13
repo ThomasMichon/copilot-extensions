@@ -8,6 +8,7 @@ from pathlib import Path
 
 from . import config as cfg
 from . import git_ops, output, providers, tracking, worktree_identity
+from .pr_checks import print_check_failures
 
 
 def _core():
@@ -662,6 +663,7 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             payload["timed_out"] = True
             print(_json.dumps(payload))
             if not args.json:
+                print_check_failures(payload, stream=sys.stderr, prefix="pr-watch: ")
                 print(f"pr-watch: timed out after {args.timeout:g}s", file=sys.stderr)
                 merge = payload.get("merge") or {}
                 if merge:
@@ -684,6 +686,7 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             return 124
         print(_json.dumps(result.payload))
         if not args.json:
+            print_check_failures(result.payload, stream=sys.stderr, prefix="pr-watch: ")
             print(
                 f"pr-watch: {args.repo}#{args.pr} -> "
                 f"{', '.join(result.payload['transitions'] + result.payload.get('updates', []))}",

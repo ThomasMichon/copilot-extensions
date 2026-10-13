@@ -468,6 +468,8 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
     if result.get("repo"):
         print(f"  repo:     {result.get('repo')}")
     if isinstance(live_block, dict):
+        from .pr_checks import print_check_failures
+        print_check_failures(live, stream=sys.stdout, prefix="    ")
         verdict = live.get("verdict") or "(none)"
         print("  live:")
         print(f"    verdict:     {verdict}")

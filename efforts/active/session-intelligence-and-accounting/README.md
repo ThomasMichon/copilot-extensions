@@ -226,6 +226,19 @@ Reviewed and merged in #5671. Implementation is authorized against this plan.
 
 ## Journal
 
+### 2026-10-13 - Usage-evidence amendment reviewed and merged
+- #6442 merged after the current-head Copilot review had no open Medium/High
+  findings and the configured required CI contexts passed. The worktree
+  reconciled through the managed PR completion path.
+- The amendment authorizes additive session-local accounting capture and
+  session-held-out transcript estimation with explicit uncertainty. It does not
+  claim either runtime capability is implemented.
+- A non-required reviewer infrastructure check separately failed to acquire a
+  runner; the watcher exposed only a failure rollup. #6495 owns the bounded
+  diagnostic correction before this contributor resumes the accounting slice.
+- The effort remains Active; preservation, calibration, consumer adoption and
+  the parent validation obligations remain open.
+
 ### 2026-10-10 - Additive ZIP preservation landed
 - Source PR #6117 merged as `0f13c88d52d645ae22c90a836604fbd35608178d`
   after exact-head Copilot approval and complete successful CI run

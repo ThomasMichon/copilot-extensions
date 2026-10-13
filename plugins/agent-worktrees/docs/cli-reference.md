@@ -330,6 +330,29 @@ profile when `pr.roles` or live merge authority can change which verbs apply.
 
 
 
+### Observed check failure diagnostics
+
+GitHub `pr-watch` results (including timeouts and `checks_failed` events) and
+the `pr-status --json` live block include `check_failures`: the failing check's
+`name`, `state` (provider conclusion), `source` (`check-run` or `commit-status`),
+`url` and available `description`. Human output prints the same names and links.
+The data comes from the existing REST status/check-run reads, so it can include
+an optional automated-review check omitted by `gh pr checks`.
+
+`checks_scope: "observed"` is intentional: this rollup includes optional checks,
+not just required CI. A reviewer runner failure does not mean the required CI
+aggregate failed. Required-check completeness is separately verified at the
+admin merge boundary; these diagnostics neither weaken nor replace that gate.
+`checks_complete` reports whether both observed sources were readable/complete,
+or is null for providers that do not supply diagnostic coverage. An empty
+failure list from an unsupported provider is not proof that no failure exists.
+
+Diagnostics retain at most 64 failures per snapshot and 2,048 characters per
+text field. `check_failures_omitted` reports any additional failures; shortened
+text is marked `[truncated]`. Only HTTP(S) diagnostic links without embedded
+credentials are emitted. Raw annotations and job logs are not fetched on each
+watch poll; the diagnostic link is the drill-down path when a summary is absent.
+
 ## Status bar segment (tmux / psmux)
 
 `status-segment` prints a **single styled line** classifying the worktree at

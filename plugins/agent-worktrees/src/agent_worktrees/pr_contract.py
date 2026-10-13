@@ -28,6 +28,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from .pr_checks import checks_payload
+from .pr_snapshot import PRSnapshot as PRSnapshot, Review as Review
+from .pr_snapshot import REVIEW_STATE_EVENT as _REVIEW_STATE_EVENT
 
 # ---------------------------------------------------------------------------
 # Transition vocabulary (shared by pr-watch's --until and pr-status)
@@ -43,8 +46,8 @@ ALL_TRANSITIONS = (
     "commented",          # a comment-only review was submitted (not the author's)
     "conflict",           # the PR became un-mergeable (mergeable true -> false)
     "mergeable",          # the PR became mergeable again (mergeable false -> true)
-    "checks_failed",      # a required CI check rolled up to failure (#225)
-    "checks_succeeded",   # a required CI check rolled up to success -- the
+    "checks_failed",      # an observed check rolled up to failure (#225)
+    "checks_succeeded",   # observed checks rolled up to success -- the
                            # terminal CI outcome ``checks_failed`` alone never
                            # covers. Not in ``DEFAULT_UNTIL``: a green build
                            # alone isn't actionable when a real review may
@@ -92,17 +95,6 @@ NONBLOCKING_DEFAULT_UNTIL = (
 #: the merge gate, not a reason to re-review).
 REVIEWER_DEFAULT_UNTIL = ("pushed", "merged", "closed")
 
-#: Provider-neutral review state (uppercased) -> transition name.  A provider
-#: normalizes its own review vocabulary onto these three canonical states.
-_REVIEW_STATE_EVENT = {
-    "REQUEST_CHANGES": "changes_requested",
-    "CHANGES_REQUESTED": "changes_requested",
-    "APPROVED": "approved",
-    "COMMENT": "commented",
-    "COMMENTED": "commented",
-    # A pending/draft review is not submitted, so it is never a transition.
-}
-
 #: Verdict states under a **blocking** review policy: a comment is not a
 #: verdict; a pending draft is not submitted. See
 #: :data:`NONBLOCKING_VERDICT_STATES` for the non-blocking case.
@@ -123,64 +115,6 @@ def default_until(review_blocking: bool) -> tuple[str, ...]:
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class Review:
-    """One submitted PR review, normalized across providers."""
-
-    id: int
-    state: str            # canonical: APPROVED | CHANGES_REQUESTED | COMMENT | ...
-    user: str
-    submitted_at: str = ""
-    commit_id: str = ""
-    dismissed: bool = False
-
-
-@dataclass(frozen=True)
-class PRSnapshot:
-    """A point-in-time view of a PR, sufficient to diff and classify.
-    Carries both the fields ``pr-watch`` needs (reviews, mergeable, lifecycle)
-    and the fields ``pr-consent`` / ``pr-status`` need (labels, title, draft),
-    so one snapshot feeds every member of the family.
-    """
-
-    pr_state: str = "open"       # "open" | "closed"
-    merged: bool = False
-    head_sha: str = ""
-    base_ref: str = ""
-    updated_at: str = ""
-    """Provider timestamp for the PR's latest mutation."""
-    reviews: tuple[Review, ...] = ()
-    author: str = ""             # the PR creator's login (its own reviews never fire)
-    mergeable: bool | None = None
-    """Provider mergeability flag: True (ready), False (conflict/blocked), or
-    None when the provider hasn't computed it yet (some compute it async, so a
-    just-opened PR can briefly report None)."""
-    checks_state: str = ""
-    """Provider-neutral CI rollup for the head commit (#225): ``"success"`` |
-    ``"failure"`` | ``"pending"`` | ``"none"`` (confirmed empty) | ``""`` (unknown). A
-    provider that doesn't report it leaves ``""`` -- which never fires a
-    ``checks_failed``/``checks_succeeded`` transition, so the field is
-    additive and safe."""
-    labels: tuple[str, ...] = ()
-    title: str = ""
-    draft: bool = False
-
-    @property
-    def max_review_id(self) -> int:
-        """High-water mark over **submitted** (verdict/comment) reviews only.
-        Excluding non-submitted reviews from the cursor means a draft visible at
-        arm time can't silently absorb its own later submission.
-        """
-        return max(
-            (r.id for r in self.reviews if r.state.upper() in _REVIEW_STATE_EVENT),
-            default=0,
-        )
-
-    @property
-    def closed_unmerged(self) -> bool:
-        return self.pr_state == "closed" and not self.merged
-
 
 @dataclass(frozen=True)
 class Comment:
@@ -410,7 +344,12 @@ def compute_events(
             and snap.checks_state == "failure"
             and "checks_failed" in want
         ):
-            events.append({"event": "checks_failed", "checks_state": snap.checks_state})
+            events.append({
+                "event": "checks_failed",
+                **checks_payload(snap.checks_state, snap.check_failures,
+                                 complete=snap.checks_complete,
+                                 omitted=snap.check_failures_omitted),
+            })
 
         # CI checks resolved to success: the symmetric terminal outcome
         # ``checks_failed`` never covers. Same "known, non-terminal baseline
