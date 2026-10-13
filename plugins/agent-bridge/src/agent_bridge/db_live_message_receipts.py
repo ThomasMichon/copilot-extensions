@@ -39,6 +39,7 @@ class _LiveMessageReceiptsMixin:
         """Fence ACK-derived busy state against already-observed consumption."""
         if not ids:
             return 0
+        # Match this ACK's timestamp, not older accepted IDs in a mixed retry.
         placeholders = ",".join("?" for _ in ids)
         cur = self.execute_write(
             "UPDATE live_sessions SET turn_state='running', last_activity_at=? "

@@ -112,6 +112,37 @@ def test_consumption_before_ack_is_monotonic_and_nested_or_foreign_events_do_not
     assert api.get("/api/v1/live-sessions/wt-1/result").json()["state"]["pending_messages"]["value"] == []
 
 
+def test_mixed_ack_retry_does_not_mark_busy_for_an_older_unconsumed_acceptance(api, tmp_db):
+    older = _send(api)["message_id"]
+    assert tmp_db.ack_live_messages("live-1", [older], time.time() - 10) == 1
+    current = tmp_db.enqueue_live_message("live-1", "peer", "current", time.time())
+    record_consumption(tmp_db, "live-1", [_consumed(current)])
+    tmp_db.update_live_turn_state("live-1", turn_state="idle", last_activity_at=time.time())
+    response = api.post("/api/v1/live-sessions/live-1/messages/ack",
+                        json={"ids": [older, current]})
+    assert response.status_code == 200, response.text
+    assert response.json()["acked"] == 1
+    assert tmp_db.get_live_session("live-1")["turn_state"] == "idle"
+    assert tmp_db.live_message_receipt("live-1", older)["stage"] == "sdk_accepted"
+    assert tmp_db.live_message_receipt("live-1", current)["stage"] == "consumed"
+
+
+def test_consumption_batch_uses_one_observation_timestamp(api, tmp_db, monkeypatch):
+    first = _send(api)["message_id"]
+    second = tmp_db.enqueue_live_message("live-1", "peer", "second", time.time())
+    calls = []
+
+    def clock():
+        calls.append(None)
+        return 123.0 + len(calls)
+
+    monkeypatch.setattr("agent_bridge.live_message_receipts.time.time", clock)
+    record_consumption(tmp_db, "live-1", [_consumed(first), _consumed(second)])
+    assert len(calls) == 1
+    assert tmp_db.live_message_receipt("live-1", first)["consumed_at"] == 124.0
+    assert tmp_db.live_message_receipt("live-1", second)["consumed_at"] == 124.0
+
+
 @pytest.mark.parametrize("delivery", ["queue", "steer", "interrupt"])
 def test_consumed_without_ack_settles_delivery_and_idle_admission(api, tmp_db, delivery):
     mid = _send(api, delivery=delivery)["message_id"]
@@ -503,6 +534,30 @@ def test_live_cli_defaults_to_receipt_and_explicit_wait_is_opt_in(monkeypatch, c
     args.wait_reply = True
     _deliver_to_live_session(client, args, "live-1", "update")
     assert client.wait is True
+
+
+@pytest.mark.parametrize("receipt", [None, {}, {"stage": None}])
+@pytest.mark.parametrize("as_json", [False, True])
+def test_cli_missing_receipt_stage_does_not_invent_admission(monkeypatch, capsys, receipt, as_json):
+    class Client:
+        def send_live_message(self, sid, **kwargs):
+            result = {"message_id": 7, "session_id": sid}
+            if receipt is not None:
+                result["receipt"] = receipt
+            return result
+
+    monkeypatch.setattr(cli, "_live_sender_label", lambda _args: "peer")
+    monkeypatch.setattr(cli, "_live_reply_to", lambda _args: None)
+    args = argparse.Namespace(json=as_json, no_wait=False)
+    _deliver_to_live_session(Client(), args, "live-1", "update")
+    output = capsys.readouterr().out
+    if as_json:
+        result = json.loads(output)
+        assert result["accepted"] and result["delivered"] is None
+        assert result["outcome"] != "admitted"
+    else:
+        assert "receipt: unavailable (delivery evidence unavailable)" in output
+        assert "receipt: admitted" not in output
 
 
 @pytest.mark.parametrize("duplicate", [False, True])

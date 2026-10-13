@@ -30,10 +30,11 @@ def consumed_message_id(event: dict[str, Any]) -> int | None:
 
 
 def record_consumption(db: Database, session_id: str, events: list[dict[str, Any]]) -> None:
+    now = time.time()
     for event in events:
         message_id = consumed_message_id(event)
         if message_id is not None:
-            db.consume_live_message(session_id, message_id, time.time())
+            db.consume_live_message(session_id, message_id, now)
 
 
 def receipt(db: Database, session_id: str, message_id: int) -> LiveMessageReceipt:
