@@ -304,3 +304,19 @@ They remain vision deltas, not features claimed by this routing foundation.
 - Targeted static-driver/canonical contract selection: 135 passed, one
   native-platform skip. Touched-code Ruff and install-contract checks passed.
   These are pure DTO/CLI proofs, not authenticated routed search or enrollment.
+
+### 2026-10-13 - Native response-contract slice merged
+- #6034 merged at `2026-10-13T00:27:29Z`, commit
+  `fc6e5d433853dc98bfb17465075329e75d61d99b`. Its final source received
+  current-head approval with zero findings and passed required checks.
+- The prior partial-publication deadlock was repaired through reviewed #6288,
+  release and normal runtime convergence. The actual supported retry preserved
+  its original saved head, independently confirmed transport lease and rebased
+  source in durable proof; no metadata or lease was edited by hand.
+- Offers, requests and routed responses now consistently preserve bounded
+  opaque native installation IDs. The public native search constructor and
+  replacement path enforce the same exact 1 MiB aggregate budget as parsing.
+  Final installed consumer/contract selection: 201 passed.
+- This closes the native DTO compatibility slice, not the runtime campaign.
+  Standalone controller/connector lifecycle, authenticated registration,
+  authorized live backend adapters and real routed search remain open.
