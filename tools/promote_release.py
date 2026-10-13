@@ -756,13 +756,18 @@ def promote(
 
         base = _git(["merge-base", main_head, dev_head], cwd=repo, check=False) or main_head
         message = format_promotion_message(dev_range=(base, dev_head), summary=summary)
-        tag_name = f"{tag_prefix}-{time.strftime('%Y%m%d%H%M%S')}"
+        # The state file records only the tag *stem*: the landed commit's sha
+        # is not known until it exists (and, on the PR path, until the
+        # squash-merge produces it). Every pushed tag is `<stem>-<sha8>` of
+        # the commit it points at, so the tag and the state it releases
+        # always agree.
+        tag_stem = f"{tag_prefix}-{time.strftime('%Y%m%d%H%M%S', time.gmtime())}"
 
         new_state = dict(state)
         new_state["last_promotion"] = {
             "dev_head": dev_head,
             "main_before": main_head,
-            "tag": tag_name,
+            "tag": tag_stem,
             "promoted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         _write_pipeline_state_into_scratch(scratch, new_state)
@@ -785,12 +790,14 @@ def promote(
                 )
             except PromotionArtifactError as exc:
                 raise PromotionError(str(exc)) from exc
-        tag_name = f"{tag_name}-{commit[:8]}"
+        tag_name: str | None = f"{tag_stem}-{commit[:8]}"
 
         if push and candidate_branch:
             # Land via a real PR, not a direct push (see promote()'s
-            # docstring) -- the tag is created by the caller against the
-            # actual post-merge commit, not this pre-merge candidate.
+            # docstring) -- the caller tags the actual post-merge commit as
+            # `<tag_stem>-<merge sha8>`; this pre-merge candidate's sha is
+            # replaced by the squash-merge, so no tag name is reported for it.
+            tag_name = None
             _git(["push", "origin", f"{commit}:refs/heads/{candidate_branch}"], cwd=scratch)
         else:
             if build_python_artifacts_dir is None:
@@ -803,6 +810,7 @@ def promote(
             "promoted": True,
             "commit": commit,
             "tag": tag_name,
+            "tag_stem": tag_stem,
             "main_before": main_head,
             "dev_head": dev_head,
             "pushed": push,
@@ -886,7 +894,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"promote-release: {report['reason']}; nothing to do.")
         return 0
 
-    print(f"promote-release: generated commit {report['commit']} (tag {report['tag']})")
+    if report["tag"]:
+        print(f"promote-release: generated commit {report['commit']} (tag {report['tag']})")
+    else:
+        print(
+            f"promote-release: generated commit {report['commit']} "
+            f"(tag stem {report['tag_stem']}; the merged commit is tagged "
+            f"{report['tag_stem']}-<merge sha8>)"
+        )
     print(f"  main before: {report['main_before']}")
     print(f"  dev head:    {report['dev_head']}")
     for plugin, (old, new) in sorted(report["bumps"].items()):
