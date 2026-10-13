@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees; ordinary changes target `dev`
 - **Created:** 2026-10-12
-- **Status:** Active; first wave live, candidate/validation consolidation open
+- **Status:** Active; first wave live, baseline correction dev-landed, composed validation open
 - **Vision:** `visions/main-owned-workflow-control/README.md`
 - **Umbrella issue:** #6237
 - **Related campaigns:** #3336; `promotion-failure-reactive-fix-agent`; #6142
@@ -145,6 +145,8 @@ authorizes critical main-path acceptance or a bounded administrative change.
 
 ### Phase 5 - Finish validation and automation consolidation
 
+- [x] Move automated module-size baseline maintenance to reviewed dev PRs,
+  preserving widen-only updates and removing its obsolete main exception (#6438).
 - [ ] Record ownership completion separately; it is not the prerequisite for
   Phase 1 reductions proven safe under existing protection.
 - [ ] Establish one exact-input validation contract and compact generated
@@ -508,3 +510,27 @@ credential changes, broad policy weakening or unreviewed releases.
 - Updated the reviewer contract and remaining live references to the retired
   workflows. Historical incident references remain historical; the independent
   attestation/control implementation is not changed.
+
+### 2026-10-13 - Widen-only correction merged; next composed-validation stretch
+
+- #6438 merged at `09:52:15Z` as `87c5f5ddcca1`. The final reviewed head was
+  `00d9cad9b9a6`, with Copilot approval `5501468799` and zero open findings.
+  CI `38373310592` and lockdown `38373311117` passed; the real read-only
+  source preflight verified every required context, complete policy pages,
+  integration identity and unchanged exact head before the managed merge.
+- Review hardening bounded the target-root probe, disabled diff helpers and
+  inherited system/global Git configuration at the publication fence, and made
+  workflow assertions select named steps while preserving required ordering.
+  Sixty-seven focused cases and Python lint passed. Widen-only maintenance,
+  deliberate manual tightening and ordinary new-offender checks are unchanged.
+- This is merged to dev, not yet claimed activated on default main. A covering
+  promotion must include #6426 and #6438 before release proof is recorded;
+  authorized runtime adoption remains separately outstanding.
+- The next stretch establishes the exact-input/final-composed-tree validation
+  contract using #6332's existing attestation producer, then proves a required
+  compact candidate gate before pruning promotion-PR or main-push validation.
+  No competing signer/receipt framework, main source exception, new credential
+  or premature removal of existing gates is authorized.
+- The campaign remains Active. First-wave measurement, independent-control
+  preservation/admission, platform coverage and the two-release-cycle
+  validation plan still require their own completion evidence.
