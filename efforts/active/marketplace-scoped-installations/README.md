@@ -495,6 +495,34 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-10-13 — Reconciliation acceptance landed; separate source provenance from cell selection
+
+- [#6532](https://github.com/ThomasMichon/copilot-extensions/pull/6532)
+  merged after a current-head Copilot approval with zero open findings and
+  passing required aggregate/lockdown checks. The POSIX profile-isolation
+  finding was resolved before merge; an approval state alone did not clear it.
+- [Native Windows job 115344742783](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38411166312/job/115344742783)
+  executed the corrected acceptance steps: 150 diagnostic/derived/peer cases
+  passed with three POSIX-only skips; both Manager cases and both real
+  reconciliation cases passed. The reconciliation helper used the actual
+  missing-policy default, not an injected policy. The entire prepared fixture
+  home remained in the no-write manifest.
+- Traced existing installer ownership before adding catalog provenance.
+  Legacy deploy manifests record payload location, not normalized marketplace
+  source. Reused the canonical source normalization and installed/directory
+  evidence resolver instead of deriving source from a display name, payload
+  basename, or plugin manifest's repository field.
+- Added the Python source-only `resolve_payload_source(...)` API and composed
+  it into `resolve_context(...)`. Source reads do not consult installation
+  policy, activation, context pointers, or cell state. Full context resolution
+  retains receipt validation and source/locator rebind refusal. Synced the
+  canonical API into all existing Python adopters, including Manager.
+- The source-only result does not select an installation or claim runtime
+  ownership/readiness. Actual source-qualified catalog publication, stable
+  lifecycle ownership, consumer migration, and release/installed-copy proof
+  remain subsequent work. No Phase 8 or Validation Plan item is closed, and
+  persistent-host diagnostic/activation restrictions remain unchanged.
+
 ### 2026-10-13 — Consumer acceptance merged; reconciliation wrapper is next
 
 - [#6527](https://github.com/ThomasMichon/copilot-extensions/pull/6527)

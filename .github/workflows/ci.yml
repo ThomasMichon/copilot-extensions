@@ -1073,7 +1073,7 @@ jobs:
         run: |
           run="$(python tools/installation_context_ci_scope.py --base "$BASE_SHA" --head "$HEAD_SHA" --event "$EVENT_NAME")"
           echo "run=$run" >> "$GITHUB_OUTPUT"
-      - name: Read-only diagnostics (Windows)
+      - name: Source provenance and read-only diagnostics (Windows)
         if: steps.installation-context.outputs.run == 'true'
         timeout-minutes: 2
         env:
@@ -1083,7 +1083,8 @@ jobs:
           tools/test_installation_context_ci_scope.py
           libs/installation-context/tests/test_installation_mode_governance.py
           libs/installation-context/tests/test_diagnostic_consumers.py
-          -k "installation_context_ci_scope or status_and_probe_cli_parity_and_read_only or diagnostic_api_never_enters_mutation or active_namespaced_cli_is_visible_and_probe_refuses or explicit_powershell or derived_diagnostic_api_read_only or peer_governance_wrapper_read_only"
+          libs/installation-context/tests/test_payload_source.py
+          -k "payload_source or installation_context_ci_scope or status_and_probe_cli_parity_and_read_only or diagnostic_api_never_enters_mutation or active_namespaced_cli_is_visible_and_probe_refuses or explicit_powershell or derived_diagnostic_api_read_only or peer_governance_wrapper_read_only"
       - name: Manager read-only wrapper (Windows)
         if: steps.installation-context.outputs.run == 'true'
         timeout-minutes: 2
