@@ -31,6 +31,7 @@ class ReaderCpuObservation:
     def __init__(self, namespace: str) -> None:
         self._namespace = namespace if re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", namespace) else "other"
         self._sampler: OwnedProcessCpuSampler | None = None
+        self._sample_holder: asyncio.Task[CpuObservation] | None = None
         self._next_sample_at = 0.0
 
     @property
@@ -43,19 +44,33 @@ class ReaderCpuObservation:
         sampler: OwnedProcessCpuSampler,
         root: ProcessIdentity,
         previous: CpuObservation | None,
+        *,
+        final: bool = False,
     ) -> tuple[CpuObservation | None, CpuIssue | None]:
-        if time.monotonic() < self._next_sample_at:
-            return previous, (
-                CpuIssue(root.pid, "sampling_rate_limited") if previous is None else None
-            )
-        self._next_sample_at = time.monotonic() + _SAMPLE_INTERVAL_SECONDS
+        holder = self._sample_holder
+        if holder is None:
+            if time.monotonic() < self._next_sample_at:
+                return previous, (
+                    CpuIssue(root.pid, "sampling_rate_limited") if previous is None else None
+                )
+            holder = asyncio.create_task(sampler.sample())
+            self._sample_holder = holder
+            self._next_sample_at = time.monotonic() + _SAMPLE_INTERVAL_SECONDS
+        elif not holder.done() and not final:
+            return previous, CpuIssue(root.pid, "sample_pending")
         try:
-            return await asyncio.wait_for(sampler.sample(), timeout=_SAMPLE_JOIN_SECONDS), None
+            observation = await asyncio.wait_for(
+                asyncio.shield(holder),
+                timeout=_SAMPLE_JOIN_SECONDS,
+            )
         except TimeoutError:
             return previous, CpuIssue(root.pid, "sample_pending")
         except Exception:
             log.warning("Namespace reader CPU observation failed", exc_info=True)
             return previous, CpuIssue(root.pid, "sampling_failed")
+        else:
+            self._sample_holder = None
+            return observation, None
         finally:
             self._next_sample_at = time.monotonic() + _SAMPLE_INTERVAL_SECONDS
 
@@ -80,13 +95,19 @@ class ReaderCpuObservation:
                             await asyncio.wait({command}, timeout=delay)
                         sampler = OwnedProcessCpuSampler(root)
                         self._sampler = sampler
+                        self._sample_holder = None
                         while not command.done():
                             observation, issue = await self._sample(sampler, root, observation)
-                            if issue is not None:
+                            if issue is not None and issue.reason != "sample_pending":
                                 break
                             await asyncio.wait({command}, timeout=_SAMPLE_INTERVAL_SECONDS)
-                        if issue is None:
-                            observation, issue = await self._sample(sampler, root, observation)
+                        if issue is None or issue.reason == "sample_pending":
+                            observation, issue = await self._sample(
+                                sampler,
+                                root,
+                                observation,
+                                final=True,
+                            )
                 except Exception:
                     log.warning("Namespace reader CPU observation setup failed", exc_info=True)
                     issue = CpuIssue(root.pid, "sampling_failed")

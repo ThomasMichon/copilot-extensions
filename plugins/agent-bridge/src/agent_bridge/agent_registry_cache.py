@@ -30,13 +30,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from concurrent.futures import Future
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
 from .agent_registry_resolver import AgentResolver
 from .agent_roster_discovery import _DiscoveryMixin
+from .reader_ownership import ProviderReaderOwnership
 
 log = logging.getLogger("agent-bridge")
 
@@ -175,8 +175,9 @@ class AgentRosterCache(_DiscoveryMixin):
         self._inflight: dict[str, asyncio.Task[None]] = {}
         self._inflight_token: dict[str, object | None] = {}
         self._owned_scans: set[asyncio.Task[None]] = set()
-        self._owned_provider_reads: set[asyncio.Task[Any]] = set()
-        self._owned_provider_samples: set[Future[Any]] = set()
+        self._provider_work = ProviderReaderOwnership()
+        self._owned_provider_reads = self._provider_work.reads
+        self._owned_provider_samples = self._provider_work.samples
         self._task: asyncio.Task[None] | None = None
         self._watchdog_task: asyncio.Task[None] | None = None
         #: Single-flight task for the in-flight discovery scan (run via
@@ -473,35 +474,7 @@ class AgentRosterCache(_DiscoveryMixin):
                 )
         self._inflight.clear()
         self._inflight_token.clear()
-        native_reads = [task for task in self._owned_provider_reads if not task.done()]
-        native_results = await asyncio.gather(
-            *(asyncio.wait_for(asyncio.shield(task), timeout=self._CANCELLATION_GRACE)
-              for task in native_reads),
-            return_exceptions=True,
-        )
-        for result in native_results:
-            if isinstance(result, TimeoutError):
-                log.warning(
-                    "Agent roster cache: native provider read still running at shutdown; "
-                    "retaining ownership until its execution timeout or completion",
-                )
-            elif isinstance(result, BaseException):
-                log.warning("Agent roster cache: native provider read ended with %r", result)
-        samples = [future for future in self._owned_provider_samples if not future.done()]
-        sample_results = await asyncio.gather(
-            *(asyncio.wait_for(asyncio.shield(asyncio.wrap_future(future)),
-                               timeout=self._CANCELLATION_GRACE)
-              for future in samples),
-            return_exceptions=True,
-        )
-        for result in sample_results:
-            if isinstance(result, TimeoutError):
-                log.warning(
-                    "Agent roster cache: native CPU sample still running at shutdown; "
-                    "retaining ownership until completion",
-                )
-            elif isinstance(result, BaseException):
-                log.warning("Agent roster cache: native CPU sample ended with %r", result)
+        await self._provider_work.wait(timeout=self._CANCELLATION_GRACE)
         if self._discovery_task is not None and not self._discovery_task.done():
             # Unlike the plain-coroutine tasks above, a discovery task's
             # worker thread (a daemon thread via ``_run_in_daemon_thread``)
@@ -720,33 +693,6 @@ class AgentRosterCache(_DiscoveryMixin):
 
     # -- single-flight, generation-guarded per-namespace scan ------------------
 
-    def _retain_provider_work(self, resolver: object | None) -> None:
-        sample = getattr(resolver, "pending_cpu_sample_future", None)
-        if sample is not None and not sample.done() and sample not in self._owned_provider_samples:
-            self._owned_provider_samples.add(sample)
-            loop = asyncio.get_running_loop()
-
-            def completed(future: Future[Any]) -> None:
-                # The native thread completes this future, not the event loop.
-                try:
-                    loop.call_soon_threadsafe(self._owned_provider_samples.discard, future)
-                except RuntimeError:
-                    log.debug("CPU sample completed after its cache event loop closed")
-
-            sample.add_done_callback(completed)
-        native_task = getattr(resolver, "pending_list_task", None)
-        if (
-            native_task is not None and not native_task.done()
-            and native_task not in self._owned_provider_reads
-        ):
-            self._owned_provider_reads.add(native_task)
-
-            def read_completed(task: asyncio.Task[Any]) -> None:
-                self._retain_provider_work(resolver)
-                self._owned_provider_reads.discard(task)
-
-            native_task.add_done_callback(read_completed)
-
     def _namespace_resolver_ref(self, ns: str) -> object | None:
         return self._resolver.namespace_resolvers.get(ns)
 
@@ -822,7 +768,7 @@ class AgentRosterCache(_DiscoveryMixin):
                     exc_info=True,
                 )
         finally:
-            self._retain_provider_work(resolver)
+            self._provider_work.retain(resolver)
             if self._inflight.get(ns) is asyncio.current_task():
                 self._inflight.pop(ns, None)
                 self._inflight_token.pop(ns, None)

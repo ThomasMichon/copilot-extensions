@@ -406,3 +406,12 @@ sample admission could hit procutil's completion-based cache; cadence now
 starts at sample completion. Linux native proof remains pending the PR's
 canonical CI run. Numeric CPU limits, cumulative role accounting, sampler
 overhead and process-tree reclamation remain separate open items.
+
+The implementation PR's guard caught the roster cache crossing the module
+cap. Native command/sample ownership is now a focused helper rather than
+another cache responsibility. Validation also caught a sample that exceeded
+its 100ms join but completed during command execution: the observer now
+retains its shielded delivery waiter and consumes the completed observation
+at the bounded final join, without confusing waiter lifetime with the
+separately retained raw future. A deterministic delayed-sample regression
+and the complete focused Windows selection pass (134 tests).

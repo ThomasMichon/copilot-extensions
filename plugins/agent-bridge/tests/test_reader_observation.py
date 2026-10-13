@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -141,6 +142,35 @@ async def test_sampler_setup_failure_preserves_enumeration(
     assert [row.name for row in await provider.list()] == ["valid"]
     assert events[0]["issues"] == [{"pid": 123, "reason": "sampling_failed"}]
     assert "private" not in json.dumps(events)
+
+
+@pytest.mark.asyncio
+async def test_sample_completing_after_join_budget_is_exported_at_command_exit(
+    monkeypatch: pytest.MonkeyPatch,
+    events: list[dict],
+) -> None:
+    root = ProcessIdentity(123, 456.0)
+
+    def run(
+        self: reader_command.OwnedReaderCommand,
+        cmd: list[str],
+        *,
+        timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        self.receipt.set_result(root)
+        time.sleep(0.25)
+        return subprocess.CompletedProcess(cmd, 0, "[]", "")
+
+    def sample(self: OwnedProcessCpuSampler) -> CpuObservation:
+        time.sleep(0.15)
+        return CpuObservation(0.5, (root,), (), False)
+
+    monkeypatch.setattr(reader_command.OwnedReaderCommand, "run", run)
+    monkeypatch.setattr(OwnedProcessCpuSampler, "_sample_sync", sample)
+    provider = CliNamespaceResolver("test", "unused", command=["fake"])
+    assert await provider.list() == []
+    assert events[0]["observed_cpu_seconds"] == 0.5
+    assert events[0]["issues"] == []
 
 
 @pytest.mark.asyncio
@@ -368,7 +398,7 @@ async def test_native_cpu_receipt_and_telemetry(
         "import json,os,pathlib,psutil,time;"
         "pathlib.Path(sys.argv[2]).write_text(json.dumps("
         "{'pid':os.getpid(),'created_at':psutil.Process().create_time()}));"
-        "end=time.monotonic()+1.3;"
+        "end=time.monotonic()+3.3;"
         "\nwhile time.monotonic()<end: sum(i*i for i in range(1000))"
         '\nprint(\'[{"name":"native"}]\')'
     )
@@ -386,7 +416,7 @@ async def test_native_cpu_receipt_and_telemetry(
         return identity
 
     monkeypatch.setattr(reader_command, "capture_identity", capture)
-    rows = await provider.list(timeout=5)
+    rows = await provider.list(timeout=8)
     assert [row.name for row in rows] == ["native"]
     native_identity = json.loads(receipt.read_text())
     event = events[-1]
@@ -398,7 +428,7 @@ async def test_native_cpu_receipt_and_telemetry(
     assert event["observed_cpu_seconds"] is not None
     assert event["observed_cpu_seconds"] > 0.1
     assert event["coverage"] == "observed_lower_bound"
-    assert event["wall_seconds"] >= 1.3
+    assert event["wall_seconds"] >= 3.3
     assert not event["truncated"]
     assert "identity_mismatch" not in {item["reason"] for item in event["issues"]}
     assert not psutil.pid_exists(event["pid"])
