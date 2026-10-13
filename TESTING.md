@@ -9,11 +9,15 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
-The standalone runner accepts the legacy `agent-index-service` component name
-as an alias for `services/index`. It normalizes the alias before environment
+The standalone runner accepts the legacy `agent-index-service` and
+`agent-dispatch-service` component names as aliases for `services/index` and
+`services/dispatch`, respectively. It normalizes aliases before environment
 admission, dependency preparation, and smoke/full selection, so a released
 promotion workflow can validate a development snapshot after the service move.
-New invocations should use `services/index`.
+New invocations should use the canonical service paths. The native runner
+contract executes both aliases in canonical contained fixture environments
+from an isolated parent whose pytest dependencies reside outside its interpreter
+scheme, exercising the layered dependency layout without installing packages.
 
 The review-request workflow's fast contract uses
 `node --test tools/test_copilot_review_gate.cjs`. To exercise its exact script
@@ -522,16 +526,7 @@ containment.
 
 The standalone runner (`tools/run-standalone-tests.py`) uses the same
 environment lease protocol for managed venvs and custom `--python`
-interpreters. Its canonical service components are `services/index` and
-`services/dispatch`; the former `agent-index-service` and
-`agent-dispatch-service` CLI names remain compatibility aliases. They normalize
-before option validation, environment selection, admission, preparation and
-test containment, so aliases share the canonical environment and lease rather
-than creating a second cache. This also lets an older trusted-main promotion
-workflow validate a dev checkout after a service-path rename, before that
-workflow itself can be promoted.
-
-Standard venv roots are discovered from the canonical containing
+interpreters. Standard venv roots are discovered from the canonical containing
 `bin`/`Scripts` directory **with `pyvenv.cfg`** or a known managed target,
 without executing candidate code. Directory names alone are not proof of a
 venv: an opaque wrapper can also live in `bin` or `Scripts`. Known managed

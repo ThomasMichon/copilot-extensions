@@ -85,7 +85,7 @@ def test_manager_preparation_retains_source_payload_layout(tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize("component", [
-    "services/index", "agent-index-service", "agent-dispatch-service",
+    "services/index", "agent-dispatch-service",
 ])
 def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch, component):
     monkeypatch.setattr(runner, "REPO", tmp_path)
@@ -101,14 +101,8 @@ def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch
     assert called == []
 
 
-@pytest.mark.parametrize(("legacy", "canonical", "smoke"), [
-    ("agent-index-service", "services/index", False),
-    ("agent-index-service", "services/index", True),
-    ("agent-dispatch-service", "services/dispatch", False),
-])
-def test_legacy_service_names_use_canonical_preparation_lease_and_tests(
-    tmp_path, monkeypatch, legacy, canonical, smoke,
-):
+def test_legacy_dispatch_name_uses_canonical_preparation_lease_and_tests(tmp_path, monkeypatch):
+    legacy, canonical = "agent-dispatch-service", "services/dispatch"
     monkeypatch.setattr(runner, "REPO", tmp_path)
     root = tmp_path / canonical
     (root / "tests").mkdir(parents=True)
@@ -128,6 +122,7 @@ def test_legacy_service_names_use_canonical_preparation_lease_and_tests(
     def prepare(component, selected_python, *, smoke):
         assert component == canonical
         assert selected_python == python
+        assert smoke is False
         events.append(("prepare", smoke))
         python.parent.mkdir(parents=True, exist_ok=True)
         python.touch()
@@ -138,8 +133,7 @@ def test_legacy_service_names_use_canonical_preparation_lease_and_tests(
         assert kwargs["cwd"] == root
         assert kwargs["env"]["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
         assert all(Path(path).is_relative_to(root / "tests") for path in command[5:-2])
-        expected = root / "tests" / "test_cli.py" if smoke else root / "tests"
-        assert command[5] == str(expected)
+        assert command[5] == str(root / "tests")
         events.append(("run",))
         return 0
 
@@ -147,10 +141,8 @@ def test_legacy_service_names_use_canonical_preparation_lease_and_tests(
     monkeypatch.setattr(runner, "prepare", prepare)
     monkeypatch.setattr(runner, "run_contained", run)
     args = [legacy, "--prepare", "--admission-wait", "60"]
-    if smoke:
-        args.append("--smoke")
     assert runner.main(args) == 0
-    assert events == [("lease", 60.0), ("prepare", smoke), ("run",), ("release",)]
+    assert events == [("lease", 60.0), ("prepare", False), ("run",), ("release",)]
     assert not (tmp_path / ".test-venvs" / sys.platform / legacy).exists()
     assert legacy not in runner.STANDALONE_CONSUMERS
 
