@@ -272,7 +272,9 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         else:
             detail = "\n".join(x for x in [r.stdout.strip(), r.stderr.strip()] if x)
             output.warn(f"Plugin update returned non-zero:\n{detail}")
-            payloads_ok, payload_status = False, f"plugin update failed: {detail[-200:]}"
+            payloads_ok, payload_status = (
+                False, f"plugin update failed: {_events.bounded(detail, 200, tail=True)}"
+            )
     except OSError as exc:
         message = _describe_copilot_spawn_error(exc, cwd=update_context)
         output.warn(f"{message} -- skipping plugin update")

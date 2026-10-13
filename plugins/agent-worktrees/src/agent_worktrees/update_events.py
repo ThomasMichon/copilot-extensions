@@ -33,6 +33,15 @@ def enter(phase: str) -> None:
         _run.enter(phase)
 
 
+def bounded(text: str, limit: int, *, tail: bool = False) -> str:
+    """Redact, then truncate: a cut taken first can leave a credential fragment
+    (for example the middle of URL userinfo) that the redactor no longer
+    recognizes."""
+    if _ut is not None:
+        text = _ut.redact(text)
+    return text[-limit:] if tail else text[:limit]
+
+
 _WINDOWS = os.name == "nt"
 
 # Statuses this update produces itself for a configuration problem, optionally

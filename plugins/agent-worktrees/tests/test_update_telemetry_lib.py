@@ -453,7 +453,22 @@ def test_credential_shaped_dict_keys_are_redacted(telemetry_env):
     run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
     run.emit("prune", "run", "info", error={"code": "x", pat: "v"}, details={pat: {pat: 1}})
     run.finish()
-    assert ("K" * 20) not in run.events_path.read_text(encoding="utf-8")
+    raw = run.events_path.read_text(encoding="utf-8")
+    assert ("K" * 20) not in raw
+    events = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    assert all(_validate(e, _schema("update-event")) == [] for e in events)
+
+
+@pytest.mark.guard
+def test_truncated_details_are_redacted_before_the_cut(telemetry_env):
+    from agent_worktrees import update_events
+
+    secret = "s3cr3t" + "U" * 30
+    text = "x" * 150 + "https://user:" + secret + "@example.com/repo.git tail"
+    for tail, limit in ((True, 50), (False, 185)):
+        assert "U" * 8 in (text[-limit:] if tail else text[:limit])  # a raw cut leaks
+        cut = update_events.bounded(text, limit, tail=tail)
+        assert "U" * 8 not in cut
     runs = Path(telemetry_env[ut.ENV_HOME]) / "runs"
     for index in range(25):
         (runs / f"20200101T0000{index:02d}Z-1-abcd").mkdir(parents=True)

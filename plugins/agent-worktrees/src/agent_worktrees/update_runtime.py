@@ -352,7 +352,7 @@ def _registered_plugin_targets() -> dict[str, _RegisteredPluginTarget]:
     def record_activation_error(message: str, error: Exception) -> None:
         nonlocal activation_unknown
         activation_unknown = True
-        detail = str(error).replace("\r", " ").replace("\n", " ")[:240]
+        detail = update_events.bounded(str(error).replace("\r", " ").replace("\n", " "), 240)
         activation_warnings.append(f"{message}: {detail}")
 
     try:
@@ -628,7 +628,7 @@ def _reconcile_one_runtime_status(
     except subprocess.TimeoutExpired:
         return "timed out"
     except Exception as exc:
-        return str(exc)[:120]
+        return update_events.bounded(str(exc), 120)
     return "OK" if r.returncode == 0 else f"installer exited {r.returncode}"
 
 

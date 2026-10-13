@@ -36,6 +36,7 @@ REFRESH_SECONDS = 30.0
 STATUS_LOCK_SECONDS = 10.0
 MAX_LINE = 8192
 MAX_MESSAGE = 2048
+ERROR_KEYS = frozenset({"code", "message", "os_errno", "winerror", "path", "op"})
 MAX_DETAILS = 4096
 
 _SEQ = itertools.count(1)
@@ -304,6 +305,9 @@ class Run:
                 record["action"] = redact(record["action"])
             if isinstance(record.get("error"), dict):
                 error = _redact_obj(record["error"])
+                # The published schema closes ``error``; drop anything else
+                # (including a key the redactor masked) so every line validates.
+                error = {k: v for k, v in error.items() if k in ERROR_KEYS}
                 error["message"] = str(error.get("message", ""))[:MAX_MESSAGE]
                 record["error"] = error
             if "details" in record:
