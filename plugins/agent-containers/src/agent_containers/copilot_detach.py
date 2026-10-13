@@ -253,7 +253,7 @@ class _ContainerAdapter:
 
     def launch(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         from .ssh_transport import build_remote_command, build_ssh_command
-        from .copilot_process_auth import prepare_launch, wrap_command
+        from .copilot_process_auth import prepare_launch, wait_for_consumption, wrap_command
         from .ssh_transport import cleanup_remote_env
 
         auth_env = None
@@ -272,6 +272,8 @@ class _ContainerAdapter:
                 timeout=timeout,
                 creationflags=no_window_flags(),
             )
+            if proc.returncode == 0 and self.target is not None:
+                wait_for_consumption(self.name, self.target.user, auth_env, timeout=timeout)
             return proc.returncode, proc.stdout or "", proc.stderr or ""
         finally:
             if self.target is not None:

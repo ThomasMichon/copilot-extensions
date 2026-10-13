@@ -222,14 +222,38 @@ def cmd_copilot(
         ssh_config = prepare_ssh_config(args.name, user)
 
         def connect(remote_command: str) -> int:
-            spawn_cmd = build_ssh_command(
-                ssh_config, remote_command,
-                reverse_forwards=reverse_forwards, pty=True,
-            )
-            env = {**os.environ, **relay_env}
-            return subprocess.run(
-                spawn_cmd, env=env, creationflags=creation_flags()
-            ).returncode
+            from . import copilot_process_auth as auth
+            from .resolver import host_gh_token
+            from .ssh_transport import cleanup_remote_env, container_environment, write_remote_env
+
+            auth_env = None
+            remote_env = None
+            try:
+                auth_env = auth.prepare_launch(config, target.fleet, args.name, user)
+                if auth_env:
+                    values = {**container_environment(args.name, user), **relay_env}
+                    forward, _ = config.credentials_for(target.fleet)
+                    if forward:
+                        git_token = host_gh_token()
+                        if not git_token:
+                            raise RuntimeError("forward_gh_token requires the independent gh login")
+                        values["GH_TOKEN"] = git_token
+                    remote_env = auth.stage_env(args.name, user, values, write_remote_env)
+                    remote_command = auth.wrap_manager_shell(remote_command, auth_env, remote_env)
+                spawn_cmd = build_ssh_command(
+                    ssh_config, remote_command,
+                    reverse_forwards=reverse_forwards, pty=True,
+                )
+                env = auth.without_inference_token({**os.environ, **relay_env})
+                rc = subprocess.run(
+                    spawn_cmd, env=env, creationflags=creation_flags()
+                ).returncode
+                if rc == 0:
+                    auth.wait_for_consumption(args.name, user, auth_env)
+                return rc
+            finally:
+                cleanup_remote_env(args.name, user, auth_env)
+                cleanup_remote_env(args.name, user, remote_env)
 
         try:
             return run_venue_copilot(

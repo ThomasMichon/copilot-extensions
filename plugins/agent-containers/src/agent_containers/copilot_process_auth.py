@@ -21,10 +21,22 @@ def stage_env(container, user, values, writer):
 def wrap_command(command: str, auth_env: str | None, *, manager: bool = False) -> str:
     if not auth_env:
         return command
-    words = shlex.split(command)
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    words = list(lexer)
+    if words[:1] == ["cd"]:
+        valid_cd = (
+            len(words) >= 4 and words[2] == "&&"
+            and "$(" not in words[1] and "`" not in words[1]
+        )
+        words = words[3:] if valid_cd else []
+    if words[:1] == ["exec"]:
+        words = words[1:]
     if not manager and (
-        any(word.endswith("/copilot") for word in words)
-        or not any(word in {"copilot", "{{target_preference_launcher}}"} for word in words)
+        not words or words[0] not in {"copilot", "{{target_preference_launcher}}"}
+        or any(word in {";", "&", "&&", "|", "||", "(", ")", "<", ">", ">>"}
+               or "$(" in word or "`" in word for word in words[1:])
+        or "\n" in command
     ):
         raise RuntimeError(
             "process-only Copilot authentication requires the PATH-resolved "
@@ -40,6 +52,30 @@ def wrap_command(command: str, auth_env: str | None, *, manager: bool = False) -
             f"unset {TOKEN_VARIABLE}; {command} {launcher}"
         )
     return f'unset {TOKEN_VARIABLE}; export PATH={directory}:"$PATH"; {command}'
+
+
+def wrap_manager_shell(command: str, auth_env: str | None, remote_env: str | None) -> str:
+    words = shlex.split(command)
+    if len(words) == 3 and words[:2] == ["bash", "-lc"]:
+        command = words[2]
+    return transport.build_remote_command(wrap_command(command, auth_env, manager=True), remote_env)
+
+
+def wait_for_consumption(
+    container: str, user: str, auth_env: str | None, *, timeout: float = 180,
+) -> None:
+    if not auth_env:
+        return
+    path = shlex.quote(auth_env)
+    attempts = max(1, min(int(timeout), 600))
+    result = transport._run([
+        "docker", "exec", "-u", user, container, "sh", "-c",
+        f"attempt=0; while test \"$attempt\" -lt {attempts}; do if test ! -e {path}; then "
+        "echo COPILOT_AUTH_CONSUMED; exit 0; fi; "
+        "attempt=$((attempt + 1)); sleep 1; done; exit 1",
+    ], timeout=attempts + 5)
+    if result.returncode or result.stdout.strip() != "COPILOT_AUTH_CONSUMED":
+        raise RuntimeError("Copilot child did not confirm consuming its launch credential")
 
 
 def prepare_launch(config, fleet, container: str, user: str) -> str | None:

@@ -261,11 +261,13 @@ behavior. Restricted fleets never receive this (or any) host credential,
 same hard boundary as `forward_gh_token`.
 
 For an explicit `copilot_cli_account`, trusted ACP, Session Host child, and
-detached CLI launches re-read that existing host source for each launch. Only
+attached/detached CLI launches re-read that existing host source for each launch. Only
 the native Copilot process receives the selected inference token: a private,
 one-use launch file is consumed by a narrow executable wrapper, not sourced
 into the Session Host, `embody`, tmux, container, or session environment.
-Copilot receives `--secret-env-vars=COPILOT_GITHUB_TOKEN`, which strips that
+Successful CLI startup must confirm the native child consumed its file before
+cleanup removes the executable wrapper; an `embody` return alone is not proof
+of native startup. Copilot receives `--secret-env-vars=COPILOT_GITHUB_TOKEN`, which strips that
 value from its normal shell and MCP child environments. Existing `GH_TOKEN`,
 `GITHUB_TOKEN`, Git credential helpers, and relay identities are independent
 and remain available to downstream tools.
@@ -273,8 +275,10 @@ and remain available to downstream tools.
 The target's native `copilot --help` must confirm `--secret-env-vars` support
 before staging authentication. Missing source tokens or unsupported CLI
 capabilities refuse the launch; they never fall back to the Git identity.
-ACP commands must use PATH-resolved `copilot` (including the target-preference
-launcher template), not an absolute executable override. Detached launches
+ACP commands must directly execute PATH-resolved `copilot` (including the
+target-preference launcher template), optionally after one `cd ... &&` and/or
+`exec`, not an absolute executable override, custom command or shell pipeline.
+Attached/detached launches
 require an agent-worktrees runtime accepting `--copilot-process-launcher`;
 an older runtime rejects that option before launching. Direct `copilot`
 templates and normalized setup are supported; custom executable templates and

@@ -15,7 +15,7 @@ from ssh_manager import SSHConfig
 from agent_containers import __main__ as cli
 from agent_containers import copilot_detach as detach
 from agent_containers import copilot_process_auth as auth
-from agent_containers import resolver
+from agent_containers import copilot_venue, resolver
 from agent_containers.config import ContainersConfig, FleetConfig
 from agent_containers.session_host_context import TrustedContext
 
@@ -24,17 +24,21 @@ from agent_containers.session_host_context import TrustedContext
 def launch_seams(monkeypatch):
     config = ContainersConfig(forward_gh_token=True, relay_enabled=False)
     fleet = FleetConfig(copilot_cli_account="inference-user")
-    target = SimpleNamespace(config=config, fleet=fleet, user="vscode")
+    target = SimpleNamespace(config=config, fleet=fleet, user="vscode",
+                             actual_profile="trusted", workspace_folder="/workspace")
     seen = SimpleNamespace(staged=[], commands=[], cleaned=[], native=[])
     tokens = iter(("inference-one", "inference-two"))
     monkeypatch.setattr(resolver, "host_copilot_cli_token", lambda account: next(tokens))
     monkeypatch.setattr(cli, "host_gh_token", lambda: "git-only")
+    monkeypatch.setattr(resolver, "host_gh_token", lambda: "git-only")
     monkeypatch.setattr(cli, "prepare_ssh_config", lambda *a: SSHConfig(host_alias="fixture"))
     monkeypatch.setattr(cli, "container_environment", lambda *a: {
         "PATH": "/usr/bin", "COPILOT_GITHUB_TOKEN": "stale-ambient",
         "GITHUB_TOKEN": "github-own", "GIT_CONFIG_COUNT": "1",
     })
     monkeypatch.setattr(cli, "cleanup_remote_envs", lambda *a: None)
+    monkeypatch.setattr(auth.transport, "container_environment", cli.container_environment)
+    monkeypatch.setattr(auth.transport, "prepare_ssh_config", cli.prepare_ssh_config)
 
     def write(name, user, values):
         seen.staged.append(dict(values))
@@ -45,6 +49,8 @@ def launch_seams(monkeypatch):
             return subprocess.CompletedProcess(argv, 0, "/usr/bin/copilot\n", "")
         if "cat >" in argv[-1]:
             seen.native.append(kwargs["input_text"])
+        if "COPILOT_AUTH_CONSUMED" in argv[-1]:
+            return subprocess.CompletedProcess(argv, 0, "COPILOT_AUTH_CONSUMED\n", "")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     monkeypatch.setattr(auth.transport, "_run", run)
@@ -62,7 +68,7 @@ def launch_seams(monkeypatch):
 
 
 @pytest.mark.guard
-@pytest.mark.parametrize("boundary", ["acp", "session-host", "detached"])
+@pytest.mark.parametrize("boundary", ["acp", "session-host", "detached", "attached"])
 def test_each_actual_launch_reads_updated_source_without_manager_token(
     launch_seams, monkeypatch, capsys, boundary,
 ):
@@ -71,6 +77,25 @@ def test_each_actual_launch_reads_updated_source_without_manager_token(
     if boundary == "session-host":
         monkeypatch.setattr(cli, "_trusted_session_host_context", lambda *a:
             TrustedContext(target.config, target.fleet, target.user, "/workspace", ""))
+    if boundary == "attached":
+        import ssh_manager
+        import venue_copilot
+
+        import agent_containers.config as config_mod
+
+        monkeypatch.setattr(config_mod, "load_config", lambda: target.config)
+        monkeypatch.setattr(resolver, "resolve_live_exec_target", lambda *a, **k: target)
+        monkeypatch.setattr(venue_copilot, "resolve_daemon_port", lambda: None)
+        monkeypatch.setattr(ssh_manager, "TargetLock", lambda *a, **k:
+            SimpleNamespace(acquire=lambda **k: None, release=lambda: None))
+        monkeypatch.setattr(venue_copilot, "run_venue_copilot", lambda identity, connect, **kw:
+            connect(venue_copilot.build_copilot_remote_command(identity, anchor=True)))
+        args.worktree_id = None
+        args.no_relay = True
+        args.driver = "cli-mode"
+        args.seed = None
+        args.ttl_seconds = None
+        args.ensure_mux = True
     adapter = detach._ContainerAdapter(
         name=args.name, ssh_config=None, hold_id="scope", remote_env="/launch/general.env",
         relay_port=None, host_relay_port=None, target=target,
@@ -88,9 +113,17 @@ def test_each_actual_launch_reads_updated_source_without_manager_token(
             assert ".env.d" in prepared["acp_command"]
             assert prepared["copilot_auth_env"]
             assert expected not in json.dumps(prepared)
-        else:
+        elif boundary == "detached":
             assert adapter.launch("agent-worktrees embody --detach", timeout=30)[0] == 0
-        assert seen.staged[-1] == {"COPILOT_GITHUB_TOKEN": expected}
+        else:
+            assert copilot_venue.cmd_copilot(
+                args, require_live_relay_port=lambda: 1, relay_healthy=lambda p: True,
+                busy_exit=75, creation_flags=lambda: 0,
+            ) == 0
+        auth_values = [
+            values for values in seen.staged if list(values) == ["COPILOT_GITHUB_TOKEN"]
+        ]
+        assert auth_values[-1] == {"COPILOT_GITHUB_TOKEN": expected}
         assert "--secret-env-vars=COPILOT_GITHUB_TOKEN" in seen.native[-1]
     command_count = len(seen.commands)
     monkeypatch.setattr(resolver, "host_copilot_cli_token", lambda account: None)
@@ -100,8 +133,13 @@ def test_each_actual_launch_reads_updated_source_without_manager_token(
                                         target.user, "copilot --acp --stdio")
         elif boundary == "session-host":
             cli._cmd_session_host_prepare(args)
-        else:
+        elif boundary == "detached":
             adapter.launch("agent-worktrees embody --detach", timeout=30)
+        else:
+            copilot_venue.cmd_copilot(
+                args, require_live_relay_port=lambda: 1, relay_healthy=lambda p: True,
+                busy_exit=75, creation_flags=lambda: 0,
+            )
     assert len(seen.commands) == command_count
     for environment in seen.staged:
         if "GH_TOKEN" in environment:
@@ -135,10 +173,52 @@ def test_unsupported_native_cli_is_not_weakened(monkeypatch):
 
 
 @pytest.mark.guard
-@pytest.mark.parametrize("command", ["/usr/bin/copilot --acp", "custom-agent --acp"])
+@pytest.mark.parametrize("command", [
+    "/usr/bin/copilot --acp", "custom-agent --acp",
+    "echo copilot && custom-agent --acp", "custom-agent copilot",
+    "copilot --acp && custom-agent",
+    'cd "$(custom-agent)" && copilot --acp',
+])
 def test_custom_acp_executable_cannot_bypass_required_process_auth(command):
     with pytest.raises(RuntimeError, match="PATH-resolved"):
         auth.wrap_command(command, "/launch/auth.env")
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("command", [
+    "copilot --acp --stdio",
+    "exec copilot --acp --stdio",
+    "cd '/workspace with spaces' && exec copilot --acp --stdio",
+    "cd /workspace && {{target_preference_launcher}} --acp --stdio",
+])
+def test_supported_executable_positions_remain_available(command):
+    assert auth.wrap_command(command, "/launch/auth.env").endswith(command)
+
+
+@pytest.mark.guard
+def test_detached_success_waits_for_consumption_before_cleanup(launch_seams, monkeypatch):
+    target, seen = launch_seams
+    adapter = detach._ContainerAdapter(
+        name="example-1", ssh_config=None, hold_id="scope", remote_env=None,
+        relay_port=None, host_relay_port=None, target=target,
+    )
+    consumption = []
+
+    def consumed(name, user, path, **kwargs):
+        assert path not in seen.cleaned
+        consumption.append(path)
+
+    monkeypatch.setattr(auth, "wait_for_consumption", consumed)
+    assert adapter.launch("agent-worktrees embody --detach", timeout=30)[0] == 0
+    assert consumption and consumption[0] in seen.cleaned
+
+
+@pytest.mark.guard
+def test_missing_consumption_receipt_refuses_success(monkeypatch):
+    monkeypatch.setattr(auth.transport, "_run", lambda argv, **kwargs:
+        subprocess.CompletedProcess(argv, 0, "", ""))
+    with pytest.raises(RuntimeError, match="did not confirm consuming"):
+        auth.wait_for_consumption("example-1", "vscode", "/launch/auth.env", timeout=1)
 
 
 def test_native_launcher_consumes_token_restores_path_and_keeps_git_identity(tmp_path):
