@@ -366,3 +366,13 @@ hiding the problem or silently dropping text.
   Retained the upstream parameterized WSL fixture rather than replaying an
   obsolete registry rewrite. Current rebased-head CI/review, promotion,
   installed rollout and normal-source Picker conversation proof remain open.
+- **2026-10-13** -- Rebased-head CI passed. Its refreshed review found a valid
+  cross-field corruption gap: a structurally valid receipt could retain its
+  fingerprint while changing prompt kind or the Resume worktree. Replay now
+  compares those fields with the request before returning an admission and
+  again after the locked reload. Six regression cases cover safe-but-mismatched
+  identities, both provenance directions and corruption between the two reads,
+  asserting no prompt reaches the other existing worktree and no damaged
+  receipt is rewritten. The complete contained admission portfolio passes
+  151 cases (one native POSIX skip); lint passes. Current-head review and CI
+  must rerun before merge; release and delivered validation remain open.

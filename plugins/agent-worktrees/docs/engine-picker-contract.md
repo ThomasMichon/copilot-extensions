@@ -40,6 +40,9 @@ A machine/platform change that cannot honor the persisted New allocation
 refuses before creation rather than allocating a differently prefixed worktree.
 Every admission-file read validates its stored identity and field types;
 corrupt state returns a structured error without disconnecting the writer.
+Replay also checks the stored fingerprint and prompt kind against the request,
+and Resume must retain its requested worktree identity, including after the
+locked receipt reload.
 A target without the request capability rejects before mutation.
 
 ## Provider-backed source registry

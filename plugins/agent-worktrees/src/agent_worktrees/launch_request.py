@@ -96,6 +96,15 @@ def _read_admission(directory: Path, request_id: str) -> dict:
     return _validate_admission(receipt, request_id)
 
 
+def _require_replay_identity(receipt: dict, args: dict) -> None:
+    if (
+        receipt["fingerprint"] != args["fingerprint"]
+        or receipt["kind"] != args["kind"]
+        or (args["kind"] == "resume" and receipt["worktree_id"] != args["worktree_id"])
+    ):
+        raise ValueError("Launch request identity was reused for different intent")
+
+
 def _apply_admit(args: dict) -> dict:
     directory = Path(args["tracking_dir"])
     path = _admission_path(directory, args["request_id"])
@@ -118,12 +127,7 @@ def _apply_admit(args: dict) -> dict:
             }
             _validate_admission(receipt, args["request_id"])
             tracking._atomic_write(path, json.dumps(receipt) + "\n")
-        if (
-            not isinstance(receipt, dict) or receipt.get("version") != 1
-            or receipt.get("request_id") != args["request_id"]
-            or receipt.get("fingerprint") != args["fingerprint"]
-        ):
-            raise ValueError("Launch request identity was reused for different intent")
+        _require_replay_identity(receipt, args)
         return receipt
 
 
@@ -138,16 +142,18 @@ def execute(config, request: dict) -> dict:
     fingerprint = hashlib.sha256(
         json.dumps(request, sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
-    receipt = _dispatch("launch_request_admit", {
+    admission_args = {
         "tracking_dir": str(directory), "request_id": request_id,
         "fingerprint": fingerprint, "kind": request["kind"],
         "worktree_id": wid, "timestamp": timestamp,
-    })
+    }
+    receipt = _dispatch("launch_request_admit", admission_args)
     wid = receipt["worktree_id"]
     path = directory / f"{wid}.yaml"
     execution_lock = _admission_path(directory, request_id).with_suffix(".execution.yaml")
     with tracking._RecordLock(execution_lock, require_sidecar=True):
         receipt = _read_admission(directory, request_id)
+        _require_replay_identity(receipt, admission_args)
         if not path.exists():
             if receipt.get("accepted") or receipt.get("creation_started"):
                 raise ValueError(

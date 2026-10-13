@@ -68,6 +68,56 @@ def test_resume_admitted_once_via_real_daemon_then_finished_never_replays(tmp_pa
     assert request.inspect(intent["request_id"])["state"] == "completed-or-superseded"
 
 
+@pytest.mark.parametrize("kind,field,value", [
+    ("resume", "worktree_id", "wt-b"),
+    ("resume", "kind", "new"),
+    ("new", "kind", "resume"),
+])
+@pytest.mark.parametrize("during_reload", [False, True])
+def test_safe_but_mismatched_receipt_never_redirects_replay(
+    tmp_path, admission_config, monkeypatch, kind, field, value, during_reload,
+):
+    import hashlib
+
+    intent = _intent(kind)
+    record = tracking.create_new_record("wt-b", "worktree/wt-b", str(tmp_path / "tree"),
+                                       "demo", "test", "windows", tmp_path)
+    args = {
+        "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
+        "fingerprint": hashlib.sha256(
+            json.dumps(intent, sort_keys=True, ensure_ascii=False).encode("utf-8"),
+        ).hexdigest(),
+        "kind": kind, "worktree_id": intent["worktree_id"] or "test-win-20261013-010000-" + "a" * 32,
+        "timestamp": "20261013-010000",
+    }
+    receipt = request._apply_admit(args)
+    receipt[field] = value
+    path = request._admission_path(tmp_path, intent["request_id"])
+
+    def damage():
+        path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    if during_reload:
+        def dispatch(verb, values):
+            assert verb == "launch_request_admit"
+            result = tracking_write.compute(tracking_write.KIND, {"verb": verb, "args": values})
+            assert "error" not in result
+            damage()
+            return result
+
+        monkeypatch.setattr(request, "_dispatch", dispatch)
+        with pytest.raises(ValueError, match="different intent"):
+            request.execute(admission_config, intent)
+    else:
+        damage()
+        result = tracking_write.compute(
+            tracking_write.KIND, {"verb": "launch_request_admit", "args": args},
+        )
+        assert "different intent" in result["error"]
+    assert launch_seed_state.peek(record.yaml_path) is None
+    assert path.read_text(encoding="utf-8") == json.dumps(receipt)
+
+
 def test_resume_new_intent_can_replace_old_but_old_request_cannot_restore_it(tmp_path, authority):
     record = tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
                                        "demo", "test", "windows", tmp_path)
