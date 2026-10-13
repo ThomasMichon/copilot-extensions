@@ -181,6 +181,50 @@ def test_failed_post_publication_health_keeps_flipped_phase_when_exit_is_uncerta
     assert breadcrumb.read_breadcrumb(tmp_path)["state"] == "flipped"
 
 
+@pytest.mark.parametrize("failure", ["before-publication", "healthy", "unhealthy"])
+def test_cold_start_rollback_preserves_a_published_successor(
+    tmp_path, monkeypatch, failure,
+):
+    orch, events, healthy = orchestrator(tmp_path, monkeypatch)
+    routing.routing_table_path(tmp_path).unlink()
+    handle = orch.spawn_passive(9290)
+    orch.health_check = lambda host, port: port in healthy and not handle.terminated
+    write = breadcrumb.write_breadcrumb
+    failed = False
+
+    def fail_after_publication(config_dir, **kwargs):
+        nonlocal failed
+        if kwargs["state"] == "flipped" and not failed:
+            failed = True
+            if failure == "unhealthy":
+                healthy.remove(9290)
+            raise OSError("flipped breadcrumb write failed")
+        return write(config_dir, **kwargs)
+
+    if failure == "before-publication":
+        healthy.remove(9290)
+    else:
+        monkeypatch.setattr(breadcrumb, "write_breadcrumb", fail_after_publication)
+
+    result = orch.run(health_timeout=0.05, drain_timeout=1)
+    if failure == "before-publication":
+        assert not result.ok and result.rolled_back and not result.committed
+        assert events.count("terminate-new") == 1
+        assert "confirmed-new-exit" in events
+        assert routing.read_table(tmp_path).get("active") is None
+    else:
+        assert "terminate-new" not in events
+        active = routing.read_active_endpoint(tmp_path)
+        assert active.port == 9290 and active.pid == handle.pid
+        assert not result.rolled_back
+        assert result.ok is (failure == "healthy")
+        assert result.committed is (failure == "healthy")
+        assert orch.health_check(active.client_host, active.port) is (failure == "healthy")
+        record = breadcrumb.read_breadcrumb(tmp_path)
+        assert record["state"] == ("committed" if failure == "healthy" else "flipped")
+        assert breadcrumb.requires_owner_reconciliation(record)
+
+
 def test_pre_adoption_cannot_force_unfinished_work(tmp_path, monkeypatch):
     orch, events, _ = orchestrator(tmp_path, monkeypatch)
     result = orch.run(force=True)

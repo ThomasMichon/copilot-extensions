@@ -300,7 +300,7 @@ class CutoverOrchestrator:
         same transaction. It must be held for this exact routing directory;
         the caller remains responsible for releasing it after reconciliation.
         """
-        from zdd.cutover_lock import CutoverBorrowError, CutoverLock, CutoverLockedError
+        from zdd.cutover_lock import CutoverBorrowError, CutoverLock, CutoverLockedError, lock_path
 
         if self.drain_before_publish and conditional is not None:
             reason = "conditional cutover cannot use pre-publication drain"
@@ -314,7 +314,7 @@ class CutoverOrchestrator:
             if (
                 not isinstance(held_lock, CutoverLock)
                 or not held_lock.held
-                or held_lock.path.resolve() != CutoverLock(self.config_dir).path.resolve()
+                or held_lock.path.resolve() != lock_path(self.config_dir).resolve()
             ):
                 return CutoverResult(
                     ok=False, error="a held cutover lock for this installation is required",

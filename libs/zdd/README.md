@@ -254,7 +254,10 @@ exact-instance promotion, final-state adoption, and selection reconciliation.
 On rollback, the orchestrator confirms the successor's exit before restoring
 and undraining the predecessor. If exit cannot be confirmed, it does not resume
 a drained predecessor or change an undrained one's state; the actual unresolved
-phase remains in the breadcrumb.
+phase remains in the breadcrumb. With no predecessor, an already-published successor
+is not terminated during rollback: a healthy successor commits forward, while
+an unhealthy one retains its route and reconciliation evidence. Before publication,
+an unsuccessful cold-start successor is still terminated with confirmed exit.
 Every opt-in breadcrumb carries `requires_writer_reconciliation: true`, including
 the pre-drain phase. Legacy stale-cutover recovery refuses these records without
 undraining or rewriting them, and another cutover cannot overwrite an unresolved

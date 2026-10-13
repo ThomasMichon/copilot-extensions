@@ -58,7 +58,7 @@ def _rollback(
             old_live = bool(old and self.health_check(old.client_host, old.port))
         except Exception:
             old_live = False
-        if old_live or old is None or not flipped:
+        if old_live or not flipped:
             try:
                 handle.terminate()
                 stopped = self._await_exit(handle)
