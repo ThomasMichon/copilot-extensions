@@ -272,3 +272,12 @@ Bounded cache shutdown observes those tasks without cancelling their native
 work, including after provider replacement, and retains timed-out holders
 until completion. Two native process regressions demonstrate shutdown and
 replacement accounting. The combined contracts pass 107 tests, one skipped.
+
+### 2026-10-12 - Native enumeration correction landed
+
+Merged #6400 as `913479b04` after exact-head approval with zero open findings
+and green checks. Native enumeration now retains one provider-local holder
+through cancelled callers and hands remaining ownership to bounded cache
+shutdown supervision, including after provider replacement. The umbrella
+remains open: process-tree identity/reclamation, role CPU/wall circuits,
+cross-platform acceptance, promotion and authorized adoption are not complete.
