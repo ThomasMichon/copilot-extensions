@@ -60,6 +60,8 @@ def _kill_tree(proc: subprocess.Popen) -> None:
     own process group (so the test harness can retain descendant
     ownership) -- ``killpg`` there would kill the harness's own worker,
     not just *proc*'s tree.
+    A child inheriting a Manager-owned group also skips ``killpg``: only
+    the outer launch owner may terminate that group, never this member.
     """
     if proc.poll() is None and not contained_test_mode():
         if platform.system() == "Windows":
@@ -71,7 +73,9 @@ def _kill_tree(proc: subprocess.Popen) -> None:
         else:
             import signal
             try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                group = os.getpgid(proc.pid)
+                if group != os.getpgrp():
+                    os.killpg(group, signal.SIGKILL)
             except (ProcessLookupError, PermissionError):
                 pass
     try:
@@ -90,6 +94,8 @@ def run_bounded(
 
     Windows captured children start headless and require a kill-on-close Job
     before they can execute. POSIX retains its existing process-group cleanup.
+    ``inherit_process_group`` is for unbounded foreground work inside the
+    Manager's owned group; the outer owner retains descendant cleanup.
     """
     windows = platform.system() == "Windows"
     proc, job = spawn_sync_in_kill_on_close_job(

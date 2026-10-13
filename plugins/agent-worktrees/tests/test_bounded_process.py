@@ -84,6 +84,43 @@ def test_required_job_admission_failure_is_not_retried(monkeypatch):
     assert len(calls) == 1 and calls[0]["require_job"] is True
 
 
+@pytest.mark.guard
+@pytest.mark.parametrize("failure", [
+    subprocess.TimeoutExpired("renderer", 1), OSError("capture failed"), KeyboardInterrupt(),
+])
+def test_inherited_process_group_never_signals_its_caller(monkeypatch, failure):
+    events = []
+    launch = {}
+    proc = SimpleNamespace(pid=123, returncode=None, poll=lambda: None)
+
+    def communicate(*, timeout):
+        if timeout != 5:
+            raise failure
+        return "partial", "diagnostic"
+
+    def spawn(argv, **kwargs):
+        launch.update(kwargs)
+        return proc, None
+
+    proc.communicate = communicate
+    proc.kill = lambda: events.append("child-kill")
+    monkeypatch.setattr(push_timeout.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(push_timeout, "contained_test_mode", lambda: False)
+    monkeypatch.setattr(push_timeout, "spawn_sync_in_kill_on_close_job", spawn)
+    monkeypatch.setattr(push_timeout.os, "getpgid", lambda pid: 42, raising=False)
+    monkeypatch.setattr(push_timeout.os, "getpgrp", lambda: 42, raising=False)
+    monkeypatch.setattr(
+        push_timeout.os, "killpg", lambda *_args: pytest.fail("signaled the caller's group"),
+        raising=False,
+    )
+    with pytest.raises(type(failure)):
+        push_timeout.run_bounded(
+            ["renderer"], cwd=None, env={}, timeout=None, inherit_process_group=True,
+        )
+    assert events and set(events) == {"child-kill"}
+    assert "start_new_session" not in launch
+
+
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
