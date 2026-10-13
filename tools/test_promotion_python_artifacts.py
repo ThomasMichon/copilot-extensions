@@ -14,6 +14,7 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -145,6 +146,54 @@ def test_bundle_and_transfer_roundtrip(tmp_path):
         assert set(bundle.namelist()) == {"manifest.json", "demo-1.0-py3-none-any.whl"}
         assert json.loads(bundle.read("manifest.json"))["plugin"] == "demo"
         assert bundle.read("demo-1.0-py3-none-any.whl") == _wheel_bytes("demo", "1.0")
+
+@pytest.mark.parametrize("failure", ["missing", "unreadable", "copy"])
+def test_bundle_wheel_read_failures_are_structured(tmp_path, monkeypatch, failure):
+    wheel_dir, out_dir = tmp_path / "wheels", tmp_path / "bundles"
+    manifest = _manifest(wheel_dir)
+    out_dir.mkdir()
+    wheel = wheel_dir / manifest["wheels"][0]["filename"]
+    if failure == "missing":
+        wheel.unlink()
+    elif failure == "unreadable":
+        original = Path.open
+
+        def open_file(path, *args, **kwargs):
+            if path == wheel:
+                raise PermissionError("wheel read denied")
+            return original(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", open_file)
+    else:
+        def copy_failure(*args, **kwargs):
+            raise OSError("wheel copy failed")
+
+        monkeypatch.setattr(artifacts.shutil, "copyfileobj", copy_failure)
+    with pytest.raises(artifacts.PromotionArtifactError, match="cannot read wheel for bundling"):
+        artifacts.bundle_wheels(manifest, wheel_dir, out_dir)
+
+
+def test_build_cli_creates_missing_output_directory(tmp_path, monkeypatch):
+    import build_toolchain_lock
+
+    monkeypatch.setattr(promotion, "_load_module", lambda *args: SimpleNamespace())
+    monkeypatch.setattr(build_toolchain_lock, "resolve_toolchain_lock", lambda *args, **kwargs: None)
+    directory = tmp_path / "nested" / "bundles"
+    assert artifacts.main(["--repo", str(tmp_path), "--out-dir", str(directory)]) == 0
+    assert json.loads((directory / artifacts._BUNDLES_NAME).read_text()) == []
+
+
+@pytest.mark.parametrize("kind", ["file", "nonempty"])
+def test_build_cli_reports_invalid_output_directory(tmp_path, monkeypatch, capsys, kind):
+    monkeypatch.setattr(promotion, "_load_module", lambda *args: SimpleNamespace())
+    directory = tmp_path / "bundles"
+    if kind == "file":
+        directory.write_text("not a directory")
+    else:
+        directory.mkdir()
+        (directory / "existing").write_text("must not replace")
+    assert artifacts.main(["--repo", str(tmp_path), "--out-dir", str(directory)]) == 1
+    assert "promotion-python-artifacts: FAILED:" in capsys.readouterr().err
 
 
 def test_identical_artifact_bundles_ignore_clock_mtimes_permissions_and_wheel_order(tmp_path, monkeypatch):
@@ -827,6 +876,33 @@ def test_attestation_failure_stops_before_any_publication(tmp_path, monkeypatch)
     ]) == 1
     assert len(calls) == 1
     assert calls[0][:2] == ["attestation", "verify"]
+
+@pytest.mark.parametrize("mutation", ["extra-zip", "missing-bundle", "unsafe-name", "invalid-index"])
+def test_verified_index_rejects_invalid_subject_set_before_bundle_attestations(
+    tmp_path, monkeypatch, mutation,
+):
+    directory = tmp_path / "export"
+    index = _index(directory)
+    if mutation == "extra-zip":
+        (directory / "unrelated.zip").write_bytes(b"unrelated")
+    elif mutation == "missing-bundle":
+        (directory / index["artifacts"][0]["filename"]).unlink()
+    elif mutation == "unsafe-name":
+        index["artifacts"][0]["filename"] = "../unrelated.zip"
+        _write_index(directory, index)
+    else:
+        (directory / artifacts.INDEX_NAME).write_text("[]")
+    calls = []
+    monkeypatch.setattr(publisher, "_gh", lambda argv, **kwargs: (
+        calls.append(argv) or subprocess.CompletedProcess(argv, 0, "verified", "")
+    ))
+    with pytest.raises(artifacts.PromotionArtifactError):
+        publisher.verify_attestations(
+            directory, repository="example/plugins", signer_digest=MAIN, source_digest=MAIN,
+            source_ref="refs/heads/main",
+        )
+    assert len(calls) == 1
+    assert Path(calls[0][2]).name == artifacts.INDEX_NAME
 
 
 def test_verification_uses_read_token_not_release_authority(monkeypatch):

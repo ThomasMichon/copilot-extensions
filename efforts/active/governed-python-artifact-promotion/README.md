@@ -547,6 +547,14 @@ win grows with build complexity.
   without release authority and never changes managed-device feed policy.
   The final documentation-impact description now includes the isolated
   agent-worktrees guard-fixture repair and its mandatory changefile.
+- The next review tightened operational failure boundaries: missing or
+  unreadable wheel inputs report structured bundling errors, and the build
+  CLI creates a missing output directory while refusing occupied/invalid
+  destinations. Publication verifies the index attestation first, reuses the
+  trusted archive validator to require its exact subject set, then verifies
+  only those referenced bundles. Extra, missing or unsafe subjects fail
+  before bundle verification. The complete artifact suite passes 159 tests;
+  native OIDC/publication evidence remains an outstanding validation gate.
 
 ### 2026-10-12 - Phase 2 slice 4: explicit public build-toolchain integration
 

@@ -58,8 +58,7 @@ def verify_attestations(
     if not index.is_file() or index.is_symlink():
         raise PromotionArtifactError("missing or unsafe promotion artifact index")
     # Verify the index before using any publisher-controlled identity fields.
-    paths = [index, *sorted(directory.glob("*.zip"))]
-    for path in paths:
+    def verify(path: Path) -> None:
         if path.is_symlink() or not path.is_file():
             raise PromotionArtifactError(f"{path.name}: unsafe attestation subject")
         _check(_gh([
@@ -68,6 +67,20 @@ def verify_attestations(
             "--signer-digest", signer_digest, "--source-digest", source_digest,
             "--source-ref", source_ref, "--deny-self-hosted-runners",
         ], verification=True))
+
+    verify(index)
+    try:
+        signed_index = json.loads(index.read_text(encoding="utf-8"))
+        if not isinstance(signed_index, dict):
+            raise PromotionArtifactError("invalid signed promotion artifact index")
+        validated = validate_artifacts(
+            directory, content_tree=signed_index.get("content_tree"),
+            dev_head=signed_index.get("dev_head"), main_before=signed_index.get("main_before"),
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PromotionArtifactError(f"cannot read signed promotion artifact index: {exc}") from exc
+    for entry in validated["artifacts"]:
+        verify(directory / entry["filename"])
 
 
 def _tag_commit(repository: str, tag: str) -> str | None:

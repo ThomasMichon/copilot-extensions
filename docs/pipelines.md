@@ -153,7 +153,10 @@ The privileged job downloads only the same run's named transfer artifact.
 Before consuming metadata, `gh attestation verify` requires this repository,
 the exact promotion workflow path and workflow digest, the source digest/ref,
 and a GitHub-hosted runner. Verification uses the read-only workflow token,
-not the release PAT. `promote_release.py --python-artifacts-dir <dir>`
+not the release PAT. `publish_python_artifacts.py`
+verifies the index first, then validates its exact bundle set before checking
+those bundles' attestations; unrelated or missing files fail closed.
+`promote_release.py --python-artifacts-dir <dir>`
 recomputes composition and refuses missing/corrupt/mis-targeted artifacts
 before pushing a candidate, including repeating the archive-content checks.
 A no-content-change or paused run builds and

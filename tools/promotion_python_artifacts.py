@@ -113,10 +113,13 @@ def bundle_wheels(manifest: dict, wheel_dir: Path, out_dir: Path) -> dict:
                 raise PromotionArtifactError("invalid or duplicate first-party wheel entry")
             names.add(name)
             path = wheel_dir / name
-            if path.is_symlink() or f"sha256:{_digest(path)}" != wheel["sha256"]:
-                raise PromotionArtifactError(f"{name}: wheel digest changed before bundling")
-            with path.open("rb") as source, bundle.open(member(name), "w") as target:
-                shutil.copyfileobj(source, target, length=1 << 20)
+            try:
+                if path.is_symlink() or f"sha256:{_digest(path)}" != wheel["sha256"]:
+                    raise PromotionArtifactError(f"{name}: wheel digest changed before bundling")
+                with path.open("rb") as source, bundle.open(member(name), "w") as target:
+                    shutil.copyfileobj(source, target, length=1 << 20)
+            except OSError as exc:
+                raise PromotionArtifactError(f"{name}: cannot read wheel for bundling: {exc}") from exc
     return {
         "plugin": plugin, "version": version, "artifact_id": artifact_id,
         "filename": filename, "sha256": _digest(destination),
@@ -134,8 +137,12 @@ def build_candidate_bundles(
         Path(__file__).with_name("build_python_artifacts.py"), "trusted_promotion_builder",
     )
     builder.REPO, builder.PLUGINS_DIR, builder.LIBS_DIR = root, root / "plugins", root / "libs"
-    if any(out_dir.iterdir()):
-        raise PromotionArtifactError("candidate bundle directory must be empty")
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        if any(out_dir.iterdir()):
+            raise PromotionArtifactError("candidate bundle directory must be empty")
+    except OSError as exc:
+        raise PromotionArtifactError(f"{out_dir}: cannot prepare candidate bundle directory: {exc}") from exc
     projects = candidate_projects(root)
     for plugin in projects:
         directory = builder.PLUGINS_DIR / plugin
