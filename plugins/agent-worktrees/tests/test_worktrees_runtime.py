@@ -141,6 +141,17 @@ def test_worktrees_runtime_failed_producer_keeps_labeled_last_good_rows(tmp_path
     owner.shutdown()
 
 
+def test_worktrees_runtime_initial_producer_failure_surfaces_the_actual_reason(tmp_path):
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    owner.publication_failed("project", OSError("fixture producer cannot enumerate mux sessions"))
+    result = owner.handle(request())
+    assert result["ok"] is False and result["error"] == {
+        "code": "unready", "message": "fixture producer cannot enumerate mux sessions",
+    }
+    owner.shutdown()
+
+
 def test_worktrees_runtime_late_initial_activation_cannot_steal_new_election(tmp_path):
     path = tmp_path / "current.sqlite3"
     active = runtime.WorktreesRuntime(path)

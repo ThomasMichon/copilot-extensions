@@ -124,6 +124,30 @@ def test_current_snapshot_commits_only_after_its_complete_publication():
     assert rows[0]["_projection"]["revision"] == 1
 
 
+@pytest.mark.parametrize(
+    ("quality", "availability"),
+    [("current", "advisory"), ("advisory", "stale")],
+)
+def test_current_rows_reject_contradictory_availability_in_envelopes_and_feeds(
+    quality, availability,
+):
+    from worktree_manager.worktree_feed_contract import CurrentFeed
+
+    value = envelope([{"id": "one"}], quality=quality)
+    value["availability"] = {"status": availability, "reason": "fixture producer unavailable"}
+    with pytest.raises(ValueError):
+        parse_current_rows(value)
+    frame = {
+        "type": "begin", "contract_version": 1, "projection": value["projection"],
+        "availability": value["availability"], "selected_count": 1, "cursor": 1,
+        "base_cursor": None,
+    }
+    with pytest.raises(ValueError):
+        CurrentSnapshot().receive(frame)
+    with pytest.raises(ValueError):
+        CurrentFeed().receive(frame)
+
+
 @pytest.mark.parametrize("failure", ["missing", "mixed", "duplicate", "excess"])
 def test_current_snapshot_rejects_incomplete_or_mixed_publications(failure):
     owner = envelope([{"id": "one"}])

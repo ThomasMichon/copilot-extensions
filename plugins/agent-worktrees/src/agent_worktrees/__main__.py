@@ -3146,6 +3146,7 @@ def _monitor_sweep(
     managed_mux_cache=None,
     config_cache_for_project=None,
     roster_publisher=None,
+    roster_failure=None,
 ) -> int:
     """One coalescing pass over the Step 4 served-session union."""
     from . import config_cache as _config_cache, list_cli as _list_cli, mux_status_link as _mux_status_link, status_bar_cli as _status_bar_cli, status_monitor_runtime as _smr, status_updater_cli as _status_updater_cli
@@ -3177,6 +3178,8 @@ def _monitor_sweep(
     if mux_bin:
         live = _monitor_list_sessions(mux_bin)
         if live is None:
+            if roster_failure is not None:
+                roster_failure(RuntimeError("mux-session enumeration unavailable"))
             return -1
         unmanaged_live_wt, stale_sessions = _monitor_unmanaged_live_sessions({n for n in live if n.startswith("wt-")}, registry, managed_entries, managed_mux_cache=managed_mux_cache)
         observed_sessions |= unmanaged_live_wt

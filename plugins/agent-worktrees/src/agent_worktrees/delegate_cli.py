@@ -21,6 +21,8 @@ import sys
 from collections import defaultdict
 from typing import Any
 
+from agent_procutil import no_window_kwargs
+
 from . import config as cfg
 from . import list_views_cli
 from . import tracking
@@ -344,6 +346,7 @@ def _finalize_target(
                 capture_output=True,
                 text=True,
                 timeout=timeout + 4,
+                **no_window_kwargs(),
             )
         else:
             proc = subprocess.run(
@@ -359,6 +362,7 @@ def _finalize_target(
                 capture_output=True,
                 text=True,
                 timeout=timeout + 4,
+                **no_window_kwargs(),
             )
     except (OSError, subprocess.SubprocessError) as exc:
         result["ok"] = False

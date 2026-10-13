@@ -86,7 +86,7 @@ def parse_current_rows(obj: dict, *, complete: bool = True) -> list[dict]:
     availability = obj.get("availability")
     if availability is not None and (
         not isinstance(availability, dict)
-        or availability.get("status") not in {"advisory", "stale"}
+        or availability.get("status") != ("advisory" if quality == "advisory" else "stale")
         or not isinstance(availability.get("reason"), str)
         or not availability["reason"]
     ):

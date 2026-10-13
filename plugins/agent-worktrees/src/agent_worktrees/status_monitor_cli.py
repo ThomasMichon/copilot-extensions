@@ -790,6 +790,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     managed_mux_cache=managed_mux_runtime.cache,
                     config_cache_for_project=_config_cache_for_project,
                     roster_publisher=lambda: publish_active_project(worktrees_runtime),
+                    roster_failure=worktrees_runtime.producer_failed,
                 )
                 wait_for_lifecycle_priority(lifecycle_priority)
                 with state_lock:

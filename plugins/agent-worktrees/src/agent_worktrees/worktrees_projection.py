@@ -333,6 +333,10 @@ class WorktreesProjection:
             raise ProjectionUnavailable("resident current roster is not published")
         return publication.read(publication.index.select(selection), quality="current")
 
+    def published_projects(self) -> set[str]:
+        with self._publication_lock:
+            return set(self._projects)
+
     def close(self) -> None:
         with self._writer_lock:
             with self._publication_lock:

@@ -172,7 +172,7 @@ class WorktreesRuntime:
         except ProjectionUnavailable as exc:
             if self._wake is not None:
                 self._wake.set()
-            return self._failure("unready", str(exc))
+            return self._failure("unready", publication_error or str(exc))
         except ProjectionError as exc:
             return self._failure("invalid-request", str(exc))
         result = {"ok": True, "contract_version": CONTRACT_VERSION, **result}
@@ -209,6 +209,10 @@ class WorktreesRuntime:
         with self._lock:
             self._publication_errors[project] = str(error)[:1024] or type(error).__name__
         self.feed.changed(project)
+
+    def producer_failed(self, error: Exception) -> None:
+        for project in self.store.published_projects() | self.demand_projects():
+            self.publication_failed(project, error)
 
     def shutdown(self) -> None:
         self.close_admission("closed")

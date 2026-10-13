@@ -1539,6 +1539,34 @@ def test_sweep_transient_mux_failure_holds(tmp_path, monkeypatch):
     assert (reg / "wt-a").exists()  # registry untouched
 
 
+def test_sweep_mux_failure_labels_all_published_and_initial_demanded_rosters(tmp_path, monkeypatch):
+    from agent_worktrees.worktrees_runtime import WorktreesRuntime
+
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    for project in ("one", "two"):
+        owner.publish(project, [{"id": project}], observed_at=1)
+    request = {"contract_version": 1, "project": "cold"}
+    assert owner.handle(request)["error"]["code"] == "unready"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: tmp_path / "reg")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda _: None)
+    try:
+        assert m._monitor_sweep(
+            "tmux", "T", "P", set(),
+            roster_publisher=lambda: pytest.fail("failed mux pass published current rows"),
+            roster_failure=owner.producer_failed,
+        ) == -1
+        for project in ("one", "two"):
+            result = owner.handle({**request, "project": project})
+            assert result["worktrees"] == [{"id": project}]
+            assert result["availability"] == {
+                "status": "stale", "reason": "mux-session enumeration unavailable",
+            }
+        assert owner.handle(request)["error"]["message"] == "mux-session enumeration unavailable"
+    finally:
+        owner.shutdown()
+
+
 def _wire_monitor_handoff_session(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
