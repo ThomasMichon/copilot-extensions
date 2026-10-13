@@ -14,6 +14,7 @@ from . import resource_producer as producer
 from . import tracking, tracking_write
 from .execution_spaces import (
     ExecutionSpaceError, project_record_config, require_owner_identity, require_record_mutation,
+    resolve_owner_record_path,
 )
 
 
@@ -33,11 +34,14 @@ def _input(operation: str, payload: object) -> dict:
         "begin": {"token"}, "complete": {"token"},
         "bind": {"token", "identity"}, "inspect": {"token"}, "close": {"token"},
     }
-    allowed = [keys[operation]] if operation in keys else []
+    if not isinstance(operation, str) or operation not in keys:
+        raise ValueError(f"unsupported producer operation {operation!r}; expected one of {sorted(keys)}")
+    allowed = [keys[operation]]
     if operation in {"bind", "complete"}:
         allowed.append(keys[operation] | {"allocation_fence"})
     if not isinstance(payload, dict) or set(payload) not in allowed:
-        raise ValueError(f"{operation}: expected exactly {sorted(keys.get(operation, set()))}")
+        options = " or ".join(str(sorted(option)) for option in allowed)
+        raise ValueError(f"{operation}: expected exactly {options}")
     producer.canonical_json(payload)
     if operation == "reserve":
         if not isinstance(payload["kind"], str) or not claim_providers.is_safe_argument(payload["kind"]):
@@ -62,8 +66,6 @@ def _require_mutable_owner(record: tracking.WorktreeRecord) -> None:
 
 
 def _owned_record(args: dict, path: Path, *, mutable: bool = True):
-    from . import config as cfg
-
     record = tracking.load_record(path)
     authority = project_record_config(record)
     require_record_mutation(record, authority)
@@ -74,7 +76,10 @@ def _owned_record(args: dict, path: Path, *, mutable: bool = True):
         owner.machine, owner.project, owner.worktree_id
     ) != (record.machine, record.repo, record.worktree_id):
         raise ValueError("producer owner does not match the current record authority")
-    if path.resolve() != (cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml").resolve():
+    resolved_path, resolved_id, error = resolve_owner_record_path(owner.canonical(), authority)
+    if error or resolved_path is None or resolved_id != owner.worktree_id:
+        raise ValueError(error or "producer owner ledger cannot be resolved by owning-project authority")
+    if path.resolve() != resolved_path.resolve():
         raise ValueError("producer record path does not match owning-project authority")
     if mutable:
         _require_mutable_owner(record)

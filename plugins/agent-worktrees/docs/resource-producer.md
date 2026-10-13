@@ -89,7 +89,8 @@ revokes begin and forbids subsequent allocation.
 Registered write API callers use `tracking_write.run_direct("resource_producer",
 args, reason=...)`, with `args` containing `schema`, `version`, `operation`,
 `input` (the same JSON object), `owner_ref`, and resolved `yaml_path`. Receiving
-authority revalidates the record identity and owning-project path under a
+authority revalidates the record identity and shared owning-record resolver's
+exact path under a
 required sidecar `_RecordLock`. The CLI uses this registered direct RMW path to
 avoid the resident monitor's shorter request deadline and does not boot a monitor.
 Generic claim writes require verb version 3, so current callers never send
