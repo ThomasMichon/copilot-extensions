@@ -435,3 +435,21 @@ requested contract.
   envelopes, malformed receipt values and both CLI error paths. Existing native
   first-touch and partial-pair checks remain part of validation.
 - Serial merge, release, rollout and adopter recovery remain coordinator-owned.
+
+### 2026-10-13 - #6542 actual-consumer correction
+
+- Reproduced both fresh-review blockers: newer worktree publication after apply
+  left a permanent pending loop, and an accepted unlabeled/unflagged retired row
+  was never consumed by an actual supervisor.
+- Kept generation/provenance checks before claim decisions, while routing newer
+  worktree ownership through the existing durable held transition. Full
+  allocation validation remains mandatory before a real lease grant, lease use
+  and outcome publication.
+- Required pre-existing release authority; recovery does not create it. Missing
+  or malformed obligations leave the row, events and recovery history untouched.
+- Extended native CLI/loopback HTTP validation through the actual supervisor
+  consumer, protected lease and conclusion publication. Verified one successful
+  retry, no replay after completion, no business spawn, and unchanged task state.
+  Fault injection covers newer active and subsequently settled allocations:
+  selected once, preserved held, never repeatedly selected as pending cleanup.
+- Merge, promotion, rollout and adopter operations remain coordinator-owned.

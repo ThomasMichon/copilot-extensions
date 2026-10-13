@@ -29,9 +29,14 @@ claims a tokenized, expiring cleanup lease before executing the retry.
 
 ## Fences and retained evidence
 
-Recovery requires a completed or abandoned task at the exact expected
+Recovery requires an already-recorded `release_requested` obligation, in addition
+to a completed or abandoned task at the exact expected
 generation, a retired `failed`/`settled` reservation with held cleanup, recorded
 created-worktree provenance, a known driver and the matching creating host.
+It never creates release authority from a held result or task labels. A missing
+or unknown obligation is rejected without changing the row, events or recovery
+history; the existing lifecycle owner must establish any release obligation.
+The owning supervisor must match the task's established pool.
 Submitted work is not completed work. Newer or ambiguous allocations, active
 exclusive ownership and unexpired cleanup claims reject recovery. Historical
 `exclusive_released: false` on a settled reservation is not an active fence,
@@ -54,6 +59,13 @@ The retained allocation identity includes the execution project, physical
 worktree path, originating reservation, logical creation key/revision, inherited
 worktree and exclusive key. Drifting any of them after acceptance cannot redirect
 the leased retry or change which allocation fence applies.
+The pre-existing release obligation is retained in that immutable fence too.
+At lease claim, unchanged task generation and provenance are checked first. A
+newer reservation carrying the worktree then uses the ordinary durable
+`held`/`worktree-carried-by-newer-reservation` transition, even if the newer
+reservation has settled, rather than remaining pending and failing every cycle.
+No lease is granted on that path. All allocation fences still run before any
+actual lease grant, and again at lease validation and outcome publication.
 All ordinary terminal guards still apply: live/unknown processes, dirty or
 unlanded work, open PRs, unfinished efforts, claims, pairing and ambiguous
 ownership remain protected. Preview eligibility is permission to retry those

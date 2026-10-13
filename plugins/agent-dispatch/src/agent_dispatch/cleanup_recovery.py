@@ -43,7 +43,7 @@ def _allocation_guard(conn, row):
             raise TaskError("cleanup exclusive allocation remains active")
 
 
-def validate_recovery(queue, conn, row):
+def validate_recovery(queue, conn, row, *, check_allocation=True):
     """Apply the recovery generation fence again under the cleanup lease."""
     if not _has_history(conn):
         return
@@ -58,7 +58,8 @@ def validate_recovery(queue, conn, row):
         raise TaskError("cleanup recovery task generation changed")
     if _json(_identity(row)) != history["identity"]:
         raise TaskError("cleanup recovery provenance changed")
-    _allocation_guard(conn, row)
+    if check_allocation:
+        _allocation_guard(conn, row)
 
 
 def _identity(row):
@@ -67,6 +68,7 @@ def _identity(row):
         "worktree_ownership", "creating_host", "driver", "state", "session_handle",
         "exclusive_key", "inherited_worktree", "allocation_project", "worktree_path",
         "allocation_revision", "creation_key", "allocation_reservation_key",
+        "release_requested",
     )}
 
 
@@ -138,6 +140,8 @@ def recover(queue, key, *, expected_generation, current_host, apply=False,
                 or not row["driver"] or not row["creating_host"]
                 or row["creating_host"].casefold() != current_host.casefold()):
             raise TaskError("cleanup recovery requires held, retired, current-host created provenance")
+        if row["release_requested"] != 1:
+            raise TaskError("cleanup recovery requires an existing release/cleanup obligation")
         if row["cleanup_claim_token"]:
             try:
                 expires_at = float(row["cleanup_claim_expires_at"])

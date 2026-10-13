@@ -151,7 +151,7 @@ class SpawnConclusionMixin:
                 conn.execute("COMMIT")
                 raise TaskError(f"reservation {key} has no retired pending cleanup")
             from .cleanup_recovery import validate_recovery
-            validate_recovery(self, conn, row)
+            validate_recovery(self, conn, row, check_allocation=False)
             try:
                 current_expiry = float(row["cleanup_claim_expires_at"] or 0)
             except (TypeError, ValueError):
@@ -182,6 +182,9 @@ class SpawnConclusionMixin:
                 }
                 conclusion_state = "held"
             else:
+                # Newer worktrees transition durably to held above; only a
+                # real lease grant needs the remaining allocation fences.
+                validate_recovery(self, conn, row)
                 claim_token = uuid.uuid4().hex
                 payload = {
                     **_conclusion_payload(row["conclusion_detail"]),
