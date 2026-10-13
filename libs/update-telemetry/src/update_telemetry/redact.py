@@ -17,7 +17,8 @@ _RULES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?i)\b(" + _SCHEMES + r")(\s+)[A-Za-z0-9._~+/=-]{12,}"), r"\1\2" + MASK),
     (re.compile(r"gh[pousr]_\w{20,}"), MASK),
     (re.compile(r"github_pat_\w{20,}"), MASK),
-    (re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@"), r"\1" + MASK + "@"),
+    # Any URL userinfo (``user:password@`` or a token-only ``token@``).
+    (re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@]+@"), r"\1" + MASK + "@"),
 )
 
 
