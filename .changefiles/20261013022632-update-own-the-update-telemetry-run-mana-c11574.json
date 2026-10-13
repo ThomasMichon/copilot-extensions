@@ -1,0 +1,9 @@
+{
+  "comment": "update: own the update-telemetry run (manager_self_update phase, run identity exported to the engine), report a failed cutover as command_failed, and map the engine's exit code through the shared update exit-code table",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

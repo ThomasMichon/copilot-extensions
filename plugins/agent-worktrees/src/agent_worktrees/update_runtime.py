@@ -10,11 +10,12 @@ import re
 import shutil
 import socket
 import subprocess
-from collections.abc import Mapping
+import time
+from collections.abc import Collection, Mapping
 from pathlib import Path
 
 from . import config as cfg
-from . import git_ops, output
+from . import git_ops, output, update_events
 from .installer_capabilities import posix_zero_downtime_flag_supported
 
 
@@ -285,6 +286,9 @@ def _update_registered_plugins(
             output.warn(f"{name}: {status} (inactive installed inventory advisory)")
         else:
             output.warn(f"{name}: {status}")
+    for name, status, target in (*purge_results, *results):
+        update_events.record("payload_refresh", f"{name}@{reconcile.MARKETPLACE}", status,
+                             required=target.required)
     payloads_ok = all(
         status.startswith("OK") or not target.required for _, status, target in results
     )
@@ -485,6 +489,7 @@ def _reconcile_registered_runtimes(
     *,
     force: bool = False,
     targets: dict[str, _RegisteredPluginTarget] | None = None,
+    force_runtimes: Collection[str] = (),
 ) -> bool:
     """Rebuild the runtime venv of every enabled plugin the other steps skip."""
     if skip_modules is not None and len(skip_modules) == 0:
@@ -507,13 +512,14 @@ def _reconcile_registered_runtimes(
     reconcile_one_runtime = _core_helper("_reconcile_one_runtime", _reconcile_one_runtime)
     results: list[tuple[str, str]] = []
     for name in sorted(names):
+        forced = force or name in force_runtimes
         results.append(
             (
                 name,
                 reconcile_one_runtime(
                     name,
                     platform_name,
-                    force=force,
+                    force=forced,
                     gate_context=targets[name].context,
                 ),
             )
@@ -549,6 +555,22 @@ def _reconcile_one_runtime(
     ``machine-gated`` runtime the gate does not allow on this machine is reported
     as :data:`MACHINE_GATED_SKIP` (even under ``--force``) and never installed.
     """
+    started = time.monotonic()
+    status = _reconcile_one_runtime_status(
+        name, platform_name, force=force, gate_context=gate_context
+    )
+    update_events.record("runtime_reconcile", f"{name}@copilot-extensions", status,
+                         changed=status.startswith("OK"), started=started)
+    return status
+
+
+def _reconcile_one_runtime_status(
+    name: str,
+    platform_name: str,
+    *,
+    force: bool,
+    gate_context: Path | None = None,
+) -> str:
     from . import reconcile
 
     pdir = reconcile.core_installed_payload_dir(name)
@@ -631,6 +653,12 @@ def _reconcile_one_runtime(
             env=child_environment,
         )
     except subprocess.TimeoutExpired:
+        # Past the deadline, but a complete slot for the payload version means
+        # the installer finished its work: report a late success, not a timeout.
+        from .status_monitor_reap_stale import _slot_marker_valid
+
+        if pver and _slot_marker_valid(runtime_root / "versions" / pver, pver):
+            return "OK (late success)"
         return "timed out"
     except Exception as exc:
         return str(exc)[:120]
@@ -722,6 +750,7 @@ def _update_modules(
     force: bool = False,
     *,
     targets: dict[str, _RegisteredPluginTarget] | None = None,
+    force_runtimes: Collection[str] = (),
 ) -> bool:
     """Update sibling modules registered in modules.json."""
     manifest = plugin_dir / "modules.json"
@@ -829,7 +858,7 @@ def _update_modules(
         mod_payload_ver = _reconcile.payload_version(module_dir)
         mod_deployed_ver = _reconcile.runtime_deployed_version(name, root=runtime_root)
         if (
-            not force
+            not (force or name in force_runtimes)
             and mod_payload_ver
             and mod_deployed_ver
             and mod_payload_ver == mod_deployed_ver
@@ -919,6 +948,9 @@ def _update_modules(
             output.warn(f"Module '{name}' install failed: {exc}")
             results.append((name, str(exc)))
 
+    for name, status in results:
+        update_events.record("runtime_reconcile", f"{name}@copilot-extensions", status,
+                             changed=status.startswith("OK"))
     if results:
         output.header("Module Update Summary")
         for name, status in results:

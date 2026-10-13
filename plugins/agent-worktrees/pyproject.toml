@@ -27,6 +27,7 @@ dependencies = [
     "agent-lazy-cli-dispatch",
     "agent-remote-login-shell",
     "agent-machine-transport",
+    "agent-update-telemetry",
 ]
 
 [tool.uv.sources]
@@ -96,6 +97,14 @@ agent-remote-login-shell = { path = "../../libs/remote-login-shell", editable = 
 # `main`-branch release (tools/materialize_main.py) ever gets a real local
 # copy.
 agent-machine-transport = { path = "../../libs/machine-transport", editable = true }
+# Shared update-run telemetry: JSONL events, folded status file, and the
+# update exit-code table (module ``update_telemetry``). This is a `uv`-editable
+# canonical reference (vendor-pointer-generalization effort, Phase 1): `path`
+# escapes this plugin's own root and resolves live to `libs/update-telemetry`,
+# so this `dev`-branch checkout has nothing to keep manually in sync -- only a
+# real `main`-branch release (tools/materialize_main.py) ever gets a real
+# local copy.
+agent-update-telemetry = { path = "../../libs/update-telemetry", editable = true }
 
 [project.scripts]
 agent-worktrees = "agent_worktrees.__main__:console_entry"

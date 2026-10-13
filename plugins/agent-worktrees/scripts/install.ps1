@@ -2188,6 +2188,23 @@ function Deploy-Package {
         }
     }
 
+    # Vendored update-telemetry lib (agent-update-telemetry / module
+    # update_telemetry). Same dev/release-layout fallback as machine-transport
+    # above; stdlib-only, so it has no ordering constraint of its own.
+    $updateTelemetryDir = Join-Path $PluginDir 'libs\update-telemetry'
+    if (-not (Test-Path (Join-Path $updateTelemetryDir 'pyproject.toml'))) {
+        $updateTelemetryDir = Join-Path $PluginDir '..\..\libs\update-telemetry'
+    }
+    if (Test-Path (Join-Path $updateTelemetryDir 'pyproject.toml')) {
+        $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-update-telemetry' -PkgDir $updateTelemetryDir
+        if ($libRes.ExitCode -ne 0) {
+            Write-ServiceErr "update-telemetry library install failed (exit $($libRes.ExitCode))"
+            if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
+            $ErrorActionPreference = $prevEAP
+            return $false
+        }
+    }
+
     $installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees' -PkgDir $PluginDir
     $rc = $installRes.ExitCode
     $ErrorActionPreference = $prevEAP

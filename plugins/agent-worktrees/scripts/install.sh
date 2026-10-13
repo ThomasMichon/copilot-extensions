@@ -1764,6 +1764,18 @@ deploy_package() {
         fi
     fi
 
+    # Vendored update-telemetry lib (agent-update-telemetry / module
+    # update_telemetry). Same materialized-release guard as machine-transport
+    # above; stdlib-only, so it has no ordering constraint of its own.
+    local update_telemetry_dir="$PLUGIN_DIR/libs/update-telemetry"
+    if [[ -f "$update_telemetry_dir/pyproject.toml" ]]; then
+        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-update-telemetry \
+                "$update_telemetry_dir" --quiet; then
+            err "update-telemetry library install failed"
+            return 1
+        fi
+    fi
+
     if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-worktrees "$PLUGIN_DIR" --quiet; then
         err "Package install failed"
         return 1

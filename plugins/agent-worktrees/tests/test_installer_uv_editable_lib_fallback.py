@@ -41,10 +41,21 @@ _BLOCKS = {
     ),
     "machine-transport": (
         "# Vendored machine-transport lib (agent-machine-transport / module",
+        "# Vendored update-telemetry lib",
+    ),
+    "update-telemetry": (
+        "# Vendored update-telemetry lib (agent-update-telemetry / module",
         "$installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees'",
     ),
 }
-_LIBS = ("plugin-resolve", "dropin-registry", "plugin-activation", "remote-login-shell", "machine-transport")
+_LIBS = (
+    "plugin-resolve",
+    "dropin-registry",
+    "plugin-activation",
+    "remote-login-shell",
+    "machine-transport",
+    "update-telemetry",
+)
 
 
 def _extract_block(lib: str) -> str:

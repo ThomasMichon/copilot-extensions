@@ -15,6 +15,7 @@ from pathlib import Path
 from . import config as cfg
 from . import installer as inst, output, services as svc
 from . import picker_profiles_cli, services_cli
+from . import update_events as _events, update_options
 from . import worktree_identity
 from .update_runtime import describe_copilot_spawn_error as _describe_copilot_spawn_error
 from .update_runtime import _installer_timeout
@@ -95,6 +96,7 @@ def add_parsers(sub) -> None:
         "Worktree Manager seam (the escape hatch the Manager "
         "itself re-enters through, and the DQ8 fallback)",
     )
+    update_options.add_update_options(p)
 
     sub.add_parser("pre-launch", help="Check bootstrap staleness (JSON output)")
 
@@ -212,6 +214,7 @@ def _update_flags(args: argparse.Namespace) -> list[str]:
         flags.append("--no-prune-pivots")
     if getattr(args, "recreate_venv", False):
         flags.append("--recreate-venv")
+    flags.extend(update_options.forwarded_flags(args))
     skip = getattr(args, "skip_modules", None)
     if skip is not None:
         flags.append("--skip-modules")
@@ -226,7 +229,20 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     1. Run ``copilot plugin update`` to fetch the latest plugin version.
     2. Locate the installed plugin directory.
     3. Run the platform-specific installer from the freshly updated plugin.
+
+    Records the run's phases/targets through ``update_events`` and returns an
+    exit code from the shared table (0 success, non-zero failure classes).
     """
+    _events.start("engine")
+    try:
+        rc = _update_in_plugin_steps(args)
+    except BaseException as exc:
+        _events.finish(None, exc)
+        raise
+    return _events.finish(rc)
+
+
+def _update_in_plugin_steps(args: argparse.Namespace) -> int:
     output.header("Updating Agent Worktrees")
 
     if getattr(args, "recreate_venv", False):
@@ -236,8 +252,9 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
         )
 
     plugin_ref = "agent-worktrees@copilot-extensions"
+    _events.enter("payload_refresh")
     output.info(f"Updating plugin: {plugin_ref}")
-    payloads_ok = True
+    payloads_ok, payload_status = True, "OK"
     update_context = _core_helper(
         "_invocation_update_context", _invocation_update_context
     )() or _core_helper("_project_update_context", _project_update_context)()
@@ -255,15 +272,16 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
         else:
             detail = "\n".join(x for x in [r.stdout.strip(), r.stderr.strip()] if x)
             output.warn(f"Plugin update returned non-zero:\n{detail}")
-            payloads_ok = False
+            payloads_ok, payload_status = False, f"plugin update failed: {detail[-200:]}"
     except OSError as exc:
         output.warn(
             f"{_describe_copilot_spawn_error(exc, cwd=update_context)} -- skipping plugin update"
         )
-        payloads_ok = False
+        payloads_ok, payload_status = False, f"plugin update failed: {exc}"
     except subprocess.TimeoutExpired:
         output.warn("Plugin update timed out -- continuing with installed version")
-        payloads_ok = False
+        payloads_ok, payload_status = False, "timed out"
+    _events.record("payload_refresh", plugin_ref, payload_status)
 
     registered_targets = _core_helper(
         "_registered_plugin_targets", _registered_plugin_targets
@@ -283,11 +301,13 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
         return 1
 
     output.info(f"Plugin source: {plugin_dir}")
+    _events.enter("runtime_reconcile")
 
     from . import reconcile as _reconcile
 
     plat = cfg.detect_platform()
     force = getattr(args, "force", False)
+    forced = update_options.forced_runtimes(args)
     try:
         aw_runtime_env, aw_runtime_root = _reconcile.runtime_installer_environment(
             "agent-worktrees",
@@ -295,12 +315,13 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
         )
     except ValueError as error:
         output.err(f"Installation context invalid: {error}")
+        _events.record("runtime_reconcile", plugin_ref, "installation context invalid")
         return 1
     aw_payload_ver = _reconcile.payload_version(plugin_dir)
     aw_context_selected = "COPILOT_EXTENSIONS_CONTEXT" in aw_runtime_env
     aw_deployed_ver = _reconcile.runtime_deployed_version("agent-worktrees", root=aw_runtime_root)
     versions_equal = bool(aw_payload_ver and aw_payload_ver == aw_deployed_ver)
-    version_match = (not force) and versions_equal
+    version_match = not (force or "agent-worktrees" in forced) and versions_equal
     hooks_drifted = (
         bool(version_match)
         and not aw_context_selected
@@ -311,6 +332,7 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
             f"Runtime already at {aw_deployed_ver} -- skipping installer "
             "(use --force to re-deploy)"
         )
+        _events.record("runtime_reconcile", plugin_ref, "SKIPPED (current)", changed=False)
         if plat == "windows":
             _refresh_terminal_profiles()
     else:
@@ -325,6 +347,7 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
             shell = shutil.which("pwsh") or shutil.which("powershell")
             if not shell:
                 output.err("PowerShell not found")
+                _events.record("runtime_reconcile", plugin_ref, "powershell not found")
                 return 1
             argv = [
                 shell,
@@ -362,14 +385,19 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
             timeout=installer_timeout,
             env=aw_runtime_env,
         )
-        if result.returncode != 0:
-            return result.returncode
+        rc = result.returncode
+        _events.record("runtime_reconcile", plugin_ref,
+                       "OK" if rc == 0 else f"installer exited {rc}", changed=rc == 0)
+        if rc != 0:
+            return rc
 
+    _events.enter("binstubs")
     try:
         inst.reconcile_binstubs()
     except Exception as e:
         output.warn(f"Binstub reconcile skipped: {e}")
 
+    _events.enter("runtime_reconcile")
     skip_modules = getattr(args, "skip_modules", None)
     runtimes_ok = True
     if (
@@ -379,6 +407,7 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
             skip_modules,
             force=force,
             targets=registered_targets,
+            force_runtimes=forced,
         )
         is False
     ):
@@ -391,15 +420,18 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
             skip_modules,
             force=force,
             targets=registered_targets,
+            force_runtimes=forced,
         )
         is False
     ):
         runtimes_ok = False
 
     if not getattr(args, "no_anchor_sync", False):
+        _events.enter("anchor_sync")
         _core_helper("_fast_forward_project_anchors", _fast_forward_project_anchors)()
 
     if not getattr(args, "no_prune_pivots", False):
+        _events.enter("prune")
         _core_helper("_prune_stale_pivots_after_update", _prune_stale_pivots_after_update)()
 
     return 0 if payloads_ok and runtimes_ok else 1

@@ -258,6 +258,14 @@ the new code: the successor starts on a fresh loopback port, status writers
 follow the routed active endpoint first, and the predecessor drains accepted
 status-apply work plus its current republish cycle before retiring.
 
+`worktree-manager update` owns the update run's telemetry: it records the
+self-update as the `manager_self_update` phase, exports the run identity to the
+engine it drives, and writes `~/.copilot-extensions/update/update-status.json`.
+A failed cutover fails the run (`command_failed`, exit 1); the engine's exit
+code is mapped through the shared update exit-code table (0 success, 1
+`command_failed`, 3 configuration, 4 auth, 5 blocked by a lock, 6 timeout, 130
+interrupted -- see the agent-worktrees CLI reference).
+
 On Windows, ordinary and passive daemon starts resolve the real base
 `python.exe`, preserve the calling venv's import context, and apply the shared
 windowless daemon launch flags. Recurring PSMux probes and status writes also
