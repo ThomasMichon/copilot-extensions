@@ -4221,7 +4221,7 @@ def test_make_headless_spawn_holds_on_unknown_carried_session(monkeypatch):
 
 
 def test_make_headless_spawn_degrades_when_bridge_absent(monkeypatch):
-    from agent_dispatch import bridge, embody
+    from agent_dispatch import bridge, embody, session_acquisition
     from agent_dispatch.supervisor import make_headless_spawn
 
     monkeypatch.setattr(embody, "autopilot_worker_prompt", lambda *a, **k: "seed")
@@ -4229,7 +4229,7 @@ def test_make_headless_spawn_degrades_when_bridge_absent(monkeypatch):
     def _boom(*a, **k):
         raise bridge.BridgeUnavailable("no agent-bridge on PATH")
 
-    monkeypatch.setattr(bridge, "spawn_worker", _boom)
+    monkeypatch.setattr(session_acquisition, "acquire", _boom)
     ok, handle = make_headless_spawn()({"id": "t"})
     assert ok is False
     assert "agent-bridge" in handle["error"]

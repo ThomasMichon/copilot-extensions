@@ -113,19 +113,29 @@ def test_reused_parent_does_not_claim_server_family(monkeypatch):
 
 def test_abandoned_breadcrumb_never_reaps_promoted_launcher(monkeypatch, tmp_path):
     from agent_dispatch import cutover_process as identity, reap
-    from zdd import breadcrumb, routing
+    from zdd import breadcrumb, diagnostics, routing
 
     monkeypatch.setattr(identity, "is_windows", lambda: True)
     monkeypatch.setattr(identity, "verified_pair", lambda *_: {10: "100", 11: "101"})
-    monkeypatch.setattr(routing, "read_table", lambda _: {
-        "active": {"port": 1234, "pid": 11, "process_start_time": "101"},
-    })
+    reads = []
+
+    def read_table(_config_dir, *, strict=False):
+        reads.append(strict)
+        return {"active": routing.Endpoint(
+            bind="127.0.0.1", port=1234, pid=11, process_start_time="101",
+        ).to_dict()}
+
+    monkeypatch.setattr(routing, "read_table", read_table)
     record = {"new_pid": 10, "started_at": "2000-01-01T00:00:00Z", "state": "flipped"}
-    monkeypatch.setattr(reap, "terminate_pid", lambda _: pytest.fail("promoted launcher killed"))
+    monkeypatch.setattr(
+        diagnostics, "terminate_pid_if_identity",
+        lambda *_args, **_kwargs: pytest.fail("promoted launcher killed"),
+    )
     monkeypatch.setattr(breadcrumb, "read_breadcrumb", lambda _: record)
     result = reap.reap_abandoned_passive_backstop(tmp_path, record=record, grace_seconds=0)
     assert not result["reaped"]
     assert "promoted" in result["reason"]
+    assert reads == [False, True]
 
 
 @pytest.mark.parametrize("adopted", [True, False], ids=["healthy-server", "pre-health-child"])
