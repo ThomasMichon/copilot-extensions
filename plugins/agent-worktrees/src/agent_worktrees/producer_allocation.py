@@ -98,7 +98,7 @@ def verified_finished(result: object, ref: str) -> bool:
     proof = result.get("producer_verification")
     return (
         isinstance(proof, dict)
-        and type(proof.get("version")) is int and proof["version"] == 1
+        and type(proof.get("version")) is int and proof["version"] == producer.VERSION
         and proof.get("subject") == ref
         and proof.get("allocation_finished") is True
     )

@@ -21,6 +21,7 @@ def test_rejected_input_enumerates_both_allowed_key_sets(
 ) -> None:
     result = writer.apply_resource_producer({
         "schema": producer.SCHEMA, "version": 1, "operation": operation, "input": payload,
+        "yaml_path": "/unused/owner.yaml", "owner_ref": "m/p/owner",
     })
     assert result["error"] == "rejected"
     assert result["message"] == (
@@ -32,6 +33,7 @@ def test_rejected_input_enumerates_both_allowed_key_sets(
 def test_unknown_operation_is_explicit_before_record_io(operation: object) -> None:
     result = writer.apply_resource_producer({
         "schema": producer.SCHEMA, "version": 1, "operation": operation, "input": {},
+        "yaml_path": "/unused/owner.yaml", "owner_ref": "m/p/owner",
     })
     assert result["error"] == "rejected"
     assert result["message"].startswith(f"unsupported producer operation {operation!r}; expected one of ")

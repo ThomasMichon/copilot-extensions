@@ -99,10 +99,18 @@ def _matched_claim(record, token):
 def apply_resource_producer(args: dict) -> dict:
     """Perform one version-1 producer operation, returning explicit errors."""
     try:
+        if not isinstance(args, dict):
+            raise ValueError("resource-producer request must be an object")
         if args.get("schema") != producer.SCHEMA or type(args.get("version")) is not int or args["version"] != 1:
             raise ValueError("unsupported resource-producer schema/version")
+        for field in ("operation", "input", "yaml_path", "owner_ref"):
+            if field not in args:
+                raise ValueError(f"missing required resource-producer field: {field}")
         operation = args["operation"]
         payload = _input(operation, args["input"])
+        for field in ("yaml_path", "owner_ref"):
+            if not isinstance(args[field], str) or not args[field].strip():
+                raise ValueError(f"resource-producer field {field} must be a nonempty string")
         path = Path(args["yaml_path"])
         probe_subject, probe_result, granted_fence = None, None, None
         if operation in {"close", "begin", "bind", "complete"}:
