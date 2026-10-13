@@ -162,7 +162,7 @@ def test_create_worktree_core_plan_project_matches_repo_name_not_ambient_global(
 
 
 def test_resolve_resume_plan_project_matches_repo_name_not_ambient_global(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, sample_record
 ):
     """Same guard for the resume path: `_resolve_resume`'s plan must carry
     `config.repo_name`, independent of the ambient `cfg.active_project()`."""
@@ -178,14 +178,18 @@ def test_resolve_resume_plan_project_matches_repo_name_not_ambient_global(
 
     worktree_path = tmp_path / "worktrees" / "wt-1"
     worktree_path.mkdir(parents=True)
-    record = SimpleNamespace(
+    record = dataclasses.replace(
+        sample_record,
         worktree_id="wt-1",
+        repo=config.repo_name,
+        machine=config.machine,
+        platform=config.platform,
         worktree_path=str(worktree_path),
         branch="worktree/wt-1",
         sessions=[],
-        yaml_path=tmp_path / "tracking" / "wt-1.yaml",
         resume_count=0,
         last_resumed_at=None,
+        codename="test-record",
     )
 
     class _NullLock:

@@ -18,6 +18,7 @@ import os
 import sys
 import subprocess
 import time
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -325,16 +326,25 @@ def test_json_base_launch_prepares_guidance_before_command(tmp_path, monkeypatch
     assert json.loads(capfd.readouterr().out)["action"] == "exec"
 
 
-def test_json_worktree_launch_prepares_selected_root(tmp_path, monkeypatch):
+def test_json_worktree_launch_prepares_selected_root(tmp_path, monkeypatch, sample_record):
     import argparse
     from agent_worktrees import resolve_cli
 
     record_path = tmp_path / "example.yaml"
     record_path.write_text("fixture", encoding="utf-8")
     root = tmp_path / "selected"
-    record = SimpleNamespace(worktree_path=str(root))
+    config = m.cfg.Config(
+        srcroot=str(tmp_path), machine="test", platform="linux", repo_name="demo",
+        repos={"demo": m.cfg.RepoConfig(
+            anchor=str(tmp_path), worktree_root=str(tmp_path / "worktrees"),
+        )},
+    )
+    record = replace(
+        sample_record, worktree_id="example", worktree_path=str(root),
+        repo=config.repo_name, machine=config.machine, platform=config.platform,
+    )
     state = SimpleNamespace(
-        load_config=lambda: SimpleNamespace(), requested_machine=None, use_base=False,
+        load_config=lambda: config, requested_machine=None, use_base=False,
         use_new=False, worktree_id="example", args=argparse.Namespace(dry_run=False),
     )
     monkeypatch.setattr(resolve_cli, "_validate_profile_assignment_config", lambda config: None)
@@ -1043,20 +1053,24 @@ class TestResumeWiring:
             },
         )
 
-    def _patched_resume(self, tmp_path: Path, monkeypatch, *, dry_run: bool):
+    def _patched_resume(self, tmp_path: Path, monkeypatch, sample_record, *, dry_run: bool):
         import argparse
 
         config = self._config(tmp_path)
         worktree_path = tmp_path / "worktrees" / "wt-1"
         worktree_path.mkdir(parents=True)
-        record = SimpleNamespace(
+        record = replace(
+            sample_record,
             worktree_id="wt-1",
+            repo=config.repo_name,
+            machine=config.machine,
+            platform=config.platform,
             worktree_path=str(worktree_path),
             branch="worktree/wt-1",
             sessions=[],
-            yaml_path=tmp_path / "tracking" / "wt-1.yaml",
             resume_count=0,
             last_resumed_at=None,
+            codename="test-record",
         )
 
         class _NullLock:
@@ -1094,10 +1108,10 @@ class TestResumeWiring:
         return record, config, args, worktree_path
 
     def test_resume_refreshes_the_local_cache(
-        self, tmp_path: Path, monkeypatch
+        self, tmp_path: Path, monkeypatch, sample_record
     ) -> None:
         record, config, args, worktree_path = self._patched_resume(
-            tmp_path, monkeypatch, dry_run=False
+            tmp_path, monkeypatch, sample_record, dry_run=False
         )
         calls = []
         monkeypatch.setattr(
@@ -1109,10 +1123,10 @@ class TestResumeWiring:
         assert calls == [str(worktree_path)]
 
     def test_dry_run_resume_never_refreshes(
-        self, tmp_path: Path, monkeypatch
+        self, tmp_path: Path, monkeypatch, sample_record
     ) -> None:
         record, config, args, _worktree_path = self._patched_resume(
-            tmp_path, monkeypatch, dry_run=True
+            tmp_path, monkeypatch, sample_record, dry_run=True
         )
         calls = []
         monkeypatch.setattr(
