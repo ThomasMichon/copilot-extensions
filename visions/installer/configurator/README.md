@@ -4,7 +4,7 @@
   plugin-owned backstage panels it hosts.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-11
+- **Last revised:** 2026-10-12
 - **Reality docs:** [Manager configuration](../../../worktree-manager/docs/configuration.md),
   [plugin contribution contract](../../../worktree-manager/docs/plugin-contribution-contract.md)
 
@@ -42,6 +42,11 @@ Plugins contribute configuration widgets, toggles, findings, and actions under
 the Manager's Configuration section. The Manager owns discovery, navigation,
 presentation, and shared interaction promises. Each plugin owns its domain
 semantics, validation, precedence, persistence, and authorized operations.
+
+Configuration is a standing backstage workspace, not a succession of plugin
+dialogs. Its sections make configured resources and available templates
+browsable before an operator chooses an action, with descriptions, status,
+statistics, provenance, and contextual actions.
 
 Plugin-owned helper daemons may expose dynamic panels and live controls where
 ongoing observation or coordination needs a service. Declarative contributions
@@ -96,6 +101,11 @@ arrangements easy to adopt. Preview their effects and conflicts before local
 application. Presets remain read-only sources, preserve explicit choices, and
 do not carry credentials or silently become repository edits.
 
+Instantiation creates a distinct, inspectable local configuration rather than
+mistaking an enabled template for an instance. Saving configuration, activating
+it, creating agentic tasks, and starting agents have distinguishable outcomes;
+an operator sees the intended effects before authorizing them.
+
 ### source-delta-requests
 
 Offer a distinct request-change action for read-only sources. Before dispatch,
@@ -114,6 +124,14 @@ for a failed source edit or silently removed to make the result appear correct.
 An open pull request is progress, not completed maintenance.
 
 ## Behaviors
+
+### navigation-before-content
+
+Entering Configuration or selecting a section immediately presents its
+workspace and a legible loading state. Slow discovery and status providers
+populate content without withholding navigation or freezing interaction.
+Failures remain visible within their section, with a recovery action, rather
+than appearing as an unresponsive control or an empty successful result.
 
 ### read-only-means-read-only
 

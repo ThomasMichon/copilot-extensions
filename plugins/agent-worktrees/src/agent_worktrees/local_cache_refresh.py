@@ -57,7 +57,7 @@ from pathlib import Path
 from typing import Literal
 
 _LOG = logging.getLogger(__name__)
-RefreshStatus = Literal["ready", "partial", "unavailable", "failed", "timeout", "skipped"]
+RefreshStatus = Literal["ready", "partial", "unavailable", "failed", "timeout", "skipped", "queued"]
 
 
 @dataclass(frozen=True)
@@ -142,22 +142,7 @@ _SIBLING_RELATIVE_SCRIPT = (
 
 # create/resume run as ordinary one-shot CLI commands, not inside the
 # long-lived resident status-monitor daemon -- a generous bound is fine.
-DEFAULT_TIMEOUT_S = 30.0
-# sessionStart's backup runs inside the resident hook server's own request
-# handling; its decision deadline is far shorter than this refresh's own
-# worst case, so this bound must leave headroom for every other diagnostic
-# sharing that same budget. Callers compute a tighter, deadline-derived
-# timeout and pass it explicitly; this is only the floor/ceiling.
-SESSIONSTART_MAX_TIMEOUT_S = 5.0
-# push_timeout.run_bounded's own timeout path kills the whole process tree,
-# then waits up to this much longer for the pipes to drain before giving up
-# (see push_timeout.py) -- wall-clock on top of the subprocess timeout
-# itself that a deadline-derived budget must also reserve. refresh_local_
-# cache runs two such bounded subprocesses in sequence (resolution, then
-# render), but only ever one of them can be the one that actually times
-# out and pays this grace in a given call, so a deadline-derived budget
-# reserves it once, not per subprocess.
-_RUN_BOUNDED_CLEANUP_GRACE_S = 5.0
+DEFAULT_TIMEOUT_S = 120.0
 # The scope name resolve_active_plugins() uses for a plugin's machine-wide
 # (non-project-specific) activation -- see ActivePlugin.root_for_scope().
 _GLOBAL_SCOPE = "global"
@@ -275,9 +260,10 @@ def refresh_local_cache(
     actual installation; nonzero exits, invalid output and timeouts cannot
     silently become success. ``timeout`` is the hard, enforced ceiling
     on this call's **own** cost (not counting ``push_timeout.run_
-    bounded``'s own cleanup grace -- see ``_RUN_BOUNDED_CLEANUP_GRACE_S``),
+    bounded``'s own five-second cleanup grace),
     shared between resolving the sibling's CLI and rendering with the actual
-    remaining time; no separate cold-start discovery cutoff is imposed.
+    remaining time. Discovery has no shorter fixed cap: a healthy cold Python
+    startup must not discard guidance while the caller still has budget.
     Both run via
     ``push_timeout.run_bounded`` rather than a plain ``subprocess.run(
     timeout=...)``, which only terminates its direct child -- both the
@@ -294,17 +280,17 @@ def refresh_local_cache(
         if timeout <= 0:
             return _report(RefreshResult("timeout", detail="no refresh budget remains"))
         repo_root = _checkout_root(repo_root)
+        resolution_timeout = deadline - time.monotonic()
+        if resolution_timeout <= 0:
+            return _report(RefreshResult("timeout", detail="no refresh budget remains"))
         outcomes: list[RefreshResult] = []
-        script = _resolve_cli_script(home, timeout=timeout, outcomes=outcomes)
+        script = _resolve_cli_script(home, timeout=resolution_timeout, outcomes=outcomes)
         if script is None:
             return _report(
                 outcomes[-1] if outcomes else RefreshResult(
                     "unavailable", detail="global renderer missing or ambiguous; using checked-in fallback"
                 )
             )
-        render_timeout = deadline - time.monotonic()
-        if render_timeout <= 0:
-            return _report(RefreshResult("timeout", detail="identity lookup exhausted refresh budget"))
         argv = [
             sys.executable,
             str(script),
@@ -317,6 +303,9 @@ def refresh_local_cache(
         agent_worktrees_command = _resolve_own_agent_worktrees_command()
         if agent_worktrees_command:
             argv += ["--agent-worktrees-path", agent_worktrees_command]
+        render_timeout = deadline - time.monotonic()
+        if render_timeout <= 0:
+            return _report(RefreshResult("timeout", detail="pre-render lookup exhausted refresh budget"))
         from . import push_timeout
 
         result = push_timeout.run_bounded(
@@ -336,46 +325,40 @@ def refresh_local_cache(
         return _report(RefreshResult("failed", detail=f"local projection refresh failed: {exc}"))
 
 
-def sessionstart_diagnostic(cwd: str, *, deadline: float | None) -> str:
-    """``sessionStart``'s backup worktree-scoped-dynamic-guidance refresh
-    (docs/patterns/worktree-scoped-dynamic-guidance.md §4) -- catches
-    payload drift accrued between this worktree's own create/resume and the
-    current session's start. Creation and launch planning run the primary
-    refresh; this backup returns an attributable diagnostic without gating
-    startup.
+def _worker_directory(root: Path) -> Path:
+    from . import local_cache_worker
 
-    Runs synchronously and in-order with the hook's other diagnostics --
-    never dispatched to a background thread -- because the pattern this
-    backs depends on the render having genuinely completed by the time
-    this hook call returns (the catch-all instruction's own first-turn
-    read is only safe *because* sessionStart has already finished). A
-    background thread would race that read instead of guaranteeing it.
-    Bounded by a timeout derived from the hook's own remaining budget
-    (capped at ``SESSIONSTART_MAX_TIMEOUT_S``) rather than this refresh's
-    own unbounded worst case, so it can never itself cause the whole
-    lifecycle response to miss the resident hook server's deadline --
-    skipped entirely once too little budget remains to be worth
-    attempting. The reserved margin also covers
-    ``_RUN_BOUNDED_CLEANUP_GRACE_S`` once: ``refresh_local_cache`` runs
-    two sequential bounded subprocesses (resolution, then render), but
-    only ever ONE of them can be the one that actually times out and
-    pays that grace in a given call -- a timed-out resolution returns
-    before the render subprocess is ever attempted, and a resolution
-    that succeeds within its own share of ``timeout`` never pays the
-    grace itself. The combined worst case is therefore ``timeout +
-    _RUN_BOUNDED_CLEANUP_GRACE_S``, never ``timeout +
-    2 * _RUN_BOUNDED_CLEANUP_GRACE_S``.
+    directory = local_cache_worker.metadata_directory(root)
+    if directory is None:
+        raise ValueError("cannot resolve this checkout's Git administrative directory")
+    return directory
+
+
+def _queue_refresh(cwd: str) -> RefreshResult:
+    from . import local_cache_worker
+
+    root = _checkout_root(cwd).resolve()
+    return local_cache_worker.queue(root, _worker_directory(root))
+
+
+def _run_refresh_worker(cwd: str) -> int:
+    from . import local_cache_worker
+
+    root = _checkout_root(cwd).resolve()
+    return local_cache_worker.run(root, _worker_directory(root))
+
+
+def sessionstart_diagnostic(cwd: str, *, deadline: float | None) -> str:
+    """Queue a bounded, survivable backup without waiting inside the hook.
+
+    Primary creation/launch preparation still refreshes synchronously. A queued
+    backup is not evidence of delivery or model admission: selectors keep using
+    authenticated existing caches or reviewed fallbacks until publication.
     """
     try:
-        if deadline is None:
-            timeout = SESSIONSTART_MAX_TIMEOUT_S
-        else:
-            budget = deadline - time.time() - _RUN_BOUNDED_CLEANUP_GRACE_S - 1.0
-            if budget < 2.0:
-                return RefreshResult("skipped", detail="backup refresh deadline too short").diagnostic + "\n"
-            timeout = min(budget, SESSIONSTART_MAX_TIMEOUT_S)
-        result = refresh_local_cache(cwd, timeout=timeout)
-        return result.diagnostic + "\n" if result is not None else ""
+        if deadline is not None and deadline - time.time() < 1.5:
+            return RefreshResult("skipped", detail="backup refresh deadline too short").diagnostic + "\n"
+        return _queue_refresh(cwd).diagnostic + "\n"
     except Exception as exc:
         return _report(RefreshResult("failed", detail=f"backup refresh failed: {exc}")).diagnostic + "\n"
 
@@ -387,6 +370,8 @@ if __name__ == "__main__":
     # Deliberately minimal and crash-free -- a bare `print('')` on any
     # unexpected argv shape, never a traceback a caller would need to
     # parse out of stderr.
+    if len(sys.argv) == 3 and sys.argv[1] == "--refresh":
+        raise SystemExit(_run_refresh_worker(sys.argv[2]))
     _home = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.home()
     _root = _select_global_root(_home)
     print(str(_root) if _root is not None else "")

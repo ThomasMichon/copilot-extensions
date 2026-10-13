@@ -250,7 +250,7 @@ def _fire_launch_resolution_watchdog() -> None:
 # expected and healthy) may run before the watchdog above assumes it is stuck.
 # Generous for a cold git call on a slow disk/network, nowhere close to a
 # human-perceptible delay for the normal case.
-_LAUNCH_RESOLUTION_TIMEOUT_SECS = 60.0
+_LAUNCH_RESOLUTION_TIMEOUT_SECS = 180.0
 
 
 def cmd_launch(argv: list[str]) -> int:
@@ -455,20 +455,20 @@ def _build_active_paths(
     records: list[tracking.WorktreeRecord],
     session_ctx: sessions.SessionContext | None = None,
 ) -> set[str]:
-    """Build set of normalized paths with live sessions (lock files OR mux sessions).
+    """Build normalized paths owned by live sessions or guidance workers.
 
     The mux check is **batched**: a single ``list-sessions`` snapshot
     (:func:`sessions._list_mux_sessions`) is diffed against the records instead
     of one ``has-session`` subprocess *per worktree*. On the picker-populate hot
     path that collapses N mux spawns (each up to a 5 s timeout) into one, which
-    is the dominant cost of populating the Active section. Falls back to the
-    per-worktree probe only when the batch list is unavailable (old/blocked mux).
+    is the dominant Active-section cost; per-worktree probes are only a fallback.
     """
+    from . import local_cache_worker
     if session_ctx is None:
         session_ctx = sessions.scan_sessions_fast(records)
     active = {sessions._normalize_path(p) for p, sids in session_ctx.active_sessions.items() if sids}
     for rec in records:
-        if rec.worktree_path and _hosted_session_blocks_cleanup(rec):
+        if rec.worktree_path and (_hosted_session_blocks_cleanup(rec) or local_cache_worker.is_active(rec.worktree_path)):
             active.add(sessions._normalize_path(rec.worktree_path))
     # Live multiplexer sessions (independent of lock files), batched.
     mux_sessions = sessions._list_mux_sessions()

@@ -4655,6 +4655,8 @@ def test_windowless_python_noop_off_windows(monkeypatch):
 
 
 def test_spawn_detached_uses_console_python_windowless_daemon(monkeypatch):
+    from agent_worktrees.status_monitor_python import direct_monitor_python
+
     seen: dict = {}
 
     def _fake_popen(argv, **kwargs):
@@ -4674,7 +4676,9 @@ def test_spawn_detached_uses_console_python_windowless_daemon(monkeypatch):
         lambda **_kw: {"windowless_daemon": True},
     )
     assert m._spawn_detached([m.sys.executable, "-m", "agent_worktrees", "status-monitor"]) is True
-    assert seen["argv"][0] == m.sys.executable
+    expected_python, expected_env = direct_monitor_python(m.sys.executable)
+    assert seen["argv"][0] == expected_python
+    assert all(seen["env"][key] == value for key, value in expected_env.items())
     assert seen["argv"][1:] == ["-m", "agent_worktrees", "status-monitor"]
     assert seen["kwargs"]["windowless_daemon"] is True
     assert seen["env"]["SAFE_VALUE"] == "kept"

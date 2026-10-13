@@ -286,6 +286,11 @@ bounded subprocess (`python -m agent_worktrees.local_cache_refresh
 <home>`) rather than in-process or on a bare thread, since the resolver
 performs bounded global identity discovery without visiting unrelated registered
 projects. Process-tree containment still protects its filesystem I/O.
+Discovery and rendering share the caller's overall refresh deadline (120 seconds
+by default for launch preparation and the asynchronous backup worker).
+Discovery has no shorter fixed deadline that could reject a healthy cold
+interpreter start while budget remains; rendering receives only the time left
+after discovery. An exhausted budget never starts the renderer.
 `worktree_creation._create_worktree_core` and
 `resolve_launch_cli._resolve_resume_context` (skipped on `--dry-run`) both
 call it at exactly the point described above. `resolve_cli._resolve_json_mode`
@@ -308,23 +313,41 @@ guessed to have installed files it might have removed.
 
 The plugin's `sessionStart` hook repeats the same render as a backup, to
 catch payload drift accrued between a worktree's creation/resume and the
-current session's own start. Because the render is a pure side effect (never
-`additionalContext`), the timing race that makes hook-written content
-unreliable for *this* session's preloaded instructions does not apply here:
-the catch-all instruction from step 3 drives an explicit, first-turn tool
-read, which always executes strictly after the hook has finished -- a
-guarantee that depends on this backup refresh running **synchronously**
-within the hook's own request handling, never dispatched to a background
-thread. **Landed**: `agent_worktrees.__main__._run_session_lifecycle` (the
-real `sessionStart` handler `hook_client.py`'s thin client dispatches to)
-calls `local_cache_refresh.sessionstart_diagnostic()` as this synchronous
-backup step before registration and later provisioning diagnostics. It resolves
-a nested session cwd back to the checkout root and includes the refresh
-outcome in the lifecycle diagnostic stream. Its subprocess call is bounded by a timeout derived from the
-hook's own remaining decision-deadline budget (capped at
-`local_cache_refresh.SESSIONSTART_MAX_TIMEOUT_S`), and skipped entirely once
-too little budget remains, with an explicit skipped diagnostic -- so it can never itself cause the resident hook
-server to miss its own response deadline.
+current session's own start. `agent_worktrees.__main__._run_session_lifecycle`
+calls `local_cache_refresh.sessionstart_diagnostic()` before registration and
+later provisioning diagnostics. It queues a headless, detached, bounded worker
+rather than waiting for discovery and rendering inside Copilot's hook deadline.
+The launch uses the canonical explicit breakaway primitive; contained tests
+retain containment. One worker per canonical checkout owns the kernel-released
+reservation, and the parent reaps its child off the hook thread. A nested session cwd
+resolves to the checkout root. An expired or nearly exhausted hook budget skips
+dispatch with an explicit diagnostic, and spawn failures remain visible.
+
+The hook reports **queued**, not installed or loaded. The worker's actual result,
+including publication counts or failures, is written to
+`<checkout-git-dir>/agent-worktrees-local-guidance/refresh.log` named by that
+diagnostic. These are ephemeral checkout artifacts, not a runtime or service
+registration root: a linked worktree uses its own Git administrative directory,
+so the normal finalization/GC Git worktree removal reclaims its lease and log.
+The log holds the latest attempt rather than an append-only history; dispatch
+leaves an active worker's log intact and does not start another worker.
+Admission holds a short kernel gate across reservation, process launch, and
+publication of the exact request nonce plus PID/start-time owner. The child
+claims only that request; another hook observes the live pending owner even
+before the child starts rendering. No lease or inherited log handle stays open
+in the Git administrative directory during rendering. The worker atomically
+publishes a latest-result log capped at 8 KiB and its completed receipt.
+Finalization and cleanup's normal liveness checks spare a live queued/running
+worker using its workspace-local receipt, without spawning Git per checkout.
+Owner birth identity uses native process APIs on Windows and macOS, and
+`/proc` start ticks on Linux; macOS admission does not depend on `/proc`.
+Creation and resume still perform synchronous primary publication before launch.
+The asynchronous backup can race instruction discovery and first-turn reads:
+neither a successful spawn nor a completed cache write proves model admission.
+Selectors and the catch-all must continue using authenticated existing caches or
+reviewed fallbacks while that backup is pending; they must not assume it completed
+merely because the hook returned. Files published later are available for
+subsequent explicit source resolution and discovery.
 
 `agent-bridge`'s own `target.type == "local"` spawn path is the one
 remaining local-spawn boundary `create`/`resume`/`sessionStart` above don't

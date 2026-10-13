@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; release and receipt contracts landed, local journal in implementation
+- **Status:** Active; local journal landed, node effect receipts next
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts. Existing dependencies #5789, #6030, #5861, #5862 retain ownership.
@@ -113,6 +113,8 @@ All detailed slices are **agent-recommended** and remain subject to review.
 ### Phase 2 - One authority, isolated execution
 - [ ] Implement identified command admission, content-bound idempotency,
   transactional intent/claims/audit/outbox and target-side receipt reconciliation.
+  Intent/receipt contracts and local admission/outbox/audit persistence landed
+  in #6357/#6360. Allocation claims and durable node effect receipts remain open.
 - [ ] Prove objective -> workspace -> host -> prompt -> outcome -> settlement
   locally, then through one Gateway and two separate nodes.
 - [ ] Persist scope/generation fences at cooperative effect owners; define
@@ -231,3 +233,18 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   transactions without a CLI mutator, executor or production task allocator.
 - Allocation claims, durable node-side effects, authentication, distributed
   fencing, installer lifecycle and live adoption remain unresolved proof gates.
+
+### 2026-10-12 - Local journal reviewed and merged
+- #6360 merged at `2026-10-12T22:35:58Z`, commit
+  `e214622ffee76280e055afe60a81d4f6441075c4`, after current-head Copilot APPROVED
+  with zero findings and green required CI. Installed contained suite: 156 passed.
+- Review fixes preserve deferred query-only reads, fail without recreating lost
+  storage and reject foreign databases including view-only schema objects.
+  Corrected a misplaced regression try/finally and reran the full suite; no failed
+  validation was waived.
+- Re-read the parent Plan and pulled forward the verified squash merge.
+  Local durable admission is a building block, not complete distributed execution.
+- Next slice under #6241: durable node acceptance/effect receipts and result
+  reconciliation, followed by allocation/authorization and actual effect-owner
+  fencing. Installation, Gateway service, live fleet adoption and migration
+  gates remain open. No deployment or enrollment was performed.

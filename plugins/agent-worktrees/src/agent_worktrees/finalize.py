@@ -198,16 +198,17 @@ def _warn_of_dev_slot_claims_for_worktree(worktree_id: str, worktree_path: str) 
 
 
 def _has_live_session(record) -> bool:
-    """Return True if this worktree has a live bound Copilot session.
+    """Keep live sessions and pending guidance workers safe from removal.
 
-    Resolved by exact session id (the worktree's session registry) plus its mux
-    session -- never by sweeping session-state (invariant:
-    ``docs/patterns/session-state-access.md``). An untracked worktree
-    (``record is None``) reports not-live; the ``inside_worktree`` gate at the
-    call site still guards the in-use case.
+    Uses exact registered sessions, mux ownership and workspace-local worker
+    receipts, never a session-state sweep. Missing records report not-live;
+    the caller's inside-worktree gate still guards its own shell.
     """
     if record is None:
         return False
+    from . import local_cache_worker
+    if getattr(record, "worktree_path", None) and local_cache_worker.is_active(record.worktree_path):
+        return True
     if (
         getattr(record, "session_backend_opaque", False)
         or getattr(record, "execution_leg_opaque", False)
@@ -1843,7 +1844,7 @@ def validate_and_finalize(
                 else (
                     "this shell is running inside the worktree"
                     if inside_worktree
-                    else "a live Copilot session is still using the worktree"
+                    else "a live session or guidance worker is still using the worktree"
                 )
             )
             output.ok(

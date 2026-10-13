@@ -5,9 +5,9 @@
 - **Branch(es):** serial proposal and implementation PRs
 - **Created:** 2026-10-10
 - **Status:** Draft
-- **Status detail:** Report-only dev slice landed in #6303; publication,
-  installed capability verification, and live pilot
-  parameters/execution and later authority graduation remain gated.
+- **Status detail:** Report-only capability released through #6358 and its
+  installed runtime/charter verified; live pilot parameters/execution and
+  later authority graduation remain gated.
 - **Vision:** `visions/plugins/agent-dispatch/README.md` scheduled production
   and durable goals; `visions/plugins/agent-worktrees/README.md` accountable
   worktree-lifetime state.
@@ -146,8 +146,9 @@ not standing authorization, pilot approval, or scheduling approval.
 - [ ] Select transcript completeness, trusted completion-verification, and
   private report-destination requirements for the audit pilot.
 - [x] Obtain explicit approval to implement the audit-only capability.
-- [ ] Complete the capability's promotion to main and verify its installed
-  runtime/charter before the live pilot; a dev merge is not deployment.
+- [x] Complete the capability's promotion to main and verify its installed
+  runtime/charter before the live pilot (#6358; installed dispatch
+  `0.16.9-dev1` verified); a dev merge is not deployment.
 - [ ] Obtain explicit approval to run the bounded live audit pilot.
 
 ### Phase 2 - Implement an audit-only pilot
@@ -160,7 +161,7 @@ Mutation-fencing implementation is not an audit gate._
   charter and gradual, separately approved authority graduation.
 - [x] Land the manually invoked report-only recipe and its receipt checker
   on dev (#6303); independent semantic verification remains mandatory.
-- [ ] Publish that capability through promotion to main.
+- [x] Publish that capability through promotion to main (#6358).
 - [ ] Implement deterministic discovery and one exclusive bounded worker using
   the existing registrar/supervisor if recurring production is later approved;
   the initial one-off recipe requires an explicit candidate roster.
@@ -307,3 +308,30 @@ registration, or apply-mode pilot has been started by this effort.
   read-only merely because their names describe status.
 - Apply operations, posted candidate cards, mutation-fencing implementation,
   recurring production, and default activation remain separately unapproved.
+
+### 2026-10-12 - Release and installed capability verified
+
+- The normal validation/promotion pipeline completed successfully in run
+  `38305079883`; its generated release PR #6358 first published the
+  capability on main as `67661d853e8f5de7a11c078dbc6dcf50cbce06be`.
+  The later release #6361 retained it, and installed-code comparison used
+  that pinned main snapshot `1fbe70751ef74ffb66cbac9598768a36272110a4`.
+  Existing upstream repair
+  owners cleared the publication blockers; this effort opened no competing
+  pipeline fix and bypassed no gate.
+- The authorized canonical unified update refreshed marketplace payloads
+  and runtimes. It returned nonzero because unrelated agent-index and
+  agent-machines installers refused legacy provenance (tracked in #1611);
+  whole-machine convergence is not claimed.
+- Independently verified the installed dispatch coordinator as healthy at
+  `0.16.9-dev1` after updater exit. Its deployed audit module matches the
+  pinned main Git blob `57ae2468f426b3a9bb1bb5a1b0bad2637508ea57`.
+  The installed CLI exposes the four required recipe parameters, the
+  report-only worker charter, and the receipt-checker command.
+- No audit task, candidate operation, producer, or recurring schedule was
+  created. Runtime availability and structural coverage do not prove a
+  live agentic audit, semantic conclusions, or candidate mutation absence.
+- The next gate remains operator selection and approval of the exact local
+  project/candidate roster, budget, private writable report destination,
+  evidence completeness standard, and independent reviewer. Fetch-free
+  reader admission must be established before executing that pilot.

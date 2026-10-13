@@ -10,18 +10,20 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Configuration Backstage and Worker Instances](active/configuration-backstage-and-worker-instances/README.md) | Draft; horizontal sections, list-first resources, explicit activation outcomes | #6379 |
 | [Main-Owned Workflow Control](active/main-owned-workflow-control/README.md) | Active; first consolidation slice | #6237; run/check consolidation primary, ownership enabling |
-| [Fleet Control V2](active/fleet-control-v2/README.md) | Active; release/receipt contracts landed, local journal slice | #6236, #6240, #6241; existing #5789/#6030 owners retained |
+| [Fleet Control V2](active/fleet-control-v2/README.md) | Active; local journal landed, node effect receipts next | #6236, #6240, #6241; existing #5789/#6030 owners retained |
 | [Lean Runtime Dependencies](active/lean-runtime-dependencies/README.md) | Active; proposal reviewed, dependency reduction | #6234 |
 | [Process Slot Ownership](active/process-slot-ownership/README.md) | Active; reader-lifetime continuation | #3963; registry presentation separately #5559 |
 | [Process Spawn Reduction](active/process-spawn-reduction/README.md) | Active | #6086 |
 | [Private PR Source Attribution](active/private-pr-source-attribution/README.md) | Active; originating identity slice | #6068 |
 | [Remote Picker Seed Parity](active/remote-picker-seed-parity/README.md) | Draft; operator-requested parity | #6057 |
-| [Worktree Conclusion Tidier](active/worktree-conclusion-tidier/README.md) | Draft; report-only dev slice landed, publication/live pilot gated | #6060 |
+| [Worktree Conclusion Tidier](active/worktree-conclusion-tidier/README.md) | Draft; audit capability released/installed, live pilot gated | #6060 |
 | [Native Context Handoff Compatibility](active/native-context-handoff-compatibility/README.md) | Active; capability-contract investigation | #6028 |
 | [Linux Role Fleet](active/linux-role-fleet/README.md) | Active; reviewed Komodo-first plan and isolated adoption proof | #6030, #5861 |
 | [Durable PR-Watch Delegation](active/durable-pr-watch-delegation/README.md) | Active; proposal reviewed | #6007 |
 | [Versioned Singleton Manager](active/versioned-singleton-manager/README.md) | Active | #5655 |
+| [Status-monitor singleton correctness](active/status-monitor-singleton-correctness/README.md) | Draft; planning only, cold-start prerequisite satisfied | #5512 (restart), then #5453 (replacement and promotion/cutover) |
 | [Adopter Material Refresh](active/adopter-material-refresh/README.md) | Active; primary documentation slice complete, preview/reference work unassigned | #5799 |
 | [Machine Fleet Routing Foundation](active/machine-fleet-routing-foundation/README.md) | Active; contract implementation | #5789 |
 | [Mutable dev slot](active/mutable-dev-slot/README.md) | Active | #5472 |

@@ -13,6 +13,16 @@ CodeSpace/container resolvers), but their absence only disables those features.
 
 ## How It Works
 
+On Windows, ordinary and passive status-monitor starts bypass the venv Python
+redirector and use the real base **console** interpreter, preserving the venv
+prefix and imports through the shared `agent-procutil` environment helper.
+The returned process PID therefore identifies the runtime used by health and
+route-generation ownership. Existing hidden-console, lifetime, cwd, and
+credential-scrubbing controls remain unchanged. A venv whose required base
+interpreter is unavailable is refused explicitly rather than launched with
+ambiguous PID ownership. This does not change endpoint-driven promotion,
+installer failure semantics, singleton ownership, or cleanup of existing pairs.
+
 Completed numbered runtime slots are immutable. An unchanged completed slot
 is reused; a same-version payload mismatch is refused before venv or package
 mutation, including forced updates. Publish a new version for ordinary changes.

@@ -1844,8 +1844,8 @@ def test_session_lifecycle_calls_local_cache_refresh_as_a_backup(
 
     monkeypatch.setattr(
         local_cache_refresh,
-        "refresh_local_cache",
-        lambda repo_root, **k: calls.append(repo_root),
+        "_queue_refresh",
+        lambda repo_root: calls.append(repo_root) or local_cache_refresh.RefreshResult("queued"),
     )
 
     main._run_session_lifecycle(payload, deadline=time.time() + 200.0)
@@ -1893,7 +1893,7 @@ def test_session_lifecycle_reports_local_cache_refresh_failure(
     def _boom(repo_root, **k):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(local_cache_refresh, "refresh_local_cache", _boom)
+    monkeypatch.setattr(local_cache_refresh, "_queue_refresh", _boom)
 
     result = main._run_session_lifecycle(payload, deadline=time.time() + 200.0)
 
