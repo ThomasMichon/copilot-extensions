@@ -110,13 +110,15 @@ def test_spawn_passive_daemon_real_spawn_logs_and_runs_from_data_root(
     home.mkdir()
     ctx = _cutover._CutoverContext(
         data_root=home, new_socket_path=home / "g3.sock",
-        new_log_path=home / "g3.log", new_control_token="tok",
+        new_log_path=home / "g3.log", new_control_token="ctl-sentinel-5e9b",
         old_control_token=None, token_by_port={},
     )
     proc = _cutover.spawn_passive_daemon(ctx, 23456)
     assert proc.wait(timeout=60) == 0
     lines = (home / "g3.log").read_text(encoding="utf-8").splitlines()
     assert "spawn_daemon cwd=" in lines[0]
+    assert "display=agent_mcp serve --passive --control-port 23456" in lines[0]
+    assert "ctl-sentinel-5e9b" not in lines[0], "the control token never reaches the log header"
     assert os.path.samefile(lines[-1].strip(), home)
 
 

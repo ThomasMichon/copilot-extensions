@@ -723,6 +723,14 @@ def _breakaway_denied(exc: OSError, kwargs: dict) -> bool:
     )
 
 
+def _daemon_log_header(stamp: str, cwd: str, executable: str, display: str | None) -> bytes:
+    """The durable launch header: never the argv tail or the environment."""
+    header = f"{stamp} spawn_daemon cwd={cwd} executable={executable}"
+    if display:
+        header += " display=" + " ".join(str(display).split())
+    return (header + "\n").encode()
+
+
 def spawn_daemon(
     argv: Sequence[str | os.PathLike[str]],
     *,
@@ -734,6 +742,7 @@ def spawn_daemon(
     breakaway: bool = True,
     contained_fallback: bool = False,
     extra_creationflags: int = 0,
+    display: str | None = None,
 ) -> subprocess.Popen:
     """Launch a long-lived daemon that outlives its caller.
 
@@ -762,6 +771,11 @@ def spawn_daemon(
     * **Logged.** stdin is ``DEVNULL``; stdout and stderr are appended to
       ``log_path`` (parent directories are created), after a one-line launch
       header. The parent closes its copy of the log handle before returning.
+      The header names the cwd and the executable (``argv[0]``) only, plus
+      ``display`` when given: the remaining argv and the environment are never
+      written, since either may carry a token, password or credential URL. A
+      caller that wants more context in the log passes an already-redacted
+      ``display`` label.
 
     ``env`` defaults to a copy of ``os.environ``; ``env_overrides`` is layered
     on top. ``extra_creationflags`` is OR'd into the Windows creation flags
@@ -791,7 +805,7 @@ def spawn_daemon(
     )
     with open(log_file, "ab") as log_fh:
         stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-        log_fh.write(f"{stamp} spawn_daemon cwd={cwd_path} argv={command}\n".encode())
+        log_fh.write(_daemon_log_header(stamp, cwd_path, command[0], display))
         log_fh.flush()
         popen_kwargs = {
             "cwd": cwd_path,

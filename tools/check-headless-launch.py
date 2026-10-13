@@ -48,10 +48,12 @@ call (or its enclosing function, to tolerate the common
 shape without real data-flow analysis) already references a raw flag
 (``creationflags=``/``startupinfo=``) or one of the shared helpers
 (``no_window_kwargs``/``detached_kwargs``/``windowless_daemon_kwargs``/
-``_process_tree_kwargs``/``no_window_flags``/``spawn_daemon``). ``spawn_daemon``
+``_process_tree_kwargs``/``no_window_flags``). ``agent_procutil.spawn_daemon``
 is the approved headless primitive for a resident daemon: it is built on the
-detach helpers, so a call through it is windowless by construction and is never
-itself reported. Only a **literal, resolvable**
+detach helpers and is not itself a ``subprocess`` call, so a launch through it
+is never reported. It is deliberately *not* one of the helpers above: a
+``spawn_daemon(...)`` call says nothing about a raw ``subprocess`` spawn beside
+it in the same function, which is still checked on its own. Only a **literal, resolvable**
 argv[0] is checked -- a dynamically-built command (a variable, a function
 call) is silently skipped rather than risk a false positive from a value this
 guard cannot actually resolve. The same inline ``# headless-guard: allow
@@ -113,7 +115,7 @@ _SPAWN_FUNCS = frozenset({"Popen", "run", "call", "check_call", "check_output"})
 _SAFE_KWARGS = frozenset({"creationflags", "startupinfo"})
 _SAFE_HELPERS = (
     "no_window_kwargs", "detached_kwargs", "windowless_daemon_kwargs",
-    "_process_tree_kwargs", "no_window_flags", "spawn_daemon",
+    "_process_tree_kwargs", "no_window_flags",
 )
 
 

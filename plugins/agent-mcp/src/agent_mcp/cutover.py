@@ -144,7 +144,8 @@ def spawn_passive_daemon(ctx: _CutoverContext, control_port: int) -> subprocess.
     home = Path(ctx.data_root).resolve()
     home.mkdir(parents=True, exist_ok=True)
     proc = spawn_daemon(cmd, cwd=home, log_path=ctx.new_log_path,
-                        env_overrides=env_overrides)
+                        env_overrides=env_overrides,
+                        display=f"agent_mcp serve --passive --control-port {control_port}")
     ctx.token_by_port[control_port] = ctx.new_control_token
     return proc
 

@@ -143,7 +143,10 @@ def group_generations(
     fails those checks, makes the grouping uncertain (the returned reason).
     """
     ordered = [candidate for _, candidate in sorted(candidates.items())]
-    if not structural or len(ordered) <= 1:
+    # Only a disabled grouping or an empty census skips the structural checks:
+    # a lone candidate whose parent is unreadable is still uncertain (it may
+    # be half of a launcher/worker pair whose other half the census missed).
+    if not structural or not ordered:
         return [Generation(worker=candidate) for candidate in ordered], None
     classify = is_launcher_image or is_venv_redirector
     problems: list[str] = []

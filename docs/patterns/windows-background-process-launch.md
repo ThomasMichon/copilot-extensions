@@ -119,7 +119,8 @@ check into recurring self-SSH process churn.
   `# headless-guard: allow <reason>` marker.
 
 `agent_procutil.spawn_daemon` is an approved headless primitive: a launch
-through it is windowless by construction.
+through it is windowless by construction. It approves only its own call; a raw
+`subprocess` spawn beside it in the same function is still checked.
 
 Canonical shared libraries and every shipped vendored copy are scanned directly.
 The vendored-library synchronization guard is also required in CI and pre-push,

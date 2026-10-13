@@ -291,12 +291,27 @@ def test_allows_spawn_via_kwargs_dict_update_in_same_function(repo):
     assert guard.verify() == []
 
 
-def test_spawn_daemon_is_an_approved_headless_primitive(repo):
-    """A function that launches through ``agent_procutil.spawn_daemon`` (the
-    shared resident-daemon primitive) is windowless by construction, including
-    a console-program fallback spawn in the same function."""
+def test_spawn_daemon_call_alone_is_clean(repo):
+    """A launch through ``agent_procutil.spawn_daemon`` (the shared
+    resident-daemon primitive) is windowless by construction and is never
+    reported, even with a literal console-program argv[0]."""
     _mk_plugin(
         repo, "agent-ok-daemon", adopts=True,
+        body=(
+            "from agent_procutil import spawn_daemon\n"
+            "def start(home):\n"
+            "    return spawn_daemon(['python', '-m', 'svc'], cwd=home,\n"
+            "                        log_path=home / 'svc.log')\n"
+        ),
+    )
+    assert guard.verify() == []
+
+
+def test_spawn_daemon_does_not_approve_a_raw_spawn_in_the_same_function(repo):
+    """``spawn_daemon`` is its own approved call, not a kwargs helper: a bare
+    fallback ``Popen`` next to it is still an unsuppressed console spawn."""
+    _mk_plugin(
+        repo, "agent-bad-daemon-fallback", adopts=True,
         body=(
             "import subprocess\n"
             "from agent_procutil import spawn_daemon\n"
@@ -308,7 +323,9 @@ def test_spawn_daemon_is_an_approved_headless_primitive(repo):
             "        return subprocess.Popen(['python', '-m', 'svc'])\n"
         ),
     )
-    assert guard.verify() == []
+    problems = guard.verify()
+    assert len(problems) == 1
+    assert "unsuppressed console spawn of 'python'" in problems[0]
 
 
 def test_spawn_daemon_mention_elsewhere_does_not_approve_a_raw_spawn(repo):

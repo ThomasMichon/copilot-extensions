@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import uuid
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -837,6 +838,68 @@ def test_spawn_daemon_access_denied_without_breakaway_propagates(
     with pytest.raises(OSError):
         pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log", breakaway=False)
     assert len(fake_popen.calls) == 1
+
+
+def _fake_credential_argv() -> tuple[list[str], str]:
+    """An argv carrying a fake credential, assembled from fragments so no
+    secret-shaped literal appears in this source file."""
+    value = "fake-" + "val" + "ue-" + uuid.uuid4().hex
+    flag = "--" + "tok" + "en"
+    url = "https://" + "user" + ":" + value + "@" + "example.invalid/"
+    return ["py", "-m", "svc", flag, value, "--upstream", url], value
+
+
+def test_spawn_daemon_log_header_never_records_argv_tail_or_env(
+    tmp_path, monkeypatch, fake_popen
+):
+    """argv and env may carry credentials: the durable header names only the
+    cwd and the executable."""
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    argv, value = _fake_credential_argv()
+    env_value = "env-" + uuid.uuid4().hex
+    log_path = tmp_path / "d.log"
+
+    pu.spawn_daemon(argv, cwd=tmp_path, log_path=log_path,
+                    env_overrides={"SVC_" + "KEY": env_value})
+
+    (spawned, _), = fake_popen.calls
+    assert spawned == argv, "the child still receives its full argv"
+    text = log_path.read_text(encoding="utf-8")
+    assert value not in text
+    assert env_value not in text
+    assert "example.invalid" not in text
+    assert "--upstream" not in text
+    assert len(text.splitlines()) == 1
+    assert f"cwd={tmp_path} executable=py" in text
+
+
+def test_spawn_daemon_log_header_uses_caller_display_label(tmp_path, monkeypatch, fake_popen):
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    argv, value = _fake_credential_argv()
+    log_path = tmp_path / "d.log"
+
+    pu.spawn_daemon(argv, cwd=tmp_path, log_path=log_path,
+                    display="svc serve\n--upstream <redacted>")
+
+    text = log_path.read_text(encoding="utf-8")
+    assert value not in text
+    assert len(text.splitlines()) == 1, "a display label never breaks the one-line header"
+    assert "executable=py display=svc serve --upstream <redacted>" in text
+
+
+def test_spawn_daemon_breakaway_denied_never_records_argv_tail(
+    tmp_path, monkeypatch, fake_popen
+):
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    fake_popen.failures.append(_access_denied())
+    argv, value = _fake_credential_argv()
+    log_path = tmp_path / "d.log"
+
+    with pytest.raises(pu.DaemonSpawnError) as info:
+        pu.spawn_daemon(argv, cwd=tmp_path, log_path=log_path)
+
+    assert value not in str(info.value)
+    assert value not in log_path.read_text(encoding="utf-8")
 
 
 def test_spawn_daemon_real_child_writes_to_log_from_cwd(tmp_path):

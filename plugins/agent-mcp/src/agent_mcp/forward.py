@@ -124,7 +124,7 @@ def _spawn_serve_host(handle: str) -> None:
     # the forwarder's lifetime still beats losing the multiplexer entirely.
     spawn_daemon(cmd, cwd=home, log_path=home / "serve.log",
                  env_overrides=windowless_python_env(python),
-                 contained_fallback=True)
+                 contained_fallback=True, display="agent_mcp serve")
 
 
 def _ensure_serve(socket_path: str | None):

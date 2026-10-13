@@ -228,6 +228,60 @@ def test_targets_from_an_uncertain_census_are_never_used(tmp_path: Path):
     assert state["terminated"] == [303]
 
 
+def _lone_passive_state(tmp_path: Path, ppid) -> dict:
+    """A one-candidate census: 303 is a stale, never-published passive while
+    the routed active generation (101) is no longer running."""
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=101, version="1.0.0")
+    _stale_breadcrumb(tmp_path, new_pid=303, start="passive")
+    return {
+        "lock": None,
+        "live": {303: "passive"},
+        "ppid": {303: ppid},
+        "image": {},
+        "terminated": [],
+    }
+
+
+def test_single_candidate_with_unreadable_parent_is_uncertain_and_blocks_repair(tmp_path: Path):
+    # A one-candidate census is not exempt from the structural checks: the
+    # lone candidate may be one half of a pair whose other half was missed.
+    state = _lone_passive_state(tmp_path, None)
+
+    report = diagnostics.audit_daemon_health(_ctx(tmp_path, state))
+
+    assert report["candidate_count"] == 1
+    assert report["grouping_uncertain"] is True
+    assert "parent of candidate 303 unreadable" in report["grouping_uncertain_reason"]
+    (finding,) = report["findings"]
+    assert finding["kind"] == "abandoned_passive"
+    assert finding["repairable"] is False
+    assert finding["blocked_reason"] == "generation grouping uncertain"
+
+    result = diagnostics.apply_daemon_health(_ctx(tmp_path, state))
+    assert state["terminated"] == []
+    assert result["actions"][-1] == {
+        "kind": "generation_grouping", "blocked": True,
+        "reason": "generation grouping uncertain",
+    }
+
+
+def test_single_candidate_with_readable_non_launcher_parent_stays_certain(tmp_path: Path):
+    state = _lone_passive_state(tmp_path, 1)
+
+    report = diagnostics.audit_daemon_health(_ctx(tmp_path, state))
+
+    assert report["grouping_uncertain"] is False
+    assert report["grouping_uncertain_reason"] is None
+    assert report["generation_count"] == 1
+    (finding,) = report["findings"]
+    assert finding["kind"] == "abandoned_passive"
+    assert finding["repairable"] is True
+    assert finding["blocked_reason"] is None
+
+    result = diagnostics.apply_daemon_health(_ctx(tmp_path, state))
+    assert all(action["kind"] != "generation_grouping" for action in result["actions"])
+
+
 def test_without_opt_in_each_candidate_is_its_own_generation(tmp_path: Path):
     routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=202, version="1.0.0")
     state = _pair_state()
@@ -252,6 +306,9 @@ def test_grouping_is_uncertain_for_every_non_pair_parent_child_relation():
 
     launcher = _candidate(1, "10", 0, LAUNCHER)
     assert reason(launcher, _candidate(2, "11", 1, WORKER)) is None
+    assert "parent of candidate 2 unreadable" in reason(_candidate(2, "11", None, WORKER))
+    assert reason(_candidate(2, "11", 1, WORKER)) is None
+    assert group_generations({}, structural=True) == ([], None)
     assert "not a launcher/worker pair" in reason(
         _candidate(1, "10", 0, WORKER), _candidate(2, "11", 1, WORKER))
     assert "start order" in reason(launcher, _candidate(2, "09", 1, WORKER))

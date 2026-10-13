@@ -376,6 +376,7 @@ def test_spawn_serve_host_launches_through_spawn_daemon(tmp_path, monkeypatch):
     assert home.is_dir()
     assert captured["kwargs"]["log_path"] == home / "serve.log"
     assert captured["kwargs"]["contained_fallback"] is True
+    assert captured["kwargs"]["display"] == "agent_mcp serve"
 
 
 def test_ensure_serve_falls_back_when_the_spawn_is_refused(tmp_path, monkeypatch):

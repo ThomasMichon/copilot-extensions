@@ -82,7 +82,10 @@ It composes the helpers above, so its flags never drift from them:
   directory is removed.
 - **Logged, never `DEVNULL`.** stdin is `DEVNULL`; stdout and stderr are
   appended to `log_path` after a one-line launch header, and the parent closes
-  its own copy of the handle before returning the `Popen`.
+  its own copy of the handle before returning the `Popen`. The header records
+  the cwd and the executable (`argv[0]`) only, never the rest of argv or the
+  environment, since either may carry a token, password or credential URL.
+  Pass an already-redacted `display="..."` label to add context to it.
 
 `env` defaults to a copy of `os.environ`; `env_overrides` is layered on top.
 `extra_creationflags` is OR'd into the Windows creation flags (for example a
