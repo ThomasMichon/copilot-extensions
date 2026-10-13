@@ -43,6 +43,7 @@ from typing import TYPE_CHECKING, Any, Callable, Protocol
 
 from zdd import breadcrumb, routing
 from zdd.routing import Endpoint
+from . import routing_persistence
 
 log = logging.getLogger("zdd")
 
@@ -94,6 +95,7 @@ class CutoverResult:
     retirement_requested: bool = False
     retirement_confirmed: bool = False
     conditional: bool = False
+    publication_uncertain: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         data = {
@@ -112,6 +114,8 @@ class CutoverResult:
                 self.serving_endpoint.to_dict() if self.serving_endpoint else None
             )
             data["retirement_requested"] = self.retirement_requested
+        if self.publication_uncertain:
+            data["publication_uncertain"] = True
         return data
 
 
@@ -696,6 +700,17 @@ class CutoverOrchestrator:
             return result
 
         except Exception as exc:  # noqa: BLE001 -- convert to a rollback
+            if isinstance(exc, routing_persistence.PublicationCommitUncertain):
+                result.publication_uncertain = True
+                result.error = "publication commit uncertain; generations retained"
+                result.serving_endpoint = None
+                result.steps.append(result.error)
+                log.error(result.error)
+                write_breadcrumb(
+                    state="publication-uncertain", old=old_dict, new_port=new_port,
+                    new_pid=new_pid, started_at=started_at, error=result.error,
+                )
+                return result
             if result.committed:
                 # Should not happen (commit is the last fallible step), but if a
                 # post-commit error escapes, the new daemon still owns the route.
@@ -735,6 +750,8 @@ class CutoverOrchestrator:
                 breadcrumb.clear_breadcrumb(self.config_dir)
             else:
                 state = "rolled_back"
+                if result.publication_uncertain:
+                    state = "publication-uncertain"
                 if conditional and not result.rolled_back:
                     state = "flipped" if flipped else "started"
                 write_breadcrumb(
@@ -830,6 +847,12 @@ class CutoverOrchestrator:
                     # failure -- release it so the survivor does not stay closed
                     # to new work (#1756). Recorded either way for traceability.
                     self._undrain(old, result)
+            except routing_persistence.PublicationCommitUncertain:
+                result.publication_uncertain = True
+                result.serving_endpoint = None
+                result.steps.append("rollback publication uncertain; generations retained")
+                log.error("Rollback publication uncertain; generations retained")
+                return
             except Exception as exc:  # noqa: BLE001
                 log.error("Rollback could not restore old endpoint: %s", exc)
 

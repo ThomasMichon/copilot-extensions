@@ -244,6 +244,40 @@ def test_saturated_history_does_not_block_verified_owner_handoff(case, monkeypat
     assert routing.read_table(root)[publication_history.KEY]["saturated"]
 
 
+def test_post_rename_fsync_failure_retains_routable_successor(case, monkeypatch):
+    from zdd import routing_persistence
+    import stat
+
+    root, _, events, handle, snapshot, _, orch = case
+    orch.spawn_passive = snapshot.spawn_passive
+    orch.health_check = lambda *_: True
+    orch.make_client = snapshot.make_client
+    monkeypatch.setattr(routing, "_pid_alive", lambda _: True)
+    monkeypatch.setattr(routing, "_listening", lambda *_a, **_k: True)
+    real_fsync = routing_persistence.os.fsync
+    calls = []
+
+    def fsync(descriptor):
+        calls.append(descriptor)
+        table = routing.read_table(root) or {}
+        if (
+            stat.S_ISDIR(os.fstat(descriptor).st_mode)
+            and (table.get("active") or {}).get("pid") == 202
+        ):
+            raise OSError("fixture post-rename directory flush failure")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(routing_persistence.os, "fsync", fsync)
+    result = orch.run()
+    assert not result.ok and not result.rolled_back and result.publication_uncertain
+    assert events == ["spawn"] and handle.poll() is None
+    assert routing.read_table(root)["active"]["pid"] == 202
+    assert breadcrumb.read_breadcrumb(root)["state"] == "publication-uncertain"
+    assert result.to_dict()["publication_uncertain"] is True
+    refused = orch.run()
+    assert not refused.ok and "owner-led recovery" in refused.error
+
+
 @pytest.mark.parametrize("after_flip", [False, True])
 def test_conditional_config_mismatch_rolls_back_before_retiring(case, after_flip):
     root, old, events, _, snapshot, request, orch = case

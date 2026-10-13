@@ -66,6 +66,13 @@ before publishing a route that can admit work. Writes flush the file and parent
 directory on POSIX and use a flushed file plus native write-through replacement
 on Windows. A failed final flip may retain an extra protected candidate; it
 must never manufacture a false negative after a crash.
+Replacement visibility and durability are separate outcomes. A post-replace
+directory-flush failure raises `PublicationCommitUncertain`; cutover retains
+both generations and an owner-recovery breadcrumb rather than entering an
+unflipped disposal path. The result exposes `publication_uncertain: true`.
+An unpublished passive's shutdown skips routing mutation when it does not own
+the active claim, so native exit confirmation can keep the termination fence
+without blocking that passive's own `clear_if_owner()` cleanup.
 
 Storage is capped at 2,048 retained entries. No remembered publication is pruned;
 capacity exhaustion sets a sticky saturation flag and disables negative proofs

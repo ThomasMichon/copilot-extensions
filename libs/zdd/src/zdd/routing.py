@@ -660,6 +660,13 @@ def clear_if_owner(config_dir: str | os.PathLike[str], pid: int) -> bool:
     entry to ``previous`` so an in-flight client mid-resolve still has a fallback
     if the successor is not yet listening.
     """
+    observed = read_table(config_dir)
+    if observed is not None:
+        raw = observed.get("active")
+        endpoint = Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+        if raw is None or (endpoint is not None and endpoint.pid != pid):
+            # An unpublished passive must not wait on its terminator's fence.
+            return False
     with _routing_lock(config_dir):
         data = read_table(config_dir)
         if not data:

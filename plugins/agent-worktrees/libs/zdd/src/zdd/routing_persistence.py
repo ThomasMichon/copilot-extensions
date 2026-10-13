@@ -10,6 +10,10 @@ import time
 from pathlib import Path
 
 
+class PublicationCommitUncertain(OSError):
+    """Replacement was visible before its durability could be confirmed."""
+
+
 def windows_replace(source: Path, target: Path, kernel32=None) -> None:
     if kernel32 is None:
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -39,8 +43,13 @@ def write(path: Path, data: dict) -> None:
                 raise
             time.sleep(0.05)
     if sys.platform != "win32":
-        descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
+            descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        except OSError:
+            raise PublicationCommitUncertain(
+                "routing replacement visible but durability unconfirmed"
+            ) from None

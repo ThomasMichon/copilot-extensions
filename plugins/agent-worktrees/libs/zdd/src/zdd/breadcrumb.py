@@ -64,7 +64,9 @@ _BREADCRUMB_FILENAME = "cutover.json"
 # breadcrumb left in one of these is an aborted cutover.
 _NON_TERMINAL = frozenset({
     "started", "flipped", "draining",
+    "publication-uncertain",
     "conditional-started", "conditional-flipped", "conditional-draining",
+    "conditional-publication-uncertain",
 })
 _TERMINAL = frozenset({"committed", "rolled_back", "failed"})
 
@@ -104,6 +106,8 @@ def recovery_refusal(config_dir: str | os.PathLike[str], record: dict | None) ->
     """Shared refusal for existing custody that legacy paths cannot interpret."""
     if requires_conditional_recovery(record):
         return "conditional cutover requires owner-led recovery"
+    if record is not None and record.get("state") == "publication-uncertain":
+        return "publication commit uncertain; owner-led recovery required"
     if (
         record is None and breadcrumb_path(config_dir).exists()
     ) or (
