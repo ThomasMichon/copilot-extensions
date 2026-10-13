@@ -41,6 +41,8 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
 - **Delegates:** None assigned to runtime implementation by this plan.
 - **Slice ownership:** Never assign a slice already held by another campaign.
   Coordinate #5789/#6030 and the standalone client PR #6133 before touching their files.
+  Client-only installation lifecycle #6424 also retains ownership; the
+  Gateway/index slice consumes it rather than opening a parallel installer.
 - **Gateway/index slice:** The operator assigned its end-to-end integration to
   the Gateway/index integrator. This is a contribution to this product, not a
   competing Gateway or ledger. Existing contract, auth, deployment and migration

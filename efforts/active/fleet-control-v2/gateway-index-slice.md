@@ -55,6 +55,8 @@ integration cannot be credited from that image proof alone.
 The Gateway/index integrator owns the vertical integration and its PRs under
 #6443. Existing #6240 release/lifecycle, #6241 ledger/receipt, #5789 routing/auth,
 #6030 deployment and provider owners retain their artifacts and active PRs.
+Client-only owned installation #6424 remains its own slice; query/controller
+integration consumes that lifecycle without taking over its implementation.
 
 1. Review this amendment and name the interfaces and exclusive source scopes.
    Reconcile local prototypes with the merged contracts before implementing.
