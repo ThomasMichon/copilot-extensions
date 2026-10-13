@@ -699,22 +699,21 @@ def test_versioned_slot_lease_classifies_only_platform_contention_codes(tmp_path
         r"\$script:VersionedSlotLeaseHandle = \[System.IO.File\]::Open\([\s\S]*?\)",
         "throw [System.IO.IOException]::new('synthetic lease failure', $TestHResult)",
         functions, count=1,
-    ).replace(
-        "[System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform",
-        "[FixtureLeasePlatformProbe]::IsOSPlatform",
     )
+    functions, probe_count = re.subn(
+        r"\[System\.Runtime\.InteropServices\.RuntimeInformation\]::IsOSPlatform"
+        r"\(\[System\.Runtime\.InteropServices\.OSPlatform\]::(\w+)\)",
+        r"(Test-FixtureOSPlatform '\1')",
+        functions,
+    )
+    assert probe_count == 2
     script = tmp_path / "platform-contention.ps1"
     script.write_text(
         """
-Add-Type -TypeDefinition @'
-using System.Runtime.InteropServices;
-public static class FixtureLeasePlatformProbe {
-    public static string CurrentOS;
-    public static bool IsOSPlatform(OSPlatform requested) {
-        return requested.ToString() == CurrentOS;
-    }
+function Test-FixtureOSPlatform {
+    param([string]$Requested)
+    return $Requested.ToUpperInvariant() -eq $script:FixtureLeaseOS
 }
-'@
 """ + functions + f'\n$InstallDir="{tmp_path}"\n$SrcVersion="1.2.3"\n'
         "$VersionedRuntime=$true\n"
         "$cases=@(\n"
@@ -722,7 +721,7 @@ public static class FixtureLeasePlatformProbe {
         " @{OS='LINUX';Code=11}, @{OS='OSX';Code=35},\n"
         " @{OS='LINUX';Code=13}, @{OS='WINDOWS';Code=11})\n"
         "$results=@(foreach ($case in $cases) {\n"
-        " [FixtureLeasePlatformProbe]::CurrentOS=$case.OS\n"
+        " $script:FixtureLeaseOS=$case.OS\n"
         " $env:OS=if ($case.OS -eq 'WINDOWS') {'Windows_NT'} else {'Fixture_Posix'}\n"
         " $TestHResult=-2147024896+$case.Code\n"
         " $acquired=Enter-VersionedSlotLease\n"
