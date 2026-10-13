@@ -100,6 +100,20 @@ python tools/run-plugin-tests.py agent-dispatch \
 Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
 than repeatedly importing file groups that contain no selected tests.
 
+Resident list-warm snapshot policy tests keep process calls mocked and verify
+exact output shapes, filter/project separation, next-pass freshness, unavailable
+classification, and unchanged standalone reads. Their bounded native companion
+executes the real warm loop, classify client/server transport and Git classifier
+against a fresh divergent checkout; transcript, mux and reclaim enrichment are
+modeled separately. The fixture refuses a bypass of the classify transport.
+Four same-selection shapes retain eight direct Git starts in each of two
+unchanged passes, then observe a subsequent dirty edit. Run that lane explicitly:
+
+```powershell
+$env:AGENT_WORKTREES_LIST_WARM_NATIVE = '1'
+python tools\run-plugin-tests.py agent-worktrees --allow-explicit-tiers -k test_native_resident_warm_two_cycle_git_budget
+```
+
 The agent-worktrees namespace-package health-gate regression uses a minimal
 payload containing the real installer and slot/resolver helpers, with fake uv
 and a real isolated Python namespace import. It retains staging and activation

@@ -111,6 +111,8 @@ a scaling aspiration, not a fixed spawn-rate budget with an approved interval.
 - [x] _(Agent-recommended bounded first slice)_ Batch per-pass fallback object
   comparisons before adding cross-cycle immutable-fact reuse; preserve fresh
   mutable Git observations and prove the one-/many-path process budgets.
+- [ ] Share fresh enrichment across compatible resident list-warm shapes within
+  one pass, preserving exact-selection/output separation and next-pass reads.
 
 ### Phase 4 - Unit boundaries and release proof
 
@@ -125,7 +127,7 @@ a scaling aspiration, not a fixed spawn-rate budget with an approved interval.
 
 ## Validation Plan
 
-- [ ] First hook slice proves zero client/CLI child processes on daemon success,
+- [x] First hook slice proves zero client/CLI child processes on daemon success,
   not merely correct creation flags or a cheaper interpreter.
 - [ ] In-process unit tests cover request/output equivalence, bounded responses,
   stale/malformed rendezvous, wrong installation, unsupported protocol,
@@ -164,6 +166,40 @@ after equivalence and error semantics are established. Keep native integration
 small and explicit while unit policy tests remain in-process.
 
 ## Journal
+
+### 2026-10-12 - Deployment proof and selection-scoped list warming
+
+- Promotion and the authorized normal global updater completed for #6271.
+  Fresh installed classifier observations retain eight Git starts for both
+  one-path and twenty-path divergent work across two cycles. The actual legacy
+  PowerShell post-hook also completed a two-call resident-success round with
+  only its shell and console infrastructure, without Python/CLI descendants.
+  Additional requests still demonstrated intermittent explicit fallback and
+  timeout; this is not a claim of universal hook availability.
+- Two identity-attributed 45-second resident observations sampled cumulative
+  Git/console-host starts and peak live descendants, with no attributable
+  visible or foreground frames observed. The workload was mixed and sampling
+  misses short-lived processes, so those results do not establish a stationary
+  host-wide reduction. The parent remains Active.
+- The next bounded source slice shares fresh enrichment only within one
+  resident list-warm pass and exact tracking-status/platform/existence
+  selection. Four compatible demanded shapes previously repeated three
+  classifications, four session/record scans and two mux/reclaim observations.
+  The candidate performs each once while preserving individual output fields.
+- Actual before/after warm-loop measurements against the retained source
+  baseline used the same real-Git divergent fixture: twenty-four versus eight
+  direct Git starts in each of two passes, through the real classify transport.
+  Transcript, mux and reclaim enrichment was modeled, not silently counted as
+  native. A concurrent measurement that exceeded the unchanged request budget
+  was excluded; its diagnostic fixture cleanup was made handler-lifetime-safe
+  before the serial measurement passed. The checked-in native lane also
+  observes a dirty edit on the next pass; in-process tests retain different
+  selection/project boundaries and unchanged standalone reads.
+- Broader event-driven polling #2619, authoritative lifecycle #3761, and
+  consolidated monitor #918 remain their existing contracts. This slice does
+  not alter polling cadence, extend freshness leases, activate installations
+  or bypass the classify provider. Review, promotion, authorized deployment
+  and post-caller live proof of this new slice are still required.
 
 ### 2026-10-12 - Per-pass tree comparison slice
 
