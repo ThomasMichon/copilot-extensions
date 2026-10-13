@@ -58,6 +58,15 @@ def test_settle_persists_and_reloads(tmp_path):
 
 # ── _settle_parent_obligation hook ───────────────────────────────────────────
 
+def _child(project_root: Path, owner_ref: str = "") -> WorktreeRecord:
+    child = tracking.create_new_record(
+        "wt-child", "worktree/wt-child", str(project_root / "wt-child"),
+        "childproj", "machine-x", "windows", project_root,
+    )
+    child.owner_ref = owner_ref
+    return child
+
+
 def _write_parent(project_root: Path, project: str, parent_id: str,
                   child_ref: str) -> Path:
     """Write a parent record (with an active claim on the child) to its tracking
@@ -85,13 +94,14 @@ def _project_root(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.mark.guard
 def test_parent_claim_settled_on_child_finalize(_project_root, monkeypatch):
     child_id = "wt-child"
     child_ref = tracking.format_claim_ref("machine-x", "childproj", child_id)
     parent_ref = tracking.format_claim_ref("machine-x", "parentproj", "wt-parent")
     parent_path = _write_parent(_project_root, "parentproj", "wt-parent", child_ref)
 
-    child = SimpleNamespace(owner_claim_ref=tracking.parse_claim_ref(parent_ref))
+    child = _child(_project_root, parent_ref)
     config = SimpleNamespace(machine="machine-x", repo_name="childproj")
 
     _settle_parent_obligation(child, config, child_id)
@@ -100,13 +110,14 @@ def test_parent_claim_settled_on_child_finalize(_project_root, monkeypatch):
     assert reloaded.resources[0].state == "at-rest"
 
 
+@pytest.mark.guard
 def test_cross_machine_parent_is_skipped(_project_root):
     child_ref = tracking.format_claim_ref("machine-x", "childproj", "wt-child")
     # Parent on a DIFFERENT machine -> hook must not touch it.
     parent_ref = tracking.format_claim_ref("other-machine", "parentproj", "wt-parent")
     parent_path = _write_parent(_project_root, "parentproj", "wt-parent", child_ref)
 
-    child = SimpleNamespace(owner_claim_ref=tracking.parse_claim_ref(parent_ref))
+    child = _child(_project_root, parent_ref)
     config = SimpleNamespace(machine="machine-x", repo_name="childproj")
 
     _settle_parent_obligation(child, config, "wt-child")
@@ -114,15 +125,17 @@ def test_cross_machine_parent_is_skipped(_project_root):
     assert tracking.load_record(parent_path).resources[0].state == "active"
 
 
+@pytest.mark.guard
 def test_no_owner_ref_is_noop(_project_root):
-    child = SimpleNamespace(owner_claim_ref=None)
+    child = _child(_project_root)
     config = SimpleNamespace(machine="machine-x", repo_name="childproj")
     # Must simply not raise.
     _settle_parent_obligation(child, config, "wt-child")
 
 
+@pytest.mark.guard
 def test_missing_parent_record_is_noop(_project_root):
     parent_ref = tracking.format_claim_ref("machine-x", "parentproj", "ghost")
-    child = SimpleNamespace(owner_claim_ref=tracking.parse_claim_ref(parent_ref))
+    child = _child(_project_root, parent_ref)
     config = SimpleNamespace(machine="machine-x", repo_name="childproj")
     _settle_parent_obligation(child, config, "wt-child")  # no file -> no-op, no raise

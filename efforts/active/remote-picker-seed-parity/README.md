@@ -429,3 +429,37 @@ hiding the problem or silently dropping text.
   cleanup uses the project loader. The final complete contained removal,
   launch-seed state and authority-budget portfolio passes all 63 cases.
   Promotion and delivered validation remain open.
+- **2026-10-13** -- The scoped removal-fixture repair merged as #6530 after
+  an Approved review with zero findings, green current-head CI and the
+  required workflow guard. The shared service-alias repair #6506 is still
+  open; wait for its owner and an actual promotion before beginning rollout.
+  No release or installed-source evidence is inferred from these test repairs.
+- **2026-10-13** -- The complete agent-worktrees release suite passed in
+  validation run `38406702688`, confirming the accumulated test repairs in
+  the real hosted full lane. Promotion then failed at first-party artifact
+  validation with a candidate payload-hash mismatch, tracked and already
+  claimed in #6535. Its owner is investigating Git checkout line-ending
+  representation while preserving exact artifact validation. Do not duplicate
+  that repair or claim the successful engine job establishes publication.
+- **2026-10-13** -- Artifact repair #6537 is open under the existing driver.
+  A newer full Manager gate also reported a routing-authority lock timeout
+  during stale-breadcrumb recovery, extending the observed cases tracked by
+  #6490. Recorded the exact job and failure without claiming its root cause
+  or a same-snapshot rerun is proven. The failed gate remains failed; no
+  authority check, timeout or promotion requirement is relaxed.
+- **2026-10-13** -- The operator explicitly authorized the existing artifact
+  driver to open the reviewed workflow-only main bootstrap, excluding direct
+  pushes, admin merges and validation waivers. That bootstrap merged as #6558;
+  the independent service-alias repair #6506 also merged. The artifact driver
+  then repaired six incomplete launch-record fixtures in #6578 while retaining
+  the production execution-space fence. A pending release still uses an older
+  snapshot with those same six failures; do not duplicate the merged repair.
+  Await promotion of a containing validated snapshot before rollout.
+- **2026-10-13** -- The containing release snapshot exposed four additional
+  incomplete child-record fixtures in obligation settlement, tracked in
+  #6587. Replace their owner-only namespaces with real existing WorktreeRecord
+  instances carrying child project, machine and platform identities; preserve
+  the parent settlement and no-op assertions rather than bypassing the fence.
+  The complete contained obligation-settlement and independent execution-space
+  suites pass all 122 cases. The four settlement contracts also run in the
+  fast guard lane; production code and fence behavior are unchanged.
