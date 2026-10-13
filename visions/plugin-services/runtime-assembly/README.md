@@ -65,9 +65,9 @@ contributes to a generation. A cache, seed, or accelerant speeds up
 acquisition. It is never a separate trust root. While another approved
 source for the same artifact is reachable, losing it changes only how long
 acquisition takes; when none is, the outcome is deferred (see
-*deferred-not-degraded*), never a different or unverified result. If an update leaves the dependency set unchanged,
-assembly reuses artifacts already admitted on the host and needs no access to
-a package index or feed.
+*deferred-not-degraded*), never a different or unverified result. If an
+update leaves the dependency set unchanged, assembly reuses artifacts already
+admitted on the host and needs no access to a package index or feed.
 
 ### first-party-only-public-distribution
 
@@ -80,8 +80,9 @@ whose terms permit it.
 ### governed-consumption-without-public-fallback
 
 An installation routed to a governed source acquires runtime dependencies
-only from that source. A public pin that has been resolved or aged is not
-evidence that the governed source has mirrored it. When the governed source
+only from that source. A public version that resolves from a public index,
+or that has passed a minimum-age policy there, is not evidence that the
+governed source has mirrored it. When the governed source
 lags the lock, the outcome is **deferred**. It names the missing artifact and
 the action that would unblock it, and leaves the current generation serving.
 It never falls back to a public runtime index, relaxes a pin, or substitutes
