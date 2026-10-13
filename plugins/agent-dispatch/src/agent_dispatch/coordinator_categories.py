@@ -28,7 +28,17 @@ def register_category_routes(app, queue, *, control_token, emit) -> None:
     @app.post(
         "/task-categories/classify",
         dependencies=[
-            Depends(_make_control_auth(control_token, emit)),
+            Depends(
+                _make_control_auth(
+                    control_token,
+                    emit,
+                    operation="category_classify",
+                    rejection_event="task.categories_classify_rejected",
+                    code_prefix="category_control",
+                    unavailable_message="category classification requires a configured control token",
+                    forbidden_message="invalid or missing category control bearer",
+                )
+            ),
         ],
     )
     def classify(body: ClassifyBody) -> dict:

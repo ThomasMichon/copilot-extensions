@@ -479,3 +479,49 @@ def test_subscription_downgrade_is_visible_not_an_empty_or_stale_success(monkeyp
     monkeypatch.setattr(board_cli, "_fetch_raw_tasks_direct", unsupported)
     with pytest.raises(DispatchUpgradeRequired):
         board_relay._Snapshot(SimpleNamespace(), "http://coordinator").full_refetch()
+
+
+@pytest.mark.parametrize("category", ["script", None, "all", "", 1, ["maintenance"]])
+@pytest.mark.guard
+def test_schedule_registration_rejects_bad_category_without_persistence(queue, category):
+    entry = {
+        "id": "health",
+        "title": "Health",
+        "repo": REPO,
+        "interval_seconds": 60,
+        "category": category,
+    }
+    with TestClient(create_app(queue)) as http:
+        assert http.post("/schedules", json=entry).status_code == 400
+    assert queue.list_schedules() == []
+
+
+@pytest.mark.parametrize("category", ["work", "maintenance"])
+@pytest.mark.guard
+def test_schedule_category_validation_preserves_valid_and_omitted_specs(queue, category):
+    entry = {"id": "health", "title": "Health", "repo": REPO, "interval_seconds": 60}
+    with TestClient(create_app(queue)) as http:
+        assert http.post("/schedules", json=entry).status_code == 200
+        previous = queue.get_schedule("health")
+        assert http.post("/schedules", json={**entry, "category": None}).status_code == 400
+        assert queue.get_schedule("health") == previous
+        assert http.post("/schedules", json={**entry, "category": category}).status_code == 200
+        assert queue.get_schedule("health").entry["category"] == category
+
+
+@pytest.mark.parametrize("control,status", [(None, 503), ("configured", 403)])
+@pytest.mark.guard
+def test_category_control_rejection_uses_its_own_context_and_event(
+    queue, monkeypatch, control, status
+):
+    app = create_app(queue, control_token=control)
+    events = []
+    monkeypatch.setattr(app.state.bus, "publish", events.append)
+    with TestClient(app) as http:
+        response = http.post("/task-categories/classify", json=PROVENANCE)
+    assert response.status_code == status
+    detail = response.json()["detail"]
+    assert detail["operation"] == "category_classify"
+    assert detail["code"].startswith("category_control_")
+    assert events[-1]["type"] == "task.categories_classify_rejected"
+    assert all(event["type"] != "producer_scope.transition_rejected" for event in events)

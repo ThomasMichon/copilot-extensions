@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -22,6 +23,102 @@ REPO = Path(__file__).resolve().parents[2]
 PLUGIN = REPO / "plugins" / "agent-dispatch"
 SOURCE = "agent-dispatch@copilot-extensions"
 NAMES = ("agent-dispatch.json", "agent-dispatch-maintenance.json")
+PRIOR_TASKS_HASH = "ef0c01ef40c70500ec4ce4910abfea0927cb37ccdc6f69b8fec8f7ac18d527ef"
+
+
+def _prior_tasks():
+    prior = json.loads((PLUGIN / "pivots" / NAMES[0]).read_text(encoding="utf-8"))
+    prior["list"] = prior["list"][:-2]
+    prior["actions"] = [
+        action for action in prior["actions"] if action["key"] != "inspect-evidence"
+    ]
+    assert (
+        hashlib.sha256(
+            json.dumps(prior, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        == PRIOR_TASKS_HASH
+    )
+    return prior
+
+
+@pytest.mark.parametrize("native", [pytest.param(False, marks=pytest.mark.guard), True])
+def test_dispatch_category_known_prior_v1_upgrades_without_losing_tasks(tmp_path, native):
+    if native and os.name != "nt":
+        pytest.skip("native Windows upgrade")
+    root = _payload(tmp_path)
+    home = tmp_path / "home"
+    registry = home / ".agent-worktrees" / "pivots"
+    registry.mkdir(parents=True)
+    legacy = registry / NAMES[0]
+    legacy.write_text(json.dumps(_prior_tasks()), encoding="utf-8")
+    if native:
+        _register_windows(root, home)
+    report = pivots.scan_pivot_registry(registry, activation_report=_activation(root))
+    assert {pivot.label for pivot in report.pivots} == {"Tasks", "Maintenance tasks"}
+    assert {item.entry_class for item in report.contributions} == {"managed-plugin"}
+    pointer = json.loads(legacy.read_text())
+    assert pointer["schema_version"] == 3 and pointer["plugin"] == SOURCE
+    before = legacy.read_bytes()
+    pivots.scan_pivot_registry(registry, activation_report=_activation(root))
+    assert legacy.read_bytes() == before
+    assert not pivots.scan_pivot_registry(registry, activation_report=_activation()).pivots
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize(
+    "case", ["custom", "foreign", "unknown", "future", "malformed", "invalid-utf8"]
+)
+def test_dispatch_category_legacy_migration_preserves_unowned_artifacts(tmp_path, case):
+    root = _payload(tmp_path)
+    registry = tmp_path / "registry"
+    registry.mkdir()
+    name = "unknown.json" if case == "unknown" else NAMES[0]
+    data = _prior_tasks()
+    if case == "custom":
+        data["label"] = "Custom tasks"
+    elif case == "foreign":
+        data.update(schema_version=3, plugin="other@example", plugin_root=str(root), template=name)
+    elif case == "future":
+        data.update(schema_version=9)
+    artifact = registry / name
+    artifact.write_text(json.dumps(data), encoding="utf-8")
+    if case == "malformed":
+        artifact.write_bytes(b"{")
+    elif case == "invalid-utf8":
+        artifact.write_bytes(b"\xff")
+    before = artifact.read_bytes()
+    pivots.scan_pivot_registry(registry, activation_report=_activation(root))
+    assert artifact.read_bytes() == before
+
+
+@pytest.mark.guard
+def test_dispatch_category_legacy_upgrade_rechecks_ownership_before_replace(tmp_path, monkeypatch):
+    from worktree_manager.production_picker.picker_tui import (
+        pivot_registry_materialization as materializer,
+    )
+
+    root = _payload(tmp_path)
+    registry = tmp_path / "registry"
+    registry.mkdir()
+    artifact = registry / NAMES[0]
+    artifact.write_text(json.dumps(_prior_tasks()), encoding="utf-8")
+    custom = {**_prior_tasks(), "label": "Operator changed tasks"}
+    original = materializer.tempfile.mkstemp
+    calls = 0
+
+    def prepare(*args, **kwargs):
+        nonlocal calls
+        result = original(*args, **kwargs)
+        if kwargs.get("prefix") == f".{NAMES[0]}.":
+            calls += 1
+            if calls == 2:
+                artifact.write_text(json.dumps(custom), encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(materializer.tempfile, "mkstemp", prepare)
+    pivots.scan_pivot_registry(registry, activation_report=_activation(root))
+    assert calls == 2
+    assert json.loads(artifact.read_text()) == custom
 
 
 def _payload(tmp_path, name="payload"):

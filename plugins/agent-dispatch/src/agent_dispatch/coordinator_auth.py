@@ -38,20 +38,26 @@ def _make_auth(token: str | None, control_token: str | None):
 def _make_control_auth(
     control_token: str | None,
     on_reject: Callable[[str, dict[str, object]], None],
+    *,
+    operation: str = "transition",
+    rejection_event: str = "producer_scope.transition_rejected",
+    code_prefix: str = "producer_control",
+    unavailable_message: str = "managed producer transitions require a configured control token",
+    forbidden_message: str = "invalid or missing producer control bearer",
 ):
     bearer = HTTPBearer(auto_error=False)
 
     def check(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> None:  # noqa: B008
         if control_token is None:
             detail = {
-                "code": "producer_control_unavailable",
-                "operation": "transition",
+                "code": f"{code_prefix}_unavailable",
+                "operation": operation,
                 "reason": "control_authority_not_configured",
-                "message": "managed producer transitions require a configured control token",
+                "message": unavailable_message,
                 "retryable": False,
             }
             on_reject(
-                "producer_scope.transition_rejected",
+                rejection_event,
                 {key: value for key, value in detail.items() if key != "message"},
             )
             raise HTTPException(
@@ -62,14 +68,14 @@ def _make_control_auth(
             creds.credentials, control_token
         ):
             detail = {
-                "code": "producer_control_forbidden",
-                "operation": "transition",
+                "code": f"{code_prefix}_forbidden",
+                "operation": operation,
                 "reason": "invalid_control_authority",
-                "message": "invalid or missing producer control bearer",
+                "message": forbidden_message,
                 "retryable": False,
             }
             on_reject(
-                "producer_scope.transition_rejected",
+                rejection_event,
                 {key: value for key, value in detail.items() if key != "message"},
             )
             raise HTTPException(

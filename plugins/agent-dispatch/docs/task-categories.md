@@ -66,6 +66,15 @@ runtime registry. An absent Picker remains an optional capability, and disabled,
 stale-root or malformed/tampered contributions do not become unowned legacy
 entries. Registry reconciliation and diagnostic cleanup stay consumer-owned.
 
+Existing canonical schema-v1 Tasks registrations are upgraded by that same
+materializer only when the complete manifest matches the trusted current
+template or an exact recognized prior canonical template digest for its known
+provider. Ownership is rechecked immediately before atomic replacement.
+Unknown names, foreign providers, customized/tampered manifests and future
+schemas are preserved rather than overwritten; they require explicit diagnosis.
+This migration restores Tasks alongside Maintenance tasks on upgrade without
+publishing raw manifests or changing activation/root-identity checks.
+
 The Worktree Manager's built-in **Maintenance** view continues to own worktree
 maintenance and its existing controls. The task contribution's distinct
 **Maintenance tasks** caption avoids colliding with or taking over that view.
@@ -74,6 +83,10 @@ maintenance and its existing controls. The task contribution's distinct
 
 A schedule entry's optional `category` is copied to every occurrence. Omit it
 for ordinary work; do not blanket-classify schedules or script workers.
+Schedule registration validates an explicitly supplied category before storing
+or updating the entry. Only `work` and `maintenance` are valid; null and other
+values are rejected without changing an existing schedule. Omission preserves
+the compatible ordinary-work default.
 `agent-index/scripts/maintenance_tick.py --schedule-template --repo <lane>
 --machine <host>` prints that producer's explicitly maintenance-category
 schedule entry, including its deployed script reference. It does **not**
@@ -96,6 +109,8 @@ Inspect the returned task IDs and `preview_token`. Apply the same selector with
 equivalent is `POST /task-categories/classify`, with `repo`, `source`,
 `origin_ref`, `labels`, optional `limit`, `apply`, `preview_token` and `actor`.
 The endpoint uses the coordinator's control credential when configured.
+Unavailable/forbidden control errors identify `category_classify` and emit
+`task.categories_classify_rejected`, not producer-transition events.
 Selection beyond the default limit of 500 refuses rather than applying a
 truncated preview; narrow the provenance or deliberately raise the limit.
 
