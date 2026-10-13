@@ -27,7 +27,7 @@ from .artifacts import (
 from .client_diagnostics import diagnose_client
 from .planning import MAX_BYTES, PlanError, canonical, decode
 from .release_auth import authenticate_release
-from .staging_cleanup import remove_owned_stage
+from .staging_cleanup import directory_identity, remove_owned_stage
 
 _FILENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,199}\Z")
 _DEVICES = {"CON", "PRN", "AUX", "NUL"} | {
@@ -62,7 +62,10 @@ def _directory(path: Path) -> tuple[int, int]:
             & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
         ):
             raise PlanError("staging directory contains a linked or non-directory entry")
-    return _identity(info)
+    try:
+        return directory_identity(path)
+    except OSError:
+        raise PlanError("staging directory identity could not be inspected") from None
 
 
 @contextmanager

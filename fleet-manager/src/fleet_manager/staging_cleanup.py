@@ -98,16 +98,35 @@ def _windows_identity(kernel, handle):
     return info.volume, int.from_bytes(bytes(info.identifier), "little")
 
 
+def _windows_path_identity(path, *, directory=False):
+    with _windows_handle(path) as (kernel, handle, info):
+        if directory and not stat.S_ISDIR(info.st_mode):
+            raise PlanError("artifact staging ownership is not a directory")
+        return _windows_identity(kernel, handle)
+
+
+def directory_identity(path: Path) -> tuple[int, int]:
+    """Use one native identity representation for stage admission and deletion."""
+    if os.name == "nt":
+        return _windows_path_identity(path, directory=True)
+    info = path.lstat()
+    _ordinary(info)
+    if not stat.S_ISDIR(info.st_mode):
+        raise PlanError("artifact staging ownership is not a directory")
+    return _identity(info)
+
+
 def _windows_remove(path, expected):
     with _windows_handle(path, delete=True) as (kernel, handle, opened):
         if _windows_identity(kernel, handle) != expected:
             raise PlanError("artifact stage cleanup ownership is unconfirmed")
         if stat.S_ISDIR(opened.st_mode):
             with os.scandir(path) as entries:
-                children = [(entry.name, os.lstat(path / entry.name)) for entry in entries]
-            for name, info in children:
-                _ordinary(info)
-                _windows_remove(path / name, _identity(info))
+                children = [
+                    (entry.name, _windows_path_identity(path / entry.name)) for entry in entries
+                ]
+            for name, identity in children:
+                _windows_remove(path / name, identity)
         _windows_delete(kernel, handle)
 
 

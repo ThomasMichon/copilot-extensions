@@ -79,7 +79,11 @@ open throughout its separately admitted use and coordinate that lifetime.
 On normal exit or interruption, retention is released, the handle is closed,
 and cleanup binds traversal to the admitted directory identity, not a prior
 path-only check. Windows keeps ancestor and entry handles open without delete
-sharing and deletes through those handles. POSIX atomically captures the named
+sharing and deletes through those handles. Windows stage and recursive child
+admission use the same native 128-bit file
+identity as deletion, rather than depending on Python's version-specific stat
+file-index width.
+POSIX atomically captures the named
 root into a fresh owner-only quarantine, verifies the captured identity before
 traversal, and removes entries only inside that exclusively owned namespace
 using held descriptors and no-follow, directory-relative operations. It never

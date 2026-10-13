@@ -435,6 +435,28 @@ def test_cleanup_root_is_pinned_during_recursive_traversal(tmp_path, monkeypatch
         assert not list(tmp_path.glob(".fleet-stage-cleanup-*"))
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows handle identity contract")
+def test_windows_cleanup_admits_native_full_width_root_and_child_identities(tmp_path, monkeypatch):
+    root = tmp_path / "owned-root"
+    root.mkdir()
+    (root / "owned-file").write_bytes(b"owned")
+    child = root / "owned-child"
+    child.mkdir()
+    (child / "nested-file").write_bytes(b"owned")
+    original = cleanup._windows_identity
+
+    def full_width(kernel, handle):
+        volume, identifier = original(kernel, handle)
+        return volume, identifier | (1 << 96)
+
+    monkeypatch.setattr(cleanup, "_windows_identity", full_width)
+    expected = staging._directory(root)
+    assert expected[1] >= 1 << 96
+    assert expected != (root.stat().st_dev, root.stat().st_ino)
+    cleanup.remove_owned_stage(root, expected)
+    assert not root.exists()
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX quarantine removal contract")
 @pytest.mark.parametrize("entry", ["file", "child", "root"])
 def test_published_replacement_at_final_removal_is_preserved(tmp_path, monkeypatch, entry):
