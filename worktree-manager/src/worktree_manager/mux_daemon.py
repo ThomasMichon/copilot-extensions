@@ -990,7 +990,7 @@ def ensure_daemon_running(
     # instead, so this helper would report failure despite successfully
     # spawning a daemon.
     argv = mux_daemon_process.detached_child_argv(root)
-    if not _spawn_detached(argv):
+    if not _spawn_detached(argv, cwd=resolved_root):
         return False
     started = time.time()
     while time.time() - started < boot_wait_s:

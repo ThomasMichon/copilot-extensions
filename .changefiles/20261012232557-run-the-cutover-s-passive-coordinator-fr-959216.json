@@ -1,0 +1,9 @@
+{
+  "comment": "Run the cutover's passive coordinator from the runtime root, never the caller's working directory",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

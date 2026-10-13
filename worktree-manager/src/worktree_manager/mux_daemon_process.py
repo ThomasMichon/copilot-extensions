@@ -90,13 +90,23 @@ def direct_daemon_python(executable: str) -> tuple[str, dict[str, str]]:
     return python, extra_env
 
 
-def spawn_detached(argv: list[str]) -> bool:
-    """Spawn a survivable daemon; log expected launch failures and return False."""
+def spawn_detached(argv: list[str], *, cwd: Path | None = None) -> bool:
+    """Spawn a survivable daemon; log expected launch failures and return False.
+
+    The child runs from ``cwd`` (the stable mux root) or, when that is not an
+    existing directory, the user's home -- never the caller's working
+    directory, which a long-lived process would otherwise hold open on
+    Windows (blocking removal of a worktree or payload directory)."""
     try:
         python, extra_env = direct_daemon_python(argv[0])
         env = scrub_session_credentials(dict(os.environ))
         env.update(extra_env)
+        run_dir = (
+            os.fspath(cwd) if cwd is not None and os.path.isdir(cwd)
+            else os.path.expanduser("~")
+        )
         kwargs: dict = {
+            "cwd": run_dir,
             "stdin": subprocess.DEVNULL,
             "stdout": subprocess.DEVNULL,
             "stderr": subprocess.DEVNULL,

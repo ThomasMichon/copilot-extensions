@@ -128,6 +128,9 @@ def test_cutover_spawn_passive_applies_service_env_overlay(tmp_path, monkeypatch
         kwargs["env"]["AGENT_DISPATCH_CONTROL_TOKEN_COMMAND"]
         == 'vault get "Agent-Dispatch Control Token" password'
     )
+    # The passive replacement runs from the runtime root, never this
+    # process's own cwd.
+    assert kwargs["cwd"] == str(install_dir)
 
 
 def test_cutover_spawn_passive_fresh_port_wins_over_service_env_port_pin(tmp_path, monkeypatch):

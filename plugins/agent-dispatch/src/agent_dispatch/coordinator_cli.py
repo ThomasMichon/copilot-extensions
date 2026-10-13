@@ -379,7 +379,8 @@ def _cmd_cutover(
     from .install_paths import apply_service_env_overlay
     from .install_paths import install_dir as runtime_install_dir
 
-    apply_service_env_overlay(os.environ, runtime_install_dir())
+    runtime_root = runtime_install_dir()
+    apply_service_env_overlay(os.environ, runtime_root)
     cfg = _config.load_config()
     token = _client_token_value()
     wildcard_v4 = ".".join(("0", "0", "0", "0"))
@@ -442,6 +443,10 @@ def _cmd_cutover(
             "stdin": _subprocess.DEVNULL,
             "stdout": _subprocess.DEVNULL,
             "stderr": _subprocess.DEVNULL,
+            # Same as the primary detached launch: run from the runtime root,
+            # never the caller's cwd (a worktree or payload directory), which a
+            # long-lived process would otherwise hold open on Windows.
+            "cwd": str(runtime_root),
         }
         # NOT windowless_python()/detached_kwargs(): this coordinator is a
         # daemon with RECURRING console-subsystem descendants (it repeatedly
