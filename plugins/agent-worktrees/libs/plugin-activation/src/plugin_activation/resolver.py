@@ -178,11 +178,13 @@ def resolve_active_plugins(
     home: str | Path | None = None,
     include_projects: bool = True,
     plugin_names: tuple[str, ...] | None = None,
+    project_root: Path | None = None,
 ) -> ActivationReport:
     """Resolve sources with tri-state authority; optionally restrict to global.
 
     Global-only callers do not inspect registered projects or their overrides.
     Named callers resolve only those plugins, retaining marketplace ambiguity checks.
+    An explicit project root resolves that checkout instead of scanning the registry.
     """
     user_home = Path(home).expanduser() if home is not None else Path.home()
     copilot_home = user_home / ".copilot"
@@ -212,16 +214,24 @@ def resolve_active_plugins(
             source_indeterminate.add(source)
 
     settings_authorities = [global_settings.authority]
-    if include_projects:
+    project_roots = []
+    if project_root is not None:
+        project_roots = [("current", project_root.expanduser().resolve())]
+    elif include_projects:
         project_roots, project_findings, projects_authority = _verified_project_roots(
             agent_worktrees_home
         )
         registry_findings.extend(project_findings)
         settings_authorities.append(projects_authority)
+    if project_roots:
         for project, root in project_roots:
             project_settings = _read_settings(root, SETTINGS_RELS, plugin_names=plugin_names)
             settings_authorities.append(project_settings.authority)
             registry_findings.extend(project_settings.findings)
+            if project_root is not None:
+                for source, enabled in project_settings.settings.enabled.items():
+                    if enabled is False:
+                        scopes.pop(source, None)
             for source in project_settings.settings.enabled_sources():
                 if selected_names is not None and split_source(source)[0] not in selected_names:
                     continue
@@ -238,6 +248,11 @@ def resolve_active_plugins(
     authority = _combine_authority(*settings_authorities)
     decisions: dict[str, EntryDecision[ActivePlugin]] = {}
     for source in sorted(scopes):
+        if project_root is not None and authority is ScanAuthority.INDETERMINATE:
+            decisions[source] = EntryDecision.indeterminate(
+                *registry_findings, *_decision_findings(source, source_findings),
+            )
+            continue
         name, marketplace = split_source(source)
         if not _valid_source_part(name) or not _valid_source_part(marketplace):
             finding = _finding(copilot_home, "invalid-entry", target=source)

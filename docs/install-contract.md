@@ -1659,11 +1659,24 @@ could silently reuse.
 Fix — a per-slot **`.install-complete.json`** marker, written **atomically right after
 the slot passes its isolated health gate** (so "marker present" == "healthy, complete
 build"), owned by the shared `versioned_runtime.py`:
-- `mark-complete <v>` / `is-complete <v>` (+ optional `--payload-hash` to force a
-  rebuild when a dev-checkout changed the payload without bumping the version).
+- `mark-complete <v>` publishes numbered evidence once; exact content reuse
+  preserves its bytes/identity/timestamp/PID, while conflicting or malformed
+  evidence refuses. Optional `--payload-hash` binds completion to attributable
+  content, never permission to rebuild a numbered slot with changed content.
+  Only an explicitly claimed `dev` slot permits completion replacement.
+- `is-complete <v>` (+ optional `--expect-hash`) checks completion without
+  mutation. Actual marker storage failures propagate rather than looking absent.
 - `slot <v> --clean-incomplete` tosses an **incomplete** slot before building (never
   the current/active slot); `toss-incomplete` / `gc --toss-incomplete` reap markerless
   non-current slots.
+
+Numbered publication uses an atomic hardlink from a unique, flushed temporary
+file under shared retention and selector-publication ownership. It never
+replaces an existing numbered marker or falls back to overwrite when hardlinks
+are unavailable. See the [canonical API contract](../libs/versioned-runtime/README.md#create-once-completion-publication).
+This protects completion evidence, not package writes by legacy installers:
+admission before construction and candidate retention through promotion/drain
+remain separate installer-adoption requirements.
 
 Because **activate (marker publish + binstub re-point) runs only after the health
 gate + marker**, a

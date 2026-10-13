@@ -144,6 +144,9 @@ verified by this effort's Validation Plan.
 
 ### Continuation C - Reader budgets and circuit-first admission (Phase 6)
 
+- [ ] Implement the operator-approved bounded
+      [CLI wall-admission circuit](reader-admission.md), preserving fallback
+      and native holder ownership; CPU and process-tree gates stay separate.
 - [ ] Define role keys, expected wall/CPU cost, fan-out limits, and provenance.
 - [ ] Open admission circuits on repeated budget overruns without reclaiming
       live progressing holders; successful bounded probes close them.
@@ -281,3 +284,11 @@ through cancelled callers and hands remaining ownership to bounded cache
 shutdown supervision, including after provider replacement. The umbrella
 remains open: process-tree identity/reclamation, role CPU/wall circuits,
 cross-platform acceptance, promotion and authorized adoption are not complete.
+
+### 2026-10-12 - Wall-admission policy approved
+
+The operator directed continued upstream execution independent of the private
+journal review. Initial CLI circuit policy was explicitly approved: two
+consecutive native timeout overruns, 60-second cooldown, and one bounded
+recovery probe. The detailed slice preserves existing fallback, execution
+timeouts and ownership; CPU and native tree reclamation are not implied.

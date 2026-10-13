@@ -80,6 +80,14 @@ the live mux observation unknown rather than probing each worktree or declaring
 its session absent. Slow classification failures retain the fast rows and are
 reported separately.
 
+Sessionless workspaces retained by another controller appear separately under
+**Owned**, not as ordinary resumable conversations. Use **Go to controller**
+when its exact target is loaded, or **Refresh** / **View details** to diagnose
+an unresolved owner. Existing live-mux attachment and orphan reclamation remain
+available; a genuinely empty, unowned worktree still offers **Open**.
+A successful explicit task embodiment may attach its newly launched session
+even while the Picker's pre-transaction workspace snapshot is still sessionless.
+
 For a local, stopped worktree, **Actions > Resume prompt…** supplies the first
 turn of the cold Copilot start alongside its prior `--resume=<session>` target.
 It uses the full `--interactive` argument, including with **No Mux**. A live

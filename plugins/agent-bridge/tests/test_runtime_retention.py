@@ -321,8 +321,8 @@ def test_retention_case_aliases_gate_cleanup_on_every_platform(tmp_path, process
 
 def test_dev_claim_preserves_previous_rollback_identity(tmp_path):
     install(tmp_path, "1.0", complete=True)
-    install(tmp_path, vr.DEV_VERSION, complete=True)
     vr.claim_dev(tmp_path, "test-owner", previous_version="1.0")
+    install(tmp_path, vr.DEV_VERSION, complete=True)
     vr.activate(tmp_path, vr.DEV_VERSION)
     assert vr.gc(tmp_path) == []
     with vr.retention_lease(tmp_path, "1.0", payload_hash="same"):

@@ -128,6 +128,88 @@ def _prior(source: str = "demo@local") -> ActivePlugin:
     )
 
 
+def test_explicit_project_resolves_repository_only_activation_without_registry_scan(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    repo = tmp_path / "current"
+    root = _installed(home, "market", "customizing-copilot")
+    _write_json(repo / ".github" / "copilot" / "settings.json", {
+        "enabledPlugins": {"customizing-copilot@market": True, "unrelated@market": True},
+    })
+    monkeypatch.setattr(
+        resolver, "_verified_project_roots",
+        lambda *_args: pytest.fail("explicit project discovery must not scan other registered projects"),
+    )
+    real_installed = resolver._installed_root
+    visited = []
+
+    def installed(copilot_home, source):
+        visited.append(source)
+        return real_installed(copilot_home, source)
+
+    monkeypatch.setattr(resolver, "_installed_root", installed)
+    report = resolve_active_plugins(
+        home=home, project_root=repo, plugin_names=("customizing-copilot",),
+    )
+    plugin = report.active["customizing-copilot@market"]
+    assert plugin.root_for_scope("project:current") == root
+    assert plugin.root_for_scope("global") is None
+    assert visited == ["customizing-copilot@market"]
+
+
+def test_explicit_project_retains_directory_marketplace_identity_validation(tmp_path):
+    home = tmp_path / "home"
+    repo = tmp_path / "current"
+    root = _plugin(repo, "local", "customizing-copilot")
+    _settings(repo, "local", "customizing-copilot")
+    report = resolve_active_plugins(
+        home=home, include_projects=False, project_root=repo,
+        plugin_names=("customizing-copilot",),
+    )
+    assert report.active["customizing-copilot@local"].root_for_scope("project:current") == root
+    _write_json(root / ".claude-plugin" / "plugin.json", {"name": "foreign"})
+    refused = resolve_active_plugins(
+        home=home, include_projects=False, project_root=repo,
+        plugin_names=("customizing-copilot",),
+    )
+    assert not refused.active
+
+
+@pytest.mark.parametrize("local_override", [False, True])
+def test_explicit_project_false_overrides_global_activation_without_changing_global_scan(
+    tmp_path, local_override,
+):
+    home = tmp_path / "home"
+    repo = tmp_path / "current"
+    source = "customizing-copilot@market"
+    root = _installed(home, "market", "customizing-copilot")
+    _write_json(home / ".copilot" / "settings.json", {"enabledPlugins": {source: True}})
+    settings = repo / ".github" / "copilot" / "settings.json"
+    _write_json(settings, {"enabledPlugins": {source: local_override}})
+    if local_override:
+        _write_json(settings.with_name("settings.local.json"), {"enabledPlugins": {source: False}})
+    global_report = resolve_active_plugins(home=home, include_projects=False)
+    assert global_report.active[source].root_for_scope("global") == root
+    scoped = resolve_active_plugins(home=home, project_root=repo)
+    assert not scoped.active
+    assert scoped.reconcile({source: _prior(source)}) == {}
+
+
+def test_unreadable_project_precedence_does_not_authorize_global_fallback(tmp_path):
+    home = tmp_path / "home"
+    repo = tmp_path / "current"
+    source = "customizing-copilot@market"
+    _installed(home, "market", "customizing-copilot")
+    _write_json(home / ".copilot" / "settings.json", {"enabledPlugins": {source: True}})
+    settings = repo / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("{")
+    report = resolve_active_plugins(home=home, project_root=repo)
+    assert report.authority is ScanAuthority.INDETERMINATE
+    assert not report.active
+    prior = {source: _prior(source)}
+    assert report.reconcile(prior) == prior
+
+
 def test_remote_normalization_for_network_forms():
     expected = "network:github.com/example/repo"
     assert normalize_remote("https://github.com/example/repo.git") == expected

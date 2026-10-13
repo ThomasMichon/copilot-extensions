@@ -12,6 +12,7 @@ from .models import (
     decimal_text, instant_text, parse_instant,
 )
 from .posture import build_posture
+from .provider_pacing import apply_pacing_advice, estimate_provider_rate
 from .quota_values import epoch_instant, quantity
 
 
@@ -287,14 +288,19 @@ def normalize_provider_quota(
     if unit != "ai_credits":
         diagnostics.append("provider-unit-is-not-an-ai-credit-budget")
         return result
+    rate = estimate_provider_rate(
+        state, result, consumed=consumed, reset=reset, observed=observed, at=at,
+        max_age_seconds=max_age_seconds,
+    )
     config = BudgetConfig(adapters=(StaticAdapter(
         adapter_id="session-provider", authority=0,
         reading=BudgetReading(
             source="session-provider-account-snapshot", captured_at=observed,
             freshness_seconds=max_age_seconds, availability="available", error=None,
             allowance=allowance, consumption=consumed, reset_at=reset,
+            trailing_rates=(rate,) if rate is not None else None,
         ),
     ),))
     result["calculated"] = build_posture(config, at)["calculated"]
-    result["advice"]["reason"] = "no attributable same-period rate evidence"
+    apply_pacing_advice(result)
     return result

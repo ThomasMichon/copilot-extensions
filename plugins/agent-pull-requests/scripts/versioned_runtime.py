@@ -1178,9 +1178,8 @@ def _release_dev(root: Path, owner: str, *, force: bool = False) -> dict | None:
 # install or a half-built corpse?" into a cheap positive check. The installer
 # writes it ATOMICALLY right after the freshly-built slot passes its isolated
 # health gate, so "marker present" == "this slot is a healthy, complete build".
-# A crashed / watchdog-killed install never reaches the marker, so its slot is
-# provably incomplete -> tossed and rebuilt on the next run (clean retry),
-# instead of being silently reused via ``uv venv --allow-existing``.
+# A crashed install never reaches publication. Admission distinguishes absent
+# evidence from malformed/published identity; cleanup must respect retention.
 
 COMPLETE_MARKER = ".install-complete.json"
 
@@ -1234,10 +1233,10 @@ def validate_marker(data, version: str) -> dict | None:
 
 
 def read_marker(root: Path, version: str) -> dict | None:
-    """Parse a slot's completion marker, or None if absent/partial/mismatched."""
+    """Parse completion evidence; absent/malformed is None, storage errors raise."""
     try:
         data = _load_unique_json(marker_path(root, version))
-    except Exception:
+    except (FileNotFoundError, ValueError):
         return None
     return validate_marker(data, version)
 
@@ -1245,12 +1244,9 @@ def read_marker(root: Path, version: str) -> dict | None:
 def is_complete(root: Path, version: str, *, expect_hash: str | None = None) -> bool:
     """True iff versions/<version> exists AND carries a valid completion marker.
 
-    A slot without a valid marker is a failed/partial build (crashed, killed by
-    the install watchdog, or interrupted) -- it must be tossed + rebuilt, never
-    reused. ``expect_hash``, when given, also requires the recorded payload hash
-    to match, so a dev-checkout that changed the payload WITHOUT bumping the
-    version forces a rebuild (marketplace: version==content, so the hash is
-    belt-and-suspenders).
+    ``expect_hash`` additionally requires exact content. False is not permission
+    to rebuild: use admission to distinguish unpublished construction from
+    content conflict or distinct-generation health repair.
     """
     if not version_dir(root, version).is_dir():
         return False
@@ -1264,17 +1260,17 @@ def is_complete(root: Path, version: str, *, expect_hash: str | None = None) -> 
 
 def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
                   pid: int | None = None) -> Path:
-    """Atomically write the slot's completion marker (temp + os.replace).
+    """Publish numbered completion once, preserving exact reuse byte-for-byte.
 
-    Call ONLY after the freshly-built slot passes its isolated health gate, so
-    the marker's presence is a positive "healthy, complete install" assertion. A
-    reader treats a partial/absent marker as incomplete, so a torn write (process
-    killed mid-marker) is safe -- it just reads as not-yet-complete and rebuilds.
+    Call only after isolated health gating. Existing malformed evidence or
+    conflicting content refuses publication; repair requires a distinct
+    generation. Only an explicitly claimed dev slot permits replacement.
+    Retention protects publication from cleanup, not the caller's subsequent
+    promotion/drain lifetime, which requires its own retained descriptor.
     """
+    import tempfile
     import time as _t
 
-    vdir = version_dir(root, version)
-    vdir.mkdir(parents=True, exist_ok=True)
     payload: dict = {
         "version": version,
         "completed_at": _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime()),
@@ -1282,10 +1278,53 @@ def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
     }
     if payload_hash is not None:
         payload["payload_hash"] = payload_hash
+    if validate_marker(payload, version) is None:
+        raise ValueError("invalid completion publication fields")
+    if version.casefold() == DEV_VERSION and version != DEV_VERSION:
+        raise ValueError("mutable dev version must be named 'dev'")
+    vdir = version_dir(root, version)
     dest = marker_path(root, version)
-    tmp = dest.with_name(dest.name + f".tmp-{os.getpid()}")
-    tmp.write_text(json.dumps(payload), encoding="utf-8")
-    os.replace(tmp, dest)  # atomic publish
+    with _kernel_lease(root, version, kind="retention", shared=True):
+        with _publication_lease(root):
+            if version == DEV_VERSION:
+                if read_dev_claim(root, strict=True) is None:
+                    raise RuntimeError("completion publication requires an explicit dev claim")
+                try:
+                    slot_stat = os.lstat(vdir)
+                except FileNotFoundError:
+                    pass
+                else:
+                    if not stat.S_ISDIR(slot_stat.st_mode):
+                        raise RuntimeError("dev completion requires an ordinary slot directory")
+            else:
+                decision = check_admission(root, version, payload_hash=payload_hash)
+                if decision == ADMIT_REUSE:
+                    return dest
+                if decision != ADMIT_CONSTRUCT:
+                    raise RuntimeError(
+                        f"completion publication refused: {version}: {decision}; "
+                        "use a new version/distinct repair generation or claimed dev slot"
+                    )
+            vdir.mkdir(parents=True, exist_ok=True)
+            fd, name = tempfile.mkstemp(prefix=dest.name + ".tmp-", dir=vdir)
+            tmp = Path(name)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(json.dumps(payload))
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                if version == DEV_VERSION:
+                    os.replace(tmp, dest)
+                else:
+                    try:
+                        os.link(tmp, dest)
+                    except FileExistsError:
+                        if check_admission(root, version, payload_hash=payload_hash) != ADMIT_REUSE:
+                            raise RuntimeError(
+                                f"completion publication raced conflicting evidence: {version}"
+                            )
+            finally:
+                tmp.unlink(missing_ok=True)
     return dest
 
 
@@ -1916,7 +1955,7 @@ def fingerprint_source(paths) -> str:
     return digest.hexdigest()
 
 
-def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
+def check_admission(root: Path, version: str, *, payload_hash: str | None) -> str:
     """Decide what an ordinary (non-``dev``) caller should do for ``version``
     without taking a construction lease.
 
@@ -2040,7 +2079,8 @@ def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
                 return ADMIT_HEALTH_REPAIR_REQUIRED
             try:
                 marker_fd = os.open(
-                    COMPLETE_MARKER, os.O_RDONLY | nofollow, dir_fd=vdir_fd
+                    COMPLETE_MARKER, os.O_RDONLY | nofollow | os.O_NONBLOCK,
+                    dir_fd=vdir_fd,
                 )
             except FileNotFoundError:
                 return ADMIT_CONSTRUCT
@@ -2104,7 +2144,7 @@ def check_admission(root: Path, version: str, *, payload_hash: str) -> str:
 
     try:
         raw = json.loads(marker_bytes, object_pairs_hook=_unique_object_pairs_hook)
-    except Exception:
+    except ValueError:
         # Malformed JSON, including invalid UTF-8/other encoding errors --
         # ambiguous evidence, never "never built".
         return ADMIT_HEALTH_REPAIR_REQUIRED

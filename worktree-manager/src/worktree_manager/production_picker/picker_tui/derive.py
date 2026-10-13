@@ -17,6 +17,7 @@ from rich.cells import cell_len
 
 from .. import prune
 from . import reciprocal
+from .controller_workspaces import managed_child, sessionless as _sessionless
 from . import source_identity
 
 # The "now" derived ages are measured against. Data sources refresh this to the
@@ -658,28 +659,6 @@ BUCKET_REASON = {
 }
 
 
-def _sessionless(w):
-    """True when we positively know a worktree has **no owning Copilot session**
-    and is not otherwise in use -- the #1026 cold-start hazard.
-
-    Only flagged when ``session_count`` is present and 0 (real data always
-    carries it now that the session-start hook is reliable, #662); an absent
-    count -- a fixture or a remote too old to report it -- stays *unknown* and is
-    never flagged. Any past turns or a live mux session count as ownership, and
-    daemon-owned ``system``/``bridge`` kinds have their own bucket.
-    """
-    sc = w.get("session_count")
-    if sc is None or sc > 0:
-        return False
-    if (w.get("kind") or "session") in ("system", "bridge"):
-        return False
-    if (w.get("turn_count", 0) > 0 or w.get("mux_session")
-            or w.get("mux_attached") or w.get("session_ahp_live")
-            or w.get("execution_leg_live")):
-        return False
-    return True
-
-
 #: (label, key_fn) pairs the Worktrees list's `s` cycles through (#2228
 #: Phase 4). "age" (default, index 0 so cycling always starts from the
 #: familiar order) is every section's own most-recently-used-first order
@@ -859,6 +838,7 @@ def norm(
         # #3307 Phase 6, renamed LENGTH: see ``_length_display``'s docstring.
         "sess_turns": _length_display(w),
         "sessionless": _sessionless(w),
+        "managed_child": managed_child(w, reciprocal_relation),
         "pr": _pr(w),
         # #3307 Phase 4: the engine's already-ranked claims summary (computed
         # in ``agent_worktrees.__main__._worktree_to_dict`` via the shared
@@ -900,8 +880,7 @@ def norm(
         "session_ahp_live": bool(w.get("session_ahp_live")),
         "execution_leg_live": bool(w.get("execution_leg_live")),
         # Controller metadata is passed through for future presentation and
-        # recovery actions. It is deliberately absent from state/active/resume
-        # derivation: control is not binding.
+        # recovery actions. Control never asserts a local session binding.
         "controllers": list(w.get("controllers") or []),
         "controller_findings": list(w.get("controller_findings") or []),
         # #4272 bridge-lock: worktree hosts a live bridge-owned Copilot per the

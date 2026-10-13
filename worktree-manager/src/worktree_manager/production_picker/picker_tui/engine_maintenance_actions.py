@@ -38,7 +38,7 @@ class PickerScreenMaintenanceActionsMixin:
         verb = dlg.get("verb", "Clean up")
         op = "sync" if verb.lower().startswith("sync") else "cleanup"
         ids = self._scope_union(dlg)
-        recs = [w for w in self.data if self._row_key(w) in ids]
+        recs = [w for w in self.data if self._row_key(w) in ids and self._record_supports(w, op)]
         if not recs:
             self.debug = (f"{verb.lower()} {dlg['scope']}: "
                           f"{', '.join(picked) or 'nothing'} → 0 worktrees")
@@ -226,7 +226,8 @@ class PickerScreenMaintenanceActionsMixin:
         """
         recs = [recs] if isinstance(recs, dict) else list(recs)
         targets = [r for r in recs
-                   if r.get("cleanup_bucket") in ("conversation", "unused")]
+                   if r.get("cleanup_bucket") in ("conversation", "unused")
+                   and self._record_supports(r, "finalize")]
         if not targets:
             self.debug = "no conversation-only / unused worktree to finalize"
             return

@@ -33,6 +33,11 @@ description: |
    `docs/provider-quota.md` in the same plugin root and opt in only to the exact
    provider/quota IDs. Provider read time is not a charge-settlement watermark;
    a capture file cannot authenticate itself or enable live arithmetic.
+   For compatible monthly evidence, read `docs/provider-pacing.md` in that root.
+   Label cycle-average projections as estimates, never measured daily/weekly
+   rates. Numeric worker counts remain unavailable without per-worker costs;
+   advice does not authorize automatic sleeps, suspensions, or increased
+   parallelism.
 5. Preserve explicit unavailable/error states and finish with the actual result.
    Do not refresh provider state, consume warnings, change workers, or block an
    operator-directed launch. Never commit captures with real account data.

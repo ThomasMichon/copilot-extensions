@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -321,39 +322,76 @@ def _list_error(args: argparse.Namespace, message: str) -> int:
     return 1
 
 
+def _list_selection_key(args: argparse.Namespace) -> tuple[str, bool, bool]:
+    return (
+        getattr(args, "tracking_status", "all"),
+        bool(getattr(args, "include_other_platforms", False)),
+        bool(getattr(args, "all", False)),
+    )
+
+
+@dataclass
+class _ListEnrichment:
+    records: list[tracking.WorktreeRecord]
+    selection: tuple[str, bool, bool]
+    session_ctx: sessions.SessionContext | None = None
+    mux_map: dict[str, sessions.MuxInfo] | None = None
+    state_map: dict[str, git_ops.WorktreeStateInfo] | None = None
+    reclaim_observation: tuple[set[str] | None, set[str] | None] | None = None
+
+
 def _build_list_json_payload(
     args: argparse.Namespace,
     records,
     *,
     stamp_session_state: bool = True,
+    enrichment: _ListEnrichment | None = None,
 ) -> dict:
     """Build the enriched JSON listing without reading or writing its cache."""
+    if enrichment is not None and stamp_session_state:
+        raise ValueError("Shared list enrichment cannot stamp session state.")
+    selection = _list_selection_key(args)
+    if enrichment is None:
+        enrichment = _ListEnrichment(records, selection)
+    elif enrichment.records is not records or enrichment.selection != selection:
+        raise ValueError("List enrichment does not match the selected records.")
     mux_map: dict[str, sessions.MuxInfo] = {}
     if getattr(args, "mux_details", False):
-        wt_ids = [rec.worktree_id for rec in records]
-        mux_map = sessions.mux_status_many(wt_ids)
-    session_ctx = sessions.scan_sessions_fast(records)
+        if enrichment.mux_map is None:
+            wt_ids = [rec.worktree_id for rec in records]
+            enrichment.mux_map = sessions.mux_status_many(wt_ids)
+        mux_map = enrichment.mux_map
+    if enrichment.session_ctx is None:
+        enrichment.session_ctx = sessions.scan_sessions_fast(records)
+    session_ctx = enrichment.session_ctx
     state_map: dict[str, git_ops.WorktreeStateInfo] = {}
     if getattr(args, "classify", False):
-        daemon_filters = {
-            "status_filter": (None if args.tracking_status == "all" else args.tracking_status),
-            "platform_filter": (
-                None if getattr(args, "include_other_platforms", False) else cfg.detect_platform()
-            ),
-            "all": bool(getattr(args, "all", False)),
-        }
-        state_map = _classify_records(records, session_ctx, daemon_filters=daemon_filters)
+        if enrichment.state_map is None:
+            daemon_filters = {
+                "status_filter": (None if args.tracking_status == "all" else args.tracking_status),
+                "platform_filter": (
+                    None if getattr(args, "include_other_platforms", False) else cfg.detect_platform()
+                ),
+                "all": bool(getattr(args, "all", False)),
+            }
+            enrichment.state_map = _classify_records(
+                records, session_ctx, daemon_filters=daemon_filters
+            )
+        state_map = enrichment.state_map
     bare_orphan_wts: set[str] | None = None
     bridge_live_wts: set[str] | None = None
     if getattr(args, "mux_details", False):
-        try:
-            bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
-        except Exception:
-            bare_orphan_wts = None
-        try:
-            bridge_live_wts = reclaim.live_bridge_worktrees()
-        except Exception:
-            bridge_live_wts = None
+        if enrichment.reclaim_observation is None:
+            try:
+                bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
+            except Exception:
+                bare_orphan_wts = None
+            try:
+                bridge_live_wts = reclaim.live_bridge_worktrees()
+            except Exception:
+                bridge_live_wts = None
+            enrichment.reclaim_observation = bare_orphan_wts, bridge_live_wts
+        bare_orphan_wts, bridge_live_wts = enrichment.reclaim_observation
     with cfg.cached_load_config_scope():
         worktrees = [
             _worktree_to_dict(
@@ -390,6 +428,7 @@ def _warm_list_cache_for_active_project(*, interval: float = 15) -> int:
         return 0
     project = cfg.project_name()
     warmed = 0
+    enrichments: dict[tuple[str, bool, bool], _ListEnrichment] = {}
     for demand in list_cache.recent_demands(project):
         shape = demand["args"]
         args = argparse.Namespace(
@@ -401,10 +440,15 @@ def _warm_list_cache_for_active_project(*, interval: float = 15) -> int:
             tracking_status=demand.get("tracking_status", "all"),
             **shape,
         )
-        records = _core_helper("_list_records_for_args", _list_records_for_args)(args)
+        selection = _list_selection_key(args)
+        enrichment = enrichments.get(selection)
+        if enrichment is None:
+            records = _core_helper("_list_records_for_args", _list_records_for_args)(args)
+            enrichment = _ListEnrichment(records, selection)
+            enrichments[selection] = enrichment
         with cfg.cached_load_config_scope():
             payload = _core_helper("_build_list_json_payload", _build_list_json_payload)(
-                args, records, stamp_session_state=False
+                args, enrichment.records, stamp_session_state=False, enrichment=enrichment
             )
         list_cache.write(
             demand["key"],

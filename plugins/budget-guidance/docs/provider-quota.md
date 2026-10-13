@@ -79,10 +79,12 @@ silently selected.
 
 Fresh incumbent AI-credit readings with a valid provider reset reuse the
 existing posture arithmetic for remaining allowance, overspend, days remaining,
-and sustainable daily pace. Without attributable rate evidence, projected
-consumption and concurrency remain unavailable; the warning band is `no-rate`
-unless a separately established overspend already exists. This mode never
-blocks an operator launch or mutates worker state.
+and sustainable daily pace. Compatible same-period monthly usage can add an
+explicitly labeled [cycle-average estimate and pacing advice](provider-pacing.md).
+Without that evidence, projected consumption remains unavailable; the warning
+band is `no-rate` unless a separately established overspend already exists.
+Numeric concurrency remains unavailable. This mode never blocks an operator
+launch or mutates worker state.
 
 ## Capture inspection
 
@@ -96,8 +98,14 @@ attribution remains caller-declared. It cannot grant itself incumbent RPC
 authority or enable derived posture calculations. The caller can inspect
 reported facts, but the helper does not authenticate arbitrary capture files.
 
-Raw legacy account-authentication resets, independently validated same-period
-rate history, launch guidance, and routing integration remain later slices of
+Malformed capture JSON produces a generic parse diagnostic that does not echo
+opaque metadata. Filesystem lookup and read failures preserve their
+operating-system cause, such as a missing path or permission denial, instead of
+being mislabeled as invalid JSON. Existing directories and other nonregular
+paths are rejected before reading.
+
+Raw legacy account-authentication resets, measured trailing-rate history,
+launch guidance, and routing integration remain later slices of
 the [active effort](../../../efforts/active/budget-aware-model-routing/README.md).
 
 See [budget-guidance](../README.md) for static/manual posture support.

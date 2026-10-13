@@ -292,6 +292,8 @@ class PickerScreenModelMixin:
                     pass
     @staticmethod
     def _record_supports(rec, capability):
+        if rec.get("managed_child") and capability in ("sync", "cleanup", "finalize"):
+            return False
         if rec.get("source_kind", "machine-ssh") == "machine-ssh":
             return True
         return bool((rec.get("source_capabilities") or {}).get(capability))
@@ -341,14 +343,23 @@ class PickerScreenModelMixin:
         ALWAYS the full, unfiltered set -- see current_list_visible() (#2228 P4)."""
         cols = ACTIVE_SPECS if self.is_all() else LIST_SPECS
         a, r, c = self.src.bucket(self._visible_scope_data())
+        owned = [w for rows in (a, r, c) for w in rows if w.get("managed_child")]
+        if owned:
+            a, r, c = (
+                [w for w in rows if not w.get("managed_child")]
+                for rows in (a, r, c)
+            )
         unowned = [w for w in r if w.get("sessionless")]
+        sections = [("Active", a), ("Recent", r), ("Completed", c)]
         if unowned:
             r = [w for w in r if not w.get("sessionless")]
-            return cols, [
+            sections = [
                 ("Active", a), ("Recent", r), ("Completed", c),
                 ("Unowned · no prior session (Open starts fresh)", unowned),
             ]
-        return cols, [("Active", a), ("Recent", r), ("Completed", c)]
+        if owned:
+            sections.append(("Owned · no session here (controller workspaces)", owned))
+        return cols, sections
     def current_list_visible(self):
         """current_list() narrowed/sorted by the "/" bar (#2228 P4) --
         rendering/navigation ONLY; every other consumer keeps the full set.

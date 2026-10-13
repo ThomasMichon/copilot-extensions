@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 from zdd import routing
 
@@ -371,7 +371,7 @@ def test_pid_owned_by_current_user_windows_matches_and_mismatches(monkeypatch):
     trivially spoofable by whatever spawned this process, so the ownership
     check must come entirely from the OS's own SID primitives, never from
     comparing against those environment values."""
-    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(daemons_status, "os", SimpleNamespace(name="nt"))
     current_sid = "S-1-5-21-1111111111-2222222222-3333333333-1001"
     owner_sid = current_sid
 
@@ -395,8 +395,7 @@ def test_pid_owned_by_current_user_windows_matches_and_mismatches(monkeypatch):
 
 
 def test_pid_owned_by_current_user_posix_ps_fallback_matches_and_mismatches(monkeypatch):
-    monkeypatch.setattr(os, "name", "posix")
-    monkeypatch.setattr(os, "getuid", lambda: 501, raising=False)
+    monkeypatch.setattr(daemons_status, "os", SimpleNamespace(name="posix", getuid=lambda: 501))
     # Force the ps fallback deterministically regardless of this test's own
     # host OS: a bare "/proc/<pid>" is never a real directory on a Windows
     # test runner, but an actual Linux CI host DOES have a real /proc -- an
@@ -428,8 +427,7 @@ def test_pid_owned_by_current_user_posix_procfs_matches_and_mismatches(monkeypat
     deterministically via a stubbed directory/stat rather than the real
     host's own ``/proc`` -- and confirming it never falls through to the
     ``ps`` fallback at all when ``/proc`` answers directly."""
-    monkeypatch.setattr(os, "name", "posix")
-    monkeypatch.setattr(os, "getuid", lambda: 501, raising=False)
+    monkeypatch.setattr(daemons_status, "os", SimpleNamespace(name="posix", getuid=lambda: 501))
     monkeypatch.setattr(daemons_status.Path, "is_dir", lambda self: True)
 
     ps_called = []
@@ -457,7 +455,7 @@ def test_pid_owned_by_current_user_handles_a_timed_out_probe(monkeypatch):
     status report (``check=False`` on ``subprocess.run`` does not suppress
     these) -- it must be treated the same as any other unverifiable
     ownership: ``False``, not a propagated exception."""
-    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setattr(daemons_status, "os", SimpleNamespace(name="nt"))
 
     def _raise(argv, **kwargs):
         raise subprocess.TimeoutExpired(argv, 10)
@@ -471,7 +469,7 @@ def test_process_start_time_falls_back_to_ps_lstart_on_macos(monkeypatch):
     Linux (``/proc``) -- on macOS (no ``/proc``, non-Windows) it returns
     ``None``, which would make every reachable daemon there permanently
     unverifiable. ``ps -o lstart=`` must supply a usable fallback token."""
-    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(daemons_status, "os", SimpleNamespace(name="posix"))
     monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: None)
     monkeypatch.setattr(daemons_status.Path, "is_dir", lambda self: False)
 
@@ -493,7 +491,7 @@ def test_process_start_time_prefers_the_shared_zdd_result_when_available(monkeyp
 
 
 def test_process_start_time_handles_a_failed_ps_fallback(monkeypatch):
-    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(daemons_status, "os", SimpleNamespace(name="posix"))
     monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: None)
     monkeypatch.setattr(daemons_status.Path, "is_dir", lambda self: False)
 

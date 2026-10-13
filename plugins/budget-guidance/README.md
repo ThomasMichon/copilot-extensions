@@ -36,5 +36,7 @@ It preserves requesting-session attribution and labels cached compatibility
 freshness unknown. Opt-in [provider evidence](docs/provider-quota.md) evaluates
 one provider's observation, units, business state, and raw reset separately.
 Qualified incumbent readings reuse posture arithmetic for sustainable pace.
-Rate-based projections, provider refresh adapters, and session-start injection
+Compatible monthly usage adds a labeled
+[cycle-average projection and advice-only pacing](docs/provider-pacing.md).
+Provider refresh adapters, session-start injection, and routing integration
 remain later slices.

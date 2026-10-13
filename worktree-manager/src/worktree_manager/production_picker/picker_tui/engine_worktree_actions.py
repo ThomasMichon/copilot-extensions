@@ -7,6 +7,7 @@ import subprocess
 import threading
 
 from .engine_dialogs import SubMenuScreen, WtDetailsScreen
+from .controller_workspaces import target_row
 from .engine_live_screens import MsgViewScreen
 from .resume_prompt_actions import open_resume_prompt
 
@@ -139,6 +140,10 @@ class PickerScreenWorktreeActionsMixin:
             acts = ["Restore", "Reclaim"] if restorable else ["Reclaim"]
         elif gone:
             acts = []
+        elif rec.get("managed_child"):
+            # An originating/controller session belongs elsewhere. Neither
+            # Resume nor a silent fresh Open may adopt its child workspace.
+            acts = []
         elif not rec.get("sessionless"):
             # A stopped worktree with prior history (not positively sessionless)
             # -> Resume (relaunch + resume its last conversation). "Bare resume"
@@ -161,7 +166,7 @@ class PickerScreenWorktreeActionsMixin:
         # for any worktree that could have a session to peek (not positively
         # sessionless) and is not in the inconsistent WARNING state. Independent
         # of the lifecycle group above (live, resumable, or residual all peek).
-        if not warning and not rec.get("sessionless"):
+        if not warning and not rec.get("sessionless") and not rec.get("managed_child"):
             acts.append("Messages")
         # #3307 Phase 7: read-only "Sessions" sub-menu -- every session EVER
         # registered against this worktree (id, started/ended, turn count,
@@ -176,7 +181,7 @@ class PickerScreenWorktreeActionsMixin:
         # non-residue lifecycle states (never beside Reclaim/Repair, where a
         # Cleanup/Sync would race the residue). A gone worktree still offers
         # Cleanup to prune the leftover record.
-        if acts and not warning and not reclaimable and not gone:
+        if acts and not warning and not reclaimable and not gone and not rec.get("managed_child"):
             if rec.get("ff_eligible"):
                 acts.append("Sync")
             if PickerScreenWorktreeActionsMixin._cleanable(rec):
@@ -186,7 +191,7 @@ class PickerScreenWorktreeActionsMixin:
                 # wrapped up directly -- finalize validates nothing is unpushed
                 # and removes it (#2258 follow-up).
                 acts.append("Finalize")
-        elif gone and PickerScreenWorktreeActionsMixin._cleanable(rec):
+        elif gone and PickerScreenWorktreeActionsMixin._cleanable(rec) and not rec.get("managed_child"):
             acts.append("Cleanup")
         acts.append("Refresh")
         return acts
@@ -339,29 +344,7 @@ class PickerScreenWorktreeActionsMixin:
         return acts, ext
     def _reciprocal_target_row(self, rec):
         """Return the one exact loaded controller target, if navigable."""
-        relation = rec.get("reciprocal_relation") or {}
-        actions = relation.get("actions") or []
-        candidates = [
-            action
-            for action in actions
-            if isinstance(action, dict)
-            and action.get("kind") == "navigate-worktree"
-            and isinstance(action.get("target"), dict)
-        ]
-        if len(candidates) != 1:
-            return None
-        target = candidates[0]["target"]
-        matches = [
-            row
-            for row in self.data
-            if (row.get("raw") or {}).get("id") == target.get("worktree_id")
-            and (row.get("raw") or {}).get("repo") == target.get("project")
-            and (
-                not target.get("machine")
-                or row.get("machine") == target.get("machine")
-            )
-        ]
-        return matches[0] if len(matches) == 1 else None
+        return target_row(rec, self.data)
     def _push_wt_submenu(self, rec, *, loading=False):
         """Open the native ``SubMenuScreen`` for ``rec`` IMMEDIATELY from its
         current (cached) liveness -- never blocking the render flow. When an
@@ -393,6 +376,13 @@ class PickerScreenWorktreeActionsMixin:
         if result is None:
             return
         cur, no_mux, ahp = result
+        if (
+            rec.get("managed_child")
+            and cur in ("Open", "Resume", "Bare resume", "Resume prompt…", "Launch in new window")
+            and cur not in self._session_action_verbs(rec)
+        ):
+            self.debug = "This workspace has no session here; navigate to its controller or Refresh."
+            return
         ext = getattr(self, "_wt_submenu_ext", {}) or {}
         if cur in ext:
             from .engine_action_confirm import confirm_then
@@ -796,7 +786,7 @@ class PickerScreenWorktreeActionsMixin:
         return False, f"unknown internal action: {verb}"
     def _resume_embodied_worktree_cli(
         self, wid, *, machine=None, env=None, title=None, source_id=None,
-        source_kind=None, project=None
+        source_kind=None, project=None, embodied=False
     ):
         """Exit into the standard resume flow for a worktree an internal task
         action just embodied.
@@ -811,6 +801,9 @@ class PickerScreenWorktreeActionsMixin:
         if row is not None:
             if row.get("source_kind") != "machine-ssh":
                 return False, "provider-backed worktrees are read-only"
+            # A successful embodiment transaction already owns a fresh binding.
+            if not embodied and row.get("managed_child") and not row.get("mux_live"):
+                return False, "workspace has no session here; navigate to its controller or Refresh"
             self._decide(self._resume_decision(row))
             if project:
                 self.app.result["project"] = project
@@ -956,6 +949,7 @@ class PickerScreenWorktreeActionsMixin:
                 source_id=source_id,
                 source_kind=source_kind,
                 project=str(payload.get("project") or "").strip() or None,
+                embodied=True,
             )
             if not ok2:
                 self.debug = f"Open into a CLI session failed · {msg2 or 'see command output'}"

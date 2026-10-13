@@ -36,6 +36,16 @@ Callers needing only machine-global scope can pass
 `resolve_active_plugins(include_projects=False)`: this preserves global
 identity verification but skips registered-project discovery and Git checks.
 The default still aggregates all scopes.
+For a current-checkout operation, pass `project_root=Path(repo)` instead:
+only that explicit checkout and global settings are inspected, not registered
+projects. Its identity-verified roots are labelled `project:current`; repository-
+only activation is supported without changing user-global activation. The same
+source containment, manifest identity and ambiguity checks still apply.
+Explicit `false` entries in that checkout's merged settings suppress the same
+globally enabled identity. The default all-project aggregate retains its union
+semantics; one checkout does not disable a provider for unrelated projects.
+Indeterminate explicit-checkout settings cannot authorize global fallback;
+reconciliation still retains prior evidence instead of declaring removal.
 
 Callers locating one sibling may also pass `plugin_names=("customizing-copilot",)`.
 Only requested names incur source resolution, but all matching marketplace

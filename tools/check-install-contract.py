@@ -321,7 +321,19 @@ def _check_runtime_retention(runtime) -> None:
                 raise AssertionError("incomplete cleanup admitted a retained candidate")
             assert payload.read_text(encoding="utf-8") == "unchanged"
         assert runtime.toss_incomplete(root) == ["candidate"], "released candidate was not reclaimed"
-        runtime.mark_complete(root, "candidate", payload_hash="same")
+        marker = runtime.mark_complete(root, "candidate", payload_hash="same", pid=11)
+        before = marker.read_bytes(), marker.stat().st_ino, marker.stat().st_mtime_ns
+        runtime.mark_complete(root, "candidate", payload_hash="same", pid=22)
+        assert (marker.read_bytes(), marker.stat().st_ino, marker.stat().st_mtime_ns) == before, (
+            "matching completion rewrote immutable evidence"
+        )
+        try:
+            runtime.mark_complete(root, "candidate", payload_hash="different")
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("numbered completion accepted conflicting content")
+        assert marker.read_bytes() == before[0], "conflict changed immutable evidence"
         with runtime.retention_lease(root, "candidate", payload_hash="same", timeout=0):
             runtime.activate(root, "candidate")
         assert runtime.gc(root) == [], "GC removed the published candidate"

@@ -19,6 +19,13 @@ of the `worktree-manager-control-plane` effort.
   `argv` array, consumed and deleted before invoking the unchanged wrapper.
   Consumption holds an exclusive delete-on-close file handle through validation,
   so concurrent consumers cannot execute the same handoff twice.
+  The interactive producer additionally requests an atomic, manifest-bound
+  receipt containing only consumption/rejection status, validation stage and
+  consumer PID, never argv or credentials. It waits up to 30 seconds for that
+  explicit acknowledgment rather than treating file disappearance as success
+  or assuming cold nested PowerShell starts within five seconds. Rejection,
+  invalid receipt and missing acknowledgment are logged before owned-session
+  teardown, with a worktree-preserving retry / `--no-mux` recovery command.
   Each create attempt uses a fresh manifest;
   failed creation cleans up its unconsumed file after owned-session teardown.
   AHP credentials still use the separate protected token handoff, not JSON.

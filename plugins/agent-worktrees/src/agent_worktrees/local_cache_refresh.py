@@ -21,16 +21,16 @@ through ``plugin_activation.resolve_active_plugins()`` -- the same
 identity-verified active-plugin evidence ``claim_providers.py`` uses for
 its own sibling callbacks -- never by trusting a directory merely because
 it contains a ``plugin.json`` self-declaring the expected name. Only the
-plugin's **global** activation scope is ever trusted -- never a project-
-scoped override, which the resolver aggregates from every agent-worktrees-
-registered project and could otherwise supply an unrelated project's
-locally-overridden copy of customizing-copilot to a session in a
-different repo entirely. Missing or ambiguous provenance (zero, or more
+plugin's **explicit current-checkout** activation scope is preferred, falling
+back to global activation. Unrelated registered-project scopes are never
+scanned and cannot supply another project's locally-overridden renderer.
+Repository-only enablement therefore works without user-global promotion.
+Missing or ambiguous provenance (zero, or more
 than one, matching active plugin) fails closed: no script is resolved,
 and the refresh reports unavailable for that round.
 
 That resolution call itself runs in its own bounded subprocess (``python
--m agent_worktrees.local_cache_refresh <home>``, this module's own
+-m agent_worktrees.local_cache_refresh <home> [repo_root]``, this module's own
 entry point below) -- never in-process, and never on a bare Python
 thread -- because identity discovery performs filesystem I/O; only a real process-tree kill
 (``push_timeout.run_bounded``, the same mechanism the render step uses)
@@ -40,7 +40,7 @@ can only abandon the wait, never the underlying Git children.
 
 Refreshes return attributable outcomes and log degradation without blocking
 session startup. Renderer budget warnings are successful delivery, not a
-reason to discard guidance. Global-only discovery avoids unrelated registered
+reason to discard guidance. Explicit-checkout discovery avoids unrelated registered
 project scans; both process boundaries remain timeout-contained.
 """
 
@@ -148,11 +148,11 @@ DEFAULT_TIMEOUT_S = 120.0
 _GLOBAL_SCOPE = "global"
 
 
-def _select_global_root(home: Path) -> Path | None:
-    """Return the identity-verified, global-scope-only root for
+def _select_global_root(home: Path, repo_root: Path | None = None) -> Path | None:
+    """Return the identity-verified current-project or global root for
     ``_SIBLING_PLUGIN_NAME``, or ``None`` when zero or more than one
-    active plugin matches. Global-only resolution preserves provenance without
-    inspecting unrelated registered-project scopes or overrides. This function
+    active plugin matches. Explicit checkout resolution preserves provenance
+    without inspecting unrelated registered-project scopes or overrides. This function
     runs only inside the bounded resolution subprocess.
     """
     try:
@@ -160,22 +160,42 @@ def _select_global_root(home: Path) -> Path | None:
 
         report = resolve_active_plugins(
             home=home, include_projects=False, plugin_names=(_SIBLING_PLUGIN_NAME,),
+            project_root=repo_root,
         )
     except Exception as exc:
-        _LOG.warning("Global projection renderer discovery failed: %s", exc)
+        _LOG.warning("Projection renderer discovery failed: %s", exc)
         return None
-    candidate_roots = [
-        root
-        for plugin in report.active.values()
+    scopes = ("project:current", _GLOBAL_SCOPE) if repo_root else (_GLOBAL_SCOPE,)
+    matching = [
+        plugin for plugin in report.active.values()
         if plugin.name == _SIBLING_PLUGIN_NAME
-        for root in [plugin.root_for_scope(_GLOBAL_SCOPE)]
-        if root is not None
+        and any(plugin.root_for_scope(scope) is not None for scope in scopes)
     ]
-    return candidate_roots[0] if len(candidate_roots) == 1 else None
+    if len(matching) != 1:
+        return None
+    plugin = matching[0]
+    for scope in scopes:
+        root = plugin.root_for_scope(scope)
+        if root is not None:
+            if scope == "project:current":
+                from plugin_activation import PluginStateError, inspect_plugin_state
+
+                if any(selected.root == root and selected.kind == "directory" for selected in plugin.live_roots):
+                    try:
+                        proof = inspect_plugin_state(plugin.source, home=home / ".copilot", repo=repo_root)
+                    except PluginStateError as exc:
+                        _LOG.warning("Current renderer trust lookup failed: %s", exc)
+                        return None
+                    if proof.get("repositoryTrusted") is not True:
+                        _LOG.warning("Current directory renderer requires explicit repository trust")
+                        return None
+            return root
+    return None
 
 
 def _resolve_cli_script(
-    home: Path, *, timeout: float, outcomes: list[RefreshResult] | None = None
+    home: Path, *, timeout: float, outcomes: list[RefreshResult] | None = None,
+    repo_root: Path | None = None,
 ) -> Path | None:
     """Resolve customizing-copilot's ``render-local-cache`` CLI script
     through identity-verified active-plugin evidence, never a bare
@@ -187,7 +207,7 @@ def _resolve_cli_script(
     Runs ``_select_global_root`` in its own bounded subprocess (see the
     module docstring for why) rather than calling it in-process. Returns
     ``None`` -- failing closed -- when customizing-copilot isn't resolved
-    at the global scope (or is ambiguous -- see ``_select_global_root``),
+    at the current-checkout or global scope (or is ambiguous -- see ``_select_global_root``),
     its script isn't present at the reported root, or resolution itself
     doesn't complete within ``timeout``.
     """
@@ -195,7 +215,10 @@ def _resolve_cli_script(
         from . import push_timeout
 
         result = push_timeout.run_bounded(
-            [sys.executable, "-m", "agent_worktrees.local_cache_refresh", str(home)],
+            [
+                sys.executable, "-m", "agent_worktrees.local_cache_refresh", str(home),
+                *([str(repo_root)] if repo_root is not None else []),
+            ],
             cwd=None, env=dict(os.environ), timeout=timeout,
         )
     except subprocess.TimeoutExpired:
@@ -284,11 +307,13 @@ def refresh_local_cache(
         if resolution_timeout <= 0:
             return _report(RefreshResult("timeout", detail="no refresh budget remains"))
         outcomes: list[RefreshResult] = []
-        script = _resolve_cli_script(home, timeout=resolution_timeout, outcomes=outcomes)
+        script = _resolve_cli_script(
+            home, timeout=resolution_timeout, outcomes=outcomes, repo_root=repo_root,
+        )
         if script is None:
             return _report(
                 outcomes[-1] if outcomes else RefreshResult(
-                    "unavailable", detail="global renderer missing or ambiguous; using checked-in fallback"
+                    "unavailable", detail="project/global renderer missing or ambiguous; using checked-in fallback"
                 )
             )
         argv = [
@@ -365,7 +390,7 @@ def sessionstart_diagnostic(cwd: str, *, deadline: float | None) -> str:
 
 if __name__ == "__main__":
     # Subprocess entry point for `_resolve_cli_script` (``python -m
-    # agent_worktrees.local_cache_refresh <home>``): print the resolved
+    # agent_worktrees.local_cache_refresh <home> [repo_root]``): print the resolved
     # root, or an empty line when none (or ambiguously many) resolve.
     # Deliberately minimal and crash-free -- a bare `print('')` on any
     # unexpected argv shape, never a traceback a caller would need to
@@ -373,5 +398,6 @@ if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--refresh":
         raise SystemExit(_run_refresh_worker(sys.argv[2]))
     _home = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.home()
-    _root = _select_global_root(_home)
+    _repo_root = Path(sys.argv[2]) if len(sys.argv) > 2 else None
+    _root = _select_global_root(_home, _repo_root)
     print(str(_root) if _root is not None else "")

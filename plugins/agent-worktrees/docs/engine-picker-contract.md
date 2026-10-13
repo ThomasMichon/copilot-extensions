@@ -136,6 +136,21 @@ cache policies remain distinct. Sharing computation does not itself establish
 daemon-only read authority or a snapshot/incremental stream: the existing
 caller-side fallback and polling contracts remain until that separate cutover.
 
+Resident warming of recently requested list shapes shares read enrichment
+within one pass when their tracking-status, platform and checkout-existence
+selection is identical. The selected records, session scan, git classification,
+mux observation and reclaim observations are computed lazily once for that
+selection. Each requested shape still renders and publishes its own payload:
+classification, mux details and assignment history are not leaked into shapes
+that did not request them. Different selections remain separate.
+Shared enrichment cannot be used for session-state stamping; resident warming
+keeps that existing write path disabled.
+
+These observations are discarded when the pass returns, including unavailable
+reclaim observations. The next pass re-reads mutable state; ordinary standalone
+reads, `--fresh`, output cache keys and existing freshness leases are unchanged.
+This is per-pass work coalescing, not a new cross-pass cache or read authority.
+
 ## Invariants for every pinned verb
 
 New and Resume prompts use one typed pending intent in

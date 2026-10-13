@@ -135,7 +135,7 @@ def parse_instant(value: Any, label: str) -> datetime:
 
 @dataclass(frozen=True)
 class TrailingRate:
-    """A measured average consumption rate over a trailing window."""
+    """An average rate over a window; its reading owns the evidence provenance."""
 
     window_days: Decimal
     rate_per_day: Decimal
