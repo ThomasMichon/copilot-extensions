@@ -10,6 +10,7 @@ Run:  python -m pytest tools/test_check_module_size.py
 from __future__ import annotations
 
 import json
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +18,23 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent / "check-module-size.py"
+
+
+def test_repository_probe_timeout_is_a_controlled_failure(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--repository", str(tmp_path)])
+
+    def hung_git(command, **kwargs):
+        assert command == ["git", "rev-parse", "--show-toplevel"]
+        assert kwargs["timeout"] == 15
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", hung_git)
+    with pytest.raises(SystemExit) as error:
+        runpy.run_path(str(SCRIPT), run_name="__main__")
+    assert error.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "[FAIL] module size: Git timed out after 15 seconds" in stderr
+    assert "Traceback" not in stderr
 
 
 def test_module_size_stays_in_ci_not_publication_hook():

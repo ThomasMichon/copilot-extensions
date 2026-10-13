@@ -60,21 +60,35 @@ def test_baseline_is_dev_owned_without_extra_workflow_or_verify_dispatch():
     assert job["concurrency"] == {
         "group": "module-size-baseline-widen-dev", "cancel-in-progress": False,
     }
-    trusted, candidate = job["steps"][:2]
+    steps = {step["name"]: step for step in job["steps"] if "name" in step}
+    trusted = steps["Check out trusted workflow tooling without credentials"]
+    candidate = steps["Check out committed dev input as data without credentials"]
+    assert job["steps"].index(trusted) < job["steps"].index(candidate)
     assert trusted["with"]["ref"] == "${{ github.workflow_sha }}"
     assert candidate["with"]["ref"] == "${{ github.event.workflow_run.head_sha }}"
     assert trusted["with"]["persist-credentials"] is False
     assert candidate["with"]["persist-credentials"] is False
-    refresh = job["steps"][3]["run"]
+    refresh_step = steps["Refresh and validate using only trusted tooling"]
+    refresh = refresh_step["run"]
     assert "python -I trusted/tools/check-module-size.py --repository candidate" in refresh
     assert "--refresh-baseline --widen-only" in refresh
     assert "--allow-widen" not in refresh
-    publisher = job["steps"][-1]
+    publisher = steps["Open a baseline-only PR against dev"]
     assert publisher["with"]["base"] == "dev"
     assert publisher["with"]["add-paths"] == "tools/module-size-baseline.json"
     assert publisher["with"]["token"] == "${{ secrets.APERTURE_RELEASE_TOKEN }}"
-    assert all("APERTURE_RELEASE_TOKEN" not in json.dumps(step) for step in job["steps"][:-1])
-    fence = job["steps"][-2]["run"]
+    assert all(
+        "APERTURE_RELEASE_TOKEN" not in json.dumps(step)
+        for step in job["steps"] if step is not publisher
+    )
+    fence_step = steps["Fence stale dev inputs and restrict the publication diff"]
+    assert job["steps"].index(candidate) < job["steps"].index(refresh_step)
+    assert job["steps"].index(refresh_step) < job["steps"].index(fence_step)
+    assert job["steps"].index(fence_step) < job["steps"].index(publisher)
+    assert fence_step["env"]["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert fence_step["env"]["GIT_CONFIG_GLOBAL"] == "/dev/null"
+    fence = fence_step["run"]
+    assert "diff --no-ext-diff --no-textconv --name-only" in fence
     assert 'live_sha" != "$INPUT_SHA' in fence
     assert 'changed" = "tools/module-size-baseline.json' in fence
     assert "workflow run" not in "\n".join(step.get("run", "") for step in job["steps"])
@@ -259,9 +273,9 @@ def baseline_fixture(tmp_path):
     git_run("config", "user.email", "fixture@example.test")
     baseline = candidate / "tools/module-size-baseline.json"
     baseline.parent.mkdir()
-    baseline.write_text("{}\n")
+    baseline.write_text("{}\n", encoding="utf-8")
     other = candidate / "source.py"
-    other.write_text("value = 1\n")
+    other.write_text("value = 1\n", encoding="utf-8")
     git_run("add", ".")
     git_run("commit", "-qm", "initial")
     base = git_run("rev-parse", "HEAD")
@@ -296,11 +310,14 @@ def baseline_fixture(tmp_path):
 def test_actual_baseline_fence_and_diff_restriction(baseline_fixture, change, live, expected):
     run, _, _, baseline, other, base, tmp_path = baseline_fixture
     if change == "baseline":
-        baseline.write_text('{"source.py": 1001}\n')
+        baseline.write_text('{"source.py": 1001}\n', encoding="utf-8")
     elif change == "other":
-        other.write_text("value = 2\n")
+        other.write_text("value = 2\n", encoding="utf-8")
     workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    code = workflow["jobs"]["refresh-module-baseline"]["steps"][-2]["run"]
+    code = next(
+        step["run"] for step in workflow["jobs"]["refresh-module-baseline"]["steps"]
+        if step.get("id") == "baseline"
+    )
     result = run(code, LIVE_SHA=base if live is None else live)
     assert (result.returncode != 0) is (expected == "fail"), result.stderr
     output = tmp_path / "output"
@@ -313,7 +330,7 @@ def test_actual_baseline_fence_and_diff_restriction(baseline_fixture, change, li
 ])
 def test_real_main_gate_rejects_baseline_automation(baseline_fixture, branch):
     run, git_run, candidate, baseline, _, base, _ = baseline_fixture
-    baseline.write_text('{"source.py": 1001}\n')
+    baseline.write_text('{"source.py": 1001}\n', encoding="utf-8")
     git_run("add", ".")
     git_run("commit", "-qm", "baseline change")
     head = git_run("rev-parse", "HEAD")

@@ -399,6 +399,7 @@ def main() -> int:
         root = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"], cwd=REPO,
             capture_output=True, text=True, encoding="utf-8",
+            timeout=15,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if root.returncode != 0 or Path(root.stdout.strip()).resolve() != REPO:
@@ -407,7 +408,7 @@ def main() -> int:
         if (
             BASELINE_PATH.is_symlink()
             or not BASELINE_PATH.resolve().is_relative_to(REPO)
-            or BASELINE_PATH.exists() and not BASELINE_PATH.is_file()
+            or (BASELINE_PATH.exists() and not BASELINE_PATH.is_file())
         ):
             parser.error("the target baseline must be a regular path inside the checkout")
     if args.allow_widen and not args.refresh_baseline:
@@ -478,6 +479,9 @@ if __name__ == "__main__":
         sys.exit(main())
     except subprocess.CalledProcessError as exc:
         print(f"[FAIL] module size: {exc.stderr.strip() if exc.stderr else exc}", file=sys.stderr)
+        sys.exit(1)
+    except subprocess.TimeoutExpired as exc:
+        print(f"[FAIL] module size: Git timed out after {exc.timeout} seconds", file=sys.stderr)
         sys.exit(1)
     except (ValueError, OSError) as exc:
         print(f"[FAIL] module size: {exc}", file=sys.stderr)

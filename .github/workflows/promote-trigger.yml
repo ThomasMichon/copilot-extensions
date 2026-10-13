@@ -100,6 +100,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           INPUT_SHA: ${{ github.event.workflow_run.head_sha }}
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_CONFIG_GLOBAL: /dev/null
         run: |
           live_sha="$(gh api "repos/$REPO/git/ref/heads/dev" --jq '.object.sha')"
           if [[ ! "$live_sha" =~ ^[0-9a-f]{40}$ ]]; then
@@ -111,7 +113,7 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          changed="$(git -C candidate diff --name-only)"
+          changed="$(git --no-pager -C candidate diff --no-ext-diff --no-textconv --name-only)"
           if [ -z "$changed" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           elif [ "$changed" = "tools/module-size-baseline.json" ]; then
