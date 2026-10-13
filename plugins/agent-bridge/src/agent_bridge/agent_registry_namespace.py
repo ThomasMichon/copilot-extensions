@@ -74,6 +74,11 @@ class NamespaceResolver(ABC):
         """The workspace repo this target hosts, or ``None``."""
         return None
 
+    @property
+    def pending_list_task(self) -> asyncio.Task[list[NamespaceAgentInfo]] | None:
+        """Actual enumeration holder, if it can outlive a cancelled caller."""
+        return None
+
 
 class CliNamespaceResolver(NamespaceResolver):
     """Drive a namespace provider over a process boundary."""
@@ -96,6 +101,10 @@ class CliNamespaceResolver(NamespaceResolver):
     def invalidate_list_cache(self) -> None:
         """Drop the cached ``list()`` result so the next call re-queries live."""
         self._list_cache = None
+
+    @property
+    def pending_list_task(self) -> asyncio.Task[list[NamespaceAgentInfo]] | None:
+        return self._list_task
 
     @property
     def prefix(self) -> str:

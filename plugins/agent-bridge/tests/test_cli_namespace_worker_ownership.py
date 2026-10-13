@@ -9,6 +9,59 @@ from pathlib import Path
 import pytest
 
 from agent_bridge.agent_registry_namespace import CliNamespaceResolver, NamespaceAgentInfo
+from agent_bridge.agent_registry_cache import AgentRosterCache
+from agent_bridge.agent_registry_resolver import AgentResolver
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replace_provider", [False, True])
+async def test_cache_shutdown_retains_native_provider_holder(
+    tmp_path: Path, replace_provider: bool,
+) -> None:
+    ready = tmp_path / "ready"
+    release = tmp_path / "release"
+    script = (
+        "import pathlib,sys,time;"
+        "ready,release=map(pathlib.Path,sys.argv[1:3]);ready.write_text('started');"
+        "\nwhile not release.exists(): time.sleep(0.01)"
+        "\nprint('[{\"name\":\"late\",\"state\":\"available\"}]')"
+    )
+    provider = CliNamespaceResolver(
+        "test", "unused",
+        command=[sys.executable, "-c", script, str(ready), str(release)],
+    )
+    registry = AgentResolver({}, {})
+    registry.register_namespace_resolver(provider)
+    cache = AgentRosterCache(registry, refresh_interval=60)
+    cache._CANCELLATION_GRACE = 0.02
+    scan = cache._refresh_namespace("test")
+    try:
+        async with asyncio.timeout(5):
+            while not ready.exists():
+                await asyncio.sleep(0.01)
+        native = provider.pending_list_task
+        assert native is not None
+        if replace_provider:
+            registry.unregister_namespace_resolver("test")
+            registry.register_namespace_resolver(
+                CliNamespaceResolver("test", "missing-test-provider"),
+            )
+            cache._reconcile_namespace_set()
+            await asyncio.gather(scan, return_exceptions=True)
+            assert native in cache._owned_provider_reads
+        await asyncio.wait_for(cache.stop(), timeout=2)
+        assert scan.done()
+        assert not native.done()
+        assert native in cache._owned_provider_reads
+        release.write_text("finish")
+        await asyncio.wait_for(asyncio.shield(native), timeout=5)
+        assert native not in cache._owned_provider_reads
+        assert cache._entries["test"].rows == []
+    finally:
+        release.write_text("finish")
+        await cache.stop()
+        if provider.pending_list_task is not None:
+            await asyncio.wait_for(asyncio.shield(provider.pending_list_task), timeout=12)
 
 
 @pytest.mark.asyncio

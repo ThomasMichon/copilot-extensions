@@ -96,6 +96,11 @@ holder alive and later callers join it instead of launching another process.
 The first admitted caller sets the subprocess execution timeout; joining
 callers retain their own outer wait budgets. This does not cancel a live
 progressing native process or establish process-tree reaping authority.
+The resolver exposes its pending enumeration holder to cache lifecycle
+supervision. If a cache scan ends before that holder, the cache retains and
+boundedly observes the native task during shutdown, including for a replaced
+provider. A shutdown wait timeout leaves ownership tracked until completion;
+it does not cancel the native task or claim that its process has exited.
 
 ## The wire protocol (generalizing `hook_ipc.py`)
 

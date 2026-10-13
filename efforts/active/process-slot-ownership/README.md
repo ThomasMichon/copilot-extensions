@@ -262,3 +262,13 @@ explicit graceful release, and returns the same result to eight joiners after
 the first caller cancels. The namespace/roster selection passed 105 tests,
 one skipped. This proves direct native enumeration admission, not descendant
 tree cleanup, CPU circuits, cross-platform adoption, or runtime release.
+
+### 2026-10-12 - Native ownership linked to cache supervision
+
+Review identified that a provider-local shielded task needed an explicit
+cache lifecycle handoff when the outer cache scan ended. Resolvers now expose
+pending enumeration; cache scan cleanup retains its exact native holder.
+Bounded cache shutdown observes those tasks without cancelling their native
+work, including after provider replacement, and retains timed-out holders
+until completion. Two native process regressions demonstrate shutdown and
+replacement accounting. The combined contracts pass 107 tests, one skipped.
