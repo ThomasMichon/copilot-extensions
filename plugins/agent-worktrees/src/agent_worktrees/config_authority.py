@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+_INREPO_AUTHORITY_BUDGET_S = 1.0
+
 
 def load_project_authority_config(
     name: str, *, path: Path | None = None,
@@ -52,7 +54,10 @@ def load_project_authority_config(
             f"{path} or the repos registry"
         )
 
-    inrepo_authority = cfg._load_inrepo_config(str(anchor))
+    with cfg.inrepo_config_source.resolution_budget(
+        _INREPO_AUTHORITY_BUDGET_S, clamp=True,
+    ):
+        inrepo_authority = cfg._load_inrepo_config(str(anchor))
     stateless = bool(
         machine_repo.get("stateless", inrepo_authority.get("stateless", False))
     )

@@ -42,13 +42,20 @@ _shared_deadline: contextvars.ContextVar[float | None] = contextvars.ContextVar(
 
 
 @contextlib.contextmanager
-def resolution_budget(seconds: float | None = None):
+def resolution_budget(seconds: float | None = None, *, clamp: bool = False):
     """Share one probe budget across every committed-config resolution in this
-    block. Nested blocks keep the outermost deadline."""
-    if _shared_deadline.get() is not None:
+    block. Nested blocks keep the outermost deadline unless ``clamp`` requests
+    a tighter local ceiling."""
+    current = _shared_deadline.get()
+    if current is not None and not clamp:
         yield
         return
-    token = _shared_deadline.set(time.monotonic() + (_RESOLUTION_BUDGET if seconds is None else seconds))
+    deadline = time.monotonic() + (
+        _RESOLUTION_BUDGET if seconds is None else seconds
+    )
+    token = _shared_deadline.set(
+        min(current, deadline) if current is not None else deadline
+    )
     try:
         yield
     finally:
