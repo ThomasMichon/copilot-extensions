@@ -62,6 +62,12 @@ For an incumbent SDK read, qualifying provider observation within that bound
 reports fresh. This means a recent account observation, **not** a ledger
 settlement watermark or proof that the latest inference charge is included.
 
+Unlimited entitlements pass these same observation checks before reporting
+`unlimited`: missing evidence is unavailable, old evidence is stale, and
+future or post-acquisition evidence is refused. The observed timestamp and
+freshness remain visible without requiring finite counters or reset arithmetic.
+Capture evidence remains unverified even when its timestamp passes the checks.
+
 The provider's `budgetMetadata.resetAtEpochMs` is evaluated separately from
 `snapshots[category].resetDateEpochMs`. Estimated, missing, zero, past, and
 malformed reset evidence cannot supply a forecast horizon. A known nonzero

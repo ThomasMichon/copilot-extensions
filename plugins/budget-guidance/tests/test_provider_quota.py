@@ -174,6 +174,75 @@ def test_later_evaluation_cannot_validate_an_impossible_capture_observation_time
     assert "provider-observation-after-acquisition" in result["diagnostics"]
 
 
+@pytest.mark.parametrize(
+    "observed,evaluated,availability,diagnostic",
+    [
+        (None, AT, "unavailable", "provider-observation-time-unknown"),
+        (AT - timedelta(seconds=301), AT, "stale", "provider-observation-stale"),
+        (AT, AT - timedelta(seconds=1), "unavailable", "provider-observation-is-in-the-future"),
+        (AT + timedelta(seconds=10), AT + timedelta(seconds=20),
+         "unavailable", "provider-observation-after-acquisition"),
+    ],
+)
+def test_unlimited_provider_evidence_requires_valid_observation(
+    observed, evaluated, availability, diagnostic,
+) -> None:
+    raw = projection()
+    raw["providerQuotas"][0]["budgetMetadata"] = {"unlimited": True}
+    raw["providerQuotas"][0]["observedAt"] = observed.isoformat() if observed else None
+    result = normalize(raw, evaluated_at=evaluated)
+    assert result["availability"] == availability
+    assert diagnostic in result["diagnostics"]
+    assert result["provider_observed_at"] == (
+        observed.isoformat().replace("+00:00", "Z") if observed else None
+    )
+    assert result["freshness"] == ("stale" if availability == "stale" else "unknown")
+    assert result["remaining"] is None
+    assert result["calculated"] is None
+
+
+@pytest.mark.parametrize("session_owned", [True, False])
+def test_unlimited_provider_evidence_preserves_freshness_without_finite_math(
+    session_owned: bool,
+) -> None:
+    raw = projection()
+    raw["providerQuotas"][0]["budgetMetadata"] = {"unlimited": True}
+    result = normalize(raw, session_owned=session_owned, evaluated_at=AT + timedelta(seconds=300))
+    assert result["availability"] == "unlimited"
+    assert result["freshness"] == ("fresh" if session_owned else "unverified")
+    assert result["provider_observed_at"] == "2030-01-10T00:00:00Z"
+    assert result["allowance"] is None
+    assert result["calculated"] is None
+
+
+def test_unlimited_provider_evidence_rejects_malformed_observation() -> None:
+    raw = projection()
+    raw["providerQuotas"][0]["budgetMetadata"] = {"unlimited": True}
+    raw["providerQuotas"][0]["observedAt"] = "invalid-time"
+    with pytest.raises(ModelError, match="provider observedAt"):
+        normalize(raw)
+
+
+def test_cli_stale_unlimited_provider_evidence_is_not_success(tmp_path, capsys) -> None:
+    raw = projection()
+    raw["providerQuotas"][0]["budgetMetadata"] = {"unlimited": True}
+    path = tmp_path / "capture.json"
+    path.write_text(json.dumps({
+        "schema": "copilot-extensions.copilot-quota-capture", "version": 1,
+        "session_id": "session-example", "runtime_version": "sdk-example",
+        "acquired_at": AT.isoformat(), "projection": raw,
+    }), encoding="utf-8")
+    assert main([
+        "quota", "--capture", str(path), "--session-id", "session-example",
+        "--provider-id", "provider-example",
+        "--at", (AT + timedelta(seconds=301)).isoformat(), "--json",
+    ]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["availability"] == "stale"
+    assert result["freshness"] == "stale"
+    assert result["calculated"] is None
+
+
 @pytest.mark.parametrize("reset", [None, 0, RESET_MS - 86400 * 1000 * 60])
 def test_missing_or_elapsed_provider_reset_is_not_replaced_by_normalized_reset(
     reset: int | None,

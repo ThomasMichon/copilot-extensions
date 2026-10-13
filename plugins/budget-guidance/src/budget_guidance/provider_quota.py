@@ -38,6 +38,31 @@ def _withhold(result: dict[str, Any], diagnostic: str, state: str) -> dict[str, 
     return result
 
 
+def _observation(
+    state: Mapping[str, Any], result: dict[str, Any], *,
+    at: datetime, max_age_seconds: int, session_owned: bool,
+) -> bool:
+    raw_observed = state.get("observedAt")
+    if raw_observed is None:
+        result["diagnostics"].append("provider-observation-time-unknown")
+        return False
+    observed = parse_instant(raw_observed, "provider observedAt")
+    result["provider_observed_at"] = instant_text(observed)
+    acquired = parse_instant(result["acquired_at"], "quota acquired_at")
+    if observed > acquired:
+        _withhold(result, "provider-observation-after-acquisition", "unavailable")
+        return False
+    if observed > at:
+        _withhold(result, "provider-observation-is-in-the-future", "unavailable")
+        return False
+    if at - observed > timedelta(seconds=max_age_seconds):
+        result["freshness"] = "stale"
+        _withhold(result, "provider-observation-stale", "stale")
+        return False
+    result["freshness"] = "fresh" if session_owned else "unverified"
+    return True
+
+
 def _reset(
     metadata: Mapping[str, Any], *, at: datetime, field: str, estimated_field: str
 ) -> tuple[datetime | None, str | None]:
@@ -170,6 +195,10 @@ def normalize_provider_quota(
     if not isinstance(unlimited, bool):
         raise ModelError("provider budget unlimited must be a boolean")
     if unlimited:
+        if not _observation(
+            state, result, at=at, max_age_seconds=max_age_seconds, session_owned=session_owned,
+        ):
+            return result
         result["availability"] = "unlimited"
         diagnostics.append("unlimited-entitlement-not-a-finite-budget")
         return result
@@ -214,21 +243,11 @@ def normalize_provider_quota(
                 if snapshot.get(field) is not None:
                     if quantity(snapshot[field], field) != expected:
                         return _withhold(result, "compatibility-budget-counters-conflict", "contradictory")
-    raw_observed = state.get("observedAt")
-    if raw_observed is None:
-        diagnostics.append("provider-observation-time-unknown")
+    if not _observation(
+        state, result, at=at, max_age_seconds=max_age_seconds, session_owned=session_owned,
+    ):
         return result
-    observed = parse_instant(raw_observed, "provider observedAt")
-    result["provider_observed_at"] = instant_text(observed)
-    acquired = parse_instant(result["acquired_at"], "quota acquired_at")
-    if observed > acquired:
-        return _withhold(result, "provider-observation-after-acquisition", "unavailable")
-    if observed > at:
-        return _withhold(result, "provider-observation-is-in-the-future", "unavailable")
-    if at - observed > timedelta(seconds=max_age_seconds):
-        result["freshness"] = "stale"
-        return _withhold(result, "provider-observation-stale", "stale")
-    result["freshness"] = "fresh" if session_owned else "unverified"
+    observed = parse_instant(result["provider_observed_at"], "provider observedAt")
     reset, reset_diagnostic = _reset(
         metadata, at=at, field="resetAtEpochMs", estimated_field="resetEstimated",
     )
