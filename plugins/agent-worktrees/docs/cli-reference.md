@@ -648,7 +648,7 @@ non-zero for every failure:
 |---|---|
 | 0 | Everything required is current (a restart may still be flagged in the status file) |
 | 1 | A step failed (`command_failed`), including a failed Manager cutover |
-| 2 | Usage error |
+| 2 | Usage error. Argument parsing rejects the command before a run starts, so no events or status are written |
 | 3 | A configuration problem must be fixed first (for example a missing PowerShell, installer or engine, an invalid installer deadline, or an invalid installation context) |
 | 4 | Authentication is required |
 | 5 | Blocked by contention: a lock that timed out, a file another process holds open (Windows sharing/lock violation), or an installer exit of 75 (the cutover did not complete and the previous generation is still serving). Plain permission or I/O errors are exit 1 (`permission_denied` / `io_error`) |
