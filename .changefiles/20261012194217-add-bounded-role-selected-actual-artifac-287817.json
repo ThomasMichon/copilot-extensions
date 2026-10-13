@@ -1,0 +1,9 @@
+{
+  "comment": "Add bounded role-selected actual artifact integrity preflight without authentication or activation",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

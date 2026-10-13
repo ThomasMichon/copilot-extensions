@@ -147,6 +147,17 @@ Vision reconciliation: closes the first contract portion of machine-fleet
 Ordinary standalone client planning remains unchanged. Live lifecycle, signed
 release distribution and node/Gateway operation remain pending.
 
+### Actual artifact integrity
+
+The separately invokable, read-only
+[role-selected artifact preflight](docs/artifact-preflight.md) hashes actual
+bounded local files against that same manifest:
+`python -m fleet_manager.artifacts --release release.json --sources sources.json --role client`.
+It reports `integrity-match`, not installed/active/ready or authenticated.
+It never reads unselected server artifacts, installs packages or authorizes
+activation. Signed release trust and owned immutable staging remain pending;
+the independently owned client lifecycle/diagnostics lane remains #6424.
+
 ## Operation and receipt shapes
 
 The first [operation contract](docs/operation-contract.md) adds immutable,
