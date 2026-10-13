@@ -5041,3 +5041,15 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   behavioral acceptance gate before blocking enforcement. This reconciles
   architectural documentation only; no runtime implementation, activation,
   or diagnostic acceptance evidence is added.
+
+### 2026-10-12 — Actionable diagnostic inventory and enforcement mechanism
+
+- Linked the canonical pointer publishers and the vendoring tool's copy
+  inventories from the single diagnostic prerequisite. Doctor and probe
+  wrappers are classified by their selected implementation and transitive
+  calls, not by a read-only-sounding command name.
+- Identified the future blocking mechanism as the guard's `--strict` CI
+  invocation, still gated by Phase 6/Phase 8 acceptance. No blocking guard or
+  diagnostic implementation is enabled by this documentation change.
+- Separated the non-cell global-command requirement from the attributable
+  project-command publication/PATH requirement in the launcher inventory.

@@ -427,9 +427,10 @@ forms is a prerequisite for making it blocking in Phase 6.
    contracts in their owning runtime phases.
 5. In Phase 6, attribute legacy state, verify health and rollback, retire
    generic global wrappers only for activated marketplace-cell installations,
-   preserve supported user-global commands on non-cell hosts and attributable project-command publication
-   and its PATH contract, add ownership-scoped guard allowances, broaden the
-   guard to cover known invisible forms, and then make it blocking.
+   and preserve supported user-global commands on non-cell hosts.
+   Preserve attributable project-command publication and its PATH contract
+   in both modes. Add ownership-scoped guard allowances and coverage for
+   known invisible forms before enabling blocking enforcement.
 
 ## Completion rule
 

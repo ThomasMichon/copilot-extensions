@@ -275,7 +275,10 @@ root or singleton that later phases need to discover and unwind.
 It is report-only while producers migrate; `--verbose` and `--json` expose
 categorized file/line findings. Blocking enforcement remains deferred until
 behavioral acceptance is complete and every remaining finding is fixed or has
-an explicit, narrow disposition. Supported own-payload placement on non-cell
+an explicit, narrow disposition. The enforcement mechanism is the guard's
+`--strict` mode in CI; Phase 6 enables that blocking invocation only after the
+Phase 8 acceptance gate is met. This document does not enable it.
+Supported own-payload placement on non-cell
 hosts is not a retirement requirement or a reason to use a blanket installer
 allowance. A compatibility exception must carry an inline
 `marketplace-isolation: allow <reason>` marker so the reason remains auditable.

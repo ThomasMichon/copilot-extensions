@@ -35,6 +35,29 @@ or `probe-legacy` resolution paths on persistent hosts, including doctor wrapper
 that reach them. Inspect existing evidence without executing those paths;
 exercise the diagnostic implementations only in disposable environments.
 
+The source inventory for that restriction is:
+
+- Python: [`_installation_context_mode_cli.py`](../../../libs/installation-context/_installation_context_mode_cli.py)
+  resolves diagnostic mode and calls `_publish_runtime_root_pointer`, defined
+  in [`_installation_context_files.py`](../../../libs/installation-context/_installation_context_files.py).
+- PowerShell: [`installation-context.ps1`](../../../libs/installation-context/installation-context.ps1)
+  calls `Publish-RuntimeRootPointer` from its `status` branch.
+- No-Python POSIX: [`installation-context.sh`](../../../libs/installation-context/installation-context.sh)
+  calls `publish_runtime_root_pointer` from its `status` branch.
+- Derived copies: [`tools/sync-installation-context.py`](../../../tools/sync-installation-context.py)
+  owns the `FILES`, `ADOPTERS`, `STANDALONE_PYTHON_ADOPTERS`, and `vendor_pairs()`
+  inventories. They identify standalone payload copies under
+  `plugins/<adopter>/scripts/installation-context/`, packaged Python copies
+  under `plugins/<adopter>/src/<package>/`, and the standalone Manager copies
+  under `worktree-manager/src/worktree_manager/`.
+
+This is a source-inspection route, not permission to run a status/probe command
+or the vendoring tool. Trace each doctor or `probe-legacy` wrapper to the
+selected implementation and its transitive calls; a wrapper name or an
+apparently read-only outer command does not exempt a call to these publishers.
+The acceptance inventory must account for these copies and affected wrappers
+before the restriction is lifted.
+
 **Verified read-only** means all of the following evidence exists for the
 implementation being invoked:
 
