@@ -396,6 +396,13 @@ def main() -> int:
         REPO = args.repository.resolve()
         if not REPO.is_dir():
             parser.error("--repository must name a checkout directory")
+        root = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], cwd=REPO,
+            capture_output=True, text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if root.returncode != 0 or Path(root.stdout.strip()).resolve() != REPO:
+            parser.error("--repository must name a Git checkout root")
         BASELINE_PATH = REPO / "tools" / "module-size-baseline.json"
         if (
             BASELINE_PATH.is_symlink()
@@ -469,6 +476,9 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         sys.exit(main())
+    except subprocess.CalledProcessError as exc:
+        print(f"[FAIL] module size: {exc.stderr.strip() if exc.stderr else exc}", file=sys.stderr)
+        sys.exit(1)
     except (ValueError, OSError) as exc:
         print(f"[FAIL] module size: {exc}", file=sys.stderr)
         sys.exit(1)

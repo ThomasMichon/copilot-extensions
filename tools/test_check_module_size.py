@@ -85,8 +85,12 @@ def test_a_small_file_passes(repo: Path):
 def test_trusted_tooling_can_refresh_a_poisoned_target_checkout(repo: Path):
     _write_lines(repo, "src/large.py", 1200)
     _write_baseline(repo, {"src/large.py": 1100})
-    (repo / "tools" / SCRIPT.name).write_text("raise RuntimeError('candidate tooling executed')\n")
-    (repo / "json.py").write_text("raise RuntimeError('candidate import executed')\n")
+    (repo / "tools" / SCRIPT.name).write_text(
+        "raise RuntimeError('candidate tooling executed')\n", encoding="utf-8",
+    )
+    (repo / "json.py").write_text(
+        "raise RuntimeError('candidate import executed')\n", encoding="utf-8",
+    )
     _commit_all(repo)
     result = subprocess.run(
         [sys.executable, "-I", str(SCRIPT), "--repository", str(repo),
@@ -194,7 +198,7 @@ def test_nonfile_target_baseline_is_a_controlled_cli_failure(repo: Path):
 
 
 def test_invalid_baseline_is_a_controlled_cli_failure(repo: Path):
-    (repo / "tools/module-size-baseline.json").write_text("{invalid\n")
+    (repo / "tools/module-size-baseline.json").write_text("{invalid\n", encoding="utf-8")
     _commit_all(repo)
     result = _run(repo)
     assert result.returncode == 1
@@ -206,6 +210,26 @@ def test_missing_target_checkout_is_a_usage_error(repo: Path):
     result = _run(repo, "--repository", str(repo / "missing"))
     assert result.returncode == 2
     assert "--repository must name a checkout directory" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize("inside_checkout", [False, True])
+def test_target_must_be_a_git_checkout_root(repo: Path, inside_checkout):
+    target = (repo if inside_checkout else repo.parent) / "not-a-checkout-root"
+    target.mkdir()
+    result = _run(repo, "--repository", str(target))
+    assert result.returncode == 2
+    assert "--repository must name a Git checkout root" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_git_failure_is_a_controlled_cli_failure(repo: Path):
+    _write_lines(repo, "src/small.py", 50)
+    _commit_all(repo)
+    result = _run(repo, "--changed-since", "missing-ref")
+    assert result.returncode == 1
+    assert "[FAIL] module size:" in result.stderr
+    assert "missing-ref" in result.stderr
     assert "Traceback" not in result.stderr
 
 
