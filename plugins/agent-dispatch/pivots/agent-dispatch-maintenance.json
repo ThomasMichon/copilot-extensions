@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "label": "Maintenance tasks",
-  "after": "Tasks",
+  "after": "Worktrees",
   "list": ["agent-dispatch-board", "--machine", "{machine}", "--category", "maintenance"],
   "stream": true,
   "subscribe": true,

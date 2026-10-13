@@ -136,6 +136,42 @@ def _payload(tmp_path, name="payload"):
     return root
 
 
+@pytest.mark.guard
+@pytest.mark.parametrize("existing", ["fresh", "prior-v1", "owned-v3"])
+def test_dispatch_category_actual_total_order_preserves_builtin_owner_and_ids(tmp_path, existing):
+    root = _payload(tmp_path)
+    registry = tmp_path / "registry"
+    if existing == "prior-v1":
+        registry.mkdir()
+        (registry / NAMES[0]).write_text(json.dumps(_prior_tasks()), encoding="utf-8")
+    elif existing == "owned-v3":
+        pivots.scan_pivot_registry(registry, activation_report=_activation(root))
+    pointers_before = (
+        {name: (registry / name).read_bytes() for name in NAMES}
+        if existing == "owned-v3"
+        else None
+    )
+    report = pivots.scan_pivot_registry(registry, activation_report=_activation(root))
+    ordered = pivots.order_pivots(("Worktrees", "Maintenance", "Profiles"), report.pivots)
+    assert [item["label"] for item in ordered] == [
+        "Worktrees",
+        "Tasks",
+        "Maintenance tasks",
+        "Maintenance",
+        "Profiles",
+    ]
+    builtin = next(item for item in ordered if item["label"] == "Maintenance")
+    assert builtin["kind"] == "maintenance" and builtin["pivot"] is None
+    assert {item["pivot"].name for item in ordered if item["kind"] == "registered"} == {
+        name[:-5] for name in NAMES
+    }
+    assert len(report.contributions) == 2
+    if pointers_before is not None:
+        assert {name: (registry / name).read_bytes() for name in NAMES} == pointers_before
+    again = pivots.scan_pivot_registry(registry, activation_report=_activation(root))
+    assert [pivot.name for pivot in again.pivots] == [pivot.name for pivot in report.pivots]
+
+
 def _activation(root=None):
     decisions = {}
     if root is not None:

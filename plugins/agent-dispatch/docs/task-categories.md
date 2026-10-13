@@ -78,6 +78,11 @@ publishing raw manifests or changing activation/root-identity checks.
 The Worktree Manager's built-in **Maintenance** view continues to own worktree
 maintenance and its existing controls. The task contribution's distinct
 **Maintenance tasks** caption avoids colliding with or taking over that view.
+Both task templates anchor to Worktrees. The consumer discovers the maintenance
+filename first, then inserts Tasks at that same existing anchor, producing
+`Worktrees → Tasks → Maintenance tasks → Maintenance → Profiles`.
+Filenames and logical IDs do not change, so existing owned v3 pointers remain
+valid without leaving a stale renamed entry or a duplicate task view.
 
 ## Schedule producers
 
