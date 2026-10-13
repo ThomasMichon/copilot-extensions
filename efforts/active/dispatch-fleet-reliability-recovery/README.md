@@ -284,3 +284,6 @@ requested contract.
   test before merge. No installation behavior changes, so a fresh-machine
   installer scenario is not applicable. No admitted external Linux venue is
   available; the existing native Linux CI lane is the integration witness.
+- The non-blocking platform documentation finding now distinguishes native
+  Windows and Linux evidence from unverified macOS custody. Missing unreaped
+  child primitives refuse before spawning; no unsafe fallback is promised.

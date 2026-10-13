@@ -818,6 +818,11 @@ acquiring its schedule lease. Loading a builtin emitter and validating a
 standby tick check declaration shape only; registry, worker-identity and
 filesystem resolution occur in the held tick.
 
+Windows Job custody has native Windows coverage; Linux unreaped-leader custody
+has native Linux coverage. macOS custody remains unverified: named-resource
+probes require Python's `waitid` and `WNOWAIT` support and refuse before spawning
+when those primitives are absent. There is no PID-only or uncustodied fallback.
+
 Repository and effort loops may set `execution_repo: tools` to bind their
 script/worker-identity context to a registered repository. This is independent
 of `repo`, which continues to identify the forge/task lane. For example:
