@@ -123,6 +123,18 @@ test("indented or container-prefixed fence content cannot close another fence", 
   assert.equal(gate.validate("    ```not a fence\n\n" + marker), null);
 });
 
+test("blockquote examples neither satisfy nor conflict with standalone metadata", () => {
+  const native = "<!-- gh-aw-workflow-id: maintenance -->";
+  for (const example of [
+    "> " + marker, "> > " + marker, "   > " + native,
+    "> Example\n>\n> " + marker + "\n> " + native,
+  ]) {
+    assert.ok(gate.validate(example));
+    assert.equal(gate.validate(example + "\n\n" + marker), null);
+    assert.equal(gate.validate(example + "\n\n" + native), null);
+  }
+});
+
 test("current description is reread and body-only repairs change the verdict", async () => {
   let current = pr("");
   const github = { rest: { pulls: { get: async () => ({ data: current }) } } };
