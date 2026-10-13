@@ -329,3 +329,27 @@ and descendants through shared procutil. The next reviewed slice preserves
 stdlib-only default consumers via optional metrics and explicitly represents
 partial coverage and unavailable samples. Numeric CPU budgets and any
 process termination policy have not been approved by this selection.
+
+### 2026-10-13 - Optional CPU observation implementation prepared
+
+The observation contract landed in #6481. Shared procutil now offers an
+optional psutil-backed, read-only sampler without importing that dependency
+through default helpers. Root and descendant identities are revalidated with
+fresh process objects; observed cumulative CPU maxima are lower bounds, not
+exhaustive tree totals. Discovery attempts and retained identities are capped,
+sampling is single-flight and cached for one second, and denied/missing/reused
+identities and counter regressions remain explicit.
+
+The complete procutil suite passed 78 tests on Windows, including a native
+root/child CPU fixture and graceful completion. Shared pytest-root cleanup
+initially encountered an unrelated access-denied path; a fresh task-local
+base directory avoided touching that shared path and validation passed.
+Full library lint, install-contract and exact source mirror checks passed.
+Linux proof, reader lifecycle wiring, cumulative role export, enforced CPU
+budgets and process-tree reclamation remain open; this library slice does not
+claim those outcomes. All 13 physical/pointer consumers carry release entries.
+
+Sampling uses a running native future rather than treating a cancelled
+asyncio task as proof that the observation thread ended. A loop-shutdown
+regression proves a later loop joins the original holder without another
+native sample. No new resident process or termination surface is introduced.
