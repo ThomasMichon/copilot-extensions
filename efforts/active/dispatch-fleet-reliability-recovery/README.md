@@ -414,3 +414,20 @@ requested contract.
   coverage passes 164 tests. Fatal lint, module ceilings, install contract and
   whitespace checks pass. This remains source validation, not deployment or
   independent native watchdog custody.
+
+### 2026-10-13 - Retirement finalization and transient reconciliation failures
+
+- Four failed-before regressions reproduced a second runtime hash after
+  irreversible retirement, a permanently poisoned legacy receipt future, and
+  healthy-looking observations with a future cycle start.
+- Withdrawal now carries the prevalidated selection into an exact metadata-only
+  under-lock recheck. Final pin withdrawal/readback share a separate one-second
+  bookkeeping budget; no partial integrity result is accepted. Changed or
+  foreign metadata preserves the pin and cannot cross the mutation boundary.
+- Completed legacy futures clear on every outcome, preserving only pending work.
+  Worker-raised timeouts remain visible failures. Future cycle starts return an
+  unknown observation and never grant recovery authority.
+- Retention, bounded receipt, health and native lifecycle coverage passes 144
+  tests with two platform skips. Final supervisor, CLI, publication and metadata
+  fence coverage passes 146 tests. No production state or lifecycle ownership
+  changes are claimed.

@@ -301,8 +301,9 @@ class ReceiptReconciliation:
                     state = "superseded"
                     return
                 snapshot = self.selected_managed(rid)
+                validated = None
                 if snapshot is not None:
-                    self._managed_retention().validate_withdrawal(
+                    validated = self._managed_retention().validate_withdrawal(
                         rid, self.receipt_dir, deadline=operation["deadline"],
                     )
                 if self.monotonic() >= operation["deadline"]:
@@ -317,10 +318,15 @@ class ReceiptReconciliation:
                     self._delete_receipt(rid)
                     if self._read_receipt(rid) is not None:
                         raise lifecycle.CompanionIndeterminate("receipt deletion is not confirmed")
+                # Retirement may consume the execution budget; finish only exact metadata.
+                completion_deadline = self.monotonic() + 1
                 if generation["selection"] is not None:
-                    self.forget_managed(rid, _operation=operation)
+                    self.forget_managed(
+                        rid, _operation=operation, _validated=validated,
+                        _deadline=completion_deadline,
+                    )
                 if not self._managed_retention().selection_withdrawn(
-                    rid, self.receipt_dir, deadline=operation["deadline"],
+                    rid, self.receipt_dir, deadline=completion_deadline,
                 ):
                     raise lifecycle.CompanionIndeterminate("managed selection withdrawal is not confirmed")
                 state = "complete"

@@ -698,6 +698,115 @@ def test_root_contention_honors_operation_deadline(tmp_path):
     assert h.record_paths("selections")
 
 
+def test_retirement_finishes_metadata_without_rehashing_expired_execution_budget(
+    tmp_path, monkeypatch,
+):
+    from agent_dispatch.managed_runtime import _canonical_digest
+
+    h = RetentionHarness(tmp_path)
+    snapshot = h.generation("1")
+    rid = snapshot.to_dict()["registration"]["id"]
+    controller = DefaultCompanionController(h.state, retention=h.retention, token_source=h.tokens.get)
+    controller._publish_selection(snapshot)
+    _receipt(controller, rid)
+    generation = controller._receipt_generation(rid)
+    operation = {
+        "schema_version": 1, "registration_id": rid, "generation": generation,
+        "generation_digest": _canonical_digest(generation), "state": "pending",
+        "owner_pid": os.getpid(), "owner_start_token": h.tokens[os.getpid()],
+        "started_at": time.time(), "observed_at": time.time(),
+        "deadline": time.monotonic() + 2,
+    }
+    controller._write_operation(rid, operation)
+    retired = []
+    hashes = []
+    original_digest = managed_retention._tree_digest
+
+    def digest(*args, **kwargs):
+        assert retired == [], "runtime integrity must precede irreversible retirement"
+        hashes.append(1)
+        return original_digest(*args, **kwargs)
+
+    def retire(*args, **kwargs):
+        retired.append(1)
+        operation["deadline"] = time.monotonic() - 1
+
+    monkeypatch.setattr(managed_retention, "_tree_digest", digest)
+    monkeypatch.setattr(controller, "_retire_receipt", retire)
+    controller._reconcile_receipt_generation(rid, operation)
+    assert hashes
+    assert retired == [1]
+    assert controller._operation_record(rid)["state"] == "complete"
+    assert controller._receipt_generation(rid) == {"receipt": None, "selection": None}
+    assert h.record_paths("selections") == []
+    assert snapshot.runtimes[0].cell.exists()
+
+
+@pytest.mark.parametrize("error", [CompanionIndeterminate, TimeoutError])
+def test_legacy_receipt_failure_clears_completed_future_for_next_cycle(error):
+    controller = FakeCompanionController()
+    attempts = []
+
+    def reconcile(ids):
+        attempts.append(ids)
+        if len(attempts) == 1:
+            raise error("transient legacy receipt failure")
+
+    controller.reconcile_receipts = reconcile
+    daemon = SupervisorDaemon(
+        FakeClient([]), "host", launcher=FakeLauncher(),
+        companion_controller=controller, reconcile_call_budget=1,
+    )
+    try:
+        daemon._reconcile_deadline = time.monotonic() + 2
+        with pytest.raises(error, match="transient legacy"):
+            daemon._reconcile_companion_receipts(set())
+        assert daemon._receipt_reconcile_future is None
+        daemon._reconcile_deadline = time.monotonic() + 2
+        daemon._reconcile_companion_receipts(set())
+        assert len(attempts) == 2
+        assert daemon._receipt_reconcile_future is None
+    finally:
+        daemon.shutdown()
+
+
+@pytest.mark.parametrize("mutation", ["replacement", "foreign-receipt"])
+def test_validated_withdrawal_rechecks_exact_metadata_before_unlink(tmp_path, mutation):
+    h = RetentionHarness(tmp_path)
+    first = h.generation("1")
+    rid = first.to_dict()["registration"]["id"]
+    h.retention.select(first, h.state)
+    validated = h.retention.validate_withdrawal(rid, h.state, deadline=time.monotonic() + 2)
+    target_state = h.state
+    if mutation == "replacement":
+        h.retention.select(h.generation("2"), h.state)
+        message = "changed during validation"
+    else:
+        target_state = h.state.with_name("other-receipt")
+        message = "different selection"
+    pins = {path: path.read_bytes() for path in h.record_paths("selections")}
+    with pytest.raises(ManagedRuntimeError, match=message):
+        with h.retention.withdraw_selection(
+            rid, target_state, validated=validated, deadline=time.monotonic() + 1,
+        ):
+            pytest.fail("invalid metadata reached the mutation boundary")
+    assert {path: path.read_bytes() for path in h.record_paths("selections")} == pins
+
+
+@pytest.mark.parametrize("finished", [None, 201.0])
+def test_progress_observation_refuses_future_cycle_start(finished):
+    observation = supervisor_progress_observation(
+        {
+            "generation": {"pid": 123, "start_token": "owner"},
+            "cycle_started_at": 200.0, "updated_at": finished,
+        },
+        token_source=lambda pid: "owner", now=100.0,
+    )
+    assert observation["state"] == "unknown"
+    assert observation["recovery_permitted"] is False
+    assert observation["retain_authority"] is True
+
+
 def test_integrity_deadline_never_accepts_partial_digest(tmp_path):
     (tmp_path / "file").write_bytes(b"content")
     started = time.monotonic()

@@ -33,6 +33,7 @@ from .managed_runtime import (
     _read_metadata,
 )
 from .managed_retention import ManagedRuntimeRetention
+from .managed_withdrawal import WithdrawalSnapshot
 from .companion_reconcile import ReceiptReconciliation
 from .companion_capture import _run_captured
 from .registrations import (
@@ -1075,12 +1076,15 @@ class DefaultCompanionController(ReceiptReconciliation):
             raise CompanionError("selected managed launch identity is inconsistent")
         return snapshot
 
-    def forget_managed(self, registration_id: str, *, _operation: dict | None = None) -> None:
+    def forget_managed(self, registration_id: str, *, _operation: dict | None = None,
+                       _validated: WithdrawalSnapshot | None = None,
+                       _deadline: float | None = None) -> None:
         """Withdraw selection, not its published runtime cells."""
         if _operation is None:
             self._assert_receipt_available(registration_id)
-        kwargs = {} if _operation is None else {"deadline": _operation["deadline"]}
-        with self._managed_retention().withdraw_selection(registration_id, self.receipt_dir, **kwargs):
+        with self._managed_retention().withdraw_selection(
+            registration_id, self.receipt_dir, deadline=_deadline, validated=_validated,
+        ):
             if _operation is not None and (
                 self._receipt_generation(registration_id)["selection"]
                 != _operation["generation"]["selection"]

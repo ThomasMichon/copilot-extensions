@@ -49,6 +49,9 @@ Completed owner probes are discarded on every outcome, so a transient probe
 error or unusable token can retry in the same daemon. Receipt futures enter
 shutdown accounting even when a later record aborts the controller's pass;
 partial scheduling cannot be reported as a clean drain.
+Completed legacy reconciliation futures are cleared on success or failure;
+only genuinely pending work is retained. A worker-raised timeout is surfaced as
+a failed operation, not mistaken for a still-running wait.
 Shutdown retires bounded executors and clears their active references even when
 work misses the grace window. A failed successor spawn can reclaim the singleton
 and create usable replacement pools; original futures and publication/receipt
@@ -62,6 +65,12 @@ outside the root-wide bookkeeping lock. Before withdrawal the same scope and
 metadata are revalidated under that lock. Full content checks remain mandatory,
 including runtime caches; an expired integrity deadline does not accept a
 partial digest. Unknown outcomes are not authorization to delete caches or pins.
+Receipt retirement carries that verified snapshot into the final metadata-only
+scope, presence and record check; it never rehashes a runtime after irreversible
+retirement. Final pin withdrawal and absence verification share a separate
+one-second bookkeeping budget, so retirement exhausting the execution budget
+does not itself strand an otherwise valid selection. Metadata changes, lock
+contention or write failures still retain unknown authority.
 Captured command execution and post-timeout pipe draining both have deadlines.
 
 Runtime status records the master's PID/start token, cycle, phase and receipt
@@ -75,7 +84,8 @@ limited to one warning per category per 30 seconds. Unavailable receipt progress
 is marked unknown (`null` with an observation error), not a confirmed empty list.
 Data/state failures in the final summary follow the same classified best-effort
 rules. The observer uses only finite, non-future progress timestamps from the
-current cycle and matching generation; a fresh phase can distinguish an advancing
+current cycle and matching generation; future cycle starts are unknown, not
+healthy progress. A fresh phase can distinguish an advancing
 slow cycle from a wedge. A superseded writer cannot overwrite another generation's
 progress. These observations still confer no recovery authority.
 Collection and filesystem publication are also off the master: one tracked

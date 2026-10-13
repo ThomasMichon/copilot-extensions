@@ -45,7 +45,7 @@ def supervisor_progress_observation(
     ):
         return result
     observed_now = time.time() if now is None else now
-    if not math.isfinite(observed_now):
+    if not math.isfinite(observed_now) or started > observed_now:
         return result
     progress = runtime_status.get("progress")
     last_progress = started

@@ -323,6 +323,9 @@ class BoundedReconciliation:
                 0.0, (self._reconcile_deadline or time.monotonic()) - time.monotonic(),
             ))
         except TimeoutError:
+            if self._receipt_reconcile_future.done():
+                raise
             log.warning("companion receipt reconciliation remains pending")
-        else:
-            self._receipt_reconcile_future = None
+        finally:
+            if self._receipt_reconcile_future.done():
+                self._receipt_reconcile_future = None

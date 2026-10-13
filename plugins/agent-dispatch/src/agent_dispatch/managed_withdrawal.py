@@ -6,12 +6,21 @@ import os
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from .managed_runtime import (
     ManagedRuntimeError, _assert_safe_descendant, _ensure_safe_root, _integrity_budget,
     _reject_link, _RootLock,
 )
+
+
+@dataclass(frozen=True)
+class WithdrawalSnapshot:
+    root: Path
+    path: Path
+    present: bool
+    record: dict | None
 
 
 class SelectionWithdrawal:
@@ -36,15 +45,15 @@ class SelectionWithdrawal:
             verified, _ = self._check_record(path, "selections", deadline=deadline)
             if verified != record:
                 raise ManagedRuntimeError("managed selection changed during validation")
-        return root, path, present, record
+        return WithdrawalSnapshot(root, path, present, record)
 
     def validate_withdrawal(
         self, registration_id: str, receipt_dir: Path, *, deadline: float | None = None
-    ) -> None:
+    ) -> WithdrawalSnapshot | None:
         if not self.root.exists():
             _reject_link(self.root, description="managed retention root")
             return
-        self._withdrawal_snapshot(registration_id, receipt_dir, deadline)
+        return self._withdrawal_snapshot(registration_id, receipt_dir, deadline)
 
     def selection_withdrawn(
         self, registration_id: str, receipt_dir: Path, *, deadline: float
@@ -79,14 +88,20 @@ class SelectionWithdrawal:
 
     @contextmanager
     def withdraw_selection(
-        self, registration_id: str, receipt_dir: Path, *, deadline: float | None = None
+        self, registration_id: str, receipt_dir: Path, *, deadline: float | None = None,
+        validated: WithdrawalSnapshot | None = None,
     ) -> Iterator[None]:
         """Revalidate exact metadata under the owner lock before changing either pin."""
         if not self.root.exists():
             _reject_link(self.root, description="managed retention root")
             yield
             return
-        root, path, present, record = self._withdrawal_snapshot(registration_id, receipt_dir, deadline)
+        snapshot = validated or self._withdrawal_snapshot(registration_id, receipt_dir, deadline)
+        root, path, present, record = snapshot.root, snapshot.path, snapshot.present, snapshot.record
+        if root != _ensure_safe_root(self.root) or path != self._path(
+            "selections", self._scope(receipt_dir, registration_id),
+        ):
+            raise ManagedRuntimeError("validated withdrawal belongs to a different selection")
         with _RootLock(root, **self._lock_budget(deadline)):
             if (path.exists() or path.is_symlink()) != present:
                 raise ManagedRuntimeError("managed selection changed during validation")
