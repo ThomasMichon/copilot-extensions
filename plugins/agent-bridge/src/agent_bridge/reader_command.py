@@ -59,7 +59,7 @@ class OwnedReaderCommand:
     def __init__(self) -> None:
         self.receipt: Future[ProcessIdentity | None] = Future()
         self.receipt.set_running_or_notify_cancel()
-        self.wall_seconds = 0.0
+        self.wall_seconds: float | None = None
 
     def run(self, cmd: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
         started = time.monotonic()

@@ -433,3 +433,9 @@ Command and sampling task callbacks consume and explicitly log late failures
 without arguments or captured output; normal awaiters still receive errors.
 Late-completion cadence and cancelled-observer failure regressions pass, as
 does the complete focused selection (137 tests).
+
+Wall telemetry now uses the command worker's own completion-written duration,
+not the asyncio task's done state. A cancelled command task can leave its
+thread alive, so that case reports unknown duration rather than invented zero.
+The dedicated thread-backed cancellation regression and the complete focused
+selection pass (138 tests).

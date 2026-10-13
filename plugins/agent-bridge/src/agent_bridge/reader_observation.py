@@ -174,7 +174,7 @@ class ReaderCpuObservation:
                 issues.append(issue)
             if root is None:
                 issues.append(CpuIssue(0, "spawn_receipt_unavailable"))
-            if not command.done():
+            if not command.done() or command.cancelled():
                 issues.append(CpuIssue(root.pid if root is not None else 0, "observer_cancelled"))
             if observation is None and not issues:
                 issues.append(
@@ -190,7 +190,7 @@ class ReaderCpuObservation:
                     "namespace": self._namespace,
                     "pid": root.pid if root is not None else None,
                     "created_at": root.created_at if root is not None else None,
-                    "wall_seconds": owned.wall_seconds if command.done() else None,
+                    "wall_seconds": owned.wall_seconds,
                     "observed_cpu_seconds": (
                         observation.observed_cpu_seconds if observation is not None else None
                     ),

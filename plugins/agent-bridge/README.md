@@ -110,6 +110,8 @@ time, native wall duration, `observed_cpu_seconds`, `coverage`, `truncated` and
 bounded PID/reason `issues`. No arguments, output or paths are emitted.
 CPU values are observed lower bounds, not exhaustive tree totals; unavailable,
 failed or rate-limited measurements remain `null` with explicit uncertainty.
+Wall duration remains `null` until the native command finishes; a cancelled
+asyncio task does not establish thread/process completion.
 Measurement failure does not discard valid enumeration. Resolve, ensure-ready
 and target-repo calls are not instrumented. No CPU admission policy, process
 registry or new termination behavior is implied; existing execution deadlines

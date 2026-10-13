@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Coroutine
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -304,6 +305,58 @@ async def test_detached_native_and_sample_failures_are_consumed(
 
 
 @pytest.mark.asyncio
+async def test_cancelled_command_task_does_not_invent_native_wall_duration(
+    monkeypatch: pytest.MonkeyPatch,
+    events: list[dict],
+) -> None:
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+
+    def run(
+        self: reader_command.OwnedReaderCommand,
+        cmd: list[str],
+        *,
+        timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        began = time.monotonic()
+        try:
+            self.receipt.set_result(ProcessIdentity(123, None))
+            started.set()
+            assert release.wait(10)
+            return subprocess.CompletedProcess(cmd, 0, "[]", "")
+        finally:
+            self.wall_seconds = time.monotonic() - began
+            finished.set()
+
+    real_create_task = asyncio.create_task
+    tasks: list[asyncio.Task] = []
+
+    def create_task(coro: Coroutine) -> asyncio.Task:
+        task = real_create_task(coro)
+        tasks.append(task)
+        return task
+
+    monkeypatch.setattr(reader_command.OwnedReaderCommand, "run", run)
+    monkeypatch.setattr(reader_observation.asyncio, "create_task", create_task)
+    observer = reader_observation.ReaderCpuObservation("test")
+    read = real_create_task(observer.run(["fake"], timeout=3))
+    try:
+        async with asyncio.timeout(2):
+            while not started.is_set():
+                await asyncio.sleep(0.001)
+        tasks[0].cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await read
+        assert not finished.is_set()
+        assert events[0]["wall_seconds"] is None
+        assert "observer_cancelled" in {item["reason"] for item in events[0]["issues"]}
+    finally:
+        release.set()
+        async with asyncio.timeout(2):
+            while not finished.is_set():
+                await asyncio.sleep(0.001)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("replace_provider", [False, True])
 async def test_stuck_sample_retained_after_command_and_provider_replacement(
     monkeypatch: pytest.MonkeyPatch,
@@ -420,6 +473,7 @@ async def test_cache_captures_sample_started_after_outer_scan_cancelled(
 def test_owned_receipt_precedes_communicate_and_reap(monkeypatch: pytest.MonkeyPatch) -> None:
     owned = reader_command.OwnedReaderCommand()
     assert not owned.receipt.cancel()
+    assert owned.wall_seconds is None
     process = Mock(pid=123, returncode=0)
     process.__enter__ = Mock(return_value=process)
     process.__exit__ = Mock(return_value=False)
@@ -442,6 +496,7 @@ def test_owned_receipt_precedes_communicate_and_reap(monkeypatch: pytest.MonkeyP
     process.communicate.side_effect = communicate
     result = owned.run(["provider", "namespace-list"], timeout=3.5)
     assert (result.returncode, result.stdout, result.stderr) == (0, "stdout", "stderr")
+    assert owned.wall_seconds is not None
     process.kill.assert_not_called()
 
 
