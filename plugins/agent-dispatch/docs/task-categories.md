@@ -65,6 +65,9 @@ The plugin installers do not copy schema-v1 payload manifests into the shared
 runtime registry. An absent Picker remains an optional capability, and disabled,
 stale-root or malformed/tampered contributions do not become unowned legacy
 entries. Registry reconciliation and diagnostic cleanup stay consumer-owned.
+The compatibility implementation extends the canonical Picker materializer's
+owned-publication seam with provider-scoped legacy recognition; it does change
+that registry implementation, without adding another registry or alias provider.
 
 Existing canonical schema-v1 Tasks registrations are upgraded by that same
 materializer only when the complete manifest matches the trusted current
@@ -92,6 +95,10 @@ Schedule registration validates an explicitly supplied category before storing
 or updating the entry. Only `work` and `maintenance` are valid; null and other
 values are rejected without changing an existing schedule. Omission preserves
 the compatible ordinary-work default.
+Category-bearing schedule adoption first verifies the running coordinator's
+category capability before sending a registration POST, including explicit
+ordinary-work declarations. This prevents older peers from silently accepting
+an unsupported template. No-category registration retains its legacy wire flow.
 `agent-index/scripts/maintenance_tick.py --schedule-template --repo <lane>
 --machine <host>` prints that producer's explicitly maintenance-category
 schedule entry, including its deployed script reference. It does **not**
@@ -116,6 +123,12 @@ equivalent is `POST /task-categories/classify`, with `repo`, `source`,
 The endpoint uses the coordinator's control credential when configured.
 Unavailable/forbidden control errors identify `category_classify` and emit
 `task.categories_classify_rejected`, not producer-transition events.
+
+Terminal-task reattach forwards the source category unchanged; only legacy
+records with no category field default to work. Original task history and
+attachments remain with that record while the new task binds its recovery
+session. Remote evidence inspection reports unavailable SSH as a concise
+nonzero failure, never a local fallback or an all-clear result.
 Selection beyond the default limit of 500 refuses rather than applying a
 truncated preview; narrow the provenance or deliberately raise the limit.
 

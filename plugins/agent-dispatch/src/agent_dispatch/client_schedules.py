@@ -14,6 +14,8 @@ class ScheduleClientMixin:
         raise NotImplementedError
 
     def register_schedule(self, entry: dict) -> dict:
+        if "category" in entry:
+            self.require_task_categories()
         return self._unwrap(self._http.post("/schedules", json=entry))
 
     def list_schedules(self, *, include_paused: bool = True) -> list[dict]:

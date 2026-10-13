@@ -392,6 +392,26 @@ def test_reattach_happy_path_local():
     assert resumed["host"] is None
 
 
+@pytest.mark.parametrize("category", ["maintenance", "work", None, "legacy-absent"])
+@pytest.mark.guard
+def test_reattach_forwards_category_and_keeps_session_associations(category):
+    old = _task(status="completed", source="manual", origin_ref="health")
+    if category != "legacy-absent":
+        old["category"] = category
+    before = dict(old)
+    client = _FakeClient(get_task=old)
+    result = reattach.reattach(
+        client, "t-1", "sess-1", local_session_verdict=lambda sid: "live", resume=False,
+    )
+    assert client.create_calls[0][1]["category"] == (
+        "work" if category == "legacy-absent" else category
+    )
+    assert client.bind_calls == [("t-2", "local-body:sess-1", "sess-1")]
+    assert client.record_spawn_calls == [("resv-1", "local-body:sess-1", None)]
+    assert result.task_id == "t-2" and result.session_id == "sess-1"
+    assert old == before
+
+
 def test_reattach_retires_source_reservation_when_exclusive_key_shared():
     """`reserve_spawn` fences an `exclusive_key` across every task sharing it;
     a terminal source task's reservation is never auto-released, so reattach

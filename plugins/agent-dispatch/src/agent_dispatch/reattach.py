@@ -319,6 +319,7 @@ def reattach(
     new_task = client.create(
         old_task.get("title") or "",
         repo=old_task.get("repo"),
+        category=old_task.get("category", "work"),
         prompt=new_prompt,
         dedup_key=dedup_key,
         requires=old_task.get("requires") or [],

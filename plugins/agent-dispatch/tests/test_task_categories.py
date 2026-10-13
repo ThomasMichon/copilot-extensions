@@ -251,18 +251,9 @@ def test_native_cli_rpc_first_touch_and_both_pivots(queue):
         return json.loads(result.stdout)
 
     try:
-        ordinary = run("agent_dispatch", "--url", url, "create", "ordinary", "--repo", REPO)
-        upkeep = run(
-            "agent_dispatch",
-            "--url",
-            url,
-            "create",
-            "upkeep",
-            "--repo",
-            REPO,
-            "--category",
-            "maintenance",
-        )
+        with DispatchClient(url) as producer:
+            ordinary = producer.create("ordinary", repo=REPO)
+            upkeep = producer.create("upkeep", repo=REPO, category="maintenance")
         assert ordinary["category"] == "work" and upkeep["category"] == "maintenance"
         assert (
             run("agent_dispatch", "--url", url, "list", "--repo", REPO, "--limit", "1")[0]["id"]
@@ -274,17 +265,16 @@ def test_native_cli_rpc_first_touch_and_both_pivots(queue):
         )
         env["AGENT_DISPATCH_URL"] = url
         env["AGENT_DISPATCH_ENDPOINT"] = url
-        for category, task_id in (("work", ordinary["id"]), ("maintenance", upkeep["id"])):
-            rows = run(
-                "agent_dispatch.board_cli",
-                "--machine",
-                "worker",
-                "--category",
-                category,
-                "--limit",
-                "1",
-            )
-            assert rows[0]["id"] == task_id
+        rows = run(
+            "agent_dispatch.board_cli",
+            "--machine",
+            "worker",
+            "--category",
+            "maintenance",
+            "--limit",
+            "1",
+        )
+        assert rows[0]["id"] == upkeep["id"]
         owner = "worker/worktree"
         queue.claim_one(owner, task_id=upkeep["id"])
         queue.start(upkeep["id"], owner)
@@ -525,3 +515,126 @@ def test_category_control_rejection_uses_its_own_context_and_event(
     assert detail["code"].startswith("category_control_")
     assert events[-1]["type"] == "task.categories_classify_rejected"
     assert all(event["type"] != "producer_scope.transition_rejected" for event in events)
+
+
+@pytest.mark.parametrize("category", ["maintenance", "work", None, "script"])
+@pytest.mark.guard
+def test_schedule_client_blocks_explicit_category_before_old_peer_mutation(queue, category):
+    from fastapi import FastAPI
+
+    legacy = FastAPI()
+    seen = []
+
+    @legacy.get("/health")
+    def health():
+        return {"status": "ok"}
+
+    @legacy.post("/schedules")
+    def register(entry: dict):
+        accepted = {key: value for key, value in entry.items() if key != "category"}
+        queue.register_schedule(accepted)
+        queue.create(accepted["title"], repo=REPO)
+        return {"entry": accepted}
+
+    with TestClient(legacy) as http:
+
+        def exchange(request):
+            seen.append((request.method, request.url.path))
+            response = http.request(
+                request.method,
+                str(request.url),
+                content=request.content,
+                headers=dict(request.headers),
+            )
+            return httpx.Response(response.status_code, json=response.json())
+
+        with DispatchClient("http://legacy", transport=httpx.MockTransport(exchange)) as client:
+            with pytest.raises(DispatchUpgradeRequired):
+                client.register_schedule(
+                    {
+                        "id": "health",
+                        "title": "Health",
+                        "repo": REPO,
+                        "interval_seconds": 60,
+                        "category": category,
+                    }
+                )
+    assert seen == [("GET", "/health")]
+    assert queue.list_schedules() == [] and queue.list() == []
+
+
+@pytest.mark.guard
+def test_schedule_client_ordinary_legacy_registration_keeps_wire_shape():
+    entry = {"id": "health", "title": "Health", "repo": REPO, "interval_seconds": 60}
+    seen = []
+
+    def exchange(request):
+        seen.append((request.method, request.url.path, json.loads(request.content)))
+        return httpx.Response(200, json={"entry": entry})
+
+    with DispatchClient("http://legacy", transport=httpx.MockTransport(exchange)) as client:
+        assert client.register_schedule(entry)["entry"] == entry
+    assert seen == [("POST", "/schedules", entry)]
+
+
+@pytest.mark.guard
+def test_remote_inspection_unavailable_is_concise_nonzero_not_local_all_clear(monkeypatch, capsys):
+    from agent_dispatch import category_cli
+
+    monkeypatch.setattr(remote_dispatch, "is_peer_machine", lambda machine: True)
+
+    def unavailable(*args, **kwargs):
+        raise remote_dispatch.RemoteDispatchUnavailable("SSH is unavailable")
+
+    def local(_args):
+        raise AssertionError("must not read a local task as a remote fallback")
+
+    monkeypatch.setattr(remote_dispatch, "browse_remote", unavailable)
+    code = category_cli.inspect_task(
+        SimpleNamespace(machine="peer", task_id="task"),
+        client_factory=local,
+    )
+    captured = capsys.readouterr()
+    assert code != 0 and captured.out == ""
+    assert "unavailable" in captured.err and "peer" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_reattach_real_coordinator_retains_category_and_attachment_history(queue):
+    from agent_dispatch import reattach
+
+    old = queue.create("upkeep", repo=REPO, category="maintenance", dedup_key="health")
+    owner = "worker/old-worktree"
+    queue.claim_one(owner, task_id=old.id, repo=REPO)
+    queue.start(old.id, owner)
+    queue.bind_owner_session(old.id, owner, "old-session")
+    queue.complete(old.id, owner, result={"logs": ["old-log"]})
+    original = asdict(queue.get(old.id))
+    attachments = queue.attachment_history(old.id)
+    with TestClient(create_app(queue)) as http:
+
+        def exchange(request):
+            response = http.request(
+                request.method,
+                str(request.url),
+                content=request.content,
+                headers=dict(request.headers),
+            )
+            return httpx.Response(response.status_code, json=response.json())
+
+        with DispatchClient(
+            "http://coordinator", transport=httpx.MockTransport(exchange)
+        ) as client:
+            result = reattach.reattach(
+                client,
+                old.id,
+                "new-session",
+                local_session_verdict=lambda sid: "live",
+                resume=False,
+            )
+    new = queue.get(result.task_id)
+    assert new.category == "maintenance"
+    assert new.owner_session_id == "new-session"
+    assert queue.attachment_history(new.id)[0].session_id == "new-session"
+    assert asdict(queue.get(old.id)) == original
+    assert queue.attachment_history(old.id) == attachments

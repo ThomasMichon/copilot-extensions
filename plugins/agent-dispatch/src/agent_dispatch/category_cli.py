@@ -1,6 +1,7 @@
 """Historical category classification commands."""
 
 import json
+import sys
 
 
 def register_category_commands(sub, *, client_factory, scope_repo) -> None:
@@ -46,17 +47,23 @@ def inspect_task(args, *, client_factory) -> int:
     from . import remote_dispatch
 
     if remote_dispatch.is_peer_machine(args.machine):
-        result = remote_dispatch.browse_remote(
-            args.machine,
-            [
-                "agent-dispatch",
-                "inspect-task",
-                args.task_id,
-                "--machine",
+        try:
+            result = remote_dispatch.browse_remote(
                 args.machine,
-            ],
-        )
-        import sys
+                [
+                    "agent-dispatch",
+                    "inspect-task",
+                    args.task_id,
+                    "--machine",
+                    args.machine,
+                ],
+            )
+        except remote_dispatch.RemoteDispatchUnavailable as exc:
+            print(
+                f"agent-dispatch: peer-queue browse of {args.machine!r} unavailable ({exc})",
+                file=sys.stderr,
+            )
+            return 2
 
         sys.stdout.write(result.stdout or "")
         sys.stderr.write(result.stderr or "")
