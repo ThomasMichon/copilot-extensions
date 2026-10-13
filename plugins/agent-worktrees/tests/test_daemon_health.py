@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import types
 from pathlib import Path
 import pytest
 
@@ -123,6 +124,7 @@ def _pair_snapshot(tmp_path):
     ]
 
 
+@pytest.mark.guard
 def test_windows_candidates_carry_ppid_and_image(tmp_path, monkeypatch):
     from agent_worktrees import windows_process_census
 
@@ -141,6 +143,7 @@ def test_windows_candidates_carry_ppid_and_image(tmp_path, monkeypatch):
     ]
 
 
+@pytest.mark.guard
 def test_windows_interpreter_pair_is_one_generation_not_a_duplicate(tmp_path, monkeypatch):
     """A venv-redirector launcher and its base-interpreter worker are one
     status-monitor generation: the census groups them instead of refusing
@@ -168,6 +171,7 @@ def test_windows_interpreter_pair_is_one_generation_not_a_duplicate(tmp_path, mo
     assert [(g.worker.pid, g.launcher.pid) for g in generations] == [(202, 101)]
 
 
+@pytest.mark.guard
 def test_launcher_outside_the_runtime_root_is_not_trusted(tmp_path, monkeypatch):
     elsewhere = _monitor_venv(tmp_path / "other-cell")
     runtime_home = tmp_path / "cell"
@@ -179,6 +183,7 @@ def test_launcher_outside_the_runtime_root_is_not_trusted(tmp_path, monkeypatch)
     assert daemon_health._is_runtime_launcher(str(_monitor_venv(runtime_home))) is True
 
 
+@pytest.mark.guard
 def test_posix_context_does_not_group_launchers(monkeypatch):
     monkeypatch.setattr(daemon_health.sys, "platform", "linux")
     assert daemon_health._context().group_launchers is False
@@ -208,7 +213,10 @@ def _windows_backstop(tmp_path, monkeypatch, processes, *, lock_pid, abandoned_p
     launcher = str(_monitor_venv(runtime))
     live = {pid: str(1000 + pid) for pid in processes}
     terminated: list[int] = []
-    monkeypatch.setattr(daemon_health.sys, "platform", "win32")
+    # Only daemon_health sees "win32": patching the global sys.platform would
+    # also send zdd's routing lock down its msvcrt branch, which does not
+    # exist off Windows, so this backstop could not run on a Linux lane.
+    monkeypatch.setattr(daemon_health, "sys", types.SimpleNamespace(platform="win32"))
     monkeypatch.setattr(daemon_health.status_monitor_runtime, "_aw_runtime_home", lambda: runtime)
     monkeypatch.setattr(windows_process_census, "snapshot", lambda: [
         {"pid": pid, "cwd": str(runtime), "start_time": start,
@@ -273,6 +281,7 @@ def _windows_backstop(tmp_path, monkeypatch, processes, *, lock_pid, abandoned_p
     return terminated
 
 
+@pytest.mark.guard
 def test_backstop_leaves_a_lone_launcher_worker_generation_running(
     tmp_path, monkeypatch, capsys
 ):
@@ -293,6 +302,7 @@ def test_backstop_leaves_a_lone_launcher_worker_generation_running(
     assert "generation: launcher pid 101 -> worker pid 202 (one daemon)" in out
 
 
+@pytest.mark.guard
 def test_doctor_reports_a_second_generation_as_one_duplicate(tmp_path, monkeypatch, capsys):
     from agent_worktrees import doctor_render
 
@@ -316,6 +326,7 @@ def test_doctor_reports_a_second_generation_as_one_duplicate(tmp_path, monkeypat
     assert "generation: launcher pid 303 -> worker pid 404 (one daemon)" in out
 
 
+@pytest.mark.guard
 def test_backstop_repairs_an_abandoned_passive_when_grouping_is_certain(
     tmp_path, monkeypatch, capsys
 ):
@@ -331,6 +342,7 @@ def test_backstop_repairs_an_abandoned_passive_when_grouping_is_certain(
     assert "terminations skipped" not in capsys.readouterr().out
 
 
+@pytest.mark.guard
 def test_backstop_terminates_nothing_when_grouping_is_uncertain(
     tmp_path, monkeypatch, capsys
 ):
@@ -350,6 +362,24 @@ def test_backstop_terminates_nothing_when_grouping_is_uncertain(
     assert "terminations skipped -- generation grouping uncertain" in logged
 
 
+@pytest.mark.guard
+def test_backstop_terminates_nothing_for_a_launcher_whose_worker_was_missed(
+    tmp_path, monkeypatch, capsys
+):
+    # The abandoned passive's census shows only its launcher (a venv
+    # redirector): the worker it started may be the half the census missed,
+    # so the backstop must not repair the launcher as a whole generation.
+    terminated = _windows_backstop(
+        tmp_path, monkeypatch, {101: (1, "worker"), 303: (1, "launcher")},
+        lock_pid=101, abandoned_pid=303,
+    )
+
+    assert terminated == []
+    out = capsys.readouterr().out
+    assert "terminations skipped" in out
+    assert "launcher candidate 303 has no captured worker" in out
+
+@pytest.mark.guard
 def test_backstop_log_lives_under_the_runtime_install_root(tmp_path, monkeypatch):
     from agent_worktrees import config as cfg
     from agent_worktrees import status_monitor_reap_stale
