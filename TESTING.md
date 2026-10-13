@@ -106,6 +106,8 @@ classification, and unchanged standalone reads. Their bounded native companion
 executes the real warm loop, classify client/server transport and Git classifier
 against a fresh divergent checkout; transcript, mux and reclaim enrichment are
 modeled separately. The fixture refuses a bypass of the classify transport.
+Its cache clock is isolated from the shared standard-library clock, so the
+native transport's request deadlines remain real.
 Four same-selection shapes retain eight direct Git starts in each of two
 unchanged passes, then observe a subsequent dirty edit. Run that lane explicitly:
 
