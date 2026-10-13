@@ -155,7 +155,7 @@ verified by this effort's Validation Plan.
       and existing telemetry seam without CPU enforcement or new termination.
 - [x] Add [sample provenance and collector cost](reader-sample-accounting.md)
       for measurement-only role-cost calibration before numeric enforcement.
-- [ ] Reduce [collector role totals and provenance](reader-role-accounting.md)
+- [x] Reduce [collector role totals and provenance](reader-role-accounting.md)
       under bounded provider epochs, without numeric enforcement
       _(agent-recommended measurement refinement)_.
 - [ ] Define role keys, expected wall/CPU cost, fan-out limits, and provenance.
@@ -545,3 +545,22 @@ All nine bounded Windows consumer sub-suites passed (4,297 passed, 97 skipped),
 with cleanup verified. Fresh Linux code CI remains open for this slice.
 Expected-cost/fan-out policy, wider reader coverage, global logical ownership,
 numeric enforcement, reclamation and authorized adoption remain parent gates.
+
+### 2026-10-13 - Bounded collector role accounting landed
+
+Merged #6547 as `8c04c5c64` after approval with zero findings on
+`033adc3f25` and actual code CI success. All nine Windows Agent Bridge
+sub-suites passed (4,297 passed, 97 skipped); canonical Linux CI installed
+psutil 7.2.2 and passed all nine sub-suites (4,345 passed, 49 skipped).
+Both native consumer fixtures compare exported collector totals directly
+against actual sampling-thread counter deltas. The collector role reduction
+contract and its focused validation are complete; #3963 remains open.
+
+The next policy gate is expected wall/CPU cost and fan-out limits.
+Native fixture values prove accounting, not representative workload budgets;
+no numeric CPU or new fan-out threshold has been approved.
+Representative cost calibration before selecting limits is
+_(agent-recommended)_; extending measurement to the remaining reader inventory
+can proceed without inventing enforcement policy. Global logical ownership,
+admission enforcement, exact-identity/no-progress reclamation, release and
+authorized running-state adoption remain separate parent obligations.

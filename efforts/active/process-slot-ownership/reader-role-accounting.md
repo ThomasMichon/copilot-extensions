@@ -48,7 +48,7 @@ budgets, process membership, owner-liveness proof or admission enforcement.
       actual completion, including late completion under an old epoch.
 - [x] Concurrent snapshot/publication and repeated sampling retain coherent,
       bounded evidence; overflow/continuity loss is visibly incomplete.
-- [ ] Native Windows/Linux consumer fixtures export actual collector totals
+- [x] Native Windows/Linux consumer fixtures export actual collector totals
       while optional-import, identity, cadence, fallback and privacy regressions
       remain green.
 
@@ -68,8 +68,13 @@ rotation, concurrent publication, bounded cursor reclamation, late completion
 after loop shutdown, provider replacement and retained native futures.
 The native consumer fixture verifies the exported aggregate against actual
 worker-thread CPU counter deltas. All nine bounded Windows consumer sub-suites
-passed (4,297 passed, 97 skipped), with cleanup verified. Fresh Linux code CI
-remains required before the final validation item closes.
+passed (4,297 passed, 97 skipped), with cleanup verified. Canonical Linux code
+CI installed psutil 7.2.2 and passed all nine sub-suites (4,345 passed,
+49 skipped), including the same native aggregate counter witness.
+Merged #6547 as `8c04c5c64` after approval with zero open findings on
+`033adc3f25` and actual CI success. All six focused validation items are
+complete; this does not close the parent effort's policy, wider-reader,
+global ownership, release or authorized adoption gates.
 
 Expected-cost/fan-out policy, global reader coverage, logical-owner membership,
 budget enforcement, no-progress reclamation and authorized adoption remain
