@@ -19,13 +19,30 @@ def result_text(completion):
     return result.get("content") if isinstance(result, dict) else None
 
 
-def successful(completion):
-    if completion is None or not isinstance(completion.get("data"), dict) or completion["data"].get("success") is not True:
-        return False
+def execution_status(completion):
+    invalid = {"success": False, "shell_exit_code": None}
+    if not isinstance(completion, dict) or not isinstance(completion.get("data"), dict):
+        return dict(invalid, error="invalid execution data")
     data = completion["data"]
-    exit_code = data.get("shellExecution", {}).get("exitCode")
-    telemetry_code = data.get("toolTelemetry", {}).get("metrics", {}).get("exit_code")
-    return exit_code in (None, 0) and telemetry_code in (None, 0)
+    for key in ("shellExecution", "toolTelemetry"):
+        if key in data and not isinstance(data[key], dict):
+            return dict(invalid, error=f"invalid optional {key} metadata")
+    shell = data.get("shellExecution", {})
+    telemetry = data.get("toolTelemetry", {})
+    if "metrics" in telemetry and not isinstance(telemetry["metrics"], dict):
+        return dict(invalid, error="invalid optional toolTelemetry.metrics metadata")
+    metrics = telemetry.get("metrics", {})
+    for container, key in ((shell, "exitCode"), (metrics, "exit_code")):
+        if key in container and type(container[key]) not in (int, float):
+            return dict(invalid, error=f"invalid optional {key} value")
+    exit_code, telemetry_code = shell.get("exitCode"), metrics.get("exit_code")
+    good = data.get("success") is True and exit_code in (None, 0) and telemetry_code in (None, 0)
+    return {"success": good, "shell_exit_code": exit_code,
+            "error": None if good else "tool execution unsuccessful"}
+
+
+def successful(completion):
+    return execution_status(completion)["success"]
 
 
 def root_event(event):
@@ -34,8 +51,9 @@ def root_event(event):
 
 
 def object_result(completion):
-    if not successful(completion):
-        return None, "tool execution unsuccessful"
+    status = execution_status(completion)
+    if not status["success"]:
+        return None, status["error"]
     try:
         payload = json.loads(result_text(completion))
     except (json.JSONDecodeError, TypeError):
@@ -161,9 +179,75 @@ def valid_read_range(bounds, upper=None):
             and (upper is None or bounds[1] <= upper))
 
 
+def shell_read_specs(command, workspace):
+    """Only literal && chains of actual readers can attribute pooled stdout."""
+    if not isinstance(command, str) or any(character in command for character in "$`\n"):
+        return None
+    try:
+        lexer = shlex.shlex(command, posix=False, punctuation_chars=";&|<>")
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return None
+    if any(token in (";", "|", "||", "&", "<", "<<", ">", ">>", ">&", "&>") for token in tokens):
+        return None
+    segments = [[]]
+    for token in tokens:
+        if token == "&&":
+            segments.append([])
+        else:
+            segments[-1].append(token)
+    cwd = Path(workspace)
+    specs = []
+    for segment in segments:
+        try:
+            words = [shlex.split(token) for token in segment]
+        except ValueError:
+            return None
+        if not words or any(len(word) != 1 for word in words):
+            return None
+        words = [word[0] for word in words]
+        if any(any(character in word for character in "*?~") for word in words):
+            return None
+        reader = words[0]
+        bounds = None
+        if reader == "cd" and len(words) == 2:
+            path = Path(words[1])
+            cwd = path if path.is_absolute() else cwd / path
+            continue
+        if reader == "cat" and len(words) == 2 and words[1] and not words[1].startswith("-"):
+            operand = words[1]
+        elif reader == "sed" and len(words) == 4 and words[1] == "-n":
+            match = re.fullmatch(r"([1-9]\d*)(?:,([1-9]\d*))?p", words[2])
+            if match is None or not words[3] or words[3].startswith("-"):
+                return None
+            bounds = [int(match[1]), int(match[2] or match[1])]
+            if not valid_read_range(bounds):
+                return None
+            operand = words[3]
+        else:
+            return None
+        path = Path(operand)
+        specs.append({"path": str(path if path.is_absolute() else cwd / path), "bounds": bounds})
+    return specs or None
+
+
 def content_read(start, completion, path, expected, workspace, view_range=None):
     if not successful(completion) or path not in resolved_read_paths(start, workspace):
         return False
+    if start["data"]["toolName"] in ("bash", "shell"):
+        specs = shell_read_specs(start["data"].get("arguments", {}).get("command"), workspace)
+        if specs is None:
+            return False
+        if view_range is None:
+            full_lines = len(expected.splitlines())
+            attributed = any(spec["path"] == path and (spec["bounds"] is None or
+                             (spec["bounds"][0] == 1 and spec["bounds"][1] >= full_lines))
+                             for spec in specs)
+        else:
+            attributed = any(spec["path"] == path and spec["bounds"] == view_range for spec in specs)
+        if not attributed:
+            return False
     content = result_text(completion)
     if not isinstance(content, str) or not normalized_content(expected):
         return False
@@ -454,6 +538,9 @@ def cursor_errors(cursor, root):
     required = {"path", "last_line", "last_record", "last_severity", "next_path", "next_line"}
     if set(cursor) != required:
         return ["audit_cursor keys must be " + ", ".join(sorted(required))]
+    for key in ("last_record", "last_severity", "next_line"):
+        if type(cursor[key]) is not int:
+            return [f"{key} must be a genuine integer"]
     try:
         path = (root / cursor["path"]).resolve()
         path.relative_to((root / "corpus").resolve())

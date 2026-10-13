@@ -66,6 +66,12 @@ merely contain it inside an entire-file read. Guidance refresh still permits
 combined sequential reads and does not impose a fixed tool count or ordering
 beyond completed refresh before task work. Transition counts must be genuine
 integers 1 or 2; boolean and floating-point aliases are invalid.
+Shell read credit is limited to literal `&&` chains of `cd`, single-file `cat`
+and simple bounded-print `sed -n` commands. Every output-producing command must
+be a validated reader; a filename operand elsewhere in the command cannot
+attribute bytes produced by `printf`, another producer, a pipeline, redirection
+or substitution. Combined sequential guidance/task reads remain supported.
+Cursor record, severity and next-line values must also be genuine integers.
 
 Evidence-integrity checks are conservative. A witness-write claim must identify
 the **first** substantive action's actual destination, not a quoted filename or
@@ -87,6 +93,9 @@ failed, stale or mismatched evidence cannot earn a positive read-back.
 Analyzer failures remain evidence: unsuccessful or malformed native tool
 results are retained as structured error observations, excluded from affirmative
 measurement/artifact lists, and still produce an observed-evidence/judge packet.
+Optional execution/telemetry objects may be absent; explicit null/nonobject
+metadata or invalid exit-code values are structured negative evidence, never
+success or an analyzer crash.
 One shared root-ownership predicate applies to clears and supporting calls;
 child-agent activity is quarantined under `non_root_activity` and cannot supply
 root windows, measurements, artifacts or refresh. Source regressions cover each

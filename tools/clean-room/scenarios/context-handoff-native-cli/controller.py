@@ -10,8 +10,8 @@ import sys
 import time
 import uuid
 from validation import (
-    checkpoint_errors, checkpoint_readback_errors, measurement_result, object_result,
-    pressure_events, recovery_event_errors, root_event, successful, witness_errors,
+    checkpoint_errors, checkpoint_readback_errors, execution_status, measurement_result, object_result,
+    pressure_events, recovery_event_errors, root_event, witness_errors,
 )
 
 OUT = Path("/home/operator/out")
@@ -375,10 +375,14 @@ def analyze():
         if not start:
             continue
         name = start["data"]["toolName"]
-        calls.append({"tool": name, "success": successful(event),
+        status = execution_status(event)
+        calls.append({"tool": name, "success": status["success"],
                       "host_success": event["data"].get("success"),
-                      "shell_exit_code": event["data"].get("shellExecution", {}).get("exitCode"),
+                      "shell_exit_code": status["shell_exit_code"],
                       "timestamp": event["timestamp"]})
+        if status["error"]:
+            evidence_errors.append({"tool": name, "complete_event": event.get("id"),
+                                    "error": status["error"]})
         if name in ("get_context_remaining", "session_artifacts", "new_context"):
             row = {"start": start, "complete": event}
             result, error = measurement_result(event) if name == "get_context_remaining" else object_result(event)

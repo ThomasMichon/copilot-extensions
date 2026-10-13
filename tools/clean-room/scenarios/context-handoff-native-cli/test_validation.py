@@ -11,11 +11,78 @@ import controller
 
 from validation import (
     RECOVERY_PREREQUISITES, action_errors, checkpoint_errors, cursor_errors,
-    pressure_events, recovery_event_errors, witness_errors,
+    content_read, pressure_events, recovery_event_errors, successful, witness_errors,
 )
 
 
 class ValidationTests(unittest.TestCase):
+    def test_fabricated_shell_output_cannot_credit_a_file_read(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            guidance = "Expected guidance bytes.\n"
+            (root / "AGENTS.md").write_text(guidance)
+            target = str(root / "AGENTS.md")
+            fabricated = [
+                f"printf 'Expected guidance bytes.\\n'; head -n 0 '{target}'",
+                f"echo 'Expected guidance bytes.' && head -n 0 '{target}'",
+                f"cat '{target}' | cat",
+                f"cat '{target}' 2>/dev/null",
+                f"cat $(echo '{target}')",
+            ]
+            completion = {"data": {"success": True, "result": {"content": guidance}}}
+            for command in fabricated:
+                start = {"data": {"toolName": "bash", "arguments": {"command": command}}}
+                self.assertFalse(content_read(start, completion, target, guidance, str(root)), command)
+            positive = {"data": {"toolName": "bash", "arguments": {
+                "command": f"cd '{root}' && cat AGENTS.md && cat task.json"}}}
+            self.assertTrue(content_read(positive, completion, target, guidance, str(root)))
+            events = self.semantic_events(root)
+            start = next(e for e in events if e.get("id") == "1-4")
+            path = start["data"]["arguments"]["path"]
+            output = next(e for e in events if e.get("id") == "complete-1-4")["data"]["result"]["content"]
+            start["data"] = {"toolName": "bash", "arguments": {
+                "command": f"printf '%s' '{output}'; head -n 0 '{path}'"}}
+            self.assertFalse(content_read(start, {"data": {"success": True, "result": {"content": output}}},
+                                          path, output, str(root), [61, 80]))
+
+    def test_cursor_fields_reject_boolean_and_float_aliases(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "corpus").mkdir()
+            (root / "corpus/shard-000.txt").write_text("".join(
+                f"record={number:05d} severity={number % 4}\n" for number in range(80)))
+            first = {"path": "corpus/shard-000.txt", "last_line": 1, "last_record": 0,
+                     "last_severity": 0, "next_path": "corpus/shard-000.txt", "next_line": 2}
+            self.assertEqual(cursor_errors(first, root), [])
+            for key in ("last_record", "last_severity"):
+                for value in (False, 0.0):
+                    self.assertTrue(cursor_errors(dict(first, **{key: value}), root), (key, value))
+            boundary = dict(first, last_line=80, last_record=79, last_severity=3,
+                            next_path="corpus/shard-001.txt", next_line=1)
+            self.assertEqual(cursor_errors(boundary, root), [])
+            for value in (True, 1.0):
+                self.assertTrue(cursor_errors(dict(boundary, next_line=value), root), value)
+
+    def test_malformed_optional_execution_metadata_preserves_packet(self):
+        cases = [
+            {"shellExecution": None},
+            {"shellExecution": []},
+            {"toolTelemetry": None},
+            {"toolTelemetry": {"metrics": None}},
+            {"toolTelemetry": {"metrics": []}},
+            {"shellExecution": {"exitCode": "0"}},
+        ]
+        self.assertTrue(successful({"data": {"success": True}}))
+        for optional in cases:
+            with tempfile.TemporaryDirectory() as temp:
+                evaluation, state, events = self.analyzer_fixture(Path(temp))
+                events[2]["data"].update(optional)
+                report = self.run_analyzer(evaluation, state, events)
+                self.assertTrue(report["evidence_errors"], optional)
+                self.assertFalse(report["checkpoint_contract_observations"][0]["pre_clear_content_readback"])
+                self.assertTrue((evaluation / "judge-packet.json").exists())
+                self.assertFalse(successful({"data": dict(success=True, **optional)}), optional)
+
     def test_warning_extraction(self):
         events = [
             {"type": "session.warning", "id": "1a2c1272", "data": {"message": "[Context Handoff] Native checkpoint preparation boundary reached (64%)."}},

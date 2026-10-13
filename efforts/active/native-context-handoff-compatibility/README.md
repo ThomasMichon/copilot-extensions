@@ -253,6 +253,18 @@ below-altitude evidence/tooling documentation, with no new rollout claim.
   newline-separated writers and unsupported `find` output. Only the simple
   bounded-print `sed` form is treated as read-only. All fifteen deterministic
   source tests and touched-Python `F,E9` checks pass after these corrections.
+- Published those corrections in `638d91e09`. The subsequent current-head
+  review resolved all five original findings, but identified shell output
+  attributed to a reader that produced no output, boolean cursor aliases and
+  malformed optional execution metadata that could still interrupt capture.
+  These evidence-integrity findings remain merge blockers pending correction.
+- Added literal reader-chain attribution, genuine-integer cursor checks and
+  shared execution-metadata validation used by both the controller and
+  validator. Regression cases reproduce fabricated guidance/task output,
+  cursor aliases and metadata crashes, then confirm negative observations and
+  packet preservation without modifying the historical runs. All eighteen
+  source tests and touched-Python `F,E9` checks pass; current-head review is
+  still required before merge.
 - The corrections affect source evidence validation only. All four historical
   independent FAIL verdicts and their original packets remain unchanged.
   No paid trial, native deployment claim or runtime change is authorized by
