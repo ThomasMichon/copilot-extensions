@@ -175,7 +175,7 @@ def test_legacy_configuration_error_is_retryable_and_late_read_is_fenced(tmp_pat
             scr._rotate_machine(1)
             try:
                 key = scr._config_section_key()
-                await _wait(pilot, lambda: scr._config_section_states[key]["state"] == "error")
+                await _wait(pilot, lambda: scr._config_section_states.get(key, {}).get("state") == "error")
                 scr._activate_config_section()
                 await _wait(pilot, lambda: len(calls) == 2)
                 scr._load_current_config_section(force=True)

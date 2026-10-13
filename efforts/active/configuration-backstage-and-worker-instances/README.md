@@ -290,3 +290,29 @@ configuration, arbitrary source editing, or automatic maintenance dispatch.
 - Forty-two worker-instance/catalog guard checks passed, including seven new
   regression cases for snapshot reuse and both source/active path failures.
   Required CI, fresh review, promotion and installed local proof remain pending.
+
+### 2026-10-12 - Publication repair visibility and integration refresh
+
+- The next review confirmed the discovery/path corrections and identified a
+  corrupt published snapshot aborting the whole browse command. Workers now
+  retains that instance as an explicit repair row, with path/reason errors,
+  unknown published runtime/capacity and no local toggle. Its valid draft,
+  other instances and templates remain visible; draft capacity never stands
+  in for an unreadable publication.
+- Dependency checks for source-owned declarations also share the catalog's
+  discovery snapshot. Regression coverage includes source declarations as well
+  as multiple local instances, and malformed JSON, encoding, schema, incomplete
+  envelopes and permission failures.
+- Rebased onto current dev, preserving the peer's new effort-index row. The
+  only conflict was that index; Manager merges were mechanical. Fixed a test's
+  eager dictionary lookup before its deferred initial load, retaining its
+  error/retry and stale-response assertions.
+- Forty-seven provider checks and 73 Manager configuration/Profiles/region
+  checks passed, including the real provider round-trip. A fresh provider venv
+  restore is blocked by the newly merged FastAPI >=0.143.0 floor (#6362):
+  the governed feed currently exposes at most 0.142.2. The provider checks used
+  the already-provisioned backend test environment with approved 0.142.2 and
+  current worktree source/shared libraries, not a feed bypass or manifest edit.
+  This proves the changed catalog/lifecycle code, not packaging against the
+  new dependency floor. Required CI and final promoted installation still
+  must pass their own declared dependencies; neither gate is waived.

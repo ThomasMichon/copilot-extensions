@@ -149,18 +149,24 @@ def catalog() -> dict:
         publication = active_dir() / f"{record['name']}.json"
         active_conf = None
         active_declarations = ()
-        if publication.exists():
+        publication_errors = []
+        try:
             from .worker_instances import _regular
             _regular(publication)
-            payload = rd._decode(publication.read_text(encoding="utf-8"), ".json", where=str(publication))
-            active_conf = (
-                {"declaration": payload["configuration"], "repo_root": payload["repo_root"]}
-                if payload.get("kind") == "user-worker-instance"
-                else {"declaration": payload, "repo_root": ""}
-            )
-            _, active_declarations = validate_configuration(
-                record["name"], active_conf["declaration"], active_conf["repo_root"],
-            )
+            if publication.exists():
+                payload = rd._decode(publication.read_text(encoding="utf-8"), ".json", where=str(publication))
+                loaded_conf = (
+                    {"declaration": payload.get("configuration"), "repo_root": payload.get("repo_root", "")}
+                    if payload.get("kind") == "user-worker-instance"
+                    else {"declaration": payload, "repo_root": ""}
+                )
+                _, active_declarations = validate_configuration(
+                    record["name"], loaded_conf["declaration"], loaded_conf["repo_root"],
+                )
+                active_conf = loaded_conf
+        except (RegistrarError, OSError, UnicodeError) as exc:
+            publication_errors.append(f"{publication}: cannot read published configuration: {exc}")
+            errors.extend(publication_errors)
         local_names.update(d.name for d in (*declarations, *active_declarations))
         runtime_declarations = active_declarations if active_conf is not None else declarations
         state = _states(runtime_declarations, overrides, observed)
@@ -174,7 +180,7 @@ def catalog() -> dict:
         row = {
             "id": record["id"], "title": record["name"], "group": "Configured",
             "description": conf["declaration"].get("description") or "User-local worker instance",
-            "validity": "invalid" if draft_errors else "valid",
+            "validity": "invalid" if draft_errors or publication_errors else "valid",
             "editable": "true", "instantiable": "false",
             "revision": record["revision"], "fields": _fields(record["name"], conf["declaration"], conf["repo_root"]),
             "provenance": record["source"]["id"], "source": record["source"],
@@ -196,9 +202,17 @@ def catalog() -> dict:
             "owner": OWNER,
             "dependency_status": "invalid-or-missing" if draft_errors else "resolved",
             "dependency_errors": draft_errors,
+            "publication_errors": publication_errors,
             **state,
         }
-        if active_conf is None:
+        if publication_errors:
+            row.update(
+                publication="error", draft_state="publication-error",
+                enabled="unknown", activity="unknown", pool_toggleable="false",
+                pool_name="", lanes=None,
+                statistics={"declarations": None, "lanes": None, "observed_running": None},
+            )
+        elif active_conf is None:
             row.update(enabled="not-published", activity="not-published")
         body = (
             f"{row['description']}\n\nSource: {row['provenance']} ({record['source']['revision']}). "
@@ -210,6 +224,8 @@ def catalog() -> dict:
         )
         if draft_errors:
             body += "\n\nUnmet draft prerequisites: " + "; ".join(draft_errors)
+        if publication_errors:
+            body += "\n\nPublished configuration requires repair: " + "; ".join(publication_errors)
         fleets = [d.fleet for d in runtime_declarations if d.fleet.enabled]
         if fleets:
             body += (
@@ -235,7 +251,9 @@ def catalog() -> dict:
         body = (f"{row['description']}\n\nOwned by {row['provenance']}. "
                 "Read-only here: edit through the owning repository/plugin configuration flow.")
         try:
-            _validate_dependencies((declaration,), "")
+            _validate_dependencies(
+                (declaration,), "", available_declarations=report.combined.declarations,
+            )
         except RegistrarError as exc:
             row.update(dependency_status="invalid-or-missing", dependency_errors=[str(exc)])
             body += f"\n\nUnmet prerequisite: {exc}"

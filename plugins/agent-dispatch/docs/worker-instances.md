@@ -30,6 +30,11 @@ For an instance with a newer Save-only draft, runtime state, capacity and
 enable/disable controls come from its still-published snapshot. Details expose
 `draft_state`, `draft_statistics`, the current edit revision and the published
 revision separately; editing the draft does not relabel a running worker.
+An unreadable or invalid published snapshot remains visible as a configuration
+requiring repair, with unknown runtime state and disabled local toggle actions.
+The catalog retains other instances and templates and includes the path and
+reason in that row's `publication_errors` and `summary.errors`; it never
+substitutes draft capacity for an unreadable publication.
 
 ## Edit or instantiate
 

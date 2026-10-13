@@ -350,11 +350,17 @@ def test_dependency_validation_reuses_one_discovery_snapshot(monkeypatch, precom
     assert len(calls) == (0 if precomputed else 1)
 
 
-def test_catalog_shares_discovery_snapshot_across_instance_validation(monkeypatch):
+def test_catalog_shares_discovery_snapshot_across_instance_validation(tmp_path, monkeypatch):
     from agent_dispatch import workers_catalog
 
     create("first")
     create("second")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "pool.json").write_text(json.dumps({
+        **templates()["worker-pool"], "name": "source-pool", "owner": "fixture",
+    }), encoding="utf-8")
+    rd.add_pointer("source", source, owner="fixture")
     refresh = rd.RegistrarSources.refresh
     validate = workers_catalog._validate_dependencies
     snapshots = []
@@ -372,8 +378,42 @@ def test_catalog_shares_discovery_snapshot_across_instance_validation(monkeypatc
     monkeypatch.setattr(rd.RegistrarSources, "refresh", record_refresh)
     monkeypatch.setattr(workers_catalog, "_validate_dependencies", record_validation)
     assert catalog()["summary"]["configured"] == 2
-    assert len(snapshots) == 1 and len(validations) == 2
+    assert len(snapshots) == 1 and len(validations) == 3
     assert all(snapshot is snapshots[0] for snapshot in validations)
+
+
+@pytest.mark.parametrize("failure", ["json", "encoding", "invalid", "envelope", "read"])
+def test_catalog_reports_bad_publication_without_hiding_other_resources(monkeypatch, failure):
+    create("broken", activate=True)
+    create("healthy")
+    publication = active_dir() / "broken.json"
+    if failure == "json":
+        publication.write_text("not-json", encoding="utf-8")
+    elif failure == "encoding":
+        publication.write_bytes(b"\xff")
+    elif failure == "invalid":
+        publication.write_text(json.dumps({"kind": "invalid-fixture-kind"}), encoding="utf-8")
+    elif failure == "envelope":
+        publication.write_text(json.dumps({"kind": "user-worker-instance"}), encoding="utf-8")
+    else:
+        read_text = Path.read_text
+
+        def refuse(self, *args, **kwargs):
+            if self == publication:
+                raise PermissionError("fixture permission denied")
+            return read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", refuse)
+    data = catalog()
+    row = next(r for r in data["entries"] if r["id"] == "instance:broken")
+    assert row["validity"] == "invalid" and row["publication"] == "error"
+    assert row["enabled"] == row["activity"] == "unknown"
+    assert row["pool_toggleable"] == "false" and row["statistics"]["lanes"] is None
+    assert row["draft_statistics"]["lanes"] == 1
+    assert row["publication_errors"] and row["publication_errors"][0] in data["summary"]["errors"]
+    assert "requires repair" in row["card"]["body"]
+    assert any(r["id"] == "instance:healthy" for r in data["entries"])
+    assert any(r["id"] == "template:worker-pool" for r in data["entries"])
 
 
 def test_missing_emitter_command_refused_before_effects():
