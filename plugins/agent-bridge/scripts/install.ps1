@@ -695,14 +695,21 @@ function Get-PayloadHash {
 function Invoke-VersionedSlotClean {
     <# Ensure the target slot exists, tossing it first if a prior build left it
        INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-       over a corpse (#935). The current/active slot is never tossed. No-op in
-       legacy mode. #>
-    if (-not $VersionedRuntime) { return }
+       over a corpse (#935). The current/active slot is never tossed. Returns
+       $false when the primitive REFUSES (e.g. the incomplete slot is selected or
+       still in use): building over it would mutate a live/selected slot in
+       place, so the caller must not proceed (#5472). No-op in legacy mode. #>
+    if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $ScriptDir 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) { return }
+    if (-not $py) { return $true }
     & $py $vr --root $InstallDir --link-name 'venv' slot $SrcVersion --clean-incomplete 2>&1 |
         ForEach-Object { Write-Step $_ }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Runtime slot versions/$SrcVersion could not be safely prepared (exit $LASTEXITCODE); refusing to build over it in place"
+        return $false
+    }
+    return $true
 }
 
 function Invoke-VersionedMarkComplete {
@@ -710,13 +717,20 @@ function Invoke-VersionedMarkComplete {
        so the slot is provably a healthy, complete build. A crashed / watchdog-
        killed install never reaches here, leaving its slot markerless and thus
        tossable + retryable (#935). No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return }
+    if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $ScriptDir 'versioned_runtime.py'
     $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
     $mcArgs = @($vr, '--root', $InstallDir, '--link-name', 'venv', 'mark-complete', $SrcVersion)
     $ph = Get-PayloadHash
     if ($ph) { $mcArgs += @('--payload-hash', $ph) }
     & $py @mcArgs 2>&1 | ForEach-Object { Write-Step $_ }
+    # A refused publication (e.g. conflicting completion evidence for this
+    # numbered version) must fail the install, never be swallowed (#5472).
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Failed to publish the completion marker for runtime slot versions/$SrcVersion (exit $LASTEXITCODE)"
+        return $false
+    }
+    return $true
 }
 
 function Get-VersionedCurrent {
@@ -780,32 +794,59 @@ function Test-SlotContentCurrent {
     } catch { return $false }
 }
 
-function Test-SlotIsLiveDifferentContent {
-    <# True iff the target version IS the active slot, that slot is a COMPLETE
-       build whose recorded content hash DIFFERS from the payload we would
-       install, AND a daemon is currently running. In that state an Invoke-Install
-       (which does NOT stop the daemon first) would rebuild the live slot in place
-       and stomp the running runtime's python.exe/site-packages (ce#776/#777,
-       WinError 2, dotfiles#1612). A version slot is immutable: new content must
-       go under a NEW version (bump), or via `update` (which stops before it
-       rebuilds). Fail-safe: any error returns $false (never blocks an install). #>
-    if (-not $VersionedRuntime) { return $false }
+function Get-SlotAdmission {
+    <# Classify the target numbered slot (versions/$SrcVersion) through the
+       shared versioned_runtime `check-admission` primitive, BEFORE anything
+       drains the daemon or touches the slot (#5472). Returns:
+         'construct'              -- absent, or no completion marker: build as before
+         'reuse'                  -- published with exactly this payload
+         'content-conflict'       -- published with DIFFERENT payload content
+         'health-repair-required' -- published evidence is malformed
+         'unverified'             -- a completion marker exists but the payload
+                                     hash / admission could not be computed
+       Only 'construct' and 'reuse' may proceed: a published slot is immutable,
+       so new content needs a new version, never an in-place rebuild. A helper
+       failure with no completion marker on disk stays 'construct' so an
+       incomplete slot is still rebuilt exactly as before. #>
+    if (-not $VersionedRuntime) { return 'construct' }
+    $markerPresent = Test-Path -LiteralPath (Join-Path $VenvDir '.install-complete.json')
+    $fallback = if ($markerPresent) { 'unverified' } else { 'construct' }
+    $vr = Join-Path $ScriptDir 'versioned_runtime.py'
+    $ph = Get-PayloadHash
+    if (-not $ph -or -not (Test-Path -LiteralPath $vr)) { return $fallback }
+    $candidates = @()
+    if (Test-Path -LiteralPath $VenvPython) { $candidates += $VenvPython }
+    $bp = Get-BootstrapPython
+    if ($bp) { $candidates += $bp }
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
-        $vr = Join-Path $ScriptDir 'versioned_runtime.py'
-        $py = if (Test-Path $LinkPython) { $LinkPython }
-              elseif (Test-Path $VenvPython) { $VenvPython }
-              else { Get-BootstrapPython }
-        if (-not $py -or -not (Test-Path $vr)) { return $false }
-        $cur = (& $py $vr --root $InstallDir --link-name 'venv' current 2>$null | Out-String).Trim()
-        if (-not $cur -or $cur -ne $SrcVersion) { return $false }        # not the active slot -> normal path
-        & $py $vr --root $InstallDir --link-name 'venv' is-complete $SrcVersion 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { return $false }                       # not complete -> toss+rebuild is safe
-        $ph = Get-PayloadHash
-        if (-not $ph) { return $false }                                  # no hash -> don't block
-        & $py $vr --root $InstallDir --link-name 'venv' is-complete $SrcVersion --expect-hash $ph 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) { return $false }                       # content MATCHES -> Test-SlotContentCurrent no-ops
-        return ($null -ne (Get-RunningProcess))                          # differs + live daemon -> would stomp
-    } catch { return $false }
+        foreach ($py in $candidates) {
+            try {
+                $out = & $py $vr --root $InstallDir --link-name 'venv' check-admission $SrcVersion --payload-hash $ph 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                    $decision = ("$out").Trim()
+                    if ($decision) { return $decision }
+                }
+            } catch { }
+        }
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+    return $fallback
+}
+
+function Write-SlotAdmissionRefusal {
+    <# The actionable refusal for a published same-version slot (#5472). There
+       is no override (matching the other runtime installers): repair or new
+       content always requires a distinct, newly versioned generation. #>
+    param([string]$Admission)
+    if ($Admission -eq 'content-conflict') {
+        Write-Fail "Runtime slot versions/$SrcVersion is already complete for different payload content; bump the plugin version instead of rebuilding an immutable slot in place"
+    } else {
+        Write-Fail "Runtime slot versions/$SrcVersion carries completion evidence that could not be verified ($Admission); bump the plugin version instead of rebuilding an immutable slot in place (repair requires a distinct generation)"
+    }
+    Write-Fail 'Refused before draining, stopping, or rebuilding anything; the running agent-bridge service was left untouched.'
 }
 
 $script:InstallLockHandle = $null
@@ -1032,7 +1073,7 @@ function Get-SignedBasePython {
 }
 
 function New-SignedVenv {
-    Invoke-VersionedSlotClean
+    if (-not (Invoke-VersionedSlotClean)) { return $false }
     return [bool](New-SignedVenvShared `
         -VenvDir $VenvDir `
         -VenvPython $VenvPython `
@@ -2055,65 +2096,10 @@ function Invoke-Stamp {
     }
 }
 
-function Invoke-Install {
-    Write-Host ''
-    Write-Host '=== agent-bridge install ===' -ForegroundColor Cyan
-    Write-Host ''
-
-    if (-not (Ensure-Uv)) { exit 1 }
-
-    # Check for migration from old installer
-    Invoke-MigrationCheck
-
-    # Strict same-content no-op (ce#776/#777): if the target version is already
-    # the active slot AND healthy with matching content, do NOT rebuild it -- the
-    # slot IS the running daemon's live venv, and overwriting it in place is the
-    # WinError-2 crash cascade (dotfiles#1612). Idempotency is keyed on content,
-    # not the mutable version label. A force rebuild/restart stays a dedicated
-    # command, never a routine-reconcile side effect.
-    if (Test-SlotContentCurrent) {
-        Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no venv rebuild, no restart)."
-        Write-DeployManifest   # re-assert the manifest so version drift clears and this never re-triggers every session
-        return
-    }
-
-    # Serialize concurrent installers (ce#776/#777 follow-up): an overlapping
-    # install of the same version must not rebuild the venv over an in-flight one
-    # (the racing-rebuild that yields a DOA slot). Wait for any in-flight install;
-    # on timeout DEFER -- it will land the version.
-    if (-not (Enter-InstallLock)) {
-        Write-Warn 'Another agent-bridge install is in progress -- deferring this run (the in-flight install lands the version). No-op.'
-        return
-    }
-    # Re-check after acquiring: the install we waited on may have JUST landed this
-    # exact content, so our rebuild would be redundant (and a live-slot stomp).
-    if (Test-SlotContentCurrent) {
-        Write-Ok "agent-bridge $SrcVersion already installed and healthy after lock wait -- no-op."
-        Write-DeployManifest
-        Exit-InstallLock
-        return
-    }
-
-    # Never rebuild a LIVE slot in place with DIFFERENT content (ce#776/#777).
-    # Invoke-Install does not stop the daemon before New-SignedVenv, so rebuilding
-    # the active slot while a daemon runs from it overwrites its python.exe in
-    # place (WinError 2, dotfiles#1612). Slots are immutable: deploy new content
-    # under a NEW version (bump), or via `update` (which stops before rebuilding).
-    # Only fires for that exact stomp shape; normal drift ($SrcVersion != current)
-    # is unaffected.
-    if (Test-SlotIsLiveDifferentContent) {
-        Write-Warn "agent-bridge $SrcVersion is the ACTIVE slot but the payload content differs and a daemon is running from it -- refusing an in-place rebuild that would stomp the live runtime (dotfiles#1612). Bump the version to deploy new content, or run 'update' / stop the service first. No-op."
-        Exit-InstallLock
-        return
-    }
-
-    # Create directories
-    foreach ($dir in @($InstallDir, $LocalBin)) {
-        if (-not (Test-Path $dir)) {
-            New-Item -ItemType Directory -Path $dir -Force | Out-Null
-        }
-    }
-
+function Invoke-InstallSlotBuild {
+    <# Build the target slot from scratch for Invoke-Install: venv, vendored
+       libs, the agent-bridge package, provider pruning. Only for an absent or
+       incomplete slot -- a completed slot is never rebuilt in place (#5472). #>
     # Create venv (signed base python where available, so it is SAC-trusted)
     if (-not (Test-Path $VenvPython)) {
         Write-Step 'Creating venv...'
@@ -2246,6 +2232,75 @@ function Invoke-Install {
     # Strip the uv-regenerated console-script trampoline(s) (SAC-blocked, unused);
     # also clears sibling agent-*.exe pulled into this venv by Install-SiblingPlugins.
     Remove-ConsoleTrampolines -VenvDir $VenvDir
+}
+
+function Invoke-Install {
+    Write-Host ''
+    Write-Host '=== agent-bridge install ===' -ForegroundColor Cyan
+    Write-Host ''
+
+    if (-not (Ensure-Uv)) { exit 1 }
+
+    # Check for migration from old installer
+    Invoke-MigrationCheck
+
+    # Strict same-content no-op (ce#776/#777): if the target version is already
+    # the active slot AND healthy with matching content, do NOT rebuild it -- the
+    # slot IS the running daemon's live venv, and overwriting it in place is the
+    # WinError-2 crash cascade (dotfiles#1612). Idempotency is keyed on content,
+    # not the mutable version label. A force rebuild/restart stays a dedicated
+    # command, never a routine-reconcile side effect.
+    if (Test-SlotContentCurrent) {
+        Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no venv rebuild, no restart)."
+        Write-DeployManifest   # re-assert the manifest so version drift clears and this never re-triggers every session
+        return
+    }
+
+    # Serialize concurrent installers (ce#776/#777 follow-up): an overlapping
+    # install of the same version must not rebuild the venv over an in-flight one
+    # (the racing-rebuild that yields a DOA slot). Wait for any in-flight install;
+    # on timeout DEFER -- it will land the version.
+    if (-not (Enter-InstallLock)) {
+        Write-Warn 'Another agent-bridge install is in progress -- deferring this run (the in-flight install lands the version). No-op.'
+        return
+    }
+    # Re-check after acquiring: the install we waited on may have JUST landed this
+    # exact content, so our rebuild would be redundant (and a live-slot stomp).
+    if (Test-SlotContentCurrent) {
+        Write-Ok "agent-bridge $SrcVersion already installed and healthy after lock wait -- no-op."
+        Write-DeployManifest
+        Exit-InstallLock
+        return
+    }
+
+    # Never rebuild a PUBLISHED same-version slot in place (#5472, ce#776/#777).
+    # A completed numbered slot is immutable: its content may already be what a
+    # running daemon executes, and rewriting it in place stomps that runtime
+    # (WinError 2, dotfiles#1612). Different content must ship under a NEW
+    # version. Refuse (non-zero, no override) before touching anything; an
+    # absent/incomplete slot ('construct') still builds exactly as before.
+    $admission = Get-SlotAdmission
+    if ($admission -ne 'construct' -and $admission -ne 'reuse') {
+        Write-SlotAdmissionRefusal -Admission $admission
+        Exit-InstallLock
+        exit 1
+    }
+
+    # Create directories
+    foreach ($dir in @($InstallDir, $LocalBin)) {
+        if (-not (Test-Path $dir)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
+    }
+
+    # A completed slot that already holds exactly this payload (just not the
+    # active one) is activated as-is: never recreate its venv, reinstall into
+    # it, or prune it (#5472). Only an absent/incomplete slot is built.
+    if ($admission -eq 'reuse') {
+        Write-Skip "Runtime slot versions/$SrcVersion is already complete for this payload -- activating it without rebuilding"
+    } else {
+        Invoke-InstallSlotBuild
+    }
 
     # Versioned layout (#581): health-gate the freshly-built slot IN ISOLATION,
     # then swap the stable `venv` junction onto it. Everything below resolves
@@ -2256,7 +2311,7 @@ function Invoke-Install {
             Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
             throw 'Versioned slot health gate failed'
         }
-        Invoke-VersionedMarkComplete
+        if (-not (Invoke-VersionedMarkComplete)) { throw 'Versioned completion publication failed' }
         if (-not (Invoke-VersionedActivate)) { throw 'Versioned activate failed' }
     }
 
@@ -2748,6 +2803,136 @@ function Remove-VenvBackup {
     if (Test-Path $bak) { Remove-Item -Recurse -Force $bak -ErrorAction SilentlyContinue }
 }
 
+function Invoke-UpdateSlotBuild {
+    <# Build/repair the target slot and (re)install every package into it for
+       Invoke-Update. Throws on failure so the caller's rollback runs. Only for
+       an absent/incomplete slot -- a completed slot is never rebuilt in place
+       (#5472). #>
+    param([bool]$UseCutover)
+    # Repair venv if python binary is missing (or rebuild if unsigned for SAC).
+    # Skipped in cutover mode: the running daemon is holding this venv, so a
+    # rebuild would break it -- an in-place package update is enough.
+    #
+    # Versioned layout: $VenvDir is a FRESH per-version slot (never the running
+    # daemon's), so we always build it -- cutover included -- and the immutable
+    # guarantee holds by construction.
+    if ($VersionedRuntime) {
+        if (-not (New-SignedVenv)) { throw "Venv build failed (versions/$SrcVersion)" }
+        if (-not (Test-Path $VenvPython)) { throw "Venv build failed (versions/$SrcVersion)" }
+        Write-Ok "Built runtime slot versions/$SrcVersion"
+    }
+    elseif ((-not $useCutover) -and ((-not (Test-Path $VenvPython)) -or ($env:OS -eq 'Windows_NT'))) {
+        if ((Test-Path $VenvDir) -or (Get-SignedBasePython)) {
+            if (-not (Test-Path $VenvPython)) { Write-Step 'Repairing venv (python binary missing)...' }
+            if (-not (New-SignedVenv)) {
+                throw 'Venv repair failed'
+            }
+            if (-not (Test-Path $VenvPython)) {
+                throw 'Venv repair failed'
+            }
+            Write-Ok 'Venv repaired'
+        } else {
+            throw 'agent-bridge not installed. Run: install.ps1 install'
+        }
+    }
+
+    # Reinstall package via uv (ssh-manager + credential-relay + agent-bridge)
+    Write-Step 'Updating agent-bridge package...'
+    # Pre-strip any locked console-script trampoline so uv can overwrite it
+    # (Windows denies overwriting an in-use .exe -- os error 5).
+    Remove-ConsoleTrampolines -VenvDir $VenvDir
+    $SshManagerDir = Resolve-SshManager
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    if ($SshManagerDir) {
+        # Refresh the vendored agent-ssh-manager distribution's build cache
+        # so a same-version source change lands (#186).
+        $sshResult = Invoke-UvPipInstallResilient -SourceDir $SshManagerDir @('--python', $VenvPython, '--reinstall-package', 'agent-ssh-manager', '--refresh-package', 'agent-ssh-manager', "$SshManagerDir", '--quiet')
+        $sshOut = $sshResult.Output
+        if ($sshResult.ExitCode -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            if ($sshOut) { Write-Host ($sshOut | Out-String) }
+            throw "ssh-manager update failed (exit $($sshResult.ExitCode))"
+        }
+    } elseif (Test-SshManagerInstalled) {
+        Write-Step 'ssh-manager already installed in venv (marketplace layout)'
+    } else {
+        throw 'Cannot locate ssh-manager library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
+    }
+    # credential-relay: force-reinstall so a local code change propagates even
+    # without a version bump (uv otherwise skips a same-version path dep).
+    $CredRelayDir = Resolve-CredentialRelay
+    if ($CredRelayDir) {
+        $crResult = Invoke-UvPipInstallResilient -SourceDir $CredRelayDir @('--python', $VenvPython, '--reinstall-package', 'agent-credential-relay', '--refresh-package', 'agent-credential-relay', "$CredRelayDir", '--quiet')
+        $crOut = $crResult.Output
+        if ($crResult.ExitCode -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            if ($crOut) { Write-Host ($crOut | Out-String) }
+            throw "credential-relay update failed (exit $($crResult.ExitCode))"
+        }
+    } elseif (Test-CredentialRelayInstalled) {
+        Write-Step 'credential-relay already installed in venv (marketplace layout)'
+    } else {
+        throw 'Cannot locate credential-relay library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
+    }
+    # zdd: force-reinstall so a local code change propagates even without a
+    # version bump (uv otherwise skips a same-version path dep).
+    $ZddDir = Resolve-Zdd
+    if ($ZddDir) {
+        $zddResult = Invoke-UvPipInstallResilient -SourceDir $ZddDir @('--python', $VenvPython, '--reinstall-package', 'agent-zdd', '--refresh-package', 'agent-zdd', "$ZddDir", '--quiet')
+        $zddOut = $zddResult.Output
+        if ($zddResult.ExitCode -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            if ($zddOut) { Write-Host ($zddOut | Out-String) }
+            throw "zdd update failed (exit $($zddResult.ExitCode))"
+        }
+    } elseif (Test-ZddInstalled) {
+        Write-Step 'zdd already installed in venv (marketplace layout)'
+    } else {
+        throw 'Cannot locate zdd library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
+    }
+    # single-instance-lease: force-reinstall so a local code change propagates.
+    $SilDir = Resolve-SingleInstanceLease
+    if ($SilDir) {
+        $silResult = Invoke-UvPipInstallResilient -SourceDir $SilDir @('--python', $VenvPython, '--reinstall-package', 'agent-single-instance-lease', '--refresh-package', 'agent-single-instance-lease', "$SilDir", '--quiet')
+        $silOut = $silResult.Output
+        if ($silResult.ExitCode -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            if ($silOut) { Write-Host ($silOut | Out-String) }
+            throw "single-instance-lease update failed (exit $($silResult.ExitCode))"
+        }
+    } elseif (Test-SingleInstanceLeaseInstalled) {
+        Write-Step 'single-instance-lease already installed in venv (marketplace layout)'
+    } else {
+        throw 'Cannot locate single-instance-lease library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
+    }
+    # config-migrate: force-reinstall so a local code change propagates.
+    $CfgMigrateDir = Resolve-ConfigMigrate
+    if ($CfgMigrateDir) {
+        $cmResult = Invoke-UvPipInstallResilient -SourceDir $CfgMigrateDir @('--python', $VenvPython, '--reinstall-package', 'agent-config-migrate', '--refresh-package', 'agent-config-migrate', "$CfgMigrateDir", '--quiet')
+        $cmOut = $cmResult.Output
+        if ($cmResult.ExitCode -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            if ($cmOut) { Write-Host ($cmOut | Out-String) }
+            throw "config-migrate update failed (exit $($cmResult.ExitCode))"
+        }
+    } elseif (Test-ConfigMigrateInstalled) {
+        Write-Step 'config-migrate already installed in venv (marketplace layout)'
+    } else {
+        throw 'Cannot locate config-migrate library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
+    }
+    # --refresh-package agent-procutil: see the matching comment in the
+    # initial-install path above.
+    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', "$PluginDir", '--quiet')
+    $bridgeOut = $bridgeResult.Output
+    $updateResult = $bridgeResult.ExitCode
+    $ErrorActionPreference = $prevEAP
+    if ($updateResult -ne 0) {
+        if ($bridgeOut) { Write-Host ($bridgeOut | Out-String) }
+        throw "Package update failed (exit $updateResult)"
+    }
+}
+
 function Invoke-Update {
     Write-Host ''
     Write-Host '=== agent-bridge update ===' -ForegroundColor Cyan
@@ -2780,6 +2965,16 @@ function Invoke-Update {
         Write-DeployManifest
         Exit-InstallLock
         return
+    }
+
+    # Refuse to rebuild a published same-version slot in place (#5472) --
+    # checked BEFORE the update marker, the drain, or any stop, so a refused
+    # update never disturbs the live daemon. See Invoke-Install.
+    $admission = Get-SlotAdmission
+    if ($admission -ne 'construct' -and $admission -ne 'reuse') {
+        Write-SlotAdmissionRefusal -Admission $admission
+        Exit-InstallLock
+        exit 1
     }
 
     # Mark the live-service update lifecycle as in-progress (ce#5066) so a
@@ -2829,7 +3024,8 @@ function Invoke-Update {
         $useCutover = $wasRunning -and (-not $activeForward)
         # Cutover onto the *same* slot is impossible (there is only one dir of that
         # name and the live daemon holds it). A same-version refresh downgrades to
-        # the classic stop-and-rebuild.
+        # the classic stop-and-rebuild. Only an active slot that never published
+        # completion can reach this: a published one was a no-op or refused above.
         if ($useCutover -and $SrcVersion -eq $prevVersion) {
             Write-Step "Cutover skipped: version $SrcVersion is already active; using classic stop-and-rebuild"
             $useCutover = $false
@@ -2862,127 +3058,13 @@ function Invoke-Update {
             }
         }
 
-        # Repair venv if python binary is missing (or rebuild if unsigned for SAC).
-        # Skipped in cutover mode: the running daemon is holding this venv, so a
-        # rebuild would break it -- an in-place package update is enough.
-        #
-        # Versioned layout: $VenvDir is a FRESH per-version slot (never the running
-        # daemon's), so we always build it -- cutover included -- and the immutable
-        # guarantee holds by construction.
-        if ($VersionedRuntime) {
-            if (-not (New-SignedVenv)) { throw "Venv build failed (versions/$SrcVersion)" }
-            if (-not (Test-Path $VenvPython)) { throw "Venv build failed (versions/$SrcVersion)" }
-            Write-Ok "Built runtime slot versions/$SrcVersion"
-        }
-        elseif ((-not $useCutover) -and ((-not (Test-Path $VenvPython)) -or ($env:OS -eq 'Windows_NT'))) {
-            if ((Test-Path $VenvDir) -or (Get-SignedBasePython)) {
-                if (-not (Test-Path $VenvPython)) { Write-Step 'Repairing venv (python binary missing)...' }
-                if (-not (New-SignedVenv)) {
-                    throw 'Venv repair failed'
-                }
-                if (-not (Test-Path $VenvPython)) {
-                    throw 'Venv repair failed'
-                }
-                Write-Ok 'Venv repaired'
-            } else {
-                throw 'agent-bridge not installed. Run: install.ps1 install'
-            }
-        }
-
-        # Reinstall package via uv (ssh-manager + credential-relay + agent-bridge)
-        Write-Step 'Updating agent-bridge package...'
-        # Pre-strip any locked console-script trampoline so uv can overwrite it
-        # (Windows denies overwriting an in-use .exe -- os error 5).
-        Remove-ConsoleTrampolines -VenvDir $VenvDir
-        $SshManagerDir = Resolve-SshManager
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        if ($SshManagerDir) {
-            # Refresh the vendored agent-ssh-manager distribution's build cache
-            # so a same-version source change lands (#186).
-            $sshResult = Invoke-UvPipInstallResilient -SourceDir $SshManagerDir @('--python', $VenvPython, '--reinstall-package', 'agent-ssh-manager', '--refresh-package', 'agent-ssh-manager', "$SshManagerDir", '--quiet')
-            $sshOut = $sshResult.Output
-            if ($sshResult.ExitCode -ne 0) {
-                $ErrorActionPreference = $prevEAP
-                if ($sshOut) { Write-Host ($sshOut | Out-String) }
-                throw "ssh-manager update failed (exit $($sshResult.ExitCode))"
-            }
-        } elseif (Test-SshManagerInstalled) {
-            Write-Step 'ssh-manager already installed in venv (marketplace layout)'
+        # A completed slot that already holds exactly this payload (just not
+        # the active one) is activated as-is: never recreate its venv or
+        # reinstall into it (#5472). Only an absent/incomplete slot is built.
+        if ($admission -eq 'reuse') {
+            Write-Skip "Runtime slot versions/$SrcVersion is already complete for this payload -- activating it without rebuilding"
         } else {
-            throw 'Cannot locate ssh-manager library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
-        }
-        # credential-relay: force-reinstall so a local code change propagates even
-        # without a version bump (uv otherwise skips a same-version path dep).
-        $CredRelayDir = Resolve-CredentialRelay
-        if ($CredRelayDir) {
-            $crResult = Invoke-UvPipInstallResilient -SourceDir $CredRelayDir @('--python', $VenvPython, '--reinstall-package', 'agent-credential-relay', '--refresh-package', 'agent-credential-relay', "$CredRelayDir", '--quiet')
-            $crOut = $crResult.Output
-            if ($crResult.ExitCode -ne 0) {
-                $ErrorActionPreference = $prevEAP
-                if ($crOut) { Write-Host ($crOut | Out-String) }
-                throw "credential-relay update failed (exit $($crResult.ExitCode))"
-            }
-        } elseif (Test-CredentialRelayInstalled) {
-            Write-Step 'credential-relay already installed in venv (marketplace layout)'
-        } else {
-            throw 'Cannot locate credential-relay library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
-        }
-        # zdd: force-reinstall so a local code change propagates even without a
-        # version bump (uv otherwise skips a same-version path dep).
-        $ZddDir = Resolve-Zdd
-        if ($ZddDir) {
-            $zddResult = Invoke-UvPipInstallResilient -SourceDir $ZddDir @('--python', $VenvPython, '--reinstall-package', 'agent-zdd', '--refresh-package', 'agent-zdd', "$ZddDir", '--quiet')
-            $zddOut = $zddResult.Output
-            if ($zddResult.ExitCode -ne 0) {
-                $ErrorActionPreference = $prevEAP
-                if ($zddOut) { Write-Host ($zddOut | Out-String) }
-                throw "zdd update failed (exit $($zddResult.ExitCode))"
-            }
-        } elseif (Test-ZddInstalled) {
-            Write-Step 'zdd already installed in venv (marketplace layout)'
-        } else {
-            throw 'Cannot locate zdd library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
-        }
-        # single-instance-lease: force-reinstall so a local code change propagates.
-        $SilDir = Resolve-SingleInstanceLease
-        if ($SilDir) {
-            $silResult = Invoke-UvPipInstallResilient -SourceDir $SilDir @('--python', $VenvPython, '--reinstall-package', 'agent-single-instance-lease', '--refresh-package', 'agent-single-instance-lease', "$SilDir", '--quiet')
-            $silOut = $silResult.Output
-            if ($silResult.ExitCode -ne 0) {
-                $ErrorActionPreference = $prevEAP
-                if ($silOut) { Write-Host ($silOut | Out-String) }
-                throw "single-instance-lease update failed (exit $($silResult.ExitCode))"
-            }
-        } elseif (Test-SingleInstanceLeaseInstalled) {
-            Write-Step 'single-instance-lease already installed in venv (marketplace layout)'
-        } else {
-            throw 'Cannot locate single-instance-lease library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
-        }
-        # config-migrate: force-reinstall so a local code change propagates.
-        $CfgMigrateDir = Resolve-ConfigMigrate
-        if ($CfgMigrateDir) {
-            $cmResult = Invoke-UvPipInstallResilient -SourceDir $CfgMigrateDir @('--python', $VenvPython, '--reinstall-package', 'agent-config-migrate', '--refresh-package', 'agent-config-migrate', "$CfgMigrateDir", '--quiet')
-            $cmOut = $cmResult.Output
-            if ($cmResult.ExitCode -ne 0) {
-                $ErrorActionPreference = $prevEAP
-                if ($cmOut) { Write-Host ($cmOut | Out-String) }
-                throw "config-migrate update failed (exit $($cmResult.ExitCode))"
-            }
-        } elseif (Test-ConfigMigrateInstalled) {
-            Write-Step 'config-migrate already installed in venv (marketplace layout)'
-        } else {
-            throw 'Cannot locate config-migrate library. Reinstall the agent-bridge plugin from the marketplace (copilot plugin install agent-bridge@copilot-extensions), then rerun this installer.'
-        }
-        # --refresh-package agent-procutil: see the matching comment in the
-        # initial-install path above.
-        $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', "$PluginDir", '--quiet')
-        $bridgeOut = $bridgeResult.Output
-        $updateResult = $bridgeResult.ExitCode
-        $ErrorActionPreference = $prevEAP
-        if ($updateResult -ne 0) {
-            if ($bridgeOut) { Write-Host ($bridgeOut | Out-String) }
-            throw "Package update failed (exit $updateResult)"
+            Invoke-UpdateSlotBuild -UseCutover $useCutover
         }
 
         # Verify the freshly-installed runtime imports before declaring success.
@@ -3036,12 +3118,14 @@ function Invoke-Update {
     # Success: discard the rollback snapshot.
     Remove-VenvBackup
 
-    # Update sibling plugins (e.g. agent-codespaces for codespace: namespace)
-    Install-SiblingPlugins -Reinstall
-
-    # Strip the uv-regenerated console-script trampoline(s) (SAC-blocked, unused);
-    # also clears sibling agent-*.exe pulled into this venv by Install-SiblingPlugins.
-    Remove-ConsoleTrampolines -VenvDir $VenvDir
+    # Update sibling plugins (e.g. agent-codespaces for codespace: namespace),
+    # then strip the uv-regenerated console-script trampoline(s) (SAC-blocked,
+    # unused; also clears sibling agent-*.exe pulled into this venv). Both
+    # mutate the slot, so a reused completed slot is left untouched (#5472).
+    if ($admission -ne 'reuse') {
+        Install-SiblingPlugins -Reinstall
+        Remove-ConsoleTrampolines -VenvDir $VenvDir
+    }
 
     # Versioned layout (#581): the new slot is built + verified; now atomically
     # swap the stable `venv` junction onto it. In cutover mode this makes `venv`
@@ -3050,7 +3134,7 @@ function Invoke-Update {
     # OLD daemon keeps serving from its own immutable slot until drained. No-op in
     # legacy mode.
     if ($VersionedRuntime) {
-        Invoke-VersionedMarkComplete
+        if (-not (Invoke-VersionedMarkComplete)) { throw 'Versioned completion publication failed' }
         if (-not (Invoke-VersionedActivate)) { throw 'Versioned activate failed' }
     }
 

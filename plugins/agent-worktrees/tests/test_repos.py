@@ -1239,7 +1239,7 @@ def test_sync_repo_bare_anchor_already_up_to_date(home: Path, tmp_path: Path):
                         paths={"windows": str(anchor)})
     state, detail = repos.sync_repo(e, plat="windows")
     assert state == "synced"
-    assert detail == "main"
+    assert detail == "main; files=current"
 
 
 def test_sync_repo_bare_anchor_fast_forwards(home: Path, tmp_path: Path):
@@ -1259,7 +1259,7 @@ def test_sync_repo_bare_anchor_fast_forwards(home: Path, tmp_path: Path):
                         paths={"windows": str(anchor)})
     state, detail = repos.sync_repo(e, plat="windows")
     assert state == "synced"
-    assert detail == "main"
+    assert detail == "main; files=refreshed"
     head = subprocess.run(
         ["git", "-C", str(anchor), "log", "-1", "--format=%s", "main"],
         capture_output=True, text=True,

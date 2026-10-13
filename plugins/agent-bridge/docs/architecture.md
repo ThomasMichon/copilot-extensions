@@ -443,6 +443,20 @@ downstream agent.
 | `status` | Show service status |
 | `uninstall` | Remove service (`--remove-config` for config too; `-DryRun`/`--dry-run` previews without changing anything) |
 
+Completed numbered runtime slots are immutable for both `install` and `update`.
+Before anything drains, stops, or rebuilds, the installer asks the shared
+`versioned_runtime.py check-admission` primitive about `versions/<v>/`: an
+already-active slot with the same payload is a no-op, and a completed but
+inactive slot with the same payload is activated as-is (no venv recreation,
+package reinstall, or provider pruning); a completed slot whose
+recorded payload differs (or whose completion evidence cannot be verified) is
+refused with a non-zero exit and a "bump the plugin version" message, leaving the
+running daemon untouched (there is no `--force` override). An absent or
+incomplete slot is built as before, unless the shared primitive refuses to prepare
+it (for example, it is the selected runtime or still in use), in which case the
+install fails instead of building over it. A refused completion-marker
+publication fails the install rather than being ignored.
+
 ### Scheduled task: write-once bootstrap (decoupled from the runtime version)
 
 On Windows the auto-start scheduled task is **write-once bootstrap

@@ -234,6 +234,13 @@ binstub/service manifest, and if a daemon is already live performs the
 installer-driven graceful cutover (falling back to drain/stop/start only on
 failure).
 
+A completed `versions/<version>/` slot is never rebuilt in place. Re-running
+`install`/`update` for the version that is already active with unchanged
+content is a no-op, and a completed but inactive slot with the same content is
+activated without being rebuilt. If the payload changed without a version bump, the installer
+refuses (non-zero exit, daemon untouched) and asks you to bump the plugin
+version; there is no `--force` override.
+
 ## Migration from Old Installer
 
 If the machine previously used a project binstub (e.g. `<project>

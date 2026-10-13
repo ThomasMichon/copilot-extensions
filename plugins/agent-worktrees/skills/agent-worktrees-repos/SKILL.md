@@ -240,6 +240,14 @@ mutation, since a diverged anchor's default merge WOULD create a genuine
 new local commit; `repos sync` is the always-available equivalent when
 typing `--ff-only` isn't convenient.
 
+A **bare** anchor (`core.bare=true`) has its default-branch ref advanced
+directly. If it also keeps an index and checked-out files, `repos sync`
+refreshes those files with the ref and refuses up front (ref unmoved) when
+the index is stale or locked, the files have local edits, or an untracked or ignored
+path is in the way. Each result ends with `; files=<status>`, and any status
+other than `refreshed`/`current`/`none` is printed as a warning -- see
+`docs/cli-reference.md` § *Bare-anchor sync*.
+
 ## Data File
 
 The registry lives at `~/.agent-worktrees/repos.yaml`. Full annotated example: <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->

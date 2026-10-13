@@ -495,12 +495,19 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             print("No repos registered.")
             return 0
         output.header("Repos Sync")
+        from . import bare_anchor_files
+
         had_error = False
         for name, state, detail in results:
+            # A bare anchor's materialized files that could not be advanced
+            # (stale index, local edits, a path in the way) need attention
+            # even when the ref itself is fine.
+            files = bare_anchor_files.status_of(detail)
+            files_warning = files is not None and files not in bare_anchor_files.QUIET_STATUSES
             if state == "synced":
-                output.ok(f"{name}: {detail}")
+                (output.warn if files_warning else output.ok)(f"{name}: {detail}")
             elif state in ("skipped", "missing"):
-                output.info(f"{name}: {state} ({detail})")
+                (output.warn if files_warning else output.info)(f"{name}: {state} ({detail})")
             else:
                 had_error = True
                 output.err(f"{name}: {detail}")

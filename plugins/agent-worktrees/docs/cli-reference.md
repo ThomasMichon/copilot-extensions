@@ -687,12 +687,40 @@ to the effort after release.
 | Subcommand | Description |
 |------------|-------------|
 | `services` | Service discovery, staleness checks, passthrough to installers |
-| `repos` | Repos registry -- list, find, add, clone, srcroot, `account`/`account-for` (owner→gh-login map), `allow-edits` (break-glass edit grants) |
+| `repos` | Repos registry -- list, find, add, clone, srcroot, `sync`, `account`/`account-for` (owner→gh-login map), `allow-edits` (break-glass edit grants) |
 | `accounts` | gh account identity catalog (`accounts.yaml`) -- list/show/set/remove logins, scopes, login flows |
 | `validate` | Validate core infrastructure files |
 | `pre-launch` | Check bootstrap staleness (JSON output, for launch wrappers) |
 | `reconcile-plugins` | Reconcile repo-adopted plugin payloads + gated runtimes (JSON output, for launch wrappers) |
 | `uninstall-plugins` | Sweep every deployed core plugin runtime via each plugin's own uninstall action (JSON; dry-run by default) |
+
+### Bare-anchor sync (`repos sync`)
+
+`repos sync` fast-forwards a bare anchor (`core.bare=true`) by moving its
+default-branch ref with a compare-and-swap `update-ref`. When the anchor also
+keeps an index and checked-out files beside its git dir (a converted ordinary
+clone), those files move with the ref: before the ref moves, the sync checks
+that no other git process holds the anchor's index lock, that the index
+matches the old commit, that the files have no local edits, and that no
+untracked or ignored path is in the way of a newly tracked one. If a
+check fails, the ref is left unmoved. After the ref moves, it runs the same
+two-tree `read-tree -m -u` a checkout would (so `core.autocrlf` applies). Linked
+worktrees are never touched. Each bare-anchor result ends with
+`; files=<status>`:
+
+| Status | Meaning |
+|--------|---------|
+| `refreshed` | Ref and files advanced together |
+| `current` | Already up to date; the index matches the ref |
+| `none` | A bare repo with no index or checked-out files; nothing to refresh |
+| `stale-index` | The index does not match the ref (for example, an earlier ref-only sync); ref left unmoved |
+| `dirty` | The checked-out files have local edits; ref left unmoved |
+| `collision` | An untracked or ignored local path is in the way of a newly tracked one; ref left unmoved |
+| `index-locked` | Another git process holds the anchor's `index.lock`; ref left unmoved |
+| `refresh-failed:<detail>` | The ref advanced (the result names the commit it advanced from) but the files could not be refreshed, for example because another git process took `index.lock` after the checks; fix the cause, then run `git -c core.bare=false --work-tree <anchor> read-tree -m -u <from> <branch>` |
+
+Any status other than `refreshed`, `current`, or `none` is printed as a
+warning.
 
 ### Repo-adopted plugin reconciliation (`reconcile-plugins`)
 
