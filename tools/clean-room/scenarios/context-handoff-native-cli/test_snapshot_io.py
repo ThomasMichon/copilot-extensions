@@ -3,6 +3,7 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -95,6 +96,23 @@ class SnapshotTests(unittest.TestCase):
             self.assertEqual(result["event_export_status"], "INVALID_EXPORT")
             self.assertTrue(any(error.get("path") == guidance.as_posix() for error in result["export_errors"]))
             self.assertEqual((archive / guidance).read_bytes(), previous)
+
+    def test_export_retains_packets_when_native_config_command_fails(self):
+        for kind in ("nonzero", "missing", "encoding"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+                original, evaluation, capsule = self.export_fixture(Path(temporary), stack)
+                canary = "synthetic-" + os.urandom(16).hex()
+                error = (subprocess.CalledProcessError(1, ["copilot", "config"], stderr=canary)
+                         if kind == "nonzero" else FileNotFoundError(canary) if kind == "missing"
+                         else UnicodeDecodeError("utf-8", b"\xff", 0, 1, canary))
+                with patch.object(controller, "run", side_effect=error):
+                    result = controller.export()
+                self.assertEqual(result["event_export_status"], "INVALID_EXPORT")
+                self.assertTrue(any(item["source"] == "copilot config" for item in result["export_errors"]))
+                self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"],
+                                 "INVALID_EXPORT")
+                self.assertIsNone(json.loads((evaluation / "effective-settings.json").read_text())["contextManagementTools"])
+                self.assertNotIn(canary, (evaluation / "export-errors.json").read_text())
 
     def test_regular_snapshot_and_redaction(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -210,6 +228,48 @@ class SnapshotTests(unittest.TestCase):
                 snapshot_io.snapshot(source, root / "evidence", errors, "fixture")
             self.assertTrue(errors)
             self.assertFalse((root / "evidence/file").exists())
+
+
+class StartupTests(unittest.TestCase):
+    def launch_keys(self, frames):
+        position = 0
+
+        def capture(label):
+            nonlocal position
+            frame = frames[min(position, len(frames) - 1)]
+            position += 1
+            return frame
+
+        with patch.object(controller, "trusted_identity", return_value=({"session_id": "fixture"}, {})), \
+                patch.object(controller, "workspace_seed_errors", return_value=[]), \
+                patch.object(Path, "exists", return_value=False), \
+                patch.object(controller, "verify_tmux_server", return_value={"server_no_new_privs": True}), \
+                patch.object(controller, "write"), patch.object(controller.time, "sleep"), \
+                patch.object(controller, "capture", side_effect=capture), \
+                patch.object(controller, "tmux") as command, redirect_stdout(io.StringIO()):
+            controller.launch()
+        return [call.args[-1] for call in command.call_args_list if call.args[0] == "send-keys"]
+
+    def test_startup_history_prompts_are_handled_once(self):
+        trust = "Confirm folder trust"
+        install = trust + "\nInstall it now?"
+        permissions = install + "\nAllow all tools"
+        self.assertEqual(self.launch_keys([trust, trust, install, install, permissions, permissions + "\nIdle"]),
+                         ["Enter", "n", "Enter"])
+
+    def test_only_latest_prompt_in_full_history_receives_a_response(self):
+        self.assertEqual(self.launch_keys(["Confirm folder trust\nInstall it now?\nEnable all permissions\nIdle"]),
+                         ["Enter"])
+
+    def test_permission_alias_does_not_repeat_confirmation(self):
+        self.assertEqual(self.launch_keys(["Allow all tools", "Allow all tools\nEnable all permissions\nIdle"]),
+                         ["Enter"])
+
+    def test_manifest_declares_the_same_exact_two_transition_boundary(self):
+        manifest = json.loads(Path(__file__).with_name("manifest.json").read_text())
+        self.assertTrue(any("exactly two native new_context transitions" in step
+                            for step in manifest["expected_outcome"]["steps"]))
+        self.assertIn("transition count other than two", manifest["expected_outcome"]["false_pass_if"])
 
 
 if __name__ == "__main__":

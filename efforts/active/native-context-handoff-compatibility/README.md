@@ -184,10 +184,10 @@ does not close those native gates. The effort remains **Active**.
 
 **Scope:** publish the existing generic test/evidence tranche, not a runtime fix
 or a passing acceptance claim. Relative to journal base `f926f234a`, the tranche
-changes thirteen files: this effort README/design plus the scenario's README,
+changes fourteen files: this effort README/design plus the scenario's README,
 manifest, setup shell, controller, read-only validator, deterministic tests and
 unpaid OS-permission probe and focused CLI-diagnostic tests
-and checkpoint-binding/no-follow snapshot helpers and tests under
+and event-parser/checkpoint-binding/no-follow snapshot helpers and tests under
 `tools/clean-room/scenarios/context-handoff-native-cli/`. No plugin payload,
 runtime, catalog, installed settings or changefile is changed. Preparation reconciles final documentation and evidence-integrity checks;
 managed publication/review/merge
@@ -208,7 +208,7 @@ Reproduce the source checks from the repository root:
 Push-Location tools\clean-room\scenarios\context-handoff-native-cli
 $env:PYTHONDONTWRITEBYTECODE = '1'
 python -m unittest discover -p 'test_*.py'
-ruff check --no-cache --select F,E9 controller.py validation.py checkpoint_binding.py snapshot_io.py test_snapshot_io.py test_validation.py test_cli_diagnostics.py os_permission_smoke.py
+ruff check --no-cache --select F,E9 controller.py validation.py event_parser.py checkpoint_binding.py snapshot_io.py test_snapshot_io.py test_validation.py test_cli_diagnostics.py os_permission_smoke.py
 Pop-Location
 python tools\check-effort-vision-structure.py efforts\active\native-context-handoff-compatibility\README.md
 git diff --check f926f234a..HEAD
@@ -223,7 +223,7 @@ test or ACP substitute. Release version/blob checks fail closed if current
 `main` no longer carries the recorded payload. No new eval was run or authorized
 by this preparation slice.
 
-**Safety and sanitization:** the reviewed thirteen-file tranche contains only
+**Safety and sanitization:** the reviewed fourteen-file tranche contains only
 generic tooling, synthetic fixture data/session identifiers and declared
 in-container paths. No real operator/machine/private checkout path, credential
 literal, private URL or raw run artifact is included. Raw judge packets/logs stay
@@ -436,6 +436,28 @@ below-altitude evidence/tooling documentation, with no new rollout claim.
   guidance-read positives. Renewed current-head review and required CI remain
   publication gates; the original native verdicts and parent completion gate
   remain unchanged.
+- The next full Balanced review resolved snapshot provenance and checkpoint
+  binding, then identified call-stream ordering/uniqueness, recursive corpus
+  reads through ancestors, repeated responses to startup scrollback, config
+  command failures losing export diagnostics and the manifest's loose transition
+  count. Startup now handles each prompt kind once, export preserves sanitized
+  config-failure packets, and the manifest explicitly matches the bounded
+  exactly-two-transition contract. Fourteen focused Linux source cases pass;
+  independent Linux consumer checks closed all three corrections, with startup
+  deliberately mocked and no Copilot launched. Shared stream checks now enforce
+  owner-scoped call uniqueness and prior-start/timestamp relationships while
+  retaining valid unfinished starts and root/child ID collisions. Recursive
+  corpus reads through ancestors and implicit current directories remain
+  substantive potential work without widening content credit. Independent
+  verification closed call relationships and normal ancestor detection, then
+  reproduced unresolved-path exceptions losing recovery diagnostics. Path
+  resolution failures now propagate explicit observations rather than crash
+  or gain content credit. All ninety integrated source tests pass in the
+  unpaid Linux lane, including actual recovery CLI/analyzer loop failures.
+  Independent actual consumer checks closed the path-failure residual and
+  retained nonrecursive guidance positives. Current-head review and required
+  CI remain publication gates. This does not authorize a paid startup/native
+  trial.
 - The corrections affect source evidence validation only. All four historical
   independent FAIL verdicts and their original packets remain unchanged.
   No paid trial, native deployment claim or runtime change is authorized by

@@ -13,6 +13,7 @@ import sys
 from fractions import Fraction
 
 from checkpoint_binding import readback_errors, recovered_checkpoint
+from event_parser import call_relationship_errors, event_stream
 
 BASELINE_DIR = Path("/opt/copilot-cleanroom/native-cli-baseline")
 RECOVERY_PREREQUISITES = [
@@ -135,49 +136,6 @@ def result_text(completion):
     return result.get("content") if isinstance(result, dict) else None
 
 
-def event_stream(path):
-    errors, events = [], []
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeError):
-        return [], [{"source": "events", "error": "event stream unavailable or unreadable"}]
-    if not lines:
-        errors.append({"source": "events", "error": "event stream is empty; no run evidence"})
-    for number, line in enumerate(lines, 1):
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            errors.append({"source": "events", "line": number, "error": "invalid event JSON"})
-            continue
-        if (not isinstance(event, dict) or not isinstance(event.get("data"), dict)
-                or any(not isinstance(event.get(key), str) or not event[key].strip()
-                       for key in ("id", "type", "timestamp"))):
-            errors.append({"source": "events", "line": number, "error": "invalid event object"})
-            continue
-        model = event["data"].get("model")
-        if model is not None and not isinstance(model, str):
-            errors.append({"source": "events", "line": number, "error": "invalid optional model metadata"})
-            continue
-        if event["type"] in ("tool.execution_start", "tool.execution_complete"):
-            data = event["data"]
-            if (not isinstance(data.get("toolCallId"), str) or not data["toolCallId"].strip()
-                    or (event["type"] == "tool.execution_start" and (
-                        not isinstance(data.get("toolName"), str) or not data["toolName"].strip()
-                        or not isinstance(data.get("arguments"), dict)))):
-                errors.append({"source": "events", "line": number, "error": "invalid tool event metadata"})
-                continue
-        if event["type"] == "user.message" and not isinstance(event["data"].get("content"), str):
-            errors.append({"source": "events", "line": number, "error": "invalid user message content"})
-            continue
-        if event["type"] == "skill.context_delivered_ref" and any(
-                not isinstance(event["data"].get(key), str) or not event["data"][key].strip()
-                for key in ("source", "prefix", "interactionId")):
-            errors.append({"source": "events", "line": number, "error": "invalid skill delivery metadata"})
-            continue
-        events.append(event)
-    return events, errors
-
-
 def execution_status(completion):
     invalid = {"success": False, "shell_exit_code": None}
     if not isinstance(completion, dict) or not isinstance(completion.get("data"), dict):
@@ -266,17 +224,17 @@ def resolved_read_paths(start, workspace):
     args = start["data"].get("arguments", {})
     if name == "view" and isinstance(args.get("path"), str):
         path = Path(args["path"])
-        return [str(path if path.is_absolute() else Path(workspace) / path)]
+        return [str(path if path.is_absolute() else Path(workspace) / path)], []
     if name not in ("bash", "shell"):
-        return []
+        return [], []
     try:
         lexer = shlex.shlex(args.get("command", ""), posix=True, punctuation_chars=";&|")
         lexer.whitespace_split = True
         tokens = list(lexer)
     except ValueError:
-        return []
+        return [], []
     cwd = Path(workspace)
-    paths = []
+    paths, errors = [], []
     index = 0
     command_start = True
     while index < len(tokens):
@@ -293,27 +251,40 @@ def resolved_read_paths(start, workspace):
             end = index + 1
             while end < len(tokens) and tokens[end] not in (";", "&&", "||", "|"):
                 end += 1
-            operands = potential_read_operands(reader, tokens[index + 1:end])
-            if not operands and (reader == "ls" or (reader == "rg" and "--files" in tokens[index + 1:end])):
+            operands, _, recursive = reader_inputs(reader, tokens[index + 1:end], include_recursion=True)
+            if not operands and recursive:
+                operands = [str(cwd)]
+            elif not operands and reader == "ls":
                 paths.append(str(cwd))
             for operand in operands:
                 path = Path(operand)
-                paths.append(str(path if path.is_absolute() else cwd / path))
+                resolved = path if path.is_absolute() else cwd / path
+                paths.append(str(resolved))
+                if recursive:
+                    try:
+                        corpus = (Path(workspace) / "corpus").resolve()
+                        corpus.relative_to(resolved.resolve())
+                        paths.append(str(corpus))
+                    except ValueError:
+                        pass  # A recursive reader outside the fixture is not corpus work.
+                    except (OSError, RuntimeError):
+                        errors.append("recursive reader path unavailable or unresolvable")
         command_start = False
         index += 1
-    return paths
+    return paths, errors
 
 
 def potential_read_operands(reader, words):
     return reader_inputs(reader, words)[0]
 
 
-def reader_inputs(reader, words):
+def reader_inputs(reader, words, *, include_recursion=False):
     """Return potential input files and preprocessing risk, never content-read credit."""
     if reader not in ("grep", "rg"):
-        return ([word for word in words if not word.startswith("-")
-                 and (reader not in ("head", "tail", "sed") or "/" in word or word.endswith((".md", ".txt")))], False)
-    files, index, has_pattern, options, executes = [], 0, False, True, False
+        files = [word for word in words if not word.startswith("-")
+                 and (reader not in ("head", "tail", "sed") or "/" in word or word.endswith((".md", ".txt")))]
+        return (files, False, False) if include_recursion else (files, False)
+    files, index, has_pattern, options, executes, recursive = [], 0, False, True, False, reader == "rg"
     long_values = set(("after-context before-context context max-count binary-files directories devices "
                        "exclude exclude-dir include label").split())
     if reader == "rg":
@@ -339,6 +310,8 @@ def reader_inputs(reader, words):
                 kind = "value"
             elif name == "files" and reader == "rg":
                 has_pattern = True
+            elif name in ("recursive", "dereference-recursive") and reader == "grep":
+                recursive = True
             if separator:
                 attached = value
         elif options and word.startswith("-") and word != "-":
@@ -347,6 +320,8 @@ def reader_inputs(reader, words):
                     kind = "pattern" if flag == "e" else "file" if flag == "f" else "value"
                     attached = word[position + 2:] or None
                     break
+                if reader == "grep" and flag in "rR":
+                    recursive = True
         if kind is not None:
             if attached is None and index + 1 < len(words):
                 index += 1
@@ -363,7 +338,7 @@ def reader_inputs(reader, words):
             else:
                 files.append(word)
         index += 1
-    return files, executes
+    return (files, executes, recursive) if include_recursion else (files, executes)
 
 
 def valid_read_range(bounds, upper=None):
@@ -427,7 +402,10 @@ def shell_read_specs(command, workspace):
 
 
 def content_read(start, completion, path, expected, workspace, view_range=None):
-    if not successful(completion) or path not in resolved_read_paths(start, workspace):
+    if not successful(completion):
+        return False
+    paths, path_errors = resolved_read_paths(start, workspace)
+    if path_errors or path not in paths:
         return False
     if start["data"]["toolName"] in ("bash", "shell"):
         specs = shell_read_specs(start["data"].get("arguments", {}).get("command"), workspace)
@@ -601,6 +579,9 @@ def write_destinations(start, workspace):
 
 def recovery_event_errors(events, root, workspace=None, baseline=None):
     """Validate semantic reads/refresh before work, not a fixed tool choreography."""
+    relationship_errors = call_relationship_errors(list(enumerate(events, 1)))
+    if relationship_errors:
+        return [{"clear_event": None, "errors": [error["error"] for error in relationship_errors]}]
     seed, baseline_errors = seed_baseline(baseline)
     if baseline_errors:
         return [{"clear_event": None, "errors": baseline_errors}]
@@ -670,7 +651,8 @@ def recovery_event_errors(events, root, workspace=None, baseline=None):
                     measurements.append(completion)
                 else:
                     errors.append("native measurement does not identify the recovered window")
-            paths = resolved_read_paths(event, workspace)
+            paths, path_errors = resolved_read_paths(event, workspace)
+            errors.extend(path_errors)
             if any("corpus" in Path(path).parts for path in paths) or task_write(event):
                 work.append(event)
         if not checkpoint:

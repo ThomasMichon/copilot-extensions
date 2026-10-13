@@ -261,14 +261,18 @@ def launch():
     tmux("new-session", "-d", "-s", TMUX, "-x", "220", "-y", "60", "-c", str(REPO), command)
     write(EVAL / "venue-protection.json", verify_tmux_server())
     tmux("set-option", "-t", TMUX, "history-limit", "100000")
+    handled = set()
+    startup_prompts = (("trust", ("Confirm folder trust",), "Enter"),
+                       ("install", ("Install it now?",), "n"),
+                       ("permissions", ("Allow all tools", "Enable all permissions"), "Enter"))
     for _ in range(30):
         text = capture("startup")
-        if "Confirm folder trust" in text:
-            tmux("send-keys", "-t", TMUX, "Enter")
-        if "Install it now?" in text:
-            tmux("send-keys", "-t", TMUX, "n")
-        if "Allow all tools" in text or "Enable all permissions" in text:
-            tmux("send-keys", "-t", TMUX, "Enter")
+        visible = [(max(text.rfind(phrase) for phrase in phrases), name, key)
+                   for name, phrases, key in startup_prompts]
+        position, name, key = max(visible)
+        if position >= 0 and name not in handled:
+            handled.add(name)
+            tmux("send-keys", "-t", TMUX, key)
         time.sleep(1)
     print(capture("startup"))
 
@@ -425,8 +429,16 @@ def export():
     except (OSError, UnicodeError):
         plugin_config = None
         export_errors.append({"source": "plugin config", "error": "configuration unavailable or unsafe"})
+    try:
+        native_setting = run("copilot", "config", "contextManagementTools").strip()
+    except (OSError, UnicodeError, subprocess.CalledProcessError) as error:
+        native_setting = None
+        diagnostic = {"source": "copilot config", "error": "configuration command unavailable or unsuccessful"}
+        if isinstance(error, subprocess.CalledProcessError):
+            diagnostic["exit_code"] = error.returncode
+        export_errors.append(diagnostic)
     write(EVAL / "effective-settings.json", {
-        "contextManagementTools": run("copilot", "config", "contextManagementTools").strip(),
+        "contextManagementTools": native_setting,
         "plugin_config": plugin_config,
         "caps_changed_by_fixture": False,
         "cli_alive_at_export": live,

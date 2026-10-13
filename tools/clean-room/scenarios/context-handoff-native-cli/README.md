@@ -212,6 +212,13 @@ copy receipt includes it; pre-created or subsequently deleted witnesses cannot
 be recovered from a stale destination.
 Regenerated packet validity retains an invalid redaction receipt across later
 analysis/export calls until an actual successful redaction check replaces it.
+Failure to execute or decode `copilot config` also becomes a sanitized export
+diagnostic with an invalid packet, rather than aborting before receipts exist.
+Startup answers each recognized prompt kind at most once, selecting the latest
+recognized prompt in captured history; stale scrollback cannot repeatedly send
+Enter or `n` into a later idle CLI. The manifest, prompt and validators all
+declare exactly two transitions for this bounded witness; the parent effort's
+broader acceptance matrix remains separate.
 Event row validation is shared by export, analysis and the direct
 `recovery-events` CLI. Invalid raw streams return structured observations and
 nonzero status, without crediting partial rows. Checkpoint/witness stdin must
@@ -220,6 +227,11 @@ failure results rather than tracebacks. Seal setup refuses a missing or
 unreadable known sudo grant with an actionable error before any policy/binary
 mutation. Validator APIs have no task override argument: only the trusted seed
 defines expected task values.
+Tool starts/completions must be unique within each owner/call-ID scope;
+completion requires a prior same-owner start and cannot precede its timestamp.
+Malformed relationships quarantine the stream before recovery attribution.
+Unfinished starts at final capture and legitimate root/child ID collisions
+remain valid, rather than inventing a completion or cross-owner correlation.
 Event rows must contain nonempty id/type/time strings and an explicit data
 object; optional model metadata must be text or null before model aggregation.
 Tool identifiers/argument objects and consumed message/delivery fields
@@ -242,6 +254,12 @@ of opaque readers such as grep/rg/wc/stat/ls before refresh. It is separate from
 the strict reader/output attribution needed to earn content credit. Regex/glob
 patterns in unrelated task-contract reads are not treated as corpus file reads
 or allowed to produce read credit.
+Recursive rg/grep reads through the workspace or corpus ancestors, including
+implicit-current-directory searches, are potential corpus work before refresh.
+Ordinary explicit prerequisite-file reads remain separate from corpus work.
+Unresolvable recursive paths produce explicit invalid-path observations;
+symlink loops or filesystem errors cannot abort recovery analysis or earn
+content credit. The CLI retains structured failure output and analysis packets.
 Work-operand parsing accounts for grep/rg short-option clusters, attached or
 separate pattern/pattern-file/value arguments, long `=value` forms and `--`.
 Absolute reader executables use the same basename classification as mutation

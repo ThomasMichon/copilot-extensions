@@ -42,6 +42,144 @@ def recovery_event_errors(events, root):
 
 
 class ValidationTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "posix", "looped-path consumer proof requires the Linux fixture")
+    def test_unresolvable_recursive_paths_preserve_cli_and_analyzer_diagnostics(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            evaluation, state, events = self.analyzer_fixture(Path(temporary))
+            root = evaluation / "workspace"
+            (root / "loop").symlink_to("loop")
+            position = next(index for index, event in enumerate(events) if event["type"] == "session.context_cleared")
+            events[position + 1:position + 1] = [
+                {"type": "tool.execution_start", "id": "loop-reader", "timestamp": "1-0a",
+                 "data": {"toolCallId": "loop-reader", "toolName": "bash",
+                          "arguments": {"command": f"rg record {shlex.quote(str(root / 'loop'))}"}}},
+                {"type": "tool.execution_complete", "id": "loop-complete", "timestamp": "1-0b",
+                 "data": {"toolCallId": "loop-reader", "success": True, "result": {"content": "fixture output"}}},
+            ]
+            report = self.run_analyzer(evaluation, state, events)
+            self.assertTrue(any("unresolvable" in error for row in report["semantic_recovery_validation"]
+                                for error in row["errors"]))
+            self.assertTrue((evaluation / "judge-packet.json").is_file())
+            options = {"capture_output": True, "text": True}
+            if sys.platform == "win32":
+                options["creationflags"] = subprocess.CREATE_NO_WINDOW
+            result = subprocess.run(
+                [sys.executable, validation.__file__, "recovery-events", str(evaluation / "session/events.jsonl"),
+                 str(root), str(TEST_SEEDS[str(root)])], **options)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(json.loads(result.stdout)["valid"])
+            self.assertNotIn("Traceback", result.stderr)
+            original = Path.resolve
+
+            def fail_operand(candidate, *args, **kwargs):
+                if candidate.name == "loop":
+                    raise OSError("fixture unavailable")
+                return original(candidate, *args, **kwargs)
+
+            with patch.object(Path, "resolve", side_effect=fail_operand, autospec=True):
+                paths, errors = validation.resolved_read_paths(events[position + 1], str(root))
+            self.assertTrue(paths)
+            self.assertTrue(any("unresolvable" in error for error in errors))
+
+    def test_call_relationship_errors_quarantine_analysis_and_recovery_cli(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evaluation, state, events = self.analyzer_fixture(Path(temp))
+            variants = {}
+            start_duplicate = copy.deepcopy(events)
+            extra = copy.deepcopy(start_duplicate[1])
+            extra["id"] = "duplicate-start-id"
+            start_duplicate.insert(2, extra)
+            variants["duplicate-start"] = start_duplicate
+            complete_duplicate = copy.deepcopy(events)
+            extra = copy.deepcopy(complete_duplicate[2])
+            extra["id"] = "duplicate-complete-id"
+            complete_duplicate.insert(3, extra)
+            variants["duplicate-complete"] = complete_duplicate
+            variants["completion-before-start"] = [events[0], events[2], events[1], *events[3:]]
+            reversed_time = copy.deepcopy(events)
+            reversed_time[2]["timestamp"] = "0-0"
+            variants["completion-time-before-start"] = reversed_time
+            options = {"capture_output": True, "text": True}
+            if sys.platform == "win32":
+                options["creationflags"] = subprocess.CREATE_NO_WINDOW
+            for name, bad in variants.items():
+                report = self.run_analyzer(evaluation, state, bad)
+                self.assertTrue(report["event_parser_errors"], name)
+                self.assertEqual(report["root_clear_events"], [], name)
+                self.assertEqual(report["context_measurements"], [], name)
+                result = subprocess.run([sys.executable, validation.__file__, "recovery-events",
+                                         str(evaluation / "session/events.jsonl"), str(evaluation / "workspace"),
+                                         str(TEST_SEEDS[str(evaluation / "workspace")])], **options)
+                self.assertNotEqual(result.returncode, 0, name)
+                self.assertFalse(json.loads(result.stdout)["valid"], name)
+
+    def test_recursive_workspace_reader_is_early_substantive_work(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for command in ("rg record .", "grep -r record .", f"rg record '{root}'",
+                            f"grep -R record '{root.parent}'", "rg record", "grep -r record"):
+                events = self.semantic_events(root)
+                self.insert_before_guidance(events, [
+                    {"type": "tool.execution_start", "id": "recursive-reader", "timestamp": "1-0a",
+                     "data": {"toolCallId": "recursive-reader", "toolName": "bash", "arguments": {"command": command}}},
+                    {"type": "tool.execution_complete", "id": "recursive-reader-complete", "timestamp": "1-0b",
+                     "data": {"toolCallId": "recursive-reader", "success": True, "result": {"content": "reader output"}}},
+                ])
+                observed = recovery_event_errors(events, root)[0]
+                self.assertTrue(observed["errors"], command)
+                self.assertEqual(observed["first_substantive_work"], "recursive-reader", command)
+
+    def test_call_ids_are_scoped_and_unfinished_starts_remain_valid(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "events.jsonl"
+            rows = [
+                {"type": "tool.execution_start", "id": "root-start", "timestamp": "0",
+                 "data": {"toolCallId": "shared", "toolName": "view", "arguments": {}}},
+                {"type": "tool.execution_start", "id": "child-start", "timestamp": "0", "agentId": "child-fixture",
+                 "data": {"toolCallId": "shared", "toolName": "view", "arguments": {}}},
+                {"type": "tool.execution_complete", "id": "root-complete", "timestamp": "0",
+                 "data": {"toolCallId": "shared", "success": True, "result": {"content": "root"}}},
+                {"type": "tool.execution_complete", "id": "child-complete", "timestamp": "1",
+                 "data": {"toolCallId": "shared", "agentId": "child-fixture", "success": False}},
+                {"type": "tool.execution_start", "id": "unfinished", "timestamp": "2",
+                 "data": {"toolCallId": "still-running", "toolName": "view", "arguments": {}}},
+            ]
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            parsed, errors = validation.event_stream(path)
+            self.assertFalse(errors)
+            self.assertEqual(parsed, rows)
+            duplicate = copy.deepcopy(rows[1])
+            duplicate["id"] = "another-child-start"
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows + [duplicate]))
+            self.assertTrue(validation.event_stream(path)[1])
+            unmatched = copy.deepcopy(rows[2])
+            unmatched["id"] = "unmatched-other-child"
+            unmatched["agentId"] = "other-child"
+            path.write_text("".join(json.dumps(row) + "\n" for row in rows + [unmatched]))
+            self.assertTrue(validation.event_stream(path)[1])
+
+    def test_recursive_reader_unrelated_files_and_pattern_literals_are_not_corpus_work(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for command in ("rg record task.json", "grep -r record task.json",
+                            f"rg record '{root / 'elsewhere'}'",
+                            "grep -r 'corpus/shard-003.txt' task.json",
+                            "rg --regexp='corpus/shard-003.txt' task.json"):
+                events = self.semantic_events(root)
+                self.insert_before_guidance(events, [
+                    {"type": "tool.execution_start", "id": "unrelated-reader", "timestamp": "1-0a",
+                     "data": {"toolCallId": "unrelated-reader", "toolName": "bash", "arguments": {"command": command}}},
+                    {"type": "tool.execution_complete", "id": "unrelated-reader-complete", "timestamp": "1-0b",
+                     "data": {"toolCallId": "unrelated-reader", "success": True, "result": {"content": "prerequisite excerpt"}}},
+                ])
+                observed = recovery_event_errors(events, root)[0]
+                self.assertFalse(observed["errors"], command)
+                self.assertEqual(observed["first_substantive_work"], "1-4", command)
+                reader = next(event for event in events if event.get("id") == "unrelated-reader")
+                completion = next(event for event in events if event.get("id") == "unrelated-reader-complete")
+                self.assertFalse(content_read(reader, completion, str(root / "corpus/shard-003.txt"),
+                                              "prerequisite excerpt", str(root), [61, 61]))
+
     def semantic_bound_events(self, root):
         return self.semantic_events(root)
 
@@ -134,8 +272,11 @@ class ValidationTests(unittest.TestCase):
                     next(event for event in bad if event.get("id") == "preread-complete-1")["data"]["success"] = False
                 report = recovery_event_errors(bad, root)[0]
                 self.assertTrue(report["errors"], form)
-                self.assertTrue(any("checkpoint" in error or "session" in error or "read" in error
-                                    for error in report["errors"]), form)
+                if form == "child":
+                    self.assertIn("tool completion lacks a prior same-owner start", report["errors"])
+                else:
+                    self.assertTrue(any("checkpoint" in error or "session" in error or "read" in error
+                                        for error in report["errors"]), form)
 
     def test_native_measurement_requires_exact_evidenced_ratio(self):
         def read(left, limit, fraction):
