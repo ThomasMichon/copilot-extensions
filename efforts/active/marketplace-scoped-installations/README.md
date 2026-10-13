@@ -495,6 +495,37 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-10-13 — Reviewed defaults plan landed; diagnostic recovery implementation
+
+- Plan amendment #6140 merged after a current-head review cleared the
+  remaining findings and both required checks passed. Phase 8 remains the
+  active implementation and acceptance gate.
+- Removed the implicit advisory-pointer publishers from canonical Python,
+  POSIX, and PowerShell diagnostics. Existing pointer files are retained
+  unchanged, not migrated or deleted.
+- Onboarding now checks its own payload command and installer without
+  executing either, instead of trusting the existence of a directory named
+  by a shared plugin-name-only pointer. It directs registration through the
+  owning session catalog and retains legacy compatibility checks.
+- Added real CLI no-write regression coverage for absent and pre-existing
+  pointer evidence, active namespaced fixtures, and mutation-entry guards
+  on the Python API. Derived copies follow the canonical sync inventory.
+- Local evidence: 127 governance tests passed across Python, POSIX shell,
+  and local PowerShell; 13 onboarding tests passed with PowerShell parity.
+  The contained devcontainer onboarding run passed 8 tests and skipped
+  5 PowerShell cases because that image does not include PowerShell.
+  Those skips were exercised by the separate local parity run.
+- The fresh-box `agent-worktrees-solo` run did not pass: a read-only
+  directory marketplace exposed the installer source-staging gap already
+  tracked by [#5851](https://github.com/ThomasMichon/copilot-extensions/issues/5851).
+  Provisioning attempted checkout artifact cleanup and failed in the
+  vendored library build before reaching the changed diagnostics.
+  Added the reproduction to that existing tracker, kept the source mount
+  read-only, and did not substitute a writable-source workaround.
+- The implementation is not yet released or deployed. Native Windows and
+  POSIX acceptance evidence must still satisfy the diagnostic prerequisite
+  before persistent-host diagnostic restrictions can be lifted.
+
 ### 2026-10-12 — Revalidate the planning continuation against current source
 
 - Preserved the 2026-10-10 direction and its agent-recommended decomposition;

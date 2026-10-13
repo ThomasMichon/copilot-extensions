@@ -22,7 +22,10 @@ and marketplace ids, resolve payload provenance, compute the approved durable
 layout, strictly validate receipts, and expose the same bounded `stamp` and
 `activation-cas` mutations. They also expose immutable `snapshot-stamp` and
 read-only `snapshot-validate` provenance actions plus read-only `status` and
-`probe-legacy` actions for installation-mode governance. `stamp` creates or
+`probe-legacy` actions for installation-mode governance. These diagnostics
+never publish a `runtime-root` file; existing advisory files are left untouched.
+Command discovery uses attributable catalogs or explicit lifecycle launchers,
+not a status-query side effect. `stamp` creates or
 updates only `namespace.json` and `install.json`. `activation-cas` explicitly
 publishes only `installation-activation.json` after pinning the caller-observed
 namespace, install, and activation generations. The cross-runner actions do not
