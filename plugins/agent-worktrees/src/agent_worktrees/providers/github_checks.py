@@ -90,9 +90,9 @@ def read_checks(
                         status_readable = False
                         continue
                     state = str(status.get("state", "")).strip().lower()
-                    if state not in ("failure", "error", "pending", "success"):
+                    valid_state = state in ("failure", "error", "pending", "success")
+                    if not valid_state:
                         status_readable = False
-                        continue
                     context = status.get("context")
                     if isinstance(context, str) and context:
                         # Status arrays are newest-first; a rerun supersedes older context entries.
@@ -100,6 +100,8 @@ def read_checks(
                         if key in seen_contexts:
                             continue
                         seen_contexts.add(key)
+                    if not valid_state:
+                        continue
                     pending = pending or state == "pending"
                     if state in ("failure", "error"):
                         failure = True

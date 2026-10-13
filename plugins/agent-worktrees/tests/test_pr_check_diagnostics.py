@@ -125,6 +125,31 @@ def test_check_diagnostics_invalid_legacy_state_retains_other_failure() -> None:
     assert [failure.name for failure in report.failures] == ["lint"]
 
 
+@pytest.mark.guard
+@pytest.mark.parametrize("invalid", [None, "", "unknown"])
+def test_check_diagnostics_malformed_latest_supersedes_stale_failure(invalid: object) -> None:
+    report = CheckFixture(status={
+        "state": "success", "statuses": [
+            {"context": "Build", "state": invalid},
+            {"context": "build", "state": "failure"},
+        ],
+    }).read()
+    assert report.state == "" and not report.complete
+    assert report.failures == ()
+
+
+def test_check_diagnostics_malformed_latest_retains_other_context_failure() -> None:
+    report = CheckFixture(status={
+        "state": "failure", "statuses": [
+            {"context": "Build", "state": None},
+            {"context": "build", "state": "failure"},
+            {"context": "lint", "state": "error"},
+        ],
+    }).read()
+    assert report.state == "failure" and not report.complete
+    assert [failure.name for failure in report.failures] == ["lint"]
+
+
 def test_check_diagnostics_legacy_pending_prevents_inconsistent_green_rollup() -> None:
     report = CheckFixture(status={
         "state": "success", "statuses": [{"context": "build", "state": "pending"}],
