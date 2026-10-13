@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh frozen preference authority fixture bindings after agent-procutil spawn_daemon update",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
