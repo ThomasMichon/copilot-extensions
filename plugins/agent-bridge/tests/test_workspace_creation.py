@@ -119,6 +119,29 @@ async def test_cold_pending_first_prompt_strictly_resumes_original_native(creati
     assert len(rig.manager.list_sessions()) == len(rig.db.execute_read("SELECT * FROM turns")) == 1
     await asyncio.sleep(0)
 
+@pytest.mark.asyncio
+async def test_cold_unprompted_creation_replay_restores_same_ready_native(creation_rig, monkeypatch):
+    rig = creation_rig
+    session, first = await workspace_creation.start(rig.manager, rig.target, key="logical-work")
+    native = session.acp_session_id
+    session.status = SessionStatus.STOPPED
+    session.client = None
+    calls = []
+    resume = rig.manager.resume_session
+
+    async def strict(*args, **kwargs):
+        calls.append(kwargs)
+        return await resume(*args, **kwargs)
+
+    monkeypatch.setattr(rig.manager, "resume_session", strict)
+    recovered, replay = await workspace_creation.start(rig.manager, rig.target, key="logical-work")
+    assert recovered is session and recovered.status == SessionStatus.IDLE
+    assert replay["replayed"] and replay["native_session_id"] == first["native_session_id"] == native
+    assert calls == [{"drain": False, "allow_recreate": False}]
+    assert not rig.db.execute_read("SELECT * FROM turns")
+    assert sum(args[0] == "create" for args, _ in rig.calls) == 1
+    await asyncio.sleep(0)
+
 
 @pytest.mark.asyncio
 async def test_existing_sessionless_allocation_is_embodied_without_create(creation_rig):

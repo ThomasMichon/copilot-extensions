@@ -188,5 +188,5 @@ An active reservation must finish its normal defer/conclusion before this verb;
 never force-clear it or directly edit the database. Deploy the promoted
 bridge and dispatch fixes through normal immutable-runtime activation first.
 The promoted bridge payload/client must be deployed too: current acquisition
-clients require daemon protocol 33 and refuse an older daemon before
+clients require daemon protocol 34 and refuse an older daemon before
 sending a request, rather than assume it implements recovery revalidation.

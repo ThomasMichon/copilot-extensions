@@ -319,3 +319,22 @@ takeover, blanket freshness authorization, or parallel session owner is proposed
   66 passed. Bridge native/keyed/acquisition/native-bound selection: 157 passed,
   one platform skip. Ground native keyed creation: 17 passed. Module-size guard
   remains green; required CI/review and actual runtime merge are still pending.
+
+### 2026-10-13 - Runtime PR review and CI follow-through
+
+- Opened runtime PR #6517. Required CI exposed stale generation evidence and
+  legacy/parser fixtures that omitted the newly mandatory workspace facts.
+  Added generation-34 source-pinned wire evidence while preserving earlier
+  fixtures, and updated the synthetic consumers rather than relaxing runtime
+  provenance checks.
+- The current-head automated review identified wall-clock ordering as a real
+  revision-regression risk. Allocation selection now orders by logical revision
+  before timestamp, with a clock-rollback regression. Corrected two remaining
+  protocol-33 documentation references to the acquisition floor of 34.
+- An integrated ordinary-start recovery check also exposed completed but cold
+  unprompted keyed creation. Replay now strictly resumes the original native
+  conversation only while it still has zero turns; it never recreates or
+  redelivers. The focused native-owner replay lane passed 23/one platform skip.
+- Independent registry and parser/creation contracts passed 47/one platform
+  skip; affected dispatch replay/revision selection passed 65. PR updates,
+  subsequent current-head review, required CI, and actual merge remain open.

@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 33,
+        "current": 34,
         "minimum": 1,
-        "previous_generation": 32,
+        "previous_generation": 33,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -39,7 +39,8 @@
           30,
           31,
           32,
-          33
+          33,
+          34
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -89,21 +90,23 @@
         "strict_acquisition": 30,
         "acquisition_retirement_revalidation": 31,
         "acquisition_retirement_recovery": 32,
-        "native_bound_prompt": 33
+        "native_bound_prompt": 33,
+        "owner_qualified_acquisition": 34,
+        "workspace_creation": 34
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "0bf9fab203297fd1b3a4e3d9749ac11c99b08445f028513f1b74e963a72a7c80",
+          "sha256": "8b7cfc9afe01df9c52b338b4126990041795f6c49a6a64a3718a28a2e7b1cd41",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "367f4c93a54ab18272b912fdbb2154cdf5aa599c0919d3ed82d03e5a7756d2c5",
+          "sha256": "241b21dfebe37d7e4b5cb55541427721f48165b454dc964064c8ebe1663e666b",
           "semantic": false,
-          "non_semantic_reason": "Preserves public model imports through re-exports; the generation33 prompt schemas now live in the separately registered prompt_models.py owner."
+          "non_semantic_reason": "Preserves public model imports through re-exports; session start schemas now live in the registered session_start_models.py owner."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
@@ -113,9 +116,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "a80e04321035b84904757bbf0951f56439e3806b9d066678cf0faa679d3ec1e0",
-          "semantic": false,
-          "non_semantic_reason": "Preserves public route imports and API paths through included prompt router; generation33 prompt admission now lives in the separately registered routes/prompts.py owner."
+          "sha256": "c581b21d1f0dc27207854dfa7210a3355d47f5043ac8c459196e5884f90b376e",
+          "semantic": true,
+          "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
@@ -148,6 +151,12 @@
           "non_semantic_reason": null
         },
         {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "sha256": "8c9cdf4bee879d348779b5589077845887b50f22a0e8a60ea81d11de61bed903",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
           "sha256": "b9045926e4f96defda6416e321729fdf2e66539f594ee55166314a30e08aa8ee",
           "semantic": true,
@@ -155,6 +164,12 @@
         }
       ],
       "fixtures": [
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-generation-34.json",
+          "sha256": "1f65087acdef6b225ea8cd0056b974ab49e216050a2627ff5459dfba308ee401",
+          "role": "Generation-34 keyed workspace evidence",
+          "generation": 34
+        },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-32.json",
           "sha256": "82459757b85aafdf6085c184e02d57923e18fa4759781c611dd34f48d403a52d",
@@ -388,6 +403,36 @@
           "sha256": "6fb25c5704ef6e4d92601e32b423fff98abe1238ba9135b3f7ec55b878383d89",
           "role": "Unchanged native-bound prompt wire after mechanical owner extraction",
           "generation": 33
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-34.json",
+          "sha256": "49c079adb3dea6350a1a97cd434d905d4b1fcbef431aa11c65f3ef333272ad73",
+          "role": "Preserved independent wire shape re-attested at generation 34",
+          "generation": 34
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-34.json",
+          "sha256": "4f33a428cff17f7f52f33b308d0a46e7dca6f202d0444a0bc80791eea08c1d5b",
+          "role": "Preserved independent wire shape re-attested at generation 34",
+          "generation": 34
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-34.json",
+          "sha256": "e4c4693845e1746f0dfdc279c05b403ff563279df2a5571a0a89f02322775846",
+          "role": "Preserved independent wire shape re-attested at generation 34",
+          "generation": 34
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-routes-generation-34.json",
+          "sha256": "74ac48c21c522c20b78d54828523cafb424d9da64c1d1f3d9bc540d325b8221f",
+          "role": "Generation-34 keyed workspace evidence",
+          "generation": 34
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-models-generation-34.json",
+          "sha256": "1da4b120ece9ce59cbc70916c1dcc4c7a716fee4bdd88e19a488b5b9f7d80ada",
+          "role": "Generation-34 keyed workspace evidence",
+          "generation": 34
         }
       ],
       "provenance": [
@@ -1198,6 +1243,54 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
           "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
           "capture_method": "Committed mechanical extraction, verified by unchanged public route serialization and compatibility tests"
+        },
+        {
+          "commit": "d96a93feb91a4c6c840f9361d8a142774dd88668",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 34,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Preserved independent fixture assertions and keyed native-owner regressions; exact normalized source bytes verified against the published candidate commit."
+        },
+        {
+          "commit": "d96a93feb91a4c6c840f9361d8a142774dd88668",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 34,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Preserved independent fixture assertions and keyed native-owner regressions; exact normalized source bytes verified against the published candidate commit."
+        },
+        {
+          "commit": "d96a93feb91a4c6c840f9361d8a142774dd88668",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 34,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Preserved independent fixture assertions and keyed native-owner regressions; exact normalized source bytes verified against the published candidate commit."
+        },
+        {
+          "commit": "d96a93feb91a4c6c840f9361d8a142774dd88668",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 34,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "8c2e171dad3afa865097262b5826cdbf6e9b64ce",
+          "capture_method": "Preserved independent fixture assertions and keyed native-owner regressions; exact normalized source bytes verified against the published candidate commit."
+        },
+        {
+          "commit": "d96a93feb91a4c6c840f9361d8a142774dd88668",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 34,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "90f2a01f70488a96e6f5160bfbf12cbfe66d65b6",
+          "capture_method": "Preserved independent fixture assertions and keyed native-owner regressions; exact normalized source bytes verified against the published candidate commit."
+        },
+        {
+          "commit": "d96a93feb91a4c6c840f9361d8a142774dd88668",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 34,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "971b3654f4d8ad49d2ed67c779cf173e080c45e5",
+          "capture_method": "Preserved independent fixture assertions and keyed native-owner regressions; exact normalized source bytes verified against the published candidate commit."
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",

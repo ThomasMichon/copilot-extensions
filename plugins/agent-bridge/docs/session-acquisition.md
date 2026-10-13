@@ -81,7 +81,7 @@ Version 2 additionally requires a nonempty execution project and worktree path.
 Admission compares both to dispatch's persisted allocation provenance, then
 checks the exact worktree owner's `repo` and `path` before native-head reads.
 Conflicting or missing owner facts refuse without searching another registry.
-Protocol 33 is required for version 2; the route continues serving version-1
+Protocol 34 is required for version 2; the route continues serving version-1
 requests from protocol-30/31/32 clients with their existing safety checks.
 Version-1 request digests remain byte-compatible with persisted history.
 

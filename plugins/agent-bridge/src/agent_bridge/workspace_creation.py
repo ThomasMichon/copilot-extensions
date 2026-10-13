@@ -241,6 +241,17 @@ async def start(
                             or admitted[0]["turn_index"] != turn_index or admitted[0]["prompt"] != prompt
                         ):
                             raise AcquisitionRefused("creation_delivery_unproven", "completed first-turn receipt is missing")
+                    elif session.status == SessionStatus.STOPPED and not db.execute_read(
+                        "SELECT 1 FROM turns WHERE session_id=? LIMIT 1", (session.session_id,),
+                    ):
+                        session = await manager.resume_session(
+                            session.session_id, drain=False, allow_recreate=False,
+                        )
+                        if (
+                            session.acp_session_id != native or session.target.project != target.project
+                            or session.target.worktree_id != worktree_id or session.target.cwd != saved["path"]
+                        ):
+                            raise AcquisitionRefused("native_identity_changed", "strict creation replay changed native identity")
                     return session, result
                 gates = db.execute_read(
                     "SELECT * FROM acquisition_launch_gates WHERE worktree_id=?", (worktree_id,),

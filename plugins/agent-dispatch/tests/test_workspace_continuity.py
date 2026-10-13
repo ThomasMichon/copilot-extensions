@@ -251,6 +251,22 @@ def test_allocation_revision_is_explicit_and_disposal_qualified(tmp_path):
     with pytest.raises(TaskError, match="revision"):
         queue.reserve_spawn(task.id, allocation_revision=1)
 
+def test_allocation_revision_does_not_regress_after_wall_clock_rollback(tmp_path):
+    queue = TaskQueue(tmp_path / "queue.db")
+    task = queue.create(title="work", repo="queue-repo", dedup_key="logical-work")
+    first, _ = queue.reserve_spawn(task.id, now=1000)
+    queue.record_spawn_worktree(first.key, "workspace-a", ownership="created")
+    queue.fail_spawn(first.key, now=1001, conclusion_state="complete",
+                     conclusion_detail=json.dumps({"action": "removed"}))
+    replacement, _ = queue.reserve_spawn(task.id, allocation_revision=2, now=100)
+    queue.record_spawn_allocation(replacement.key, "execution-repo")
+    queue.fail_spawn(replacement.key, now=101, detail="replacement response lost")
+    retry, admitted = TaskQueue(tmp_path / "queue.db").reserve_spawn(task.id, now=102)
+    assert admitted and retry.allocation_revision == 2
+    assert retry.creation_key == replacement.creation_key != first.creation_key
+    assert retry.allocation_reservation_key == replacement.key
+    assert retry.allocation_project == "execution-repo" and retry.worktree is None
+
 
 @pytest.mark.parametrize("exclusive_key", [None, "exclusive-work"])
 def test_replacement_revision_lost_response_never_inherits_the_disposed_revision(

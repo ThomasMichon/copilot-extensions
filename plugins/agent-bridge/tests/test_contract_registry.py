@@ -55,13 +55,24 @@ def _fixture(relative: str) -> dict:
 
 
 def test_http_declared_generation_matches_current_fixture() -> None:
-    fixture = _fixture("fixtures/http/current/native-bound-protocol-generation-33.json")
+    fixture = _fixture("fixtures/http/current/workspace-creation-generation-34.json")
     body = fixture["health"]
     assert body["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
     assert (
         body["min_protocol_version"]
         == bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED
     )
+
+def test_workspace_creation_fixture_matches_additive_models_and_capability_floors() -> None:
+    fixture = _fixture("fixtures/http/current/workspace-creation-generation-34.json")
+    request = StartSessionRequest.model_validate(fixture["request"]["json"])
+    assert request.creation_key == "logical-work"
+    assert request.creation_prompt is None
+    response = StartSessionResponse.model_validate(fixture["response"])
+    assert response.creation == fixture["response"]["creation"]
+    assert fixture["capability"]["workspace_creation"] == bridge_protocol.WORKSPACE_CREATION_PROTOCOL_VERSION
+    assert fixture["capability"]["owner_qualified_acquisition"] == bridge_protocol.ACQUISITION_WORKSPACE_PROTOCOL_VERSION
+    assert fixture["capability"]["native_bound_prompt"] == bridge_protocol.NATIVE_BOUND_PROMPT_PROTOCOL_VERSION
 
 
 def test_retirement_recovery_capability_matches_current_fixture() -> None:
@@ -206,7 +217,9 @@ def test_historical_health_fixture_preserves_complete_route_shape(
 def test_session_create_request_fixture_proves_unknown_field_tolerance() -> None:
     fixture = _fixture("fixtures/http/current/session-create-request.json")
     request = StartSessionRequest.model_validate(fixture["request"])
-    assert request.model_dump(mode="json") == fixture["accepted_model"]
+    assert request.model_dump(mode="json") == {
+        **fixture["accepted_model"], "creation_key": None, "creation_prompt": None,
+    }
     assert "future_option" not in request.model_fields_set
 
 
@@ -219,7 +232,7 @@ def test_session_create_response_fixture_matches_model() -> None:
         status=expected["status"],
         protocol_version=expected["protocol_version"],
     )
-    assert response.model_dump(mode="json") == expected
+    assert response.model_dump(mode="json") == {**expected, "creation": None}
 
 
 @pytest.mark.asyncio
@@ -252,6 +265,7 @@ async def test_agents_list_response_fixture_matches_route_serialization() -> Non
 def test_representative_error_fixture_matches_route() -> None:
     fixture = _fixture("fixtures/http/current/representative-error.json")
     request = SimpleNamespace(
+        url=SimpleNamespace(path="/api/v1/sessions"),
         app=SimpleNamespace(
             state=SimpleNamespace(
                 ready=False,

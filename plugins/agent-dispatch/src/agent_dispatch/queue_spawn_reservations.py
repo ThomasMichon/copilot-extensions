@@ -184,7 +184,7 @@ class SpawnReservationMixin:
             creation_prefix = "dispatch-workspace:" + hashlib.sha256(logical_identity.encode()).hexdigest() + ":"
             allocation_rows = conn.execute(
                 "SELECT * FROM spawn_reservations WHERE creation_key LIKE ? "
-                "ORDER BY reserved_at DESC, attempt DESC",
+                "ORDER BY allocation_revision DESC, reserved_at DESC, attempt DESC",
                 (creation_prefix + "%",),
             ).fetchall()
             latest_allocation = allocation_rows[0] if allocation_rows else (rows[-1] if rows else None)

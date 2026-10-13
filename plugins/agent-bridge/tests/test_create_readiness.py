@@ -56,13 +56,20 @@ def test_dispatch_ordinary_calls_parse_with_real_bridge_parser(monkeypatch):
     created = {
         "session_id": "bridge-a", "ready": True, "status": "awaiting_first_prompt",
         "connection": {"repo": "example", "worktree_id": "worktree-a",
-                       "native_session_id": "native-a"},
+                       "native_session_id": "native-a", "target_dir": "/example/worktree"},
     }
-    reservation = {"state": "reserving", "agent_info": None, "conversation_retired": False}
+    reservation = {
+        "key": "reservation-a", "state": "reserving", "agent_info": None,
+        "conversation_retired": False, "creation_key": "logical-work", "allocation_project": None,
+    }
     calls = []
 
     class Client:
         def get_reservation(self, key):
+            return reservation
+
+        def record_spawn_allocation(self, key, project):
+            reservation["allocation_project"] = project
             return reservation
 
         def record_created_agent(self, key, **facts):
@@ -74,6 +81,7 @@ def test_dispatch_ordinary_calls_parse_with_real_bridge_parser(monkeypatch):
         calls.append(args.command)
         if args.command == "create":
             assert args.target == "example@local" and args.charter == "reviewer"
+            assert args.creation_key == "logical-work"
             assert args.prompt is None and args.prompt_file is None
             result = created
         elif args.command == "send":

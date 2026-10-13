@@ -29,6 +29,7 @@ def _task(ownership="reused", *, conversation_retired=False):
         "repo": TEST_REPO,
         "spawn_worktree": "review-worktree",
         "spawn_worktree_path": "/example/review-worktree",
+        "spawn_allocation_project": TEST_REPO,
         "spawn_worktree_ownership": ownership,
         "spawn_session_handle": None,
         "spawn_conversation_retired": conversation_retired,
@@ -159,6 +160,7 @@ def test_missing_conversation_retired_marker_fails_closed(monkeypatch):
         "repo": TEST_REPO,
         "spawn_worktree": "review-worktree",
         "spawn_worktree_path": "/example/review-worktree",
+        "spawn_allocation_project": TEST_REPO,
         "spawn_worktree_ownership": "reused",
         "spawn_session_handle": None,
         # spawn_conversation_retired deliberately absent -- the pre-field
