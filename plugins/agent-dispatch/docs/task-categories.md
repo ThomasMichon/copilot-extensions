@@ -57,6 +57,15 @@ queries to reach older records. Loading a new contribution still requires the
 normal payload publication and Picker contribution reconciliation; backend
 metadata alone does not change an already-installed Tasks contribution.
 
+The Picker's existing activation-aware materializer publishes attributed
+schema-v3 pointers for both templates under the same `agent-dispatch` provider.
+Each pointer carries only its provider, verified payload root and template name;
+discovery rereads the live template after checking enabled state and root identity.
+The plugin installers do not copy schema-v1 payload manifests into the shared
+runtime registry. An absent Picker remains an optional capability, and disabled,
+stale-root or malformed/tampered contributions do not become unowned legacy
+entries. Registry reconciliation and diagnostic cleanup stay consumer-owned.
+
 The Worktree Manager's built-in **Maintenance** view continues to own worktree
 maintenance and its existing controls. The task contribution's distinct
 **Maintenance tasks** caption avoids colliding with or taking over that view.

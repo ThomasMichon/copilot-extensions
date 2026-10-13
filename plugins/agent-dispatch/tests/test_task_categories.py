@@ -414,6 +414,7 @@ def test_remote_browse_and_create_forward_category():
         assert argv[argv.index("--category") + 1] == "maintenance"
 
 
+@pytest.mark.guard
 def test_independent_pivot_manifests_and_full_inspection_access():
     directory = Path(__file__).resolve().parents[1] / "pivots"
     for filename, category in (

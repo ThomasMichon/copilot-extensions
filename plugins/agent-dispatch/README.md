@@ -206,8 +206,9 @@ fallback are unchanged, including their argv and environment behavior.
 
 ### Worktree-picker task-category pivots
 
-The installer drops a pivot manifest at
-`~/.agent-worktrees/pivots/agent-dispatch.json` so the agent-worktrees Textual
+The Picker's existing activation-aware materializer publishes schema-v3 pointers
+at `~/.agent-worktrees/pivots/` from the enabled plugin's verified payload
+templates; the plugin installers do not copy raw manifests there. The Textual
 picker grows a **Tasks** pivot that explicitly requests ordinary work.
 The independent `agent-dispatch-maintenance.json` contribution adds
 **Maintenance tasks** after Tasks, without replacing the built-in worktree
