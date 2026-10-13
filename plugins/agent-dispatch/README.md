@@ -826,10 +826,13 @@ of `repo`, which continues to identify the forge/task lane. For example:
 kind: evaluator
 name: verify-work
 spec:
-  cwd: "repo:tools:."
-  scripts:
-    verify-work: ["python", "repo:tools:scripts/verify.py"]
-  timeout_seconds: 30
+  repo: example/project
+  evaluator_ref: verify-work
+  evaluator_spec:
+    cwd: "repo:tools:."
+    scripts:
+      verify-work: ["python", "repo:tools:scripts/verify.py"]
+    timeout_seconds: 30
 ```
 
 An identity-only discovery pointer uses the same registration:

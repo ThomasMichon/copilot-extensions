@@ -561,3 +561,18 @@ def test_field_provenance_and_merge_share_named_snapshot(tmp_path, monkeypatch):
             {"extends": "repo:tools:recipe.json"}, directory=leaf, repo_root=leaf,
         )
     assert len(calls) == 1
+
+
+def test_documented_named_evaluator_is_a_valid_registration():
+    from pathlib import Path
+
+    import yaml
+
+    from agent_dispatch.registrar import load_declaration
+
+    readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+    section = readme.split("### Registered repository resources", 1)[1]
+    example = section.split("```yaml\n", 1)[1].split("```", 1)[0]
+    declaration = load_declaration(yaml.safe_load(example))
+    assert declaration.spec["evaluator_ref"] == "verify-work"
+    assert declaration.spec["evaluator_spec"]["cwd"] == "repo:tools:."
