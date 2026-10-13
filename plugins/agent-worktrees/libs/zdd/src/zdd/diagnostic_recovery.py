@@ -6,7 +6,7 @@ import logging
 import time
 from dataclasses import replace
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from . import breadcrumb, publication_history, routing
 from .cutover_lock import CutoverLock, CutoverLockedError, lock_path
@@ -15,6 +15,13 @@ if TYPE_CHECKING:
     from .diagnostics import DiagnosticContext
 
 log = logging.getLogger("zdd")
+
+
+class IdentityTerminator(Protocol):
+    def __call__(
+        self, pid: int, expected_start_time: str | None, *,
+        exit_timeout: float | None = None,
+    ) -> dict: ...
 
 
 def terminate_unpromoted(ctx: DiagnosticContext, pid: int, start_time: str | None) -> dict:
@@ -26,12 +33,29 @@ def terminate_unpromoted(ctx: DiagnosticContext, pid: int, start_time: str | Non
             if publication_history.candidate_never_published(
                 table, record, pid, start_time,
             ):
-                return ctx.terminate_pid_if_identity(pid, start_time)
+                result = ctx.terminate_pid_if_identity(pid, start_time, exit_timeout=5.0)
+                if not isinstance(result, dict):
+                    raise ValueError("native terminator returned invalid exit evidence")
+                if all(result.get(key) is True for key in (
+                    "killed", "identity_verified", "exit_confirmed",
+                )):
+                    return result
+                reason = "native candidate exit unconfirmed; retirement refused"
+                log.error(reason)
+                return {
+                    "killed": False, "blocked": True, "reason": reason,
+                    "identity_verified": result.get("identity_verified") is True,
+                    "exit_confirmed": result.get("exit_confirmed") is True,
+                    "signal_accepted": result.get("killed") is True,
+                }
             reason = "publication custody unverified; native owner retirement required"
-    except (OSError, ValueError) as exc:
-        reason = f"publication custody unavailable ({type(exc).__name__}); retirement refused"
+    except (OSError, ValueError, TypeError) as exc:
+        reason = f"native retirement authority unavailable ({type(exc).__name__}); retirement refused"
     log.error(reason)
-    return {"killed": False, "identity_verified": False, "blocked": True, "reason": reason}
+    return {
+        "killed": False, "identity_verified": False, "exit_confirmed": False,
+        "blocked": True, "reason": reason,
+    }
 
 
 def mark_custody_refusals(findings: list[dict], table: dict, record: dict) -> None:

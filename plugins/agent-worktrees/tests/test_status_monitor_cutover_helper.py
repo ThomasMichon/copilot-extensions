@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -23,6 +24,18 @@ class _Handle:
 
     def poll(self) -> int | None:
         return None if self.daemon.alive else 0
+
+
+def test_failed_monitor_census_is_not_an_empty_inventory(monkeypatch):
+    monkeypatch.setattr(smc, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(
+        smc.subprocess, "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 1, stdout="", stderr="fixture census failure",
+        ),
+    )
+    with pytest.raises(OSError, match="native monitor process census failed"):
+        smc._iter_status_monitor_pids()
 
 
 @pytest.mark.parametrize("phase", ["recovery", "passive_reap"])

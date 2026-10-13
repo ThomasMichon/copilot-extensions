@@ -347,9 +347,12 @@ def _iter_mux_daemon_pids() -> set[int]:
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }",
+            "Get-CimInstance Win32_Process -ErrorAction Stop | "
+            "ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }",
         ]
         out = subprocess.run(argv, capture_output=True, text=True, timeout=10, check=False)  # noqa: S603
+        if out.returncode != 0:
+            raise OSError(f"native mux process census failed (exit {out.returncode})")
         hits: set[int] = set()
         for line in (out.stdout or "").splitlines():
             if "\t" not in line:
@@ -370,6 +373,8 @@ def _iter_mux_daemon_pids() -> set[int]:
         check=False,
         env=_ps_env_without_width_override(),
     )
+    if out.returncode != 0:
+        raise OSError(f"native mux process census failed (exit {out.returncode})")
     hits: set[int] = set()
     for line in (out.stdout or "").splitlines():
         parts = line.strip().split(None, 1)

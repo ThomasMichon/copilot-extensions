@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 import time
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -29,7 +30,9 @@ def _ctx(
             for pid, start_time in sorted(state["live"].items())
         ]
 
-    def _terminate(pid: int, expected_start_time: str | None) -> dict:
+    def _terminate(
+        pid: int, expected_start_time: str | None, *, exit_timeout: float | None = None,
+    ) -> dict:
         if state["live"].get(pid) != expected_start_time:
             return {
                 "killed": False,
@@ -38,7 +41,9 @@ def _ctx(
             }
         state["terminated"].append(pid)
         state["live"].pop(pid, None)
-        return {"killed": True, "identity_verified": True, "method": "fake"}
+        return {
+            "killed": True, "identity_verified": True, "exit_confirmed": True, "method": "fake",
+        }
 
     return diagnostics.DiagnosticContext(
         service="test-daemon",
@@ -63,6 +68,66 @@ def _set_breadcrumb_age(tmp_path: Path, record: dict, *, seconds: float) -> None
     ).isoformat()
     (tmp_path / "cutover.json").write_text(json.dumps(record), encoding="utf-8")
 
+
+@pytest.mark.parametrize("exit_evidence", [True, False, 1, None, "missing"])
+def test_diagnostic_disposal_requires_native_exit_under_publication_fence(
+    tmp_path, monkeypatch, exit_evidence,
+):
+    from zdd import diagnostic_recovery
+
+    witness = routing.publication_witness(tmp_path, deadline=time.monotonic() + 1)
+    breadcrumb.write_breadcrumb(
+        tmp_path, state="rolled_back", new_pid=202, new_port=61002,
+        new_process_start_time="2020", publication_witness=witness,
+    )
+    before = breadcrumb.breadcrumb_path(tmp_path).read_bytes()
+    state = {"live": {202: "2020"}, "terminated": [], "lock": {}}
+    outcomes = []
+
+    def compete():
+        try:
+            with routing.routing_lock(tmp_path, deadline=time.monotonic()):
+                outcomes.append("admitted")
+        except routing.RoutingLockTimeout:
+            outcomes.append("blocked")
+
+    def terminate(pid, expected_start_time, *, exit_timeout):
+        assert pid == 202 and expected_start_time == "2020" and exit_timeout == 5.0
+        competitor = threading.Thread(target=compete)
+        competitor.start()
+        competitor.join(timeout=2)
+        assert not competitor.is_alive()
+        result = {"killed": True, "identity_verified": True}
+        if exit_evidence != "missing":
+            result["exit_confirmed"] = exit_evidence
+        return result
+
+    ctx = replace(_ctx(tmp_path, state=state), terminate_pid_if_identity=terminate)
+    result = diagnostic_recovery.terminate_unpromoted(ctx, 202, "2020")
+    assert outcomes == ["blocked"]
+    assert result["killed"] is (exit_evidence is True)
+    if exit_evidence is not True:
+        assert result["blocked"] is True and result["signal_accepted"] is True
+    assert breadcrumb.breadcrumb_path(tmp_path).read_bytes() == before
+
+
+def test_diagnostic_disposal_refuses_legacy_signal_only_callback(tmp_path):
+    from zdd import diagnostic_recovery
+
+    witness = routing.publication_witness(tmp_path, deadline=time.monotonic() + 1)
+    breadcrumb.write_breadcrumb(
+        tmp_path, state="rolled_back", new_pid=202, new_port=61002,
+        new_process_start_time="2020", publication_witness=witness,
+    )
+    state = {"live": {202: "2020"}, "terminated": [], "lock": {}}
+    ctx = replace(
+        _ctx(tmp_path, state=state),
+        terminate_pid_if_identity=lambda _pid, _start: pytest.fail("signal-only callback invoked"),
+    )
+    result = diagnostic_recovery.terminate_unpromoted(ctx, 202, "2020")
+    assert result["blocked"] is True and result["killed"] is False
+    assert "TypeError" in result["reason"]
+    assert state["terminated"] == [] and breadcrumb.read_breadcrumb(tmp_path)["new_pid"] == 202
 
 @pytest.mark.parametrize("apply", [False, True])
 @pytest.mark.parametrize("error", [OSError("unavailable"), subprocess.TimeoutExpired("census", 10)])

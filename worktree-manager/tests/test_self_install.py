@@ -10,8 +10,10 @@ and a synthetic HOME/root.
 from __future__ import annotations
 
 import os
+import subprocess
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from _conftest_sandbox import _apply_sandbox
@@ -215,6 +217,49 @@ def test_apply_retains_slot_when_native_passive_custody_is_unavailable(tmp_path,
     assert result.action == "error" and "version slot retained" in result.reason
     assert marker.read_text() == "retained"
     assert current_version(root) is None
+    assert breadcrumb.breadcrumb_path(route).read_bytes() == before
+
+
+@pytest.mark.parametrize("platform", ["posix", "nt"])
+@pytest.mark.parametrize("failure_phase", ["passive-reap", "follow-up"])
+def test_failed_native_census_retains_occupied_slot(
+    tmp_path, monkeypatch, platform, failure_phase,
+):
+    from zdd import breadcrumb, routing
+    import worktree_manager.mux_daemon_cutover as mdc
+
+    pd = _fake_payload(tmp_path, "9.9.9")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+    slot = version_slot("9.9.9", root)
+    slot.mkdir(parents=True)
+    marker = slot / "retained-marker.txt"
+    marker.write_text("retained")
+    route = mdc.routing_dir(root)
+    witness = routing.publication_witness(route, deadline=time.monotonic() + 1)
+    breadcrumb.write_breadcrumb(
+        route, state="started", new_pid=999999, new_port=54321,
+        new_process_start_time="12345", publication_witness=witness,
+    )
+    before = breadcrumb.breadcrumb_path(route).read_bytes()
+    monkeypatch.setattr(mdc, "os", SimpleNamespace(name=platform, environ=os.environ))
+    calls = []
+
+    def census(argv, **kwargs):
+        calls.append(argv)
+        if platform == "nt":
+            assert "-ErrorAction Stop" in argv[-1]
+        code = 0 if failure_phase == "follow-up" and len(calls) == 1 else 1
+        return subprocess.CompletedProcess(argv, code, stdout="", stderr="fixture census failure")
+
+    monkeypatch.setattr(mdc.subprocess, "run", census)
+    monkeypatch.setattr(si, "_copy_payload", lambda *_: pytest.fail("unsafe slot replacement"))
+    result = self_install(pd, root=root, dry_run=False)
+    assert result.action == "error" and "version slot retained" in result.reason
+    assert len(calls) == (1 if failure_phase == "passive-reap" else 2)
+    assert calls[0][0] == ("powershell" if platform == "nt" else "ps")
+    assert marker.read_text() == "retained" and current_version(root) is None
     assert breadcrumb.breadcrumb_path(route).read_bytes() == before
 
 

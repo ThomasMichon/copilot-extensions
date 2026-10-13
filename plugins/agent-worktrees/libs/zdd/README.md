@@ -90,6 +90,12 @@ owner retirement, even if classified as duplicates or superseded. It may
 dispose only a fresh, identity-matched candidate with a pre-birth witness and
 complete negative publication evidence, rechecked under native routing authority
 at the termination point. A valid current owner alone is not disposal authority.
+Generic diagnostic terminators must accept the `exit_timeout` keyword and
+confirm exit through the same native handle within five seconds while the
+routing fence remains held. Legacy signal-only callbacks, nonboolean evidence
+and unconfirmed exits are blocked outcomes, not successful retirement.
+An unavailable or failed process census is never an empty inventory; occupied
+slot replacement remains refused when native candidate absence is unverified.
 Ordinary cutover also refuses unreadable or unknown recovery states rather than
 overwriting them with a new attempt.
 An unreadable/corrupt routing table is a typed `ActivePublicationRefused` for

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from . import breadcrumb, routing
+from .diagnostic_recovery import IdentityTerminator
 
 __all__ = [
     "DaemonCandidate",
@@ -321,7 +322,7 @@ class DiagnosticContext:
     acquire_cutover_guard: Callable[[float], Any] | None = None
     repair_supported: bool = True
     reachability_check: Callable[[str, int], bool] | None = None
-    terminate_pid_if_identity: Callable[[int, str | None], dict] = terminate_pid_if_identity
+    terminate_pid_if_identity: IdentityTerminator = terminate_pid_if_identity
     lock_is_live: Callable[[dict | None], bool] = lock_data_is_live
     make_client: Callable[[str], Any] | None = None
     health_check: Callable[[str, int], bool] | None = None

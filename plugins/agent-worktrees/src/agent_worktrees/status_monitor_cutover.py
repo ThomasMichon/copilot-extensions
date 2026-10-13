@@ -349,6 +349,8 @@ def _iter_status_monitor_pids() -> set[int]:
         }
     argv = ["ps", "-eo", "pid=,args="]
     out = subprocess.run(argv, capture_output=True, text=True, timeout=5, check=False)  # noqa: S603
+    if out.returncode != 0:
+        raise OSError(f"native monitor process census failed (exit {out.returncode})")
     hits: set[int] = set()
     for line in (out.stdout or "").splitlines():
         parts = line.strip().split(None, 1)

@@ -935,6 +935,24 @@ class TestEnsureSessionCopilotReaped:
 
 
 class TestIdentityBoundTermination:
+    @pytest.mark.parametrize("timeout", [0.0, 5.0])
+    def test_requested_exit_wait_uses_shared_native_handle(self, monkeypatch, timeout):
+        from zdd import diagnostics
+
+        calls = []
+
+        def native(pid, start, *, exit_timeout):
+            calls.append((pid, start, exit_timeout))
+            return {"killed": True, "identity_verified": True, "exit_confirmed": True}
+
+        monkeypatch.setattr(diagnostics, "terminate_pid_if_identity", native)
+        monkeypatch.setattr(
+            procs, "_terminate_posix_if_identity",
+            lambda *_: pytest.fail("legacy signal-only termination used for native exit wait"),
+        )
+        result = procs.terminate_pid_if_identity(202, "2020", exit_timeout=timeout)
+        assert calls == [(202, "2020", timeout)] and result["exit_confirmed"] is True
+
     def test_windows_uses_same_verified_handle_for_termination(
         self, monkeypatch
     ):
