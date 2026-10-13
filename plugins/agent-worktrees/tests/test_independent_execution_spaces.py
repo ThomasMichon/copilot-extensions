@@ -293,7 +293,11 @@ def test_finalize_authority_fenced_write_catches_a_record_gone_foreign(
 def test_handoff_equal_physical_labels_do_not_bypass_space_selection(scoped_config, monkeypatch):
     from agent_worktrees import claim_handoff_accept_support
 
-    monkeypatch.setattr(cfg, "load_config", lambda: scoped_config)
+    def fake_load_config(*, include_control_plane_related_pr):
+        assert include_control_plane_related_pr is False
+        return scoped_config
+
+    monkeypatch.setattr(cfg, "load_config", fake_load_config)
     with pytest.raises(execution_spaces.ExecutionSpaceError):
         claim_handoff_accept_support.same_machine("workstation", "workstation")
     assert claim_handoff_accept_support.same_machine(
@@ -533,7 +537,12 @@ def test_handoff_rejects_transport_alias_authority(scoped_config, monkeypatch):
     entries["workstation-windows"] = replace(
         entries["workstation-windows"], alias="windows-ssh",
     )
-    monkeypatch.setattr(cfg, "load_config", lambda: scoped_config)
+
+    def fake_load_config(*, include_control_plane_related_pr):
+        assert include_control_plane_related_pr is False
+        return scoped_config
+
+    monkeypatch.setattr(cfg, "load_config", fake_load_config)
     with pytest.raises(execution_spaces.ExecutionSpaceError, match="registered|explicit"):
         claim_handoff_accept_support.same_machine("windows-ssh", "windows-ssh")
 
