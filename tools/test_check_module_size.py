@@ -148,6 +148,24 @@ def test_automatic_baseline_still_rejects_new_offenders(repo: Path):
     assert "1000-line cap" in result.stdout
 
 
+def test_nonfile_target_baseline_is_a_controlled_cli_failure(repo: Path):
+    (repo / "tools/module-size-baseline.json").mkdir()
+    _commit_all(repo)
+    result = _run(repo, "--repository", str(repo))
+    assert result.returncode == 2
+    assert "baseline must be a regular path" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_invalid_baseline_is_a_controlled_cli_failure(repo: Path):
+    (repo / "tools/module-size-baseline.json").write_text("{invalid\n")
+    _commit_all(repo)
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "[FAIL] module size:" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_an_uncapped_new_file_over_the_cap_fails(repo: Path):
     _write_lines(repo, "src/huge.py", 1001)
     _commit_all(repo)

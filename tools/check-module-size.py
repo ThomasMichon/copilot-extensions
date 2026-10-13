@@ -386,7 +386,11 @@ def main() -> int:
         if not REPO.is_dir():
             parser.error("--repository must name a checkout directory")
         BASELINE_PATH = REPO / "tools" / "module-size-baseline.json"
-        if BASELINE_PATH.is_symlink() or not BASELINE_PATH.resolve().is_relative_to(REPO):
+        if (
+            BASELINE_PATH.is_symlink()
+            or not BASELINE_PATH.resolve().is_relative_to(REPO)
+            or BASELINE_PATH.exists() and not BASELINE_PATH.is_file()
+        ):
             parser.error("the target baseline must be a regular path inside the checkout")
     if args.allow_widen and not args.refresh_baseline:
         parser.error("--allow-widen requires --refresh-baseline")
@@ -453,4 +457,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except (ValueError, OSError) as exc:
+        print(f"[FAIL] module size: {exc}", file=sys.stderr)
+        sys.exit(1)
