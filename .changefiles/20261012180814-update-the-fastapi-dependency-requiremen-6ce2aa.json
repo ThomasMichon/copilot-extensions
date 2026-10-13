@@ -1,0 +1,9 @@
+{
+  "comment": "Update the FastAPI dependency requirement to 0.143.0 or newer.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
