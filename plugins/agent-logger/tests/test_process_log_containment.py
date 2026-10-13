@@ -198,6 +198,25 @@ def test_archive_directory_identity_check_uses_distinct_error(
             pytest.fail("changed root was admitted")
 
 
+def test_process_log_transfer_root_change_diagnostic_is_not_bad_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger.sync.archive_directory import ArchiveRootChangedError
+    from agent_logger.sync.targets import filesystem
+
+    def changed_directory(path: Path) -> None:
+        raise ArchiveRootChangedError("archive root changed while opening")
+
+    monkeypatch.setattr(filesystem, "archive_directory", changed_directory)
+    result = LocalTarget({"path": str(tmp_path / "destination")}).push_process_logs(
+        tmp_path, "example",
+    )
+    assert not result.ok
+    assert "root changed while opening" in result.detail
+    assert str(tmp_path) in result.detail
+    assert "not a directory" not in result.detail
+
+
 def test_process_log_invalid_source_diagnostic_names_path(tmp_path: Path) -> None:
     source = tmp_path / "not-a-directory"
     source.write_bytes(b"not a directory")

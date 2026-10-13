@@ -407,9 +407,7 @@ def _copy_process_logs(
             raise _SourceChangedDuringCopy(f"{exc}: {source}") from exc
         except (NotADirectoryError, ValueError) as exc:
             raise ValueError(f"process-log source is not a directory: {source}") from exc
-        opened = (
-            os.fstat(directory.fd) if directory.fd is not None else directory.path.stat()
-        )
+        opened = os.fstat(directory.fd) if directory.fd is not None else directory.path.stat()
         if source_identity is not None and (
             source_identity.st_dev, source_identity.st_ino,
         ) != (opened.st_dev, opened.st_ino):
