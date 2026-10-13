@@ -490,9 +490,45 @@ jobs:
           ARTIFACT_DIR: ${{ runner.temp }}/python-artifacts
         run: |
           git fetch origin main
-          "$RUNNER_TEMP/artifact-validator/bin/python" tools/promotion_python_artifacts.py validate --out-dir "$ARTIFACT_DIR" \
-            --dev-head "$DEV_SHA" --main-before "$(git rev-parse origin/main)" \
-            --toolchain-source seasoned-public --toolchain-min-age-days 7
+          # Bootstrap the canonical checkout until the repaired trusted CLI is promoted.
+          "$RUNNER_TEMP/artifact-validator/bin/python" - "$DEV_SHA" "$(git rev-parse origin/main)" "$ARTIFACT_DIR" <<'PY'
+          import os
+          import re
+          import sys
+          import tempfile
+          from pathlib import Path
+
+          sys.path.insert(0, str(Path("tools").resolve()))
+          import promote_release as promotion
+          import promotion_python_artifacts as artifacts
+
+          dev, main, directory = sys.argv[1:]
+          if not all(re.fullmatch(r"[0-9a-f]{40}", value) for value in (dev, main)):
+              raise artifacts.PromotionArtifactError("invalid expected candidate commit identity")
+          repo = Path.cwd()
+          scratch = promotion.add_scratch_worktree(dev, repo=repo)
+          try:
+              state = promotion._read_pipeline_state(main, repo=repo)
+              summary = promotion.consume_pending_changes(
+                  scratch, main_head=main, repo=repo,
+                  last_dev_head=(state.get("last_promotion") or {}).get("dev_head"),
+                  trusted_source=repo,
+              )
+              control = {"control": summary["control_preserved"]} if "control_preserved" in summary else {}
+              tree = promotion.build_promotion_tree(scratch, **control)
+              with tempfile.TemporaryDirectory(prefix="promotion-artifact-validation-") as temporary:
+                  candidate = Path(temporary).resolve()
+                  promotion._git(
+                      ["checkout-index", "--all", f"--prefix={candidate}{os.sep}"], cwd=scratch,
+                  )
+                  artifacts.validate_artifacts(
+                      Path(directory), content_tree=tree, dev_head=dev, main_before=main,
+                      projects=artifacts.candidate_projects(candidate), candidate_root=candidate,
+                      source_policy="seasoned-public", min_age_days=7,
+                  )
+          finally:
+              promotion.remove_scratch_worktree(scratch, repo=repo)
+          PY
       - name: Attest the validated index and every first-party bundle
         if: needs.build-python-artifacts.outputs.exported == 'true'
         uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
