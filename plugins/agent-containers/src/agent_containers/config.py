@@ -717,7 +717,11 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
     # the machine-local copy. A repo/cwd copy is only migrated in memory here.
     from . import config_migrations
 
+    before_mode = data.get("copilot_auth_mode")
     data = config_migrations.migrate_loaded(data)
+    if before_mode is None and data.get("copilot_auth_mode") == "legacy":
+        log.warning("Existing configuration migrated to explicit legacy Copilot auth; "
+                    "select host-copilot and its intended account for inference isolation")
 
     config.exec_user = data.get("exec_user", config.exec_user)
     config.workspace_folder = data.get("workspace_folder", config.workspace_folder)

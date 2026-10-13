@@ -59,3 +59,28 @@ def test_loader_preserves_explicit_policy_and_rejects_invalid_modes(tmp_path, mo
     path.write_text("copilot_auth_mode: automatic-gh-fallback\n")
     with pytest.raises(RuntimeError, match="copilot_auth_mode must"):
         load_config()
+
+
+@pytest.mark.guard
+def test_existing_posture_migrates_explicitly_but_new_host_mode_never_falls_back(tmp_path, monkeypatch):
+    import agent_containers.config as config_module
+
+    path = tmp_path / "containers.yaml"
+    monkeypatch.setattr(config_module, "_config_path", lambda: path)
+    path.write_text("schema_version: 1\nforward_gh_token: true\n")
+    assert trusted_auth_mode(load_config(), None) == "legacy"
+    assert "copilot_auth_mode" not in path.read_text()
+    path.write_text("schema_version: 1\ncopilot_cli_account: inference-user\n")
+    assert trusted_auth_mode(load_config(), None) == "host-copilot"
+    path.write_text("schema_version: 2\nforward_gh_token: true\n")
+    current = load_config()
+    assert trusted_auth_mode(current, None) == "host-copilot"
+    with pytest.raises(RuntimeError, match="refusing GH_TOKEN/GITHUB_TOKEN"):
+        auth.prepare_launch(current, FleetConfig(), "example-1", "vscode")
+    path.write_text(
+        "schema_version: 1\nfleets:\n  selected:\n    copilot_cli_account: inference-user\n"
+        "  existing:\n    repo: example/repo\n",
+    )
+    current = load_config()
+    assert trusted_auth_mode(current, current.fleets["selected"]) == "host-copilot"
+    assert trusted_auth_mode(current, current.fleets["existing"]) == "legacy"

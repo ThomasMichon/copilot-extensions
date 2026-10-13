@@ -237,6 +237,7 @@ own Copilot CLI login on THIS HOST should back `COPILOT_GITHUB_TOKEN`,
 independent of whatever GH_TOKEN carries:
 
 ```yaml
+schema_version: 2
 copilot_auth_mode: host-copilot       # default; no repository-token fallback
 copilot_cli_account: inference-user   # global default for every trusted fleet
 fleets:
@@ -266,6 +267,15 @@ not promise host-Copilot identity or inference-token isolation and is never an
 implicit fallback from a failed host-Copilot launch. A per-fleet mode overrides
 the global mode; an invalid mode refuses configuration. Restricted inference
 does not use either trusted authentication mode and remains unchanged.
+
+Existing version-1/unversioned configurations are migrated compatibly to an
+explicit mode: already selected Copilot accounts retain `host-copilot`; other
+old configurations retain `legacy` with a visible warning. The loader migrates
+in memory only; the existing authorized installer migration stamps the
+machine-local copy, never a repository copy. This does not make legacy the
+default of a new version-2 configuration or permit fallback from host mode.
+To adopt the new isolation contract deliberately, set `schema_version: 2`,
+`copilot_auth_mode: host-copilot`, and the intended `copilot_cli_account`.
 
 For an explicit `copilot_cli_account`, trusted ACP, Session Host child, and
 attached/detached CLI launches re-read that existing host source for each launch. Only
