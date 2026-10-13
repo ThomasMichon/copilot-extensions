@@ -13,7 +13,6 @@ def main() -> int:
         os.execv(sys.argv[1], sys.argv[1:])
     except OSError:
         return 126
-    return 126
 
 
 if __name__ == "__main__":

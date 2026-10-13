@@ -335,3 +335,28 @@ def test_unmatched_grant_counts_do_not_echo_potential_path_or_secret(tmp_path):
         acquire_config(_config(), {"secret-invalid-path": _reader(tmp_path, "pass")})
     assert "1 unmatched; 1 configured" in str(raised.value)
     assert "secret-invalid-path" not in str(raised.value)
+
+
+@pytest.mark.parametrize("options", [
+    ["--reader-timeout", "10"], ["--reader-output-limit", "65536"],
+])
+def test_explicit_default_reader_options_still_require_full_grant(options, capsys):
+    assert main(["status", "--json", *options]) == 2
+    assert "reader options require" in json.loads(capsys.readouterr().out)["error"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX interpreter validation")
+@pytest.mark.parametrize("executable", ["", "python", "/missing/operator/python"])
+def test_unusable_host_interpreter_refuses_before_spawn(tmp_path, monkeypatch, executable):
+    import budget_guidance.external_reader as module
+
+    reader = _reader(tmp_path, "pass")
+    monkeypatch.setattr(module.sys, "executable", executable)
+
+    def forbidden_spawn(*args, **kwargs):
+        pytest.fail("an unusable interpreter reached process creation")
+
+    monkeypatch.setattr(module, "spawn_sync_in_kill_on_close_job", forbidden_spawn)
+    posture = _posture(acquire_config(_config(), {"report": reader}))
+    assert posture["calculated"] is None
+    assert posture["adapters"][0]["error"] == "reader host interpreter is unavailable"

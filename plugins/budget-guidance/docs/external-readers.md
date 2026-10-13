@@ -32,6 +32,9 @@ absolute. Batch executables (`.cmd` and `.bat`) are rejected to avoid implicit
 shell execution; select a trusted interpreter explicitly when necessary.
 The CLI authorizes exactly one adapter. There is no environment-variable,
 configuration-file, or session-start grant path.
+Explicit reader options require the complete grant even when they equal their
+defaults. The POSIX host also refuses an empty, relative, missing, or
+non-executable `sys.executable`; it never searches PATH for an interpreter.
 
 Library callers may pass multiple grants to
 `external_reader.acquire_config(config, readers)`:

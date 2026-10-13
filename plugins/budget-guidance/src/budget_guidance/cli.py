@@ -84,11 +84,12 @@ def _status(args: argparse.Namespace) -> int:
                 raise ModelError("--reader-id, --reader-cwd and --reader-command are required together")
             readers[args.reader_id] = CommandReader(
                 tuple(args.reader_command), Path(args.reader_cwd),
-                args.reader_timeout, args.reader_output_limit,
+                10 if args.reader_timeout is None else args.reader_timeout,
+                65536 if args.reader_output_limit is None else args.reader_output_limit,
             )
         elif (
-            args.reader_cwd is not None or args.reader_timeout != 10
-            or args.reader_output_limit != 65536
+            args.reader_cwd is not None or args.reader_timeout is not None
+            or args.reader_output_limit is not None
         ):
             raise ModelError("reader options require --reader-id and --reader-command")
     except ModelError as exc:
@@ -183,8 +184,8 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     status.add_argument("--reader-id", help="explicitly authorize one configured external adapter")
     status.add_argument("--reader-cwd", help="absolute operator-selected reader working directory")
-    status.add_argument("--reader-timeout", type=float, default=10)
-    status.add_argument("--reader-output-limit", type=int, default=65536)
+    status.add_argument("--reader-timeout", type=float, help="deadline in seconds (default: 10)")
+    status.add_argument("--reader-output-limit", type=int, help="stdout bytes (default: 65536)")
     status.add_argument(
         "--reader-command", nargs=argparse.REMAINDER,
         help="absolute executable followed by literal arguments; this option must be last",

@@ -86,6 +86,11 @@ def _run(reader: CommandReader) -> bytes:
         or not all(hasattr(signal, name) for name in ("SIGSTOP", "SIGKILL"))
     ):
         raise ReaderFailure("bounded reader execution is unsupported on this runtime")
+    if not windows and (
+        not sys.executable or not Path(sys.executable).is_absolute()
+        or not Path(sys.executable).is_file() or not os.access(sys.executable, os.X_OK)
+    ):
+        raise ReaderFailure("reader host interpreter is unavailable")
     deadline = time.monotonic() + reader.timeout_seconds
     try:
         argv = list(reader.argv) if windows else [
