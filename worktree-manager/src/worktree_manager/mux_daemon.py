@@ -983,14 +983,10 @@ def ensure_daemon_running(
     lock = lock_path(resolved_root)
     if _daemon_is_live(read_lock_data(lock)):
         return True
-    # Propagate the resolved root to the child (Copilot review finding):
-    # without this, a caller-supplied non-default `root` (e.g. a test's
-    # scratch directory) would wait on a lock under that root while the
-    # spawned `mux-daemon run` resolved its own default installation root
-    # instead, so this helper would report failure despite successfully
-    # spawning a daemon. It is absolute because the child runs from that root:
-    # a relative root (or a relative WORKTREE_MANAGER_ROOT) would otherwise
-    # resolve against the child's new cwd.
+    # Propagate the resolved root to the child (Copilot review finding): a
+    # caller-supplied `root` (e.g. a test's scratch directory) must be the one
+    # the child publishes its lock under. Absolute, because the child runs
+    # from that root and a relative one would resolve against its new cwd.
     argv = mux_daemon_process.detached_child_argv(resolved_root)
     if not _spawn_detached(argv, cwd=resolved_root):
         return False
