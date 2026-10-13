@@ -23,6 +23,7 @@ def test_metadata_events_and_trusted_checkout_do_not_execute_pr_content():
     assert source["name"] == "source-attribution"
     assert source["if"] == "github.event_name == 'pull_request_target'"
     checkout = source["steps"][0]
+    assert checkout["uses"] == "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
     assert checkout["with"] == {"ref": "${{ github.workflow_sha }}", "persist-credentials": "false"}
     install = source["steps"][1]
     assert install["working-directory"] == ".github/actions"
@@ -42,6 +43,7 @@ def test_existing_heads_are_refreshed_from_only_the_default_branch():
         "contents": "read", "pull-requests": "read", "checks": "write",
     }
     assert refresh["steps"][0]["with"]["ref"] == "${{ github.workflow_sha }}"
+    assert refresh["steps"][0]["uses"] == "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
     assert refresh["steps"][1]["run"] == "npm ci --ignore-scripts --no-audit --no-fund"
     assert ".backfill(" in refresh["steps"][2]["with"]["script"]
     assert "labeled" in workflow["jobs"]["request-review"]["if"]

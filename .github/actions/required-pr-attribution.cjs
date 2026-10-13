@@ -169,11 +169,20 @@ async function currentPR(github, context, number) {
 
 async function headPolicy(github, context, number) {
   const pr = await currentPR(github, context, number);
-  const listed = await github.paginate(github.rest.pulls.list, {
-    ...context.repo, state: "open", base: "dev", per_page: 100,
+  let listed = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
+    ...context.repo, commit_sha: pr.head.sha, per_page: 100,
   });
-  const peers = listed.filter((item) => item.head.sha === pr.head.sha)
-    .map((item) => item.number).sort((a, b) => a - b);
+  const peersForHead = (items) => items.filter((item) =>
+    item.state === "open" && item.base.ref === "dev" && item.head.sha === pr.head.sha,
+  ).map((item) => item.number).sort((a, b) => a - b);
+  let peers = peersForHead(listed);
+  if (pr.state === "open" && pr.base.ref === "dev" && !peers.includes(number)) {
+    // Commits already on the default branch can omit open PRs from the association API.
+    listed = await github.paginate(github.rest.pulls.list, {
+      ...context.repo, state: "open", base: "dev", per_page: 100,
+    });
+    peers = peersForHead(listed);
+  }
   if (pr.state === "open" && pr.base.ref === "dev" && !peers.includes(number)) {
     throw new Error("Current dev pull request membership could not be verified.");
   }

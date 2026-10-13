@@ -303,6 +303,10 @@ share a head commit: GitHub's commit-scoped checks cannot safely express
 independent per-PR results. Each PR needs a distinct head. Refresh snapshots
 include current same-head PR membership, so a peer joining or leaving during
 publication invalidates the result just like a concurrent metadata edit.
+Freshness rereads normally query only PRs associated with that head commit,
+not the entire repository's open-PR list. If this endpoint omits the current
+PR (as it can for a commit already on the default branch), a full current
+listing is required rather than assuming a unique head.
 The trusted checkout's integrity-locked CommonMark and HTML parsers identify
 actual HTML comments, excluding fenced/indented code and quoted examples even
 inside continuation list items. HTML containers cannot conceal additional

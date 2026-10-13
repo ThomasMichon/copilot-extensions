@@ -64,7 +64,8 @@ test("silent approvals emit no attribution diagnostic", async () => {
       context, core: output,
       github: {
         paginate: async () => [{ ...value, number: 1 }],
-        rest: { pulls: { list() {}, get: async () => ({ data: value }) } },
+        rest: { repos: { listPullRequestsAssociatedWithCommit() {} },
+          pulls: { list() {}, get: async () => ({ data: value }) } },
       },
     });
     assert.deepEqual(output.messages, []);
@@ -186,7 +187,8 @@ test("current description is reread and body-only repairs change the verdict", a
   let current = pr("");
   const github = {
     paginate: async () => [{ ...current, number: 1 }],
-    rest: { pulls: { list() {}, get: async () => ({ data: current }) } },
+    rest: { repos: { listPullRequestsAssociatedWithCommit() {} },
+      pulls: { list() {}, get: async () => ({ data: current }) } },
   };
   const failed = core();
   await gate.enforce({ github, context, core: failed });
@@ -206,8 +208,12 @@ test("current description is reread and body-only repairs change the verdict", a
 function headFixture(values) {
   const created = [];
   const github = {
-    paginate: async () => values.filter((value) => value.state === "open" && value.base.ref === "dev"),
+    paginate: async (_method, options) => values.filter((value) =>
+      value.state === "open" && value.base.ref === "dev" &&
+      (!options.commit_sha || value.head.sha === options.commit_sha),
+    ),
     rest: {
+      repos: { listPullRequestsAssociatedWithCommit() {} },
       pulls: { list() {}, get: async ({ pull_number }) => ({
         data: values.find((value) => value.number === pull_number),
       }) },
@@ -344,11 +350,63 @@ test("a peer leaving during publication supersedes the old collision snapshot", 
   assert.equal(created.at(-1).conclusion, "success");
 });
 
+test("normal refreshes list all open PRs once and query only associated heads thereafter", async () => {
+  const values = Array.from({ length: 150 }, (_, index) => ({
+    ...pr(marker), number: index + 1, head: { sha: `head-${index}` },
+  }));
+  const { github, created } = headFixture(values);
+  const paginate = github.paginate;
+  let fullLists = 0;
+  let associations = 0;
+  github.paginate = async (method, options) => {
+    if (method === github.rest.pulls.list) { fullLists++; assert.equal(options.commit_sha, undefined); }
+    else { associations++; assert.ok(options.commit_sha); }
+    return paginate(method, options);
+  };
+  await gate.backfill({ github, context, core: core(), pause: async () => {} });
+  assert.equal(fullLists, 1);
+  assert.equal(created.length, values.length);
+  assert.equal(associations, values.length * 4);
+  assert.ok(created.every((check) => check.conclusion === "success"));
+});
+
+test("association omissions use a fresh full listing without hiding same-head peers", async () => {
+  for (const peer of [false, true]) {
+    const values = [{ ...pr(marker), number: 1 }];
+    if (peer) values.push({ ...pr(""), number: 2 });
+    const { github } = headFixture(values);
+    const paginate = github.paginate;
+    github.paginate = async (method, options) => method === github.rest.pulls.list ?
+      paginate(method, options) : [{ ...pr(marker), number: 3, state: "closed" }];
+    const output = core();
+    await gate.enforce({ github, context, core: output });
+    if (peer) assert.ok(output.messages.join("\n").includes("Multiple open dev pull requests"));
+    else assert.deepEqual(output.messages, []);
+    github.paginate = async () => [];
+    await assert.rejects(gate.enforce({ github, context, core: core() }), /membership could not be verified/);
+  }
+});
+
+test("associated ancestor commits, non-dev and closed PRs do not create head collisions", async () => {
+  const values = [
+    { ...pr(marker), number: 1 },
+    { ...pr(""), number: 2, head: { sha: "descendant" } },
+    { ...pr(""), number: 3, base: { ref: "main" } },
+    { ...pr(""), number: 4, state: "closed" },
+  ];
+  const { github } = headFixture(values);
+  github.paginate = async () => values;
+  const output = core();
+  await gate.enforce({ github, context, core: output });
+  assert.deepEqual(output.messages, []);
+});
+
 test("existing PR heads receive distinct current metadata results", async () => {
   const created = [];
   const github = {
-    paginate: async () => [1, 2].map((number) => ({ number, head: { sha: `head-${number}` } })),
+    paginate: async () => [1, 2].map((number) => ({ ...pr(marker), number, head: { sha: `head-${number}` } })),
     rest: {
+      repos: { listPullRequestsAssociatedWithCommit() {} },
       pulls: {
         list() {},
         get: async ({ pull_number }) => ({
@@ -378,6 +436,7 @@ test("unchanged decisions avoid repeated writes while body changes are reevaluat
   const github = {
     paginate: async () => [{ ...current, number: 1 }],
     rest: {
+      repos: { listPullRequestsAssociatedWithCommit() {} },
       pulls: { list() {}, get: async () => ({ data: current }) },
       checks: {
         listForRef: async () => ({ data: {
@@ -414,6 +473,7 @@ test("changes during pacing and publication cannot leave a stale success", async
     const github = {
       paginate: async () => [{ ...current, number: 1 }],
       rest: {
+        repos: { listPullRequestsAssociatedWithCommit() {} },
         pulls: { list() {}, get: async () => ({ data: current }) },
         checks: {
           listForRef: async () => ({ data: { check_runs: [] } }),
@@ -454,6 +514,7 @@ test("unverifiable publication is failed closed without exposing metadata", asyn
   const github = {
     paginate: async () => [{ ...pr(marker), number: 1 }],
     rest: {
+      repos: { listPullRequestsAssociatedWithCommit() {} },
       pulls: { list() {}, get: async () => {
         if (published) throw new Error("metadata unavailable");
         return { data: pr(marker) };
@@ -478,8 +539,9 @@ test("unverifiable or unstable PRs do not starve later current heads", async () 
     let reads = 0;
     const output = core();
     const github = {
-      paginate: async () => [1, 2].map((number) => ({ number, head: { sha: `head-${number}` } })),
+      paginate: async () => [1, 2].map((number) => ({ ...pr(marker), number, head: { sha: `head-${number}` } })),
       rest: {
+        repos: { listPullRequestsAssociatedWithCommit() {} },
         pulls: { list() {}, get: async ({ pull_number }) => {
           if (pull_number === 1 && unavailable) throw new Error("private diagnostic");
           return { data: {
