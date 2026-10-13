@@ -201,6 +201,15 @@ def _send(args: argparse.Namespace) -> None:
     target = args.target
     prompt = _resolve_prompt(args, required=True)
 
+    if getattr(args, "expected_native_session_id", None) is not None:
+        if any(getattr(args, option, False) for option in ("force", "queue", "new")):
+            raise SendRefused(
+                "refused_unavailable", reason="invalid_native_fence_options", retryable=False,
+                target=target, error="native-bound send cannot force, queue, or create a session",
+            )
+        core._submit_and_stream(client, args, target, prompt, caller_id=core._caller_id_for(args))
+        return
+
     live = client.resolve_live_session(target)
     if live:
         expected_session_id = getattr(args, "expected_session_id", None)
@@ -398,13 +407,21 @@ def _submit_and_stream(
     from .client import BridgeClientError
 
     try:
-        result = client.submit_prompt(
-            session_id,
-            prompt,
-            queue=queue,
-            caller_id=caller_id,
-            request_timeout=core._startup_request_timeout(resume=True, fresh_fallback=True),
-        )
+        expected_native = getattr(args, "expected_native_session_id", None)
+        if expected_native is not None:
+            from .native_bound_prompt import submit_native_bound_prompt
+            result = submit_native_bound_prompt(
+                client, session_id, prompt, caller_id=caller_id,
+                expected_native_session_id=expected_native,
+            )
+        else:
+            result = client.submit_prompt(
+                session_id,
+                prompt,
+                queue=queue,
+                caller_id=caller_id,
+                request_timeout=core._startup_request_timeout(resume=True, fresh_fallback=True),
+            )
     except BridgeClientError as exc:
         if exc.status == 404:
             # The session vanished between resolving it and this submit.
@@ -845,7 +862,13 @@ def _cmd_create(args: argparse.Namespace) -> None:
     if not prompt:
         ident = core._connection_identity(client, session_id)
         if args.json:
-            core._json_out({"session_id": session_id, "connection": ident})
+            session = client.get_session(session_id)
+            ident["native_session_id"] = session.get("acp_session_id")
+            ident["target_dir"] = session.get("target_dir")
+            ready = session.get("status") == "idle" and session.get("turn_count") == 0
+            core._json_out({"session_id": session_id, "connection": ident,
+                            "ready": ready,
+                            "status": "awaiting_first_prompt" if ready else session.get("status")})
         else:
             core._print_connection_identity(ident)
             print(f"[OK] Session {session_id} created -- send work with: agent-bridge send {session_id} \"<prompt>\"")
@@ -934,6 +957,7 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     send_p.add_argument("--idempotency-key", help="stable producer key; retries return the original live-message id instead of enqueuing a duplicate")
     send_p.add_argument("--expected-session-id", help="deliver only if the target still resolves to this exact live session id (checked again atomically when enqueuing)")
     send_p.add_argument("--min-daemon-protocol", type=int, default=None, metavar="N", help="send nothing (exit 3) unless the running daemon advertises HTTP protocol N or newer")
+    send_p.add_argument("--expected-native-session-id", default=None, metavar="UUID", help="Admit an immediate prompt only to this exact running native conversation; never resume, recreate, queue, or hand off")
     core._add_stream_args(send_p)
     send_p.set_defaults(func=_cmd_send)
 

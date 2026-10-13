@@ -17,6 +17,7 @@ class ReserveSpawnBody(BaseModel):
     task_id: str
     reserved_by: str | None = None
     allow_suspended_reembodiment: bool = False
+    driver: str | None = None
 
 
 class RoutingAssignmentBody(BaseModel):
@@ -57,6 +58,7 @@ class RoutingBillingRefBody(BaseModel):
 class RecordSpawnBody(BaseModel):
     session_handle: str | None = None
     worktree: str | None = None
+    session_info: dict | None = None
 
 
 class RecordSpawnWorktreeBody(BaseModel):
@@ -172,6 +174,7 @@ def register_spawn_routes(
                 body.task_id,
                 reserved_by=body.reserved_by,
                 allow_suspended_reembodiment=body.allow_suspended_reembodiment,
+                driver=body.driver,
             )
         except TaskError as exc:
             msg = str(exc)
@@ -317,6 +320,9 @@ def register_spawn_routes(
 
     @app.post("/spawn-reservations/{key}/spawned")
     def record_spawn(key: str, body: RecordSpawnBody) -> dict:
+        if body.session_info is not None:
+            from .ordinary_bridge import record_session_info
+            _reservation_guard(lambda: record_session_info(queue, key, body.session_info))
         reservation = queue.get_reservation(key)
         task = queue.get(reservation.task_id) if reservation else None
         if task and task.source == "ci-repair":
@@ -333,6 +339,9 @@ def register_spawn_routes(
         )
         bus.publish({"type": "spawn.spawned", "reservation": result})
         return result
+
+    from .ordinary_bridge import register_routes
+    register_routes(app, queue, bus)
 
     @app.post("/spawn-reservations/{key}/worktree")
     def record_spawn_worktree(key: str, body: RecordSpawnWorktreeBody) -> dict:
@@ -522,4 +531,5 @@ def register_spawn_routes(
         reservation = queue.get_reservation(key)
         if reservation is None:
             raise HTTPException(status_code=404, detail="no such reservation")
-        return _reservation_dict(reservation)
+        from .ordinary_bridge import legacy_bound
+        return {**_reservation_dict(reservation), "legacy_acquisition": legacy_bound(queue, reservation.task_id, reservation.worktree)}

@@ -266,6 +266,7 @@ class SubmitPromptRequest(BaseModel):
     queue: bool = False
     caller_id: str | None = None
     no_resume: bool = False
+    expected_native_session_id: str | None = None
 
 
 class ResumeSessionRequest(BaseModel):
@@ -336,6 +337,7 @@ class SubmitPromptResponse(BaseModel):
     """
 
     status: SessionStatus
+    native_session_id: str | None = None
     session_id: str | None = None
     turn_index: int | None = None
     queued: bool = False

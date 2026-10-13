@@ -22,3 +22,12 @@ The registry is repository-side evidence; no runtime component reads it.
 
 Externally owned contracts remain references until their owner promotes them.
 Do not copy or reinterpret another protocol's normative corpus here.
+
+Historical producer tests use local Git evidence when available. A minimal
+disconnected snapshot may omit an older release's commit; the registered frozen
+producer source then supplies the same bytes, checked against both its SHA-256
+and Git blob identity before execution. Other Git errors still fail. This does
+not fetch history or replace the registry's independent provenance checks.
+The historical test's read-only Git command trusts only its explicitly selected
+checkout for that invocation, so a root-staged test snapshot does not depend on
+the test user's redirected HOME carrying a global `safe.directory` setting.

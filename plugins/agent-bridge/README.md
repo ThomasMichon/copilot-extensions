@@ -433,6 +433,27 @@ for wedged dispatches, resume issues, relay/auth failures, and repair drills.
 | `agent-bridge-troubleshooting` | Diagnose and recover stuck dispatches, resume hangs, relay/auth failures, and split-brain |
 | `agent-worktrees:copilot-extensions-setup` | Marketplace/runtime setup when a host needs guided installation |
 
+Ordinary `create <target> --charter <profile> --json` without a prompt returns
+the bridge `session_id`, connection/worktree identity, native conversation ID,
+and observed `ready`/`status`. An idle, zero-turn creation reports
+`ready: true` and `status: awaiting_first_prompt`; creation itself sends no
+model prompt. Consumers must persist this identity before using ordinary
+`send` for the first assigned task. A false readiness result is not permission
+to send or to create a replacement.
+
+`send <session-id> --expected-native-session-id <uuid>` (HTTP protocol 33)
+admits an immediate ordinary prompt only when that exact native conversation
+is still idle with a running client. Identity and liveness are checked under
+the turn-admission lock. It never resumes, recreates, queues, or hands off;
+`--force` and `--queue` are incompatible. Resume a stopped conversation
+explicitly with `resume --strict`, then use the same guarded send. Older
+daemons refuse rather than silently ignore the fence: the conditional
+`/sessions/{id}/turns/native-bound` route is absent there, including after a
+daemon downgrade between capability check and POST. It shares ordinary turn
+admission, not acquisition or reviewer-specific transport. The successful result
+carries the native UUID that admitted the turn; admission does not prove the
+model completed it.
+
 ## Platforms
 
 | Platform | Service manager | Auto-start |

@@ -101,6 +101,7 @@ class SpawnReservationMixin:
     def reserve_spawn(
         self, task_id: str, *, reserved_by: str | None = None, now: float | None = None,
         allow_suspended_reembodiment: bool = False,
+        driver: str | None = None,
     ) -> tuple[SpawnReservation, bool]:
         """Atomically reserve the right to spawn an embody worker for ``task_id``.
 
@@ -293,12 +294,15 @@ class SpawnReservationMixin:
                     worktree_ownership = None
                     conversation_retired = False
                     break
+            from .ordinary_bridge import carry_agent
+            carried_worktree, carried_session, worktree_ownership, agent_info = carry_agent(
+                conn, task, carried_worktree, carried_session, worktree_ownership, conversation_retired)
             conn.execute(
                 "INSERT INTO spawn_reservations "
                 "(key, task_id, exclusive_key, attempt, state, reserved_by, "
                 "session_handle, worktree, inherited_worktree, "
-                "worktree_ownership, conversation_retired, reserved_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "worktree_ownership, conversation_retired, reserved_at, updated_at, agent_info, driver) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     key,
                     task_id,
@@ -313,6 +317,8 @@ class SpawnReservationMixin:
                     int(conversation_retired),
                     ts,
                     ts,
+                    agent_info,
+                    driver,
                 ),
             )
             row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (key,)).fetchone()

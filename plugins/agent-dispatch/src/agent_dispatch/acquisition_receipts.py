@@ -121,11 +121,13 @@ def start_authority(queue: Any, task_id: str) -> dict[str, Any] | None:
     with queue._connect() as conn:
         ensure(conn)
         row = conn.execute(
-            "SELECT a.delivery_id,a.task_generation FROM spawn_reservations s LEFT JOIN acquisition_receipts a "
+            "SELECT a.delivery_id,a.task_generation,s.agent_info FROM spawn_reservations s LEFT JOIN acquisition_receipts a "
             "ON s.key=a.reservation_key WHERE s.task_id=? "
             "ORDER BY s.attempt DESC LIMIT 1", (task_id,),
         ).fetchone()
         task = queue._fetch(conn, task_id)
+        if row and row["agent_info"]:
+            return None
         if row and row["delivery_id"] and task and task.generation > row["task_generation"] + 1:
             return None
     return bridge_evidence(row["delivery_id"]) if row and row["delivery_id"] else None
@@ -136,11 +138,23 @@ def validate_start(
 ) -> None:
     ensure(conn)
     rows = conn.execute(
-        "SELECT a.*,s.state AS reservation_state,s.release_requested,s.worktree AS reserved_worktree,"
+        "SELECT a.*,s.agent_info,s.state AS reservation_state,s.release_requested,s.worktree AS reserved_worktree,"
         "EXISTS(SELECT 1 FROM acquisition_markers m WHERE m.reservation_key=s.key) AS acquisition_marked FROM spawn_reservations s "
         "LEFT JOIN acquisition_receipts a ON s.key=a.reservation_key WHERE s.task_id=? "
         "ORDER BY s.attempt DESC LIMIT 1", (task.id,),
     ).fetchall()
+    if rows and rows[0]["agent_info"]:
+        ordinary = rows[0]
+        info = json.loads(ordinary["agent_info"])
+        if (
+            ordinary["acquisition_marked"] or ordinary["delivery_id"]
+            or ordinary["reservation_state"] not in {"reserving", "spawned"} or ordinary["release_requested"]
+            or native_id != info["connection"]["native_session_id"]
+            or not info["task_generation"] <= task.generation <= info["task_generation"] + 1
+            or ("/" in (task.owner or "") and task.owner.split("/", 1)[1] != ordinary["reserved_worktree"])
+        ):
+            raise TaskError("start owner does not match the ordinary created-agent reservation")
+        return
     if not rows or not rows[0]["delivery_id"]:
         if (task.owner or "").startswith("acquired-") or (
             rows and rows[0]["acquisition_marked"]

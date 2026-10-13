@@ -561,7 +561,10 @@ class Supervisor:
         return value if isinstance(value, str) and value else default
 
     def _prepare_spawn_task(self, task: dict, reservation: dict) -> dict:
-        """Pre-create or resolve a backend-required worktree before launch."""
+        """Prepare the selected backend's reservation-bound startup facts."""
+        ordinary = getattr(self.spawn_fn, "ordinary_bridge_for", None)
+        if callable(ordinary) and ordinary(task):
+            return {**task, "spawn_reservation_key": reservation["key"], "_spawn_client": self.client}
         if not self._spawn_requires_reusable_worktree(task):
             return task
         from . import embody
@@ -1046,24 +1049,13 @@ class Supervisor:
     def reconcile_reserving(self) -> int:
         """Recover pre-launch reservations after a supervisor interruption.
 
-        A worktree-backed reservation is safe to classify because the reusable
-        worktree id is recorded before launch. Confirmed-live worktrees are
-        promoted to ``spawned`` with their observed session; confirmed-gone
-        worktrees fail for a fresh attempt; unknown state remains reserved.
-        A handle-less reservation remains untouched during its launch window.
-        After that bound, this same stable supervisor identity may fail its own
-        orphaned reservation so the queued task can receive a fresh attempt.
-
-        A worktree-backed reservation whose owner is confirmed LIVE but which
-        never produces an actual session in that worktree is the same class of
-        gap, previously unbounded: the embody/spawn call can silently fail or
-        hang with no session ever launched, and -- unlike the handle-less
-        case above -- this branch had no timeout at all, so it could sit in
-        ``reserving`` indefinitely with no automatic recovery (confirmed in a
-        real deployment: 46+ minutes, only noticed and manually recovered by
-        an operator -- see #3354). It now shares the same ``reserving_timeout``
-        bound: past that age, with no session ever observed, this supervisor
-        fails its own reservation so a fresh attempt can be reserved.
+        Ordinary created-agent facts preserve the retained Bridge identity for
+        same-handle retry. Unrecorded ordinary creation remains fenced for
+        explicit repair, never a timeout-authorized second allocation.
+        Legacy worktree-backed reservations retain their liveness recovery:
+        confirmed live sessions are promoted, confirmed absence permits a
+        retry, and unknown state remains reserved. Their own handle-less launch
+        window remains bounded by ``reserving_timeout``.
         """
         reconciled = 0
         for res in self._pool_reservations(state=SpawnState.RESERVING):
@@ -1072,6 +1064,10 @@ class Supervisor:
             except DispatchError:
                 continue
             if not self._matches_pool(task):
+                continue
+            if res.get("agent_info") or res.get("driver") == "ordinary-bridge":
+                from .ordinary_bridge import reconcile_created
+                reconciled += reconcile_created(self, res, task)
                 continue
             local_sid = _parse_local_body_handle(res.get("session_handle"))
             if local_sid is not None:
@@ -3703,7 +3699,8 @@ class Supervisor:
                         before_reserve.get("status"),
                     )
                     break
-                resp = self.client.reserve_spawn(task["id"], reserved_by=self.supervisor_id, **({"coordinator_launch": True} if task.get("source") == "ci-repair" else {}))
+                from .ordinary_bridge import reserve_for_backend
+                resp = reserve_for_backend(self.client, task, self.supervisor_id, ordinary=getattr(self.spawn_fn, "ordinary_bridge_for", lambda _: False)(task))
             except DispatchError:
                 continue
             if resp.get("coordinator_launch") and (resp["coordinator_launch"].get("ok") or resp["reservation"].get("state") != "failed"): return spawned + ([task["id"]] if resp["coordinator_launch"].get("ok") else [])
@@ -3711,6 +3708,7 @@ class Supervisor:
                 continue
             reservation = resp["reservation"]
             key = reservation["key"]
+            active += 1
             from . import bridge
             from .embody import EmbodyUnavailable
             try:
@@ -3733,6 +3731,7 @@ class Supervisor:
                         key,
                         detail=f"reusable worktree preparation failed: {exc}",
                     )
+                    active -= 1
                 except DispatchError:
                     log.exception("bookkeeping failed for reservation %s", key)
                 log.warning(
@@ -3774,17 +3773,7 @@ class Supervisor:
                 break
             ok, handle = self.spawn_fn(spawn_task)
             if ok and not handle.get("session"):
-                # A spawn_fn reporting success with no session id would
-                # record a SPAWNED reservation with session_handle=None --
-                # indistinguishable from a reservation that never reached
-                # spawning anything at all, which release_requested_bodies'
-                # absent-worktree shortcut requires in order to avoid
-                # bypassing a real (if unidentifiable) body's own liveness
-                # resolution. This guards every spawn_fn generically (not
-                # only the built-in make_embody_spawn/make_headless_spawn
-                # factories, which already enforce this themselves) by
-                # downgrading to the ordinary failed/retry path instead of
-                # ever calling record_spawn with an empty handle.
+                # No usable identity means no published spawn or absence proof.
                 ok = False
                 handle = {
                     **handle,
@@ -3799,16 +3788,19 @@ class Supervisor:
                         key,
                         session_handle=handle.get("session"),
                         worktree=handle.get("worktree"),
+                        **({"session_info": handle["session_info"]} if "session_info" in handle else {}),
                     )
                     if self.publish_activity:
                         self.client.set_activity(task["id"], "ACTIVE", reservation_key=key)
-                    active += 1
                     spawned.append(task["id"])
                     log.info("spawned embody for task %s (%s)", task["id"], key)
                 else:
                     detail = handle.get("error", "spawn failed")
-                    if handle.get("deferred"):
+                    if handle.get("retained"):
+                        log.error("spawn reservation %s retained for explicit repair: %s", key, detail)
+                    elif handle.get("deferred"):
                         self.client.defer_spawn(key, detail=detail)
+                        active -= 1
                         log.info(
                             "spawn deferred (carried session busy) for task %s (%s): %s",
                             task["id"],
@@ -3827,6 +3819,7 @@ class Supervisor:
                         )
                     else:
                         self.client.fail_spawn(key, detail=detail)
+                        active -= 1
                         log.warning(
                             "spawn failed for task %s (%s): %s",
                             task["id"],

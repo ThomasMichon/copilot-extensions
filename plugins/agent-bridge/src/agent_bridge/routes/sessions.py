@@ -1098,12 +1098,20 @@ async def submit_prompt(
     """
     mgr: SessionManager = request.app.state.session_manager
     try:
+        if req.expected_native_session_id is not None and req.queue:
+            raise ValueError("native-bound prompts cannot be queued")
         if req.queue:
             result = await mgr.submit_or_queue_prompt(
                 session_id, req.prompt, caller_id=req.caller_id, no_resume=req.no_resume
             )
         else:
-            turn_index = await mgr.submit_prompt(session_id, req.prompt)
+            if req.expected_native_session_id is not None or req.no_resume:
+                turn_index = await mgr.submit_prompt(
+                    session_id, req.prompt, no_resume=req.no_resume,
+                    expected_native_session_id=req.expected_native_session_id,
+                )
+            else:
+                turn_index = await mgr.submit_prompt(session_id, req.prompt)
             result = {"queued": False, "turn_index": turn_index}
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
@@ -1128,7 +1136,20 @@ async def submit_prompt(
             status=status, session_id=effective, queued=True,
             queue_id=result.get("queue_id"), position=result.get("position"),
         )
-    return SubmitPromptResponse(turn_index=result.get("turn_index"), status=status, session_id=effective)
+    return SubmitPromptResponse(
+        turn_index=result.get("turn_index"), status=status, session_id=effective,
+        native_session_id=req.expected_native_session_id,
+    )
+
+
+@router.post("/{session_id}/turns/native-bound", response_model=SubmitPromptResponse)
+async def submit_native_bound_prompt(
+    session_id: str, req: SubmitPromptRequest, request: Request, response: Response,
+) -> SubmitPromptResponse:
+    """Conditional ordinary turn admission; older daemons cannot ignore its fence."""
+    if not req.expected_native_session_id:
+        raise HTTPException(status_code=422, detail="expected_native_session_id is required")
+    return await submit_prompt(session_id, req, request, response)
 
 
 @router.get("/{session_id}/queue", response_model=PendingQueueResponse)

@@ -76,6 +76,10 @@ def test_create_writes_exact_session_id_before_return(
 ):
     class _Client:
         def get_session(self, _target):
+            if _target == "sid-123":
+                assert output.read_text(encoding="utf-8") == "sid-123\n"
+                return {"status": "idle", "turn_count": 0,
+                        "acp_session_id": "native-123", "target_dir": "/tmp/worktree"}
             raise BridgeClientError(404, "not found")
 
     output = tmp_path / "session-id"

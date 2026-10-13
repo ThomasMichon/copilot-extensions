@@ -3861,9 +3861,7 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
     """The headless backend embodies via agent-bridge, delivering the SAME
     autopilot seed the CLI backend uses (parity: identical driving, different
     body) -- and records no worktree handle (a headless body is not a worktree)."""
-    import subprocess
-
-    from agent_dispatch import session_acquisition, embody
+    from agent_dispatch import ordinary_bridge, embody
     from agent_dispatch.supervisor import make_headless_spawn
 
     calls: dict = {}
@@ -3874,9 +3872,10 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
         calls.update(
             task_id=task["id"], agent=agent, prompt=prompt,
         )
-        return subprocess.CompletedProcess(args=[], returncode=0, stdout='{"mode":"acp","session_id":"bridge-1","native_session_id":"native-1","worktree_id":"wt-1"}', stderr="")
+        return {"mode": "acp", "session": "local-body:bridge-1",
+                "native_session_id": "native-1", "worktree": "wt-1"}
 
-    monkeypatch.setattr(session_acquisition, "acquire", fake_spawn_worker)
+    monkeypatch.setattr(ordinary_bridge, "start", fake_spawn_worker)
     monkeypatch.setattr(
         embody, "autopilot_worker_prompt",
         lambda task_id, *, worker_id, route="", repo=None, all_repos=False,
@@ -4064,24 +4063,21 @@ def test_make_headless_spawn_charter_overrides_allocation_agent():
     ],
 )
 def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch, stderr):
-    import subprocess
-
-    from agent_dispatch import session_acquisition, embody
+    from agent_dispatch import ordinary_bridge, embody
     from agent_dispatch.supervisor import make_headless_spawn
 
     monkeypatch.setattr(embody, "autopilot_worker_prompt", lambda *a, **k: "seed")
-    monkeypatch.setattr(
-        session_acquisition, "acquire",
-        lambda *a, **k: subprocess.CompletedProcess([], 1, "", stderr),
-    )
+    def fail(*args, **kwargs):
+        raise ordinary_bridge.CreatedAgentUnrecorded(stderr)
+    monkeypatch.setattr(ordinary_bridge, "start", fail)
     ok, handle = make_headless_spawn()({"id": "t"})
     assert ok is False
     assert "failed-123" in handle["error"]
-    assert handle["session"] == "local-body:failed-123"
+    assert handle["retained"] is True
 
 
 def test_make_headless_spawn_reuses_carried_session(monkeypatch):
-    from agent_dispatch import bridge, embody, session_acquisition
+    from agent_dispatch import bridge, embody, ordinary_bridge
     from agent_dispatch.supervisor import make_headless_spawn
 
     resumed = []
@@ -4097,11 +4093,11 @@ def test_make_headless_spawn_reuses_carried_session(monkeypatch):
         "spawn_worker",
         lambda *args, **kwargs: created.append((args, kwargs)),
     )
-    import subprocess
     def acquire(task, **kwargs):
         resumed.append((task["spawn_session_handle"].removeprefix("local-body:"), kwargs["prompt"]))
-        return subprocess.CompletedProcess([], 0, '{"mode":"acp","session_id":"session-old","native_session_id":"native-old","worktree_id":"wt-review"}', "")
-    monkeypatch.setattr(session_acquisition, "acquire", acquire)
+        return {"mode": "acp", "session": "local-body:session-old",
+                "native_session_id": "native-old", "worktree": "wt-review"}
+    monkeypatch.setattr(ordinary_bridge, "start", acquire)
 
     ok, handle = make_headless_spawn()(
         {
@@ -4123,7 +4119,7 @@ def test_make_headless_spawn_reuses_carried_session(monkeypatch):
 
 
 def test_make_headless_spawn_does_not_replace_live_busy_session(monkeypatch):
-    from agent_dispatch import bridge, embody, session_acquisition
+    from agent_dispatch import bridge, embody, ordinary_bridge
     from agent_dispatch.supervisor import make_headless_spawn
 
     created = []
@@ -4136,7 +4132,7 @@ def test_make_headless_spawn_does_not_replace_live_busy_session(monkeypatch):
     )
     def acquire(*args, **kwargs):
         raise bridge.BridgeCarriedSessionBusy("carried session remains live")
-    monkeypatch.setattr(session_acquisition, "acquire", acquire)
+    monkeypatch.setattr(ordinary_bridge, "start", acquire)
 
     ok, handle = make_headless_spawn()(
         {
@@ -4156,7 +4152,7 @@ def test_make_headless_spawn_does_not_replace_live_busy_session(monkeypatch):
 def test_make_headless_spawn_does_not_replace_confirmed_gone_session(monkeypatch):
     import subprocess
 
-    from agent_dispatch import bridge, embody, session_acquisition
+    from agent_dispatch import bridge, embody, ordinary_bridge
     from agent_dispatch.supervisor import make_headless_spawn
 
     created = []
@@ -4175,7 +4171,7 @@ def test_make_headless_spawn_does_not_replace_confirmed_gone_session(monkeypatch
     monkeypatch.setattr(bridge, "spawn_worker", create)
     def acquire(*args, **kwargs):
         raise bridge.BridgeUnavailable("strict native resume refused")
-    monkeypatch.setattr(session_acquisition, "acquire", acquire)
+    monkeypatch.setattr(ordinary_bridge, "start", acquire)
 
     ok, handle = make_headless_spawn()(
         {
@@ -4192,7 +4188,7 @@ def test_make_headless_spawn_does_not_replace_confirmed_gone_session(monkeypatch
 
 
 def test_make_headless_spawn_holds_on_unknown_carried_session(monkeypatch):
-    from agent_dispatch import bridge, embody, session_acquisition
+    from agent_dispatch import bridge, embody, ordinary_bridge
     from agent_dispatch.supervisor import make_headless_spawn
 
     created = []
@@ -4204,7 +4200,7 @@ def test_make_headless_spawn_holds_on_unknown_carried_session(monkeypatch):
     )
     def acquire(*args, **kwargs):
         raise bridge.BridgeCarriedSessionBusy("could not determine native liveness")
-    monkeypatch.setattr(session_acquisition, "acquire", acquire)
+    monkeypatch.setattr(ordinary_bridge, "start", acquire)
 
     ok, handle = make_headless_spawn()(
         {
@@ -4221,7 +4217,7 @@ def test_make_headless_spawn_holds_on_unknown_carried_session(monkeypatch):
 
 
 def test_make_headless_spawn_degrades_when_bridge_absent(monkeypatch):
-    from agent_dispatch import bridge, embody, session_acquisition
+    from agent_dispatch import bridge, embody, ordinary_bridge
     from agent_dispatch.supervisor import make_headless_spawn
 
     monkeypatch.setattr(embody, "autopilot_worker_prompt", lambda *a, **k: "seed")
@@ -4229,7 +4225,7 @@ def test_make_headless_spawn_degrades_when_bridge_absent(monkeypatch):
     def _boom(*a, **k):
         raise bridge.BridgeUnavailable("no agent-bridge on PATH")
 
-    monkeypatch.setattr(session_acquisition, "acquire", _boom)
+    monkeypatch.setattr(ordinary_bridge, "start", _boom)
     ok, handle = make_headless_spawn()({"id": "t"})
     assert ok is False
     assert "agent-bridge" in handle["error"]

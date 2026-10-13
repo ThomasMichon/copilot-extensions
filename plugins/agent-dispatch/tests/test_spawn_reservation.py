@@ -1902,7 +1902,7 @@ def test_create_spawn_never_double_spawns(monkeypatch, q):
 
     monkeypatch.setattr(m, "_do_spawn", fake_do_spawn)
 
-    args = types.SimpleNamespace(url=None, token=None)
+    args = types.SimpleNamespace(url=None, token=None, spawn_backend="embody")
     m._spawn_worker_for(args, {"id": t.id})
     m._spawn_worker_for(args, {"id": t.id})  # dedup collision / re-run
 
@@ -1933,7 +1933,7 @@ def test_create_spawn_failure_without_absence_proof_remains_fenced(
         return (types.SimpleNamespace(returncode=1), "fake", {"session": None, "worktree": None})
 
     monkeypatch.setattr(m, "_do_spawn", failing_do_spawn)
-    args = types.SimpleNamespace(url=None, token=None)
+    args = types.SimpleNamespace(url=None, token=None, spawn_backend="embody")
 
     m._spawn_worker_for(args, {"id": t.id})
     first = q.latest_reservation(t.id)
@@ -1972,7 +1972,7 @@ def test_create_spawn_failure_stays_fenced_when_cleanup_is_pending(
         )
 
     monkeypatch.setattr(m, "_do_spawn", failing_do_spawn)
-    args = types.SimpleNamespace(url=None, token=None)
+    args = types.SimpleNamespace(url=None, token=None, spawn_backend="embody")
 
     m._spawn_worker_for(args, {"id": t.id})
     first = q.latest_reservation(t.id)
@@ -2011,7 +2011,7 @@ def test_create_spawn_failure_without_handle_stays_fenced_when_cleanup_is_held(
         )
 
     monkeypatch.setattr(m, "_do_spawn", failing_do_spawn)
-    args = types.SimpleNamespace(url=None, token=None)
+    args = types.SimpleNamespace(url=None, token=None, spawn_backend="embody")
 
     m._spawn_worker_for(args, {"id": t.id})
     first = q.latest_reservation(t.id)
@@ -2054,7 +2054,7 @@ def test_create_spawn_failure_without_handle_stays_fenced_when_pending(
         )
 
     monkeypatch.setattr(m, "_do_spawn", failing_do_spawn)
-    args = types.SimpleNamespace(url=None, token=None)
+    args = types.SimpleNamespace(url=None, token=None, spawn_backend="embody")
 
     m._spawn_worker_for(args, {"id": task.id})
     fenced = q.latest_reservation(task.id)
@@ -2094,7 +2094,7 @@ def test_create_spawn_failure_without_handle_stays_fenced_when_cleanup_complete(
             },
         ),
     )
-    args = types.SimpleNamespace(url=None, token=None)
+    args = types.SimpleNamespace(url=None, token=None, spawn_backend="embody")
 
     m._spawn_worker_for(args, {"id": task.id})
 
@@ -2118,7 +2118,7 @@ def test_no_spawn_mechanism_can_retire_held_cleanup(monkeypatch, q):
         },
     )
     monkeypatch.setattr(m, "_do_spawn", lambda *_args, **_kwargs: None)
-    args = types.SimpleNamespace(url=None, token=None)
+    args = types.SimpleNamespace(url=None, token=None, spawn_backend="embody")
 
     m._spawn_worker_for(args, {"id": task.id})
 
@@ -2144,7 +2144,7 @@ def test_no_spawn_mechanism_retires_pending_cleanup_with_metadata(
         },
     )
     monkeypatch.setattr(m, "_do_spawn", lambda *_args, **_kwargs: None)
-    args = types.SimpleNamespace(url=None, token=None)
+    args = types.SimpleNamespace(url=None, token=None, spawn_backend="embody")
 
     m._spawn_worker_for(args, {"id": task.id})
 

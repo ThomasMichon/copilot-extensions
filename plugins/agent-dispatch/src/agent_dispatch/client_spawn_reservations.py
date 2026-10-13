@@ -8,6 +8,7 @@ already-baselined file.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 
@@ -17,6 +18,16 @@ class SpawnReservationClientMixin:
 
     Relies on ``self._unwrap`` and ``self._http`` from the composing class.
     """
+
+    _http: Any
+    _unwrap: Callable[[Any], Any]
+
+    def record_created_agent(self, key: str, *, task_generation: int, agent_info: dict) -> dict:
+        """Persist ordinary Bridge readiness before any first task prompt."""
+        return self._unwrap(self._http.post(
+            f"/spawn-reservations/{key}/created-agent",
+            json={"task_generation": task_generation, "agent_info": agent_info},
+        ))
 
     def list_reservations(
         self,

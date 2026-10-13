@@ -1,11 +1,24 @@
-"""A retained allocation resumes its conversation without taking over live work."""
+"""Legacy acquisition compatibility; ordinary startup has its own contract suite."""
 
 import json
 import subprocess
 
 from agent_dispatch import bridge, embody, session_acquisition
-from agent_dispatch.spawn_factories import make_embody_spawn, make_headless_spawn
+from agent_dispatch.spawn_factories import make_embody_spawn
 from tests._helpers import TEST_REPO
+
+
+def make_legacy_acp_acquisition():
+    """Exercise the retained legacy adapter, not ordinary factory selection."""
+    def spawn(task):
+        try:
+            result = session_acquisition.acquire(task, mode="acp", prompt="assigned task")
+            return True, session_acquisition.handle(result)
+        except bridge.BridgeCarriedSessionBusy as exc:
+            return False, {"error": str(exc), "deferred": True}
+        except bridge.BridgeUnavailable as exc:
+            return False, {"error": str(exc)}
+    return spawn
 
 
 def _task(ownership="reused", *, conversation_retired=False):
@@ -53,7 +66,7 @@ def _transport(monkeypatch, *, refusal=None, send_busy=False):
 
 def test_missing_handle_resumes_retained_worktree_conversation(monkeypatch):
     calls = _transport(monkeypatch)
-    ok, handle = make_headless_spawn()(_task())
+    ok, handle = make_legacy_acp_acquisition()(_task())
     assert ok is True
     assert handle["session"] == "local-body:existing-conversation"
     assert calls[0] == ["bridge", "acquire", "--request-file", "-"]
@@ -63,7 +76,7 @@ def test_missing_handle_resumes_retained_worktree_conversation(monkeypatch):
 
 def test_first_allocation_still_creates_a_conversation(monkeypatch):
     calls = _transport(monkeypatch)
-    ok, handle = make_headless_spawn()(_task("created"))
+    ok, handle = make_legacy_acp_acquisition()(_task("created"))
     assert ok is True
     assert handle["session"] == "local-body:replacement-conversation"
     assert calls[0][1] == "acquire"
@@ -73,7 +86,7 @@ def test_retained_worktree_never_takes_over_an_interactive_holder(monkeypatch):
     calls = _transport(monkeypatch, refusal={
         "reason": "live_cli_holds_worktree", "session_id": "interactive-holder",
     })
-    ok, handle = make_headless_spawn()(_task())
+    ok, handle = make_legacy_acp_acquisition()(_task())
     assert ok is False
     assert handle["deferred"] is True
     assert len(calls) == 1
@@ -82,7 +95,7 @@ def test_retained_worktree_never_takes_over_an_interactive_holder(monkeypatch):
 
 def test_resume_failure_is_not_a_success_shaped_fresh_conversation(monkeypatch):
     calls = _transport(monkeypatch, refusal={"reason": "coordinator_unreachable"})
-    ok, handle = make_headless_spawn()(_task())
+    ok, handle = make_legacy_acp_acquisition()(_task())
     assert ok is False
     assert "refused" in handle["error"]
     assert len(calls) == 1
@@ -90,7 +103,7 @@ def test_resume_failure_is_not_a_success_shaped_fresh_conversation(monkeypatch):
 
 def test_busy_send_never_ends_or_replaces_the_resumed_conversation(monkeypatch):
     calls = _transport(monkeypatch, send_busy=True)
-    ok, handle = make_headless_spawn()(_task())
+    ok, handle = make_legacy_acp_acquisition()(_task())
     assert ok is False
     assert handle["deferred"] is True
     assert len(calls) == 1
@@ -105,7 +118,7 @@ def test_gone_carried_body_falls_back_to_worktree_resume_not_create(monkeypatch)
     monkeypatch.setattr(embody, "local_body_verdict", lambda sid: "gone")
     monkeypatch.setattr(bridge, "resume_worker", lambda *a, **kw: False)
     task = {**_task(), "spawn_session_handle": "local-body:stopped-body"}
-    ok, handle = make_headless_spawn()(task)
+    ok, handle = make_legacy_acp_acquisition()(task)
     assert ok is True
     assert handle["session"] == "local-body:stopped-body"
     assert not any("create" in call for call in calls)
@@ -120,7 +133,7 @@ def test_retired_conversation_never_recovers_via_worktree_resume(monkeypatch):
     genuinely fresh conversation must be created instead -- never
     ``--strict resume``."""
     calls = _transport(monkeypatch)
-    ok, handle = make_headless_spawn()(_task(conversation_retired=True))
+    ok, handle = make_legacy_acp_acquisition()(_task(conversation_retired=True))
     assert ok is True
     assert handle["session"] == "local-body:replacement-conversation"
     assert calls[0][1] == "acquire"
@@ -151,7 +164,7 @@ def test_missing_conversation_retired_marker_fails_closed(monkeypatch):
         # spawn_conversation_retired deliberately absent -- the pre-field
         # coordinator shape.
     }
-    ok, handle = make_headless_spawn()(task)
+    ok, handle = make_legacy_acp_acquisition()(task)
     assert ok is False
     assert "refused" in handle["error"]
     assert not any(call[1:3] == ["--json", "resume"] for call in calls)

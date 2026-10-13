@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import os
 import subprocess
@@ -54,8 +55,8 @@ def _fixture(relative: str) -> dict:
 
 
 def test_http_declared_generation_matches_current_fixture() -> None:
-    fixture = _fixture("fixtures/http/current/acquisition-protocol.json")
-    body = fixture["response"]
+    fixture = _fixture("fixtures/http/current/native-bound-protocol-generation-33.json")
+    body = fixture["health"]
     assert body["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
     assert (
         body["min_protocol_version"]
@@ -279,17 +280,59 @@ def _historical_protocol(commit: str):
     environment["GIT_NO_LAZY_FETCH"] = "1"
     environment["GIT_NO_REPLACE_OBJECTS"] = "1"
     result = subprocess.run(
-        ["git", "-C", str(REPO), "show", f"{commit}:{SESSION_HOST_PROTOCOL_PATH}"],
-        check=True,
+        ["git", "-c", f"safe.directory={REPO}", "-C", str(REPO),
+         "show", f"{commit}:{SESSION_HOST_PROTOCOL_PATH}"],
+        check=False,
         capture_output=True,
         text=True,
         env=environment,
     )
+    if result.returncode:
+        if not any(marker in result.stderr for marker in ("invalid object name", "bad object")):
+            result.check_returncode()
+        frozen = _fixture("fixtures/session-host/prior-runtime-dev150/protocol-source.json")
+        captured = frozen["captured_from"]
+        assert captured["commit"] == commit
+        assert captured["source_path"] == SESSION_HOST_PROTOCOL_PATH
+        historical_source = frozen["source_text"]
+        raw = historical_source.encode("utf-8")
+        assert hashlib.sha256(raw).hexdigest() == captured["source_sha256"]
+        assert hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest() == captured["source_git_blob"]
+    else:
+        historical_source = result.stdout
     module_name = f"_agent_bridge_protocol_{commit[:12]}"
     module = types.ModuleType(module_name)
     sys.modules[module_name] = module
-    exec(compile(result.stdout, f"{commit}:{SESSION_HOST_PROTOCOL_PATH}", "exec"), module.__dict__)
+    exec(compile(historical_source, f"{commit}:{SESSION_HOST_PROTOCOL_PATH}", "exec"), module.__dict__)
     return module
+
+
+def test_historical_protocol_without_commit_uses_hash_verified_source(monkeypatch) -> None:
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(
+        a[0], 128, "", "fatal: invalid object name",
+    ))
+    captured = _fixture("fixtures/session-host/prior-runtime-dev150/protocol-source.json")
+    protocol = _historical_protocol(captured["captured_from"]["commit"])
+    assert protocol.PROTOCOL_VERSION == 1
+
+
+def test_historical_protocol_rejects_corrupted_frozen_source(monkeypatch) -> None:
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(
+        a[0], 128, "", "fatal: invalid object name",
+    ))
+    captured = _fixture("fixtures/session-host/prior-runtime-dev150/protocol-source.json")
+    captured["source_text"] += "\n"
+    monkeypatch.setattr(sys.modules[__name__], "_fixture", lambda _: captured)
+    with pytest.raises(AssertionError):
+        _historical_protocol(captured["captured_from"]["commit"])
+
+
+def test_historical_protocol_preserves_unrelated_git_failures(monkeypatch) -> None:
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(
+        a[0], 128, "", "fatal: failed to read repository",
+    ))
+    with pytest.raises(subprocess.CalledProcessError):
+        _historical_protocol("4ed08dcdd0e72377b95a67d6bd22aec819bf7fec")
 
 
 def _message_frames(protocol) -> dict[str, dict[str, str]]:

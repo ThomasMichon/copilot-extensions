@@ -2130,6 +2130,7 @@ executes the task:
 ```bash
 agent-dispatch create "Summarize PR 42" --require review --spawn            # managed (waits)
 agent-dispatch create "Summarize PR 42" --spawn --spawn-agent task-worker --async  # fire-and-forget
+agent-dispatch create "Review a change" --spawn --spawn-agent example-harness --spawn-charter reviewer --async
 ```
 
 The worker is instructed to claim the specific task by id
@@ -2142,6 +2143,30 @@ taken from the coordinator before anything is launched: a dedup collision
 (`--spawn` on an existing `dedup_key`) or a racing second `--spawn` spawns the
 worker **exactly once**; the rest skip. See
 [`docs/spawn-supervisor.md`](docs/spawn-supervisor.md) for the reservation model.
+
+Local headless startup uses ordinary Bridge **create without a prompt → durable
+created-agent storage → send the assigned task → store returned session info**.
+The created-agent facts are visible in the task's `spawn_reservation.agent_info`;
+readiness is not execution. A storage failure sends nothing. Interrupted send
+retries retain the same handle: reuse an idle agent, or strictly resume a
+stopped one, never create a replacement. Both paths recheck the authenticated
+reservation/task admission fence immediately before delivery. That coordinator
+transaction is a pre-send admission point, not a cross-service transaction:
+later holds still gate claim/start. The ordinary send itself requires Bridge
+HTTP protocol 33 and the retained native UUID, refusing a dead or replaced
+conversation without auto-resume/recreation. Retained or ambiguous reservations
+consume supervisor capacity even when startup fails. Bridge-created worktrees remain Bridge-owned rather than being stamped
+as Dispatch-created allocations with Dispatch cleanup authority.
+The first ordinary message includes the assigned task's prompt before the
+generic worker lifecycle seed, so task-specific identity/rubric bootstrap
+instructions arrive before claim/start. Local headless workers claim through
+their managed worktree's CWD identity, just like CLI-backed workers; they do
+not substitute a synthetic owner for a concrete worktree.
+Acquisition-marked tasks and retained allocations without ordinary metadata
+require an explicit authorized migration and are refused, not silently
+downgraded. CLI and fleet backends retain their existing transport; no mode is
+silently switched. The headless `--no-pair` allocation override is refused
+because ordinary Bridge create does not expose it.
 
 An optional **routing assignment** may be attached to a reservation before
 launch. Agent-dispatch is the single writer for this append-only provenance:

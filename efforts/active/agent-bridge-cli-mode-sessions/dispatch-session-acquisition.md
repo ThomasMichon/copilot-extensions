@@ -7,20 +7,89 @@ conversation recovery), and PR #6064 (gated CLI-resume stopgap).
 
 ## Requested contract
 
-agent-dispatch uses agent-bridge exclusively for acquiring and messaging agent
-sessions. An explicit task flag selects CLI or ACP; the bridge handles a new
-session versus an existing conversation automatically. CLI remains opt-in,
-not an inferred consequence of task age, a worktree's existence, or cleanup
-labels.
+**Operator clarification (2026-10-12):** On first assignment, Dispatch calls
+ordinary `agent-bridge create` in the target harness, passing the target
+charter and **no initial prompt**. Creation returns the worktree, bridge
+handle, and readiness status awaiting the first prompt. Dispatch persists
+those facts in task information **before** ordinary `agent-bridge send`
+delivers the assigned task as the first prompt, then records the returned
+session information.
 
-This is session-boundary consolidation, not transfer of worktree ownership.
-agent-worktrees remains responsible for allocation and its session ledger.
-CLI/mux, ACP session hosts, and venue providers remain the execution and
-transport mechanisms behind bridge acquisition. Dispatch retains task leases,
-reservations, evaluation, and existing terminal cleanup responsibilities.
-Standalone non-session dispatch remains usable without the optional bridge;
-session acquisition then reports that capability unavailable rather than
-silently bypassing the bridge.
+Follow-up task lifecycle, system/emitter events, and user/evaluator steering
+are deterministic ordinary messages to that retained agent. Reviewers are
+Bridge agents like any other: the target charter, assigned-task first prompt,
+harness rules, and venue bounds provide guidance. There is no reviewer-specific
+transport or parallel agent lifecycle.
+
+Bridge owns agent creation, worktree allocation through its existing
+agent-worktrees owner, and retained-conversation resume. Dispatch owns task
+reservations, concurrency, claims, leases, authentication, and task bookkeeping.
+Creation readiness is not task execution. A failed storage write must send
+nothing; a failed or ambiguous send retains the known worktree and handle for
+ordinary message retry rather than allocating another agent or discarding
+history. No new acquisition receipt, journal, or agent lifecycle replaces
+Bridge's ordinary lifecycle.
+
+Explicit CLI and fleet mode choices remain unchanged until their ordinary
+Bridge creation capability supports them; they must not silently become ACP.
+Standalone non-session dispatch remains usable without optional Bridge.
+
+## Local ordinary create/store/send slice
+
+The local headless factory, label-routed supervisor, and one-shot
+`create --spawn --spawn-backend bridge` share `ordinary_bridge.start`.
+The authenticated `created-agent` reservation operation atomically stores
+the returned worktree, `local-body:<bridge-handle>`, native conversation
+identity, and observed readiness in `spawn_reservation.agent_info` while the
+reservation remains `reserving` and the task remains queued. Normal task reads
+expose those facts. Ordinary send's returned session information is stored
+with the existing spawned operation; neither operation fabricates execution
+or replaces claim/start/lease admission.
+
+Retried reservations carry the same stored handle, including tasks without
+an exclusive key. Strict ordinary resume precedes retry send; failures never
+authorize fresh creation. The supervisor's existing reserving reconciliation
+preserves stopped, unprompted agents for same-handle retry. An ordinary
+reservation with an unrecorded creation result requires explicit repair,
+not a timeout-based permission to create again.
+
+**Compatibility boundary:** Acquisition-marked tasks and retained allocations
+without ordinary created-agent metadata are explicitly refused. Their old
+receipt/start-authority checks remain enforced and their markers are not
+deleted or fabricated. The existing fresh-acquisition recovery operation
+authorizes the old acquisition contract, not ordinary creation, and is not a
+migration operation. A separately authorized, identity-verified conversion of
+these existing tasks remains with #6076's integration/recovery owner; this
+slice makes no live conversion and does not permit raw database edits.
+
+**Agent-recommended realization details, not additional operator requirements:**
+store metadata in the existing reservation row; retain the existing
+`local-body:` cleanup/liveness handle; stamp the ordinary backend on the
+reservation before creation so an ambiguous creation cannot be timed out into
+another allocation; use Bridge's existing registered target or explicit
+`repo@venue` address to select the target harness. Generic initial prompts
+include the native identity needed by the normal owner-gated start command.
+
+The source inventory and receipt-based implementation notes below are
+**historical evidence**, not the current lifecycle contract. Their bespoke
+acquisition recommendations are superseded by the operator clarification.
+
+### Local validation boundary
+
+Bounded isolated selections exercise creation readiness, exact
+create/store/send/publication ordering through a supervisor poll, authenticated
+task-information reads and storage, unchanged native start/lease authority,
+same-handle interrupted-send retry, restarted unprompted-agent preservation,
+reviewer/nonreviewer parity, and retained legacy guards. They do not credit
+native process-exit/transcript, Windows, fleet, release, or production proof.
+
+Full-module mypy still reports 50 inherited diagnostics across the client,
+spawn factories, queue reservations, supervisor, and Bridge targeting module
+(54 on the untouched source baseline, zero introduced after normalizing source
+line offsets). Seven touched leaf modules, including the ordinary startup
+helper and authenticated storage routes, type-check cleanly. The remaining
+baseline typing work is a named integration limitation under #6076, not a
+claim that the full-module type check passed.
 
 ## Evidence and limits
 
@@ -137,9 +206,9 @@ authorized rollout. Local adapter tests use actual SessionManager and SQLite
 with process/native-provider I/O simulated; they do not resolve native integration
 items in the validation matrix.
 
-The following sequencing and compatibility details are **agent-recommended**
-ways to realize the operator's requested contract, not additional operator
-requirements.
+The following are **historical agent recommendations**, superseded by the
+ordinary lifecycle contract above; they document the earlier receipt-based
+implementation, not instructions to extend it.
 
 1. Inventory every dispatch session-launch entry point (one-shot, supervisor,
    interactive, and remote fleet), mode selectors, carried handles, worktree

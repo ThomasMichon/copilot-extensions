@@ -233,6 +233,7 @@ class SpawnReservation:
     worktree_ownership: str | None = None
     creating_host: str | None = None
     driver: str | None = None
+    agent_info: dict | None = None
     conversation_retired: bool = False
     release_requested: bool = False
     release_disposition: str | None = None
@@ -260,6 +261,7 @@ class SpawnReservation:
             worktree_ownership=row["worktree_ownership"],
             creating_host=row["creating_host"],
             driver=row["driver"],
+            agent_info=json.loads(row["agent_info"]) if "agent_info" in row.keys() and row["agent_info"] else None,
             conversation_retired=bool(row["conversation_retired"])
             if "conversation_retired" in row.keys() else False,
             release_requested=bool(row["release_requested"]),

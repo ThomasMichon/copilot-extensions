@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 32,
+        "current": 33,
         "minimum": 1,
-        "previous_generation": 31,
+        "previous_generation": 32,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -38,7 +38,8 @@
           29,
           30,
           31,
-          32
+          32,
+          33
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -87,21 +88,22 @@
         "current_attention": 29,
         "strict_acquisition": 30,
         "acquisition_retirement_revalidation": 31,
-        "acquisition_retirement_recovery": 32
+        "acquisition_retirement_recovery": 32,
+        "native_bound_prompt": 33
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "f71dbf17041074c9e906cd8d195f2294b3a18a6d544a8b5f552b2d6d5c3a0374",
+          "sha256": "0bf9fab203297fd1b3a4e3d9749ac11c99b08445f028513f1b74e963a72a7c80",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "a4fddf5fff6fccb66a5633b51ec444d5892b1315ef557e93e04ee00652b15d06",
-          "semantic": false,
-          "non_semantic_reason": "Live-message request/response models gained an optional delivery urgency field, then its default changed from \"queue\" to \"steer\"; the live-session registration request gained an optional process_started_at; and ServiceConfig gained an agent_roster_cache_interval field (Phase 3b), whose validation floor was later raised from gt=0 to ge=1.0 to match AgentRosterCache's own runtime clamp; SessionInfo/StartSessionRequest also gained an optional, tolerant-reader caller_session_id (the creating Copilot session id), recorded as null in the representative session-create request fixture's accepted_model. StartSessionResponse gains an optional caller_session_id (HTTP generation 24, gated by caller_session_id), captured in the current session-create response fixture; the representative session-create request shape is unchanged. The live-message response gained an optional duplicate flag for an identical idempotent retry; the prompt-submit request gained an optional no_resume and its response an optional session_id naming the session that took the prompt (HTTP generation 25, gated by cooperative_stop). The live-event ingest item (SdkEventIn) gained an optional, tolerant-reader agentId (the event envelope's sub-agent id); an older daemon ignores it and a newer daemon without it treats the event as before, so no client gates on it. ServiceConfig also gained the optional local_execution_space daemon-configuration selector; it does not change any registered HTTP request or response fixture."
+          "sha256": "0d5fe5e789c5dc2def908cbaf13eeec59a006a2a10dac23f9c30d3165de7d83e",
+          "semantic": true,
+          "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
@@ -111,9 +113,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "199959547106c940aa62faca1d94d28e780c68a2ab23759c0f2ba943284426c1",
-          "semantic": false,
-          "non_semantic_reason": "Adds the before=/limit= backward JSON page (continuity-qualified, atomic with event-log rebuild) to the events route (HTTP generation 23, gated by events_before_paging); forwards an optional caller_session_id from the create request into session rows and the status dict and echoes it in the create/reuse StartSessionResponse (HTTP generation 24, gated by caller_session_id); the representative session-create request shape is otherwise unchanged. The prompt-submit route forwards no_resume and fills the response's session_id with the session that took the prompt (HTTP generation 25, gated by cooperative_stop). It also mounts GET /api/v1/sessions/{ref}/attention/current (HTTP generation 29, gated by current_attention), whose own route module is outside this representative shape."
+          "sha256": "27e05f185721e4a49c25ea77c42c7f775949048885beb88aa02146a8525feae6",
+          "semantic": true,
+          "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
@@ -332,6 +334,30 @@
           "sha256": "3f396c2b72725a881cadf7f96241f0779c9c7911566d72379b06f009dedad19e",
           "role": "unchanged agent-roster response re-attested at current recovery HTTP generation",
           "generation": 31
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-protocol-generation-33.json",
+          "sha256": "3464be0909981089a5ff5a059da52e17d219226f84837c8940c74682563bb1a2",
+          "role": "Current conditional ordinary native-bound turn admission",
+          "generation": 33
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-models-generation-33.json",
+          "sha256": "5a257baac9c796f1155d6912dd061bc1df57e420bdba0e1057782db97ec6784e",
+          "role": "Current conditional ordinary native-bound turn admission",
+          "generation": 33
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-routes-sessions-generation-33.json",
+          "sha256": "82754091e3b28ae95f9e1931d8ca14143547b8912a80a651e20a7d7c70e8b187",
+          "role": "Current conditional ordinary native-bound turn admission",
+          "generation": 33
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-33.json",
+          "sha256": "94047bb55133cd66b8fbfb33e7a3d2327ee3ea22ee187e253b82a1952bd252ed",
+          "role": "Unchanged roster response re-attested at native-bound prompt generation",
+          "generation": 33
         }
       ],
       "provenance": [
@@ -1094,6 +1120,38 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
           "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
           "capture_method": "Re-attested unchanged agent roster: source blob remains identical to generation-30 capture."
+        },
+        {
+          "commit": "dcbb776b4f8bee7f6f3ec0a5b6166ce382a81a87",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 33,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "d8b6764628617de97ab5330367cdaeddc7ef308a",
+          "capture_method": "Exact committed source bytes and source-neutral fixture serialization"
+        },
+        {
+          "commit": "dcbb776b4f8bee7f6f3ec0a5b6166ce382a81a87",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 33,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "56f3f36fbf60cadf6e1c16fc5491222dedf0eeb9",
+          "capture_method": "Exact committed source bytes and source-neutral fixture serialization"
+        },
+        {
+          "commit": "dcbb776b4f8bee7f6f3ec0a5b6166ce382a81a87",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 33,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "27d3af1c95e2f34216a2a059e4d034b708c0d1f0",
+          "capture_method": "Exact committed source bytes and source-neutral fixture serialization"
+        },
+        {
+          "commit": "dcbb776b4f8bee7f6f3ec0a5b6166ce382a81a87",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 33,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Exact committed source bytes and source-neutral fixture serialization"
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",
@@ -1223,6 +1281,12 @@
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/version-mux.json",
           "sha256": "11f70c03f74d344f79ed87d28615aa05929ee738aa6c2cd35ae7b4c536f7745f",
           "role": "current frontend supported Session Host generations",
+          "generation": 1
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/session-host/prior-runtime-dev150/protocol-source.json",
+          "sha256": "cf874f456e681b57ad4b59793ff79ae6181dff888e3b7bec118745152f0ce81b",
+          "role": "Immutable historical producer bytes for shallow/disconnected validation",
           "generation": 1
         }
       ],

@@ -102,7 +102,8 @@ def test_make_embody_spawn_is_directly_importable():
 def test_make_headless_spawn_is_directly_importable():
     spawn = make_headless_spawn()
     assert callable(spawn)
-    assert spawn.requires_reusable_worktree is True
+    assert spawn.requires_reusable_worktree is False
+    assert spawn.ordinary_bridge_for({})
 
 
 def test_make_script_spawn_is_directly_importable():

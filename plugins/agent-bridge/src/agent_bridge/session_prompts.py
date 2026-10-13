@@ -33,7 +33,10 @@ class SessionNotRunningError(ValueError):
 class _SessionPromptMixin:
     """Prompt admission, queueing, and usage tracking helpers."""
 
-    async def submit_prompt(self, session_id: str, prompt: str) -> int:
+    async def submit_prompt(
+        self, session_id: str, prompt: str, *, no_resume: bool = False,
+        expected_native_session_id: str | None = None,
+    ) -> int:
         """Atomically start a turn against conditional idle teardown."""
         if self._draining:
             raise DaemonDrainingError("turn")
@@ -42,7 +45,13 @@ class _SessionPromptMixin:
         if not session:
             raise KeyError(f"Session {resolved} not found")
         async with session._turn_start_lock:
-            return await self._submit_prompt_locked(resolved, prompt)
+            if self._sessions.get(resolved) is not session:
+                raise KeyError(f"Session {resolved} not found")
+            if expected_native_session_id is not None:
+                if not expected_native_session_id or session.acp_session_id != expected_native_session_id:
+                    raise ValueError("expected_native_mismatch: retained native conversation changed")
+                no_resume = True
+            return await self._submit_prompt_locked(resolved, prompt, no_resume=no_resume)
 
     async def _submit_prompt_locked(
         self, session_id: str, prompt: str, *, no_resume: bool = False,

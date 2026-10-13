@@ -622,6 +622,7 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
         self, task_id: str, *, reserved_by: str | None = None,
         allow_suspended_reembodiment: bool = False,
         coordinator_launch: bool = False,
+        driver: str | None = None,
     ) -> dict:
         """Atomically reserve the right to spawn an embody worker for a task.
 
@@ -642,6 +643,7 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
                     "task_id": task_id,
                     "reserved_by": reserved_by,
                     "allow_suspended_reembodiment": allow_suspended_reembodiment,
+                    **({"driver": driver} if driver is not None else {}),
                 },
                 **({"timeout": 180.0} if coordinator_launch else {}),
             )
@@ -653,11 +655,13 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
         *,
         session_handle: str | None = None,
         worktree: str | None = None,
+        session_info: dict | None = None,
     ) -> dict:
         return self._unwrap(
             self._http.post(
                 f"/spawn-reservations/{key}/spawned",
-                json={"session_handle": session_handle, "worktree": worktree},
+                json={"session_handle": session_handle, "worktree": worktree,
+                      **({"session_info": session_info} if session_info is not None else {})},
             )
         )
 
