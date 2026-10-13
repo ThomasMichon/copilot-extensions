@@ -89,6 +89,9 @@ description/base edits and metadata changes, so a body-only repair needs no
 dummy commit. Its required-context rollout occurs only after the trusted
 workflow has reached `main` and is verified; old green checks from earlier
 workflow versions do not substitute for this distinct requirement.
+GitHub attaches check results to commits, not individual PRs. Multiple open
+`dev` PRs sharing one head commit therefore fail this check, even when each
+description is valid. Publish a distinct head commit for each PR before retrying.
 
 **PRs target `dev`, not `main`.** `main` is regenerated wholesale by a CI
 promotion pipeline (`.github/workflows/validate-and-promote.yml`,

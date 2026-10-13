@@ -4,7 +4,7 @@ const gate = require("./required-pr-attribution.cjs");
 
 const marker = "<!-- agent-worktrees:source codename=clear-compass -->";
 const context = {
-  repo: { owner: "owner", repo: "repo" }, payload: { pull_request: { number: 1 } },
+  repo: { owner: "owner", repo: "repo" }, payload: { pull_request: { number: 1, head: { sha: "head" } } },
   serverUrl: "https://github.com", runId: 123,
 };
 function pr(body, labels = []) {
@@ -54,16 +54,18 @@ test("malformed, duplicate, raw and quoted forms fail without reflecting their v
   }
 });
 
-test("non-dev and silent approvals emit no attribution diagnostic", async () => {
+test("silent approvals emit no attribution diagnostic", async () => {
   for (const value of [
-    { ...pr(""), base: { ref: "main" } },
     pr("", [{ name: "attribution-exempt" }]),
     pr(marker),
   ]) {
     const output = core();
     await gate.enforce({
       context, core: output,
-      github: { rest: { pulls: { get: async () => ({ data: value }) } } },
+      github: {
+        paginate: async () => [{ ...value, number: 1 }],
+        rest: { pulls: { list() {}, get: async () => ({ data: value }) } },
+      },
     });
     assert.deepEqual(output.messages, []);
   }
@@ -182,7 +184,10 @@ test("quoted and indented examples neither satisfy nor conflict with standalone 
 
 test("current description is reread and body-only repairs change the verdict", async () => {
   let current = pr("");
-  const github = { rest: { pulls: { get: async () => ({ data: current }) } } };
+  const github = {
+    paginate: async () => [{ ...current, number: 1 }],
+    rest: { pulls: { list() {}, get: async () => ({ data: current }) } },
+  };
   const failed = core();
   await gate.enforce({ github, context, core: failed });
   assert.ok(failed.messages.join("\n").includes("attribution-prepare --body-file"));
@@ -198,10 +203,151 @@ test("current description is reread and body-only repairs change the verdict", a
   assert.ok(gate.decision(current));
 });
 
+function headFixture(values) {
+  const created = [];
+  const github = {
+    paginate: async () => values.filter((value) => value.state === "open" && value.base.ref === "dev"),
+    rest: {
+      pulls: { list() {}, get: async ({ pull_number }) => ({
+        data: values.find((value) => value.number === pull_number),
+      }) },
+      checks: {
+        listForRef: async ({ ref }) => ({ data: { check_runs: created
+          .map((check, index) => ({ ...check, id: index + 1, app: { slug: "github-actions" } }))
+          .filter((check) => check.head_sha === ref) } }),
+        create: async (check) => { created.push(check); return { data: { id: created.length } }; },
+        get: async ({ check_run_id }) => ({ data: created[check_run_id - 1] }),
+        update: async (check) => {
+          assert.notEqual(created[check.check_run_id - 1].status, "completed");
+          Object.assign(created[check.check_run_id - 1], check);
+        },
+      },
+    },
+  };
+  return { github, created };
+}
+
+test("native checks fail shared heads regardless of individual source decisions", async () => {
+  for (const peer of [pr(marker), pr(""), pr("malformed source"), pr("", [{ name: "attribution-exempt" }])]) {
+    const values = [{ ...pr(marker), number: 1 }, { ...peer, number: 2 }];
+    const { github } = headFixture(values);
+    for (const number of [1, 2]) {
+      const output = core();
+      await gate.enforce({
+        github, core: output,
+        context: { ...context, payload: { pull_request: { number, head: { sha: "head" } } } },
+      });
+      assert.ok(output.messages.join("\n").includes("Multiple open dev pull requests"));
+      assert.ok(!output.messages.join("\n").includes("attribution-exempt"));
+    }
+    values[1].head = { sha: "unique-peer" };
+    const output = core();
+    await gate.enforce({ github, context, core: output });
+    assert.deepEqual(output.messages, []);
+  }
+});
+
+test("backfill cannot bless opposite decisions on a shared SHA in either order", async () => {
+  for (const reverse of [false, true]) {
+    const values = [{ ...pr(marker), number: 1 }, { ...pr(""), number: 2 }];
+    if (reverse) values.reverse();
+    const { github, created } = headFixture(values);
+    const args = { github, context, core: core(), pause: async () => {} };
+    await gate.backfill(args);
+    assert.ok(created.length);
+    assert.ok(created.every((check) => check.conclusion === "failure"));
+    values.find((value) => value.number === 2).body = marker;
+    await gate.backfill(args);
+    assert.ok(created.every((check) => check.conclusion === "failure"));
+    values.find((value) => value.number === 2).head = { sha: "unique-peer" };
+    await gate.backfill(args);
+    assert.equal(created.at(-1).conclusion, "success");
+    assert.equal(created.filter((check) => check.head_sha === "head").at(-1).conclusion, "success");
+  }
+});
+
+test("peer membership changes invalidate refresh publication and deduplicated results", async () => {
+  for (const stage of ["pause", "create", "complete", "deduplicate"]) {
+    const values = [{ ...pr(marker), number: 1 }];
+    const { github, created } = headFixture(values);
+    const args = { github, context, core: core(), pause: async () => {} };
+    if (stage === "deduplicate") await gate.backfill(args);
+    let joined = false;
+    const join = () => {
+      if (joined) return;
+      joined = true;
+      values.push({ ...pr(""), number: 2 });
+    };
+    const create = github.rest.checks.create;
+    const update = github.rest.checks.update;
+    const paginate = github.paginate;
+    let lists = 0;
+    github.paginate = async (...params) => {
+      // Initial batch listing, observed policy, then deduplication reread.
+      if (stage === "deduplicate" && ++lists === 3) join();
+      return paginate(...params);
+    };
+    github.rest.checks.create = async (check) => {
+      const result = await create(check);
+      if (stage === "create" && check.status === "in_progress") join();
+      return result;
+    };
+    github.rest.checks.update = async (check) => {
+      const result = await update(check);
+      if (stage === "complete" && check.conclusion === "success") join();
+      return result;
+    };
+    args.pause = async () => { if (stage === "pause") join(); };
+    await gate.backfill(args);
+    assert.ok(joined);
+    assert.equal(created.at(-1).conclusion, "failure");
+    values[1].state = "closed";
+    await gate.backfill(args);
+    assert.equal(created.at(-1).conclusion, "success");
+  }
+});
+
+test("native enforcement refuses stale event heads and changing membership", async () => {
+  for (const stale of ["head", "base", "state", "membership"]) {
+    const values = [{ ...pr(marker), number: 1 }];
+    const { github } = headFixture(values);
+    if (stale === "head") values[0].head = { sha: "new-head" };
+    if (stale === "base") values[0].base = { ref: "main" };
+    if (stale === "state") values[0].state = "closed";
+    if (stale === "membership") {
+      const paginate = github.paginate;
+      let lists = 0;
+      github.paginate = async (...params) => {
+        if (++lists === 2) values.push({ ...pr(""), number: 2 });
+        return paginate(...params);
+      };
+    }
+    const output = core();
+    await gate.enforce({ github, context, core: output });
+    assert.ok(output.messages.join("\n").includes("metadata changed or could not be verified"));
+  }
+});
+
+test("a peer leaving during publication supersedes the old collision snapshot", async () => {
+  const values = [{ ...pr(marker), number: 1 }, { ...pr(""), number: 2 }];
+  const { github, created } = headFixture(values);
+  const update = github.rest.checks.update;
+  let left = false;
+  github.rest.checks.update = async (check) => {
+    const result = await update(check);
+    if (!left) { left = true; values[1].state = "closed"; }
+    return result;
+  };
+  await gate.backfill({ github, context, core: core(), pause: async () => {} });
+  assert.equal(created[0].conclusion, "failure");
+  assert.ok(created[1].external_id.endsWith(":superseded"));
+  assert.equal(created.at(-1).conclusion, "success");
+});
+
 test("existing PR heads receive distinct current metadata results", async () => {
   const created = [];
   const github = {
-    paginate: async () => [{ number: 1 }, { number: 2 }],
+    paginate: async () => [1, 2].map((number) => ({ number, head: { sha: `head-${number}` } })),
     rest: {
       pulls: {
         list() {},
@@ -230,7 +376,7 @@ test("unchanged decisions avoid repeated writes while body changes are reevaluat
   let current = pr(marker);
   const created = [];
   const github = {
-    paginate: async () => [{ number: 1 }],
+    paginate: async () => [{ ...current, number: 1 }],
     rest: {
       pulls: { list() {}, get: async () => ({ data: current }) },
       checks: {
@@ -266,7 +412,7 @@ test("changes during pacing and publication cannot leave a stale success", async
     let changed = false;
     const invalidate = () => { changed = true; current = pr(""); };
     const github = {
-      paginate: async () => [{ number: 1 }],
+      paginate: async () => [{ ...current, number: 1 }],
       rest: {
         pulls: { list() {}, get: async () => ({ data: current }) },
         checks: {
@@ -306,7 +452,7 @@ test("unverifiable publication is failed closed without exposing metadata", asyn
   let published = false;
   const created = [];
   const github = {
-    paginate: async () => [{ number: 1 }],
+    paginate: async () => [{ ...pr(marker), number: 1 }],
     rest: {
       pulls: { list() {}, get: async () => {
         if (published) throw new Error("metadata unavailable");
@@ -332,7 +478,7 @@ test("unverifiable or unstable PRs do not starve later current heads", async () 
     let reads = 0;
     const output = core();
     const github = {
-      paginate: async () => [{ number: 1 }, { number: 2 }],
+      paginate: async () => [1, 2].map((number) => ({ number, head: { sha: `head-${number}` } })),
       rest: {
         pulls: { list() {}, get: async ({ pull_number }) => {
           if (pull_number === 1 && unavailable) throw new Error("private diagnostic");

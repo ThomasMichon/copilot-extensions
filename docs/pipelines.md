@@ -298,6 +298,11 @@ account — it's an Enterprise-only feature.)
 `github.workflow_sha`, never the PR head, and reads the current description
 through the GitHub API. Body/base edits and metadata changes reevaluate the
 same head; repository automation and manually opened PRs are covered too.
+Both native enforcement and refresh fail closed when multiple open dev PRs
+share a head commit: GitHub's commit-scoped checks cannot safely express
+independent per-PR results. Each PR needs a distinct head. Refresh snapshots
+include current same-head PR membership, so a peer joining or leaving during
+publication invalidates the result just like a concurrent metadata edit.
 The trusted checkout's integrity-locked CommonMark and HTML parsers identify
 actual HTML comments, excluding fenced/indented code and quoted examples even
 inside continuation list items. HTML containers cannot conceal additional

@@ -164,23 +164,49 @@ function decision(pr) {
 
 async function currentPR(github, context, number) {
   if (!Number.isSafeInteger(number) || number < 1) throw new Error("Invalid pull request metadata.");
-  return (await github.rest.pulls.get({ ...context.repo, pull_number: number })).data;
+  return { ...(await github.rest.pulls.get({ ...context.repo, pull_number: number })).data, number };
+}
+
+async function headPolicy(github, context, number) {
+  const pr = await currentPR(github, context, number);
+  const listed = await github.paginate(github.rest.pulls.list, {
+    ...context.repo, state: "open", base: "dev", per_page: 100,
+  });
+  const peers = listed.filter((item) => item.head.sha === pr.head.sha)
+    .map((item) => item.number).sort((a, b) => a - b);
+  if (pr.state === "open" && pr.base.ref === "dev" && !peers.includes(number)) {
+    throw new Error("Current dev pull request membership could not be verified.");
+  }
+  return {
+    pr,
+    error: peers.length > 1 ?
+      "Multiple open dev pull requests share this head commit. Publish a distinct head commit for each PR, then retry the check." :
+      decision(pr),
+    snapshot: snapshot(pr, peers),
+  };
 }
 
 async function enforce({ github, context, core }) {
-  const pr = await currentPR(github, context, context.payload.pull_request.number);
-  const error = decision(pr);
+  const number = context.payload.pull_request.number;
+  const observed = await headPolicy(github, context, number);
+  let error = observed.error;
+  if (observed.pr.state !== "open" || observed.pr.base.ref !== "dev" ||
+      observed.pr.head.sha !== context.payload.pull_request.head.sha ||
+      (await headPolicy(github, context, number)).snapshot !== observed.snapshot) {
+    error = "Pull request metadata changed or could not be verified; retry the current check.";
+  }
   if (error) {
     core.setFailed(`${error}\n\n${REPAIR}`);
     await core.summary.addHeading("Required source attribution").addRaw(`${error}\n\n${REPAIR}`).write();
   }
 }
 
-function snapshot(pr) {
+function snapshot(pr, peers) {
   return "source-metadata:" + crypto.createHash("sha256").update(JSON.stringify({
     definition: DEFINITION, number: pr.number, body: pr.body,
     head: pr.head.sha, base: pr.base.ref, state: pr.state,
     labels: (pr.labels || []).map((label) => typeof label === "string" ? label : label.name).sort(),
+    peers,
   })).digest("hex");
 }
 
@@ -205,24 +231,25 @@ async function backfill({ github, context, core, pause = (ms) => new Promise((re
 async function refreshPR(github, context, listed, pause) {
     let stable = false;
     for (let attempt = 0; attempt < 3; attempt++) {
-      let pr = await currentPR(github, context, listed.number);
+      let observed = await headPolicy(github, context, listed.number);
+      let { pr } = observed;
       if (pr.state !== "open" || pr.base.ref !== "dev") { stable = true; break; }
       const { data } = await github.rest.checks.listForRef({
         ...context.repo, ref: pr.head.sha, check_name: CONTEXT, per_page: 100,
       });
       const latest = data.check_runs.filter((check) => check.app?.slug === "github-actions")
         .sort((a, b) => b.id - a.id)[0];
-      const observed = snapshot(pr);
-      if (latest?.external_id === observed && latest.status === "completed" &&
-          latest.conclusion === (decision(pr) ? "failure" : "success")) {
-        if (snapshot(await currentPR(github, context, listed.number)) === observed) { stable = true; break; }
+      if (latest?.external_id === observed.snapshot && latest.status === "completed" &&
+          latest.conclusion === (observed.error ? "failure" : "success")) {
+        if ((await headPolicy(github, context, listed.number)).snapshot === observed.snapshot) { stable = true; break; }
         continue;
       }
       await pause(1000);
-      pr = await currentPR(github, context, listed.number);
+      observed = await headPolicy(github, context, listed.number);
+      pr = observed.pr;
       if (pr.state !== "open" || pr.base.ref !== "dev") { stable = true; break; }
-      const externalId = snapshot(pr);
-      const error = decision(pr);
+      const externalId = observed.snapshot;
+      const error = observed.error;
       const created = await github.rest.checks.create({
         ...context.repo, name: CONTEXT, head_sha: pr.head.sha,
         external_id: externalId,
@@ -234,7 +261,7 @@ async function refreshPR(github, context, listed, pause) {
         },
       });
       try {
-        if (snapshot(await currentPR(github, context, listed.number)) === externalId) {
+        if ((await headPolicy(github, context, listed.number)).snapshot === externalId) {
           await github.rest.checks.update({
             ...context.repo, check_run_id: created.data.id, status: "completed",
             conclusion: error ? "failure" : "success",
@@ -243,7 +270,7 @@ async function refreshPR(github, context, listed, pause) {
               summary: error ? `${error}\n\n${REPAIR}` : "Required source metadata check completed.",
             },
           });
-          stable = snapshot(await currentPR(github, context, listed.number)) === externalId;
+          stable = (await headPolicy(github, context, listed.number)).snapshot === externalId;
         }
       } finally {
         if (!stable) {
