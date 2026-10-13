@@ -555,7 +555,10 @@ Each worktree exposes its current handoff head through a directly readable
 current-state slot. Ordinary status and monitoring read that head, not the
 sequence that led to it. Historical succession and handoff reconstruction are
 explicit workflow-repair operations, never prerequisites for reporting current
-status.
+status. Advancing that head does not strand older unresolved predecessor
+retirements: their owner preserves automatic retry through bounded current
+work selection, separate from head reporting, while explicit repair can
+inspect every outstanding duty.
 
 ### continuously-revalidated-freshness
 

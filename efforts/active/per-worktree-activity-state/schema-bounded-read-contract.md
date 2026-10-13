@@ -43,8 +43,13 @@ an unbounded collection smuggled into the bounded status projection.
 Current handoff-head state is selected directly from the worktree's current
 slot. The succession sequence and older lifecycle evidence are interesting
 when repairing a workflow, not when reporting current state. Older unresolved
-retirement duties retain durable custody and explicit repair visibility;
-current-head selection does not silently conclude them.
+retirement duties retain durable custody and automatic retry visibility:
+the owning mutation/retry path maintains an independently addressable bounded
+next-due duty cursor, separate from the current handoff head. A newer head
+does not hide an earlier failed retirement. Routine execution consumes bounded
+work per turn with owner-maintained advancement and retry fairness, never by
+scanning succession history or returning an all-duties list. Explicit repair
+can enumerate every outstanding duty; current status does not do so.
 
 Cold cache, restart, missing/unready projection, and advisory-degrade reads
 must retain the same bound. An unavailable projection is explicit, not a reason
@@ -156,7 +161,10 @@ None of these implementation checks is claimed passed by the source audit.**
   a responsibility.
 - Verify one current handoff-head lookup is unaffected by long succession
   history. Late predecessor writes cannot overwrite the new head; existing
-  unresolved retirement duties remain explicitly owned and repairable.
+  unresolved retirement duties remain explicitly owned, automatically retried
+  and repairable. Advance the head repeatedly while older retirements fail,
+  defer and later settle; verify the bounded next-due cursor preserves every
+  duty and retry fairness, and explicit repair still enumerates them all.
 - Increase unrelated inactive records without increasing recurring expensive
   probes at fixed watch membership. Explicit historical inventory remains
   usable, but viewing it does not enroll unrelated cold rows indefinitely.

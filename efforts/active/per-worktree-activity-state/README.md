@@ -363,16 +363,24 @@ No manual service restart or stale-runtime process killing is authorized.
       snapshot, and that no deadlock occurs under contention.
 
 ### Phase 2 — Rewire hot-path consumers onto slots
-- [ ] `__main__._pending_handoff_retire_requests` -- read the direct current
-      handoff-head projection for both the retire-decision fields and the spawn-identity
+- [ ] `__main__._pending_handoff_retire_requests` -- split current-head
+      status selection from outstanding-retirement work selection. The
+      automatic sweep reads an independently addressable, owner-maintained
+      next-due unresolved-retirement cursor, including bounded retire-decision
+      fields and the spawn-identity
       fields (`spawn_old_pane`, `spawn_predecessor_pid`,
       `spawn_predecessor_start_time`, `spawn_expected_mux_session`),
       keeping the existing fresh `mux_binding_for_session()` lookup as the
       preferred execution-time identity guard when it resolves; stop calling
       `activity.read_events`/`handoff_trace.read_trace` for
-      ordinary decision-making. Older unresolved retirement duties remain
-      durably owned and explicitly repairable; they are not silently discarded
-      when current-head selection stops walking history.
+      ordinary decision-making. Advancing the handoff head must not remove
+      an older unresolved duty from automatic processing. The mutation/retry
+      owner durably maintains and advances the cursor as duties become due,
+      settle or defer, with retry fairness; the sweep consumes bounded work
+      per turn without scanning history or materializing an all-duties list.
+      Explicit `handoffs-check` repair retains enumeration of every outstanding
+      duty rather than inheriting the bounded automatic-selection shape.
+      Current status still reads only the direct current handoff-head slot.
 - [ ] `status_monitor_runtime._monitor_pending_handoff_request` -- read
       the direct current handoff-head's spawn/retire fields **and** the new
       `request_predecessor_session_id` / `request_session_state_path` /
