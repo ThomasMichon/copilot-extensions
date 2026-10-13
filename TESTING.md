@@ -106,6 +106,10 @@ python tools/run-plugin-tests.py agent-dispatch \
 Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
 than repeatedly importing file groups that contain no selected tests.
 
+Managed-worktree removal fixtures accept the canonical project loader's
+keyword-only overlay selection while retaining synthetic receiving-side
+configuration; they never discover installed project or plugin registries.
+
 Agent-worktrees installer command resolution, pipefail execution and POSIX
 background-prune tests are explicit T3 native contracts. Collection never probes
 Bash or PowerShell. A lazy session fixture admits native shells only after

@@ -1,0 +1,9 @@
+{
+  "comment": "Align managed-removal fixture with the canonical project loader overlay option.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
