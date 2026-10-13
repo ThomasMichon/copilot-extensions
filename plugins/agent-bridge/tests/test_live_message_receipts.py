@@ -18,6 +18,7 @@ from agent_bridge.events import EventLog
 from agent_bridge.live_message_receipts import record_consumption
 from agent_bridge.live_representation import LiveEventStore, await_turn_reply
 from agent_bridge.models import SendMessageRequest
+from agent_bridge.protocol import LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
 from agent_bridge.routes import live_sessions
 from agent_bridge.send_outcome import run_send
 from agent_bridge.session_targeting_cli import _deliver_to_live_session
@@ -448,12 +449,12 @@ def test_client_invalid_reply_wait_makes_no_transport_request(monkeypatch, timeo
 @pytest.mark.parametrize("timeout,effective", [(None, 120.0), (0.0, 0.0), (600.0, 600.0)])
 def test_client_reply_wait_uses_validated_bound_plus_transport_margin(monkeypatch, timeout, effective):
     client = BridgeClient("http://127.0.0.1:1", "test")
-    monkeypatch.setattr(client, "daemon_supports", lambda version: version == 33)
+    monkeypatch.setattr(client, "daemon_supports", lambda version: version == LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION)
     calls = []
 
     def request(*args, **kwargs):
         calls.append((args, kwargs))
-        return {"protocol_version": 33} if args[:2] == ("GET", "/health") else {}
+        return {"protocol_version": LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION} if args[:2] == ("GET", "/health") else {}
 
     monkeypatch.setattr(client, "_request", request)
     client.send_live_message("live-1", sender="peer", body="update", wait=True, wait_timeout=timeout)
@@ -485,7 +486,7 @@ def test_receipt_only_send_does_not_use_ignored_reply_timeout(monkeypatch, capsy
     assert json.loads(capsys.readouterr().out)["outcome"] == "admitted"
 
 
-@pytest.mark.parametrize("protocol", [0, 32, 33])
+@pytest.mark.parametrize("protocol", [0, 32, 33, LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION])
 @pytest.mark.parametrize("wait", [False, True])
 def test_reply_wait_requires_receipt_protocol_before_message_submission(
     monkeypatch: pytest.MonkeyPatch, protocol: int, wait: bool,
@@ -501,8 +502,11 @@ def test_reply_wait_requires_receipt_protocol_before_message_submission(
         return {"message_id": 7, "replied": False}
 
     monkeypatch.setattr(client, "_request", request)
-    if wait and protocol < 33:
-        with pytest.raises(BridgeClientError, match="reply waits require daemon protocol 33") as error:
+    if wait and protocol < LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION:
+        with pytest.raises(
+            BridgeClientError,
+            match=f"reply waits require daemon protocol {LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION}",
+        ) as error:
             client.send_live_message("live-1", sender="peer", body="update",
                                      wait=wait, wait_timeout=0)
         assert error.value.status == 426 and calls == [("GET", "/health")]
@@ -535,7 +539,7 @@ def test_cli_legacy_reply_wait_reports_typed_refusal_without_sending(
         run_send(args, lambda actual: _deliver_to_live_session(client, actual, "live-1", "update"))
     assert error.value.code == 69
     output = capsys.readouterr()
-    assert "require daemon protocol 33" in output.err
+    assert f"require daemon protocol {LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION}" in output.err
     if as_json:
         result = json.loads(output.out)
         assert result["outcome"] == "refused_unavailable"
@@ -589,7 +593,7 @@ def test_cli_missing_receipt_stage_does_not_invent_admission(monkeypatch, capsys
         assert "receipt: admitted" not in output
         assert "observe: agent-bridge read live-1 --json" in output
         assert "--message-id" not in output
-        assert "receipt observation requires daemon protocol 33 or newer" in output
+        assert f"receipt observation requires daemon protocol {LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION} or newer" in output
 
 
 @pytest.mark.parametrize("stage", ["admitted", "sdk_accepted", "consumed"])
@@ -623,9 +627,9 @@ def test_cli_wait_output_distinguishes_duplicate_and_uses_current_identity(
     duplicate: bool, as_json: bool,
 ) -> None:
     client = BridgeClient("http://127.0.0.1:1", "test")
-    monkeypatch.setattr(client, "daemon_supports", lambda version: version == 33)
+    monkeypatch.setattr(client, "daemon_supports", lambda version: version == LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION)
     monkeypatch.setattr(client, "_request", lambda method, path, *_args, **_kwargs: (
-        {"protocol_version": 33} if (method, path) == ("GET", "/health") else {
+        {"protocol_version": LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION} if (method, path) == ("GET", "/health") else {
             "message_id": 7, "session_id": "live-renamed", "duplicate": duplicate,
             "receipt": {"stage": "admitted"}, "receipt_current": True, "replied": False,
         }
@@ -687,5 +691,5 @@ def test_receipt_client_refuses_unsupported_daemon_without_request(monkeypatch):
     client = BridgeClient("http://127.0.0.1:1", "test")
     monkeypatch.setattr(client, "daemon_supports", lambda _version: False)
     monkeypatch.setattr(client, "_request", lambda *_args, **_kwargs: pytest.fail("must not request"))
-    with pytest.raises(BridgeClientError, match="protocol 33"):
+    with pytest.raises(BridgeClientError, match=f"protocol {LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION}"):
         client.get_live_message_receipt("live-1", 7)

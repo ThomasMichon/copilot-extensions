@@ -17,6 +17,7 @@ import pytest
 
 from agent_bridge import __main__ as m
 from agent_bridge.client import BridgeClientError
+from agent_bridge.protocol import LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
 
 
 class FakeClient:
@@ -639,7 +640,7 @@ def test_cmd_send_returns_receipt_without_waiting(monkeypatch, capsys, no_wait, 
         assert "receipt: unavailable (delivery evidence unavailable)" in out
         assert "read live-sess-1 --json" in out
         assert "--message-id" not in out
-        assert "receipt observation requires daemon protocol 33 or newer" in out
+        assert f"receipt observation requires daemon protocol {LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION} or newer" in out
     else:
         assert f"receipt: {receipt_stage}" in out
         assert "read live-sess-1 --message-id 7 --json" in out

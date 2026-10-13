@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import io
 import json
 import urllib.error
@@ -11,6 +12,7 @@ from typing import Any
 import pytest
 
 from agent_bridge.client import BridgeClient, BridgeClientError, BridgeConnectionError
+from agent_bridge.client_protocol_floor import protocol_floored_request
 from agent_bridge.protocol import (
     LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION,
     REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION,
@@ -33,7 +35,7 @@ def test_reply_wait_reprobes_the_maximum_floor_before_retry(
 ) -> None:
     old_base = "http://127.0.0.1:57585"
     new_base = "http://127.0.0.1:47000" if replacement == "new-url" else old_base
-    floor = max(33, cli_floor)
+    floor = max(LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION, cli_floor)
     client = BridgeClient(
         old_base, "test", connect_grace=2,
         reresolve=None if replacement == "pinned" else lambda: new_base,
@@ -70,7 +72,7 @@ def test_reply_wait_reprobes_the_maximum_floor_before_retry(
     assert posted == [f"{old_base}/api/v1/live-sessions/live-1/messages"]
     assert client._request == original_request
     assert client._connect_grace == 2
-    if cli_floor < 33:
+    if cli_floor < LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION:
         result = client.send_live_message("live-1", sender="peer", body="legacy", wait=False)
         assert result["message_id"] == 7
         assert posted[-1] == f"{new_base}/api/v1/live-sessions/live-1/messages"
@@ -89,7 +91,8 @@ def test_reply_wait_reprobes_before_the_first_post_after_cached_preflight(
     def transport(req: urllib.request.Request, timeout: float | None = None) -> _Response:
         assert req.full_url.endswith("/health"), "must not send to the downgraded daemon"
         healths.append(req.full_url)
-        return _Response({"protocol_version": 33 if len(healths) == 1 else 32})
+        return _Response({"protocol_version": LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
+                          if len(healths) == 1 else LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION - 1})
 
     monkeypatch.setattr("agent_bridge.client.urllib.request.urlopen", transport)
     with pytest.raises(BridgeClientError) as error:
@@ -109,7 +112,7 @@ def test_reply_wait_can_retry_a_supported_replacement_without_gating_legacy_send
     def transport(req: urllib.request.Request, timeout: float | None = None) -> _Response:
         if req.full_url.endswith("/health"):
             healths.append(req.full_url)
-            return _Response({"protocol_version": 33})
+            return _Response({"protocol_version": LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION})
         posted.append(req.full_url)
         payload = json.loads(req.data)
         assert bool(payload.get("wait")) is wait
@@ -141,7 +144,7 @@ def test_reply_wait_never_retries_an_ambiguously_delivered_post(
 
     def transport(req: urllib.request.Request, timeout: float | None = None) -> _Response:
         if req.full_url.endswith("/health"):
-            return _Response({"protocol_version": 33})
+            return _Response({"protocol_version": LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION})
         posted.append(req.full_url)
         raise failure
 
@@ -155,6 +158,7 @@ def test_reply_wait_never_retries_an_ambiguously_delivered_post(
     ("receipt", LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION),
     ("snapshot", REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION),
     ("detail", REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION),
+    ("resolver", REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION),
 ])
 def test_versioned_receipt_and_result_reads_reprobe_their_floor_after_cutover(
     monkeypatch: pytest.MonkeyPatch, read: str, floor: int,
@@ -178,7 +182,120 @@ def test_versioned_receipt_and_result_reads_reprobe_their_floor_after_cutover(
             client.get_live_message_receipt("live-1", 7)
         elif read == "snapshot":
             client.get_live_result_snapshot("live-1", max_items=2)
-        else:
+        elif read == "detail":
             client.expand_live_result_ref("live-1", "opaque-ref")
+        else:
+            client.resolve_live_result_target("live-1")
     assert error.value.status == 426
     assert len(resources) == 1 and resources[0].startswith(old_base)
+
+
+@pytest.mark.parametrize("read", ["snapshot", "detail", "resolver"])
+@pytest.mark.parametrize("replacement_protocol", [6, 7])
+def test_result_history_merging_retries_only_after_a_fresh_floor(
+    monkeypatch: pytest.MonkeyPatch, read: str, replacement_protocol: int,
+) -> None:
+    client = BridgeClient("http://127.0.0.1:57585", "test", connect_grace=2)
+    resources: list[str] = []
+    healths: list[str] = []
+
+    def transport(req: urllib.request.Request, timeout: float | None = None) -> _Response:
+        if req.full_url.endswith("/health"):
+            healths.append(req.full_url)
+            return _Response({"protocol_version": replacement_protocol if resources else 7})
+        resources.append(req.full_url)
+        if len(resources) == 1:
+            raise urllib.error.HTTPError(
+                req.full_url, 503, "unavailable", {},
+                io.BytesIO(json.dumps({"detail": "represented history is merging"}).encode()),
+            )
+        assert replacement_protocol == 7
+        return _Response({"session_id": "live-1"})
+
+    monkeypatch.setattr("agent_bridge.client.urllib.request.urlopen", transport)
+    monkeypatch.setattr("agent_bridge.client_protocol_floor.time.sleep", lambda _seconds: None)
+    action = {
+        "snapshot": lambda: client.get_live_result_snapshot("live-1"),
+        "detail": lambda: client.expand_live_result_ref("live-1", "opaque"),
+        "resolver": lambda: client.resolve_live_result_target("live-1"),
+    }[read]
+    if replacement_protocol < 7:
+        with pytest.raises(BridgeClientError) as error:
+            action()
+        assert error.value.status == 426 and len(resources) == 1
+    else:
+        assert action()["session_id"] == "live-1"
+        assert len(resources) == 2
+    assert len(healths) == 3
+
+
+@pytest.mark.parametrize("replacement", ["new-url", "same-url", "pinned"])
+@pytest.mark.parametrize("command", ["client", "read", "result"])
+def test_result_target_downgrade_cannot_turn_a_missing_endpoint_into_acp_fallback(
+    monkeypatch: pytest.MonkeyPatch, replacement: str, command: str,
+) -> None:
+    from agent_bridge import __main__ as cli
+
+    old_base = "http://127.0.0.1:57585"
+    new_base = "http://127.0.0.1:47000" if replacement == "new-url" else old_base
+    client = BridgeClient(
+        old_base, "test", connect_grace=2,
+        reresolve=None if replacement == "pinned" else lambda: new_base,
+    )
+    resources: list[str] = []
+    healths: list[str] = []
+
+    def transport(req: urllib.request.Request, timeout: float | None = None) -> _Response:
+        if req.full_url.endswith("/health"):
+            healths.append(req.full_url)
+            return _Response({"protocol_version": 7 if len(healths) == 1 else 6})
+        resources.append(req.full_url)
+        raise urllib.error.HTTPError(req.full_url, 404, "missing", {}, io.BytesIO(b"{}"))
+
+    monkeypatch.setattr("agent_bridge.client.urllib.request.urlopen", transport)
+    monkeypatch.setattr(cli, "_get_client", lambda **_kwargs: client)
+    monkeypatch.setattr(cli, "_caller_id_for", lambda _args: "peer")
+    monkeypatch.setattr(cli, "_resolve_read_target", lambda *_args: pytest.fail("no ACP read fallback"))
+    monkeypatch.setattr(client, "get_result_snapshot", lambda *_args, **_kwargs: pytest.fail("no ACP result fallback"))
+    if command == "result":
+        with pytest.raises(SystemExit) as error:
+            cli._cmd_result(argparse.Namespace(session_ref="live-1", expand=None))
+        assert error.value.code == 1
+    else:
+        with pytest.raises(BridgeClientError) as error:
+            if command == "read":
+                cli._cmd_read(argparse.Namespace(session_id="live-1"))
+            else:
+                client.resolve_live_result_target("live-1")
+        assert error.value.status == 426
+    assert resources == [] and len(healths) == 2
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD", "POST"])
+def test_history_merging_retry_is_bounded_and_never_repeats_a_post(
+    monkeypatch: pytest.MonkeyPatch, method: str,
+) -> None:
+    client = BridgeClient("http://127.0.0.1:57585", "test", connect_grace=1)
+    now = [0.0]
+    resources: list[str] = []
+    healths: list[str] = []
+
+    def transport(req: urllib.request.Request, timeout: float | None = None) -> _Response:
+        if req.full_url.endswith("/health"):
+            healths.append(req.full_url)
+            return _Response({"protocol_version": 7})
+        resources.append(req.full_url)
+        raise urllib.error.HTTPError(
+            req.full_url, 503, "unavailable", {},
+            io.BytesIO(json.dumps({"detail": "represented history is merging"}).encode()),
+        )
+
+    monkeypatch.setattr("agent_bridge.client.urllib.request.urlopen", transport)
+    monkeypatch.setattr("agent_bridge.client_protocol_floor.time.monotonic", lambda: now[0])
+    monkeypatch.setattr("agent_bridge.client_protocol_floor.time.sleep", lambda seconds: now.__setitem__(0, now[0] + seconds))
+    with pytest.raises(BridgeClientError) as error:
+        protocol_floored_request(client, 7)(method, "/api/v1/live-sessions/live-1/result")
+    assert error.value.status == 503
+    assert len(resources) == (1 if method == "POST" else 2)
+    assert len(healths) == (1 if method == "POST" else 3)
+    assert now[0] <= 1

@@ -82,7 +82,11 @@ def _request_with_floor(
             retrying, last_error = True, exc
         except BridgeClientError as exc:
             detail = str(exc.detail).lower()
-            if exc.status != 503 or not ("drain" in detail or "initializing" in detail) \
+            retryable = (
+                "drain" in detail or "initializing" in detail
+                or (method in ("GET", "HEAD") and "merging" in detail)
+            )
+            if exc.status != 503 or not retryable \
                     or time.monotonic() >= deadline:
                 raise
             retrying, last_error = True, exc

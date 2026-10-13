@@ -729,9 +729,12 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
 
     def resolve_live_result_target(self, handle: str) -> dict[str, Any]:
         """Resolve a represented live or wedged target for result inspection."""
+        from .client_protocol_floor import protocol_floored_request
+        from .protocol import REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION
+
         self._require_represented_result_snapshots()
         try:
-            return self._request(
+            return protocol_floored_request(self, REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION)(
                 "GET",
                 "/api/v1/live-sessions/result-target",
                 params={"handle": handle},

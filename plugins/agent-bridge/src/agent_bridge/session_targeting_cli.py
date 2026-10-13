@@ -313,7 +313,12 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
         if receipt.get("stage"):
             print("    (message receipt observation is unavailable; inspect session state instead)")
         else:
-            print("    (message receipt observation requires daemon protocol 33 or newer)")
+            from .protocol import LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
+
+            print(
+                "    (message receipt observation requires daemon protocol "
+                f"{LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION} or newer)"
+            )
     if reply_to:
         print(f"    reply-to: {reply_to}")
     else:
