@@ -1,11 +1,14 @@
 const fs = require("node:fs");
 const crypto = require("node:crypto");
+const path = require("node:path");
+const { Parser } = require("commonmark");
 
 const HANDLE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const WORKFLOW = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/;
 const EXEMPTION = "attribution-exempt";
 const CONTEXT = "source-attribution";
-const DEFINITION = crypto.createHash("sha256").update(fs.readFileSync(__filename)).digest("hex");
+const DEFINITION = crypto.createHash("sha256").update(fs.readFileSync(__filename))
+  .update(fs.readFileSync(path.join(__dirname, "package-lock.json"))).digest("hex");
 const REPAIR = [
   "Every pull request targeting dev must carry one source attribution comment in its description.",
   "",
@@ -34,36 +37,31 @@ const REPAIR = [
   "See CONTRIBUTING.md for the full manual-repair procedure.",
 ].join("\n");
 
-function mapVisibleLines(body, visible, hidden = () => null) {
-  let fence = null;
-  return body.split(/\r?\n/).map((line) => {
-    let rest = line;
-    let quotes = 0;
-    let prefix;
-    while ((prefix = rest.match(/^ {0,3}>[ \t]?/))) {
-      quotes++;
-      rest = rest.slice(prefix[0].length);
+function metadataText(body) {
+  const lines = body.split(/\r?\n/);
+  const comments = [];
+  const walker = new Parser().parse(body).walker();
+  let event;
+  while ((event = walker.next())) {
+    if (!event.entering) continue;
+    const node = event.node;
+    if (node.type === "code_block" || node.type === "block_quote") {
+      for (let line = node.sourcepos[0][0] - 1; line < node.sourcepos[1][0]; line++) lines[line] = "";
+      continue;
     }
-    if (fence) {
-      const close = rest.match(/^( *)(`{3,}|~{3,})[ \t]*$/);
-      if (quotes === fence.quotes && close &&
-          close[1].length >= fence.indent && close[1].length <= fence.indent + 3 &&
-          close[2][0] === fence.delimiter[0] && close[2].length >= fence.delimiter.length) fence = null;
-      return hidden(line);
+    if (!["html_block", "html_inline"].includes(node.type) ||
+        !/^<!--\s*(?:agent-worktrees:source\b|gh-aw-workflow-id:)/.test(node.literal.trimStart())) continue;
+    let quoted = false;
+    for (let parent = node.parent; parent; parent = parent.parent) {
+      if (parent.type === "block_quote") { quoted = true; break; }
     }
-    let indent = 0;
-    // List prefixes apply to openers, not to arbitrary content inside a fence.
-    while ((prefix = rest.match(/^ *(?:[-+*]|\d{1,9}[.)])[ \t]+/))) {
-      indent += prefix[0].length;
-      rest = rest.slice(prefix[0].length);
-    }
-    const open = rest.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
-    if (open && (open[1][0] !== "`" || !open[2].includes("`"))) {
-      fence = { delimiter: open[1], quotes, indent };
-      return hidden(line);
-    }
-    return quotes || /^(?: {4}|\t)/.test(line) ? hidden(line) : visible(line);
-  }).filter((line) => line !== null).join("\n");
+    if (!quoted) comments.push(node);
+  }
+  // Also exclude source-looking comments between multiline example backticks.
+  const visible = withoutInlineCode(lines.join("\n")).split("\n");
+  return comments.map((node) => node.type === "html_block" ?
+    visible.slice(node.sourcepos[0][0] - 1, node.sourcepos[1][0]).join("\n") :
+    "not-standalone " + node.literal).join("\n");
 }
 
 function withoutInlineCode(text) {
@@ -103,7 +101,7 @@ function withoutInlineCode(text) {
 function validate(body) {
   if (body == null) body = "";
   if (typeof body !== "string" || body.length > 65536) return "Source attribution could not be validated.";
-  const text = withoutInlineCode(mapVisibleLines(body, (line) => line, () => ""));
+  const text = metadataText(body);
   const candidates = text.match(/<!--\s*agent-worktrees:source\b/g) || [];
   const nativeCount = (text.match(/<!--\s*gh-aw-workflow-id:/g) || []).length;
   const markers = [...text.matchAll(/^ {0,3}<!--\s*agent-worktrees:source\s+([^\r\n]*?)\s*-->[ \t]*$/gm)];

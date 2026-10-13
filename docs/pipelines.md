@@ -298,6 +298,10 @@ account — it's an Enterprise-only feature.)
 `github.workflow_sha`, never the PR head, and reads the current description
 through the GitHub API. Body/base edits and metadata changes reevaluate the
 same head; repository automation and manually opened PRs are covered too.
+The trusted checkout's integrity-locked CommonMark parser identifies actual
+HTML comments, excluding fenced/indented code and quoted examples even inside
+continuation list items. Both metadata jobs install these pinned dependencies
+with `npm ci --ignore-scripts`; no PR-head package or lifecycle script runs.
 CONTRIBUTING.md and failure output publish the accepted codename, workflow and
 native gh-aw origin forms and concrete manual repair steps. Encryption remains
 optional, and syntax validation is not proof of actual source ownership.
@@ -307,6 +311,8 @@ distinct context on current open dev PR heads without editing their descriptions
 or labels. Unchanged metadata/validator decisions are deduplicated and writes
 are paced. This refresh closes the rollout gap for already-open PRs whose old
 green lockdown runs never examined attribution.
+An unstable or unreadable PR fails its refresh without starving later heads;
+the job reports sanitized failures after processing the batch.
 Refresh publication starts pending, rereads metadata before and after completing
 its result, and supersedes any changed/unverifiable snapshot with a failure
 before a bounded retry. A delayed refresh must not leave a stale successful

@@ -75,7 +75,7 @@ test("Markdown container fences cannot turn examples into source metadata", () =
     "- ```html\n  SOURCE\n  ```",
     "1. ~~~html\n   SOURCE\n   ~~~",
     "- outer\n  - ```html\n    SOURCE\n    ```",
-    "> - ```html\n  SOURCE\n>   ```",
+    "> - ```html\n>   SOURCE\n>   ```",
     "- ```html\n  SOURCE\n  ````",
     "- ```html\n  SOURCE",
   ]) {
@@ -111,6 +111,24 @@ test("multiline code spans hide examples without changing actual comment fields"
   assert.equal(gate.validate("<!-- documented example\n" + marker + "\n-->\n\n" + marker), null);
 });
 
+test("list continuation and quoted containers retain their rendered code boundaries", () => {
+  const native = "<!-- gh-aw-workflow-id: maintenance -->";
+  for (const source of [marker, native]) {
+    for (const body of [
+      "- Example\n    ```html\n  SOURCE\n    ```",
+      "1. Example\n     ~~~html\n   SOURCE\n     ~~~",
+      "- Outer\n  - Example\n      ```html\n    SOURCE\n      ```",
+      "> - Example\n>     ```html\n>   SOURCE\n>     ```",
+    ]) {
+      const example = body.replace("SOURCE", source);
+      assert.ok(gate.validate(example));
+      assert.equal(gate.validate(example + "\n\n" + source), null);
+    }
+    assert.ok(gate.validate("\\<!-- example -->\n\n\\" + source));
+    assert.equal(gate.validate("\\" + source + "\n\n" + source), null);
+  }
+});
+
 test("indented or container-prefixed fence content cannot close another fence", () => {
   for (const body of [
     "```html\n    ```\n" + marker + "\n```",
@@ -118,7 +136,7 @@ test("indented or container-prefixed fence content cannot close another fence", 
     "```html\n> ```\n" + marker + "\n```",
     "```html\n- ```\n" + marker + "\n```",
     "- ```html\n      ```\n  " + marker + "\n  ```",
-    "> ```html\n>     ```\n" + marker + "\n> ```",
+    "> ```html\n>     ```\n> " + marker + "\n> ```",
   ]) {
     assert.ok(gate.validate(body));
     assert.equal(gate.validate(body + "\n\n" + marker), null);

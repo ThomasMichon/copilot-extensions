@@ -1,4 +1,5 @@
 """Trusted metadata wiring, event repair, and automation origin contracts."""
+import json
 from pathlib import Path
 
 import yaml
@@ -23,7 +24,10 @@ def test_metadata_events_and_trusted_checkout_do_not_execute_pr_content():
     assert source["if"] == "github.event_name == 'pull_request_target'"
     checkout = source["steps"][0]
     assert checkout["with"] == {"ref": "${{ github.workflow_sha }}", "persist-credentials": "false"}
-    assert "required-pr-attribution.cjs" in source["steps"][1]["with"]["script"]
+    install = source["steps"][1]
+    assert install["working-directory"] == ".github/actions"
+    assert install["run"] == "npm ci --ignore-scripts --no-audit --no-fund"
+    assert "required-pr-attribution.cjs" in source["steps"][2]["with"]["script"]
     protected = workflow["jobs"]["workflow-lockdown-guard"]
     assert protected["if"] == "github.event_name == 'pull_request_target'"
     assert "protectedPrefixes" in protected["steps"][0]["with"]["script"]
@@ -38,7 +42,8 @@ def test_existing_heads_are_refreshed_from_only_the_default_branch():
         "contents": "read", "pull-requests": "read", "checks": "write",
     }
     assert refresh["steps"][0]["with"]["ref"] == "${{ github.workflow_sha }}"
-    assert ".backfill(" in refresh["steps"][1]["with"]["script"]
+    assert refresh["steps"][1]["run"] == "npm ci --ignore-scripts --no-audit --no-fund"
+    assert ".backfill(" in refresh["steps"][2]["with"]["script"]
     assert "labeled" in workflow["jobs"]["request-review"]["if"]
     assert "unlabeled" in workflow["jobs"]["request-review"]["if"]
 
@@ -46,9 +51,24 @@ def test_existing_heads_are_refreshed_from_only_the_default_branch():
 def test_contract_tests_are_wired_and_dev_cleanup_has_a_workflow_origin():
     steps = load("ci.yml")["jobs"]["checks"]["steps"]
     assert any("required-pr-attribution.test.cjs" in step.get("run", "") for step in steps)
+    assert any("npm ci --prefix .github/actions --ignore-scripts" in step.get("run", "") for step in steps)
     assert any("test_required_source_attribution_workflow.py" in step.get("run", "") for step in steps)
     purge = (ROOT / ".github" / "workflows" / "purge-consumed-changefiles.yml").read_text(encoding="utf-8")
     assert "agent-worktrees:source workflow=purge-consumed-changefiles run=$GITHUB_RUN_ID" in purge
     assert '"$origin"' in purge
     agentic = load("ci-failure-fix-attempt.md")
     assert agentic["safe-outputs"]["create-pull-request"]["base-branch"] == "dev"
+
+
+def test_metadata_parser_is_exactly_pinned_with_integrity():
+    directory = ROOT / ".github" / "actions"
+    manifest = json.loads((directory / "package.json").read_text(encoding="utf-8"))
+    lock = json.loads((directory / "package-lock.json").read_text(encoding="utf-8"))
+    assert manifest["dependencies"]["commonmark"] == "0.31.2"
+    parser = lock["packages"]["node_modules/commonmark"]
+    assert parser["version"] == manifest["dependencies"]["commonmark"]
+    assert parser["integrity"].startswith("sha512-")
+    for name, package in lock["packages"].items():
+        if name:
+            assert package["resolved"].startswith("https://registry.npmjs.org/")
+            assert package["integrity"].startswith("sha512-")

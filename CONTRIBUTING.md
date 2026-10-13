@@ -40,6 +40,9 @@ base64 AWI1 envelope produced by the shared-key attribution tools. Handles are
 lowercase alphanumeric segments joined by hyphens, at most 64 characters.
 Encryption is optional; never publish raw machine, worktree or session fields.
 Place the comment on its own line outside code fences or quoted examples.
+Indented code, blockquotes, escaped comments and list-contained fenced examples
+are not source metadata; the trusted check parses Markdown containers rather
+than counting example text.
 
 Repository automation instead supplies its public workflow origin:
 

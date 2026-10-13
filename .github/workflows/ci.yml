@@ -298,6 +298,7 @@ jobs:
         run: python tools/check-version-consistency.py
       - name: Required source metadata contract tests
         run: |
+          npm ci --prefix .github/actions --ignore-scripts --no-audit --no-fund
           node --test .github/actions/required-pr-attribution.test.cjs
           python -m pytest -q tools/test_required_source_attribution_workflow.py
       - name: Changefile presence (touched plugins must have a pending changefile; PR-into-dev only)
