@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 Mode = Literal["cli", "acp"]
 Acquired = Literal["created", "reused", "resumed"]
 ACQUISITION_CONTRACT_VERSION: Literal[1] = 1
+DEFAULT_CLI_WORKER_TARGET = "task-worker"
 
 
 class AcquisitionRequest(BaseModel):

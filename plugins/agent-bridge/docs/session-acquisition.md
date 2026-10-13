@@ -25,6 +25,16 @@ task/reservation/native bindings. A new field that changes safety or continuity
 semantics requires a new negotiated protocol, not an ignorable extension.
 No mode defaults to CLI.
 
+The default local CLI worker target `task-worker` is a stable task-affinity
+label, not an ACP registry prerequisite. Its execution target comes from the
+owner-verified local worktree, and the worktree CLI retains control of configured
+launch defaults. Explicit named CLI targets still resolve normally and must be
+local; ACP targets, including `task-worker`, still require a registered agent.
+Missing explicit/ACP targets return `target_unavailable` and a prepared refusal
+receipt rather than an HTTP 500 with a stranded pending attempt. No dummy agent,
+pool activation, changed affinity label or fresh-conversation authorization is
+needed for the default CLI body.
+
 `AcquisitionResult` requires the represented or owned session handle **and**
 the exact native conversation ID, requested bindings, delivery ID, and
 `created`/`reused`/`resumed` outcome. A mux handle, path, successful process

@@ -1,0 +1,9 @@
+{
+  "comment": "Remove the default CLI worker ACP registry prerequisite and return typed prelaunch refusals for missing targets",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
