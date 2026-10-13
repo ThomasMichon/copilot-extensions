@@ -262,11 +262,14 @@ async def cleanup_container_session_host(
     target: dict[str, Any],
     prepared: dict[str, Any],
 ) -> bool:
-    """Best-effort removal of one launch-only secret env file."""
+    """Best-effort removal of general and process-only launch files."""
     from ..transport import _reresolve_stale_interpreter
 
-    remote_env = prepared.get("remote_env")
-    if not remote_env:
+    paths = [
+        path for path in (prepared.get("remote_env"), prepared.get("copilot_auth_env"))
+        if path
+    ]
+    if not paths:
         return True
     command = _reresolve_stale_interpreter(
         list(target.get("provider_command") or [])
@@ -274,6 +277,15 @@ async def cleanup_container_session_host(
     name = str(target.get("name") or "")
     if not command or not name:
         return False
+    success = True
+    for remote_env in paths:
+        success = await _cleanup_launch_file(command, name, remote_env, prepared) and success
+    return success
+
+
+async def _cleanup_launch_file(
+    command: list[str], name: str, remote_env: str, prepared: dict[str, Any],
+) -> bool:
     rc, out, err = await _run_provider(
         [
             *command,

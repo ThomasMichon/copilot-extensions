@@ -33,6 +33,7 @@ from pathlib import Path, PurePosixPath
 from agent_procutil import no_window_flags
 
 from . import claim_provider_cli, rescue_capture_cli
+from . import copilot_process_auth as process_auth
 from .config import (
     RESTRICTED_PROFILE,
     SECURITY_PROFILE_LABEL,
@@ -44,7 +45,6 @@ from .resolver import (
     _append_copilot_args,
     build_restricted_acp_spawn_command,
     host_gh_token,
-    resolve_copilot_cli_token_or_raise,
     resolve_extra_copilot_args,
     resolve_live_exec_target,
 )
@@ -475,9 +475,6 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
             )
         launch_env["GH_TOKEN"] = github_token
 
-    copilot_token = resolve_copilot_cli_token_or_raise(config, fleet, args.name)
-    if copilot_token:
-        launch_env["COPILOT_GITHUB_TOKEN"] = copilot_token
 
     reverse_forwards: list[str] = []
     if relay_enabled:
@@ -500,7 +497,10 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
             f"{config.relay_port}:127.0.0.1:{args.host_relay_port}"
         )
 
-    remote_env = write_remote_env(projection_target, user, launch_env)
+    remote_env = process_auth.stage_env(projection_target, user, launch_env, write_remote_env)
+    copilot_auth_env, acp_command = process_auth.prepare_acp_launch(
+        config, fleet, projection_target, user, acp_command, remote_env,
+    )
     remote_command = build_remote_command(
         acp_command,
         remote_env,
@@ -514,6 +514,7 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
         "acp_command": acp_command,
         "remote_command": remote_command,
         "remote_env": remote_env,
+        "copilot_auth_env": copilot_auth_env,
         "execution_instance": instance_id or None,
         "preference_wrapper": (
             {"version": 1, "launcher": launcher_token} if token_count else None
@@ -1054,8 +1055,6 @@ def _launch_container_agent(
                 "the in-container Copilot CLI may be unauthenticated."
             )
 
-    copilot_token = resolve_copilot_cli_token_or_raise(config, fleet, args.name)
-
     # On-demand credential relay. Trusted SSH carries a reverse forward from the
     # container's loopback relay port to agent-bridge's live host-loopback port;
     # restricted fleets cannot enable this path.
@@ -1101,16 +1100,18 @@ def _launch_container_agent(
     launch_env = container_environment(args.name, user)
     if forward and "GH_TOKEN" in env:
         launch_env["GH_TOKEN"] = env["GH_TOKEN"]
-    if copilot_token:
-        launch_env["COPILOT_GITHUB_TOKEN"] = copilot_token
     launch_env.update({
         name: env[name]
         for name in relay_env
         if name in env
     })
-    remote_env = write_remote_env(args.name, user, launch_env)
+    remote_env = process_auth.stage_env(args.name, user, launch_env, write_remote_env)
+    env = process_auth.without_inference_token(env)
+    copilot_auth_env = None
     try:
         ssh_config = prepare_ssh_config(args.name, user)
+        copilot_auth_env = process_auth.prepare_launch(config, fleet, args.name, user)
+        acp_command = process_auth.wrap_command(acp_command, copilot_auth_env)
         remote_command = build_remote_command(acp_command, remote_env)
         spawn_cmd = build_ssh_command(
             ssh_config,
@@ -1126,6 +1127,7 @@ def _launch_container_agent(
         return _exec_stdio(spawn_cmd, env)
     finally:
         cleanup_remote_env(args.name, user, remote_env)
+        cleanup_remote_env(args.name, user, copilot_auth_env)
 
 
 def _exec_stdio(spawn_cmd: list[str], env: dict[str, str]) -> int:

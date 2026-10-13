@@ -158,11 +158,6 @@ def _launch_env(
                 "the container's Copilot CLI would start signed out"
             )
         env["GH_TOKEN"] = github_token
-    from .resolver import resolve_copilot_cli_token_or_raise
-
-    copilot_token = resolve_copilot_cli_token_or_raise(config, target.fleet, args.name)
-    if copilot_token:
-        env["COPILOT_GITHUB_TOKEN"] = copilot_token
     for key in _DISPATCH_ENV_KEYS:
         value = os.environ.get(key, "").strip()
         if value:
@@ -210,6 +205,9 @@ def _prepare_remote_env(
 
     launch_env = container_environment(args.name, target.user)
     launch_env.update(values)
+    from .copilot_process_auth import without_inference_token
+
+    launch_env = without_inference_token(launch_env)
     return write_remote_env(args.name, target.user, launch_env)
 
 
@@ -236,6 +234,7 @@ class _ContainerAdapter:
         remote_env: str | None,
         relay_port: int | None,
         host_relay_port: int | None,
+        target: Any = None,
     ) -> None:
         self.name = name
         self.ssh_config = ssh_config
@@ -243,6 +242,7 @@ class _ContainerAdapter:
         self.remote_env = remote_env
         self.relay_port = relay_port
         self.host_relay_port = host_relay_port
+        self.target = target
         self._hold_updated_at: float | None = None
 
     def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
@@ -253,17 +253,29 @@ class _ContainerAdapter:
 
     def launch(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         from .ssh_transport import build_remote_command, build_ssh_command
+        from .copilot_process_auth import prepare_launch, wrap_command
+        from .ssh_transport import cleanup_remote_env
 
-        remote_command = build_remote_command(command, self.remote_env)
-        proc = subprocess.run(
-            build_ssh_command(self.ssh_config, remote_command, pty=False),
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            creationflags=no_window_flags(),
-        )
-        return proc.returncode, proc.stdout or "", proc.stderr or ""
+        auth_env = None
+        try:
+            if self.target is not None:
+                auth_env = prepare_launch(
+                    self.target.config, self.target.fleet, self.name, self.target.user,
+                )
+            command = wrap_command(command, auth_env, manager=True)
+            remote_command = build_remote_command(command, self.remote_env)
+            proc = subprocess.run(
+                build_ssh_command(self.ssh_config, remote_command, pty=False),
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                creationflags=no_window_flags(),
+            )
+            return proc.returncode, proc.stdout or "", proc.stderr or ""
+        finally:
+            if self.target is not None:
+                cleanup_remote_env(self.name, self.target.user, auth_env)
 
     def ensure_keeper(self, *, venue_port: int, mux: str) -> dict[str, Any]:
         from . import forward_keeper
@@ -362,6 +374,7 @@ def cmd_detach(
             remote_env=remote_env,
             relay_port=relay_port,
             host_relay_port=host_relay_port,
+            target=target,
         )
         _progress("prepare", "registration credentials on the container")
         rc, payload = launch_detached(

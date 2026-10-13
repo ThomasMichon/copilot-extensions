@@ -50,6 +50,50 @@ def test_plain_launch_appends_allow_all():
     assert cmd[-2:] == ["--allow-all", "--experimental"]
 
 
+@pytest.mark.guard
+@pytest.mark.parametrize("normalized", [False, True])
+def test_process_launcher_binds_the_actual_native_command(tmp_path, monkeypatch, normalized):
+    launcher = tmp_path / "copilot"
+    launcher.write_text("#!/bin/sh\nexit 0\n")
+    launcher.chmod(0o700)
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    config = _config()
+    config.repos["ext"] = dataclasses.replace(
+        config.default_repo, anchor=str(tmp_path), launch={} if normalized else {"linux": ["copilot"]},
+    )
+    if normalized:
+        assert not (tmp_path / "tools" / "setup" / "setup.sh").exists()
+    args = _args([])
+    args.copilot_process_launcher = str(launcher)
+    inner = _inner_command(m._build_launch_cmd(config, args, str(tmp_path)))
+    if normalized:
+        assert "default-setup.sh" in inner[1]
+        assert inner[inner.index("--copilot-path") + 1] == str(launcher)
+    else:
+        assert inner[0] == str(launcher)
+    assert "COPILOT_GITHUB_TOKEN" not in str(inner)
+
+
+@pytest.mark.guard
+def test_process_launcher_refuses_unknown_template_missing_file_and_custom_path(tmp_path):
+    args = _args([])
+    args.copilot_process_launcher = str(tmp_path / "missing")
+    with pytest.raises(m.LaunchPreflightError, match="not executable"):
+        m._build_launch_cmd(_config(), args, str(tmp_path))
+    launcher = tmp_path / "copilot"
+    launcher.write_text("#!/bin/sh\nexit 0\n")
+    launcher.chmod(0o700)
+    args.copilot_process_launcher = str(launcher)
+    with pytest.raises(m.LaunchPreflightError, match="direct copilot"):
+        m._build_launch_cmd(_config({"linux": ["custom-agent"]}), args, str(tmp_path))
+    config = _config()
+    config.repos["ext"] = dataclasses.replace(
+        config.default_repo, launch={}, copilot_path={"linux": "/custom/copilot"},
+    )
+    with pytest.raises(m.LaunchPreflightError, match="configured copilot_path"):
+        m._build_launch_cmd(config, args, str(tmp_path))
+
+
 def test_plain_launch_does_not_append_removed_no_sandbox_flag():
     # Copilot CLI 1.0.81-9 removed --no-sandbox. Auto-appending the retired flag
     # makes every new interactive worktree and handoff successor exit at launch.

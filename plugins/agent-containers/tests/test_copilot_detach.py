@@ -313,7 +313,7 @@ def test_detach_without_relay_still_prepares_agent_worktrees_and_workspace(monke
     ]
 
 
-def test_launch_env_forwards_a_separate_copilot_cli_account_token(monkeypatch):
+def test_launch_env_does_not_stage_inference_auth(monkeypatch):
     import agent_containers.resolver as resolver_mod
 
     monkeypatch.setattr(
@@ -340,11 +340,11 @@ def test_launch_env_forwards_a_separate_copilot_cli_account_token(monkeypatch):
         relay_healthy=lambda p: (_ for _ in ()).throw(AssertionError("no relay")),
     )
 
-    assert env["COPILOT_GITHUB_TOKEN"] == "gho_inference_only"
+    assert "COPILOT_GITHUB_TOKEN" not in env
     assert "GH_TOKEN" not in env
 
 
-def test_launch_env_fails_closed_when_copilot_cli_account_has_no_host_login(monkeypatch):
+def test_actual_detached_launch_fails_closed_when_source_is_missing(monkeypatch):
     import agent_containers.resolver as resolver_mod
 
     monkeypatch.setattr(resolver_mod, "host_copilot_cli_token", lambda account: None)
@@ -352,11 +352,11 @@ def test_launch_env_fails_closed_when_copilot_cli_account_has_no_host_login(monk
     target.fleet.copilot_cli_account = "inference-user"
 
     with pytest.raises(RuntimeError, match="copilot-login"):
-        detach._launch_env(
-            _args(no_relay=True),
-            target,
-            require_live_relay_port=lambda: (_ for _ in ()).throw(AssertionError("no relay")),
-            relay_healthy=lambda p: (_ for _ in ()).throw(AssertionError("no relay")),
+        detach._ContainerAdapter(
+            name="repo-1", ssh_config=None, hold_id="scope", remote_env=None,
+            relay_port=None, host_relay_port=None, target=target,
+        ).launch(
+            "agent-worktrees embody --detach", timeout=30,
         )
 
 

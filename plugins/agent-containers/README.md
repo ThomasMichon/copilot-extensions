@@ -260,6 +260,36 @@ back to whatever GH_TOKEN/GITHUB_TOKEN already carries, the pre-existing
 behavior. Restricted fleets never receive this (or any) host credential,
 same hard boundary as `forward_gh_token`.
 
+For an explicit `copilot_cli_account`, trusted ACP, Session Host child, and
+detached CLI launches re-read that existing host source for each launch. Only
+the native Copilot process receives the selected inference token: a private,
+one-use launch file is consumed by a narrow executable wrapper, not sourced
+into the Session Host, `embody`, tmux, container, or session environment.
+Copilot receives `--secret-env-vars=COPILOT_GITHUB_TOKEN`, which strips that
+value from its normal shell and MCP child environments. Existing `GH_TOKEN`,
+`GITHUB_TOKEN`, Git credential helpers, and relay identities are independent
+and remain available to downstream tools.
+
+The target's native `copilot --help` must confirm `--secret-env-vars` support
+before staging authentication. Missing source tokens or unsupported CLI
+capabilities refuse the launch; they never fall back to the Git identity.
+ACP commands must use PATH-resolved `copilot` (including the target-preference
+launcher template), not an absolute executable override. Detached launches
+require an agent-worktrees runtime accepting `--copilot-process-launcher`;
+an older runtime rejects that option before launching. Direct `copilot`
+templates and normalized setup are supported; custom executable templates and
+configured `copilot_path` overrides refuse rather than bypass isolation.
+Caller-supplied `--secret-env-vars` overrides or `--` separators are likewise
+refused for these authenticated launches.
+
+This is accidental-inheritance isolation in a **trusted** venue, not a hard
+credential-custody boundary: trusted agents can access their inference
+credential. It neither changes the existing source parser nor proves a
+vendor storage/expiry/refresh schema. Synthetic launch tests establish
+per-launch source rereads, child argv/environment isolation and fail-closed
+behavior, not live OAuth or inference success. Restricted native-proxy
+launches remain separate and never receive a host inference token.
+
 **Worst case: no live login exists anywhere for the configured account yet.**
 Run the device-code flow INSIDE a running container of the target fleet
 instead of on the bare host (useful when the host itself can't run an

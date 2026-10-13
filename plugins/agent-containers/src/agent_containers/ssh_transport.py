@@ -451,6 +451,11 @@ def cleanup_remote_env(container: str, user: str, remote_path: str | None) -> bo
         result = _run([
             "docker", "exec", "-u", user, container,
             "rm", "-f", remote_path,
+            remote_path + ".d/copilot",
+        ])
+        _run([
+            "docker", "exec", "-u", user, container,
+            "sh", "-c", f"rmdir {shlex.quote(remote_path + '.d')} 2>/dev/null || true",
         ])
     except RuntimeError as exc:
         log.warning("Could not clean SSH launch environment in %s: %s", container, exc)

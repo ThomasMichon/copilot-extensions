@@ -51,6 +51,12 @@ def resolve_worktree_id_by_codename(*args, **kwargs): return _core().resolve_wor
 def add_launch_passthrough_args(p: argparse.ArgumentParser) -> None:
     """Register the launch-passthrough flags shared by `embody` and `copilot`."""
     p.add_argument(
+        "--copilot-process-launcher", default=None, metavar="PATH",
+        help="One-launch executable wrapper for direct Copilot or normalized "
+        "setup. Requires an absolute executable path; custom templates and "
+        "configured copilot_path overrides fail closed.",
+    )
+    p.add_argument(
         "--copilot-arg", dest="copilot_args", action="append", default=[],
         metavar="ARG",
         help="Extra argument appended to the launched Copilot command line "
