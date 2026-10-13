@@ -147,10 +147,12 @@ verified by this effort's Validation Plan.
 - [x] Implement the operator-approved bounded
       [CLI wall-admission circuit](reader-admission.md), preserving fallback
       and native holder ownership; CPU and process-tree gates stay separate.
-- [ ] Implement the operator-approved
+- [x] Implement the operator-approved
       [owned CPU observation boundary](reader-cpu-observation.md) through
       optional shared procutil metrics; reader wiring and enforcement remain
       separate gates.
+- [ ] Wire the [CLI reader observation lifecycle](reader-cpu-wiring.md)
+      and existing telemetry seam without CPU enforcement or new termination.
 - [ ] Define role keys, expected wall/CPU cost, fan-out limits, and provenance.
 - [ ] Open admission circuits on repeated budget overruns without reclaiming
       live progressing holders; successful bounded probes close them.
@@ -367,3 +369,13 @@ its native fixture executes rather than skips in the canonical Linux lane.
 Stdlib-only collection still reports the optional test as skipped when that
 backend is absent; production default consumers do not gain a runtime dependency.
 Linux execution evidence will be recorded only after the current CI run passes.
+
+### 2026-10-13 - CPU observation library landed; reader wiring next
+
+Merged #6496 as `3f5e9e550` after exact-head approval with zero findings and
+green checks. Canonical Linux CI installed psutil and passed 72 procutil tests
+with only the six existing Windows-native exclusions; Windows passed all 78.
+The optional shared-library observation boundary is complete, not the wider
+CPU budget or process-tree contract. The next slice connects owned CLI spawn
+receipts and the existing telemetry seam while keeping sampling holders
+accounted for independently from command completion.

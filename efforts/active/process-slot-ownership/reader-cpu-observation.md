@@ -48,18 +48,25 @@ a competing process registry.
 
 ## Validation
 
-- [ ] Root PID reuse never reads or adopts the replacement's CPU.
-- [ ] Descendant identities are verified; repeated samples do not double count.
-- [ ] Reparented observed descendants remain identity-pinned.
-- [ ] Access denial and disappearing processes preserve explicit uncertainty.
-- [ ] Discovery/storage cap reports partial coverage with bounded retained data.
-- [ ] CPU counter regression cannot produce negative or invented usage.
-- [ ] Optional metrics absence leaves ordinary procutil imports working and
+- [x] Root PID reuse never reads or adopts the replacement's CPU.
+- [x] Descendant identities are verified; repeated samples do not double count.
+- [x] Reparented observed descendants remain identity-pinned.
+- [x] Access denial and disappearing processes preserve explicit uncertainty.
+- [x] Discovery/storage cap reports partial coverage with bounded retained data.
+- [x] CPU counter regression cannot produce negative or invented usage.
+- [x] Optional metrics absence leaves ordinary procutil imports working and
       yields an explicit unavailable result for a measurement request.
-- [ ] Native root/child fixture demonstrates increasing CPU observations and
+- [x] Native root/child fixture demonstrates increasing CPU observations and
       graceful cleanup without relying on mocks alone.
-- [ ] Relevant Windows and Linux tests plus dependency/install-contract
+- [x] Relevant Windows and Linux tests plus dependency/install-contract
       checks pass; unexecuted platform proof remains marked unverified.
+
+Library evidence: #6496, merged as `3f5e9e550`. Windows: 78 passed.
+Canonical Linux CI: 72 passed, six existing Windows-only tests skipped;
+psutil was installed and the native CPU fixture executed. Stdlib-only cold
+validation: 77 passed, one explicitly optional metrics fixture skipped.
+The sampler's running native future also survives waiter/loop cancellation;
+no cancellation-shaped coroutine completion releases its sampling holder.
 
 ## Remaining gates
 
