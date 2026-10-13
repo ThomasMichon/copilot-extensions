@@ -1,0 +1,9 @@
+{
+  "comment": "Add the stable public-install-surface proxy (install/dispatch/bootstrap.{ps1,sh}) and repoint the self-provisioning binstub's upstream-installer URL at it instead of services/dispatch/bootstrap.{ps1,sh} directly, so a future standalone-package move never breaks the published install URL again (issue #6419).",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

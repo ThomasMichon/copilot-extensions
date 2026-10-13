@@ -27,17 +27,24 @@ either way; it does not permit arbitrary plugin-to-plugin copying.
 
 ## Install and run
 
+The stable, public install command (never changes across future repo
+reorganizations -- see
+[`docs/patterns/standalone-service-layout.md`](../../docs/patterns/standalone-service-layout.md)'s
+"public-install-surface indirection"):
+
 ```bash
 # Linux / WSL / macOS:
-curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/services/dispatch/bootstrap.sh | bash -s -- install
+curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/install/dispatch/bootstrap.sh | bash -s -- install
 ```
 
 ```powershell
 # Windows:
-iex (irm https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/services/dispatch/bootstrap.ps1)
+iex (irm https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/install/dispatch/bootstrap.ps1)
 ```
 
-Both scripts fetch this repository (git clone/fetch when available, else a
+The `install/dispatch/bootstrap.{sh,ps1}` proxy does nothing but resolve and
+exec this package's own `bootstrap.{sh,ps1}` (below), which fetches this
+repository (git clone/fetch when available, else a
 GitHub tarball so a bare machine without `git` still bootstraps), then exec
 straight into the existing `plugins/agent-dispatch/scripts/install.{sh,ps1}`
 -- the identical installer every plugin-delivered host already runs. Every

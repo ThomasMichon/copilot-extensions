@@ -84,14 +84,19 @@ same change. `worktree-manager/` and `fleet-manager/` predate even the
 `agent-*-service` convention this pattern retires and remain a distinct,
 unscoped case this pattern does not decide.
 
-**Still open:** the public-install-surface indirection (a dedicated
-top-level `install/` proxy directory, vs. a unified `copilot-extensions
-install <name>` dispatcher) was **not** implemented as part of this move --
-the hardcoded bootstrap URL now points directly at
-`services/dispatch/bootstrap.{ps1,sh}`, so it would need updating again if
-that path ever moves further. Picking and implementing one of the two
-mechanisms above remains tracked in
-[#6419](https://github.com/ThomasMichon/copilot-extensions/issues/6419).
+**Public-install-surface indirection implemented (2026-10-13).** Picked the
+dedicated top-level `install/` proxy directory over a unified
+`copilot-extensions install <name>` dispatcher, since it needs no other app
+installed first. `install/dispatch/bootstrap.{ps1,sh}` is now the one
+durable public URL (`.../main/install/dispatch/bootstrap.{ps1,sh}`);
+it does nothing but resolve and exec whatever `services/dispatch/bootstrap.{ps1,sh}`
+currently is (local sibling copy when run from a checkout, else fetched over
+the network), so only that one proxy file's hardcoded real-path needs
+updating on a future move -- no external caller's URL changes.
+`plugins/agent-dispatch/scripts/install.{ps1,sh}`'s self-provisioning
+binstub was repointed at the new proxy URL accordingly. A future standalone
+service gets the same pattern: `install/<topic>/bootstrap.{ps1,sh}` proxying
+to `services/<topic>/bootstrap.{ps1,sh}`.
 
 ## Rationale
 

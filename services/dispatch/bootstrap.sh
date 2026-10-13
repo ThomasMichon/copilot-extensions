@@ -2,7 +2,14 @@
 # bootstrap.sh — fetch and install the copilot-extensions agent-dispatch
 # coordinator, with NO Copilot CLI and NO marketplace involved.
 #
-#   curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/services/dispatch/bootstrap.sh | bash
+# This is the real implementation. The STABLE, public URL any published
+# install command / bookmarked reference should use instead is the proxy at
+# install/dispatch/bootstrap.sh (see
+# docs/patterns/standalone-service-layout.md's "public-install-surface
+# indirection") -- it never changes even if this file's own location moves
+# in a future reorganization:
+#
+#   curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/install/dispatch/bootstrap.sh | bash
 #
 # This is delivered OUTSIDE the plugin pipe, mirroring
 # worktree-manager/bootstrap.sh's exact shape: it does not require any

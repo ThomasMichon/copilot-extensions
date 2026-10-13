@@ -1,7 +1,14 @@
 # bootstrap.ps1 — fetch and install the copilot-extensions agent-dispatch
 # coordinator, with NO Copilot CLI and NO marketplace involved.
 #
-#   iex (irm https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/services/dispatch/bootstrap.ps1)
+# This is the real implementation. The STABLE, public URL any published
+# install command / bookmarked reference should use instead is the proxy at
+# install/dispatch/bootstrap.ps1 (see
+# docs/patterns/standalone-service-layout.md's "public-install-surface
+# indirection") -- it never changes even if this file's own location moves
+# in a future reorganization:
+#
+#   iex (irm https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/install/dispatch/bootstrap.ps1)
 #
 # This is delivered OUTSIDE the plugin pipe, mirroring
 # worktree-manager/bootstrap.ps1's exact shape: it does not require any
