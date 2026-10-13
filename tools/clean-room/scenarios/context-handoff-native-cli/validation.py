@@ -99,7 +99,11 @@ def seal_disposable_venue(workspace, baseline, sudoers=Path("/etc/sudoers.d"),
             or workspace_seed_errors(workspace, seed)):
         raise ValueError("refusing to seal an unverified disposable venue")
     grant = sudoers / "operator"
-    if grant.read_text().strip() != "operator ALL=(ALL) NOPASSWD:ALL":
+    try:
+        expected_grant = grant.read_text().strip()
+    except (OSError, UnicodeError) as error:
+        raise ValueError("clean-room sudo grant missing or unreadable; refusing seal before mutation") from error
+    if expected_grant != "operator ALL=(ALL) NOPASSWD:ALL":
         raise ValueError("unexpected clean-room sudo grant; refusing host/shared policy changes")
     deny = sudoers / "zz-native-cli-operator-deny"
     if deny.exists():
@@ -710,7 +714,7 @@ def action_errors(action, cursor, transitions, workspace):
     return []
 
 
-def common_errors(document, root, task, workspace=None, baseline=None, kind="checkpoint"):
+def common_errors(document, root, *, workspace=None, baseline=None, kind="checkpoint"):
     seed, errors = seed_baseline(baseline)
     if errors:
         return errors
@@ -762,8 +766,8 @@ def common_errors(document, root, task, workspace=None, baseline=None, kind="che
     return errors
 
 
-def checkpoint_errors(document, root, task=None, workspace=None, baseline=None):
-    errors = common_errors(document, root, task, workspace, baseline, "checkpoint")
+def checkpoint_errors(document, root, *, workspace=None, baseline=None):
+    errors = common_errors(document, root, workspace=workspace, baseline=baseline, kind="checkpoint")
     cursor = document.get("audit_cursor")
     if document.get("transition_number") == 2 or (
             isinstance(cursor, dict) and {"next_path", "next_line"} <= cursor.keys()):
@@ -776,8 +780,8 @@ def checkpoint_errors(document, root, task=None, workspace=None, baseline=None):
     return errors
 
 
-def witness_errors(document, root, task=None, workspace=None, baseline=None):
-    errors = common_errors(document, root, task, workspace, baseline, "witness")
+def witness_errors(document, root, *, workspace=None, baseline=None):
+    errors = common_errors(document, root, workspace=workspace, baseline=baseline, kind="witness")
     if type(document.get("transitions_completed")) is not int or document["transitions_completed"] != 2:
         errors.append("witness requires exactly two completed transitions")
     if document.get("declaration") != "NOT-JUDGED; parent remains Active":
@@ -790,7 +794,11 @@ def witness_errors(document, root, task=None, workspace=None, baseline=None):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) < 3:
+        raise SystemExit("usage: validation.py <command> <workspace-or-events> <command-arguments>")
     kind, root_arg, *extra = sys.argv[1:]
+    if kind not in ("capture-baseline", "verify-baseline", "seal-venue", "recovery-events", "checkpoint", "witness"):
+        raise SystemExit("usage: validation.py <capture-baseline|verify-baseline|seal-venue|recovery-events|checkpoint|witness> ...")
     if kind == "capture-baseline":
         if (len(extra) != 2 or (os.name == "posix" and os.geteuid() != 0)
                 or Path(extra[0]).resolve() != BASELINE_DIR.resolve()):

@@ -11,6 +11,9 @@ from unittest.mock import patch
 import controller
 import os_permission_smoke
 import validation
+import inspect
+import subprocess
+import sys
 
 from validation import (
     RECOVERY_PREREQUISITES, action_errors,
@@ -24,11 +27,11 @@ def cursor_errors(cursor, root):
     return validation.cursor_errors(cursor, root, baseline=TEST_SEEDS[str(root)])
 
 
-def checkpoint_errors(document, root, task=None):
+def checkpoint_errors(document, root):
     return validation.checkpoint_errors(document, root, baseline=TEST_SEEDS[str(root)])
 
 
-def witness_errors(document, root, task=None):
+def witness_errors(document, root):
     return validation.witness_errors(document, root, baseline=TEST_SEEDS[str(root)])
 
 
@@ -37,6 +40,202 @@ def recovery_event_errors(events, root):
 
 
 class ValidationTests(unittest.TestCase):
+    def test_incomplete_event_rows_preserve_analysis_and_export_packet(self):
+        incomplete = [
+            {"type": "user.message", "id": "bad-user", "timestamp": "0-0"},
+            {"type": "user.message", "id": "bad-user", "timestamp": "0-0", "data": {"content": None}},
+            {"type": "", "id": "bad-type", "timestamp": "0-0", "data": {}},
+            {"type": "session.info", "id": "bad-time", "timestamp": " ", "data": {}},
+            {"type": "tool.execution_complete", "timestamp": "0-0",
+             "data": {"toolCallId": "bad-call", "success": True, "result": {"content": "text"}}},
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            evaluation, state, events = self.analyzer_fixture(Path(temp))
+            for row in incomplete:
+                report = self.run_analyzer(evaluation, state, [row] + events)
+                self.assertTrue(report["evidence_errors"])
+                self.assertTrue((evaluation / "judge-packet.json").exists())
+
+    def test_valid_snapshot_export_diagnostics_preserve_normal_root_evidence(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evaluation, state, events = self.analyzer_fixture(Path(temp))
+            (evaluation / "export-errors.json").write_text(json.dumps({"status": "captured", "errors": []}))
+            report = self.run_analyzer(evaluation, state, events)
+            self.assertEqual(len(report["root_clear_events"]), 2)
+            self.assertEqual(report["quarantined_event_snapshot"], [])
+            self.assertFalse(any(error["source"] == "export diagnostics" for error in report["evidence_errors"]))
+
+    def test_completion_without_id_exports_as_negative_row_not_crash(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            original, state, events = self.analyzer_fixture(base / "original")
+            capsule = TEST_SEEDS[str(original / "workspace")]
+            capsule.chmod(0o755)
+            (capsule / "venue-seal.json").write_text(json.dumps({
+                "session_id": "root-fixture", "operator_sudo_denied": True,
+                "sudo_elevation_bits_removed": True,
+            }))
+            home = base / "home"
+            session = home / ".copilot/session-state/root-fixture"
+            session.mkdir(parents=True)
+            row = {"type": "tool.execution_complete", "timestamp": "0-0",
+                   "data": {"toolCallId": "unmatched", "success": True, "result": {"content": "text"}}}
+            (session / "events.jsonl").write_text(json.dumps(row) + "\n")
+            evaluation = base / "export/eval"
+            evaluation.mkdir(parents=True)
+            with patch.object(controller, "BASELINE", capsule), patch.object(controller, "EVAL", evaluation), \
+                    patch.object(controller, "OUT", evaluation.parent), \
+                    patch.object(controller, "REPO", original / "workspace"), \
+                    patch.object(controller, "SCENARIO", Path(__file__).parent), \
+                    patch.object(Path, "home", return_value=home), patch.object(controller, "run", return_value="true"), \
+                    patch.object(controller.subprocess, "run", return_value=type("Result", (), {"returncode": 1})()), \
+                    redirect_stdout(io.StringIO()):
+                controller.export()
+            self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"], "INVALID_EXPORT")
+
+    def test_failed_event_snapshot_copy_quarantines_previous_root_clears(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            original, state, events = self.analyzer_fixture(base / "original")
+            capsule = TEST_SEEDS[str(original / "workspace")]
+            capsule.chmod(0o755)
+            (capsule / "venue-seal.json").write_text(json.dumps({
+                "session_id": "root-fixture", "operator_sudo_denied": True,
+                "sudo_elevation_bits_removed": True,
+            }))
+            home = base / "home"
+            session = home / ".copilot/session-state/root-fixture"
+            session.mkdir(parents=True)
+            (session / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+            evaluation = base / "export/eval"
+            (evaluation / "session").mkdir(parents=True)
+            prior = evaluation / "session/events.jsonl"
+            prior.write_text("".join(json.dumps(e) + "\n" for e in events))
+            before = prior.read_bytes()
+            copy = controller.shutil.copy2
+
+            def fail_events(source, destination, *args, **kwargs):
+                if Path(source).name == "events.jsonl":
+                    raise PermissionError("fixture copy denied")
+                return copy(source, destination, *args, **kwargs)
+
+            with patch.object(controller, "BASELINE", capsule), patch.object(controller, "EVAL", evaluation), \
+                    patch.object(controller, "STATE", state), patch.object(controller, "OUT", evaluation.parent), \
+                    patch.object(controller, "REPO", original / "workspace"), \
+                    patch.object(controller, "SCENARIO", Path(__file__).parent), \
+                    patch.object(Path, "home", return_value=home), patch.object(controller, "run", return_value="true"), \
+                    patch.object(controller.shutil, "copy2", side_effect=fail_events), \
+                    patch.object(controller.subprocess, "run", return_value=type("Result", (), {"returncode": 1})()), \
+                    redirect_stdout(io.StringIO()):
+                controller.export()
+                controller.analyze()
+            report = json.loads((evaluation / "observed-evidence.json").read_text())
+            self.assertEqual(report["root_clear_events"], [])
+            self.assertTrue(report["evidence_errors"])
+            self.assertTrue(report["quarantined_event_snapshot"])
+            self.assertEqual(prior.read_bytes(), before)
+            self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"], "INVALID_EXPORT")
+
+    def test_export_keeps_diagnostic_packet_for_invalid_event_stream(self):
+        for kind in ("missing", "unreadable", "bad-row", "empty", "invalid-object"):
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp)
+                original, state, events = self.analyzer_fixture(base / "original")
+                capsule = TEST_SEEDS[str(original / "workspace")]
+                capsule.chmod(0o755)
+                (capsule / "venue-seal.json").write_text(json.dumps({
+                    "session_id": "root-fixture", "operator_sudo_denied": True,
+                    "sudo_elevation_bits_removed": True,
+                }))
+                home = base / "home"
+                session = home / ".copilot/session-state/root-fixture"
+                session.mkdir(parents=True)
+                path = session / "events.jsonl"
+                if kind != "missing":
+                    path.write_text("" if kind == "empty" else "{}\n" if kind in ("unreadable", "invalid-object") else
+                                    json.dumps(events[0]) + "\nnot-json\n")
+                evaluation = base / "export/eval"
+                evaluation.mkdir(parents=True)
+                original_read = Path.read_text
+
+                def read(candidate, *args, **kwargs):
+                    if kind == "unreadable" and candidate.name == "events.jsonl":
+                        raise PermissionError("fixture unreadable")
+                    return original_read(candidate, *args, **kwargs)
+
+                with patch.object(controller, "BASELINE", capsule), patch.object(controller, "EVAL", evaluation), \
+                        patch.object(controller, "OUT", evaluation.parent), \
+                        patch.object(controller, "REPO", original / "workspace"), \
+                        patch.object(controller, "SCENARIO", Path(__file__).parent), \
+                        patch.object(Path, "home", return_value=home), patch.object(Path, "read_text", read), \
+                        patch.object(controller, "run", return_value="true"), \
+                        patch.object(controller.subprocess, "run", return_value=type("Result", (), {"returncode": 1})()), \
+                        redirect_stdout(io.StringIO()):
+                    controller.export()
+                self.assertTrue((evaluation / "judge-packet.json").exists(), kind)
+                self.assertTrue(json.loads((evaluation / "export-errors.json").read_text())["errors"], kind)
+                self.assertIn("INVALID", (evaluation / "transcript.txt").read_text(), kind)
+                self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"],
+                                 "INVALID_EXPORT")
+
+    def test_missing_or_unreadable_sudo_grant_refuses_before_mutation(self):
+        for unreadable in (False, True):
+            with tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                evaluation, state, events = self.analyzer_fixture(root)
+                workspace = evaluation / "workspace"
+                capsule = TEST_SEEDS[str(workspace)]
+                sudoers = root / "sudoers.d"
+                sudoers.mkdir()
+                grant = sudoers / "operator"
+                if unreadable:
+                    grant.write_text("operator ALL=(ALL) NOPASSWD:ALL\n")
+                sudo = root / "sudo"
+                sudo.write_text("fixture")
+                sudo.chmod(0o6755)
+                before = sudo.stat().st_mode
+                flag = root / ".dockerenv"
+                flag.touch()
+                original_read = Path.read_text
+
+                def read(candidate, *args, **kwargs):
+                    if unreadable and candidate == grant:
+                        raise PermissionError("fixture denied")
+                    return original_read(candidate, *args, **kwargs)
+
+                with patch.object(Path, "read_text", read):
+                    with self.assertRaises(ValueError):
+                        validation.seal_disposable_venue(workspace, capsule, sudoers, sudo, flag,
+                                                         policy_check=lambda: self.fail("no mutation allowed"))
+                self.assertFalse((sudoers / "zz-native-cli-operator-deny").exists())
+                self.assertEqual(sudo.stat().st_mode, before)
+                self.assertFalse((capsule / "venue-seal.json").exists())
+
+    def test_baseline_api_has_no_mutable_task_override(self):
+        for function in (validation.common_errors, validation.checkpoint_errors, validation.witness_errors):
+            self.assertNotIn("task", inspect.signature(function).parameters)
+
+    def test_missing_validator_arguments_have_concise_usage(self):
+        options = {"capture_output": True, "text": True}
+        if sys.platform == "win32":
+            options["creationflags"] = subprocess.CREATE_NO_WINDOW
+        result = subprocess.run([sys.executable, str(Path(validation.__file__))], **options)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("usage:", result.stderr.lower())
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_apply_patch_limitation_is_declared_in_seed_contract_and_prompt(self):
+        source = Path(controller.__file__).read_text()
+        self.assertTrue('"unsupported_write_mechanisms": ["apply_patch"]' in source)
+        self.assertTrue("apply_patch is unsupported" in source)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            events = self.semantic_events(root)
+            writer = next(event for event in events if event.get("id") == "2-4")
+            writer["data"]["toolName"] = "apply_patch"
+            writer["data"]["arguments"] = {"patch": f"*** Add File: {root / 'witness.json'}\n+{{}}\n"}
+            self.assertTrue(recovery_event_errors(events, root)[1]["errors"])
+
     def test_unpaid_permission_smoke_requires_all_denials_and_actual_inheritance(self):
         names = ("direct_write", "direct_chmod", "direct_rename", "trusted_validator_write",
                  "sudo_write", "sudo_chmod", "sudo_rename", "sudo_validator_write")
@@ -123,23 +322,21 @@ class ValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             evaluation, state, events = self.analyzer_fixture(Path(temp))
             root = evaluation / "workspace"
-            task = json.loads((root / "task.json").read_text())
             checkpoint = json.loads(events[1]["data"]["arguments"]["content"])
             witness = dict(checkpoint, transitions_completed=2,
                            declaration="NOT-JUDGED; parent remains Active", unexercised=["adverse cases"])
-            self.assertTrue(witness_errors(witness, root, task))
-            self.assertTrue(checkpoint_errors(dict(checkpoint, transitions_completed=1), root, task))
+            self.assertTrue(witness_errors(witness, root))
+            self.assertTrue(checkpoint_errors(dict(checkpoint, transitions_completed=1), root))
 
     def test_live_checkpoint_rejects_abbreviated_native_measurement(self):
         with tempfile.TemporaryDirectory() as temp:
             evaluation, state, events = self.analyzer_fixture(Path(temp))
             root = evaluation / "workspace"
-            task = json.loads((root / "task.json").read_text())
             checkpoint = json.loads(events[1]["data"]["arguments"]["content"])
             checkpoint["trigger_measurements"] = [{
                 "context_info": {"promptTokenLimit": 200000},
                 "fraction_remaining": .35, "context_window": {"number": 1}}]
-            self.assertTrue(checkpoint_errors(checkpoint, root, task))
+            self.assertTrue(checkpoint_errors(checkpoint, root))
 
     def test_stderr_file_write_is_substantive_not_fd_duplication(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -412,19 +609,19 @@ class ValidationTests(unittest.TestCase):
                        audit_cursor={"path": "corpus/shard-000.txt", "last_line": 1, "last_record": 0,
                                      "last_severity": 0, "next_path": "corpus/shard-000.txt", "next_line": 2},
                        unexercised=["force threshold"])
-            self.assertEqual(witness_errors(doc, root, task), [])
+            self.assertEqual(witness_errors(doc, root), [])
             for key in ("workspace", "session_id", "audit_cursor", "trigger_measurements", "parent_gate"):
                 bad = copy.deepcopy(doc)
                 del bad[key]
-                self.assertTrue(witness_errors(bad, root, task), key)
+                self.assertTrue(witness_errors(bad, root), key)
             bad = dict(doc, trigger_measurements=measurements[1:])
-            self.assertTrue(witness_errors(bad, root, task))
-            self.assertTrue(witness_errors(dict(doc, checkpoint_fidelity="perfect"), root, task))
+            self.assertTrue(witness_errors(bad, root))
+            self.assertTrue(witness_errors(dict(doc, checkpoint_fidelity="perfect"), root))
             cp = dict(doc, transition_number=2,
                       recovery_prerequisites=RECOVERY_PREREQUISITES,
                       next_action={"operation": "write_witness", "path": str(root / "witness.json")})
             del cp["transitions_completed"]
-            self.assertEqual(checkpoint_errors(cp, root, task), [])
+            self.assertEqual(checkpoint_errors(cp, root), [])
 
     def full_measurement(self, number):
         return {"tokens_left": 70000, "fraction_remaining": .35,
@@ -609,18 +806,17 @@ class ValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             evaluation, state, events = self.analyzer_fixture(Path(temp))
             root = evaluation / "workspace"
-            task = json.loads((root / "task.json").read_text())
             checkpoint = json.loads(events[1]["data"]["arguments"]["content"])
             for count in (True, 1.0):
                 bad = dict(checkpoint, transition_number=count)
-                self.assertTrue(checkpoint_errors(bad, root, task), count)
+                self.assertTrue(checkpoint_errors(bad, root), count)
             witness = dict(checkpoint, transitions_completed=2,
                            trigger_measurements=[checkpoint["trigger_measurements"][0],
                                                  self.full_measurement(2)],
                            declaration="NOT-JUDGED; parent remains Active", unexercised=["adverse cases"])
             del witness["transition_number"]
-            self.assertEqual(witness_errors(witness, root, task), [])
-            self.assertTrue(witness_errors(dict(witness, transitions_completed=2.0), root, task))
+            self.assertEqual(witness_errors(witness, root), [])
+            self.assertTrue(witness_errors(dict(witness, transitions_completed=2.0), root))
 
     def test_witness_path_mention_is_not_a_write_destination(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -662,7 +858,7 @@ class ValidationTests(unittest.TestCase):
         binding = {"agent_session_id": "root-fixture", "memory_scope_id": "scope-fixture",
                    "revision": 1, "source_window": 0}
         events = [
-            {"type": "user.message", "timestamp": "0-0", "data": {
+            {"type": "user.message", "id": "initial-request", "timestamp": "0-0", "data": {
                 "content": "Execute the bounded native CLI continuity witness"}},
             {"type": "tool.execution_start", "id": "write-id", "timestamp": "0-1",
              "data": {"toolCallId": "write", "toolName": "session_artifacts", "model": "model-fixture",

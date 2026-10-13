@@ -292,6 +292,28 @@ below-altitude evidence/tooling documentation, with no new rollout claim.
   Twenty-nine source tests and `F,E9` checks pass. This proves the fixture's
   containment contract, not native rollover acceptance; no Copilot turn,
   borrowed credentials, host privilege change or shared-image mutation occurred.
+- Published protected authority and containment in `3dc9442f6`. The next review
+  reported that its full agentic runner did not start before timeout and used
+  the Lite fallback; it did not revalidate the four earlier corrected findings.
+  Its distinct new observations cover export diagnostics, missing privilege-
+  seal prerequisites, patch destination attribution, an obsolete task argument
+  and CLI usage errors. These are being addressed separately; the unavailable
+  full review and queued required CI are not passing publication gates.
+- Added structured invalid-export diagnostics and a diagnostic judge packet
+  with a nonzero CLI result, an actionable pre-mutation seal refusal and concise
+  validator usage errors. The baseline is now the sole explicit validator API
+  authority. Unsupported patch writes are declared in the synthetic task,
+  contract and prompt rather than inferred from validator failure. Thirty-four
+  source tests and `F,E9` checks pass; targeted correction verification and
+  current-head publication gates remain pending.
+- Targeted verification reproduced two remaining export defects: incomplete
+  event rows could still lose a packet, and failed snapshot copies could leave
+  stale destination events eligible for analysis. Required row fields are now
+  validated before consumption; invalid export diagnostics propagate into
+  analysis and quarantine unreliable snapshots without deleting prior bytes.
+  Thirty-eight source tests and `F,E9` checks pass, including normal snapshot
+  positives. This correction does not alter the paid-run packets or repeat the
+  settled fixture-containment proof.
 - The corrections affect source evidence validation only. All four historical
   independent FAIL verdicts and their original packets remain unchanged.
   No paid trial, native deployment claim or runtime change is authorized by

@@ -143,6 +143,12 @@ the **first** substantive action's actual destination, not a quoted filename or
 a later write. Native create/edit paths, literal shell redirections and
 option-free two-operand `cp` commands are supported; dynamic destinations, conditional/pipeline writes
 and unsupported writer forms are explicitly uncredited rather than guessed.
+The actual synthetic task and prompt declare
+`unsupported_write_mechanisms: ["apply_patch"]`: the driven CLI's patch
+destination schema has not been established from captured evidence, so no
+patch grammar or filename mention is guessed as attribution. For the recorded
+witness action, select a supported native create/edit path or literal shell
+writer. A patch attempt remains substantive invalid work, not an ignored action.
 Potential writes through `tee`, other mutators, unknown commands/interpreters or
 unparseable shell input remain substantive invalid work even when their
 destinations cannot be proven. They cannot disappear from refresh-before-work
@@ -163,6 +169,22 @@ measurement/artifact lists, and still produce an observed-evidence/judge packet.
 Optional execution/telemetry objects may be absent; explicit null/nonobject
 metadata or invalid exit-code values are structured negative evidence, never
 success or an analyzer crash.
+Export likewise records missing, unreadable, empty or malformed event streams
+in `export-errors.json`, keeps valid rows only as explicitly diagnostic/partial
+evidence, and writes a judge packet with `INVALID_EXPORT` status. Its CLI exits
+nonzero after preserving diagnostics; it never invents an empty valid run.
+Event row validation is shared with analysis. Seal setup refuses a missing or
+unreadable known sudo grant with an actionable error before any policy/binary
+mutation. Validator APIs have no task override argument: only the trusted seed
+defines expected task values.
+Event rows must contain nonempty id/type/time strings and an explicit data
+object; tool identifiers/argument objects and consumed message/delivery fields
+are validated before downstream access. Incomplete rows become line-specific
+diagnostics, not invented defaults. Analysis propagates export diagnostics and
+quarantines an unreliable exported event snapshot, including a pre-existing
+destination left after a failed copy. Quarantined rows remain inspectable but
+cannot supply root clears, tools, measurements or acceptance evidence; valid
+captured snapshots retain their normal path.
 One shared root-ownership predicate applies to clears and supporting calls;
 child-agent activity is quarantined under `non_root_activity` and cannot supply
 root windows, measurements, artifacts or refresh. Source regressions cover each

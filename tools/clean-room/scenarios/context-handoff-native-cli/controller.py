@@ -47,6 +47,45 @@ def metadata(path, label, errors):
     return value
 
 
+def event_stream(path):
+    errors, events = [], []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return [], [{"source": "events", "error": "event stream unavailable or unreadable"}]
+    if not lines:
+        errors.append({"source": "events", "error": "event stream is empty; no run evidence"})
+    for number, line in enumerate(lines, 1):
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            errors.append({"source": "events", "line": number, "error": "invalid event JSON"})
+            continue
+        if (not isinstance(event, dict) or not isinstance(event.get("data"), dict)
+                or any(not isinstance(event.get(key), str) or not event[key].strip()
+                       for key in ("id", "type", "timestamp"))):
+            errors.append({"source": "events", "line": number, "error": "invalid event object"})
+            continue
+        if event["type"] in ("tool.execution_start", "tool.execution_complete"):
+            data = event.get("data", {})
+            if (not isinstance(data.get("toolCallId"), str) or not data["toolCallId"].strip()
+                    or (event["type"] == "tool.execution_start" and (
+                        not isinstance(data.get("toolName"), str) or not data["toolName"].strip()
+                        or not isinstance(data.get("arguments"), dict)))):
+                errors.append({"source": "events", "line": number, "error": "invalid tool event metadata"})
+                continue
+        if event["type"] == "user.message" and not isinstance(event["data"].get("content"), str):
+            errors.append({"source": "events", "line": number, "error": "invalid user message content"})
+            continue
+        if event["type"] == "skill.context_delivered_ref" and any(
+                not isinstance(event["data"].get(key), str) or not event["data"][key].strip()
+                for key in ("source", "prefix", "interactionId")):
+            errors.append({"source": "events", "line": number, "error": "invalid skill delivery metadata"})
+            continue
+        events.append(event)
+    return events, errors
+
+
 def require_venue_seal():
     errors = []
     manifest = metadata(BASELINE / "manifest.json", "protected seed manifest", errors)
@@ -141,6 +180,7 @@ Never read credentials, environment tokens, or unrelated home files.
         "live_references": {"ledger": str(REPO / "ledger.json"), "canary": "NATIVE_LEDGER_5c31b7", "background": "No spawned workers or watches; synthetic obligation remains open"},
         "completion": "Write witness.json after two native transitions; do not declare Tier E pass or parent completion",
         "synthetic_contract": "audit-contract.md",
+        "unsupported_write_mechanisms": ["apply_patch"],
     }
     write(REPO / "task.json", task)
     (REPO / "audit-contract.md").write_text("""# Synthetic audit task contract
@@ -172,6 +212,10 @@ the rollover recovery and durable guidance refresh. For the first boundary,
 its only keys are operation="read", path (absolute cursor next_path) and
 view_range=[next_line, bounded_end_line<=80]. For the second boundary, its only
 keys are operation="write_witness" and path (absolute witness.json).
+apply_patch is unsupported by this fixture's write-destination attribution.
+For the recorded report action, use native create/edit with its literal path or
+a supported literal shell redirection/copy. A patch attempt remains substantive
+invalid work; this restriction is synthetic task semantics, not plugin guidance.
 Do not add "then", recovery sequences, rollover calls or alternatives to that
 action. Recovery/rollover procedures belong to the plugin-owned skill, not
 the successor task action. A stale/compound action or bad cursor is a STOP,
@@ -325,6 +369,9 @@ checkpoint/terminal rollover sequence once more. There must be exactly two nativ
 After transition two, refresh guidance and execute its one next action: write and validate witness.json
 with BOTH full trigger measurements, precise audit cursor, actual workspace/session identity,
 task fields and unresolved adverse cases, without fidelity self-claims. Do not declare Tier E pass.
+apply_patch is unsupported for the synthetic recorded report write; use native
+create/edit or supported literal shell redirection/copy. Unsupported writes remain
+substantive uncredited work, not an alternate recovery tool sequence.
 Do not update the native checkpoint after the final report. The strict outcome validator is read-only.
 No workers, watchers or claims are spawned here; the ledger obligation is synthetic and stays open.
 STOP IMMEDIATELY at the first real obstacle, with its exact tool/step and output; do not self-heal.
@@ -338,13 +385,18 @@ to the coordinator, not to this worker. All fixture input is already provisioned
 def export():
     state, seed = trusted_identity()
     session = Path.home() / ".copilot/session-state" / state["session_id"]
+    events, export_errors = event_stream(session / "events.jsonl")
     target = EVAL / "session"
     target.mkdir(exist_ok=True)
     for path in session.rglob("*"):
         if path.is_file() and path.suffix not in (".lock", ".hold"):
             destination = target / path.relative_to(session)
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, destination)
+            try:
+                shutil.copy2(path, destination)
+            except OSError:
+                export_errors.append({"source": "session snapshot", "path": path.relative_to(session).as_posix(),
+                                      "error": "snapshot file unavailable or unreadable"})
     logs = Path.home() / ".copilot/logs"
     if logs.exists():
         shutil.copytree(logs, OUT / "cr-logs/cli", dirs_exist_ok=True)
@@ -376,11 +428,15 @@ def export():
         process = tmux("display-message", "-p", "-t", TMUX,
                        "#{pane_pid} #{pane_current_command} #{pane_current_path}").strip()
         write(EVAL / "process-identity.json", {"pane": process, "session_id": state["session_id"]})
-    events = [json.loads(line) for line in (target / "events.jsonl").read_text().splitlines()]
     names = {event["data"]["toolCallId"]: event["data"]["toolName"] for event in events
              if event["type"] == "tool.execution_start"}
     with (EVAL / "transcript.txt").open("w") as transcript:
-        transcript.write("Real interactive CLI event transcript. Full event evidence: session/events.jsonl.\n")
+        if export_errors:
+            transcript.write("INVALID event export: diagnostic/partial rows only, not a valid empty run. See export-errors.json.\n")
+            for error in export_errors:
+                transcript.write(json.dumps({"type": "export.evidence_error", "data": error}) + "\n")
+        else:
+            transcript.write("Real interactive CLI event transcript. Full event evidence: session/events.jsonl.\n")
         for event in events:
             if event["type"] not in ("user.message", "assistant.message", "tool.execution_start",
                                      "tool.execution_complete", "session.context_cleared",
@@ -400,11 +456,19 @@ def export():
         "caps_changed_by_fixture": False,
         "cli_alive_at_export": live,
     })
+    write(EVAL / "export-errors.json", {"status": "INVALID_EXPORT" if export_errors else "captured",
+                                      "errors": export_errors, "valid_rows": len(events)})
     write_judge_packet()
-    print(json.dumps(state))
+    summary = {"identity": state, "event_export_status": "INVALID_EXPORT" if export_errors else "captured",
+               "export_errors": export_errors}
+    print(json.dumps(summary))
+    return summary
 
 
 def write_judge_packet():
+    diagnostics = []
+    export_note = metadata(EVAL / "export-errors.json", "export diagnostics", diagnostics) \
+        if (EVAL / "export-errors.json").exists() else None
     write(EVAL / "judge-packet.json", {
         "transport": "interactive-cli-tmux", "verdict": "NOT-JUDGED",
         "manifest": "manifest.json", "transcript": "transcript.txt",
@@ -417,35 +481,28 @@ def write_judge_packet():
         "configuration": "effective-settings.json",
         "semantic_recovery_validation": "observed-evidence.json#semantic_recovery_validation",
         "acceptance_contract": "semantic-content-refresh-before-task",
+        "export_diagnostics": "export-errors.json",
+        "event_export_status": export_note.get("status") if export_note else "not-established",
         "note": "Setup telemetry is not a Tier-E verdict. Read judge_attention and unexercised gates literally.",
     })
 def analyze():
-    evidence_errors = []
-    events = []
-    try:
-        lines = (EVAL / "session/events.jsonl").read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeError):
-        lines = []
-        evidence_errors.append({"source": "events", "error": "event stream unavailable"})
-    for number, line in enumerate(lines, 1):
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            evidence_errors.append({"source": "events", "line": number, "error": "invalid event JSON"})
-            continue
-        if (not isinstance(event, dict) or not isinstance(event.get("data", {}), dict)
-                or not isinstance(event.get("type"), str) or not isinstance(event.get("timestamp"), str)):
-            evidence_errors.append({"source": "events", "line": number, "error": "invalid event object"})
-            continue
-        if event["type"] in ("tool.execution_start", "tool.execution_complete"):
-            data = event.get("data", {})
-            if (not isinstance(data.get("toolCallId"), str)
-                    or (event["type"] == "tool.execution_start" and (
-                        not isinstance(data.get("toolName"), str) or not isinstance(data.get("arguments"), dict)))):
-                evidence_errors.append({"source": "events", "line": number, "error": "invalid tool event metadata"})
-                continue
-        events.append(event)
+    events, evidence_errors = event_stream(EVAL / "session/events.jsonl")
     child_activity = [event for event in events if not root_event(event)]
+    quarantined = []
+    export_path = EVAL / "export-errors.json"
+    if export_path.exists():
+        export_note = metadata(export_path, "export diagnostics", evidence_errors)
+        export_errors = export_note.get("errors") if export_note else None
+        unreliable = (export_note is None or export_note.get("status") != "captured"
+                      or not isinstance(export_errors, list) or bool(export_errors))
+        if unreliable:
+            evidence_errors.append({"source": "export diagnostics",
+                                    "error": "unreliable exported event snapshot excluded from affirmative evidence"})
+            if isinstance(export_errors, list):
+                evidence_errors.extend({"source": "export diagnostics", "observation": error}
+                                       for error in export_errors)
+            quarantined = events
+            events = []
     events = [event for event in events if root_event(event)]
     starts = {event["data"]["toolCallId"]: event for event in events
               if event["type"] == "tool.execution_start"}
@@ -524,7 +581,7 @@ def analyze():
                 checkpoints.append({"write_event": row["start"]["id"], "errors": ["checkpoint content is not a JSON object"],
                                     "pre_clear_content_readback": False})
                 continue
-            errors = checkpoint_errors(document, EVAL / "workspace", task, workspace, BASELINE) if task_ready and workspace \
+            errors = checkpoint_errors(document, EVAL / "workspace", workspace=workspace, baseline=BASELINE) if task_ready and workspace \
                 else ["authoritative task/workspace unavailable"]
             if row["result_error"]:
                 errors.append(f"checkpoint write: {row['result_error']}")
@@ -561,7 +618,7 @@ def analyze():
         if document is None:
             witness_validation = {"errors": ["witness content unavailable or invalid"]}
         else:
-            errors = witness_errors(document, EVAL / "workspace", task, workspace, BASELINE) if task_ready and workspace \
+            errors = witness_errors(document, EVAL / "workspace", workspace=workspace, baseline=BASELINE) if task_ready and workspace \
                 else ["authoritative task/workspace unavailable"]
             if not owner or document.get("session_id") != owner:
                 errors.append("witness session differs from driver identity")
@@ -593,6 +650,7 @@ def analyze():
         "seed_baseline_available": seed is not None,
         "evidence_errors": evidence_errors,
         "non_root_activity": child_activity,
+        "quarantined_event_snapshot": quarantined,
         "root_clear_events": clears,
         "context_measurements": contexts,
         "native_artifact_and_terminal_calls": artifacts,
@@ -670,7 +728,9 @@ if __name__ == "__main__":
     elif action == "capture":
         print(capture(sys.argv[2]))
     elif action == "export":
-        export()
+        summary = export()
+        if summary["export_errors"]:
+            sys.exit(1)
     elif action == "analyze":
         analyze()
     elif action == "redact":
