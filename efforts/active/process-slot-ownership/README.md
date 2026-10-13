@@ -489,3 +489,17 @@ skipped), including native accounting export. Linux CI and exact-head review
 remain required before merge. Numeric policy, role reduction, reclamation and
 authorized adoption remain unresolved parent gates; this implementation does
 not close them.
+
+### 2026-10-13 - Worker-start cache failure semantics corrected
+
+Review identified the same cache-invalidation omission in the canonical sampler
+and its physical mirror. A worker-start failure after an unavailable or regressed
+cache clock must invalidate `_last_at`, as a backend failure already does, so
+later clock recovery cannot resurrect an older successful observation.
+Both paths now do so; four recovery regressions cover both clock conditions
+and RuntimeError/OSError start failures while preserving the original exception.
+
+The full Windows procutil suite passed 103 tests after this correction, and the
+focused reader/admission/telemetry/vendoring selection passed 42. The previous
+full nine-sub-suite Windows and Linux runs are baseline evidence only; fresh
+exact-head review and code CI remain required before landing the correction.

@@ -286,3 +286,42 @@ def test_loop_shutdown_and_repeated_samples_keep_only_current_last_evidence(
         release.set()
         if sampler.pending_sample_future is not None:
             sampler.pending_sample_future.result(timeout=2)
+
+
+@pytest.mark.parametrize("uncertain_now", [None, 9.0])
+@pytest.mark.parametrize("failure_type", [RuntimeError, OSError])
+def test_worker_start_failure_never_resurrects_cached_success_after_clock_uncertainty(
+    monkeypatch: pytest.MonkeyPatch, uncertain_now: float | None,
+    failure_type: type[Exception],
+) -> None:
+    now: list[float | None] = [10.0]
+    monkeypatch.setattr(OwnedProcessCpuSampler, "_sample_sync", _observation)
+    sampler = OwnedProcessCpuSampler(ProcessIdentity(1, 10.0), clock=lambda: now[0])
+    real_start = threading.Thread.start
+    failure = failure_type("worker could not start")
+
+    def fail_start(worker: threading.Thread) -> None:
+        raise failure
+
+    async def run() -> None:
+        first = await sampler.sample()
+        assert first.sample is not None and first.sample.sequence == 1
+        now[0] = uncertain_now
+        monkeypatch.setattr(threading.Thread, "start", fail_start)
+        with pytest.raises(failure_type) as caught:
+            await sampler.sample()
+        assert caught.value is failure
+        failed = sampler.current_sample
+        assert failed is not None and failed.state == "failed"
+        assert failed.sequence == 2
+        assert sampler._last is first
+        assert sampler._last_at is None
+        now[0] = 10.25
+        monkeypatch.setattr(threading.Thread, "start", real_start)
+        recovered = await sampler.sample()
+        assert recovered is not first
+        assert recovered.sample is not None and recovered.sample.sequence == 3
+        assert recovered.observed_cpu_seconds == first.observed_cpu_seconds
+        assert sampler.current_sample is recovered.sample
+
+    asyncio.run(run())

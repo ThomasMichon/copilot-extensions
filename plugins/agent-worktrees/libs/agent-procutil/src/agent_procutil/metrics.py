@@ -162,6 +162,7 @@ class OwnedProcessCpuSampler:
                 failed = replace(sample, state="failed", issues=("worker_start_failed",))
                 with self._lock:
                     self._current_sample = failed
+                    self._last_at = None
                 accounting.set_result(failed)
                 pending.set_exception(error)
                 log.error("Owned CPU sampling worker could not start", exc_info=error)
