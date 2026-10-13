@@ -130,12 +130,12 @@ No private host, checkout, task or session identifiers are needed upstream.
 
 ### Phase 4 - Resolve repository resources from one registry
 
-- [ ] Define an explicit registered-repository binding for script resources,
+- [x] Define an explicit registered-repository binding for script resources,
   execution cwd and effort state-root identity.
-- [ ] Resolve roots through the owning global registry at use time; reject missing,
+- [x] Resolve roots through the owning global registry at use time; reject missing,
   ambiguous or incompatible registrations without PATH/ancestor guessing.
-- [ ] Separate local repository identity from forge/task-lane coordinates.
-- [ ] Avoid persisting a second authoritative checkout root in repo discovery
+- [x] Separate local repository identity from forge/task-lane coordinates.
+- [x] Avoid persisting a second authoritative checkout root in repo discovery
   pointers or repository-owned declarations.
 - [ ] Preserve standalone queue use and stage adopter migration deliberately;
   old peers must fail explicitly when required resolution support is unavailable.
@@ -165,7 +165,7 @@ No private host, checkout, task or session identifiers are needed upstream.
   bound cycle latency and prove unrelated units continue progressing.
 - [ ] Restart/lost-response tests preserve one operation and exact generation
   ownership; watchdog recovery does not duplicate active or cold workers.
-- [ ] The same named-repository declaration resolves under two distinct registered
+- [x] The same named-repository declaration resolves under two distinct registered
   roots; missing and ambiguous registrations fail explicitly.
 - [ ] Scalar repair remains with its existing PR and is exercised after release.
 - [ ] Held-cleanup retry never restarts business work or bypasses newer ownership.
@@ -431,3 +431,15 @@ requested contract.
   tests with two platform skips. Final supervisor, CLI, publication and metadata
   fence coverage passes 146 tests. No production state or lifecycle ownership
   changes are claimed.
+
+### 2026-10-13 - Registered resources merged; adopter gate retained
+
+- #6531 merged to dev as `c88d004c36e4b8d06aa56349a0f80bcfa205be1c`
+  with clean exact-head review, required CI and no unresolved threads.
+  Registered-resource source and two-root validation items are resolved.
+- Standalone compatibility and deferred admission are proven in source.
+  Promotion, installed runtime evidence and deliberate adopter migration remain
+  open; merged is not released or live.
+- Integrated the resolver into this supervisor slice, retaining both effort
+  journals. Native independent watchdog custody and scalar repair still remain
+  with their existing unresolved acceptance gates.
