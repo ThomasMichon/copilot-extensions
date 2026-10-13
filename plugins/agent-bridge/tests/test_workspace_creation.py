@@ -4,6 +4,8 @@ import asyncio
 import os
 import sys
 import subprocess
+import time
+import sqlite3
 from dataclasses import replace
 from dataclasses import asdict
 from pathlib import Path
@@ -15,6 +17,7 @@ from agent_bridge import workspace_creation, acquisition_authority
 from agent_bridge.acquisition_contract import AcquisitionRefused
 from agent_bridge.client import BridgeClient, BridgeClientError
 from agent_bridge.models import SessionStatus
+from agent_bridge.session_manager import Session
 from agent_bridge.transport import SpawnTarget
 from tests.test_acquisition_runtime import rig as _connected_rig
 
@@ -102,6 +105,85 @@ async def test_drain_after_owner_revalidation_restores_allocated_creation_for_sa
     assert session.session_id == saved["session_id"] and receipt["status"] == "complete"
     assert sum(args[0] == "create" for args, _ in rig.calls) == 1
     assert len(rig.db.execute_read("SELECT * FROM turns")) == 1
+    await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("holder", ["manager", "ownership"])
+async def test_holder_during_owner_revalidation_prevents_keyed_native_start(creation_rig, monkeypatch, holder):
+    rig = creation_rig
+    command = workspace_creation.worktree_command
+    head_reads = 0
+
+    async def claim_during_owner_read(args, project):
+        nonlocal head_reads
+        result = await command(args, project)
+        if args[0] == "head-session":
+            head_reads += 1
+            if head_reads == 2:
+                if holder == "manager":
+                    target = replace(
+                        rig.target, worktree_id="worktree-a", cwd=rig.row["path"], explicit_cwd=True,
+                    )
+                    session = Session("ordinary-session", "ordinary", target)
+                    session.status = SessionStatus.STARTING
+                    rig.manager._sessions[session.session_id] = session
+                else:
+                    assert rig.db.reserve_worktree_ownership("worktree-a", "ordinary-session", now=time.time())
+        return result
+
+    monkeypatch.setattr(workspace_creation, "worktree_command", claim_during_owner_read)
+    with pytest.raises(AcquisitionRefused) as refused:
+        await workspace_creation.start(rig.manager, rig.target, key="logical-work", prompt="Do the work")
+    assert refused.value.code == "live_holder"
+    operation = rig.db.execute_read("SELECT state,session_id FROM workspace_embodiments")[0]
+    assert operation["state"] == "allocated"
+    assert rig.manager.get_session(operation["session_id"]) is None
+    assert len(rig.manager.list_sessions()) == (1 if holder == "manager" else 0)
+    assert not rig.db.execute_read("SELECT 1 FROM acquisition_launch_gates")
+    assert not rig.db.execute_read("SELECT * FROM turns")
+    assert not rig.head["id"]
+    assert sum(args[0] == "create" for args, _ in rig.calls) == 1
+    assert not any(args[0] == "bind-session" for args, _ in rig.calls)
+    await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("holder", ["manager", "live_session"])
+async def test_launch_gate_fences_ordinary_registration_during_owner_read(creation_rig, monkeypatch, holder):
+    rig = creation_rig
+    command = workspace_creation.worktree_command
+    head_reads = 0
+
+    async def register_during_owner_read(args, project):
+        nonlocal head_reads
+        result = await command(args, project)
+        if args[0] == "head-session":
+            head_reads += 1
+            if head_reads == 2:
+                with pytest.raises(sqlite3.IntegrityError, match="acquisition launch fence held"):
+                    if holder == "manager":
+                        await rig.manager.start_session(replace(
+                            rig.target, worktree_id="worktree-a", cwd=rig.row["path"], explicit_cwd=True,
+                        ))
+                    else:
+                        rig.db.register_live_session(
+                            "ordinary-native", machine="test-machine", cwd=rig.row["path"],
+                            worktree_id="worktree-a", repo="test-project", branch="test",
+                            pid=os.getpid(), role="worker", now=time.time(),
+                        )
+        return result
+
+    monkeypatch.setattr(workspace_creation, "worktree_command", register_during_owner_read)
+    session, receipt = await workspace_creation.start(
+        rig.manager, rig.target, key="logical-work", prompt="Do the work",
+    )
+    assert receipt["native_session_id"] == session.acp_session_id == rig.head["id"]
+    assert rig.manager.list_sessions() == [session]
+    assert len(rig.db.execute_read("SELECT * FROM sessions")) == 1
+    assert not rig.db.list_fresh_live_sessions("worktree-a", now=time.time())
+    assert len(rig.db.execute_read("SELECT * FROM turns")) == 1
+    assert not rig.db.execute_read("SELECT 1 FROM acquisition_launch_gates")
     await asyncio.sleep(0)
 
 

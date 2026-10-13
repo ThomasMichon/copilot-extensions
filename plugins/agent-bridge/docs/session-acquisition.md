@@ -39,6 +39,9 @@ That first-conversation path requires an owner-returned creation nonce, an
 explicit zero-session history, an authoritative empty head, and no represented,
 owned or uncertain execution leg. Missing legacy proof and foreign/live holders
 refuse; this path is not takeover or dispatch fresh-recovery authorization.
+That complete holder check runs again after awaited owner revalidation, before
+native-start registration. The existing SQLite launch gate also fences ordinary
+bridge and live-session registrations during that await.
 
 The installation's SQLite embodiment journal binds the key, effective target
 and execution options before allocation effects, and reserves its original

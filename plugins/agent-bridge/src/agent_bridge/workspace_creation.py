@@ -96,6 +96,18 @@ def _update(db: Database, digest: str, **fields: Any) -> None:
     )
 
 
+def _sessionless(
+    manager: SessionManager, row: dict[str, Any], head: str | None, worktree_id: str,
+) -> bool:
+    return not (
+        row.get("session_count") != 0 or row.get("last_session_id") or head
+        or row.get("execution_leg") or row.get("execution_leg_live")
+        or manager.db.list_fresh_live_sessions(worktree_id, now=time.time())
+        or manager.db.get_worktree_ownership(worktree_id)
+        or any(item.target.worktree_id == worktree_id for item in manager.list_sessions())
+    )
+
+
 async def start(
     manager: SessionManager, target: SpawnTarget, *, key: str,
     prompt: str | None = None, **options: Any,
@@ -185,20 +197,14 @@ async def start(
                     _update(db, digest, state="terminal")
                     raise AcquisitionRefused("creation_terminal", "original native conversation was ended")
                 if operation["state"] == "allocated":
-                    if (
-                        row.get("session_count") != 0 or row.get("last_session_id") or head
-                        or row.get("execution_leg") or row.get("execution_leg_live")
-                        or db.list_fresh_live_sessions(worktree_id, now=time.time())
-                        or db.get_worktree_ownership(worktree_id)
-                        or any(item.target.worktree_id == worktree_id for item in manager.list_sessions())
-                    ):
+                    if not _sessionless(manager, row, head, worktree_id):
                         raise AcquisitionRefused("creation_history_occupied", "workspace is not positively sessionless")
                     store.gate_workspace(
                         worktree_id, delivery_id, "acp", operation["session_id"], None, "agent-bridge",
                     )
                     try:
                         current, current_head = await _workspace(target.project, worktree_id)
-                        if current.get("session_count") != 0 or current_head or current.get("execution_leg_live"):
+                        if not _sessionless(manager, current, current_head, worktree_id):
                             raise AcquisitionRefused("live_holder", "workspace changed before native start")
                     except AcquisitionRefused:
                         store.release_workspace_gate(worktree_id, delivery_id)
