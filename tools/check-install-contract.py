@@ -288,7 +288,7 @@ def _runtime_scope_violations(plugins_dir: Path) -> list[str]:
 # current shell, so it silently discards all of the installer's later stderr --
 # including its own failure messages. Group it instead:
 # `{ exec 8>"$f"; } 2>/dev/null` keeps fd 8 and restores stderr.
-_EXEC_STDERR_SWALLOW = re.compile(r'\bexec\s+\d+[<>](?:&-|&\d+|"[^"]*"|\S+)\s+2>\s*/dev/null')
+_EXEC_STDERR_SWALLOW = re.compile(r'\bexec\s+\d+[<>]\s*(?:&-|&\d+|"[^"]*"|\S+)\s+2>\s*/dev/null')
 
 
 def _exec_stderr_swallow_violations(plugins_dir: Path) -> list[str]:

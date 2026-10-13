@@ -188,6 +188,8 @@ def test_valid_scopes_match_the_reconciler() -> None:
         '    exec 8>"$INSTALL_DIR/.install.lock" 2>/dev/null || return 1',
         "            exec 8>&- 2>/dev/null || true",
         '    exec 9>"${LOCK}" 2> /dev/null || return 0',
+        '    exec 8> "$INSTALL_DIR/.install.lock" 2>/dev/null || return 1',
+        '    exec 7< "$f" 2>/dev/null',
     ],
 )
 def test_exec_redirect_that_swallows_stderr_is_rejected(tmp_path, line) -> None:
