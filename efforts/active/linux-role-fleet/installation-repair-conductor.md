@@ -122,20 +122,26 @@ there is no stale replay or automatic rollback of unrelated successful owners.
 3. Add explicit qualified apply through existing owner actions. Prove
    independent post-readiness, dependency blocking, restart boundaries, stale
    inputs and bounded interruption/timeout behavior.
-4. Exercise real first-touch consumer entry points in isolated Windows and
-   Linux fixtures using an attributable synthetic payload and ordinary
-   downstream mode; separately exercise an already-active core-cell fixture.
+4. Exercise real first-touch consumer entry points on each supported native
+   host platform: Windows, Linux, WSL and macOS, using an attributable synthetic
+   payload and ordinary downstream mode. Separately exercise an already-active
+   core-cell fixture. A module that does not declare the selected platform must
+   report unsupported and never execute; that is not a substitute for native
+   proof of the conductor's own supported platforms.
    Prove repeat repair and config preservation, not just mocked installer calls.
 5. Only then wire a consuming setup conductor and prove a real missing/stale
    enabled runtime becomes ready through that owning flow. A release, local
    install or graph plan alone cannot close the live setup gap.
 
+Unavailable native lanes remain explicit pending gates; mocked platform dispatch
+or another POSIX host does not count as native macOS or WSL first-touch evidence.
+
 Unit fixtures cover source collisions, malformed/cyclic graphs, declaration and
 receipt changes, selected closure, unsatisfied-empty prerequisites, partial
 failure, unknown probes, restart-required results, output limits and
 read-only mode. Native integration proves exact Windows/POSIX argument
-boundaries, no-self-provision readiness, timeout cleanup and actual installed
-consumer invocation. Fresh-environment evidence names release identity and
+boundaries on Windows, Linux, WSL and macOS, no-self-provision readiness, timeout
+cleanup and actual installed consumer invocation. Fresh-environment evidence names release identity and
 remaining attended prerequisites. External/live execution is separate and
 requires its adopter's own authority.
 
