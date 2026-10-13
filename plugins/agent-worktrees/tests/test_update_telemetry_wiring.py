@@ -264,6 +264,12 @@ def test_module_installer_timeout_is_timeout_whatever_the_slot(
      "another process has locked a portion of the file", (ut.BLOCKED_BY_LOCK, "lock_violation")),
     ("plugin update failed: (os error 33)", (ut.BLOCKED_BY_LOCK, "lock_violation")),
     ("plugin update failed: [WinError 32] sharing", (ut.BLOCKED_BY_LOCK, ut.SHARING_VIOLATION)),
+    ("plugin update failed: [WinError 5] Zugriff verweigert",
+     (ut.COMMAND_FAILED, ut.PERMISSION_DENIED)),
+    ("plugin update failed: Zugriff verweigert (os error 5)",
+     (ut.COMMAND_FAILED, ut.PERMISSION_DENIED)),
+    ("plugin update failed: [WinError 50] Anfrage nicht unterstuetzt", (ut.COMMAND_FAILED, None)),
+    ("plugin update failed: (os error 330)", (ut.COMMAND_FAILED, None)),
 ])
 def test_status_classification_needs_contention_evidence(status, expected):
     assert update_events.classify_status(status) == expected

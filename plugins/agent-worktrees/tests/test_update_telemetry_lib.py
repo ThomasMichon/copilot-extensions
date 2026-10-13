@@ -498,7 +498,7 @@ def test_older_overlapping_run_never_overwrites_newer_status(tmp_path):
     status = _status({ut.ENV_HOME: home})
     assert status["run"]["id"] == run_b.run_id
     assert status["last_success"]["run_id"] == run_b.run_id
-    assert status["last_failure"] is None
+    assert status["last_failure"]["run_id"] == run_a.run_id, "A's later completion is kept"
 
 
 def test_newer_run_ordering_tie_breaks_on_run_id():
@@ -539,3 +539,31 @@ def test_diagnostics_never_escape_a_broken_stderr(telemetry_env, monkeypatch, ex
     run.target("runtime_reconcile", "a@m", ut.TIMEOUT)
     assert run.finish() == 6
     run_mod._stderr("warning: still best-effort")
+
+
+def test_older_run_completion_is_merged_into_history(tmp_path):
+    home = str(tmp_path / "home")
+    run_a = ut.Run.from_env_or_new("engine", environ={ut.ENV_HOME: home})
+    time.sleep(0.01)
+    run_b = ut.Run.from_env_or_new("engine", environ={ut.ENV_HOME: home})
+    run_a.target("runtime_reconcile", "a@m", ut.VERIFIED_CURRENT)
+    assert run_a.finish() == 0
+    status = _status({ut.ENV_HOME: home})
+    assert status["run"]["id"] == run_b.run_id
+    assert status["run"]["outcome"] == ut.IN_PROGRESS
+    assert status["last_success"]["run_id"] == run_a.run_id
+
+    run_b.target("runtime_reconcile", "b@m", ut.TIMEOUT)
+    assert run_b.finish() == 6
+    status = _status({ut.ENV_HOME: home})
+    assert status["run"]["id"] == run_b.run_id
+    assert status["last_failure"]["run_id"] == run_b.run_id
+    assert status["last_success"]["run_id"] == run_a.run_id
+
+
+def test_older_completion_never_replaces_a_later_one():
+    later = {"run_id": "B", "ended_at": "2026-01-01T00:00:10.000Z", "duration_ms": 1}
+    previous = {"run": {"id": "B"}, "last_success": later, "last_failure": None}
+    mine = {"run": {"id": "A"}, "last_failure": None,
+            "last_success": {"run_id": "A", "ended_at": "2026-01-01T00:00:05.000Z"}}
+    assert run_mod._merge_completion(previous, mine, "now") is None

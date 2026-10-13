@@ -32,6 +32,11 @@ def enter(phase: str) -> None:
         _run.enter(phase)
 
 
+def _win_error(low: str, code: int) -> bool:
+    """The locale-independent ``[WinError N]`` / ``(os error N)`` marker."""
+    return re.search(rf"\b(?:winerror|os error) {code}\b", low) is not None
+
+
 def classify_status(status: str) -> tuple[str, str | None]:
     """Map an update status string to ``(outcome, error_code)``."""
     text = str(status).strip()
@@ -49,12 +54,12 @@ def classify_status(status: str) -> tuple[str, str | None]:
         return _ut.outcome_for_installer_exit(int(exited.group(1)))
     if "input/output error" in low or "i/o error" in low:
         return _ut.COMMAND_FAILED, _ut.IO_ERROR
-    if any(k in low for k in ("os error 33", "winerror 33", "locked a portion of the file")):
+    if _win_error(low, 33) or "locked a portion of the file" in low:
         return _ut.BLOCKED_BY_LOCK, "lock_violation"
-    if any(k in low for k in ("os error 32", "winerror 32", "used by another process")):
+    if _win_error(low, 32) or "used by another process" in low:
         return _ut.BLOCKED_BY_LOCK, _ut.SHARING_VIOLATION
-    if any(k in low for k in ("os error 5", "access is denied", "permission denied")):
-        return _ut.COMMAND_FAILED, "permission_denied"
+    if _win_error(low, 5) or "access is denied" in low or "permission denied" in low:
+        return _ut.COMMAND_FAILED, _ut.PERMISSION_DENIED
     if any(k in low for k in ("not found", "context invalid", "unsupported", "deadline")):
         return _ut.CONFIGURATION_LIMITATION, "configuration"
     return _ut.COMMAND_FAILED, None

@@ -417,13 +417,14 @@ class Run:
                     previous = json.loads(status_path.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     previous = None
+                document = fold(events, run=meta, previous=previous, final=final,
+                                hint=hint, error_code=error_code, updated_at=now)
                 newer = _newer_run(previous, self.run_id, self.started_at)
                 if newer:
                     _stderr(f"warning: update status left to newer run {newer}")
-                    return
-                document = fold(events, run=meta, previous=previous, final=final,
-                                      hint=hint, error_code=error_code, updated_at=now)
-                write_json_atomic(status_path, document)
+                    document = _merge_completion(previous, document, now) if final else None
+                if document is not None:
+                    write_json_atomic(status_path, document)
         except Exception as exc:
             _warn(exc)
 
@@ -441,6 +442,27 @@ def _newer_run(previous, run_id: str, started_at: str) -> str | None:
     if other_id == run_id:
         return None
     return other_id if (other_start, other_id) > (started_at, run_id) else None
+
+
+def _merge_completion(previous: dict, document: dict, now: str) -> dict | None:
+    """Keep a newer run's status, carrying an older run's later completion.
+
+    The older run's ``last_success``/``last_failure`` replaces the recorded one
+    only when it ended later; ``None`` means nothing needs writing.
+    """
+    merged, changed = dict(previous), False
+    for key in ("last_success", "last_failure"):
+        mine, recorded = document.get(key), previous.get(key)
+        if not isinstance(mine, dict) or mine.get("run_id") != document["run"]["id"]:
+            continue
+        if isinstance(recorded, dict) and str(recorded.get("ended_at") or "") >= str(
+            mine.get("ended_at") or ""
+        ):
+            continue
+        merged[key], changed = mine, True
+    if changed:
+        merged["updated_at"] = now
+    return merged if changed else None
 
 
 def _prune_runs(runs_dir: Path, *, keep: int, current: str) -> None:
