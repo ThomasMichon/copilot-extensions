@@ -1,0 +1,9 @@
+{
+  "comment": "Align local-cache resolver diagnostics tests with the packaged projection engine contract.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

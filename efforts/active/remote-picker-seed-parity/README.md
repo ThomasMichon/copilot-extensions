@@ -118,17 +118,20 @@ equivalent-flow contract, not additional product features.
 - [x] Actual process-boundary checks through Windows and POSIX remote shell
   adapters: multiline and Unicode text, quotes, dollar signs, semicolons and
   shell metacharacters arrive unchanged and are never executed.
-- [ ] Failure matrix: disconnected/unavailable target before admission,
+- [x] Failure matrix: disconnected/unavailable target before admission,
   response lost after admission, setup refusal, backend-start failure,
   replacement intent, stale acknowledgement and newly live/unknown target.
   Assert one New worktree, one admitted identity, retained state on known
   pre-handoff failure and no automatic replay of uncertain handoff.
-- [ ] Fresh-target/old-engine check: unsupported capability refuses before
+- [x] Fresh-target/old-engine check: unsupported capability refuses before
   mutation, while ordinary seedless remote New/Resume still work.
-- [ ] Live SSH validation in isolated owned Windows and POSIX target worktrees:
+- [ ] Live SSH validation in an isolated owned POSIX target worktree:
   actual Picker New first turn and cold Resume next turn, original Resume
   conversation preserved, exactly one prompt/answer, target state retained
   through preflight and discarded only at actual native Copilot handoff.
+- [x] Deferred to `ThomasMichon/copilot-extensions#6370`: native Windows
+  Picker New/cold Resume conversation validation and managed disposition of
+  the isolated Windows source candidate, after its SSH route becomes reachable.
 - [ ] Record each validation tier exercised, or a concrete reason and tracked
   disposition for an unavailable lane. Never count host plan JSON as remote
   conversation evidence.
@@ -376,3 +379,24 @@ hiding the problem or silently dropping text.
   receipt is rewritten. The complete contained admission portfolio passes
   151 cases (one native POSIX skip); lint passes. Current-head review and CI
   must rerun before merge; release and delivered validation remain open.
+- **2026-10-13** -- Implementation #6073 merged after the exact head received
+  a clean Balanced review with zero open findings, successful CI and the
+  required workflow guard. The normal merge command initially refused a stale
+  recorded push head following authorized native publication. Reconciled it
+  with the existing guarded adoption primitive, which checks the provider head
+  against the sole tracked worktree's actual HEAD before recording it; the
+  normal role-scoped merge then succeeded. No expected-head check was bypassed.
+  Pulled forward onto the confirmed squash merge. Fault-matrix and old-engine
+  compatibility coverage are resolved; Windows conversation validation and
+  candidate cleanup remain explicitly transferred to #6370, not claimed as
+  passing. Continue through promotion, authorized installed rollout and the
+  normal-source POSIX Picker New/cold Resume observation before closure.
+- **2026-10-13** -- Release remains blocked. The service-name compatibility
+  repair is owned by #6506; do not duplicate it. A later gate exposed two
+  stale local-cache resolver tests after #6429 replaced sibling CLI discovery
+  with this payload's packaged engine. Claimed #6507 and updated the tests to
+  exercise supported packaged-engine exceptions and success without external
+  resolver execution. The contained diagnostics and materialized standalone
+  engine portfolio passes all ten cases, including real rendering without a
+  sibling plugin. This narrow test repair does not establish promotion or
+  delivered Picker behavior; those gates remain open.
