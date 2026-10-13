@@ -521,6 +521,19 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   Its actual native result, wider reconciliation refusal cases, derived
   PowerShell/POSIX per-copy CLI proof, release, and installed-copy freshness
   remain open. No persistent-host restriction or Phase 8 checkbox is lifted.
+- The first native reconciliation step detected PowerShell's host startup
+  JIT profile, not an installation/discovery publisher:
+  `AppData/Local/Microsoft/PowerShell/StartupProfileData-NonInteractive`.
+  PowerShell records this even with `-NoProfile`. The Windows fixture now
+  prepares the ordinary empty host-cache directory and disables .NET profile
+  gathering for that test process only. The complete fixture-home snapshot
+  remains measured, with no cache-path exclusions.
+- Verified the profiling control against a real PowerShell child and a
+  positive control: disabling gathering left the prepared home unchanged;
+  normal gathering created the startup-profile file. The contained
+  reconciliation selection still passed both cases. Content hashes replace
+  raw-byte assertion values to preserve byte-change detection without
+  enormous failure logs. Corrected-head native evidence remains pending.
 
 ### 2026-10-13 — Native Windows proof landed; wrapper acceptance remains scoped
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import subprocess
@@ -36,6 +37,15 @@ def test_runtime_resolution_real_helper_read_only(env, monkeypatch, pointer_exis
     monkeypatch.setenv("USERPROFILE", str(env.home))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: env.home))
     assert Path.home() == env.home
+    if os.name == "nt":
+        # PowerShell's .NET host otherwise records startup JIT profiles even
+        # with -NoProfile. Prepare its empty cache and disable recording only
+        # in the test process; keep the entire fixture home in the snapshot.
+        (env.home / "AppData" / "Local" / "Microsoft" / "PowerShell").mkdir(
+            parents=True,
+        )
+        monkeypatch.setenv("DOTNET_MultiCoreJitNoProfileGather", "1")
+        monkeypatch.setenv("COMPlus_MultiCoreJitNoProfileGather", "1")
     legacy = env.home / ".agent-worktrees"
     legacy.mkdir()
     (legacy / "retained-state.json").write_text('{"retained":true}\n', encoding="utf-8")
@@ -68,7 +78,7 @@ def test_runtime_resolution_real_helper_read_only(env, monkeypatch, pointer_exis
         return {
             path.relative_to(env.home).as_posix(): (
                 path.is_dir(), path.stat().st_mtime_ns,
-                path.read_bytes() if path.is_file() else None,
+                hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None,
             )
             for path in env.home.rglob("*")
         }
