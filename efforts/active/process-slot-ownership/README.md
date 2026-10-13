@@ -151,8 +151,10 @@ verified by this effort's Validation Plan.
       [owned CPU observation boundary](reader-cpu-observation.md) through
       optional shared procutil metrics; reader wiring and enforcement remain
       separate gates.
-- [ ] Wire the [CLI reader observation lifecycle](reader-cpu-wiring.md)
+- [x] Wire the [CLI reader observation lifecycle](reader-cpu-wiring.md)
       and existing telemetry seam without CPU enforcement or new termination.
+- [ ] Add [sample provenance and collector cost](reader-sample-accounting.md)
+      for measurement-only role-cost calibration before numeric enforcement.
 - [ ] Define role keys, expected wall/CPU cost, fan-out limits, and provenance.
 - [ ] Open admission circuits on repeated budget overruns without reclaiming
       live progressing holders; successful bounded probes close them.
@@ -450,3 +452,21 @@ passed, 94 skipped. The non-blocking documentation observation was corrected
 as well: uncertainty retains an earlier valid CPU lower bound; `null` applies
 only when none was observed. Current-head review and Linux CI must pass again
 before landing this correction.
+
+### 2026-10-13 - Reader CPU wiring landed; calibration next
+
+Merged #6524 as `76eca4833` after exact-head approval with zero open findings
+and actual CI success on `5f32439f9`. The apparent earlier checks-success
+state contained only review workflows while code CI was still queued; merge
+waited for the complete code workflow and its required aggregate gate.
+
+Canonical Linux CI installed psutil 7.2.2 and passed all nine Agent Bridge
+sub-suites (4,287 passed, 46 skipped), including native CPU export. Windows
+passed all nine sub-suites (4,239 passed, 94 skipped). The reader wiring
+contract is complete, not numeric CPU enforcement or release/adoption.
+
+The next agent-recommended increment measures collector cost and gives each
+native sample bounded completion provenance so cached reuse and repeated
+observations cannot inflate accounting. It remains measurement-only;
+cumulative role reduction, expected cost/fan-out policy, enforced budgets and
+identity-safe process-tree reclamation are separate open gates.

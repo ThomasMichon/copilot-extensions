@@ -42,16 +42,20 @@ process-termination authority is introduced.
 
 ## Validation
 
-- [ ] Native enumeration still returns the same output and fallback outcomes.
-- [ ] Owned spawn identity is captured before reaping; a missing/reused PID
+- [x] Native enumeration still returns the same output and fallback outcomes.
+- [x] Owned spawn identity is captured before reaping; a missing/reused PID
       cannot be adopted by a delayed observer.
-- [ ] Native CPU activity produces a lower-bound observation through the
+- [x] Native CPU activity produces a lower-bound observation through the
       configured existing telemetry sink on Windows and Linux.
-- [ ] Missing backend, access denial and sampling failure surface uncertainty
+- [x] Missing backend, access denial and sampling failure surface uncertainty
       without converting successful enumeration to failed/empty data.
-- [ ] Cancelled requests and replaced providers retain native command and
+- [x] Cancelled requests and replaced providers retain native command and
       sampling ownership without admitting duplicate work.
-- [ ] A stuck sampling holder cannot amplify through later readers and is
+- [x] A stuck sampling holder cannot amplify through later readers and is
       still observed by bounded cache shutdown.
-- [ ] Telemetry contains neither raw command/output nor private path data.
-- [ ] Existing wall-admission, roster and native holder contracts remain green.
+- [x] Telemetry contains neither raw command/output nor private path data.
+- [x] Existing wall-admission, roster and native holder contracts remain green.
+
+Validated in #6524: Windows and canonical Linux Agent Bridge portfolios both
+passed completely. Release/adoption, role aggregation and enforcement are not
+implied by this slice's completion.
