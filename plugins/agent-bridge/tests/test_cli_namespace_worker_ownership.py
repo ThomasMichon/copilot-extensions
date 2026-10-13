@@ -97,6 +97,8 @@ async def test_cancelled_waiter_cannot_duplicate_native_enumeration(
             await first
         assert provider._list_task is holder
         assert not holder.done()
+        assert provider._list_admission.consecutive_overruns == 0
+        assert provider._list_admission.retry_at is None
         joiners = [asyncio.create_task(provider.list(timeout=0.01)) for _ in range(8)]
         await asyncio.sleep(0)
         assert provider._list_task is holder

@@ -292,3 +292,13 @@ journal review. Initial CLI circuit policy was explicitly approved: two
 consecutive native timeout overruns, 60-second cooldown, and one bounded
 recovery probe. The detailed slice preserves existing fallback, execution
 timeouts and ownership; CPU and native tree reclamation are not implied.
+
+### 2026-10-12 - Wall-admission implementation prepared
+
+The policy and complete transition matrix landed in #6428. Provider-local
+admission now records native execution timeout separately from caller
+cancellation, preserves fallback during suppression, and admits one bounded
+native recovery probe. Deterministic tests cover consecutive streaks,
+suppression, failed probes restarting cooldown, and native-only recovery.
+Existing process-backed holder and roster contracts remain in the targeted
+selection. CPU measurement and process-tree cleanup are still separate gates.
