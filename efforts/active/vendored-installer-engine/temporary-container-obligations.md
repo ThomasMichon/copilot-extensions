@@ -209,18 +209,14 @@ live cleanup authority and native proofs remain pending. After implementation,
 update worktree obligation docs, clean-room architecture/operator docs and
 the test-flow docs to describe only the guarantees actually delivered.
 
-## Allocation-fence clarification
+## Allocation-fence rationale
 
-The agent recommended mandatory allocation begin/completion fencing after review
-identified that absence could be observed before a creator allocated and bound
-its resource. The operator asked, verbatim:
+An absence observation alone cannot prevent a creator from subsequently
+allocating and binding a resource. Mandatory allocation begin/completion fencing
+serializes allocation permission with claim close-out, preserving cleanup
+responsibility across interruption and stale absence observations.
 
-> What's the subject here? Close/handoff of what?
-
-The clarification was resource cleanup responsibility in the worktree ledger:
-close settles verified removal/no allocation; handoff transfers that
-responsibility to an accepting worktree. Neither operation closes a Copilot
-session, a conversation or a service. No physical cleanup was requested.
-The operator then approved the proposed generic fence amendment, verbatim:
-
-> Sounds good. Proceed
+Close settles resource cleanup responsibility after verified removal or no
+allocation; handoff transfers that responsibility to an accepting worktree.
+Neither operation closes a Copilot session, a conversation or a service, and
+ledger transitions do not authorize physical cleanup.

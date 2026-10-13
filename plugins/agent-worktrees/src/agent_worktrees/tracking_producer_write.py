@@ -56,6 +56,11 @@ def _input(operation: str, payload: object) -> dict:
     return payload
 
 
+def _require_mutable_owner(record: tracking.WorktreeRecord) -> None:
+    if record.status in producer.FROZEN_OWNER_STATUSES:
+        raise ValueError(f"producer owner is {record.status}; ownership is frozen")
+
+
 def _owned_record(args: dict, path: Path, *, mutable: bool = True):
     from . import config as cfg
 
@@ -71,8 +76,8 @@ def _owned_record(args: dict, path: Path, *, mutable: bool = True):
         raise ValueError("producer owner does not match the current record authority")
     if path.resolve() != (cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml").resolve():
         raise ValueError("producer record path does not match owning-project authority")
-    if mutable and record.status in producer.FROZEN_OWNER_STATUSES:
-        raise ValueError(f"producer owner is {record.status}; ownership is frozen")
+    if mutable:
+        _require_mutable_owner(record)
     return record, owner
 
 
@@ -97,9 +102,15 @@ def apply_resource_producer(args: dict) -> dict:
         probe_subject, probe_result, granted_fence = None, None, None
         if operation in {"close", "begin", "bind", "complete"}:
             with tracking._RecordLock(path, require_sidecar=True):
-                snapshot, _ = _owned_record(args, path)
+                snapshot, _ = _owned_record(args, path, mutable=operation != "close")
                 candidate = _matched_claim(snapshot, payload["token"])
                 phase = candidate.producer["phase"]
+                if operation == "close":
+                    if tracking.claim_handoff_reservation(snapshot, candidate):
+                        raise ValueError("producer claim is reserved by an offered handoff")
+                    if phase == "closed":
+                        return _response(snapshot, candidate)
+                    _require_mutable_owner(snapshot)
                 if operation == "close" and phase == "allocating":
                     raise ValueError("allocation is in progress; complete or recover it before close")
                 if (
@@ -116,7 +127,7 @@ def apply_resource_producer(args: dict) -> dict:
                 # the subject including phase and non-repeating allocation epoch.
                 probe_result = claim_providers.resolve_claim_status(probe_subject)
         with tracking._RecordLock(path, require_sidecar=True):
-            record, owner = _owned_record(args, path, mutable=operation != "inspect")
+            record, owner = _owned_record(args, path, mutable=operation not in {"inspect", "close"})
             if operation == "reserve":
                 metadata = {
                     "version": 1, "lifetime": "disposable-owned",
@@ -141,6 +152,8 @@ def apply_resource_producer(args: dict) -> dict:
                 phase = claim.producer["phase"]
                 if phase == "closed" and operation == "close":
                     return _response(record, claim)
+                if operation == "close":
+                    _require_mutable_owner(record)
                 if phase not in {"pending", "allocating", "bound"}:
                     raise ValueError(f"producer claim is {phase}; mutation refused")
                 if operation == "begin":

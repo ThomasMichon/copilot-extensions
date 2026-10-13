@@ -28,10 +28,12 @@ values, excessive nesting, and oversized input are refused. `--json` is required
 An explicit owner resolves through the owning project's registered configuration,
 execution-space checks and record path. Otherwise the current worktree or a
 supported singleton anchor is resolved by the existing owner resolver. Missing,
-remote, unauthorized or terminal owners fail; reserve never reopens a finalized
+remote or unauthorized owners fail; terminal owners refuse mutations.
+Reserve never reopens a finalized
 record and never creates a guessed ledger. Session-qualified owner references
 are normalized to their worktree record.
-Read-only inspect remains available for terminal records with valid metadata.
+Read-only inspect and replay of an already-closed claim remain available for
+terminal records with valid metadata and matching owner authority.
 Archived tombstones, orphaned records and finalizing owners cannot receive new
 reservations or accepted producer transfers.
 
@@ -150,7 +152,9 @@ across all its attempts, not merely the current generation.
 The status probe runs outside the record lock; the final locked transaction
 rechecks authority, handoff reservation, phase and exact epoch-bearing subject before storing
 the callback receipt as `closeout`, setting phase `closed` and generic state
-`released`. Repeating an already-confirmed close is a no-op. A closed claim
+`released`. Repeating an already-confirmed close is a read-only no-op even after
+its owner freezes or finalizes: no provider probe, save or event write occurs.
+Frozen owners still cannot close a live claim. A closed claim
 retains the exact pending/bound callback subject that was verified.
 
 ### Lost-fence recovery

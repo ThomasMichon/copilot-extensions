@@ -600,16 +600,25 @@ installs, no service-specific config needed for this class of plugin.
 - Further review identified pending-close allocation races, per-owner token
   ambiguity and accepted-retry dependence on a source that may already be
   reaped. The operator accepted the review-directed allocation-fence amendment
-  after [clarifying resource close/handoff scope](temporary-container-obligations.md#allocation-fence-clarification).
-  This does not authorize physical cleanup or deployment.
+  after clarifying resource close/handoff scope. The operator asked, verbatim,
+  "What's the subject here? Close/handoff of what?" The response distinguished
+  resource cleanup responsibility from closing a Copilot session, conversation
+  or service. The operator then approved the generic amendment, verbatim,
+  "Sounds good. Proceed". This does not authorize physical cleanup or deployment.
+  The durable rationale is in the
+  [allocation-fence plan section](temporary-container-obligations.md#allocation-fence-rationale).
 - The proposed source now requires begin before creation, validates private
   generation-specific fences for bind/completion, retains the epoch against
   stale absence through ABA, and requires separate authoritative quiescence
   evidence for lost-fence recovery. Transfer rejection preserves all records;
   accepted retry repairs the recipient without loading the source or
   resurrecting closed/transferred responsibility. These changes still await
-  the normal review gate; Docker integration and native updated-ABI proof remain
-  pending.
+  the normal review gate; Docker integration remains pending. The exact committed
+  fence-ABI snapshot `c1550157eae5b3c61a7e258b0dd5020ca21fcfb7` passed 184 native
+  Windows tests under Python 3.12.13 and Windows PowerShell 5.1. Its archive
+  SHA-256 was `9ce88882b58009b98ad2a0c25a31e0b457bdfc6294a485d73a8decccf417c536`;
+  the bounded supervisor verified successful cleanup. This supersedes the
+  earlier 126-test run as fence-ABI evidence, not as live Docker proof.
 - The first ownership implementation slice adds a provider-neutral
   `resource-producer` ABI to the existing ledger: durable pending reservation,
   immutable identity binding, exact-subject provider-verified close-out and
