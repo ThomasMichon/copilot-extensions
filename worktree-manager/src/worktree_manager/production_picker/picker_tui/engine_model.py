@@ -292,6 +292,8 @@ class PickerScreenModelMixin:
                     pass
     @staticmethod
     def _record_supports(rec, capability):
+        if rec.get("managed_child") and capability in ("sync", "cleanup", "finalize"):
+            return False
         if rec.get("source_kind", "machine-ssh") == "machine-ssh":
             return True
         return bool((rec.get("source_capabilities") or {}).get(capability))

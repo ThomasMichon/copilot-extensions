@@ -181,7 +181,7 @@ class PickerScreenWorktreeActionsMixin:
         # non-residue lifecycle states (never beside Reclaim/Repair, where a
         # Cleanup/Sync would race the residue). A gone worktree still offers
         # Cleanup to prune the leftover record.
-        if acts and not warning and not reclaimable and not gone:
+        if acts and not warning and not reclaimable and not gone and not rec.get("managed_child"):
             if rec.get("ff_eligible"):
                 acts.append("Sync")
             if PickerScreenWorktreeActionsMixin._cleanable(rec):
@@ -191,7 +191,7 @@ class PickerScreenWorktreeActionsMixin:
                 # wrapped up directly -- finalize validates nothing is unpushed
                 # and removes it (#2258 follow-up).
                 acts.append("Finalize")
-        elif gone and PickerScreenWorktreeActionsMixin._cleanable(rec):
+        elif gone and PickerScreenWorktreeActionsMixin._cleanable(rec) and not rec.get("managed_child"):
             acts.append("Cleanup")
         acts.append("Refresh")
         return acts

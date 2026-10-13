@@ -83,6 +83,9 @@ class PickerScreenSelectionMixin:
                     and self._record_supports(rec, capability)
                 )
             }
+            if not ids:
+                self.debug = f"no eligible worktrees for {act.lower()}"
+                return
         if act == "Sync":
             self._open_sync(ids=ids)
         elif act == "Cleanup":

@@ -56,6 +56,79 @@ def test_picker_status_counts_owned_workspaces_in_full_and_compact_headers(compa
     assert ("own:1" if compact else "1 owned") in text
 
 
+def _bulk_screen(rows, calls):
+    return types.SimpleNamespace(
+        list_records=lambda: rows,
+        _row_key=PickerScreen._row_key,
+        _record_supports=PickerScreen._record_supports,
+        _open_sync=lambda **kwargs: calls.append(("Sync", kwargs["ids"])),
+        _open_cleanup=lambda **kwargs: calls.append(("Cleanup", kwargs["ids"])),
+        _start_finalize=lambda selected: calls.append(("Finalize", {row["id"] for row in selected})),
+        _start_stop=lambda selected: calls.append(("Stop", {row["id"] for row in selected})),
+        _start_reclaim=lambda selected: calls.append(("Reclaim", {row["id"] for row in selected})),
+    )
+
+
+@pytest.mark.parametrize("action", ["Sync", "Cleanup", "Finalize"])
+def test_bulk_mutations_exclude_owned_children_and_do_not_expand_empty_scope(action):
+    owned = [
+        derive.norm(_raw(
+            id=f"owned-{index}", session_count=0, owner_ref="host/example/controller",
+            state="unused", cleanup_bucket="unused", ff_eligible=True,
+        ), "host", "windows")
+        for index in range(2)
+    ]
+    calls = []
+    screen = _bulk_screen(owned, calls)
+    ids = {PickerScreen._row_key(row) for row in owned}
+    PickerScreen._run_maint_action(screen, action, ids)
+    assert not calls
+    assert "no eligible worktrees" in screen.debug
+    unowned = derive.norm(_raw(id="unowned", session_count=0), "host", "windows")
+    screen.list_records = lambda: [*owned, unowned]
+    PickerScreen._run_maint_action(screen, action, ids | {PickerScreen._row_key(unowned)})
+    expected = {unowned["id"]} if action == "Finalize" else {PickerScreen._row_key(unowned)}
+    assert calls == [(action, expected)]
+
+
+@pytest.mark.parametrize("action", ["Stop", "Reclaim"])
+def test_bulk_owned_child_recovery_is_still_available(action):
+    row = derive.norm(_raw(
+        session_count=0, owner_ref="host/example/controller",
+    ), "host", "windows")
+    calls = []
+    screen = _bulk_screen([row], calls)
+    PickerScreen._run_maint_action(screen, action, {PickerScreen._row_key(row)})
+    assert calls == [(action, {row["id"]})]
+
+
+def test_finalize_execution_boundary_rejects_owned_children():
+    owned = derive.norm(_raw(
+        session_count=0, owner_ref="host/example/controller",
+        state="unused", cleanup_bucket="unused",
+    ), "host", "windows")
+    calls = []
+    screen = types.SimpleNamespace(
+        _record_supports=PickerScreen._record_supports,
+        _run_op_progress=lambda *_args, **_kwargs: calls.append("unexpected mutation"),
+    )
+    PickerScreen._start_finalize(screen, [owned])
+    assert not calls
+    assert "no conversation-only" in screen.debug
+
+
+@pytest.mark.parametrize("values", [
+    {"mux_attached": True, "state": "unused", "ff_eligible": True},
+    {"state": "gone"},
+])
+def test_owned_child_menu_excludes_maintenance_even_when_mux_is_openable_or_directory_gone(values):
+    row = derive.norm(_raw(
+        session_count=0, owner_ref="host/example/controller", **values,
+    ), "host", "windows")
+    assert row["managed_child"]
+    assert not {"Sync", "Cleanup", "Finalize"} & set(PickerScreen._session_action_verbs(row))
+
+
 @pytest.mark.parametrize("values", [
     {"session_count": 1},
     {"session_count": 0, "last_session_id": "own-session"},
