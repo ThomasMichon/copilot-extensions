@@ -16,8 +16,12 @@ effective-mode contracts are normative only in
 
 During this effort, namespaced installation and usage are clean-room-only.
 Persistent development and production machines remain in legacy mode with no
-namespaced activation, runtime, state, service, or migration. Read-only
-status/doctor inspection is permitted. The policy applies only to
+namespaced activation, runtime, state, service, or migration. Verified read-only
+status/doctor inspection is permitted after Phase 8 restores and tests
+non-mutating diagnostic resolution. Until then, known pointer-writing `status`
+and `probe-legacy` paths, including wrappers that reach them, must not execute
+on persistent hosts; inspect existing evidence without invoking those paths.
+The policy applies only to
 runtime-bearing core plugin identities from the `copilot-extensions` suite.
 Independent marketplaces may carry those identities for source-isolation proof;
 payload-only plugins and unrelated plugins remain out of scope, including
@@ -96,7 +100,9 @@ can be placed under one cell plugin root for scoped surgery.
 
 Marker existence wins even when the sidecar cannot be parsed. Ownerless, dead,
 or otherwise stale maintenance is reported and never automatically cleared.
-Read-only status and doctor remain available. Mutation during maintenance
+Verified read-only status and doctor remain available subject to the Phase 8
+diagnostic prerequisite above; the known pointer-writing paths are not
+read-only inspection. Mutation during maintenance
 requires a management command's explicit authorization flag; an environment
 variable or inherited process context is not authorization.
 

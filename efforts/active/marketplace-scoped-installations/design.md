@@ -14,7 +14,11 @@ create, validate, expose, or depend on these installation cells.
 Namespaced mode is explicit opt-in and default-off. While this effort is active,
 all namespaced installation and lifecycle execution occurs only in disposable
 clean-room environments. Persistent development and production machines remain
-in legacy mode and may inspect the model only through read-only diagnostics.
+in legacy mode and may inspect the model only through verified read-only
+diagnostics after Phase 8 restores and tests non-mutating resolution. Until
+then, do not invoke known pointer-writing `status` or `probe-legacy` paths on
+persistent hosts, including through doctor wrappers; inspect existing evidence
+without executing those paths.
 
 ## Decisions
 
