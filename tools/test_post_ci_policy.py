@@ -97,6 +97,9 @@ def test_automatic_baseline_canonicality_reuses_required_pr_guards():
     ("push", "dev", True, "success", True),
     ("push", "dev", True, "failure", True),
     ("push", "dev", True, "cancelled", False),
+    ("push", "dev", True, "skipped", False),
+    ("push", "dev", True, "neutral", False),
+    ("push", "dev", True, "timed_out", False),
     ("push", "main", True, "success", False),
     ("pull_request", "dev", True, "success", False),
     ("workflow_dispatch", "dev", True, "success", False),
@@ -115,7 +118,7 @@ def test_only_committed_same_repo_dev_ci_can_refresh_baseline(
         ("github.repository", "repo"),
     ]:
         condition = condition.replace(source, target)
-    assert eval(condition.replace("&&", "and"), {"__builtins__": {}}, {
+    assert eval(condition.replace("&&", "and").replace("||", "or"), {"__builtins__": {}}, {
         "event": event, "branch": branch, "head_repo": "o/r" if same_repo else "fork/r",
         "repo": "o/r", "conclusion": conclusion,
     }) is expected

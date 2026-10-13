@@ -382,7 +382,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     if args.repository is not None:
-        REPO = args.repository.resolve(strict=True)
+        REPO = args.repository.resolve()
         if not REPO.is_dir():
             parser.error("--repository must name a checkout directory")
         BASELINE_PATH = REPO / "tools" / "module-size-baseline.json"

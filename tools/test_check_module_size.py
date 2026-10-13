@@ -107,7 +107,7 @@ def test_trusted_target_refresh_still_rejects_new_offenders(repo: Path):
     for extra in [("--refresh-baseline", "--allow-widen"), ()]:
         result = subprocess.run(
             [sys.executable, "-I", str(SCRIPT), "--repository", str(repo), *extra],
-            capture_output=True, text=True, timeout=15,
+            cwd=repo.parent, capture_output=True, text=True, timeout=15,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         assert result.returncode == (0 if extra else 1), result.stdout + result.stderr
@@ -163,6 +163,13 @@ def test_invalid_baseline_is_a_controlled_cli_failure(repo: Path):
     result = _run(repo)
     assert result.returncode == 1
     assert "[FAIL] module size:" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_missing_target_checkout_is_a_usage_error(repo: Path):
+    result = _run(repo, "--repository", str(repo / "missing"))
+    assert result.returncode == 2
+    assert "--repository must name a checkout directory" in result.stderr
     assert "Traceback" not in result.stderr
 
 
