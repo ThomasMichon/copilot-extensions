@@ -1,6 +1,7 @@
 """Descriptor-relative, no-follow I/O for the Linux evidence venue."""
 
 from contextlib import contextmanager
+import hashlib
 import os
 from pathlib import Path
 import stat
@@ -29,13 +30,22 @@ def directory(path, create=False):
         os.close(descriptor)
 
 
-def read_at(parent, name):
+def matches_identity(info, actual):
+    return (isinstance(info, dict) and type(info.get("device")) is int and type(info.get("inode")) is int
+            and info["device"] == actual.st_dev and info["inode"] == actual.st_ino)
+
+
+def read_at(parent, name, expected=None):
     descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
     with os.fdopen(descriptor, "rb") as stream:
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             raise OSError("evidence input is not a singly-linked regular file")
-        return stream.read()
+        content = stream.read()
+        if expected is not None and (not matches_identity(expected, info)
+                                     or expected.get("sha256") != hashlib.sha256(content).hexdigest()):
+            raise OSError("snapshot file identity or content changed")
+        return content
 
 
 def write_at(parent, name, content):
@@ -51,7 +61,9 @@ def write_at(parent, name, content):
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(content)
+            info = os.fstat(stream.fileno())
         os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
+        return {"device": info.st_dev, "inode": info.st_ino, "sha256": hashlib.sha256(content).hexdigest()}
     finally:
         try:
             os.unlink(temporary, dir_fd=parent)
@@ -72,15 +84,50 @@ def write_bytes(path, content):
 
 
 class EventPath:
-    def __init__(self, path):
+    def __init__(self, path, snapshot=None):
         self.path = path
+        self.snapshot = snapshot
 
     def read_text(self, encoding="utf-8"):
-        return read_bytes(self.path).decode(encoding)
+        content = (read_snapshot(*self.snapshot, Path(self.path).relative_to(self.snapshot[0]).as_posix())
+                   if self.snapshot is not None else read_bytes(self.path))
+        return content.decode(encoding)
+
+
+class SnapshotReceipt(set):
+    def __init__(self):
+        super().__init__()
+        self.bindings = {"root": None, "files": {}}
+
+
+def read_snapshot(root, bindings, relative):
+    relative_path = Path(relative)
+    if (relative_path.is_absolute() or not relative_path.parts or ".." in relative_path.parts
+            or not isinstance(bindings, dict) or not isinstance(bindings.get("files"), dict)):
+        raise OSError("invalid snapshot file binding")
+    expected = bindings["files"].get(relative_path.as_posix())
+    if not isinstance(expected, dict):
+        raise OSError("snapshot file was not copied in this invocation")
+    with directory(root) as root_fd:
+        if not matches_identity(bindings.get("root"), os.fstat(root_fd)):
+            raise OSError("snapshot root was replaced")
+        parent = os.dup(root_fd)
+        try:
+            for name in relative_path.parts[:-1]:
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                os.close(parent)
+                parent = child
+            content = read_at(parent, relative_path.name, expected)
+        finally:
+            os.close(parent)
+        with directory(root) as current:
+            if not matches_identity(bindings.get("root"), os.fstat(current)):
+                raise OSError("snapshot root changed during consumption")
+        return content
 
 
 def snapshot(source, destination, errors, label, excluded=()):
-    copied = set()
+    copied = SnapshotReceipt()
     previous = set()
     def inspect_destination(parent, relative):
         for name in os.listdir(parent):
@@ -124,7 +171,8 @@ def snapshot(source, destination, errors, label, excluded=()):
                     finally:
                         os.close(child)
                 elif stat.S_ISREG(info.st_mode):
-                    write_at(destination_fd, name, read_at(source_fd, name))
+                    identity = write_at(destination_fd, name, read_at(source_fd, name))
+                    copied.bindings["files"][path.as_posix()] = identity
                     copied.add(path.as_posix())
                 else:
                     raise OSError("unsupported snapshot entry")
@@ -133,12 +181,18 @@ def snapshot(source, destination, errors, label, excluded=()):
                                "error": "snapshot entry unavailable or unsafe; quarantined"})
     try:
         with directory(source) as source_fd, directory(destination, create=True) as destination_fd:
+            info = os.fstat(destination_fd)
+            copied.bindings["root"] = {"device": info.st_dev, "inode": info.st_ino}
             inspect_destination(destination_fd, Path())
             visit(source_fd, destination_fd, Path())
             for path in sorted(previous - copied):
                 errors.append({"source": label, "path": path,
                                "error": "previous snapshot entry not copied in this invocation; quarantined"})
+            with directory(destination) as current:
+                if not matches_identity(copied.bindings["root"], os.fstat(current)):
+                    raise OSError("snapshot destination changed during copying")
     except OSError:
+        copied.clear()
         errors.append({"source": label, "error": "snapshot root unavailable or unsafe; quarantined"})
     return copied
 

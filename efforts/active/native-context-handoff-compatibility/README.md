@@ -458,6 +458,24 @@ below-altitude evidence/tooling documentation, with no new rollout claim.
   retained nonrecursive guidance positives. Current-head review and required
   CI remain publication gates. This does not authorize a paid startup/native
   trial.
+- The next full Balanced review resolved stream ordering and recursive-read
+  findings, then identified detached snapshot-directory reuse, malformed shell
+  command rows and blocking mutable FIFO inputs. Snapshot receipts now bind
+  pinned destination roots and written file identities/bytes through export
+  and later consumption. Independent actual Linux checks closed seven targeted
+  cases, then reproduced an existing receipt losing its bindings and selecting
+  raw analysis. Existing receipts now fail closed when session binding data is
+  missing; raw legacy analysis remains limited to streams with no receipt.
+  Shared event validation rejects nonstring bash/shell commands before consumers,
+  and mutable seed reads are nonblocking, no-follow, singly-linked regular
+  files. All ninety-seven integrated source tests pass in the unpaid isolated
+  Linux lane. Portable Windows logic fixtures pass seventy-six tests with
+  twenty-one explicit Linux-only skips; their test-only manifest-bound adapter
+  does not relax the production Linux boundary. `F,E9` checks pass. These are
+  unit and simple actual-consumer checks in a disposable source-read-only
+  container, not first-provision/native external-venue acceptance. No further
+  paid trial is authorized; historical results remain immutable. Current-head
+  review and required CI still gate publication.
 - The corrections affect source evidence validation only. All four historical
   independent FAIL verdicts and their original packets remain unchanged.
   No paid trial, native deployment claim or runtime change is authorized by

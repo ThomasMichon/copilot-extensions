@@ -71,6 +71,10 @@ def event_stream(path):
                         or not isinstance(data.get("arguments"), dict)))):
                 errors.append({"source": "events", "line": number, "error": "invalid tool event metadata"})
                 continue
+            if (event["type"] == "tool.execution_start" and data["toolName"] in ("bash", "shell")
+                    and not isinstance(data["arguments"].get("command"), str)):
+                errors.append({"source": "events", "line": number, "error": "invalid shell command metadata"})
+                continue
         if event["type"] == "user.message" and not isinstance(event["data"].get("content"), str):
             errors.append({"source": "events", "line": number, "error": "invalid user message content"})
             continue

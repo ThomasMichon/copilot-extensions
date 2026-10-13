@@ -198,6 +198,14 @@ Linux snapshot and redaction I/O uses descriptor-relative no-follow access,
 including path ancestors and existing destination entries. Symlinks, hardlinks
 and nonregular files are quarantined rather than copied or redacted through.
 Output files are replaced atomically without overwriting a linked target.
+Copy receipts retain the destination directory identity and each written file's
+identity/SHA-256. Copy-and-consume checks use pinned descriptors and verify the
+named directory still matches; later analysis applies those bindings to events,
+sidecars and witnesses. Detached directories, stale replacement trees and
+changed copied bytes remain invalid rather than supplying snapshot evidence.
+An existing export receipt must include its session binding; missing binding
+data cannot select unbound legacy analysis, which is reserved for raw streams
+with no export receipt.
 The same guards cover session, workspace, logs, source snapshots and generated
 export/configuration outputs. Redaction errors retain explicit diagnostics and
 an invalid packet status with a nonzero CLI result. These guards belong to the
@@ -236,7 +244,12 @@ Event rows must contain nonempty id/type/time strings and an explicit data
 object; optional model metadata must be text or null before model aggregation.
 Tool identifiers/argument objects and consumed message/delivery fields
 are validated before downstream access. Incomplete rows become line-specific
-diagnostics, not invented defaults. Analysis propagates export diagnostics and
+diagnostics, not invented defaults. Bash/shell starts require a string command;
+missing, null and other JSON kinds cannot reach stdin-sensitive consumers.
+Mutable seed verification uses the same nonblocking, no-follow, singly-linked
+regular-file reader, so FIFOs and other nonregular inputs yield explicit
+unavailable-input diagnostics without blocking export or recovery validation.
+Analysis propagates export diagnostics and
 quarantines an unreliable exported event snapshot, including a pre-existing
 destination left after a failed copy. Quarantined rows remain inspectable but
 cannot supply root clears, tools, measurements or acceptance evidence; valid

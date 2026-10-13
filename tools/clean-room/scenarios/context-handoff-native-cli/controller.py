@@ -41,9 +41,11 @@ def write(path, value):
         path.write_bytes(content)
 
 
-def metadata(path, label, errors):
+def metadata(path, label, errors, snapshot=None):
     try:
-        value = json.loads(snapshot_io.read_bytes(path).decode("utf-8") if os.name == "posix"
+        content = (snapshot_io.read_snapshot(*snapshot, Path(path).relative_to(snapshot[0]).as_posix())
+                   if snapshot is not None else snapshot_io.read_bytes(path)) if os.name == "posix" else None
+        value = json.loads(content.decode("utf-8") if os.name == "posix"
                            else path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
         errors.append({"source": label, "error": "metadata unavailable or invalid JSON"})
@@ -367,7 +369,8 @@ def export():
     if "events.jsonl" not in copied:
         export_errors.append({"source": "session snapshot",
                               "error": "live events were not copied; previous snapshot is uncredited"})
-    events, parser_errors = event_stream(snapshot_io.EventPath(target / "events.jsonl"))
+    events, parser_errors = event_stream(snapshot_io.EventPath(target / "events.jsonl",
+                                                              (target, copied.bindings)))
     export_errors.extend(parser_errors)
     logs = Path.home() / ".copilot/logs"
     if logs.exists():
@@ -446,7 +449,10 @@ def export():
     write(EVAL / "export-errors.json", {"status": "INVALID_EXPORT" if export_errors else "captured",
                                       "errors": export_errors, "valid_rows": len(events),
                                       "workspace_copied": sorted(workspace_copied),
-                                      "seed_copied": sorted(seed_copied)})
+                                      "seed_copied": sorted(seed_copied),
+                                      "snapshot_bindings": {"session": copied.bindings,
+                                                            "workspace": workspace_copied.bindings,
+                                                            "seed-baseline": seed_copied.bindings}})
     write_judge_packet()
     summary = {"identity": state, "event_export_status": "INVALID_EXPORT" if export_errors else "captured",
                "export_errors": export_errors}
@@ -478,13 +484,26 @@ def write_judge_packet(invalid_analysis=False):
         "acceptance_contract": "semantic-content-refresh-before-task",
         "export_diagnostics": "export-errors.json",
         "redaction_diagnostics": "credential-redaction.json",
+        "snapshot_bindings": "export-errors.json#snapshot_bindings",
         "event_export_status": "INVALID_EXPORT" if invalid_analysis or diagnostics
             else export_note.get("status") if export_note else "not-established",
         "note": "Setup telemetry is not a Tier-E verdict. Read judge_attention and unexercised gates literally.",
     })
 def analyze():
+    receipt_errors = []
+    export_path = EVAL / "export-errors.json"
+    export_note = metadata(export_path, "export diagnostics", receipt_errors) if export_path.exists() else None
+    bindings = export_note.get("snapshot_bindings", {}) if export_note else {}
+    if not isinstance(bindings, dict):
+        bindings = {}
+        receipt_errors.append({"source": "snapshot bindings", "error": "invalid snapshot directory bindings"})
+    if export_note is not None and "session" not in bindings:
+        receipt_errors.append({"source": "snapshot bindings", "error": "session snapshot binding is missing"})
     event_path = EVAL / "session/events.jsonl"
-    events, evidence_errors = event_stream(snapshot_io.EventPath(event_path) if os.name == "posix" else event_path)
+    session_binding = (EVAL / "session", bindings["session"]) if "session" in bindings else None
+    events, evidence_errors = event_stream(snapshot_io.EventPath(event_path, session_binding)
+                                          if os.name == "posix" else event_path)
+    evidence_errors.extend(receipt_errors)
     child_activity = [event for event in events if not root_event(event)]
     quarantined = []
     parser_errors = list(evidence_errors)
@@ -494,10 +513,8 @@ def analyze():
         events = []
         evidence_errors.append({"source": "events",
                                 "error": "parser-invalid event stream excluded from all affirmative evidence"})
-    export_path = EVAL / "export-errors.json"
     workspace_copied = []
     if export_path.exists():
-        export_note = metadata(export_path, "export diagnostics", evidence_errors)
         export_errors = export_note.get("errors") if export_note else None
         workspace_copied = export_note.get("workspace_copied", []) if export_note else []
         if not isinstance(workspace_copied, list) or any(not isinstance(path, str) for path in workspace_copied):
@@ -624,10 +641,11 @@ def analyze():
                                 "clear_event": clear["id"] if clear else None})
     report = EVAL / "workspace/witness.json"
     witness_validation = {"errors": ["witness.json absent"]}
-    if report.exists() and "witness.json" not in workspace_copied:
+    if report.exists() and ("witness.json" not in workspace_copied or "workspace" not in bindings):
         witness_validation = {"errors": ["witness.json was not copied in the current export"]}
     elif report.exists():
-        document = metadata(report, "witness", evidence_errors)
+        workspace_binding = (EVAL / "workspace", bindings["workspace"]) if "workspace" in bindings else None
+        document = metadata(report, "witness", evidence_errors, workspace_binding)
         if document is None:
             witness_validation = {"errors": ["witness content unavailable or invalid"]}
         else:
@@ -676,7 +694,8 @@ def analyze():
         "witness_contract_observation": witness_validation,
         "recovery_observations": recovery,
         "semantic_recovery_validation": semantic_recovery,
-        "final_plugin_usage_sidecar": metadata(EVAL / "session/context.json", "plugin usage sidecar", evidence_errors),
+        "final_plugin_usage_sidecar": metadata(EVAL / "session/context.json", "plugin usage sidecar",
+                                               evidence_errors, session_binding),
         "actual_tool_models": sorted({event["data"].get("model") for event in starts.values()
                                      if event["data"].get("model")}),
         "unexercised": [

@@ -9,9 +9,10 @@ from unittest.mock import patch
 import controller
 import os_permission_smoke
 import validation
+from test_validation import WindowsSeedReadFixtures
 
 
-class CliDiagnosticsTests(unittest.TestCase):
+class CliDiagnosticsTests(WindowsSeedReadFixtures, unittest.TestCase):
     def test_measurement_numbers_are_finite_and_within_prompt_capacity(self):
         valid = {"context_window": {"number": 1, "current_window_id": "fixture:1"},
                  "context_info": {"promptTokenLimit": 200000},

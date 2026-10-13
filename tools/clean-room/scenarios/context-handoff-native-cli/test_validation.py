@@ -5,6 +5,7 @@ import io
 import json
 import os
 import shlex
+import stat
 from pathlib import Path
 import tempfile
 import unittest
@@ -41,7 +42,156 @@ def recovery_event_errors(events, root):
     return validation.recovery_event_errors(events, root, baseline=TEST_SEEDS[str(root)])
 
 
-class ValidationTests(unittest.TestCase):
+class WindowsSeedReadFixtures:
+    """Portable logic fixtures only; Linux tests retain the real descriptor reader."""
+
+    def setUp(self):
+        super().setUp()
+        if os.name != "nt":
+            return
+        verify = validation.workspace_seed_errors
+
+        def fixture_verification(workspace, seed):
+            allowed = {Path(workspace) / name for name in seed["manifest"]["files_sha256"]}
+
+            def read_fixture(path):
+                path = Path(path)
+                if path not in allowed:
+                    raise AssertionError("fixture reader escaped manifest-bound workspace inputs")
+                info = path.lstat()
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or path.is_symlink():
+                    raise OSError("fixture input is not a singly-linked regular file")
+                return path.read_bytes()
+
+            # Deliberately not an OS-boundary proof or a production Windows fallback.
+            with patch.object(validation.snapshot_io, "read_bytes", side_effect=read_fixture):
+                return verify(workspace, seed)
+
+        self.enterContext(patch.object(validation, "workspace_seed_errors", side_effect=fixture_verification))
+        self.enterContext(patch.object(controller, "workspace_seed_errors", side_effect=fixture_verification))
+
+
+class ValidationTests(WindowsSeedReadFixtures, unittest.TestCase):
+    def test_workspace_fixture_reader_retains_changed_and_missing_input_diagnostics(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            evaluation, state, events = self.analyzer_fixture(Path(temporary))
+            root = evaluation / "workspace"
+            seed, errors = validation.seed_baseline(TEST_SEEDS[str(root)])
+            self.assertFalse(errors)
+            self.assertEqual(validation.workspace_seed_errors(root, seed), [])
+            path = root / "task.json"
+            path.write_text('{"fixture":"changed"}')
+            self.assertEqual(validation.workspace_seed_errors(root, seed), ["driven seed input changed: task.json"])
+            path.unlink()
+            self.assertEqual(validation.workspace_seed_errors(root, seed), ["driven seed input unavailable: task.json"])
+
+    def test_shell_command_schema_rejects_malformed_rows_before_consumers(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            evaluation, state, original = self.analyzer_fixture(Path(temporary))
+            for tool in ("bash", "shell"):
+                for command in (None, [], 7, {}, "missing"):
+                    with self.subTest(tool=tool, command=command):
+                        arguments = {} if command == "missing" else {"command": command}
+                        row = {"type": "tool.execution_start", "id": "malformed-shell", "timestamp": "2-0",
+                               "data": {"toolCallId": "malformed-shell", "toolName": tool,
+                                        "arguments": arguments}}
+                        events = original + [row]
+                        path = evaluation / "session/events.jsonl"
+                        path.write_text("".join(json.dumps(event) + "\n" for event in events))
+                        parsed, errors = validation.event_stream(path)
+                        self.assertTrue(errors)
+                        self.assertNotIn(row, parsed)
+                        report = self.run_analyzer(evaluation, state, events)
+                        self.assertTrue(report["event_parser_errors"])
+                        self.assertEqual(report["root_clear_events"], [])
+                        self.assertTrue((evaluation / "judge-packet.json").is_file())
+                        options = {"capture_output": True, "text": True, "input": "", "timeout": 10}
+                        if sys.platform == "win32":
+                            options["creationflags"] = subprocess.CREATE_NO_WINDOW
+                        result = subprocess.run(
+                            [sys.executable, validation.__file__, "recovery-events", str(path),
+                             str(evaluation / "workspace"), str(TEST_SEEDS[str(evaluation / "workspace")])],
+                            **options)
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertFalse(json.loads(result.stdout)["valid"])
+                        self.assertNotIn("Traceback", result.stderr)
+            for command in ("", "cat task.json"):
+                row["data"]["arguments"] = {"command": command}
+                path.write_text(json.dumps(row) + "\n")
+                self.assertEqual(validation.event_stream(path), ([row], []))
+            row["data"].update(toolName="unknown-fixture", arguments={})
+            path.write_text(json.dumps(row) + "\n")
+            self.assertEqual(validation.event_stream(path), ([row], []))
+
+    @unittest.skipUnless(os.name == "posix", "nonblocking seed consumer proof requires Linux")
+    def test_nonregular_workspace_seed_preserves_analyzer_packet_and_cli_failure(self):
+        for kind in ("fifo", "directory", "symlink", "hardlink"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                base = Path(temporary)
+                original, state, events = self.analyzer_fixture(base / "original")
+                events[1:1] = [
+                    {"type": "tool.execution_start", "id": "measurement", "timestamp": "0-0a",
+                     "data": {"toolCallId": "measurement", "toolName": "get_context_remaining", "arguments": {}}},
+                    {"type": "tool.execution_complete", "id": "measurement-complete", "timestamp": "0-0b",
+                     "data": {"toolCallId": "measurement", "success": True,
+                              "result": {"content": json.dumps(self.full_measurement(1))}}},
+                ]
+                baseline = TEST_SEEDS[str(original / "workspace")]
+                baseline.chmod(0o755)
+                (baseline / "venue-seal.json").write_text(json.dumps({
+                    "session_id": "root-fixture", "operator_sudo_denied": True,
+                    "sudo_elevation_bits_removed": True,
+                }))
+                home = base / "home"
+                session = home / ".copilot/session-state/root-fixture"
+                session.mkdir(parents=True)
+                (session / "events.jsonl").write_text("".join(json.dumps(event) + "\n" for event in events))
+                evaluation = base / "export/eval"
+                evaluation.mkdir(parents=True)
+                with patch.object(controller, "BASELINE", baseline), patch.object(controller, "EVAL", evaluation), \
+                        patch.object(controller, "OUT", evaluation.parent), patch.object(controller, "STATE", state), \
+                        patch.object(controller, "REPO", original / "workspace"), \
+                        patch.object(controller, "SCENARIO", Path(__file__).parent), \
+                        patch.object(Path, "home", return_value=home), patch.object(controller, "run", return_value="true"), \
+                        patch.object(controller.subprocess, "run", return_value=type("Result", (), {"returncode": 1})()), \
+                        redirect_stdout(io.StringIO()):
+                    controller.export()
+                    controller.analyze()
+                positive = json.loads((evaluation / "observed-evidence.json").read_text())
+                self.assertFalse(positive["checkpoint_contract_observations"][0]["errors"])
+                root = evaluation / "workspace"
+                path = root / "task.json"
+                path.unlink()
+                if kind == "fifo":
+                    os.mkfifo(path)
+                elif kind == "directory":
+                    path.mkdir()
+                elif kind == "symlink":
+                    path.symlink_to(baseline / "task.json")
+                else:
+                    os.link(baseline / "task.json", path)
+                seed, errors = validation.seed_baseline(baseline)
+                self.assertFalse(errors)
+                # Bound the actual exported-workspace consumer, not just a mocked file read.
+                code = ("import controller,sys; from pathlib import Path; "
+                        "controller.EVAL=Path(sys.argv[1]); controller.STATE=Path(sys.argv[2]); "
+                        "controller.BASELINE=Path(sys.argv[3]); controller.analyze()")
+                result = subprocess.run([sys.executable, "-c", code, str(evaluation), str(state), str(baseline)],
+                                        capture_output=True, text=True, input="", timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                report = json.loads((evaluation / "observed-evidence.json").read_text())
+                self.assertTrue(any("driven seed input unavailable: task.json" in row["errors"]
+                                    for row in report["semantic_recovery_validation"]))
+                self.assertTrue(report["checkpoint_contract_observations"][0]["errors"])
+                self.assertTrue((evaluation / "judge-packet.json").is_file())
+                result = subprocess.run([sys.executable, validation.__file__, "verify-baseline",
+                                         str(root), str(baseline)], capture_output=True, text=True,
+                                        input="", timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(json.loads(result.stdout)["valid"])
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertIn("driven seed input unavailable: task.json", validation.workspace_seed_errors(root, seed))
+
     @unittest.skipUnless(os.name == "posix", "looped-path consumer proof requires the Linux fixture")
     def test_unresolvable_recursive_paths_preserve_cli_and_analyzer_diagnostics(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -386,16 +536,15 @@ class ValidationTests(unittest.TestCase):
     def test_reanalysis_does_not_clear_invalid_redaction_receipt(self):
         with tempfile.TemporaryDirectory() as temporary:
             evaluation, state, events = self.analyzer_fixture(Path(temporary))
-            (evaluation / "export-errors.json").write_text(json.dumps({"status": "captured", "errors": []}))
             receipt = evaluation / "credential-redaction.json"
             for document in ({"status": "INVALID_EXPORT", "errors": [{"error": "unsafe entry"}]},
                              {"status": "checked", "errors": "invalid-shape"}, []):
                 receipt.write_text(json.dumps(document))
-                self.run_analyzer(evaluation, state, events)
+                self.run_analyzer(evaluation, state, events, captured=True)
                 self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"],
                                  "INVALID_EXPORT")
             receipt.write_text(json.dumps({"status": "checked", "errors": []}))
-            self.run_analyzer(evaluation, state, events)
+            self.run_analyzer(evaluation, state, events, captured=True)
             self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"], "captured")
 
     def test_only_absent_or_null_ownership_markers_are_root(self):
@@ -701,15 +850,14 @@ class ValidationTests(unittest.TestCase):
     def test_valid_snapshot_export_diagnostics_preserve_normal_root_evidence(self):
         with tempfile.TemporaryDirectory() as temp:
             evaluation, state, events = self.analyzer_fixture(Path(temp))
-            (evaluation / "export-errors.json").write_text(json.dumps({"status": "captured", "errors": []}))
-            report = self.run_analyzer(evaluation, state, events)
+            report = self.run_analyzer(evaluation, state, events, captured=True)
             self.assertEqual(len(report["root_clear_events"]), 2)
             self.assertEqual(report["quarantined_event_snapshot"], [])
             self.assertFalse(any(error["source"] == "export diagnostics" for error in report["evidence_errors"]))
             for model in (None, "", "fixture-model"):
                 valid_events = copy.deepcopy(events)
                 valid_events[0]["data"]["model"] = model
-                report = self.run_analyzer(evaluation, state, valid_events)
+                report = self.run_analyzer(evaluation, state, valid_events, captured=True)
                 self.assertEqual(len(report["root_clear_events"]), 2)
                 self.assertFalse(report["event_parser_errors"])
 
@@ -782,7 +930,7 @@ class ValidationTests(unittest.TestCase):
             report = json.loads((evaluation / "observed-evidence.json").read_text())
             self.assertEqual(report["root_clear_events"], [])
             self.assertTrue(report["evidence_errors"])
-            self.assertTrue(report["quarantined_event_snapshot"])
+            self.assertTrue(report["event_parser_errors"])
             self.assertEqual(prior.read_bytes(), before)
             self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"], "INVALID_EXPORT")
 
@@ -912,6 +1060,7 @@ class ValidationTests(unittest.TestCase):
         self.assertTrue(os_permission_smoke.denied(forbidden)["denied"])
 
     def setUp(self):
+        super().setUp()
         TEST_SEEDS.clear()
 
     def provisional_baseline(self, root):
@@ -1548,8 +1697,19 @@ class ValidationTests(unittest.TestCase):
             start["data"]["arguments"]["command"] = f"cp source.txt '{target}'"
             self.assertFalse(recovery_event_errors(events, root)[1]["errors"])
 
-    def run_analyzer(self, evaluation, state, events):
-        (evaluation / "session/events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+    def run_analyzer(self, evaluation, state, events, captured=False):
+        event_path = evaluation / "session/events.jsonl"
+        event_path.write_text("".join(json.dumps(e) + "\n" for e in events))
+        if captured:
+            root_info, file_info = event_path.parent.stat(), event_path.stat()
+            binding = {
+                "root": {"device": root_info.st_dev, "inode": root_info.st_ino},
+                "files": {"events.jsonl": {"device": file_info.st_dev, "inode": file_info.st_ino,
+                                         "sha256": hashlib.sha256(event_path.read_bytes()).hexdigest()}},
+            }
+            (evaluation / "export-errors.json").write_text(json.dumps({
+                "status": "captured", "errors": [], "snapshot_bindings": {"session": binding},
+            }))
         with patch.object(controller, "EVAL", evaluation), patch.object(controller, "STATE", state), \
                 patch.object(controller, "BASELINE", TEST_SEEDS[str(evaluation / "workspace")]), \
                 redirect_stdout(io.StringIO()):

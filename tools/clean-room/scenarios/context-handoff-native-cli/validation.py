@@ -14,6 +14,7 @@ from fractions import Fraction
 
 from checkpoint_binding import readback_errors, recovered_checkpoint
 from event_parser import call_relationship_errors, event_stream
+import snapshot_io
 
 BASELINE_DIR = Path("/opt/copilot-cleanroom/native-cli-baseline")
 RECOVERY_PREREQUISITES = [
@@ -88,7 +89,7 @@ def workspace_seed_errors(workspace, seed):
     for name, digest in seed["manifest"]["files_sha256"].items():
         path = workspace / name
         try:
-            if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            if hashlib.sha256(snapshot_io.read_bytes(path)).hexdigest() != digest:
                 errors.append(f"driven seed input changed: {name}")
         except OSError:
             errors.append(f"driven seed input unavailable: {name}")

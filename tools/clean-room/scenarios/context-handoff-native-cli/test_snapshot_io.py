@@ -15,6 +15,71 @@ import test_validation
 
 @unittest.skipUnless(os.name == "posix", "descriptor no-follow proof requires the Linux fixture")
 class SnapshotTests(unittest.TestCase):
+    def test_destination_replacement_during_copy_invalidates_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, destination = root / "source", root / "target"
+            source.mkdir()
+            destination.mkdir()
+            (source / "file").write_bytes(b"fresh")
+            original = snapshot_io.write_at
+
+            def swap(parent, name, content):
+                destination.rename(root / "detached")
+                destination.mkdir()
+                (destination / "file").write_bytes(b"stale")
+                return original(parent, name, content)
+
+            errors = []
+            with patch.object(snapshot_io, "write_at", side_effect=swap):
+                receipt = snapshot_io.snapshot(source, destination, errors, "fixture")
+            self.assertFalse(receipt)
+            self.assertTrue(errors)
+            with self.assertRaises(OSError):
+                snapshot_io.read_snapshot(destination, receipt.bindings, "file")
+            self.assertEqual((root / "detached/file").read_bytes(), b"fresh")
+            self.assertEqual((destination / "file").read_bytes(), b"stale")
+
+    def test_bound_consumption_refuses_later_directory_and_file_mutation(self):
+        for kind in ("directory", "file", "content"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source, destination = root / "source", root / "target"
+                source.mkdir()
+                (source / "file").write_bytes(b"fresh")
+                errors = []
+                receipt = snapshot_io.snapshot(source, destination, errors, "fixture")
+                self.assertFalse(errors)
+                self.assertEqual(snapshot_io.read_snapshot(destination, receipt.bindings, "file"), b"fresh")
+                if kind == "directory":
+                    destination.rename(root / "detached")
+                    destination.mkdir()
+                    (destination / "file").write_bytes(b"stale")
+                elif kind == "file":
+                    (destination / "replacement").write_bytes(b"stale")
+                    (destination / "replacement").replace(destination / "file")
+                else:
+                    (destination / "file").write_bytes(b"stale")
+                with self.assertRaises(OSError):
+                    snapshot_io.read_snapshot(destination, receipt.bindings, "file")
+
+    def test_analysis_cannot_credit_replaced_export_directory(self):
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+            original, evaluation, capsule = self.export_fixture(Path(temporary), stack)
+            result = controller.export()
+            self.assertEqual(result["export_errors"], [])
+            session = evaluation / "session"
+            stream = (session / "events.jsonl").read_bytes()
+            session.rename(evaluation / "detached-session")
+            session.mkdir()
+            (session / "events.jsonl").write_bytes(stream)
+            controller.analyze()
+            observed = json.loads((evaluation / "observed-evidence.json").read_text())
+            self.assertFalse(observed["root_clear_events"])
+            self.assertTrue(observed["evidence_errors"])
+            self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"],
+                             "INVALID_EXPORT")
+
     def export_fixture(self, root, stack):
         fixture = test_validation.ValidationTests()
         stack.callback(fixture.doCleanups)
@@ -40,6 +105,30 @@ class SnapshotTests(unittest.TestCase):
                                         return_value=type("Result", (), {"returncode": 1})()))
         stack.enter_context(redirect_stdout(io.StringIO()))
         return original, evaluation, capsule
+
+    def test_existing_receipt_cannot_disable_snapshot_binding(self):
+        for kind in ("missing", "empty", "null"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+                original, evaluation, capsule = self.export_fixture(Path(temporary), stack)
+                self.assertEqual(controller.export()["export_errors"], [])
+                receipt_path = evaluation / "export-errors.json"
+                receipt = json.loads(receipt_path.read_text())
+                if kind == "missing":
+                    del receipt["snapshot_bindings"]
+                else:
+                    receipt["snapshot_bindings"] = {} if kind == "empty" else None
+                receipt_path.write_text(json.dumps(receipt))
+                session = evaluation / "session"
+                stream = (session / "events.jsonl").read_bytes()
+                session.rename(evaluation / "detached-session")
+                session.mkdir()
+                (session / "events.jsonl").write_bytes(stream)
+                controller.analyze()
+                observed = json.loads((evaluation / "observed-evidence.json").read_text())
+                self.assertFalse(observed["root_clear_events"])
+                self.assertTrue(observed["evidence_errors"])
+                self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"],
+                                 "INVALID_EXPORT")
 
     def test_export_recopies_every_protected_seed_file_and_seal(self):
         with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
