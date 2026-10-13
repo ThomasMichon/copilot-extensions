@@ -78,7 +78,9 @@ def test_diff_error_is_not_reported_as_unrelated(monkeypatch, capsys) -> None:
 
 def test_native_windows_diagnostic_step_is_scoped_and_bounded() -> None:
     workflow = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
-    steps = workflow["jobs"]["test-runner-windows"]["steps"]
+    job = workflow["jobs"]["test-runner-windows"]
+    assert job["timeout-minutes"] == 5
+    steps = job["steps"]
     detection = next(step for step in steps if step.get("id") == "installation-context")
     smoke = next(step for step in steps if step.get("name") == "Read-only diagnostics (Windows)")
     assert "installation_context_ci_scope.py" in detection["run"]

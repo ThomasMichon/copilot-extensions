@@ -2516,9 +2516,13 @@ def test_diagnostic_api_never_enters_mutation(
     legacy = tmp_path / "legacy"
     profile.mkdir()
     legacy.mkdir()
+    environment = _profile_environment(profile)
     if namespaced:
-        _activation(layout, environment=_api_environment(profile))
-    arguments = _api_arguments(layout, profile, legacy)
+        _activation(layout, environment=environment)
+    arguments = _api_arguments(
+        layout, profile, legacy,
+        platform=environment["platform"], wsl_distro=environment["wslDistro"],
+    )
     before = _snapshot(tmp_path)
 
     def refuse_mutation(*args, **kwargs):
@@ -2534,7 +2538,7 @@ def test_diagnostic_api_never_enters_mutation(
         monkeypatch.setattr(module, name, refuse_mutation)
     result = module.resolve_installation_mode(**arguments)
     decision = module.probe_legacy_entrypoint(**arguments)
-    assert result["actualMode"] == ("namespaced" if namespaced else "legacy")
+    assert result["actualMode"] == ("namespaced" if namespaced else "legacy"), result
     assert decision["allowMutation"] is (not namespaced)
     assert _snapshot(tmp_path) == before
 
