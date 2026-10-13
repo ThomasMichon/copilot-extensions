@@ -282,6 +282,52 @@ def test_single_candidate_with_readable_non_launcher_parent_stays_certain(tmp_pa
     assert all(action["kind"] != "generation_grouping" for action in result["actions"])
 
 
+def test_single_candidate_with_unreadable_executable_is_uncertain_and_blocks_repair(
+    tmp_path: Path,
+):
+    # A readable parent is not enough: without the executable image the
+    # doctor cannot prove the lone candidate is not an unpaired launcher.
+    state = _lone_passive_state(tmp_path, 1)
+    state["image"][303] = None
+
+    report = diagnostics.audit_daemon_health(_ctx(tmp_path, state))
+
+    assert report["candidate_count"] == 1
+    assert report["grouping_uncertain"] is True
+    assert "executable of candidate 303 unreadable" in report["grouping_uncertain_reason"]
+    (finding,) = report["findings"]
+    assert finding["kind"] == "abandoned_passive"
+    assert finding["repairable"] is False
+    assert finding["blocked_reason"] == "generation grouping uncertain"
+
+    result = diagnostics.apply_daemon_health(_ctx(tmp_path, state))
+    assert state["terminated"] == []
+    assert result["actions"][-1] == {
+        "kind": "generation_grouping", "blocked": True,
+        "reason": "generation grouping uncertain",
+    }
+
+
+def test_unreadable_executable_is_uncertain_for_every_candidate():
+    def reason(*items):
+        return group_generations(
+            {item.pid: item for item in items}, structural=True, is_launcher_image=_is_launcher,
+        )[1]
+
+    launcher = _candidate(1, "10", 0, LAUNCHER)
+    # Unpaired candidates: one unreadable image is enough, either way round.
+    assert reason(_candidate(2, "11", 1, None)) == "executable of candidate 2 unreadable"
+    assert reason(_candidate(2, "11", 1, WORKER), _candidate(5, "12", 1, None)) == (
+        "executable of candidate 5 unreadable"
+    )
+    # A parent/child pair with either image unreadable stays uncertain, and the
+    # problem is named once.
+    assert reason(launcher, _candidate(2, "11", 1, None)) == "executable of candidate 2 unreadable"
+    assert reason(_candidate(1, "10", 0, None), _candidate(2, "11", 1, WORKER)) == (
+        "executable of candidate 1 unreadable"
+    )
+
+
 def test_without_opt_in_each_candidate_is_its_own_generation(tmp_path: Path):
     routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=202, version="1.0.0")
     state = _pair_state()

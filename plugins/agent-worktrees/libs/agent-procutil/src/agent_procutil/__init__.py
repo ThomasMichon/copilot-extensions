@@ -694,13 +694,21 @@ def _validated_daemon_cwd(cwd: str | os.PathLike[str] | None) -> str:
         raise ValueError(f"spawn_daemon cwd must be an absolute path, got {path!r}")
     if not os.path.isdir(path):
         raise ValueError(f"spawn_daemon cwd does not exist: {path}")
-    parts = {part.lower() for part in os.path.normpath(path).replace("\\", "/").split("/")}
-    if _PAYLOAD_DIR_MARKER in parts:
-        raise ValueError(
-            f"spawn_daemon cwd is inside a plugin payload ({path}); use the "
-            "daemon's runtime root or home directory instead"
-        )
+    # Check the resolved target too: a symlink or junction such as
+    # ``<runtime>/current -> .../installed-plugins/...`` would otherwise pass.
+    for candidate in (path, os.path.realpath(path)):
+        if _is_inside_payload(candidate):
+            raise ValueError(
+                f"spawn_daemon cwd is inside a plugin payload ({path}"
+                + (f" -> {candidate}" if candidate != path else "")
+                + "); use the daemon's runtime root or home directory instead"
+            )
     return path
+
+
+def _is_inside_payload(path: str) -> bool:
+    parts = {part.lower() for part in os.path.normpath(path).replace("\\", "/").split("/")}
+    return _PAYLOAD_DIR_MARKER in parts
 
 
 def _daemon_popen_kwargs(
@@ -766,10 +774,14 @@ def spawn_daemon(
       still better than no daemon, passes ``contained_fallback=True`` to start
       it inside the Job instead (logged as a warning and in the daemon log).
     * **Explicit cwd.** ``cwd`` is required, must be absolute and existing,
-      and must not be inside an ``installed-plugins`` payload -- use the
-      daemon's runtime root or home directory, never the caller's cwd.
+      and must not be inside an ``installed-plugins`` payload, either
+      lexically or once symlinks/junctions are resolved -- use the daemon's
+      runtime root or home directory, never the caller's cwd. Because the
+      daemon runs from ``cwd`` rather than the caller's directory, any path
+      the caller passes in ``argv`` or the environment should be absolute.
     * **Logged.** stdin is ``DEVNULL``; stdout and stderr are appended to
-      ``log_path`` (parent directories are created), after a one-line launch
+      ``log_path`` (must be absolute; parent directories are created), after a
+      one-line launch
       header. The parent closes its copy of the log handle before returning.
       The header names the cwd and the executable (``argv[0]``) only, plus
       ``display`` when given: the remaining argv and the environment are never
@@ -790,9 +802,11 @@ def spawn_daemon(
     if log_path is None:
         raise ValueError("spawn_daemon requires a log_path")
     log_file = os.fspath(log_path)
-    if not os.path.isabs(log_file):
-        log_file = os.path.join(cwd_path, log_file)
-    os.makedirs(os.path.dirname(log_file) or cwd_path, exist_ok=True)
+    if not log_file or not os.path.isabs(log_file):
+        # Never resolved against ``cwd``: a caller-relative path would silently
+        # land somewhere else once the daemon's cwd differs from the caller's.
+        raise ValueError(f"spawn_daemon log_path must be an absolute path, got {log_file!r}")
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
 
     child_env = dict(os.environ if env is None else env)
     if env_overrides:

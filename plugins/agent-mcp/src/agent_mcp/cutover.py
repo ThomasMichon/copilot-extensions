@@ -135,15 +135,24 @@ def spawn_passive_daemon(ctx: _CutoverContext, control_port: int) -> subprocess.
     """
     from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
 
+    from .sockio import daemon_env_overrides
+
+    # Resolve every path against THIS process's cwd before the spawn: the
+    # child runs from the data root, so a relative AGENT_MCP_HOME-derived
+    # socket/log path (or AGENT_MCP_HOME itself) would otherwise be resolved a
+    # second time there and name ``home/home/...``.
+    home = Path(ctx.data_root).resolve()
+    socket_path = Path(ctx.new_socket_path).resolve()
+    log_path = Path(ctx.new_log_path).resolve()
     python = sys.executable
     cmd = [windowless_python(python), "-m", "agent_mcp", "serve",
-          "--socket", str(ctx.new_socket_path),
-          "--passive", "--control-port", str(control_port)]
-    env_overrides = {"AGENT_MCP_CONTROL_TOKEN": ctx.new_control_token}
+           "--socket", str(socket_path),
+           "--passive", "--control-port", str(control_port)]
+    env_overrides = daemon_env_overrides(home)
+    env_overrides["AGENT_MCP_CONTROL_TOKEN"] = ctx.new_control_token
     env_overrides.update(windowless_python_env(python))
-    home = Path(ctx.data_root).resolve()
     home.mkdir(parents=True, exist_ok=True)
-    proc = spawn_daemon(cmd, cwd=home, log_path=ctx.new_log_path,
+    proc = spawn_daemon(cmd, cwd=home, log_path=log_path,
                         env_overrides=env_overrides,
                         display=f"agent_mcp serve --passive --control-port {control_port}")
     ctx.token_by_port[control_port] = ctx.new_control_token

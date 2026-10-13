@@ -93,9 +93,16 @@ def _abs_bridge_ref(bridge: str) -> str:
 
 
 def _serve_handle(socket_path: str | None) -> str:
-    """The socket handle both the forwarder and a spawned host agree on."""
-    return (socket_path or os.environ.get("AGENT_MCP_SERVE_SOCKET")
-            or str(sockio.default_socket_path()))
+    """The socket handle both the forwarder and a spawned host agree on.
+
+    Always absolute: the host runs from ``AGENT_MCP_HOME``, not from this
+    forwarder's cwd, so a relative ``--socket``/``AGENT_MCP_SERVE_SOCKET`` (or a
+    relative ``AGENT_MCP_HOME``) resolved by the host would bind somewhere
+    other than the path this forwarder polls.
+    """
+    raw = (socket_path or os.environ.get("AGENT_MCP_SERVE_SOCKET")
+           or str(sockio.default_socket_path()))
+    return str(Path(raw).resolve())
 
 
 def _spawn_serve_host(handle: str) -> None:
@@ -116,14 +123,17 @@ def _spawn_serve_host(handle: str) -> None:
     from agent_procutil import spawn_daemon, windowless_python, windowless_python_env
 
     python = sys.executable
+    handle = str(Path(handle).resolve())
     cmd = [windowless_python(python), "-m", "agent_mcp", "serve", "--socket", handle]
     home = sockio.default_home_dir().resolve()
     home.mkdir(parents=True, exist_ok=True)
+    env_overrides = sockio.daemon_env_overrides(home)
+    env_overrides.update(windowless_python_env(python))
     # contained_fallback: before adopting spawn_daemon this host always ran
     # inside the forwarder's Job; if that Job forbids breakaway, a host with
     # the forwarder's lifetime still beats losing the multiplexer entirely.
     spawn_daemon(cmd, cwd=home, log_path=home / "serve.log",
-                 env_overrides=windowless_python_env(python),
+                 env_overrides=env_overrides,
                  contained_fallback=True, display="agent_mcp serve")
 
 

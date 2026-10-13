@@ -60,6 +60,21 @@ def default_socket_path() -> Path:
     return default_home_dir() / "serve.sock"
 
 
+def daemon_env_overrides(home: Path) -> dict[str, str]:
+    """Environment for a serve host spawned with the absolute ``home`` as cwd.
+
+    The host runs from ``home``, not from its spawner's directory, so every
+    ``AGENT_MCP_*`` path it reads must already be absolute: a relative
+    ``AGENT_MCP_HOME`` (or ``AGENT_MCP_SERVE_SOCKET``) would otherwise be
+    re-resolved against ``home`` and name a nested directory.
+    """
+    env = {"AGENT_MCP_HOME": str(home)}
+    raw = os.environ.get("AGENT_MCP_SERVE_SOCKET")
+    if raw:
+        env["AGENT_MCP_SERVE_SOCKET"] = str(Path(raw).resolve())
+    return env
+
+
 def _endpoint_path(socket_path: str | Path) -> Path:
     """The TCP endpoint sidecar for a serve handle (loopback port-discovery)."""
     return Path(str(socket_path) + ".endpoint")

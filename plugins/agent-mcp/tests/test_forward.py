@@ -371,12 +371,56 @@ def test_spawn_serve_host_launches_through_spawn_daemon(tmp_path, monkeypatch):
     home = (tmp_path / "home").resolve()
     assert captured["argv"][0] == agent_procutil.windowless_python(sys.executable)
     assert captured["argv"][1:] == [
-        "-m", "agent_mcp", "serve", "--socket", str(tmp_path / "serve.sock")]
+        "-m", "agent_mcp", "serve", "--socket", str((tmp_path / "serve.sock").resolve())]
     assert captured["kwargs"]["cwd"] == home
     assert home.is_dir()
     assert captured["kwargs"]["log_path"] == home / "serve.log"
+    assert captured["kwargs"]["env_overrides"]["AGENT_MCP_HOME"] == str(home)
     assert captured["kwargs"]["contained_fallback"] is True
     assert captured["kwargs"]["display"] == "agent_mcp serve"
+
+
+@pytest.mark.parametrize("socket_arg, env_socket, expected", [
+    ("rel/serve.sock", None, ("rel", "serve.sock")),
+    (None, "env/serve.sock", ("env", "serve.sock")),
+    (None, None, ("home", "serve.sock")),
+])
+def test_ensure_serve_polls_the_absolute_path_the_host_binds(
+    tmp_path, monkeypatch, socket_arg, env_socket, expected,
+):
+    """A relative --socket, AGENT_MCP_SERVE_SOCKET or AGENT_MCP_HOME is
+    resolved here, against the forwarder's cwd: the host runs from
+    AGENT_MCP_HOME, so a handle it resolved itself would bind somewhere other
+    than the path this forwarder polls."""
+    import agent_procutil
+
+    spawned: dict = {}
+    polled: list = []
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("AGENT_MCP_NO_SERVE", raising=False)
+    monkeypatch.setenv("AGENT_MCP_HOME", "home")
+    if env_socket is None:
+        monkeypatch.delenv("AGENT_MCP_SERVE_SOCKET", raising=False)
+    else:
+        monkeypatch.setenv("AGENT_MCP_SERVE_SOCKET", env_socket)
+    monkeypatch.setattr(agent_procutil, "spawn_daemon",
+                        lambda argv, **kw: spawned.update(argv=argv, kwargs=kw))
+    monkeypatch.setattr(forward.sockio, "serve_socket_if_available",
+                        lambda handle=None: polled.append(handle))
+    monkeypatch.setattr(forward, "_ENSURE_SERVE_TIMEOUT", 0.01)
+
+    assert forward._ensure_serve(socket_arg) is None
+
+    want = str(tmp_path.resolve().joinpath(*expected))
+    argv = spawned["argv"]
+    assert argv[argv.index("--socket") + 1] == want
+    assert polled and all(handle == want for handle in polled)
+    env = spawned["kwargs"]["env_overrides"]
+    home = (tmp_path / "home").resolve()
+    assert env["AGENT_MCP_HOME"] == str(home)
+    assert spawned["kwargs"]["cwd"] == home
+    if env_socket is not None:
+        assert env["AGENT_MCP_SERVE_SOCKET"] == want
 
 
 def test_ensure_serve_falls_back_when_the_spawn_is_refused(tmp_path, monkeypatch):

@@ -103,6 +103,10 @@ def _started_after(parent: DaemonCandidate, child: DaemonCandidate) -> bool:
         return False
 
 
+def _unreadable_image(candidate: DaemonCandidate) -> str:
+    return f"executable of candidate {candidate.pid} unreadable"
+
+
 def _pair_problem(
     parent: DaemonCandidate,
     child: DaemonCandidate,
@@ -114,8 +118,9 @@ def _pair_problem(
         return f"candidate {parent.pid} parents {len(children[parent.pid])} candidates"
     if parent.ppid in candidates or child.pid in children:
         return f"candidates {parent.pid} and {child.pid} are part of a longer chain"
-    if not parent.image or not child.image:
-        return f"executable of candidate {parent.pid} or {child.pid} unreadable"
+    for member in (parent, child):
+        if not member.image:
+            return _unreadable_image(member)
     if not is_launcher_image(parent.image) or is_launcher_image(child.image):
         return (
             f"candidate {child.pid} is a child of candidate {parent.pid} but not "
@@ -139,19 +144,23 @@ def group_generations(
     it, a candidate C and its parent P form one generation only when P is a
     launcher image, C is not, P parents no other candidate, neither belongs
     to a longer candidate chain, and C provably started after P. Any
-    candidate whose parent is unreadable, or any parent/child relation that
-    fails those checks, makes the grouping uncertain (the returned reason).
+    candidate whose parent or executable is unreadable, or any parent/child
+    relation that fails those checks, makes the grouping uncertain (the
+    returned reason).
     """
     ordered = [candidate for _, candidate in sorted(candidates.items())]
     # Only a disabled grouping or an empty census skips the structural checks:
-    # a lone candidate whose parent is unreadable is still uncertain (it may
-    # be half of a launcher/worker pair whose other half the census missed).
+    # a lone candidate whose parent or executable is unreadable is still
+    # uncertain (it may be half of a launcher/worker pair whose other half the
+    # census missed, and without its image it cannot be shown not to be).
     if not structural or not ordered:
         return [Generation(worker=candidate) for candidate in ordered], None
     classify = is_launcher_image or is_venv_redirector
     problems: list[str] = []
     children: dict[int, list[DaemonCandidate]] = {}
     for candidate in ordered:
+        if not candidate.image:
+            problems.append(_unreadable_image(candidate))
         if candidate.ppid is None:
             problems.append(f"parent of candidate {candidate.pid} unreadable")
         elif candidate.ppid in candidates and candidate.ppid != candidate.pid:
@@ -173,7 +182,7 @@ def group_generations(
             generations.append(Generation(worker=worker_of[candidate.pid], launcher=candidate))
         else:
             generations.append(Generation(worker=candidate))
-    return generations, "; ".join(problems) or None
+    return generations, "; ".join(dict.fromkeys(problems)) or None
 
 
 def generation_of(generations: list[Generation], pid: object) -> Generation | None:

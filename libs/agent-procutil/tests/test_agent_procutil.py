@@ -725,6 +725,58 @@ def test_spawn_daemon_rejects_payload_cwd(tmp_path, fake_popen):
     assert fake_popen.calls == []
 
 
+def _payload_and_link(tmp_path):
+    payload = tmp_path / "installed-plugins" / "market" / "plugin"
+    payload.mkdir(parents=True)
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    return payload, runtime / "current"
+
+
+def test_spawn_daemon_rejects_cwd_that_resolves_into_payload(tmp_path, monkeypatch, fake_popen):
+    """The lexical path is clean; only its resolved target is a payload."""
+    payload, link = _payload_and_link(tmp_path)
+    link.mkdir()
+    real = pu.os.path.realpath
+    monkeypatch.setattr(
+        pu.os.path, "realpath",
+        lambda p, *a, **k: str(payload) if os.fspath(p) == str(link) else real(p, *a, **k),
+    )
+    with pytest.raises(ValueError, match="plugin payload"):
+        pu.spawn_daemon(["x"], cwd=link, log_path=tmp_path / "d.log")
+    assert fake_popen.calls == []
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="NTFS junctions are Windows-only")
+def test_spawn_daemon_rejects_junction_into_payload(tmp_path, fake_popen):
+    _winapi = pytest.importorskip("_winapi")
+    payload, link = _payload_and_link(tmp_path)
+    _winapi.CreateJunction(str(payload), str(link))
+    with pytest.raises(ValueError, match="plugin payload"):
+        pu.spawn_daemon(["x"], cwd=link, log_path=tmp_path / "d.log")
+    assert fake_popen.calls == []
+
+
+def test_spawn_daemon_rejects_symlink_into_payload(tmp_path, fake_popen):
+    payload, link = _payload_and_link(tmp_path)
+    try:
+        os.symlink(payload, link, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"directory symlinks unavailable here: {exc}")
+    with pytest.raises(ValueError, match="plugin payload"):
+        pu.spawn_daemon(["x"], cwd=link, log_path=tmp_path / "d.log")
+    assert fake_popen.calls == []
+
+
+def test_spawn_daemon_requires_absolute_log_path(tmp_path, fake_popen):
+    # A relative log path is never resolved against cwd: the caller meant its
+    # own directory, and the daemon's cwd differs from it.
+    with pytest.raises(ValueError, match="log_path must be an absolute path"):
+        pu.spawn_daemon(["x"], cwd=tmp_path, log_path="d.log")
+    assert fake_popen.calls == []
+    assert not (tmp_path / "d.log").exists()
+
+
 def test_spawn_daemon_requires_log_path(tmp_path, fake_popen):
     with pytest.raises(ValueError, match="log_path"):
         pu.spawn_daemon(["x"], cwd=tmp_path, log_path=None)

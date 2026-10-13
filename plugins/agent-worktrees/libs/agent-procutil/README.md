@@ -77,11 +77,15 @@ It composes the helpers above, so its flags never drift from them:
   (logged as a warning and in the daemon log). Contained test mode suppresses
   breakaway and the new session, like the helpers it builds on.
 - **Explicit cwd.** `cwd` must be an existing absolute directory and must not be
-  inside an `installed-plugins` payload. Never pass the caller's cwd: a
-  long-lived process pins it, and every relative-path child breaks once that
-  directory is removed.
+  inside an `installed-plugins` payload, either as given or once symlinks and
+  junctions are resolved (`<runtime>/current -> .../installed-plugins/...` is
+  refused). Never pass the caller's cwd: a long-lived process pins it, and
+  every relative-path child breaks once that directory is removed. Because the
+  daemon does not run from the caller's directory, make every path you pass in
+  `argv` or the environment absolute.
 - **Logged, never `DEVNULL`.** stdin is `DEVNULL`; stdout and stderr are
-  appended to `log_path` after a one-line launch header, and the parent closes
+  appended to `log_path` (which must be absolute; it is never resolved against
+  `cwd`) after a one-line launch header, and the parent closes
   its own copy of the handle before returning the `Popen`. The header records
   the cwd and the executable (`argv[0]`) only, never the rest of argv or the
   environment, since either may carry a token, password or credential URL.

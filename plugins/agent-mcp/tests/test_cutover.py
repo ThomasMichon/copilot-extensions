@@ -83,12 +83,51 @@ def test_spawn_passive_daemon_launches_through_spawn_daemon(
     assert "--passive" in captured["argv"]
     kwargs = captured["kwargs"]
     assert kwargs["cwd"] == tmp_path.resolve()
-    assert kwargs["log_path"] == tmp_path / "g2.log"
+    assert kwargs["log_path"] == (tmp_path / "g2.log").resolve()
     assert kwargs["env_overrides"]["AGENT_MCP_CONTROL_TOKEN"] == "tok"
     # A refused breakaway must fail this pre-commit spawn (rolled back), never
     # promote a generation that dies when the launching updater's Job closes.
     assert not kwargs.get("contained_fallback")
     assert ctx.token_by_port[12345] == "tok"
+
+
+def test_spawn_passive_daemon_resolves_relative_home_before_the_spawn(
+    tmp_path, monkeypatch,
+):
+    """With a relative AGENT_MCP_HOME the generation paths are relative to the
+    cutover caller; the daemon runs from the resolved home, so it must receive
+    them (and AGENT_MCP_HOME itself) already absolute, never ``home/home/...``."""
+    from pathlib import Path
+
+    import agent_procutil
+
+    captured: dict = {}
+
+    class _FakeProc:
+        pid = 4242
+
+    def _fake_spawn_daemon(argv, **kwargs):
+        captured.update(argv=argv, kwargs=kwargs)
+        return _FakeProc()
+
+    monkeypatch.setattr(agent_procutil, "spawn_daemon", _fake_spawn_daemon)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENT_MCP_HOME", "home")
+    rel = Path("home")
+    ctx = _cutover._CutoverContext(
+        data_root=rel, new_socket_path=rel / "serve-g2.sock",
+        new_log_path=rel / "serve-g2.log", new_control_token="tok",
+        old_control_token=None, token_by_port={},
+    )
+    _cutover.spawn_passive_daemon(ctx, 12345)
+
+    home = (tmp_path / "home").resolve()
+    argv, kwargs = captured["argv"], captured["kwargs"]
+    assert argv[argv.index("--socket") + 1] == str(home / "serve-g2.sock")
+    assert kwargs["cwd"] == home
+    assert kwargs["log_path"] == home / "serve-g2.log"
+    assert kwargs["env_overrides"]["AGENT_MCP_HOME"] == str(home)
+    assert kwargs["env_overrides"]["AGENT_MCP_CONTROL_TOKEN"] == "tok"
 
 
 def test_spawn_passive_daemon_real_spawn_logs_and_runs_from_data_root(
