@@ -105,6 +105,41 @@ def test_check_diagnostics_legacy_rerun_keeps_other_failed_context() -> None:
     assert report.failures[0].description == "Latest lint"
 
 
+@pytest.mark.guard
+@pytest.mark.parametrize("invalid", [None, "", "unknown", 1, {}])
+def test_check_diagnostics_invalid_legacy_state_cannot_claim_success(invalid: object) -> None:
+    report = CheckFixture([_run("build", "success")], status={
+        "state": "success", "statuses": [{"context": "legacy", "state": invalid}],
+    }).read()
+    assert report.state == "" and not report.complete
+
+
+def test_check_diagnostics_invalid_legacy_state_retains_other_failure() -> None:
+    report = CheckFixture(status={
+        "state": "success", "statuses": [
+            {"context": "broken", "state": None},
+            {"context": "lint", "state": "error"},
+        ],
+    }).read()
+    assert report.state == "failure" and not report.complete
+    assert [failure.name for failure in report.failures] == ["lint"]
+
+
+def test_check_diagnostics_legacy_pending_prevents_inconsistent_green_rollup() -> None:
+    report = CheckFixture(status={
+        "state": "success", "statuses": [{"context": "build", "state": "pending"}],
+    }).read()
+    assert report.state == "pending" and report.complete
+
+
+@pytest.mark.parametrize("invalid", [None, "", "unknown"])
+def test_check_diagnostics_invalid_run_status_is_incomplete(invalid: object) -> None:
+    run = _run("build", "success")
+    run["status"] = invalid
+    report = CheckFixture([run]).read()
+    assert report.state == "" and not report.complete
+
+
 def test_check_diagnostics_preserve_later_page_failure() -> None:
     fixture = CheckFixture()
     fixture.pages = [

@@ -85,6 +85,10 @@ def read_checks(
                     if not isinstance(status, dict):
                         status_readable = False
                         continue
+                    state = str(status.get("state", "")).strip().lower()
+                    if state not in ("failure", "error", "pending", "success"):
+                        status_readable = False
+                        continue
                     context = status.get("context")
                     if isinstance(context, str) and context:
                         # Status arrays are newest-first; a rerun supersedes older context entries.
@@ -92,7 +96,7 @@ def read_checks(
                         if key in seen_contexts:
                             continue
                         seen_contexts.add(key)
-                    state = str(status.get("state", "")).strip().lower()
+                    pending = pending or state == "pending"
                     if state in ("failure", "error"):
                         failure = True
                         add(CheckFailure(
@@ -120,7 +124,11 @@ def read_checks(
         if not isinstance(run, dict):
             runs_readable = False
             continue
-        if str(run.get("status", "")).strip().lower() != "completed":
+        run_status = str(run.get("status", "")).strip().lower()
+        if run_status not in ("queued", "in_progress", "completed", "waiting", "requested", "pending"):
+            runs_readable = False
+            continue
+        if run_status != "completed":
             pending = True
             continue
         conclusion = str(run.get("conclusion", "")).strip().lower()
