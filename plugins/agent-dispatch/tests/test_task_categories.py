@@ -578,6 +578,70 @@ def test_schedule_client_ordinary_legacy_registration_keeps_wire_shape():
 
 
 @pytest.mark.guard
+@pytest.mark.parametrize("operation", ["read", "schedule"])
+def test_category_capability_rechecked_after_same_url_rolls_back(queue, operation):
+    from fastapi import FastAPI
+
+    peer = FastAPI()
+    capable = True
+    seen = []
+
+    @peer.get("/health")
+    def health():
+        return {"status": "ok", **({"task_categories": 1} if capable else {})}
+
+    @peer.get("/tasks")
+    def tasks():
+        return (
+            [{"id": "work", "category": "work"}]
+            if capable
+            else [
+                {"id": "wrong-view", "category": "maintenance"},
+            ]
+        )
+
+    @peer.post("/schedules")
+    def register(entry: dict):
+        accepted = {key: value for key, value in entry.items() if key != "category"}
+        queue.register_schedule(accepted)
+        queue.create(accepted["title"], repo=REPO)
+        return {"entry": accepted}
+
+    with TestClient(peer) as http:
+
+        def exchange(request):
+            seen.append((request.method, request.url.path))
+            response = http.request(
+                request.method,
+                str(request.url),
+                content=request.content,
+                headers=dict(request.headers),
+            )
+            return httpx.Response(response.status_code, json=response.json())
+
+        with DispatchClient(
+            "http://same-endpoint", transport=httpx.MockTransport(exchange)
+        ) as client:
+            assert client.list(category="work")[0]["id"] == "work"
+            capable = False
+            with pytest.raises(DispatchUpgradeRequired):
+                if operation == "read":
+                    client.list(category="work")
+                else:
+                    client.register_schedule(
+                        {
+                            "id": "health",
+                            "title": "Health",
+                            "repo": REPO,
+                            "interval_seconds": 60,
+                            "category": "maintenance",
+                        }
+                    )
+    assert seen == [("GET", "/health"), ("GET", "/tasks"), ("GET", "/health")]
+    assert queue.list_schedules() == [] and queue.list() == []
+
+
+@pytest.mark.guard
 def test_remote_inspection_unavailable_is_concise_nonzero_not_local_all_clear(monkeypatch, capsys):
     from agent_dispatch import category_cli
 

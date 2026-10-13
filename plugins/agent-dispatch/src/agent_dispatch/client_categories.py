@@ -20,12 +20,10 @@ def require_endpoint_categories(endpoint: str) -> None:
 
 class CategoryClientMixin:
     def require_task_categories(self) -> None:
-        if not getattr(self, "_task_categories_supported", False):
-            if self.health().get("task_categories") != 1:
-                raise DispatchUpgradeRequired(
-                    "coordinator lacks task category filtering/classification"
-                )
-            self._task_categories_supported = True
+        if self.health().get("task_categories") != 1:
+            raise DispatchUpgradeRequired(
+                "coordinator lacks task category filtering/classification"
+            )
 
     def list(self, **params: Any) -> list[dict]:
         if params.get("category") is not None:

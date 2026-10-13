@@ -33,7 +33,12 @@ the same selector. `get`, results, events, progress and session reverse lookups
 remain category-independent.
 
 Clients require `/health`'s `task_categories: 1` before explicit category
-reads, maintenance creation, or classification. An older coordinator that
+reads, maintenance creation, or classification.
+The check runs for each category-sensitive operation using the client's existing
+bounded transport/error flow, including category-bearing schedule registration.
+A positive result is not cached for the client lifetime: reconnect or rollback
+can replace the coordinator at the same URL with an older generation.
+An older coordinator that
 silently ignores unknown query parameters is rejected as upgrade-required.
 Remote CLI forwarding preserves the flag; an older peer CLI refuses the unknown
 flag instead of displaying a misleading unfiltered view. Omitted/work creation
