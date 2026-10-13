@@ -619,6 +619,18 @@ demand through the `Installation context full` workflow. This keeps unrelated
 pull requests incremental and keeps the required fast lane independent from the
 size of the long-form regression portfolio.
 
+Native Windows diagnostic evidence is a separate, bounded selection inside
+the existing `test runner (windows-latest)` job. It runs actual `status` and
+`probe-legacy` CLI calls, existing/absent pointer checks, and mutation-entry
+guards from `test_installation_mode_governance.py`; it is not inferred from
+the job merely finishing successfully. The step has a two-minute budget,
+uses Windows PowerShell 5.1 via
+`INSTALLATION_CONTEXT_POWERSHELL=powershell`, and shares the
+`tools/installation_context_ci_scope.py` path detector with Linux. Canonical
+and derived implementation changes trigger it; unrelated docs do not.
+An explicitly requested unavailable shell fails collection rather than
+silently skipping the evidence. No exhaustive adapter matrix is added to PR CI.
+
 Run the relevant suite yourself before pushing a runtime change — there is
 intentionally **no** automatic push/PR gate. Fast structural/contract checks are
 marked `@pytest.mark.guard` (marketplace + picker integrity, shipped-manifest

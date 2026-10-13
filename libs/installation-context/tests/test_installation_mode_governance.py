@@ -16,7 +16,15 @@ import pytest
 LIB = Path(__file__).resolve().parents[1]
 PYTHON_SCRIPT = LIB / "installation_context.py"
 POSIX_SCRIPT = LIB / "installation-context.sh"
-POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
+_REQUESTED_POWERSHELL = os.environ.get("INSTALLATION_CONTEXT_POWERSHELL")
+if _REQUESTED_POWERSHELL:
+    POWERSHELL = shutil.which(_REQUESTED_POWERSHELL)
+    if POWERSHELL is None:
+        raise RuntimeError(
+            f"Requested installation-context PowerShell runner is unavailable: {_REQUESTED_POWERSHELL}"
+        )
+else:
+    POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 SOURCE_FIXTURES = LIB / "fixtures" / "source-identities.json"
 GOVERNANCE_FIXTURES = LIB / "fixtures" / "installation-mode-governance.json"
 PLUGIN_ID = "agent-example"
@@ -75,6 +83,18 @@ def _load_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.mark.installation_context_smoke
+def test_explicit_powershell_unavailable_fails_instead_of_skipping() -> None:
+    environment = {**os.environ}
+    environment["INSTALLATION_CONTEXT_POWERSHELL"] = "installation-context-shell-does-not-exist"
+    result = subprocess.run(
+        [sys.executable, "-c", "import runpy,sys; runpy.run_path(sys.argv[1])", __file__],
+        env=environment, capture_output=True, text=True, check=False, timeout=20,
+    )
+    assert result.returncode != 0
+    assert "Requested installation-context PowerShell runner is unavailable" in result.stderr
 
 
 def _source_vector(index: int = 0) -> dict[str, object]:
