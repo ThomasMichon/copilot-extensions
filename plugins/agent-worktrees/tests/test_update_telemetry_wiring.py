@@ -191,7 +191,7 @@ def test_force_runtime_option_parses_forwards_and_selects(monkeypatch, tmp_path)
     monkeypatch.setattr(m, "_module_names", lambda plugin_dir: set())
     monkeypatch.setattr(
         m, "_reconcile_one_runtime",
-        lambda name, plat, *, force: (seen.__setitem__(name, force), "OK")[1],
+        lambda name, plat, *, force, gate_context=None: (seen.__setitem__(name, force), "OK")[1],
     )
     targets = {
         name: runtime._RegisteredPluginTarget(None, runtime._PluginActivation.ACTIVE)
@@ -226,6 +226,7 @@ def test_module_installer_timeout_is_timeout_whatever_the_slot(
     module = tmp_path / "agent-example"
     (module / "scripts").mkdir(parents=True)
     (module / "scripts" / "install.sh").write_text("#!/bin/sh\n")
+    (module / "plugin.json").write_text(json.dumps({"name": "agent-example", "runtimeScope": "universal"}))
     root = tmp_path / "module-runtime"
     _write_slot(root, "3.0.0", slot)
     environment = {k: v for k, v in os.environ.items() if k != "COPILOT_EXTENSIONS_CONTEXT"}
