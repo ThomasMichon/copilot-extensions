@@ -131,7 +131,10 @@ def _write_supervisor_progress(scope: str, progress: dict) -> None:
         raise RuntimeError("supervisor progress snapshot is unavailable")
     if payload.get("cycle_id") != progress.get("cycle_id"):
         raise RuntimeError("supervisor progress cycle is superseded")
-    payload["progress"] = progress
+    generation = payload.get("generation")
+    if not isinstance(generation, dict) or generation.get("pid") != os.getpid():
+        raise RuntimeError("supervisor progress generation is superseded")
+    payload["progress"] = {**progress, "generation": generation}
     temporary = path.with_suffix(f".{os.getpid()}.tmp")
     temporary.write_text(json.dumps(payload), encoding="utf-8")
     os.replace(temporary, path)

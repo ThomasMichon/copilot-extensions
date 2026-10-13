@@ -16,10 +16,112 @@ review, copilot-extensions#3731).
 from __future__ import annotations
 
 import logging
+import copy
+import time
+from concurrent.futures import CancelledError, Executor, Future, TimeoutError
+
+import httpx
 
 from .registrations import RegistrationKind
 
 log = logging.getLogger("agent-dispatch.supervisor-daemon")
+
+class BoundedDeclarationPublisher:
+    """Single tracked metadata batch; uncertain writes are read back before retry."""
+
+    def __init__(self):
+        self.future: Future | None = None
+        self.records: dict[str, dict] = {}
+        self.inflight_ids: set[str] = set()
+        self.seen_ids: set[str] = set()
+
+    def poll(self, client, registrations: list[dict], *, executor: Executor, deadline: float) -> set[str]:
+        wanted = {reg["id"]: reg for reg in registrations if reg.get("kind") in RegistrationKind.DIRECT}
+        self.seen_ids.update(wanted)
+        if self.future is not None and self.future.done():
+            try:
+                self.records = self.future.result()
+                self.seen_ids.difference_update(self.inflight_ids - set(self.records))
+            except CancelledError:
+                pass  # queued batch performed no write; retain the prior ledger
+            finally:
+                self.future = None
+                self.inflight_ids = set()
+        if self.future is None and time.monotonic() < deadline:
+            for rid in self.seen_ids:
+                self.records.setdefault(rid, {"target": wanted.get(rid), "state": "pending"})
+            self.inflight_ids = set(wanted) | set(self.records)
+            self.future = executor.submit(self._advance, client, wanted, self.records, deadline)
+        if self.future is not None:
+            try:
+                self.records = self.future.result(timeout=max(0.0, deadline - time.monotonic()))
+            except TimeoutError:
+                if self.future.done():
+                    raise
+            else:
+                self.seen_ids.difference_update(self.inflight_ids - set(self.records))
+                self.future = None
+                self.inflight_ids = set()
+        return set(wanted) | set(self.records) | self.inflight_ids | self.seen_ids
+
+    @staticmethod
+    def _matches(row: dict | None, target: dict | None) -> bool:
+        if target is None:
+            return row is None
+        return row is not None and all(
+            row.get(key, "default" if key == "env" else None)
+            == target.get(key, "default" if key == "env" else None)
+            for key in ("kind", "spec", "machine", "env")
+        )
+
+    def _advance(self, client, wanted: dict[str, dict], previous: dict[str, dict], deadline: float) -> dict:
+        wanted, records = copy.deepcopy(wanted), copy.deepcopy(previous)
+        try:
+            return self._advance_batch(client, wanted, records, deadline)
+        finally:
+            # Publish the partial ledger even if a later malformed item aborts:
+            # earlier unknown writes must not be downgraded to unstarted work.
+            self.records = records
+
+    @classmethod
+    def _advance_batch(cls, client, wanted: dict[str, dict], records: dict[str, dict], deadline: float) -> dict:
+        if time.monotonic() >= deadline:
+            return records
+        try:
+            rows = {row["id"]: row for row in client.list_registrations(include_paused=True)}
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
+            log.warning("declaration publication readback unavailable: error_type=%s", type(exc).__name__)
+            return records
+        for rid in sorted(set(wanted) | set(records)):
+            if time.monotonic() >= deadline:
+                break
+            prior = records.get(rid)
+            target = (
+                prior["target"] if prior is not None and prior["state"] == "unknown"
+                else wanted.get(rid)
+            )
+            if cls._matches(rows.get(rid), target):
+                if target is None:
+                    records.pop(rid, None)
+                else:
+                    records[rid] = {"target": target, "state": "confirmed"}
+                continue
+            records[rid] = {"target": target, "state": "unknown"}
+            try:
+                if target is None:
+                    client.remove_registration(rid)
+                else:
+                    client.register_registration(
+                        target["kind"], target["spec"], reg_id=rid,
+                        machine=target.get("machine"), env=target.get("env", "default"),
+                    )
+            except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
+                log.warning("declaration publication outcome unknown: error_type=%s", type(exc).__name__)
+            else:
+                if target is not None:
+                    records[rid] = {"target": target, "state": "confirmed"}
+                # Keep withdrawal fenced until a subsequent read confirms absence.
+        return records
 
 
 def publish_declared_registrations(

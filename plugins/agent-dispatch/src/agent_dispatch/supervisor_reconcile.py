@@ -9,8 +9,7 @@ from collections.abc import Callable
 from concurrent.futures import Executor, ThreadPoolExecutor, TimeoutError
 from typing import Any
 
-from .companion import CompanionError, CompanionIndeterminate
-from .managed_runtime import ManagedRuntimeError
+from .companion import CompanionIndeterminate
 
 log = logging.getLogger("agent-dispatch.supervisor-daemon")
 
@@ -23,6 +22,9 @@ class BoundedReconciliation:
         self._receipt_reconcile_future = None
         self._receipt_executor = None
         self._read_executor = None
+        self._publication_executor = None
+        self._retired_bounded_executors = []
+        self._declaration_publisher = None
         self._resolution_futures = {}
         self._discovery_futures = {}
         self._last_store_registrations = []
@@ -31,12 +33,17 @@ class BoundedReconciliation:
         self._progress_warning_after: dict[str, float] = {}
 
     def _shutdown_bounded_pools(self, drained: bool) -> None:
-        for field in ("_receipt_executor", "_read_executor"):
+        for retired in self._retired_bounded_executors:
+            retired.shutdown(wait=False, cancel_futures=True)
+        if not any(not future.done() for future in self._probe_inflight):
+            self._retired_bounded_executors.clear()
+        for field in ("_receipt_executor", "_read_executor", "_publication_executor"):
             pool = getattr(self, field)
             if pool is not None:
                 pool.shutdown(wait=False, cancel_futures=True)
-                if drained:
-                    setattr(self, field, None)
+                if not drained:
+                    self._retired_bounded_executors.append(pool)
+                setattr(self, field, None)
 
     def _phase(self, phase: str) -> None:
         self._phase_name = phase
@@ -69,10 +76,29 @@ class BoundedReconciliation:
         try:
             operations = getattr(self._companion(), "receipt_operation_progress", None)
             snapshot["receipt_operations"] = operations() if callable(operations) else []
-        except (OSError, ValueError, CompanionError, CompanionIndeterminate, ManagedRuntimeError) as exc:
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
             self._warn_progress_failure("receipt-progress-unavailable", exc)
             snapshot.update(receipt_operations=None, observation_error="receipt-progress-unavailable")
         return snapshot
+
+    def _publish_declarations(self, registrations: list[dict]) -> set[str]:
+        from .supervisor_daemon_registration_publish import BoundedDeclarationPublisher
+
+        if self._declaration_publisher is None:
+            self._declaration_publisher = BoundedDeclarationPublisher()
+        if self._publication_executor is None:
+            self._publication_executor = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="dispatch-publication",
+            )
+        try:
+            return self._declaration_publisher.poll(
+                self.client, registrations, executor=self._publication_executor,
+                deadline=self._reconcile_deadline if self._reconcile_deadline is not None
+                else time.monotonic() + self._reconcile_call_budget,
+            )
+        finally:
+            if self._declaration_publisher.future is not None:
+                self._probe_inflight.add(self._declaration_publisher.future)
 
     def _bounded_read(self, key: str, read: Callable[[], Any]) -> Any:
         if self._reconcile_deadline is None:

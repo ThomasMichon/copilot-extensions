@@ -450,7 +450,9 @@ def test_status_io_failure_cannot_abort_desired_work(tmp_path, monkeypatch, capl
     if failure == "corrupt":
         path.write_text("{invalid", encoding="utf-8")
     elif failure == "unwritable":
-        path.write_text(json.dumps({"cycle_id": 1}), encoding="utf-8")
+        path.write_text(json.dumps({
+            "cycle_id": 1, "generation": {"pid": os.getpid(), "start_token": "fixture"},
+        }), encoding="utf-8")
         original = type(path).write_text
 
         def write(candidate, *args, **kwargs):

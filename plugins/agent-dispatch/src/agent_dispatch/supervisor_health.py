@@ -47,7 +47,20 @@ def supervisor_progress_observation(
     observed_now = time.time() if now is None else now
     if not math.isfinite(observed_now):
         return result
-    elapsed = observed_now - started
+    progress = runtime_status.get("progress")
+    last_progress = started
+    if isinstance(progress, dict):
+        stamp = progress.get("observed_at")
+        cycle = runtime_status.get("cycle_id")
+        if (
+            type(cycle) is int and type(progress.get("cycle_id")) is int
+            and progress["cycle_id"] == cycle
+            and progress.get("generation", generation) == generation
+            and type(stamp) in (int, float) and math.isfinite(stamp)
+            and started <= stamp <= observed_now
+        ):
+            last_progress = stamp
+    elapsed = observed_now - last_progress
     state = "progressing"
     if not isinstance(finished, (float, int)) or finished < started:
         if elapsed >= SUPERVISOR_STALL_THRESHOLD_SECONDS:
@@ -56,7 +69,6 @@ def supervisor_progress_observation(
         return result
     elif observed_now - finished >= SUPERVISOR_STALL_THRESHOLD_SECONDS:
         state = "stalled"
-    progress = runtime_status.get("progress")
     return {
         **result, "state": state, "generation": generation,
         "cycle_id": runtime_status.get("cycle_id"),

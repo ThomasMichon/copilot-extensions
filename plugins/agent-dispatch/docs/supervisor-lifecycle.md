@@ -12,6 +12,13 @@ registration reads and companion provider resolution. Pending reads retain the
 last confirmed desired state; unfinished providers cannot supply new launch
 authority. Receipt integrity runs in a separate two-worker pool, so a contended
 root lock or slow tree hash cannot occupy every health/runtime worker.
+Declaration conversion runs inside the discovery future. Coordinator mirroring
+uses one tracked publication batch on a separate single-worker pool: a slow
+register/remove cannot hold the master, and the batch checks its deadline
+between requests. Uncertain metadata writes are read back before an idempotent
+retry of that exact target; withdrawals stay suppressed until absence is
+confirmed. A changed declaration cannot submit a concurrent publication batch.
+Publication is metadata mirroring, not authority to replay task execution.
 
 Each withdrawn receipt has one durable `*.reconcile-operation.json` record tied
 to its exact process receipt and selected launch generation. `pending`, `timeout`
@@ -33,6 +40,10 @@ Completed owner probes are discarded on every outcome, so a transient probe
 error or unusable token can retry in the same daemon. Receipt futures enter
 shutdown accounting even when a later record aborts the controller's pass;
 partial scheduling cannot be reported as a clean drain.
+Shutdown retires bounded executors and clears their active references even when
+work misses the grace window. A failed successor spawn can reclaim the singleton
+and create usable replacement pools; original futures and publication/receipt
+operations remain tracked rather than resubmitted. This is not native custody proof.
 Changed receipts are superseded rather than retired. The existing crash-safe OS
 lock primitive serializes the exact receipt operation. No new reservation store,
 force-release policy or automatic recovery scheduler is introduced.
@@ -53,6 +64,11 @@ failures cannot abort desired-state reconciliation or hide completed mutations:
 they report fixed, sanitized reason/error categories through standard logging,
 limited to one warning per category per 30 seconds. Unavailable receipt progress
 is marked unknown (`null` with an observation error), not a confirmed empty list.
+Data/state failures in the final summary follow the same classified best-effort
+rules. The observer uses only finite, non-future progress timestamps from the
+current cycle and matching generation; a fresh phase can distinguish an advancing
+slow cycle from a wedge. A superseded writer cannot overwrite another generation's
+progress. These observations still confer no recovery authority.
 Independent watchdog invocation,
 custody/recovery and native platform proof remain integration gates of the
 existing #5301/#5655 owners. This slice neither implements a second watchdog nor

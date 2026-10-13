@@ -356,20 +356,18 @@ class SupervisorDaemon(BoundedReconciliation):
         if self.declared_source is None:
             return []
         from .registrar_reconcile import declared_registrations
-        from .supervisor_daemon_registration_publish import publish_declared_registrations
-
         try:
-            decls = self._bounded_read("declarations", lambda: list(self.declared_source()))
+            registrations = self._bounded_read("declarations", lambda: declared_registrations(
+                list(self.declared_source()), machine=self.machine, env=self.env,
+            ))
         except _FUTURE_TIMEOUT:
             log.warning("declaration discovery remains pending; retaining confirmed declarations")
             return self._last_declared
         except Exception:  # pragma: no cover - discovery is environment-dependent
             log.exception("failed to read declared profile set; keeping the last known set")
             return self._last_declared
-        self._last_declared = declared_registrations(decls, machine=self.machine, env=self.env)
-        self._published_declared_ids = publish_declared_registrations(
-            self.client, self._last_declared, published_ids=self._published_declared_ids
-        )
+        self._last_declared = registrations
+        self._published_declared_ids = self._publish_declarations(self._last_declared)
         return self._last_declared
 
     def _overridden_off(self) -> set[str]:
