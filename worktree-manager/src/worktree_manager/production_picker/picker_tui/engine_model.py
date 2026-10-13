@@ -225,6 +225,21 @@ class PickerScreenModelMixin:
                 machine, rec.get("id"))
         except Exception:
             return []
+    def _worktree_supervised_workers_index(self, records):
+        from .pivots import supervised_workers_by_worktree
+
+        machine_keys = self._machine_key_map()
+        scopes = {}
+        result = {}
+        for rec in records:
+            display = rec.get("machine")
+            machine = machine_keys.get(display, display) if display else None
+            if machine not in scopes:
+                scopes[machine] = supervised_workers_by_worktree(
+                    self.pivots, self._pivot_runtimes, machine)
+            result[self._row_key(rec)] = scopes[machine].get(
+                str(rec.get("id") or "").strip().lower(), [])
+        return result
     def _task_groups(self):
         """Task rows grouped for display. Groups by the pivot's ``group`` entry
         field (``group_field``) when the manifest declares one -- e.g. the

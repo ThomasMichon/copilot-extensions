@@ -635,7 +635,7 @@ MAINT_ACTION_DESC = {
 
 
 class VRow:
-    __slots__ = ("data", "kind", "pin_band", "pin_section", "stop", "text")
+    __slots__ = ("alt", "data", "kind", "pin_band", "pin_section", "stop", "text")
 
     def __init__(self, text, stop=None, kind=None, data=None):
         self.text = text
@@ -644,6 +644,7 @@ class VRow:
         self.pin_band = None
         self.pin_section = None
         self.data = data
+        self.alt = False
 
 
 def _resolve_mock_mode(explicit=None):

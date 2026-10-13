@@ -9,6 +9,8 @@ from textual.visual import Visual
 
 
 class DeferredRow(Visual):
+    __slots__ = ("_render",)
+
     def __init__(self, render: Callable[[], Text]) -> None:
         self._render = render
 

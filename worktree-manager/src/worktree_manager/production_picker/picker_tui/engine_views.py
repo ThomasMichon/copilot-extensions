@@ -272,6 +272,8 @@ class WorktreesView:
         eng = self._eng
         btn_focus = sel == ("BTN", 0)
         cols, sections = eng.current_list_visible()
+        worker_index = eng._worktree_supervised_workers_index(
+            [rec for _label, rows in sections for rec in rows])
         # The checkbox gutter's two left cells (box + margin) are ALWAYS
         # reserved so the table never shifts. Since #88 NF5-5 (mouse support in
         # the native list) the box GLYPH is also always shown per row, so
@@ -304,21 +306,33 @@ class WorktreesView:
                 render_row = partial(self._row_text, rec, li, sel, width, lcols,
                                      preview, preview_ids, alt=alt)
                 render_detail = partial(self._detail_line, rec, width, alt=alt)
-                add(DeferredRow(render_row) if deferred else render_row(),
-                    stop=("L", li), data=rec)
+                vrow = add(DeferredRow(render_row) if deferred else render_row(),
+                           stop=("L", li), data=rec)
+                if vrow is not None:
+                    vrow.alt = alt
                 add(DeferredRow(render_detail) if deferred else render_detail())
-                for worker_line in self._worker_lines(rec, width, alt=alt):
-                    add(worker_line)
+                workers = worker_index.get(eng._row_key(rec), [])
+                if deferred:
+                    for index in range(min(len(workers), 2) + (len(workers) > 2)):
+                        add(DeferredRow(partial(
+                            self._worker_line_at, rec, width, index, workers, alt)))
+                else:
+                    for worker_line in self._worker_lines(rec, width, alt=alt, workers=workers):
+                        add(worker_line)
                 li += 1
 
-    def _worker_lines(self, rec, width, limit=2, alt=False):
+    def _worker_line_at(self, rec, width, index, workers, alt):
+        return self._worker_lines(rec, width, alt=alt, workers=workers)[index]
+
+    def _worker_lines(self, rec, width, limit=2, alt=False, *, workers=None):
         """One dim ``→ <venue> LIVE|IDLE <activity>`` line per remote worker
         this worktree supervises (venue-pivots-ux: supervised workers, seen
         from the worktree row), at most ``limit`` inline plus a ``+N more``
         tail. The activity is the transient half, so it is what gets clipped.
         Empty until a venue pivot has loaded (graceful absence). ``alt`` --
         see ``_row_text``'s own docstring."""
-        workers = self._eng._worktree_supervised_workers(rec)
+        if workers is None:
+            workers = self._eng._worktree_supervised_workers(rec)
         lines = []
         for worker in workers[:limit]:
             line = Text("      → ", style=C_DIM)

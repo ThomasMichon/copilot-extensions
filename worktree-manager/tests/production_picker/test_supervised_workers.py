@@ -113,6 +113,26 @@ def test_find_supervised_workers_uses_the_machine_scope_for_machine_pivots():
     assert pivots.find_supervised_workers([{"pivot": reg}], runtimes, "other", _WID) == []
 
 
+def test_supervised_worker_index_visits_each_ready_scope_once():
+    scans = []
+
+    class Rows(list):
+        def __iter__(self):
+            scans.append(True)
+            return super().__iter__()
+
+    reg = _worker_pivot()
+    rows = Rows(
+        {"display": f"worker-{i}", "worktree_id": f"worktree-{i}"}
+        for i in range(1100)
+    )
+    index = pivots.supervised_workers_by_worktree(
+        [{"pivot": reg}], {reg.name: _Runtime({"": rows})}, "host")
+    assert len(index) == 1100
+    assert scans == [True]
+    assert index["worktree-1099"][0]["label"] == "worker-1099"
+
+
 def test_find_supervised_workers_is_empty_until_the_pivot_has_loaded():
     reg = _worker_pivot()
     rows = [{"display": "cs-one", "worktree_id": _WID}]

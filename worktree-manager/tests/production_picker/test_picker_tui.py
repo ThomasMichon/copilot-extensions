@@ -7488,7 +7488,7 @@ def test_live_column_repaints_when_async_mux_reconcile_lands():
             assert len(recs) == 1
             assert recs[0]["sess"] == "PROC"
             nl = scr.query_one("#nf-body-data")
-            idx, _rec, _li = nl._l_rows[recs[0]["selection_id"]]
+            idx, _rec, _li, _alt = nl._l_rows[recs[0]["selection_id"]]
             assert "PROC" in str(nl.get_option_at_index(idx).prompt)
 
             # The async Group C reconcile lands: mux_attached flips true, with
@@ -7501,7 +7501,7 @@ def test_live_column_repaints_when_async_mux_reconcile_lands():
 
             recs = scr.list_records()
             assert recs[0]["sess"] == "MUX(1)"
-            idx, _rec, _li = nl._l_rows[recs[0]["selection_id"]]
+            idx, _rec, _li, _alt = nl._l_rows[recs[0]["selection_id"]]
             assert "MUX(1)" in str(nl.get_option_at_index(idx).prompt)
             assert "PROC" not in str(nl.get_option_at_index(idx).prompt)
 
@@ -11460,8 +11460,8 @@ def test_native_data_content_repaint_patches_one_row_without_a_full_rebuild():
                 assert not rebuild_calls, (
                     "a content-only sess change triggered a full _rebuild() "
                     "-- the content-repaint fast path should have handled it")
-                assert patch_calls == [idx2_before], (
-                    f"expected exactly one patch at index {idx2_before}, "
+                assert patch_calls == [idx2_before, idx2_before + 1], (
+                    f"expected title/detail patches at index {idx2_before}, "
                     f"got {patch_calls}")
                 idx2 = nl._l_rows[rid2][0]
                 option = nl.get_option_at_index(idx2)

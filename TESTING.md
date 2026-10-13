@@ -144,19 +144,34 @@ The stalled descendant/captured-pipe case lives separately in
 `test_first_install_bootstrap_watchdog.py` and runs only in the full suite,
 not the required guard lane.
 
-Worktree Manager's native viewport regression uses 1,100 synthetic worktrees,
-with 40 visible by default. It checks Show Hidden through the real Textual
-compositor, bounds row formatting by the viewport, retains one-line option
-geometry and exercises focus/scroll continuity. Native rows defer formatting
-and Rich-to-Textual conversion until painted; the deterministic capture seam
-resolves only its selected window and retains Rich styles.
+Worktree Manager's native viewport regression uses 1,100 live synthetic
+worktrees, with 40 visible by default, both without workers and with 1,100
+loaded worker rows. It checks Show Hidden and the actual pulse refresh through
+the real Textual compositor, bounds formatting by the viewport, retains
+one-line option geometry and exercises off-screen selection/content updates,
+late worker changes, focus and scrolling. Worker scopes are indexed once per
+build rather than scanned per worktree. Native title, detail and worker rows
+remain deferred during incremental repaint too. Native chrome does not build
+the data body; deterministic capture resolves its selected window with Rich
+styles intact.
 The ordinary regression enforces access counts rather than host-speed timing.
-For an explicit local 200 ms rebuild-to-painted check:
+For an explicit local 200 ms rebuild/pulse-to-painted check, collect only the
+benchmark file and run each shape in its own contained process, matching one
+production application. Wait for the default view to paint before measuring a
+mode change. Process CPU and GC costs are reported, never subtracted from the
+wall-time gate; no GC policy is changed:
 
 ```powershell
-$env:PYTEST_ADDOPTS = '-k native_viewport -s'
+$target = (Resolve-Path worktree-manager\tests\production_picker\test_native_viewport.py).Path
+$ignore = Get-ChildItem worktree-manager\tests -Filter 'test*.py' -Recurse -File |
+    Where-Object FullName -ne $target |
+    ForEach-Object { '--ignore="' + $_.FullName + '"' }
 $env:WORKTREE_MANAGER_RENDER_BUDGET = '1'
-python tools\run-standalone-tests.py worktree-manager --prepare
+foreach ($shape in 'False', 'True') {
+    $env:PYTEST_ADDOPTS = '-s -k ' + $shape + ' ' + ($ignore -join ' ')
+    python tools\run-standalone-tests.py worktree-manager --prepare
+    if ($LASTEXITCODE -ne 0) { throw 'Native viewport budget failed' }
+}
 ```
 
 FINAL stamp regressions use one immutable real-Git template and isolated
