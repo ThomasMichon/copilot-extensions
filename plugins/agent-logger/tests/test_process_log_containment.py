@@ -149,6 +149,55 @@ def test_process_log_copy_preserves_consumer_error(
         filesystem._copy_process_logs(tmp_path, tmp_path / "destination")
 
 
+@pytest.mark.parametrize("operation", ["read", "copy"])
+def test_process_log_root_identity_error_preserves_reason_and_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    from agent_logger import process_logs
+    from agent_logger.sync import archive_directory as directory_module
+    from agent_logger.sync.targets import filesystem
+
+    def changed_directory(path: Path) -> None:
+        raise directory_module.ArchiveRootChangedError("archive root changed while opening")
+
+    target = directory_module if operation == "read" else filesystem
+    monkeypatch.setattr(target, "archive_directory", changed_directory)
+    expected = (
+        directory_module.ArchiveRootChangedError
+        if operation == "read" else filesystem._SourceChangedDuringCopy
+    )
+    with pytest.raises(expected, match="root changed while opening") as caught:
+        if operation == "read":
+            with process_logs._process_log_directory(tmp_path):
+                pytest.fail("changed root was admitted")
+        else:
+            filesystem._copy_process_logs(tmp_path, tmp_path / "destination")
+    assert str(tmp_path) in str(caught.value)
+    assert "not a directory" not in str(caught.value)
+    assert isinstance(caught.value.__cause__, directory_module.ArchiveRootChangedError)
+
+
+def test_archive_directory_identity_check_uses_distinct_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger.sync.archive_directory import ArchiveRootChangedError, archive_directory
+
+    original_lstat = Path.lstat
+
+    def changed_identity(path: Path, *args: object, **kwargs: object) -> os.stat_result:
+        metadata = original_lstat(path, *args, **kwargs)
+        if path == tmp_path:
+            fields = list(metadata)
+            fields[1] += 1
+            return os.stat_result(fields)
+        return metadata
+
+    monkeypatch.setattr(Path, "lstat", changed_identity)
+    with pytest.raises(ArchiveRootChangedError, match="root changed while opening"):
+        with archive_directory(tmp_path):
+            pytest.fail("changed root was admitted")
+
+
 def test_process_log_invalid_source_diagnostic_names_path(tmp_path: Path) -> None:
     source = tmp_path / "not-a-directory"
     source.write_bytes(b"not a directory")

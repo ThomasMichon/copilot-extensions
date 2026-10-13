@@ -166,11 +166,13 @@ def supports_dir_fd() -> bool:
 @contextmanager
 def _process_log_directory(log_root: Path) -> Iterator[ArchiveDirectory]:
     """Normalize opening failures without relabelling errors in the consumer."""
-    from agent_logger.sync.archive_directory import archive_directory
+    from agent_logger.sync.archive_directory import ArchiveRootChangedError, archive_directory
 
     with ExitStack() as stack:
         try:
             directory = stack.enter_context(archive_directory(log_root))
+        except ArchiveRootChangedError as exc:
+            raise ArchiveRootChangedError(f"{exc}: {log_root}") from exc
         except (NotADirectoryError, ValueError) as exc:
             raise ValueError(f"process-log source is not a directory: {log_root}") from exc
         except OSError as exc:

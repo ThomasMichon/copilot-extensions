@@ -28,7 +28,7 @@ from agent_logger import process_logs as _process_logs
 from agent_logger import sessions
 from agent_logger.process_logs import is_process_log_candidate
 from agent_logger.sessions import SessionRef
-from agent_logger.sync.archive_directory import archive_directory
+from agent_logger.sync.archive_directory import ArchiveRootChangedError, archive_directory
 from agent_logger.sync.detritus import (
     DetritusSummary,
     discover_session_detritus,
@@ -403,6 +403,8 @@ def _copy_process_logs(
     with ExitStack() as stack:
         try:
             directory = stack.enter_context(archive_directory(source))
+        except ArchiveRootChangedError as exc:
+            raise _SourceChangedDuringCopy(f"{exc}: {source}") from exc
         except (NotADirectoryError, ValueError) as exc:
             raise ValueError(f"process-log source is not a directory: {source}") from exc
         opened = (
