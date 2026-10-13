@@ -35,8 +35,11 @@ Use non-secret paths and documents; argparse syntax diagnostics can echo argumen
 Artifacts must be ordinary nonempty files, at most 64 MiB each and 512 MiB in
 total for the selected role. Streaming reads are at most 64 KiB. Links and
 Windows reparse points in the inspected path chain are refused. Opening is
-checked against the inspected file identity and metadata; metadata, size and
-path are checked again after reading. Nonregular inputs, unreadable/missing
+checked against the inspected file identity and size; content timestamps and
+size are compared on the same opened handle before/after reading, and the path
+chain/file identity is checked again. Path metadata timestamps are not compared
+with handle timestamps: the two OS lookup paths can report different values
+without a content change. Nonregular inputs, unreadable/missing
 files, observed concurrent changes, digest mismatches and oversized sets fail
 explicitly without printing paths or file contents.
 

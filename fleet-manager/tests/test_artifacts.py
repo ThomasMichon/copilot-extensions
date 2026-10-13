@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -133,6 +134,20 @@ def test_exact_stream_and_aggregate_limits(tmp_path, monkeypatch):
     monkeypatch.setattr(artifacts, "MAX_ARTIFACT_BYTES", size - 1)
     with pytest.raises(PlanError, match="bounds"):
         artifacts.verify_role_artifacts(release, sources, role="client")
+
+
+def test_path_timestamp_difference_does_not_invent_content_change(tmp_path, monkeypatch):
+    release, sources = inputs(tmp_path)
+    original = artifacts._file_stat
+
+    def path_metadata(path):
+        info = original(path)
+        return SimpleNamespace(st_dev=info.st_dev, st_ino=info.st_ino,
+                               st_size=info.st_size, st_mtime_ns=info.st_mtime_ns - 100,
+                               st_ctime_ns=info.st_ctime_ns - 100)
+
+    monkeypatch.setattr(artifacts, "_file_stat", path_metadata)
+    assert artifacts.verify_role_artifacts(release, sources, role="gateway")["status"] == "integrity-match"
 
 
 def test_actual_64_mib_limit_and_bounded_stream_reads(tmp_path, monkeypatch):

@@ -16,7 +16,11 @@ CHUNK_BYTES = 64 * 1024
 
 
 def _identity(info):
-    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+    return info.st_dev, info.st_ino
+
+
+def _content_stamp(info):
+    return info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
 def _file_stat(path):
@@ -46,8 +50,11 @@ def _artifact(path, remaining):
         descriptor = os.open(path, flags)
         with os.fdopen(descriptor, "rb") as stream:
             opened = os.fstat(stream.fileno())
-            if not stat.S_ISREG(opened.st_mode) or _identity(opened) != _identity(before):
+            if (not stat.S_ISREG(opened.st_mode) or _identity(opened) != _identity(before)
+                    or opened.st_size != before.st_size):
                 raise PlanError("artifact changed during preflight")
+            if not 1 <= opened.st_size <= MAX_ARTIFACT_BYTES or opened.st_size > remaining:
+                raise PlanError("artifact set exceeds byte bounds or contains an empty artifact")
             hasher = hashlib.sha256()
             size = 0
             while True:
@@ -60,7 +67,8 @@ def _artifact(path, remaining):
                     raise PlanError("artifact set exceeds byte bounds")
                 hasher.update(chunk)
             after = os.fstat(stream.fileno())
-            if (_identity(after) != _identity(before) or size != before.st_size
+            # Compare content timestamps from the same handle, not cached path metadata.
+            if (_content_stamp(after) != _content_stamp(opened) or size != opened.st_size
                     or _identity(_file_stat(path)) != _identity(before)):
                 raise PlanError("artifact changed during preflight")
         return hasher.hexdigest(), size

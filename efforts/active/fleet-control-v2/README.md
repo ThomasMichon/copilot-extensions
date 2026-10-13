@@ -454,3 +454,8 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   No live external lane exists for this unassembled product and none was
   enrolled. Documentation impact covers the product README, artifact contract
   and canonical baseline/vertical gates. The full effort remains Active.
+- Native Windows CI exposed false change refusals from comparing path and
+  handle timestamps. Identity/size correlation remains across the open;
+  content-change stamps now compare the same handle before/after streaming.
+  The regression models timestamp disagreement while real mutation/tamper
+  checks remain required. No retry or CI bypass hides the failure.
