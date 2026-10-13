@@ -1,17 +1,125 @@
 """Synthetic task validation, not a native artifact writer or Tier-E judge."""
 
+import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import shlex
+import stat
+import subprocess
 import sys
 
+BASELINE_DIR = Path("/opt/copilot-cleanroom/native-cli-baseline")
 RECOVERY_PREREQUISITES = [
     "read_bound_checkpoint",
     "read_AGENTS.md",
     "refresh_context-handoff_skill",
     "get_context_remaining",
 ]
+
+
+def capture_baseline(workspace, destination, session_id):
+    """Setup-only capture; the live CLI invokes this as root before any driven turn."""
+    workspace, destination = workspace.resolve(), destination.resolve()
+    if destination == workspace or workspace in destination.parents:
+        raise ValueError("seed baseline must be outside the driven workspace")
+    if destination.exists():
+        raise ValueError("seed baseline already exists; refusing recapture")
+    names = ["AGENTS.md", "task.json", "audit-contract.md", "ledger.json", ".context-handoff/config.yaml"]
+    names += [path.relative_to(workspace).as_posix() for path in sorted((workspace / "corpus").glob("*.txt"))]
+    if not names[5:] or not isinstance(session_id, str) or not session_id:
+        raise ValueError("complete corpus and session identity required before seed capture")
+    destination.mkdir(parents=True)
+    hashes = {}
+    for name in names:
+        source = workspace / name
+        if source.is_symlink() or not source.is_file():
+            raise ValueError(f"seed input is absent or not a regular file: {name}")
+        target = destination / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        contents = source.read_bytes()
+        target.write_bytes(contents)
+        hashes[name] = hashlib.sha256(contents).hexdigest()
+    manifest = {"schema": 1, "workspace": str(workspace), "session_id": session_id, "files_sha256": hashes}
+    (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    for path in destination.rglob("*"):
+        path.chmod(0o555 if path.is_dir() else 0o444)
+    destination.chmod(0o555)
+    return manifest
+
+
+def seed_baseline(baseline=None):
+    directory = Path(baseline) if baseline is not None else BASELINE_DIR
+    try:
+        manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+        if (not isinstance(manifest, dict) or manifest.get("schema") != 1
+                or not isinstance(manifest.get("workspace"), str) or not manifest["workspace"]
+                or not isinstance(manifest.get("session_id"), str) or not manifest["session_id"]
+                or not isinstance(manifest.get("files_sha256"), dict)):
+            return None, ["seed baseline manifest is invalid"]
+        hashes = manifest["files_sha256"]
+        required = {"AGENTS.md", "task.json", "audit-contract.md", "ledger.json", ".context-handoff/config.yaml"}
+        if not required <= hashes.keys() or not any(name.startswith("corpus/") for name in hashes):
+            return None, ["seed baseline is incomplete"]
+        for name, digest in hashes.items():
+            relative = Path(name)
+            if relative.is_absolute() or ".." in relative.parts or not isinstance(digest, str):
+                return None, ["seed baseline contains an invalid file binding"]
+            path = directory / relative
+            if path.is_symlink() or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                return None, [f"seed baseline integrity failed: {name}"]
+        task = json.loads((directory / "task.json").read_text(encoding="utf-8"))
+        if not isinstance(task, dict) or not all(key in task for key in (
+                "original_objective", "parent_gate", "current_slice", "unresolved_user_requests", "decisions", "live_references")):
+            return None, ["seed task baseline is not an object"]
+        return {"directory": directory, "manifest": manifest, "task": task}, []
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError):
+        return None, ["seed baseline missing or unreadable; mutable workspace is not a fallback"]
+
+
+def workspace_seed_errors(workspace, seed):
+    errors = []
+    for name, digest in seed["manifest"]["files_sha256"].items():
+        path = workspace / name
+        try:
+            if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                errors.append(f"driven seed input changed: {name}")
+        except OSError:
+            errors.append(f"driven seed input unavailable: {name}")
+    return errors
+
+
+def seal_disposable_venue(workspace, baseline, sudoers=Path("/etc/sudoers.d"),
+                          sudo_binary=Path("/usr/bin/sudo"), container_flag=Path("/.dockerenv"),
+                          policy_check=None):
+    """Root setup only: remove the clean-room grant and executable escalation path."""
+    seed, errors = seed_baseline(baseline)
+    if (errors or not container_flag.is_file() or seed["manifest"]["workspace"] != str(workspace.resolve())
+            or workspace_seed_errors(workspace, seed)):
+        raise ValueError("refusing to seal an unverified disposable venue")
+    grant = sudoers / "operator"
+    if grant.read_text().strip() != "operator ALL=(ALL) NOPASSWD:ALL":
+        raise ValueError("unexpected clean-room sudo grant; refusing host/shared policy changes")
+    deny = sudoers / "zz-native-cli-operator-deny"
+    if deny.exists():
+        raise ValueError("venue already sealed; refusing policy replacement")
+    deny.write_text("operator ALL=(ALL:ALL) !ALL\n")
+    deny.chmod(0o440)
+    grant.unlink()
+    sudo_binary.chmod(stat.S_IMODE(sudo_binary.stat().st_mode) & ~(stat.S_ISUID | stat.S_ISGID))
+    if sudo_binary.stat().st_mode & (stat.S_ISUID | stat.S_ISGID):
+        raise RuntimeError("sudo elevation bits were not removed")
+    if policy_check is None:
+        subprocess.run(["visudo", "-c"], check=True)
+    else:
+        policy_check()
+    marker = {"schema": 1, "session_id": seed["manifest"]["session_id"],
+              "operator_sudo_denied": True, "sudo_elevation_bits_removed": True}
+    path = baseline / "venue-seal.json"
+    path.write_text(json.dumps(marker, indent=2) + "\n")
+    path.chmod(0o444)
+    return marker
 
 
 def result_text(completion):
@@ -274,7 +382,7 @@ def task_write(start):
         command = args.get("command", "")
         if not isinstance(command, str):
             return True
-        if re.search(r"(?<![2&])>(?!&)|write_text|json\.dump|[$`]", command):
+        if re.search(r">|write_text|json\.dump|[$`]", command):
             return True
         try:
             lexer = shlex.shlex(command.replace("\n", ";"), posix=True, punctuation_chars=";&|")
@@ -359,6 +467,8 @@ def write_destinations(start, workspace):
         elif token in (">", ">>"):
             if index + 1 >= len(tokens):
                 return None
+            if tokens[index + 1] == "&":
+                return None
             destination = path_for(tokens[index + 1])
             if destination is None:
                 return None
@@ -399,11 +509,17 @@ def write_destinations(start, workspace):
     return destinations or None
 
 
-def recovery_event_errors(events, root, workspace=None):
+def recovery_event_errors(events, root, workspace=None, baseline=None):
     """Validate semantic reads/refresh before work, not a fixed tool choreography."""
-    workspace = workspace or str(root)
+    seed, baseline_errors = seed_baseline(baseline)
+    if baseline_errors:
+        return [{"clear_event": None, "errors": baseline_errors}]
+    workspace = workspace or seed["manifest"]["workspace"]
+    integrity_errors = workspace_seed_errors(root, seed)
+    if integrity_errors:
+        return [{"clear_event": None, "errors": integrity_errors}]
     try:
-        guidance = (root / "AGENTS.md").read_text(encoding="utf-8")
+        guidance = (seed["directory"] / "AGENTS.md").read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         return [{"clear_event": None, "errors": ["durable guidance source unavailable or undecodable"]}]
     if not guidance.strip():
@@ -493,7 +609,7 @@ def recovery_event_errors(events, root, workspace=None):
                     errors.append("recorded task read has invalid source binding")
                 else:
                     try:
-                        source = root / Path(path).relative_to(Path(workspace))
+                        source = seed["directory"] / Path(path).relative_to(Path(workspace))
                         lines = source.read_text().splitlines()
                         if not valid_read_range(bounds, len(lines)):
                             errors.append("recorded task read range is outside source bounds")
@@ -532,7 +648,10 @@ def pressure_events(events):
             and root_event(event)]
 
 
-def cursor_errors(cursor, root):
+def cursor_errors(cursor, root, baseline=None):
+    seed, errors = seed_baseline(baseline)
+    if errors:
+        return errors
     if not isinstance(cursor, dict):
         return ["audit_cursor must be an object"]
     required = {"path", "last_line", "last_record", "last_severity", "next_path", "next_line"}
@@ -542,8 +661,8 @@ def cursor_errors(cursor, root):
         if type(cursor[key]) is not int:
             return [f"{key} must be a genuine integer"]
     try:
-        path = (root / cursor["path"]).resolve()
-        path.relative_to((root / "corpus").resolve())
+        path = (seed["directory"] / cursor["path"]).resolve()
+        path.relative_to((seed["directory"] / "corpus").resolve())
         lines = path.read_text().splitlines()
         line = cursor["last_line"]
         if type(line) is not int or not 1 <= line <= len(lines):
@@ -591,20 +710,31 @@ def action_errors(action, cursor, transitions, workspace):
     return []
 
 
-def common_errors(document, root, task, workspace=None):
-    errors = []
+def common_errors(document, root, task, workspace=None, baseline=None, kind="checkpoint"):
+    seed, errors = seed_baseline(baseline)
+    if errors:
+        return errors
+    task = seed["task"]
+    errors = workspace_seed_errors(root, seed)
     for key in ("original_objective", "parent_gate", "current_slice",
                 "unresolved_user_requests", "decisions", "live_references"):
         if document.get(key) != task[key]:
             errors.append(f"{key} must retain the authoritative task value")
-    if document.get("workspace") != (workspace or str(root)):
+    if document.get("workspace") != (workspace or seed["manifest"]["workspace"]):
         errors.append("workspace must be the actual synthetic cwd")
-    if not isinstance(document.get("session_id"), str) or not document["session_id"]:
-        errors.append("session_id is required")
+    if document.get("session_id") != seed["manifest"]["session_id"]:
+        errors.append("session_id must match the trusted seed identity")
     cursor = document.get("audit_cursor")
-    errors.extend(cursor_errors(cursor, root))
+    errors.extend(cursor_errors(cursor, root, baseline))
     measurements = document.get("trigger_measurements")
-    count = document.get("transition_number", document.get("transitions_completed"))
+    count_key = "transition_number" if kind == "checkpoint" else "transitions_completed"
+    wrong_key = "transitions_completed" if kind == "checkpoint" else "transition_number"
+    count = document.get(count_key)
+    if wrong_key in document:
+        errors.append(f"{wrong_key} is not a field for this document kind")
+    if ("transition_number" in document and "transitions_completed" in document
+            and document["transition_number"] != document["transitions_completed"]):
+        errors.append("transition counters disagree")
     for key in ("transition_number", "transitions_completed"):
         if key in document and (type(document[key]) is not int or document[key] not in (1, 2)):
             errors.append(f"{key} must be a genuine integer 1 or 2")
@@ -614,8 +744,13 @@ def common_errors(document, root, task, workspace=None):
         errors.append("trigger_measurements must retain one actual native result per completed transition")
     else:
         for index, measurement in enumerate(measurements):
+            captured, error = measurement_result({"data": {"success": True,
+                                                          "result": {"content": json.dumps(measurement)}}})
+            if error:
+                errors.append(f"trigger measurement: {error}")
+                continue
             try:
-                if measurement["context_info"]["promptTokenLimit"] != 200000:
+                if captured["context_info"]["promptTokenLimit"] != 200000:
                     errors.append("trigger measurement prompt limit changed")
                 if not 0.30 <= measurement["fraction_remaining"] <= 0.40:
                     errors.append("trigger utilization must be between 60% and 70%")
@@ -627,8 +762,8 @@ def common_errors(document, root, task, workspace=None):
     return errors
 
 
-def checkpoint_errors(document, root, task, workspace=None):
-    errors = common_errors(document, root, task, workspace)
+def checkpoint_errors(document, root, task=None, workspace=None, baseline=None):
+    errors = common_errors(document, root, task, workspace, baseline, "checkpoint")
     cursor = document.get("audit_cursor")
     if document.get("transition_number") == 2 or (
             isinstance(cursor, dict) and {"next_path", "next_line"} <= cursor.keys()):
@@ -641,8 +776,8 @@ def checkpoint_errors(document, root, task, workspace=None):
     return errors
 
 
-def witness_errors(document, root, task, workspace=None):
-    errors = common_errors(document, root, task, workspace)
+def witness_errors(document, root, task=None, workspace=None, baseline=None):
+    errors = common_errors(document, root, task, workspace, baseline, "witness")
     if type(document.get("transitions_completed")) is not int or document["transitions_completed"] != 2:
         errors.append("witness requires exactly two completed transitions")
     if document.get("declaration") != "NOT-JUDGED; parent remains Active":
@@ -656,17 +791,38 @@ def witness_errors(document, root, task, workspace=None):
 
 if __name__ == "__main__":
     kind, root_arg, *extra = sys.argv[1:]
-    if kind == "recovery-events":
+    if kind == "capture-baseline":
+        if (len(extra) != 2 or (os.name == "posix" and os.geteuid() != 0)
+                or Path(extra[0]).resolve() != BASELINE_DIR.resolve()):
+            raise SystemExit("capture-baseline requires root setup, destination and session id")
+        print(json.dumps(capture_baseline(Path(root_arg), Path(extra[0]), extra[1])))
+        sys.exit(0)
+    if kind == "verify-baseline":
         if len(extra) != 1:
-            raise SystemExit("recovery-events requires events.jsonl and the synthetic workspace directory")
+            raise SystemExit("verify-baseline requires workspace and trusted seed baseline")
+        seed, errors = seed_baseline(Path(extra[0]))
+        if seed is not None:
+            errors.extend(workspace_seed_errors(Path(root_arg), seed))
+        print(json.dumps({"valid": not errors, "errors": errors}))
+        sys.exit(bool(errors))
+    if kind == "seal-venue":
+        if (len(extra) != 1 or os.name != "posix" or os.geteuid() != 0
+                or Path(extra[0]).resolve() != BASELINE_DIR.resolve()):
+            raise SystemExit("seal-venue is root-only disposable clean-room setup")
+        print(json.dumps(seal_disposable_venue(Path(root_arg).resolve(), Path(extra[0]).resolve())))
+        sys.exit(0)
+    if kind == "recovery-events":
+        if len(extra) != 2:
+            raise SystemExit("recovery-events requires events.jsonl, workspace and trusted seed baseline")
         observations = recovery_event_errors([json.loads(line) for line in Path(root_arg).read_text().splitlines()],
-                                             Path(extra[0]).resolve())
+                                             Path(extra[0]).resolve(), baseline=Path(extra[1]))
         print(json.dumps({"valid": all(not row["errors"] for row in observations), "observations": observations}))
         sys.exit(any(row["errors"] for row in observations))
     root = Path(root_arg).resolve()
-    task = json.loads((root / "task.json").read_text())
+    if len(extra) != 1:
+        raise SystemExit("checkpoint/witness validation requires a trusted seed baseline")
     document = json.load(sys.stdin)
     validate = {"checkpoint": checkpoint_errors, "witness": witness_errors}[kind]
-    errors = validate(document, root, task)
+    errors = validate(document, root, baseline=Path(extra[0]))
     print(json.dumps({"valid": not errors, "errors": errors}))
     sys.exit(bool(errors))

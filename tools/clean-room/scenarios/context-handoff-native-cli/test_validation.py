@@ -1,5 +1,6 @@
 import copy
 from contextlib import redirect_stdout
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -8,14 +9,296 @@ import unittest
 from unittest.mock import patch
 
 import controller
+import os_permission_smoke
+import validation
 
 from validation import (
-    RECOVERY_PREREQUISITES, action_errors, checkpoint_errors, cursor_errors,
-    content_read, pressure_events, recovery_event_errors, successful, witness_errors,
+    RECOVERY_PREREQUISITES, action_errors,
+    content_read, pressure_events, successful,
 )
+
+TEST_SEEDS = {}
+
+
+def cursor_errors(cursor, root):
+    return validation.cursor_errors(cursor, root, baseline=TEST_SEEDS[str(root)])
+
+
+def checkpoint_errors(document, root, task=None):
+    return validation.checkpoint_errors(document, root, baseline=TEST_SEEDS[str(root)])
+
+
+def witness_errors(document, root, task=None):
+    return validation.witness_errors(document, root, baseline=TEST_SEEDS[str(root)])
+
+
+def recovery_event_errors(events, root):
+    return validation.recovery_event_errors(events, root, baseline=TEST_SEEDS[str(root)])
 
 
 class ValidationTests(unittest.TestCase):
+    def test_unpaid_permission_smoke_requires_all_denials_and_actual_inheritance(self):
+        names = ("direct_write", "direct_chmod", "direct_rename", "trusted_validator_write",
+                 "sudo_write", "sudo_chmod", "sudo_rename", "sudo_validator_write")
+        report = {"uid": 1000, "no_new_privs": 0, "workspace_changed": True,
+                  "checks": {name: {"denied": True} for name in names}}
+        self.assertEqual(os_permission_smoke.probe_errors(report, 0, 1000), [])
+        self.assertTrue(os_permission_smoke.probe_errors(report, 1, 1000))
+        for name in names:
+            bad = copy.deepcopy(report)
+            bad["checks"][name]["denied"] = False
+            self.assertTrue(os_permission_smoke.probe_errors(bad, 0, 1000), name)
+        bad = dict(report, workspace_changed=False)
+        self.assertTrue(os_permission_smoke.probe_errors(bad, 0, 1000))
+        self.assertTrue(os_permission_smoke.probe_errors(dict(report, uid=0), 0, 1000))
+
+        def missing():
+            raise FileNotFoundError(os_permission_smoke.errno.ENOENT, "fixture missing")
+
+        def forbidden():
+            raise PermissionError(os_permission_smoke.errno.EACCES, "fixture forbidden")
+
+        self.assertFalse(os_permission_smoke.denied(missing)["denied"])
+        self.assertTrue(os_permission_smoke.denied(forbidden)["denied"])
+
+    def setUp(self):
+        TEST_SEEDS.clear()
+
+    def provisional_baseline(self, root):
+        if str(root) in TEST_SEEDS:
+            return TEST_SEEDS[str(root)]
+        defaults = {
+            "AGENTS.md": "Seed fixture guidance.\n",
+            "task.json": json.dumps({key: key for key in (
+                "original_objective", "parent_gate", "current_slice", "unresolved_user_requests", "decisions", "live_references")}),
+            "audit-contract.md": "Seed fixture task contract.\n",
+            "ledger.json": '{"canary":"fixture","owner":"root-fixture"}\n',
+            ".context-handoff/config.yaml": "mode: auto\n",
+        }
+        for name, text in defaults.items():
+            path = root / name
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text)
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        destination = Path(holder.name) / "seed"
+        validation.capture_baseline(root, destination, "root-fixture")
+        TEST_SEEDS[str(root)] = destination
+        return destination
+
+    def test_agent_task_edit_cannot_change_authoritative_seed_gate(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evaluation, state, events = self.analyzer_fixture(Path(temp))
+            workspace = evaluation / "workspace"
+            baseline = self.provisional_baseline(workspace)
+            task = json.loads((workspace / "task.json").read_text())
+            task.update(original_objective="worker replacement", parent_gate="worker declares complete")
+            (workspace / "task.json").write_text(json.dumps(task))
+            document = json.loads(events[1]["data"]["arguments"]["content"])
+            document.update(original_objective=task["original_objective"], parent_gate=task["parent_gate"])
+            content = json.dumps(document)
+            events[1]["data"]["arguments"]["content"] = content
+            result = json.loads(events[4]["data"]["result"]["content"])
+            result["content"] = content
+            events[4]["data"]["result"]["content"] = json.dumps(result)
+            with patch.object(controller, "BASELINE", baseline, create=True):
+                report = self.run_analyzer(evaluation, state, events)
+            errors = report["checkpoint_contract_observations"][0]["errors"]
+            self.assertTrue(any("original_objective" in error or "parent_gate" in error for error in errors))
+
+    def test_agent_guidance_edit_cannot_change_expected_seed_content(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            events = self.semantic_events(root)
+            baseline = self.provisional_baseline(root)
+            forged = "Worker replacement guidance.\n"
+            (root / "AGENTS.md").write_text(forged)
+            next(e for e in events if e.get("id") == "complete-1-1")["data"]["result"]["content"] = forged
+            with patch.object(validation, "BASELINE_DIR", baseline, create=True):
+                report = recovery_event_errors(events, root)
+            self.assertTrue(report[0]["errors"])
+
+    def test_counter_conflicts_and_wrong_document_kind_are_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evaluation, state, events = self.analyzer_fixture(Path(temp))
+            root = evaluation / "workspace"
+            task = json.loads((root / "task.json").read_text())
+            checkpoint = json.loads(events[1]["data"]["arguments"]["content"])
+            witness = dict(checkpoint, transitions_completed=2,
+                           declaration="NOT-JUDGED; parent remains Active", unexercised=["adverse cases"])
+            self.assertTrue(witness_errors(witness, root, task))
+            self.assertTrue(checkpoint_errors(dict(checkpoint, transitions_completed=1), root, task))
+
+    def test_live_checkpoint_rejects_abbreviated_native_measurement(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evaluation, state, events = self.analyzer_fixture(Path(temp))
+            root = evaluation / "workspace"
+            task = json.loads((root / "task.json").read_text())
+            checkpoint = json.loads(events[1]["data"]["arguments"]["content"])
+            checkpoint["trigger_measurements"] = [{
+                "context_info": {"promptTokenLimit": 200000},
+                "fraction_remaining": .35, "context_window": {"number": 1}}]
+            self.assertTrue(checkpoint_errors(checkpoint, root, task))
+
+    def test_stderr_file_write_is_substantive_not_fd_duplication(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            events = self.semantic_events(root)
+            mutation = [
+                {"type": "tool.execution_start", "id": "stderr-writer", "timestamp": "1-0a",
+                 "data": {"toolCallId": "stderr-writer", "toolName": "bash",
+                          "arguments": {"command": f"printf '{{}}' 2>'{root / 'witness.json'}'"}}},
+                {"type": "tool.execution_complete", "id": "stderr-writer-complete", "timestamp": "1-0b",
+                 "data": {"toolCallId": "stderr-writer", "success": True, "result": {"content": ""}}},
+            ]
+            events[3:3] = mutation
+            report = recovery_event_errors(events, root)[0]
+            self.assertEqual(report["first_substantive_work"], "stderr-writer")
+            duplication = {"data": {"toolName": "bash", "arguments": {"command": "printf '{}' 2>&1"}}}
+            self.assertIsNone(validation.write_destinations(duplication, str(root)))
+
+    def test_missing_seed_baseline_is_uncredited_without_workspace_fallback(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evaluation, state, events = self.analyzer_fixture(Path(temp))
+            missing = Path(temp) / "absent-seed"
+            with patch.object(controller, "EVAL", evaluation), patch.object(controller, "STATE", state), \
+                    patch.object(controller, "BASELINE", missing), redirect_stdout(io.StringIO()):
+                (evaluation / "session/events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+                controller.analyze()
+            report = json.loads((evaluation / "observed-evidence.json").read_text())
+            self.assertFalse(report["seed_baseline_available"])
+            self.assertFalse(report["checkpoint_contract_observations"][0]["pre_clear_content_readback"])
+            self.assertTrue(report["semantic_recovery_validation"][0]["errors"])
+            self.assertTrue((evaluation / "judge-packet.json").exists())
+            root = evaluation / "workspace"
+            self.assertTrue(validation.recovery_event_errors(events, root, baseline=missing)[0]["errors"])
+
+    def test_seed_corpus_and_contract_mutations_fail_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evaluation, state, events = self.analyzer_fixture(Path(temp))
+            root = evaluation / "workspace"
+            baseline = TEST_SEEDS[str(root)]
+            document = json.loads(events[1]["data"]["arguments"]["content"])
+            (root / "corpus/shard-000.txt").write_text("record=00077 severity=0\nrecord=00001 severity=1\n")
+            document["audit_cursor"]["last_record"] = 77
+            self.assertTrue(validation.checkpoint_errors(document, root, baseline=baseline))
+            (root / "audit-contract.md").write_text("Worker weakened the contract.\n")
+            report = self.run_analyzer(evaluation, state, events)
+            self.assertTrue(any("audit-contract.md" in str(error) for error in report["evidence_errors"]))
+            self.assertTrue(report["semantic_recovery_validation"][0]["errors"])
+
+    def test_setup_captures_before_launch_and_pressure_does_not_reseed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            repository, evaluation, capsule = base / "driven", base / "eval", base / "trusted-seed"
+            lib = base / "lib"
+            lib.mkdir()
+            (lib / "literal-mode.md").write_text("Literal-mode fixture.\n")
+            commands = []
+
+            def arranged_command(*args, **kwargs):
+                commands.append(args)
+                if args[:2] == ("sudo", "python3"):
+                    if args[3] == "capture-baseline":
+                        validation.capture_baseline(Path(args[4]), Path(args[5]), args[6])
+                    elif args[3] == "seal-venue":
+                        capsule.chmod(0o755)  # Simulated trusted root setup, not a driven mutation.
+                        (capsule / "venue-seal.json").write_text(json.dumps({
+                            "session_id": json.loads((capsule / "manifest.json").read_text())["session_id"],
+                            "operator_sudo_denied": True, "sudo_elevation_bits_removed": True,
+                        }))
+                        capsule.chmod(0o555)
+                return ""
+
+            with patch.object(controller, "REPO", repository), patch.object(controller, "EVAL", evaluation), \
+                    patch.object(controller, "STATE", evaluation / "driver-state.json"), \
+                    patch.object(controller, "BASELINE", capsule), patch.object(controller, "LIB", lib), \
+                    patch.object(controller, "SCENARIO", Path(__file__).parent), \
+                    patch.object(controller, "run", side_effect=arranged_command):
+                controller.seed()
+                state, seed = controller.trusted_identity()
+                self.assertEqual(seed["manifest"]["session_id"], state["session_id"])
+                self.assertEqual(len(list((capsule / "corpus").glob("*.txt"))), 80)
+                self.assertTrue(any(args[:2] == ("sudo", "python3") for args in commands))
+                (repository / "task.json").write_text('{"worker":"changed"}')
+                with patch.object(controller, "send") as send:
+                    with self.assertRaises(RuntimeError):
+                        controller.pressure()
+                    send.assert_not_called()
+                self.assertEqual(hashlib.sha256((capsule / "task.json").read_bytes()).hexdigest(),
+                                 seed["manifest"]["files_sha256"]["task.json"])
+                (repository / "task.json").write_bytes((capsule / "task.json").read_bytes())
+                (evaluation / "driver-state.json").write_text('{"session_id":"worker replacement"}')
+                # Launch identity is derived from the capsule, not mutable state.
+                self.assertEqual(controller.trusted_identity()[0]["session_id"], state["session_id"])
+                with patch.object(controller, "capture", return_value=""), patch.object(controller.time, "sleep"), \
+                        patch.object(controller, "verify_tmux_server", return_value={"server_no_new_privs": True}), \
+                        patch.object(controller, "TMUX_SOCKET", base / "dedicated.sock"), \
+                        redirect_stdout(io.StringIO()):
+                    controller.launch()
+                tmux_commands = [args for args in commands if args[:3] == ("setpriv", "--no-new-privs", "tmux")]
+                self.assertTrue(tmux_commands)
+                self.assertTrue(all(args[3:5] == ("-S", str(base / "dedicated.sock")) for args in tmux_commands))
+                launch = next(args[-1] for args in tmux_commands if args[5] == "new-session")
+                self.assertIn("setpriv --no-new-privs", launch)
+                self.assertIn(state["session_id"], launch)
+                self.assertNotIn("worker replacement", launch)
+
+    def test_dedicated_tmux_server_must_be_nnp_and_never_reused(self):
+        with patch.object(controller, "tmux", return_value="123"), \
+                patch.object(Path, "read_text", return_value="Name:\ttmux\nNoNewPrivs:\t1\n"):
+            controller.verify_tmux_server()
+        with patch.object(controller, "tmux", return_value="123"), \
+                patch.object(Path, "read_text", return_value="Name:\ttmux\nNoNewPrivs:\t0\n"):
+            with self.assertRaises(RuntimeError):
+                controller.verify_tmux_server()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            evaluation, state, events = self.analyzer_fixture(root)
+            capsule = TEST_SEEDS[str(evaluation / "workspace")]
+            capsule.chmod(0o755)
+            (capsule / "venue-seal.json").write_text(json.dumps({
+                "session_id": "root-fixture", "operator_sudo_denied": True,
+                "sudo_elevation_bits_removed": True,
+            }))
+            socket = root / "occupied.sock"
+            socket.touch()
+            with patch.object(controller, "BASELINE", capsule), patch.object(controller, "TMUX_SOCKET", socket), \
+                    patch.object(controller, "REPO", evaluation / "workspace"), patch.object(controller, "run") as run:
+                with self.assertRaises(RuntimeError):
+                    controller.launch()
+                run.assert_not_called()
+
+    def test_venue_seal_cuts_server_mediated_sudo_without_host_policy_edits(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            evaluation, state, events = self.analyzer_fixture(root)
+            workspace = evaluation / "workspace"
+            capsule = TEST_SEEDS[str(workspace)]
+            capsule.chmod(0o755)
+            sudoers = root / "sudoers.d"
+            sudoers.mkdir()
+            grant = sudoers / "operator"
+            grant.write_text("operator ALL=(ALL) NOPASSWD:ALL\n")
+            sudo = root / "sudo"
+            sudo.write_text("fixture sudo executable")
+            sudo.chmod(0o6755)
+            flag = root / ".dockerenv"
+            flag.touch()
+            checked = []
+            marker = validation.seal_disposable_venue(workspace, capsule, sudoers, sudo, flag,
+                                                       policy_check=lambda: checked.append(True))
+            self.assertTrue(checked)
+            self.assertFalse(grant.exists())
+            self.assertEqual((sudoers / "zz-native-cli-operator-deny").read_text(), "operator ALL=(ALL:ALL) !ALL\n")
+            self.assertFalse(sudo.stat().st_mode & (0o4000 | 0o2000))
+            self.assertTrue(marker["operator_sudo_denied"])
+            self.assertTrue(marker["sudo_elevation_bits_removed"])
+            with self.assertRaises((OSError, ValueError)):
+                validation.seal_disposable_venue(workspace, capsule, sudoers, sudo, root / "not-a-container",
+                                                  policy_check=lambda: self.fail("host policy must not be touched"))
+
     def test_fabricated_shell_output_cannot_credit_a_file_read(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -51,6 +334,7 @@ class ValidationTests(unittest.TestCase):
             (root / "corpus").mkdir()
             (root / "corpus/shard-000.txt").write_text("".join(
                 f"record={number:05d} severity={number % 4}\n" for number in range(80)))
+            self.provisional_baseline(root)
             first = {"path": "corpus/shard-000.txt", "last_line": 1, "last_record": 0,
                      "last_severity": 0, "next_path": "corpus/shard-000.txt", "next_line": 2}
             self.assertEqual(cursor_errors(first, root), [])
@@ -98,6 +382,7 @@ class ValidationTests(unittest.TestCase):
             (root / "corpus").mkdir()
             (root / "corpus/shard-021.txt").write_text("".join(
                 f"record={1680 + n:05d} severity={(1680 + n) % 4}\n" for n in range(80)))
+            self.provisional_baseline(root)
             cursor = {"path": "corpus/shard-021.txt", "last_line": 34, "last_record": 1713,
                       "last_severity": 1, "next_path": "corpus/shard-021.txt", "next_line": 35}
             self.assertEqual(cursor_errors(cursor, root), [])
@@ -119,9 +404,10 @@ class ValidationTests(unittest.TestCase):
             (root / "corpus/shard-000.txt").write_text("record=00000 severity=0\nrecord=00001 severity=1\n")
             task = {key: key for key in ("original_objective", "parent_gate", "current_slice",
                                          "unresolved_user_requests", "decisions", "live_references")}
-            measurements = [{"context_info": {"promptTokenLimit": 200000}, "fraction_remaining": .35,
-                             "context_window": {"number": n}} for n in (1, 2)]
-            doc = dict(task, workspace=str(root), session_id="root", transitions_completed=2,
+            (root / "task.json").write_text(json.dumps(task))
+            self.provisional_baseline(root)
+            measurements = [self.full_measurement(n) for n in (1, 2)]
+            doc = dict(task, workspace=str(root), session_id="root-fixture", transitions_completed=2,
                        trigger_measurements=measurements, declaration="NOT-JUDGED; parent remains Active",
                        audit_cursor={"path": "corpus/shard-000.txt", "last_line": 1, "last_record": 0,
                                      "last_severity": 0, "next_path": "corpus/shard-000.txt", "next_line": 2},
@@ -137,12 +423,19 @@ class ValidationTests(unittest.TestCase):
             cp = dict(doc, transition_number=2,
                       recovery_prerequisites=RECOVERY_PREREQUISITES,
                       next_action={"operation": "write_witness", "path": str(root / "witness.json")})
+            del cp["transitions_completed"]
             self.assertEqual(checkpoint_errors(cp, root, task), [])
+
+    def full_measurement(self, number):
+        return {"tokens_left": 70000, "fraction_remaining": .35,
+                "context_info": {"promptTokenLimit": 200000},
+                "context_window": {"number": number, "current_window_id": f"root-fixture:window-{number}"}}
 
     def semantic_events(self, root, bash_reads=False):
         (root / "AGENTS.md").write_text("Literal mode: stop on errors.\nRefresh guidance and owning skill.\n")
         (root / "corpus").mkdir(exist_ok=True)
         (root / "corpus/shard-003.txt").write_text("".join(f"record={n}\n" for n in range(80)))
+        self.provisional_baseline(root)
         events = []
         for window in (1, 2):
             events.append({"type": "session.context_cleared", "id": f"clear-{window}"})
@@ -323,8 +616,7 @@ class ValidationTests(unittest.TestCase):
                 self.assertTrue(checkpoint_errors(bad, root, task), count)
             witness = dict(checkpoint, transitions_completed=2,
                            trigger_measurements=[checkpoint["trigger_measurements"][0],
-                                                 {"context_info": {"promptTokenLimit": 200000},
-                                                  "fraction_remaining": .35, "context_window": {"number": 2}}],
+                                                 self.full_measurement(2)],
                            declaration="NOT-JUDGED; parent remains Active", unexercised=["adverse cases"])
             del witness["transition_number"]
             self.assertEqual(witness_errors(witness, root, task), [])
@@ -352,15 +644,15 @@ class ValidationTests(unittest.TestCase):
         evaluation = base / "eval"
         workspace = evaluation / "workspace"
         workspace.mkdir(parents=True)
-        (workspace / "AGENTS.md").write_text("Literal fixture guidance.\n")
+        (workspace / "AGENTS.md").write_text("Literal mode: stop on errors.\nRefresh guidance and owning skill.\n")
         (workspace / "corpus").mkdir()
         (workspace / "corpus/shard-000.txt").write_text("record=00000 severity=0\nrecord=00001 severity=1\n")
+        (workspace / "corpus/shard-003.txt").write_text("".join(f"record={n}\n" for n in range(80)))
         task = {key: key for key in ("original_objective", "parent_gate", "current_slice",
                                      "unresolved_user_requests", "decisions", "live_references")}
         (workspace / "task.json").write_text(json.dumps(task))
         document = dict(task, session_id="root-fixture", workspace=str(workspace), transition_number=1,
-                        trigger_measurements=[{"context_info": {"promptTokenLimit": 200000},
-                                               "fraction_remaining": .35, "context_window": {"number": 1}}],
+                        trigger_measurements=[self.full_measurement(1)],
                         audit_cursor={"path": "corpus/shard-000.txt", "last_line": 1, "last_record": 0,
                                       "last_severity": 0, "next_path": "corpus/shard-000.txt", "next_line": 2},
                         recovery_prerequisites=RECOVERY_PREREQUISITES,
@@ -391,6 +683,7 @@ class ValidationTests(unittest.TestCase):
         (evaluation / "session/context.json").write_text("{}")
         state = evaluation / "driver-state.json"
         state.write_text(json.dumps({"session_id": "root-fixture", "workspace": str(workspace)}))
+        self.provisional_baseline(workspace)
         return evaluation, state, events
 
     def test_copy_target_directory_options_do_not_credit_witness_destination(self):
@@ -410,6 +703,7 @@ class ValidationTests(unittest.TestCase):
     def run_analyzer(self, evaluation, state, events):
         (evaluation / "session/events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
         with patch.object(controller, "EVAL", evaluation), patch.object(controller, "STATE", state), \
+                patch.object(controller, "BASELINE", TEST_SEEDS[str(evaluation / "workspace")]), \
                 redirect_stdout(io.StringIO()):
             controller.analyze()
         return json.loads((evaluation / "observed-evidence.json").read_text())

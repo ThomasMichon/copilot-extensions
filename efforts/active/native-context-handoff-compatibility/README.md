@@ -183,8 +183,9 @@ does not close those native gates. The effort remains **Active**.
 
 **Scope:** publish the existing generic test/evidence tranche, not a runtime fix
 or a passing acceptance claim. Relative to journal base `f926f234a`, the tranche
-changes eight files: this effort README/design plus the scenario's README,
-manifest, setup shell, controller, read-only validator and deterministic tests
+changes nine files: this effort README/design plus the scenario's README,
+manifest, setup shell, controller, read-only validator, deterministic tests and
+unpaid OS-permission probe
 under `tools/clean-room/scenarios/context-handoff-native-cli/`. No plugin payload,
 runtime, catalog, installed settings or changefile is changed. Preparation reconciles final documentation and evidence-integrity checks;
 managed publication/review/merge
@@ -205,7 +206,7 @@ Reproduce the source checks from the repository root:
 Push-Location tools\clean-room\scenarios\context-handoff-native-cli
 $env:PYTHONDONTWRITEBYTECODE = '1'
 python -m unittest test_validation
-ruff check --no-cache --select F,E9 controller.py validation.py test_validation.py
+ruff check --no-cache --select F,E9 controller.py validation.py test_validation.py os_permission_smoke.py
 Pop-Location
 python tools\check-effort-vision-structure.py efforts\active\native-context-handoff-compatibility\README.md
 git diff --check f926f234a..HEAD
@@ -220,7 +221,7 @@ test or ACP substitute. Release version/blob checks fail closed if current
 `main` no longer carries the recorded payload. No new eval was run or authorized
 by this preparation slice.
 
-**Safety and sanitization:** the reviewed eight-file tranche contains only
+**Safety and sanitization:** the reviewed nine-file tranche contains only
 generic tooling, synthetic fixture data/session identifiers and declared
 in-container paths. No real operator/machine/private checkout path, credential
 literal, private URL or raw run artifact is included. Raw judge packets/logs stay
@@ -265,6 +266,32 @@ below-altitude evidence/tooling documentation, with no new rollout claim.
   packet preservation without modifying the historical runs. All eighteen
   source tests and touched-Python `F,E9` checks pass; current-head review is
   still required before merge.
+- Published the reader/cursor/metadata corrections in `9f927564d`. The next
+  review resolved the named read-attribution and cursor findings, then
+  identified agent-mutable task/guidance baselines, conflicting transition
+  counters, abbreviated pre-clear measurements and a stale judge-packet note.
+  Validation must use independent seeded inputs rather than trusting changed
+  post-run workspace files. These findings still block evidence publication;
+  correcting them does not authorize another paid trial or historical regrade.
+- Added protected pre-launch seed capture and baseline-bound live/exported
+  validation, plus complete measurement, counter-kind and stderr-write checks.
+  Twenty-six source tests pass. An unpaid isolated-container check proved
+  direct baseline write/chmod/rename and `sudo` attempts fail under
+  `no_new_privs`, while changed workspace files produce integrity errors.
+  Independent review then identified a same-user unrestricted tmux-server
+  privilege path; direct process protection alone is insufficient. Server-
+  mediated containment remains a blocker pending correction and OS proof.
+- Added a dedicated cold tmux server with verified `no_new_privs` and a
+  disposable-venue-only privilege seal after provisioning. An unpaid fresh
+  Linux-container probe using the actual capture, seal and server helpers passed
+  all three lanes: direct NNP execution, an NNP client requesting work from the
+  pre-seal unrestricted default server, and an unrestricted client requesting
+  work from the protected dedicated server. All direct and sudo write/chmod/
+  rename/validator-mutation attempts were denied, baseline hashes stayed equal
+  and workspace mutations were detected. The container was removed afterward.
+  Twenty-nine source tests and `F,E9` checks pass. This proves the fixture's
+  containment contract, not native rollover acceptance; no Copilot turn,
+  borrowed credentials, host privilege change or shared-image mutation occurred.
 - The corrections affect source evidence validation only. All four historical
   independent FAIL verdicts and their original packets remain unchanged.
   No paid trial, native deployment claim or runtime change is authorized by

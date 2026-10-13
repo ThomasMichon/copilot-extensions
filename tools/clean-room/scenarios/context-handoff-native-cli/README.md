@@ -21,14 +21,74 @@ model using `/model <id>`, then capture `/env`. Read the setting with
 `copilot config contextManagementTools`; `/settings <key>` opens an interactive
 editor and is not a safe read-only probe. No operator-host setting is changed.
 
+Before any driven session, setup creates the complete corpus and captures task,
+AGENTS, task contract, ledger and pressure config into
+`/opt/copilot-cleanroom/native-cli-baseline`. The setup-only capture command runs
+as root; capsule directories/files are read-only and are outside both the driven
+repository and its writable home/results directories. Ordinary worker edits
+cannot redefine expected values. The scenario mount supplies the read-only
+validator; no workspace-local validator is authoritative.
+
+After all provisioning and seed capture, root setup seals **only this disposable
+venue**: it verifies the known base-image operator grant, removes that
+passwordless grant, installs a deny-all operator sudo rule, removes sudo's
+setuid/setgid elevation bits and validates the policy before writing the
+root-owned readiness marker. Thus an already-running unrestricted same-UID
+tmux server cannot regain root via the inherited passwordless-sudo route.
+The shared base image and the host's sudo policy are not modified.
+
+All scenario tmux operations use the dedicated
+`/home/operator/native-cli-witness.sock`, never the default server. Cold server
+startup itself runs through `setpriv --no-new-privs`, not merely the CLI pane;
+launch rejects an existing socket and checks the actual server PID's
+`/proc/<pid>/status` for `NoNewPrivs: 1` before proceeding. New panes/windows
+therefore inherit NNP even when requested by an unrestricted client. The CLI
+pane additionally retains NNP. Missing seal/server evidence stops launch.
+
+The boundary covers ordinary worker and same-UID server-mediated sudo escalation
+inside the fresh venue. Trusted root Docker-exec/control-plane authorization,
+privileged pre-existing services, kernel compromise and privileged alteration of
+the capsule/host/source are outside this fixture boundary. Root control-plane
+Docker exec remains available for inspection and cleanup.
+
+For the control plane's separately authorized **unpaid OS proof**, create an
+unrestricted same-UID server *before* sealing in an exclusively owned fresh
+venue, then verify both mediated routes after setup:
+
+```text
+docker exec <venue> tmux -L native-preseal-probe new-session -d -s probe "sleep 600"
+# Run this scenario's setup/seed/seal; do not submit a Copilot prompt.
+docker exec <venue> python3 -c "import sys; sys.path.insert(0, '/home/operator/scenario'); import controller; controller.tmux('new-session', '-d', '-s', controller.TMUX, 'sleep 600'); controller.verify_tmux_server()"
+docker exec <venue> tmux -S /home/operator/native-cli-witness.sock new-window -t native-cli-witness "cat /proc/self/status; sudo -n id -u"
+docker exec <venue> tmux -L native-preseal-probe new-window -t probe "sudo -n id -u"
+```
+
+The unrestricted client-created pane on the dedicated server must show
+`NoNewPrivs: 1`; the pre-seal unrestricted server must still fail sudo after
+the venue seal. In both lanes attempt direct and sudo-mediated write/chmod/
+rename of the capsule and trusted validator, compare capsule hashes before/
+after, and confirm ordinary workspace edits remain possible. Capture exit
+codes/output under the rig results directory and retire only the probe servers
+and owned venue. These commands are proof instructions, not a claim that
+source mocks establish the actual OS boundary or that a paid acceptance passed.
+
+`launch` and `pressure` verify capsule integrity and unchanged seed inputs.
+Pressure never regenerates the corpus or recaptures expectations. Live
+checkpoint/report commands use the trusted scenario script and explicit capsule:
+
+```
+python3 /home/operator/scenario/validation.py checkpoint <workspace> /opt/copilot-cleanroom/native-cli-baseline
+python3 /home/operator/scenario/validation.py witness <workspace> /opt/copilot-cleanroom/native-cli-baseline
+```
+
 Before the pressure run, send a literal-mode setup-measurement prompt asking for
 `get_context_remaining`, actual offered native tool schemas and the released
 context-handoff skill, then a synthetic `setup-measurement.json`. It must not
 clear context or repair missing support. Require a measured prompt limit
 materially below the reference coordinator limit, not merely the picker label.
 
-`controller.py pressure` generates deterministic synthetic audit records and
-submits the bounded literal prompt (also saved in `eval/acceptance-prompt.txt`).
+`controller.py pressure` submits the bounded literal prompt over the already
+captured corpus (also saved in `eval/acceptance-prompt.txt`).
 It requests exactly two native transitions at 60-70% measured prompt utilization,
 with unchanged policy caps and default plugin thresholds. The workload exercises
 the soft boundary, not necessarily hard or force behavior. This is intentional:
@@ -52,7 +112,7 @@ reads are permitted. Task/contract reads may precede the atomic task action.
 Native measurement must evidence each recovered window, without an artificial
 position/count. Checkpoints retain `recovery_prerequisites` separately from their
 one successor TASK action; a rollover is never that task action.
-`validation.py recovery-events <events.jsonl> <workspace>` validates successful
+`validation.py recovery-events <events.jsonl> <workspace> <trusted-seed-baseline>` validates successful
 returned content attributable to actual read operands and the expected file bytes,
 owning skill delivery, recovered-window measurement and work-before-refresh.
 It rejects failed/skipped/bogus refresh or incorrect task content and never
@@ -72,6 +132,11 @@ be a validated reader; a filename operand elsewhere in the command cannot
 attribute bytes produced by `printf`, another producer, a pipeline, redirection
 or substitution. Combined sequential guidance/task reads remain supported.
 Cursor record, severity and next-line values must also be genuine integers.
+Checkpoint documents use only `transition_number`; witness documents use only
+`transitions_completed`. Conflicting or wrong-kind counter fields are invalid.
+Every retained trigger measurement must satisfy the same captured-field
+validation as the real native result, including tokens-left and current window
+identity; abbreviated limit/fraction/number summaries are not full measurements.
 
 Evidence-integrity checks are conservative. A witness-write claim must identify
 the **first** substantive action's actual destination, not a quoted filename or
@@ -82,6 +147,8 @@ Potential writes through `tee`, other mutators, unknown commands/interpreters or
 unparseable shell input remain substantive invalid work even when their
 destinations cannot be proven. They cannot disappear from refresh-before-work
 checks or be replaced by a later supported action.
+File redirection on stderr is also substantive; descriptor duplication is not
+proof of a witness destination.
 Only the simple `sed -n '<positive-line-range>p' <source>` form is exempted as
 read-only; other scripts, shell substitutions and unsupported commands remain
 potential mutations.
@@ -116,6 +183,12 @@ transcript, literal fixture, source fingerprints, workspace outputs and setup
 report are the judge's inputs. Intermediate checkpoint revisions survive in
 tool events even when the witness subsequently updates the latest artifact.
 Read `judge_attention` literally; it identifies evidence gaps, not a verdict.
+Export includes a hash-verified archive of the protected capsule and provenance.
+Analysis uses the capsule's original task/guidance/corpus/contract and identity,
+not the agent-mutable post-run workspace or driver report. Workspace changes
+are negative observations. A missing capsule, including an older record made
+without seed capture, is explicitly uncredited; there is no mutable fallback
+or reconstruction/regrading of historical raw packets.
 Warning extraction includes `session.warning`; native preparation notifications
 must not be dropped or confused with agent-facing idle nudges or force behavior.
 Preserve a prior failed run's report, judge verdict and evidence unchanged; a
@@ -125,3 +198,33 @@ Exit the CLI with `/exit` and remove only this run's exact container after
 capturing the terminal events. Do not register a host bridge provider, mutate
 operator queues/claims/settings, create a forge repository, or publish from this
 scenario. Do not credit mock SDK tests or an ACP run as real CLI continuity.
+
+## Unpaid programmatic OS permission smoke
+
+`os_permission_smoke.py` is a separate one-shot root orchestration for an
+exclusively owned, fresh Linux container with this scenario mounted read-only
+at `/home/operator/scenario`. It requires `tmux`, `setpriv`, `sudo`, `visudo`
+and Python; it stops if any are missing and does not install them. The parent
+may provision tmux **only in that ephemeral venue** before execution. No Copilot,
+authentication, plugin installation or paid/eval session is launched.
+
+```text
+docker exec --user root <owned-venue> python3 /home/operator/scenario/os_permission_smoke.py --results /home/operator/out/os-permission-smoke
+```
+
+The script creates a real unrestricted default tmux server before calling the
+same `capture_baseline` and `seal_disposable_venue` functions used by setup.
+It then probes direct NNP execution, an NNP client's new window on that old
+unrestricted server, and an unrestricted client's new window on the actual
+dedicated NNP server created through `controller.tmux`. Probe process flags
+must respectively be 1, 0 and 1. All lanes attempt ordinary and sudo-mediated
+write/chmod/rename of the capsule and write to the trusted validator; all must
+be denied. Capsule and validator hashes must remain unchanged, while ordinary
+workspace task changes must succeed and be reported against the seed.
+
+Each probe has bounded command/file waits. Results include per-lane JSON and
+`os-permission-report.json` under the specified rig artifact directory. Cleanup
+retires only PID/socket-matching servers created by the smoke. It deliberately
+does not restore sudo policy, remove the immutable capsule or reuse the venue;
+the parent owns container retirement and any root Docker-exec inspection.
+Source test success is not a claim that this OS smoke or native acceptance ran.

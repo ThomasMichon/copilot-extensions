@@ -43,13 +43,22 @@ cat >"$HOME/.copilot/settings.json" <<JSON
 JSON
 capture plugin-install -- copilot plugin install context-handoff@copilot-extensions
 phase 2 "synthetic task and real CLI discovery"
+if ! command -v setpriv >/dev/null 2>&1; then
+    jam baseline-protection "setpriv is required to prevent driven sudo escalation" "use a supported base image"
+    cr_finalize
+    exit 1
+fi
+capture privilege-helper-help -- setpriv --help
 if ! cr_tmux_ensure; then
     jam tmux-unavailable "could not provision the documented real CLI lane" "no ACP substitution"
     cr_finalize
     exit 1
 fi
 python3 /home/operator/scenario/controller.py seed
-pass "synthetic repository, literal fixture and default pressure configuration established"
+capture seed-baseline-ready -- python3 /home/operator/scenario/validation.py \
+    verify-baseline /home/operator/native-cli-repo /opt/copilot-cleanroom/native-cli-baseline
+pass "seed baseline established and disposable operator sudo privileges sealed before launch"
+cr_meta seed_baseline "/opt/copilot-cleanroom/native-cli-baseline"
 cr_meta transport interactive-cli-tmux
 cr_meta verdict NOT-JUDGED
 cr_finalize
