@@ -288,7 +288,7 @@ def normalized_content(text):
 
 
 def resolved_read_paths(start, workspace):
-    """Attribute read output to actual file operands, never a quoted title."""
+    """Track potential task operands; content_read separately proves producer/output."""
     name = start["data"]["toolName"]
     args = start["data"].get("arguments", {})
     if name == "view" and isinstance(args.get("path"), str):
@@ -315,17 +315,71 @@ def resolved_read_paths(start, workspace):
         if command_start and token == "cd" and index + 1 < len(tokens):
             operand = Path(tokens[index + 1])
             cwd = operand if operand.is_absolute() else cwd / operand
-        if command_start and token in ("cat", "head", "tail", "sed"):
+        if command_start and token in ("cat", "head", "tail", "sed", "grep", "rg", "wc", "stat", "ls"):
             end = index + 1
             while end < len(tokens) and tokens[end] not in (";", "&&", "||", "|"):
-                operand = tokens[end]
-                if not operand.startswith("-") and ("/" in operand or operand.endswith(".md") or operand.endswith(".txt")):
-                    path = Path(operand)
-                    paths.append(str(path if path.is_absolute() else cwd / path))
                 end += 1
+            operands = potential_read_operands(token, tokens[index + 1:end])
+            if not operands and (token == "ls" or (token == "rg" and "--files" in tokens[index + 1:end])):
+                paths.append(str(cwd))
+            for operand in operands:
+                path = Path(operand)
+                paths.append(str(path if path.is_absolute() else cwd / path))
         command_start = False
         index += 1
     return paths
+
+
+def potential_read_operands(reader, words):
+    """Distinguish grep/rg patterns from file operands without granting read credit."""
+    if reader not in ("grep", "rg"):
+        return [word for word in words if not word.startswith("-")
+                and (reader not in ("head", "tail", "sed") or "/" in word or word.endswith((".md", ".txt")))]
+    files, index, has_pattern, options = [], 0, False, True
+    long_values = set(("after-context before-context context max-count binary-files directories devices "
+                       "exclude exclude-dir include label").split())
+    if reader == "rg":
+        long_values.update(("glob iglob type type-not type-add type-clear color encoding engine threads "
+                            "max-columns max-depth max-filesize sort sortr path-separator replace pre pre-glob").split())
+    short_values = set("ABCm" + ("gtTMj" if reader == "rg" else "dD"))
+    while index < len(words):
+        word = words[index]
+        if options and word == "--":
+            options = False
+            index += 1
+            continue
+        kind, attached = None, None
+        if options and word.startswith("--"):
+            name, separator, value = word[2:].partition("=")
+            if name in ("regexp", "file"):
+                kind = "pattern" if name == "regexp" else "file"
+            elif name in long_values:
+                kind = "value"
+            elif name == "files" and reader == "rg":
+                has_pattern = True
+            if separator:
+                attached = value
+        elif options and word.startswith("-") and word != "-":
+            for position, flag in enumerate(word[1:]):
+                if flag in "ef" or flag in short_values:
+                    kind = "pattern" if flag == "e" else "file" if flag == "f" else "value"
+                    attached = word[position + 2:] or None
+                    break
+        if kind is not None:
+            if attached is None and index + 1 < len(words):
+                index += 1
+                attached = words[index]
+            if kind in ("pattern", "file"):
+                has_pattern = True
+            if kind == "file" and attached:
+                files.append(attached)
+        elif not options or not word.startswith("-") or word == "-":
+            if not has_pattern:
+                has_pattern = True
+            else:
+                files.append(word)
+        index += 1
+    return files
 
 
 def valid_read_range(bounds, upper=None):
@@ -696,6 +750,20 @@ def pressure_events(events):
             and root_event(event)]
 
 
+def bound_seed_corpus(seed, name):
+    if not isinstance(name, str) or not name.startswith("corpus/") or name not in seed["manifest"]["files_sha256"]:
+        return None, "corpus path is not bound in the protected seed manifest"
+    try:
+        path = seed["directory"] / name
+        path.resolve().relative_to((seed["directory"] / "corpus").resolve())
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError, ValueError):
+        return None, "bound seed corpus is unreadable or invalid"
+    if not lines:
+        return None, "bound seed corpus is empty; no readable resume cursor"
+    return lines, None
+
+
 def cursor_errors(cursor, root, baseline=None):
     seed, errors = seed_baseline(baseline)
     if errors:
@@ -709,9 +777,10 @@ def cursor_errors(cursor, root, baseline=None):
         if type(cursor[key]) is not int:
             return [f"{key} must be a genuine integer"]
     try:
-        path = (seed["directory"] / cursor["path"]).resolve()
-        path.relative_to((seed["directory"] / "corpus").resolve())
-        lines = path.read_text().splitlines()
+        lines, error = bound_seed_corpus(seed, cursor["path"])
+        if error:
+            return [f"current cursor: {error}"]
+        path = seed["directory"] / cursor["path"]
         line = cursor["last_line"]
         if type(line) is not int or not 1 <= line <= len(lines):
             return ["last_line must be a real 1-based corpus line"]
@@ -733,12 +802,19 @@ def cursor_errors(cursor, root, baseline=None):
             expected_path, expected_line = f"corpus/shard-{shard:03d}.txt", 1
         if (cursor["next_path"], cursor["next_line"]) != (expected_path, expected_line):
             errors.append(f"next cursor must be {expected_path}:{expected_line}")
+        for label, name, next_line in (("computed next", expected_path, expected_line),
+                                       ("declared next", cursor["next_path"], cursor["next_line"])):
+            next_lines, error = bound_seed_corpus(seed, name)
+            if error:
+                errors.append(f"{label} cursor: {error}")
+            elif not 1 <= next_line <= len(next_lines):
+                errors.append(f"{label} cursor line is not readable in the protected seed corpus")
         return errors
     except (OSError, ValueError, TypeError):
         return ["invalid audit cursor: unreadable or invalid corpus binding"]
 
 
-def action_errors(action, cursor, transitions, workspace):
+def action_errors(action, cursor, transitions, workspace, baseline=None):
     if type(transitions) is not int or transitions not in (1, 2):
         return ["transition count must be a genuine integer 1 or 2"]
     if not isinstance(action, dict):
@@ -756,6 +832,14 @@ def action_errors(action, cursor, transitions, workspace):
         bounds = action["view_range"]
         if not valid_read_range(bounds, 80) or bounds[0] != cursor["next_line"]:
             return ["successor read range must begin at the exact next line and end by line 80"]
+        seed, errors = seed_baseline(baseline)
+        if errors:
+            return errors
+        lines, error = bound_seed_corpus(seed, cursor["next_path"])
+        if error:
+            return [f"successor action: {error}"]
+        if not valid_read_range(bounds, len(lines)):
+            return ["successor action range is not readable in the protected seed corpus"]
     elif transitions == 2:
         if action != {"operation": "write_witness", "path": str(Path(workspace) / "witness.json")}:
             return ["second successor action must only write witness.json"]
@@ -822,7 +906,7 @@ def checkpoint_errors(document, root, *, workspace=None, baseline=None):
     if document.get("transition_number") == 2 or (
             isinstance(cursor, dict) and {"next_path", "next_line"} <= cursor.keys()):
         errors.extend(action_errors(document.get("next_action"), cursor,
-                                    document.get("transition_number"), workspace or str(root)))
+                                    document.get("transition_number"), workspace or str(root), baseline))
     if "new_context" in json.dumps(document.get("next_action")):
         errors.append("terminal rollover is not a successor action")
     if document.get("recovery_prerequisites") != RECOVERY_PREREQUISITES:

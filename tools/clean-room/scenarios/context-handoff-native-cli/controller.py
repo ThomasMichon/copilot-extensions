@@ -157,6 +157,10 @@ with only path (repo-relative corpus path), last_line, last_record (integer),
 last_severity (integer), next_path and next_line. next_line is last_line+1,
 or line 1 of the next shard if last_line is 80. Retain measured native context
 results rather than reconstructing them.
+Both current and computed successor path/line must be readable in the ORIGINAL
+protected seed manifest/corpus before accepting a checkpoint. Exhausted,
+nonexistent, empty or unbound successors are STOP conditions; do not create a
+new shard or invent EOF/completion semantics to bypass the readable-cursor gate.
 
 For deterministic evidence, checkpoint.md's CONTENT is a JSON object authored
 by the driven agent through native session_artifacts, not a filesystem file.

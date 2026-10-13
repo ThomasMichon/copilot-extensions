@@ -32,7 +32,8 @@ Compaction remains emergency recovery rather than the planned continuity path.
 
 - **Topology:** one canonical public effort, independent implementation slices.
 - **Host:** coordinator owns PRs and completion judgment.
-- **Delegates:** none launched for implementation.
+- **Delegates:** compatibility worker owns bounded evidence-tooling edits;
+  coordinator owns integration, independent verification and publication.
 - **Handoff:** carry this effort, current slice, and unresolved obligations.
   A completed context or merged phase is not objective completion.
 - No private deployment record is required to understand or execute this plan.
@@ -355,6 +356,26 @@ below-altitude evidence/tooling documentation, with no new rollout claim.
   plugin runtime/payload are unchanged. All fifty source tests and `F,E9` checks
   pass, including the live checkpoint validator path; seven diagnostic tests
   also pass in an unpaid Linux container. Original native verdicts remain FAIL.
+- The next full Balanced review resolved finite-number validation and the
+  tooling classification, but found that arithmetic-only cursor advancement
+  could name a nonexistent final successor shard. It also called out potential
+  pre-refresh corpus work outside the supported attribution forms. These
+  remaining validator findings are being resolved against the protected
+  manifest before publication; no end-of-corpus semantics, historical regrade
+  or new paid trial is being inferred.
+- Bound current and successor cursors and the full successor read range to
+  readable files/lines in the protected original manifest before live checkpoint
+  approval. Final/exhausted, missing, empty and unbound successors are rejected;
+  positive fixtures now include real successor seed data. Added separate
+  conservative corpus-work tracking for opaque readers without granting their
+  output read credit. Fifty-five discovered tests and `F,E9`/module-budget
+  checks pass; targeted independent verification remains pending.
+- That verification closed protected successor binding but reproduced clustered
+  grep pattern/pattern-file options and a value-taking rg option that could
+  lose or invent corpus operands. Reader work tracking now handles those option
+  roles and `--` without widening strict output attribution. All sixty source
+  tests and `F,E9`/module-budget checks pass; the named parser correction is
+  awaiting independent confirmation before publication.
 - The corrections affect source evidence validation only. All four historical
   independent FAIL verdicts and their original packets remain unchanged.
   No paid trial, native deployment claim or runtime change is authorized by

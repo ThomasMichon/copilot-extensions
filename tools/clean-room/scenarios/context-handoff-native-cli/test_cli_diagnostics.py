@@ -130,18 +130,28 @@ class CliDiagnosticsTests(unittest.TestCase):
 
     def test_malformed_corpus_fields_have_stable_cursor_diagnostics(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
+            root = Path(temporary) / "workspace"
+            root.mkdir()
             (root / "corpus").mkdir()
             path = root / "corpus/shard-000.txt"
+            (root / "corpus/shard-001.txt").write_text("record=1 severity=1\n")
+            task = {key: key for key in ("original_objective", "parent_gate", "current_slice",
+                                        "unresolved_user_requests", "decisions", "live_references")}
+            for name, text in {"AGENTS.md": "fixture guidance\n", "task.json": json.dumps(task),
+                               "audit-contract.md": "fixture contract\n", "ledger.json": "{}",
+                               ".context-handoff/config.yaml": "mode: manual-only\n"}.items():
+                target = root / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text)
             cursor = {"path": "corpus/shard-000.txt", "last_line": 1, "last_record": 0,
                       "last_severity": 0, "next_path": "corpus/shard-001.txt", "next_line": 1}
-            with patch.object(validation, "seed_baseline", return_value=({"directory": root}, [])):
-                for content in ("record=0\n", "severity=0\n", "no record fields\n"):
-                    path.write_text(content)
-                    self.assertEqual(validation.cursor_errors(cursor, root),
-                                     ["last_line does not contain record/severity fields"])
-                path.write_text("record=0 severity=0\n")
-                self.assertEqual(validation.cursor_errors(cursor, root), [])
+            for index, content in enumerate(("record=0\n", "severity=0\n", "no record fields\n",
+                                             "record=0 severity=0\n")):
+                path.write_text(content)
+                baseline = Path(temporary) / f"seed-{index}"
+                validation.capture_baseline(root, baseline, "fixture-root")
+                expected = ["last_line does not contain record/severity fields"] if index < 3 else []
+                self.assertEqual(validation.cursor_errors(cursor, root, baseline), expected)
 
 
 if __name__ == "__main__":

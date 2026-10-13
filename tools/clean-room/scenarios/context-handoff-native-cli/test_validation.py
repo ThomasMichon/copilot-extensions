@@ -3,6 +3,7 @@ from contextlib import redirect_stdout
 import hashlib
 import io
 import json
+import shlex
 from pathlib import Path
 import tempfile
 import unittest
@@ -40,6 +41,146 @@ def recovery_event_errors(events, root):
 
 
 class ValidationTests(unittest.TestCase):
+    def reader_option_observation(self, template, should_be_work):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            events = self.semantic_events(root)
+            command = template.format(path=shlex.quote(str(root / "corpus/shard-003.txt")))
+            events[3:3] = [
+                {"type": "tool.execution_start", "id": "option-reader", "timestamp": "1-0a",
+                 "data": {"toolCallId": "option-reader", "toolName": "bash", "arguments": {"command": command}}},
+                {"type": "tool.execution_complete", "id": "option-reader-complete", "timestamp": "1-0b",
+                 "data": {"toolCallId": "option-reader", "success": True, "result": {"content": "reader output"}}},
+            ]
+            observed = recovery_event_errors(events, root)[0]
+            self.assertEqual(observed["first_substantive_work"], "option-reader" if should_be_work else "1-4", command)
+            self.assertEqual(bool(observed["errors"]), should_be_work, command)
+
+    def test_grep_cluster_attached_pattern_keeps_corpus_operand(self):
+        self.reader_option_observation("grep -nerecord {path}", True)
+
+    def test_grep_cluster_separate_pattern_file_is_corpus_work(self):
+        self.reader_option_observation("grep -nf {path} task.json", True)
+
+    def test_grep_cluster_attached_pattern_file_is_corpus_work(self):
+        self.reader_option_observation("grep -nf{path} task.json", True)
+
+    def test_rg_long_value_does_not_turn_pattern_into_file(self):
+        self.reader_option_observation("rg --color never 'corpus/shard-003.txt' task.json", False)
+
+    def test_reader_end_of_options_and_explicit_quoted_patterns(self):
+        self.reader_option_observation("grep -ne 'corpus/shard-003.txt' -- task.json", False)
+        self.reader_option_observation("rg --color=never --regexp='corpus/shard-003.txt' -- task.json", False)
+        self.reader_option_observation("grep --regexp=record -- {path}", True)
+        self.reader_option_observation("rg --file={path} -- task.json", True)
+        self.reader_option_observation("grep -nA 3 record {path}", True)
+        self.reader_option_observation("rg --context=2 --color never --regexp record {path}", True)
+        self.reader_option_observation("grep --color never {path} task.json", True)
+
+    def final_seed_checkpoint(self, root):
+        (root / "corpus").mkdir(parents=True)
+        (root / "corpus/shard-079.txt").write_text("".join(
+            f"record={number:05d} severity={number % 4}\n" for number in range(80)))
+        baseline = self.provisional_baseline(root)
+        task = json.loads((root / "task.json").read_text())
+        document = dict(task, workspace=str(root), session_id="root-fixture", transition_number=1,
+                        trigger_measurements=[self.full_measurement(1)],
+                        recovery_prerequisites=RECOVERY_PREREQUISITES,
+                        audit_cursor={"path": "corpus/shard-079.txt", "last_line": 80, "last_record": 79,
+                                      "last_severity": 3, "next_path": "corpus/shard-080.txt", "next_line": 1},
+                        next_action={"operation": "read", "path": str(root / "corpus/shard-080.txt"),
+                                     "view_range": [1, 1]})
+        return baseline, document
+
+    def test_final_seed_eof_cannot_approve_nonexistent_successor(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            baseline, document = self.final_seed_checkpoint(root)
+            self.assertTrue(validation.checkpoint_errors(document, root, baseline=baseline))
+
+    def test_live_checkpoint_cli_rejects_final_seed_eof_before_clear(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            baseline, document = self.final_seed_checkpoint(root)
+            options = {"input": json.dumps(document), "capture_output": True, "text": True}
+            if sys.platform == "win32":
+                options["creationflags"] = subprocess.CREATE_NO_WINDOW
+            result = subprocess.run([sys.executable, validation.__file__, "checkpoint", str(root), str(baseline)], **options)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(json.loads(result.stdout)["valid"])
+            self.assertNotIn("Traceback", result.stderr)
+
+    def test_opaque_corpus_readers_cannot_skip_refresh_before_work(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            path = root / "corpus/shard-003.txt"
+            commands = [f"grep record '{path}'", f"rg record '{path}'", f"wc -l '{path}'",
+                        f"stat '{path}'", f"ls '{root / 'corpus'}'"]
+            for command in commands:
+                events = self.semantic_events(root)
+                events[3:3] = [
+                    {"type": "tool.execution_start", "id": "opaque-reader", "timestamp": "1-0a",
+                     "data": {"toolCallId": "opaque-reader", "toolName": "bash", "arguments": {"command": command}}},
+                    {"type": "tool.execution_complete", "id": "opaque-reader-complete", "timestamp": "1-0b",
+                     "data": {"toolCallId": "opaque-reader", "success": True, "result": {"content": "opaque output"}}},
+                ]
+                observed = recovery_event_errors(events, root)[0]
+                self.assertTrue(observed["errors"], command)
+                self.assertEqual(observed["first_substantive_work"], "opaque-reader", command)
+
+    def test_seed_successors_are_readable_within_and_across_bound_shards(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "corpus").mkdir()
+            (root / "corpus/shard-000.txt").write_text("record=00000 severity=0\nrecord=00001 severity=1\n")
+            (root / "corpus/shard-001.txt").write_text("record=00002 severity=2\n")
+            baseline = self.provisional_baseline(root)
+            cursor = {"path": "corpus/shard-000.txt", "last_line": 1, "last_record": 0,
+                      "last_severity": 0, "next_path": "corpus/shard-000.txt", "next_line": 2}
+            self.assertEqual(validation.cursor_errors(cursor, root, baseline), [])
+            boundary = dict(cursor, last_line=2, last_record=1, last_severity=1,
+                            next_path="corpus/shard-001.txt", next_line=1)
+            self.assertEqual(validation.cursor_errors(boundary, root, baseline), [])
+            action = {"operation": "read", "path": str(root / boundary["next_path"]), "view_range": [1, 1]}
+            self.assertEqual(validation.action_errors(action, boundary, 1, str(root), baseline), [])
+            self.assertTrue(validation.action_errors(dict(action, view_range=[1, 80]), boundary, 1, str(root), baseline))
+            seed, errors = validation.seed_baseline(baseline)
+            self.assertFalse(errors)
+            malformed_binding = dict(seed, manifest=dict(seed["manifest"], files_sha256={
+                name: digest for name, digest in seed["manifest"]["files_sha256"].items()
+                if name != "corpus/shard-001.txt"}))
+            self.assertTrue(validation.bound_seed_corpus(malformed_binding, "corpus/shard-001.txt")[1])
+            self.assertTrue(validation.bound_seed_corpus(seed, "corpus/../task.json")[1])
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "corpus").mkdir()
+            (root / "corpus/shard-000.txt").write_text("record=00000 severity=0\n")
+            (root / "corpus/shard-001.txt").write_text("")
+            baseline = self.provisional_baseline(root)
+            boundary = {"path": "corpus/shard-000.txt", "last_line": 1, "last_record": 0,
+                        "last_severity": 0, "next_path": "corpus/shard-001.txt", "next_line": 1}
+            self.assertTrue(validation.cursor_errors(boundary, root, baseline))
+
+    def test_quoted_corpus_pattern_in_contract_read_is_not_task_file_work(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for command in ("grep 'corpus/shard-003.txt' audit-contract.md",
+                            "rg -n -e 'corpus/shard-003.txt' audit-contract.md",
+                            "rg --glob '*.md' 'corpus/' audit-contract.md"):
+                events = self.semantic_events(root)
+                events[3:3] = [
+                    {"type": "tool.execution_start", "id": "prerequisite-reader", "timestamp": "1-0a",
+                     "data": {"toolCallId": "prerequisite-reader", "toolName": "bash", "arguments": {"command": command}}},
+                    {"type": "tool.execution_complete", "id": "prerequisite-reader-complete", "timestamp": "1-0b",
+                     "data": {"toolCallId": "prerequisite-reader", "success": True, "result": {"content": "contract excerpt"}}},
+                ]
+                observed = recovery_event_errors(events, root)[0]
+                self.assertFalse(observed["errors"], command)
+                self.assertEqual(observed["first_substantive_work"], "1-4", command)
+                path = str(root / "corpus/shard-003.txt")
+                fake = {"data": {"success": True, "result": {"content": "record=60\n"}}}
+                self.assertFalse(content_read(events[3], fake, path, "record=60\n", str(root), [61, 61]))
+
     def test_direct_analyze_parser_error_quarantines_all_supporting_rows(self):
         with tempfile.TemporaryDirectory() as temp:
             evaluation, state, events = self.analyzer_fixture(Path(temp))
@@ -626,6 +767,7 @@ class ValidationTests(unittest.TestCase):
             (root / "corpus").mkdir()
             (root / "corpus/shard-000.txt").write_text("".join(
                 f"record={number:05d} severity={number % 4}\n" for number in range(80)))
+            (root / "corpus/shard-001.txt").write_text("record=00080 severity=0\n")
             self.provisional_baseline(root)
             first = {"path": "corpus/shard-000.txt", "last_line": 1, "last_record": 0,
                      "last_severity": 0, "next_path": "corpus/shard-000.txt", "next_line": 2}
@@ -684,10 +826,10 @@ class ValidationTests(unittest.TestCase):
             self.assertEqual(cursor_errors(at_1714, root), [])
             self.assertTrue(cursor_errors(dict(at_1714, last_line=36, next_line=37), root))
             action = {"operation": "read", "path": str(root / cursor["path"]), "view_range": [35, 60]}
-            self.assertEqual(action_errors(action, cursor, 1, str(root)), [])
+            self.assertEqual(action_errors(action, cursor, 1, str(root), TEST_SEEDS[str(root)]), [])
             for bad in ("Call new_context now; then read", [action], dict(action, then="new_context"),
                         {"operation": "new_context"}, dict(action, view_range=[36, 60])):
-                self.assertTrue(action_errors(bad, cursor, 1, str(root)))
+                self.assertTrue(action_errors(bad, cursor, 1, str(root), TEST_SEEDS[str(root)]))
 
     def test_witness_required_fields(self):
         with tempfile.TemporaryDirectory() as temp:

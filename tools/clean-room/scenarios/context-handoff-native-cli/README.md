@@ -135,6 +135,11 @@ be a validated reader; a filename operand elsewhere in the command cannot
 attribute bytes produced by `printf`, another producer, a pipeline, redirection
 or substitution. Combined sequential guidance/task reads remain supported.
 Cursor record, severity and next-line values must also be genuine integers.
+Current and computed successor corpus paths/lines must be bound and readable
+in the protected seed before checkpoint acceptance, including the full recorded
+successor range. Final-shard exhaustion, absent/empty/unbound next inputs remain
+explicit negatives; the fixture neither creates a runtime shard nor assigns new
+EOF/completion semantics.
 Checkpoint documents use only `transition_number`; witness documents use only
 `transitions_completed`. Conflicting or wrong-kind counter fields are invalid.
 Every retained trigger measurement must satisfy the same captured-field
@@ -202,6 +207,16 @@ the unchanged raw stream and row diagnostics preserve invalid rows, and no
 clear/measurement/artifact or semantic-recovery credit is computed from it.
 Process substitutions (`<(...)` and `>(...)`) remain potential substantive
 mutations, including nested writers hidden behind an otherwise read-only command.
+Conservative work detection also tracks literal corpus file/directory operands
+of opaque readers such as grep/rg/wc/stat/ls before refresh. It is separate from
+the strict reader/output attribution needed to earn content credit. Regex/glob
+patterns in unrelated task-contract reads are not treated as corpus file reads
+or allowed to produce read credit.
+Work-operand parsing accounts for grep/rg short-option clusters, attached or
+separate pattern/pattern-file/value arguments, long `=value` forms and `--`.
+Pattern files remain actual reads; regex, glob and option values are not shifted
+into file roles. This broader work classification does not expand shell-output
+attribution or permit opaque readers to earn unverified content credit.
 One shared root-ownership predicate applies to clears and supporting calls;
 child-agent activity is quarantined under `non_root_activity` and cannot supply
 root windows, measurements, artifacts or refresh. Source regressions cover each
