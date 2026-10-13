@@ -24,8 +24,11 @@ in legacy mode and may inspect the model only through read-only diagnostics.
    version alone never select mutable state or a running service.
 3. **Generic plugin shims are payload-local.** Skills, hooks, agents, services,
    and peers invoke the shim belonging to the payload that supplied them.
-4. **Global command space is project-owned.** `~/.local/bin` retains project
-   entry points only. Each wrapper records and pins its owning installation.
+4. **Global command space is ownership-qualified.** Activated marketplace-cell
+   installations reserve `~/.local/bin` for attributable project entry points;
+   non-cell hosts retain their supported user-global plugin commands. Consumers
+   use the selected installation's exact callable command rather than ambient
+   name precedence. Cell and project wrappers pin their owning installation.
 5. **Committed repo policy is source-neutral.** Marketplace cells isolate
    machine-local runtime and adoption state; they do not duplicate ordinary
    committed project configuration.
@@ -266,7 +269,8 @@ still control the machine-global daemon.
   publication, and verification.
 - If new and legacy state both exist, diagnostics report both and never merge
   registries silently.
-- Legacy services and global shims are retired only after ownership is proven,
+- Legacy services and global shims are retired only for activated marketplace-cell
+  installations after ownership is proven,
   the new cell is healthy, and rollback metadata exists.
 - Uninstall removes only artifacts carrying the uninstalling cell's ownership
   receipt.
