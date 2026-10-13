@@ -15,6 +15,16 @@ from .cli_mode_models import (  # noqa: F401 -- re-exported public models
     RegisterLiveSessionRequest,
 )
 from .install_paths import effective_config_dir
+from .live_message_models import (  # noqa: F401 -- re-exported public models
+    AckMessagesRequest,
+    AckMessagesResult,
+    LiveMessage,
+    LiveMessageDelivery,
+    LiveMessageListResponse,
+    LiveMessageReceipt,
+    SendMessageRequest,
+    SendMessageResult,
+)
 from .protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
 from .preference_models import PreferencePolicyFields
 from .session_start_models import StartSessionRequest  # noqa: F401 -- public model re-export
@@ -349,6 +359,9 @@ class ResultCurrentState(BaseModel):
     attention: ResultField
     active_work: ResultField
     pending_input: ResultField
+    pending_messages: ResultField = Field(default_factory=lambda: ResultField(
+        availability="unsupported_for_target", reason="target does not expose a live inbox"
+    ))
 
 
 class ResultLimits(BaseModel):
@@ -500,79 +513,6 @@ class LiveProgressRequest(BaseModel):
     phase: str = ""
     blocker: str | None = None
     pr: str | None = None
-
-
-LiveMessageDelivery = Literal["queue", "steer", "interrupt"]
-
-
-class SendMessageRequest(BaseModel):
-    """Post a message INTO a live interactive session (Phase 2 write path)."""
-
-    sender: str
-    body: str
-    reply_to: str | None = None
-    kind: str = "prompt"
-    delivery: LiveMessageDelivery = "steer"  # not "queue": see _live_message_delivery
-    wait: bool = False
-    wait_timeout: float = 120.0
-    #: Optional freshness assertion (#2906): the session id the caller believes
-    #: is the *current* live registration for the target's worktree. When set,
-    #: the bridge rejects (409) the message if it doesn't match the current live
-    #: session -- so a steer addressed to a rolled/taken-over incarnation fails
-    #: fast instead of durably queuing a wrong-incarnation write.
-    expected_session_id: str | None = None
-    #: Stable producer key. Repeating a send with the same key returns the
-    #: original message id instead of enqueuing a duplicate.
-    idempotency_key: str | None = None
-
-
-class SendMessageResult(BaseModel):
-    """Result of enqueuing a message for delivery into a live session.
-
-    ``duplicate``: an identical idempotent retry matched the original
-    (``message_id``). With ``wait`` (D1), ``replied`` is True once the reply turn's
-    ``turn_complete`` lands, with its text (``reply``) and ``stop_reason``; on a
-    timeout it is False and the message still sits durably in the queue.
-    """
-
-    ok: bool = True
-    session_id: str
-    message_id: int
-    duplicate: bool = False
-    replied: bool = False
-    reply: str | None = None
-    stop_reason: str | None = None
-
-
-class LiveMessage(BaseModel):
-    """A pending message awaiting delivery into a live session."""
-
-    id: int
-    sender: str
-    body: str
-    reply_to: str | None = None
-    kind: str = "prompt"
-    delivery: LiveMessageDelivery = "steer"
-    created_at: float
-
-
-class LiveMessageListResponse(BaseModel):
-    """Pending messages for a live session, oldest-first (the poll response)."""
-
-    messages: list[LiveMessage]
-
-
-class AckMessagesRequest(BaseModel):
-    """Ack delivered messages by id (the extension acks after ``session.send``)."""
-
-    ids: list[int]
-
-
-class AckMessagesResult(BaseModel):
-    """Result of acking delivered messages."""
-
-    ok: bool = True
-    acked: int
 
 
 class CursorInfo(BaseModel):

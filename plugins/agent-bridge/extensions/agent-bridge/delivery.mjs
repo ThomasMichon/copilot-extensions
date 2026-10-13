@@ -89,7 +89,7 @@ const MSG_ID_ATTR = /<agent-message\b[^>]*\bmsg-id="(\d+)"/;
 // The bridge message id a `user.message` event carries, when it is one of our
 // deliveries (the rendered envelope names it), else null.
 export function consumedMessageId(event) {
-  if (event?.type !== "user.message") return null;
+  if (event?.type !== "user.message" || isSubAgentEvent(event)) return null;
   const data = event.data || {};
   if (data.source !== undefined && data.source !== DELIVERY_SOURCE) return null;
   const match = MSG_ID_ATTR.exec(String(data.transformedContent ?? data.content ?? ""));
@@ -103,10 +103,12 @@ export function consumedMessageId(event) {
 export class InFlightMessages {
   constructor(limit = 50) {
     this.pending = new Map();
+    this.consumed = new Set();
     this.limit = limit;
   }
 
   sent(msg) {
+    if (this.consumed.has(msg.id)) return;
     this.pending.set(msg.id, msg);
     while (this.pending.size > this.limit) {
       this.pending.delete(this.pending.keys().next().value);
@@ -115,7 +117,13 @@ export class InFlightMessages {
 
   observe(event) {
     const id = consumedMessageId(event);
-    if (id !== null) this.pending.delete(id);
+    if (id !== null) {
+      this.pending.delete(id);
+      this.consumed.add(id);
+      while (this.consumed.size > this.limit) {
+        this.consumed.delete(this.consumed.values().next().value);
+      }
+    }
   }
 
   // The unconsumed messages older than `id`, oldest first, removed from tracking.
@@ -163,8 +171,8 @@ export class MainTurn {
 }
 
 // Translate the bridge's persisted per-message urgency into SDK actions.
-// Missing/unknown values intentionally degrade to "queue" so older bridge rows
-// and future additive values never drop a message on the floor.
+// Missing delivery uses non-aborting steering, matching ordinary peer sends.
+// Unknown values are refused visibly rather than silently changing urgency.
 //
 // ``mainTurnRunning`` (default true: abort when unknown) decides whether an
 // interrupt aborts first. session.abort() also cancels every running
@@ -172,7 +180,7 @@ export class MainTurn {
 // abort would only kill those -- the message is sent immediately instead.
 export function deliveryPlan(msg, { mainTurnRunning = true } = {}) {
   const options = buildDeliveredSendOptions(msg);
-  if (msg?.delivery === "steer") {
+  if (msg?.delivery == null || msg.delivery === "steer") {
     return { abortFirst: false, options: { ...options, mode: "immediate" } };
   }
   if (msg?.delivery === "interrupt") {
@@ -180,7 +188,8 @@ export function deliveryPlan(msg, { mainTurnRunning = true } = {}) {
     // behind messages that were enqueued before it.
     return { abortFirst: !!mainTurnRunning, options: { ...options, mode: "immediate" } };
   }
-  return { abortFirst: false, options };
+  if (msg.delivery === "queue") return { abortFirst: false, options };
+  throw new Error(`unknown message delivery ${msg.delivery}`);
 }
 
 // Session controls (polled from /controls, never delivered as a prompt).

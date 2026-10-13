@@ -18,6 +18,7 @@ import yaml
 from .client_session_start import SessionStartClientMixin
 from .client_answers import AnswerClientMixin
 from .client_cli_mode import CliModeClientMixin
+from .client_live_results import LiveResultsClientMixin
 from .client_session_stop import SessionStopClientMixin
 from .client_worktree_restart import WorktreeRestartMixin
 from .client_worktrees import InventoryClientMixin
@@ -147,7 +148,7 @@ class SseStream(Iterator[dict[str, Any]]):
             response.close()
 
 
-class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMixin, InventoryClientMixin):
+class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixin, LiveResultsClientMixin, SessionStopClientMixin, WorktreeRestartMixin, InventoryClientMixin):
     """Sync HTTP client for the agent-bridge REST API."""
 
     def __init__(
@@ -880,52 +881,6 @@ class BridgeClient(AnswerClientMixin, SessionStartClientMixin, CliModeClientMixi
             "POST",
             f"/api/v1/sessions/{session_id}/permission",
             body={"request_id": request_id, "option_id": option_id},
-        ) or {}
-
-    def _require_represented_result_snapshots(self) -> None:
-        from .protocol import REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION
-
-        if not self.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION):
-            version, _minimum = self.daemon_protocol()
-            raise BridgeClientError(
-                426,
-                "represented result snapshots require agent-bridge HTTP "
-                f"protocol v{REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION}; "
-                f"the daemon advertises v{version}. Update the agent-bridge "
-                "plugin + runtime.",
-            )
-
-    def get_live_result_snapshot(
-        self,
-        session_ref: str,
-        *,
-        position: str | None = None,
-        max_items: int | None = None,
-        max_text_chars: int | None = None,
-    ) -> dict[str, Any]:
-        """GET /api/v1/live-sessions/{ref}/result after a capability gate."""
-        self._require_represented_result_snapshots()
-        params: dict[str, Any] = {}
-        if position:
-            params["position"] = position
-        if max_items is not None:
-            params["max_items"] = max_items
-        if max_text_chars is not None:
-            params["max_text_chars"] = max_text_chars
-        return self._request(
-            "GET", f"/api/v1/live-sessions/{session_ref}/result",
-            params=params or None,
-        ) or {}
-
-    def expand_live_result_ref(
-        self, session_ref: str, ref: str
-    ) -> dict[str, Any]:
-        """GET represented result detail for one process-lifetime reference."""
-        self._require_represented_result_snapshots()
-        return self._request(
-            "GET",
-            f"/api/v1/live-sessions/{session_ref}/result/detail",
-            params={"ref": ref},
         ) or {}
 
     def submit_prompt(

@@ -265,11 +265,14 @@ and fallback/completeness semantics remain unchanged.
 When a host agent delegates work with `send`, it gets a **continuous, low-noise
 feed** of the remote agent's progress -- not a silent block that looks "stuck".
 
-- **`send`** streams the remote turn live by default, then returns when the turn
-  settles.
+- **`send`** streams bridge-owned ACP turns by default. Represented live-session
+  sends return an inbox receipt immediately; see
+  [peer messaging](skills/agent-bridge/references/agent-messages.md) for bounded
+  readback and optional reply waiting.
 - **`wait`** streams the in-flight turn to completion.
-- **`read`** resumes the feed from where the host last left off, or does
-  random-access historical reads.
+- **`read`** resumes an ACP feed or does random-access historical reads.
+  Represented live sessions return a bounded cursor-neutral result snapshot,
+  including pending inbox metadata and an optional message receipt.
 - **`start`** does not stream (no conversation yet).
 
 ### Collapsed feed (default)

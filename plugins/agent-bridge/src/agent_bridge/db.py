@@ -13,6 +13,7 @@ from .db_core import (
 )
 from .db_events import _EventsMixin
 from .db_live_sessions import _LiveSessionsMixin
+from .db_live_message_receipts import _LiveMessageReceiptsMixin
 from .db_maintenance import _MaintenanceMixin
 from .db_prompts import _PromptsMixin
 from .db_schema import _SchemaMixin
@@ -34,6 +35,7 @@ class Database(
     _SchemaMixin,
     _SessionsMixin,
     _LiveSessionsMixin,
+    _LiveMessageReceiptsMixin,
     _EventsMixin,
     _PromptsMixin,
     _MaintenanceMixin,

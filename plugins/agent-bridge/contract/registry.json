@@ -100,7 +100,8 @@
         "qualified_live_peer": 35,
         "provider_creation": 36,
         "worktree_render_cache": 37,
-        "remote_acp": 38
+        "remote_acp": 38,
+        "live_message_receipt": 36
       },
       "durable_records": [],
       "source_paths": [
@@ -113,6 +114,12 @@
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
           "sha256": "1a26085ec890a59a2457d36e584ea3e371668f130eb379718732cc825a5ee169",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
+          "sha256": "2017c67ef231a3540c423564f4287176ce6bde764955088d990b3c285a0bece1",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -263,6 +270,12 @@
           "generation": 34
         },
         {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-35.json",
+          "sha256": "6c890479ec139475abcc41e4f0b62249d729175eadfec5abe559fdee5d61f6da",
+          "role": "unchanged roster response re-attested at current receipt generation",
+          "generation": 35
+        },
+        {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-32.json",
           "sha256": "82459757b85aafdf6085c184e02d57923e18fa4759781c611dd34f48d403a52d",
           "role": "unchanged agent-roster response re-attested at current retirement-recovery HTTP generation",
@@ -276,8 +289,20 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/acquisition-protocol.json",
-          "sha256": "18026e314eb8961eef4cd443f28277518b13d81b3d1a5dd718539f7771f0ece3",
+          "sha256": "86a610d23bb881d6bdc55de3eae1d047db390b4a7d2a0b7757e6eeba2afc00af",
           "role": "current additive acquisition capability constants and refusal contract",
+          "generation": 33
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/live-message-receipt.json",
+          "sha256": "70a491081481c414ef424999849717f4c645fafde7466ce82dbb3ca08e73be53",
+          "role": "current receipt capability and typed live-message admission request/response",
+          "generation": 33
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-32/acquisition-protocol.json",
+          "sha256": "18026e314eb8961eef4cd443f28277518b13d81b3d1a5dd718539f7771f0ece3",
+          "role": "retained immutable retirement-recovery evidence across receipt rollout",
           "generation": 32
         },
         {
@@ -943,6 +968,30 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
           "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
           "capture_method": "Freeze the opt-in registration payload from the actual owning model; independent serialization/default assertions and HTTP clearing, retention and recovery assertions exercise it with matching incarnation identity."
+        },
+        {
+          "commit": "0138427b73ae03b902dbe5b6e8c221c651cd1a55",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 33,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-attest unchanged agent-roster source and its representative response at additive receipt generation 33."
+        },
+        {
+          "commit": "0138427b73ae03b902dbe5b6e8c221c651cd1a55",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 33,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "674f10fcd80f9491504279619ff0d72c5497b6a4",
+          "capture_method": "Read committed protocol-33 receipt capability constants; retain the exact protocol-32 acquisition fixture as previous-generation evidence."
+        },
+        {
+          "commit": "0138427b73ae03b902dbe5b6e8c221c651cd1a55",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 33,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
+          "source_git_blob": "be45ed1c968d42caf99dc569182390612ebe2218",
+          "capture_method": "Compare typed request and admission-response serialization against a deterministic synthetic receipt fixture; separate TestClient regressions exercise admission, SDK acknowledgement, consumption, timeout, alias and retained-evidence behavior."
         },
         {
           "commit": "eab727b8afc4de461934a3e801f75d61ddfb516e",
@@ -2952,7 +3001,7 @@
       "tracked_issue": "https://github.com/ThomasMichon/copilot-extensions/issues/1448",
       "reason": "The delegation effort owns lifecycle vocabulary and product semantics; the compatibility registry must not redefine them.",
       "reference_path": "plugins/agent-bridge/docs/delegation-contract.md",
-      "reference_sha256": "411872464178f57ff4e8aa97ba1ec5b1217d1ce9275909a8ed0a8349a1438054"
+      "reference_sha256": "bdf0ecd5a0a893f6213d951bb1774b5d72ff5b12edbd2e2925a336a10c5b9c43"
     },
     {
       "id": "agent-bridge.event-history-identity",

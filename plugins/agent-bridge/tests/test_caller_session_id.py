@@ -204,7 +204,7 @@ def test_migrates_existing_v24_database(tmp_path) -> None:
             version = probe.execute("SELECT version FROM schema_version").fetchone()[0]
         finally:
             probe.close()
-        assert version == SCHEMA_VERSION == 25
+        assert version == SCHEMA_VERSION
         old = db.get_session("old")
         assert old["caller_id"] == "/wt"
         assert old["caller_session_id"] is None

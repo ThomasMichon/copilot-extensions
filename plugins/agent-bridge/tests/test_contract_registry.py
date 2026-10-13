@@ -214,6 +214,22 @@ def test_retirement_recovery_capability_matches_current_fixture() -> None:
     )
 
 
+def test_live_message_receipt_generation_and_typed_fixture() -> None:
+    from agent_bridge.models import SendMessageRequest, SendMessageResult
+
+    fixture = _fixture("fixtures/http/current/live-message-receipt.json")
+    assert fixture["capability"]["required_protocol_version"] == (
+        bridge_protocol.LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
+    )
+    registry = _fixture("registry.json")
+    contract = next(item for item in registry["contracts"] if item["id"] == "agent-bridge.http-wire")
+    assert contract["capability_versions"]["live_message_receipt"] == (
+        bridge_protocol.LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
+    )
+    assert SendMessageRequest.model_validate(fixture["request"]).model_dump() == fixture["accepted_model"]
+    assert SendMessageResult.model_validate(fixture["response"]).model_dump() == fixture["response"]
+
+
 def test_http_protocol_constant_fixture_matches_production() -> None:
     fixture = _fixture("fixtures/http/current/protocol-constants.json")
     assert fixture["declared_range"] == {

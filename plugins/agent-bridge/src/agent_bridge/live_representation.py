@@ -99,6 +99,8 @@ def _relayed(d: dict[str, Any]) -> dict[str, Any]:
         out["relay_from"] = attrs["from"]
     # The extension omits ``kind`` for an ordinary prompt.
     out["relay_kind"] = attrs.get("kind") or "prompt"
+    if attrs.get("msg-id", "").isdigit():
+        out["relay_message_id"] = int(attrs["msg-id"])
     return out
 
 
@@ -895,7 +897,7 @@ def translate_reconnect_cursor(
 
 
 async def await_turn_reply(
-    log: EventLog, *, after: int, timeout: float
+    log: EventLog, *, after: int, timeout: float, message_id: int | None = None
 ) -> TurnReply:
     """Wait for the represented session's next reply turn, after event ``after``.
 
@@ -908,18 +910,18 @@ async def await_turn_reply(
 
     Returns ``{"replied": bool, "reply": str | None, "stop_reason": str | None,
     "last_id": int}``. On timeout ``replied`` is False and ``reply`` is whatever
-    partial assistant text (if any) had arrived -- the message still sits in the
-    durable queue regardless.
+    partial assistant text (if any) had arrived. Reply timeout says nothing
+    about inbox admission, SDK acceptance, or consumption.
 
-    Honest limit (single-operator, deliberate use): this reads the *next* turn
-    to complete after ``after``. If an unrelated turn was already in flight when
-    the caller sent, that turn's completion is what returns first; correlating a
-    specific reply to a specific ``msg-id`` is a later refinement (the envelope
-    ``msg-id`` is the seed).
+    With ``message_id``, observe that attributed root input first, then require
+    root assistant text before settling. Empty tool-only completions and nested
+    turns do not constitute a reply. This is post-consumption turn evidence, not
+    semantic proof that the assistant answered this specific message.
     """
     deadline = time.monotonic() + timeout
     cursor = after
     texts: list[str] = []
+    consumed = message_id is None
     while True:
         # A session-id change merged this log into another, maybe more than
         # once (C -> B -> A) while we slept: follow every completed merge, with
@@ -938,11 +940,19 @@ async def await_turn_reply(
             break  # timed out with no new events
         for e in events:
             cursor = e.id
+            if e.data.get("agent_id") or e.data.get("parent_tool_call_id"):
+                continue
+            if e.event == "user_message" and e.data.get("relay_message_id") == message_id:
+                consumed = True
+                texts.clear()
+                continue
+            if not consumed:
+                continue
             if e.event == "agent_message":
                 text = e.data.get("text")
                 if text:
                     texts.append(str(text))
-            elif e.event == "turn_complete":
+            elif e.event == "turn_complete" and (message_id is None or texts):
                 return {
                     "replied": True,
                     "reply": "".join(texts) or None,

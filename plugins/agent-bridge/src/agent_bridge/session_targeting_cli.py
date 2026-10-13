@@ -320,7 +320,7 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
     reply_to = core._live_reply_to(args)
     kind = core._live_message_kind(args)
     delivery = core._live_message_delivery(args)
-    wait = not getattr(args, "no_wait", False)
+    wait = getattr(args, "wait_reply", False) and not getattr(args, "no_wait", False)
     wait_timeout = getattr(args, "reply_timeout", 120.0)
     idempotency = getattr(args, "idempotency_key", None)
     expected_session_id = getattr(args, "expected_session_id", None)
@@ -357,7 +357,10 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
         # A daemon that reports duplicates always includes the field; an older
         # one omits it, so a keyed retry can't be told from a first delivery.
         duplicate_known = not idempotency or "duplicate" in result
-        payload = {"delivered": True, "target": session_id, **result,
+        receipt = result.get("receipt") or {}
+        stage = receipt.get("stage")
+        payload = {"delivered": stage == "consumed" if stage else None,
+                   "accepted": True, "target": session_id, **result,
                    "outcome": live_outcome(result, delivery, duplicate_known=duplicate_known)}
         if not duplicate_known:
             payload["duplicate"] = None
@@ -367,9 +370,14 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
     kind_note = "" if kind == "prompt" else f", kind {kind}"
     delivery_note = "" if delivery == "queue" else f", delivery {delivery}"
     print(
-        f"[>] Delivered to live session {session_id} "
+        f"[>] Accepted by live session inbox {result.get('session_id', session_id)} "
         f"(message {mid}, from {sender}{kind_note}{delivery_note})"
     )
+    receipt = result.get("receipt") or {}
+    print(f"    receipt: {receipt.get('stage', 'admitted (delivery evidence unavailable)')}")
+    if result.get("receipt_error"):
+        print(f"    receipt evidence unavailable: {result['receipt_error']}", file=sys.stderr)
+    print(f"    observe: agent-bridge read {session_id} --message-id {mid} --json")
     if reply_to:
         print(f"    reply-to: {reply_to}")
     else:
@@ -383,7 +391,7 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
     else:
         print(
             f"\n[..] No reply within {wait_timeout:g}s "
-            "(message remains pending until delivered)."
+            "(send remains accepted; inspect its receipt rather than resend)."
         )
 
 
@@ -967,8 +975,10 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     delivery_group.add_argument("--delivery", choices=["queue", "steer", "interrupt"], default="steer", help="Delivery urgency when targeting a live session: steer (default) injects at the running turn's next step, queue sends after the current turn finishes (can take a long time against a busy agent), interrupt aborts the current turn first.")
     delivery_group.add_argument("--steer", action="store_true", help="Shorthand for --delivery steer when targeting a live session.")
     delivery_group.add_argument("--interrupt", action="store_true", help="Shorthand for --delivery interrupt when targeting a live session.")
-    send_p.add_argument("--no-wait", action="store_true", help="Return immediately without waiting for response")
-    send_p.add_argument("--reply-timeout", type=float, default=120.0, metavar="SECONDS", help="When delivering to a live interactive session, how long to wait for the receiver's reply turn before returning (default 120; the message is queued and still delivered on timeout). Ignored with --no-wait.")
+    reply_group = send_p.add_mutually_exclusive_group()
+    reply_group.add_argument("--no-wait", action="store_true", help="Return immediately without waiting for response")
+    reply_group.add_argument("--wait-reply", action="store_true", help="For live sessions, opt into a bounded post-consumption reply wait (default: return the send receipt immediately)")
+    send_p.add_argument("--reply-timeout", type=float, default=120.0, metavar="SECONDS", help="With --wait-reply, maximum reply wait (0..600 seconds; default 120). A timeout is not a failed send.")
     send_p.add_argument("--new", action="store_true", help=argparse.SUPPRESS)
     send_p.add_argument("--full-history", action="store_true", help="When resuming an existing session, replay its prior conversation instead of fast-forwarding past it (default hides the backlog and prints a marker)")
     send_p.add_argument("--force", action="store_true", help="If the target's session is busy running a turn, terminate that in-flight turn and start a fresh session to deliver this prompt (discards the in-flight turn's work). Without --force, a busy target is rejected with guidance to wait/observe or end it.")

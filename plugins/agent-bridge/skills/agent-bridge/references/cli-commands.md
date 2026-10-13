@@ -98,13 +98,16 @@ ID, or a **live interactive session** (delivered as an attributed
 **Typed outcomes.** `<agent-bridge catalog argv[0]> --json send ...` prints exactly one JSON
 document on stdout for every classified outcome (progress text goes to
 stderr), always with an `outcome`.
-Accepted (exit 0, the path's existing keys kept): `delivered` (a prompt started
-a turn), `queued` (a `--queue` prompt behind a busy turn, or a live message with
-`--delivery queue`), `steered`, `interrupted`, and `duplicate` (an identical
+Accepted (exit 0): `delivered` (an ACP prompt started a turn),
+`queued` (a hosted `--queue` prompt behind a busy turn),
+`admitted`, `sdk_accepted`, `consumed` (live inbox receipt evidence), and `duplicate` (an identical
 `--idempotency-key` retry; `message_id` is the original's, nothing new
 enqueued; a keyed live send to an older daemon, whose response has no
 `duplicate` field, reports `accepted` with `duplicate: null`, since it can't
-tell). Refused, as `{outcome, target, retryable, reason, error}` with a
+tell). Legacy live responses retain `queued`, `steered`, or `interrupted` as
+requested modes, not observed delivery; `delivered: null` makes the absence of
+receipt evidence explicit. See [agent-messages.md](agent-messages.md) for
+receipt/readback semantics. Refused, as `{outcome, target, retryable, reason, error}` with a
 distinct exit code: `refused_busy` (75: the target is running a turn),
 `refused_unavailable` (69: `not_found`, `stale`, `superseded` or
 `expected_mismatch`; `stale`/`superseded` are retryable after re-resolving),
@@ -211,15 +214,15 @@ with bounded reads instead of streaming its transcript into your context:
 ```bash
 <agent-bridge catalog argv[0]> --json live-sessions resolve --handle <sid>   # status, liveness, turn_state, latest_progress
 <agent-bridge catalog argv[0]> result <sid> --json --max-items 5 --max-text-chars 2000 [--position <p>]
-<agent-bridge catalog argv[0]> send <sid> "focus on the failing test first" --no-wait   # default: queue after current turn
+<agent-bridge catalog argv[0]> send <sid> "focus on the failing test first" --json  # immediate admission receipt
 <agent-bridge catalog argv[0]> send <sid> "check the next test step" --steer --no-wait  # join the running turn at its next step
 <agent-bridge catalog argv[0]> send <sid> "stop and handle this now" --interrupt --no-wait  # abort current turn first
 ```
 
-Live-session `send` defaults to `--delivery queue`, preserving the receiver's
-current turn and running after it ends. `--steer` uses SDK immediate delivery to
-join the running turn at its next step without cancelling it. `--interrupt`
-aborts the current turn first, then sends the message as the fresh next turn.
+Live-session `send` defaults to non-aborting steering and immediate receipt
+return. Explicit `--delivery queue` defers consumption until the turn ends.
+See [agent-messages.md](agent-messages.md) for the bounded `read --message-id`
+and opt-in `--wait-reply` contract.
 
 > **Warning:** interrupting a running turn also cancels the receiver's
 > background sub-agents. When the receiver's main turn is idle (only background

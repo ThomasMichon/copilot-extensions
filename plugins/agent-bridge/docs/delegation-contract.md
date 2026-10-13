@@ -54,7 +54,8 @@ delegated-agent facade.
 | Answer a manual permission | No dedicated CLI verb yet | `POST .../permission` with correlated request and option IDs | Parked permission resumes and emits durable resolution |
 | Hand off context | `handoff` | `POST .../handoff` | A successor session is created and linked |
 | Rebuild a damaged relay log | No CLI verb; the watchdog may trigger it internally | Authenticated `POST .../resync` | Event log is rebuilt from downstream replay and delivery cursors reset |
-| Message a represented interactive session | `send <live-handle>` | `POST /api/v1/live-sessions/{id}/messages` | Durable inbox message ID; optional waited reply |
+| Message a represented interactive session | `send <live-handle>`; optional `--wait-reply` | `POST /api/v1/live-sessions/{id}/messages` | Immediate admission receipt; SDK acceptance and consumption are distinct; optional bounded post-consumption reply evidence |
+| Observe a busy represented peer | `read <live-handle> --message-id N --json` | `GET .../result` plus `GET .../messages/{id}/receipt` | Bounded activity, pending inbox metadata, recent output, and a cursor-neutral message receipt (HTTP protocol 33) |
 
 Source anchors:
 

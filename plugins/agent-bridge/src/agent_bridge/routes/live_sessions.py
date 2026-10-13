@@ -29,6 +29,7 @@ from ..models import (
     IngestLiveEventsResult,
     LiveMessage,
     LiveMessageListResponse,
+    LiveMessageReceipt,
     LiveProgressRequest,
     LiveSessionInfo,
     LiveSessionListResponse,
@@ -47,6 +48,7 @@ from ..live_controls import (
     SetModeResult,
 )
 from .. import live_backfill as _backfill
+from ..live_message_receipts import admission_evidence, receipt, record_consumption
 from ..live_representation import (
     progress_from_events,
     await_turn_reply,
@@ -452,6 +454,7 @@ def get_live_result_snapshot(
             max_items=max_items,
             max_text_chars=max_text_chars,
             retired_ids=frozenset(db.live_session_aliases_to(row["session_id"])),
+            inbox=db.inspect_live_inbox(row["session_id"], max_items + 1),
         )
     except ResultTokenError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -573,6 +576,7 @@ async def ingest_live_events(
     store = _store(request)
     raw = [e.model_dump() for e in body.events]
     ingested = _backfill.ingest(request, registration, raw, replay=replay)  # held while a replay is awaited
+    record_consumption(db, session_id, raw)
     if replay:  # an older history, replayed: it never re-derives the session's current state
         return IngestLiveEventsResult(session_id=session_id, ingested=ingested,
                                       last_id=_backfill.latest_id(store, session_id))
@@ -682,19 +686,12 @@ async def stream_live_events(
 async def post_live_message(
     session_id: str, body: SendMessageRequest, request: Request
 ) -> SendMessageResult:
-    """Post a message INTO a live interactive session (Phase 2 write path).
+    """Durably admit an attributed inbox envelope and return its send receipt.
 
-    Enqueues an attributed envelope the target session's extension polls and
-    injects via ``session.send`` (as an attributed user turn). 404 if the id is
-    not a registered live session -- the vision's "clear refusal when the target
-    is not serviceable". Delivery is durable: the message waits in the queue
-    until the extension drains it.
-
-    When ``wait`` is set (D1), the bridge also watches the target's *represented*
-    event stream and returns the reply turn's assistant text once the next
-    ``turn_complete`` lands (or ``replied=False`` on timeout). The represented
-    head is captured **before** enqueue so the reply window starts at the moment
-    of sending.
+    Optional reply waiting observes this message's root-input consumption
+    followed by assistant text and completion. Timeout is not a failed send.
+    Capture the represented head before enqueue; SDK acceptance and consumption
+    remain distinct stages.
     """
     if body.kind.startswith("control:"):
         raise HTTPException(
@@ -776,18 +773,31 @@ async def post_live_message(
         )
     if message_id is None:  # defensive: unreachable when reason is None
         raise HTTPException(status_code=500, detail="enqueue produced no id")
+    admitted_receipt, receipt_current = admission_evidence(
+        db, target_session_id, message_id, now, duplicate
+    )
+    if admitted_receipt:
+        target_session_id = admitted_receipt.session_id
 
-    if not body.wait or duplicate:
+    if not body.wait or duplicate or not receipt_current:
         # A duplicate enqueued nothing, so there is no new turn to wait for:
         # waiting would block, or attach an unrelated later turn as its reply.
-        return SendMessageResult(session_id=target_session_id, message_id=message_id, duplicate=duplicate)
+        return SendMessageResult(
+            session_id=target_session_id, message_id=message_id, duplicate=duplicate,
+            receipt=admitted_receipt,
+            receipt_current=receipt_current,
+            receipt_error=None if receipt_current else "live-message receipt is no longer retained",
+        )
 
     store = _store(request)
     registration = db.get_live_session(target_session_id) or {}
-    log = store.get_or_create(
+    log = existing_log or store.get_or_create(
         target_session_id, worktree_id=registration.get("worktree_id")
     )
-    reply = await await_turn_reply(log, after=after, timeout=body.wait_timeout)
+    reply = await await_turn_reply(
+        log, after=after, timeout=body.wait_timeout, message_id=message_id
+    )
+    current_receipt = db.live_message_receipt(target_session_id, message_id)
     return SendMessageResult(
         session_id=target_session_id,
         message_id=message_id,
@@ -795,7 +805,20 @@ async def post_live_message(
         replied=bool(reply["replied"]),
         reply=reply["reply"],
         stop_reason=reply["stop_reason"],
+        receipt=LiveMessageReceipt(**current_receipt) if current_receipt else admitted_receipt,
+        receipt_current=current_receipt is not None,
+        receipt_error=None if current_receipt else "live-message receipt is no longer retained",
+        reply_correlation="post_consumption_turn",
     )
+
+
+@router.get("/{session_id}/messages/{message_id}/receipt", response_model=LiveMessageReceipt)
+def get_live_message_receipt(session_id: str, message_id: int, request: Request):
+    """Inspect an admitted message without redelivering it or moving a cursor."""
+    try:
+        return receipt(_db(request), session_id, message_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 #: How often ``POST /mode`` checks whether the extension applied the change.

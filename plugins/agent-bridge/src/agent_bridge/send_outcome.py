@@ -12,6 +12,8 @@ path's existing keys and exit 0:
 - ``accepted``: a keyed live message taken by an older daemon whose response
   has no ``duplicate`` field, so it can't say whether it matched an earlier
   request (``duplicate: null``).
+- ``admitted`` / ``sdk_accepted`` / ``consumed``: current live receipt evidence,
+  independent of requested urgency or whether a bounded reply wait settled.
 
 Refusals print ``{"outcome", "target", "retryable", "reason", "error"}`` and
 exit with a distinct code, so a caller never parses text:
@@ -72,6 +74,9 @@ def live_outcome(result: dict[str, Any], delivery: str, *, duplicate_known: bool
         return "duplicate"
     if not duplicate_known:
         return "accepted"
+    receipt = result.get("receipt") or {}
+    if receipt.get("stage") in {"admitted", "sdk_accepted", "consumed"}:
+        return receipt["stage"]
     return _LIVE_DELIVERY_OUTCOMES.get(delivery, "queued")
 
 

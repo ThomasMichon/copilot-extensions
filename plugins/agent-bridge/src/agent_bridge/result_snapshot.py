@@ -30,6 +30,7 @@ from .result_tokens import (  # noqa: F401 (ResultTokenError/ResultHistoryChange
     _span_ref,
     _turn_ref,
 )
+from .live_message_receipts import project_inbox
 
 if TYPE_CHECKING:
     from .db import Database
@@ -752,6 +753,7 @@ def build_represented_result_snapshot(
     max_items: int = DEFAULT_MAX_ITEMS,
     max_text_chars: int = DEFAULT_MAX_TEXT_CHARS,
     retired_ids: frozenset[str] = frozenset(),
+    inbox: list[dict[str, Any]] | None = None,
 ) -> DelegatedResultSnapshot:
     """Build a reduced-fidelity snapshot for a represented live session."""
     max_items, max_text_chars = normalize_bounds(max_items, max_text_chars)
@@ -767,9 +769,7 @@ def build_represented_result_snapshot(
         registration.get("latest_progress") or {},
         state_budget,
     )
-    pending_input, attention_pending = _represented_pending_input(
-        event_log, state_budget
-    )
+    pending_input, attention_pending = _represented_pending_input(event_log, state_budget)
     latest_result, latest_stop_reason = _represented_latest_result(
         event_log, session_id, latest_budget
     )
@@ -845,6 +845,7 @@ def build_represented_result_snapshot(
             attention=attention,
             active_work=active_work,
             pending_input=pending_input,
+            pending_messages=project_inbox(inbox, max_items, state_budget),
         ),
         latest_result=latest_result,
         incremental=incremental,

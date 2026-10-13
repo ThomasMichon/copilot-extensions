@@ -79,6 +79,7 @@ _HTTP_CAPABILITY_CONSTANTS = {
     "remote_acp": "REMOTE_ACP_PROTOCOL_VERSION",
     "provider_creation": "PROVIDER_CREATION_PROTOCOL_VERSION",
     "qualified_live_peer": "QUALIFIED_LIVE_PEER_PROTOCOL_VERSION",
+    "live_message_receipt": "LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION",
     "acquisition_retirement_recovery": "ACQUISITION_RETIREMENT_RECOVERY_PROTOCOL_VERSION",
     "acquisition_retirement_revalidation": "ACQUISITION_RETIREMENT_REVALIDATION_PROTOCOL_VERSION",
     "relay_interrupt": "RELAY_INTERRUPT_PROTOCOL_VERSION",
