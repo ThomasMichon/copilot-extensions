@@ -97,6 +97,11 @@ def _status(args: argparse.Namespace) -> int:
     try:
         config_path = Path(args.config).expanduser()
         if not config_path.is_file():
+            if readers:
+                return _emit_model_error(
+                    args, ModelError("cannot validate reader grants without configuration"),
+                    human_prefix="invalid invocation: ",
+                )
             posture = unavailable_posture(at, f"configuration not found: {config_path}")
         else:
             config = parse_config(load_json(config_path))

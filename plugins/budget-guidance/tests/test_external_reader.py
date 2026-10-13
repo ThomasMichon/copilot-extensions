@@ -360,3 +360,48 @@ def test_unusable_host_interpreter_refuses_before_spawn(tmp_path, monkeypatch, e
     posture = _posture(acquire_config(_config(), {"report": reader}))
     assert posture["calculated"] is None
     assert posture["adapters"][0]["error"] == "reader host interpreter is unavailable"
+
+
+def test_missing_config_does_not_silently_ignore_grant(tmp_path, capsys):
+    assert main([
+        "status", "--config", str(tmp_path / "missing.json"), "--json",
+        "--reader-id", "report", "--reader-cwd", str(tmp_path),
+        "--reader-command", sys.executable, "-c", "pass",
+    ]) == 2
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert "cannot validate reader grants without configuration" in error
+
+
+@pytest.mark.parametrize(("code", "primary"), [
+    ("print('x' * 65537)", "reader output exceeds byte limit"),
+    ("raise SystemExit(9)", "reader exited unsuccessfully"),
+    ("import time; time.sleep(10)", "reader deadline exceeded"),
+    (f"print({json.dumps(_reading())!r})", None),
+])
+def test_cleanup_failure_keeps_primary_failure_and_redacts_native_detail(
+    tmp_path, monkeypatch, code, primary,
+):
+    import budget_guidance.external_reader as module
+
+    spawn = module.spawn_sync_in_kill_on_close_job
+
+    def failing_cleanup_spawn(*args, **kwargs):
+        process, job = spawn(*args, **kwargs)
+        wait = process.wait
+
+        def fail_after_wait(*args, **kwargs):
+            wait(*args, **kwargs)
+            raise OSError("secret-native-cleanup-detail")
+
+        process.wait = fail_after_wait
+        return process, job
+
+    monkeypatch.setattr(module, "spawn_sync_in_kill_on_close_job", failing_cleanup_spawn)
+    reader = _reader(tmp_path, code, timeout_seconds=0.5)
+    posture = _posture(acquire_config(_config(), {"report": reader}))
+    error = posture["adapters"][0]["error"]
+    if primary is not None:
+        assert primary in error
+    assert "reader process cleanup could not be confirmed" in error
+    assert "secret-native-cleanup-detail" not in json.dumps(posture)
+    assert posture["calculated"] is None

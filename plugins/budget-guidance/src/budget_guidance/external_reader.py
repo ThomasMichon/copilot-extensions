@@ -110,6 +110,7 @@ def _run(reader: CommandReader) -> bytes:
         target=_read_output, args=(process.stdout, reader.max_output_bytes, result),
         daemon=True,
     )
+    primary_error: ReaderFailure | None = None
     try:
         try:
             thread.start()
@@ -143,8 +144,12 @@ def _run(reader: CommandReader) -> bytes:
             if remaining <= 0:
                 raise ReaderFailure("reader deadline exceeded")
             time.sleep(min(0.01, remaining))
+    except ReaderFailure as exc:
+        primary_error = exc
+        raise
     except OSError:
-        raise ReaderFailure("reader process status could not be read") from None
+        primary_error = ReaderFailure("reader process status could not be read")
+        raise primary_error from None
     finally:
         try:
             if job is not None:
@@ -162,8 +167,11 @@ def _run(reader: CommandReader) -> bytes:
                 if thread.is_alive():
                     raise ReaderFailure("reader output cleanup could not be confirmed")
             process.stdout.close()
-        except (OSError, RuntimeError, TimeoutError, subprocess.TimeoutExpired):
-            raise ReaderFailure("reader process cleanup could not be confirmed") from None
+        except (ReaderFailure, OSError, RuntimeError, TimeoutError, subprocess.TimeoutExpired):
+            cleanup_error = "reader process cleanup could not be confirmed"
+            if primary_error is not None:
+                cleanup_error = f"{primary_error}; {cleanup_error}"
+            raise ReaderFailure(cleanup_error) from None
 
 
 def _acquire(adapter: ExternalCommandAdapter, reader: CommandReader | None) -> StaticAdapter:

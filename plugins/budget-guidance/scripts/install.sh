@@ -16,13 +16,13 @@ _install_budget_guidance_package() {
     fi
     [[ -f "$procutil/pyproject.toml" ]] || { _fail 'Owning agent-procutil source is missing'; return 1; }
     if [[ "$HAVE_UV" -eq 1 ]]; then
-        if uv pip install --python "$VENV_PYTHON" "$procutil" "$PLUGIN_DIR" --quiet; then
+        if uv pip install --python "$VENV_PYTHON" "$procutil" "$PLUGIN_DIR" --quiet 2>/dev/null; then
             return 0
         fi
         _step 'uv package install failed -- falling back to python -m pip'
     fi
 
-    "$VENV_PYTHON" -m pip install --quiet "$procutil" "$PLUGIN_DIR"
+    "$VENV_PYTHON" -m pip install --quiet "$procutil" "$PLUGIN_DIR" 2>/dev/null
 }
 
 ACTION="${BUDGET_GUIDANCE_ACTION:-install}"

@@ -38,6 +38,16 @@ def test_installers_recommend_supported_version_flag():
     assert "Try: budget-guidance version" not in powershell
 
 
+def test_package_installers_retain_quiet_native_output_with_explicit_failure():
+    posix = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+    powershell = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    assert '"$procutil" "$PLUGIN_DIR" --quiet 2>/dev/null' in posix
+    assert '--quiet "$procutil" "$PLUGIN_DIR" 2>/dev/null' in posix
+    assert '@Dependencies $Source --quiet 2>&1 | Out-Null' in powershell
+    assert "Failed to install budget-guidance package into venv" in posix
+    assert "Failed to install budget-guidance package into venv" in powershell
+
+
 def _fake_uv_environment(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

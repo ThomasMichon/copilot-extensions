@@ -61,6 +61,8 @@ contains ordinary static readings, so resolution remains pure and field
 authority, contradictions, freshness, and arithmetic use the existing contract.
 Direct resolution of an unacquired external reference is an explicit error.
 Invocation errors are distinguished from invalid configuration in human output.
+An explicit grant with missing configuration is an invocation error, rather than
+an ordinary unconfigured posture that silently ignores the grant.
 Grant mismatch diagnostics report unmatched/configured counts, not raw grant IDs:
 a malformed invocation can put a path or credential into an identifier slot.
 
@@ -98,6 +100,8 @@ source mismatch, future capture, launch/containment failure, and unconfirmed
 cleanup produce an explicit error reading with no numeric values. Missing
 authorization produces an unavailable reading. Neither becomes zero usage.
 Reader-reported error text is reduced to a safe acquisition diagnostic.
+When acquisition and cleanup both fail, the safe primary diagnostic is retained
+alongside the cleanup failure; unconfirmed cleanup never becomes success.
 
 ## Trust and credentials
 
