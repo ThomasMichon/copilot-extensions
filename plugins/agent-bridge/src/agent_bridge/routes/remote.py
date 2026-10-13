@@ -74,6 +74,7 @@ class RemoteSessionEndRequest(BaseModel):
 
 
 class RemoteLiveMessageRequest(BaseModel):
+    qualified_peer: bool = False
     sender: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=1_048_576)
     kind: str = Field(default="prompt")
@@ -197,10 +198,12 @@ async def remote_session_status(
 
 @router.get("/{host}/live-sessions/{session_id:path}")
 async def remote_live_session(
-    host: str, session_id: str, request: Request
+    host: str, session_id: str, request: Request, qualified_peer: bool = False,
 ) -> dict[str, Any]:
     try:
-        return await _service(request).resolve_live_session(host, session_id)
+        return await _service(request).resolve_live_session(
+            host, session_id, **({"qualified_peer": True} if qualified_peer else {}),
+        )
     except RemoteBridgeError as exc:
         _raise(exc)
 
@@ -283,6 +286,7 @@ async def remote_send_live_message(
             reply_to=body.reply_to,
             wait=body.wait,
             wait_timeout=body.wait_timeout,
+            **({"qualified_peer": True} if body.qualified_peer else {}),
         )
     except RemoteBridgeError as exc:
         _raise(exc)

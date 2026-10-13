@@ -34,6 +34,9 @@ Exact registered session IDs retain lookup precedence, including legacy IDs
 beginning with `live:`. Only a handle without an exact registered match is
 interpreted as a qualified peer address; the prefix does not rename or reserve
 previously accepted session IDs.
+Explicit HTTP/client `qualified_peer: true` opts into tuple-only resolution
+and the new protocol; qualified CLI forwarding supplies it. Prefix text alone
+never upgrades a legacy exact-ID request to a newer carrier operation.
 
 [Session preference authority](docs/session-preferences.md) documents optional
 execution-user defaults, the unchanged caller-settings default, and the

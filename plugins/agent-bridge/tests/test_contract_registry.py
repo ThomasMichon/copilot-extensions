@@ -80,7 +80,7 @@ def test_qualified_peer_contract_matches_current_fixture() -> None:
     from agent_bridge.remote_operations import REMOTE_PEER_REPLY_MIN_VERSION
     from agent_bridge.routes.remote import RemoteLiveMessageRequest
 
-    fixture = _fixture("fixtures/http/current/peer-replies-generation-33.json")
+    fixture = _fixture("fixtures/http/current/peer-replies-generation-34.json")
     capability = fixture["capability"]
     assert capability["required_protocol_version"] == bridge_protocol.QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
     assert capability["required_carrier_operation_version"] == REMOTE_PEER_REPLY_MIN_VERSION
@@ -89,6 +89,24 @@ def test_qualified_peer_contract_matches_current_fixture() -> None:
     assert body.reply_to == capability["address"]
     assert body.wait and body.wait_timeout == 120
     assert body.timeout >= body.wait_timeout + 15
+
+
+@pytest.mark.parametrize("owner", ["prompt_models", "routes-prompts"])
+def test_native_bound_wire_is_preserved_at_the_new_peer_generation(owner) -> None:
+    from agent_bridge.prompt_models import SubmitPromptRequest, SubmitPromptResponse
+
+    previous = _fixture(f"fixtures/http/current/native-bound-extracted-{owner}-generation-33.json")
+    current = _fixture(f"fixtures/http/current/native-bound-extracted-{owner}-generation-34.json")
+    assert current["request"] == previous["request"]
+    assert current["response"] == previous["response"]
+    assert current["capability"] == previous["capability"]
+    assert current["health"]["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
+    assert SubmitPromptRequest.model_validate(current["request"]["json"]).model_dump(
+        mode="json", exclude_unset=True,
+    ) == current["request"]["json"]
+    assert SubmitPromptResponse.model_validate(current["response"]).model_dump(
+        mode="json",
+    ) == current["response"]
 
 
 def test_retirement_recovery_capability_matches_current_fixture() -> None:

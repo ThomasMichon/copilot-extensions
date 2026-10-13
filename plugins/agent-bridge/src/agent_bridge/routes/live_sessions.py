@@ -372,7 +372,7 @@ async def list_live_sessions(
 
 
 @router.get("/resolve", response_model=LiveSessionInfo)
-async def resolve_live_session(handle: str, request: Request) -> LiveSessionInfo:
+async def resolve_live_session(handle: str, request: Request, qualified_peer: bool = False) -> LiveSessionInfo:
     """Resolve a handle (session id OR **worktree handle**) -> its live session.
 
     This is D3's addressing endpoint: an agent is a series of sessions in one
@@ -386,7 +386,7 @@ async def resolve_live_session(handle: str, request: Request) -> LiveSessionInfo
     """
     db = _db(request)
     try:
-        row = db.resolve_live_session(handle, now=time.time())
+        row = db.resolve_live_session(handle, now=time.time(), qualified_peer=qualified_peer)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if row is None:

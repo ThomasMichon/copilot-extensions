@@ -84,7 +84,7 @@ carrier reaches the hosting bridge; both reply metadata and the waited reply
 turn return through it. Remote waits are bounded to 1-600 seconds.
 Client, HTTP and carrier operation deadlines cover the requested reply wait
 plus transport margin, including when their defaults are used without the CLI.
-Qualified addressing requires HTTP protocol 33 and remote carrier operation
+Qualified addressing requires HTTP protocol 34 and remote carrier operation
 version 4. An older hosting bridge/carrier refuses explicitly rather than
 silently dropping the reply fields. An unavailable qualified peer is never
 interpreted as an agent to create: restore its registration or resume its
@@ -95,6 +95,14 @@ return its waited reply, but omits an automatic local-only side-channel address
 rather than letting another bridge interpret the caller's worktree handle as
 its own. Resolve the caller's registration before relying on asynchronous
 cross-machine replies.
+
+The carrier distinguishes explicit qualified addressing with
+`qualified_peer: true`, which the qualified CLI send supplies. Raw HTTP
+and client APIs default to legacy/exact addressing; an exact ID beginning
+with `live:` remains an exact ID even through an older carrier or daemon.
+Default lookup queries the daemon before applying a new-protocol gate.
+Explicit qualified mode requires the new protocol and selects the complete
+machine/project/worktree tuple even if a legacy exact ID has the same string.
 
 ## Replying over the bridge (asynchronous side-channel)
 

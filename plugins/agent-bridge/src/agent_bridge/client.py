@@ -1386,23 +1386,6 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
             params={"caller_id": caller_id},
         ) or {}
 
-    def resolve_remote_live_session(
-        self, host: str, target: str
-    ) -> dict[str, Any]:
-        """Resolve an exact session or worktree handle on a hosting Bridge."""
-        self._require_remote_operations()
-        from .protocol import QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
-        if target.startswith("live:") and not self.daemon_supports(QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
-            raise BridgeClientError(426, "remote qualified peer resolution requires HTTP protocol 33")
-        return self._request(
-            "GET",
-            self._remote_path(
-                host,
-                "/live-sessions/"
-                + urllib.parse.quote(target, safe=""),
-            ),
-        ) or {}
-
     def create_remote_session(
         self,
         host: str,
@@ -1495,15 +1478,16 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
         reply_to: str | None = None,
         wait: bool = False,
         wait_timeout: float = 120.0,
+        qualified_peer: bool = False,
     ) -> dict[str, Any]:
         """Deliver to a represented remote session through the carrier."""
         self._require_remote_commands()
         from .live_peer_address import peer_operation_timeout
         from .protocol import QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
         timeout = peer_operation_timeout(timeout, wait=wait, wait_timeout=wait_timeout)
-        if (target.startswith("live:") or reply_to is not None or wait):
+        if (qualified_peer or reply_to is not None or wait):
             if not self.daemon_supports(QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
-                raise BridgeClientError(426, "remote peer replies require HTTP protocol 33")
+                raise BridgeClientError(426, "remote peer replies require HTTP protocol 34")
         return self._request(
             "POST",
             self._remote_path(
@@ -1523,6 +1507,7 @@ class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClien
                 "reply_to": reply_to,
                 "wait": wait,
                 "wait_timeout": wait_timeout if wait else 120.0,
+                **({"qualified_peer": True} if qualified_peer else {}),
             },
             request_timeout=timeout + 15.0,
         ) or {}

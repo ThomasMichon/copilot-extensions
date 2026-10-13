@@ -28,7 +28,7 @@ class _HttpClient(BridgeClient):
         self.http = TestClient(app)
 
     def daemon_supports(self, version):
-        return version <= 33
+        return version <= 34
 
     def _request(self, method, path, data=None, *, params=None, request_timeout=None):
         response = self.http.request(method, path, json=data, params=params)
@@ -201,7 +201,7 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
         output = capsys.readouterr().out
         assert '"replied": true' in output and '"reply": "peer response"' in output
         fixture_path = (Path(__file__).parents[1] / "contract" / "fixtures" / "http"
-                        / "current" / "remote-peer-generation-33.json")
+                        / "current" / "remote-peer-generation-34.json")
         expected = json.loads(fixture_path.read_text(encoding="utf-8"))["response"]
         observed = json.loads(output)
         assert {key: observed[key] for key in expected} == expected
@@ -253,6 +253,7 @@ def test_old_carrier_rejects_new_contract_before_delivery():
     response = asyncio.run(router(Envelope(EnvelopeType.REQUEST, payload={
         "version": 3, "operation": "live_session.send",
         "target": "live:host-b:project-a:wt-b", "sender": "peer", "message": "hello",
+        "qualified_peer": True,
     })))
     assert response.type is EnvelopeType.ERROR
     assert response.payload["code"] == "unsupported_version"
@@ -267,6 +268,7 @@ def test_old_hosting_bridge_rejects_reply_contract_before_delivery():
         Envelope(EnvelopeType.REQUEST, payload={
             "version": 4, "operation": "live_session.send", "target": "live:host-b:project-a:wt-b",
             "sender": "peer", "message": "hello",
+            "qualified_peer": True,
         }),
     ))
     assert response.type is EnvelopeType.ERROR
@@ -278,8 +280,118 @@ def test_old_local_bridge_refuses_qualified_lookup_before_http():
     client.daemon_supports = lambda _: False
     client._request = lambda *_a, **_k: pytest.fail("HTTP must not be reached")
     with pytest.raises(BridgeClientError) as refused:
-        client.resolve_live_session("live:host-a:project-a:wt-a")
+        client.resolve_live_session("live:host-a:project-a:wt-a", qualified_peer=True)
     assert refused.value.status == 426
+
+
+@pytest.mark.parametrize("handle", ["live:host", "live:host:project:wt", "live:host:project:wt:extra"])
+def test_old_http_bridge_exact_lookup_precedes_capability_check(handle):
+    client = BridgeClient.__new__(BridgeClient)
+    client.daemon_supports = lambda _: pytest.fail("an exact lookup needs no new capability")
+    client._request = lambda *_a, **_k: {"session_id": handle}
+    assert client.resolve_live_session(handle)["session_id"] == handle
+
+
+def test_missing_live_handle_checks_old_http_capability_only_after_404():
+    client = BridgeClient.__new__(BridgeClient)
+    queried = []
+
+    def request(*_a, **_k):
+        queried.append(True)
+        raise BridgeClientError(404, "not found")
+
+    client._request = request
+    client.daemon_supports = lambda _: False if queried else pytest.fail("must query first")
+    with pytest.raises(BridgeClientError) as refused:
+        client.resolve_live_session("live:host:project:wt")
+    assert refused.value.status == 426 and queried == [True]
+
+
+def _route_through_versioned_carrier(app, hosting_client, carrier_version):
+    packets = []
+
+    class Carrier:
+        async def request(self, payload, **_kwargs):
+            packets.append(dict(payload))
+            if payload["version"] > carrier_version:
+                raise CarrierRemoteError({
+                    "code": "unsupported_version", "message": "carrier version unsupported",
+                })
+            result = await CarrierRequestRouter(lambda: hosting_client)(
+                Envelope(EnvelopeType.REQUEST, payload=payload),
+            )
+            if result.type is EnvelopeType.ERROR:
+                raise CarrierRemoteError(result.payload)
+            return result
+
+    service = RemoteOperationService(SimpleNamespace())
+
+    async def lease(_host):
+        return SimpleNamespace(carrier=Carrier(), release=_release)
+
+    service._lease = lease
+    app.state.remote_operations = service
+    return packets
+
+
+@pytest.mark.parametrize("handle", ["live:host", "live:host:project:wt", "live:host:project:wt:extra"])
+@pytest.mark.parametrize("carrier_version", [3, 4])
+@pytest.mark.parametrize("hosting_version", [32, 34])
+def test_remote_exact_ids_keep_legacy_carrier_and_http_compatibility(
+    tmp_path, handle, carrier_version, hosting_version,
+):
+    source, hosting = Database(tmp_path / "source.db"), Database(tmp_path / "hosting.db")
+    try:
+        _register(hosting, handle, "host", project="other-project", worktree="exact-wt")
+        _register(hosting, "qualified-peer", "host", project="project", worktree="wt")
+        source_app, source_client = _bridge(source)
+        _hosting_app, hosting_client = _bridge(hosting)
+        hosting_client.daemon_supports = lambda version: version <= hosting_version
+        packets = _route_through_versioned_carrier(source_app, hosting_client, carrier_version)
+        assert source_client.resolve_remote_live_session("host", handle)["session_id"] == handle
+        result = source_client.send_remote_live_message(
+            "host", handle, sender="peer", message="legacy exact",
+        )
+        assert result["session_id"] == handle
+        assert all(packet["version"] <= 3 for packet in packets)
+        assert hosting.list_pending_live_messages(handle)[0]["body"] == "legacy exact"
+        assert hosting.list_pending_live_messages("qualified-peer") == []
+    finally:
+        source.close()
+        hosting.close()
+
+
+@pytest.mark.parametrize("carrier_version,hosting_version", [(3, 34), (4, 32), (4, 34)])
+def test_explicit_remote_qualified_mode_is_fenced_and_cannot_hit_a_colliding_exact_id(
+    tmp_path, carrier_version, hosting_version,
+):
+    source, hosting = Database(tmp_path / "source.db"), Database(tmp_path / "hosting.db")
+    address = "live:host:project:wt"
+    try:
+        _register(hosting, address, "host", project="other-project", worktree="exact-wt")
+        _register(hosting, "qualified-peer", "host", project="project", worktree="wt")
+        source_app, source_client = _bridge(source)
+        _hosting_app, hosting_client = _bridge(hosting)
+        hosting_client.daemon_supports = lambda version: version <= hosting_version
+        packets = _route_through_versioned_carrier(source_app, hosting_client, carrier_version)
+        if carrier_version == 4 and hosting_version == 34:
+            result = source_client.send_remote_live_message(
+                "host", address, sender="peer", message="qualified", qualified_peer=True,
+            )
+            assert result["session_id"] == "qualified-peer"
+            assert hosting.list_pending_live_messages("qualified-peer")[0]["body"] == "qualified"
+        else:
+            with pytest.raises(BridgeClientError) as refused:
+                source_client.send_remote_live_message(
+                    "host", address, sender="peer", message="qualified", qualified_peer=True,
+                )
+            assert refused.value.status == 426
+            assert hosting.list_pending_live_messages("qualified-peer") == []
+        assert packets and all(packet["version"] == 4 for packet in packets)
+        assert hosting.list_pending_live_messages(address) == []
+    finally:
+        source.close()
+        hosting.close()
 
 
 def test_address_metadata_is_not_a_session_id():

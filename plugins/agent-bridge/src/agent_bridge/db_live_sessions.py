@@ -643,6 +643,7 @@ class _LiveSessionsMixin:
         *,
         now: float,
         stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
+        qualified_peer: bool = False,
     ) -> dict[str, Any] | None:
         """Resolve a *handle* -> its current live session row (or None).
 
@@ -667,12 +668,14 @@ class _LiveSessionsMixin:
         """
         from .live_peer_address import LivePeerAddress, resolve_qualified_peer
 
-        exact = self.get_live_session(handle)
+        exact = None if qualified_peer else self.get_live_session(handle)
         if exact is not None:
             return exact
         address = LivePeerAddress.parse(handle)
         if address is not None:
             return resolve_qualified_peer(self, address, now=now, stale_seconds=stale_seconds)
+        if qualified_peer:
+            raise ValueError("peer address must be live:<machine>:<project>:<worktree>")
         cutoff = now - stale_seconds
         rows = self.execute_read(
             "SELECT * FROM live_sessions "

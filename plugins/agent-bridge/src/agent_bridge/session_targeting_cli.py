@@ -275,25 +275,9 @@ def _caller_worktree_handle() -> str | None:
 
 
 def _live_reply_to(args: argparse.Namespace) -> str | None:
-    explicit = getattr(args, "reply_to", None)
-    if explicit:
-        return explicit
-    handle = _caller_worktree_handle()
-    session = (os.environ.get("AGENT_BRIDGE_SESSION_ID") or os.environ.get("SESSION_ID")
-               or os.environ.get("COPILOT_AGENT_SESSION_ID"))
-    candidate = os.environ.get("COPILOT_AGENT_SESSION_ID") or session or handle
-    if candidate:
-        from .live_peer_address import LivePeerAddress
-        registration = _core()._get_client().resolve_live_session(candidate)
-        address = LivePeerAddress.from_registration(registration)
-        if address is not None:
-            return str(address)
-    if candidate or handle:
-        print("[!] Caller registration lacks a qualified reply address; reply-to is local-only.",
-              file=sys.stderr)
-    if handle:
-        return handle
-    return session
+    from .live_peer_address import caller_reply_address
+
+    return caller_reply_address(args, lambda: _core()._get_client(), _caller_worktree_handle)
 
 
 def _live_sender_label(args: argparse.Namespace) -> str:

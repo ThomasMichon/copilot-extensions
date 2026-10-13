@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import asyncio
 from dataclasses import dataclass
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -48,21 +48,49 @@ class LivePeerAddress:
             return None
 
 
-def validate_live_handle(value: Any, *, field: str) -> str:
+def validate_live_handle(value: Any, *, field: str, qualified_peer: bool = False) -> str:
     from .remote_errors import RemoteBridgeError
     from .remote_operations import validate_session_id
 
+    if not qualified_peer:
+        try:
+            return validate_session_id(value, field=field)
+        except RemoteBridgeError:
+            if not isinstance(value, str) or not value.startswith("live:"):
+                raise
     if isinstance(value, str) and value.startswith("live:"):
         try:
             LivePeerAddress.parse(value)
         except ValueError as exc:
             raise RemoteBridgeError(400, "invalid_request", f"{field}: {exc}") from exc
         return value
-    return validate_session_id(value, field=field)
+    raise RemoteBridgeError(400, "invalid_request", f"{field}: expected a live peer address")
 
 
 def peer_operation_timeout(timeout: float, *, wait: bool, wait_timeout: float) -> float:
     return max(timeout, wait_timeout + 15.0) if wait else timeout
+
+
+def caller_reply_address(args: Namespace, client_factory: Callable[[], BridgeClient],
+                         worktree_handle: Callable[[], str | None]) -> str | None:
+    import os
+    import sys
+
+    explicit = getattr(args, "reply_to", None)
+    if explicit:
+        return explicit
+    handle = worktree_handle()
+    session = (os.environ.get("AGENT_BRIDGE_SESSION_ID") or os.environ.get("SESSION_ID")
+               or os.environ.get("COPILOT_AGENT_SESSION_ID"))
+    candidate = os.environ.get("COPILOT_AGENT_SESSION_ID") or session or handle
+    if candidate:
+        address = LivePeerAddress.from_registration(client_factory().resolve_live_session(candidate))
+        if address is not None:
+            return str(address)
+    if candidate or handle:
+        print("[!] Caller registration lacks a qualified reply address; reply-to is local-only.",
+              file=sys.stderr)
+    return handle or session
 
 
 def send_remote_peer(client: BridgeClient, args: Namespace, address: LivePeerAddress, *, sender: str,
@@ -90,6 +118,7 @@ def send_remote_peer(client: BridgeClient, args: Namespace, address: LivePeerAdd
         expected_session_id=getattr(args, "expected_session_id", None),
         idempotency_key=getattr(args, "idempotency_key", None),
         timeout=peer_operation_timeout(20.0, wait=wait, wait_timeout=wait_timeout),
+        qualified_peer=True,
     )
     if not result.get("message_id"):
         raise SendRefused(
@@ -134,7 +163,7 @@ def current_worktree_session(db: Database, worktree: str, *, now: float, stale_s
 
 def peer_reply_requested(payload: dict[str, Any]) -> bool:
     return (
-        str(payload.get("target") or payload.get("session_id") or "").startswith("live:")
+        payload.get("qualified_peer") is True
         or payload.get("reply_to") is not None or payload.get("wait") is True
     )
 
@@ -151,7 +180,7 @@ async def require_peer_reply_protocol(client: BridgeClient) -> None:
     from .remote_errors import RemoteBridgeError
     if not await asyncio.to_thread(client.daemon_supports, QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
         raise RemoteBridgeError(
-            426, "unsupported_version", "the hosting Bridge requires HTTP protocol 33 for peer replies",
+            426, "unsupported_version", "the hosting Bridge requires HTTP protocol 34 for peer replies",
         )
 
 
@@ -165,7 +194,8 @@ async def deliver_remote_peer(client: BridgeClient, payload: dict[str, Any]) -> 
 
     if peer_reply_requested(payload):
         await require_peer_reply_protocol(client)
-    target = validate_live_handle(payload.get("target"), field="target")
+    qualified_peer = validate_optional_bool(payload, "qualified_peer")
+    target = validate_live_handle(payload.get("target"), field="target", qualified_peer=qualified_peer)
     sender = validate_caller_id(payload.get("sender"), field="sender")
     message = validate_message(payload.get("message"), field="message")
     idempotency_key = validate_optional_id(
@@ -183,7 +213,9 @@ async def deliver_remote_peer(client: BridgeClient, payload: dict[str, Any]) -> 
         reply_options["reply_to"] = reply_to
     if wait:
         reply_options["wait_timeout"] = peer_wait_timeout(payload.get("wait_timeout", 120.0))
-    live = await asyncio.to_thread(client.resolve_live_session, target)
+    live = await asyncio.to_thread(
+        client.resolve_live_session, target, **({"qualified_peer": True} if qualified_peer else {}),
+    )
     if not live:
         raise RemoteBridgeError(404, "session_not_found", f"live session target {target} was not found")
     session_id = validate_session_id(live.get("session_id"))

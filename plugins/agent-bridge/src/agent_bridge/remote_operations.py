@@ -424,7 +424,10 @@ class CarrierRequestRouter:
                     payload={"result": result},
                 )
             session_id = (
-                _validate_live_handle(payload.get("session_id"), field="target")
+                _validate_live_handle(
+                    payload.get("session_id"), field="target",
+                    qualified_peer=validate_optional_bool(payload, "qualified_peer"),
+                )
                 if operation == "live_session.resolve"
                 else validate_session_id(payload.get("session_id"))
             )
@@ -468,6 +471,7 @@ class CarrierRequestRouter:
                 result = await asyncio.to_thread(
                     self._client().resolve_live_session,
                     session_id,
+                    **({"qualified_peer": True} if payload.get("qualified_peer") is True else {}),
                 )
                 if not result:
                     raise RemoteBridgeError(
@@ -982,13 +986,14 @@ class RemoteOperationService:
         return dict(result) if isinstance(result, dict) else {}
 
     async def resolve_live_session(
-        self, host: str, target: str
+        self, host: str, target: str, *, qualified_peer: bool = False,
     ) -> dict[str, Any]:
         response = await self._request(
             host,
             {
                 "operation": "live_session.resolve",
-                "session_id": _validate_live_handle(target, field="target"),
+                "session_id": _validate_live_handle(target, field="target", qualified_peer=qualified_peer),
+                **({"qualified_peer": True} if qualified_peer else {}),
             },
         )
         result = response.get("result")
@@ -1071,6 +1076,7 @@ class RemoteOperationService:
         reply_to: str | None = None,
         wait: bool = False,
         wait_timeout: float = 120.0,
+        qualified_peer: bool = False,
     ) -> dict[str, Any]:
         if delivery not in LIVE_MESSAGE_DELIVERIES:
             raise RemoteBridgeError(
@@ -1081,7 +1087,7 @@ class RemoteOperationService:
             host,
             {
                 "operation": "live_session.send",
-                "target": _validate_live_handle(target, field="target"),
+                "target": _validate_live_handle(target, field="target", qualified_peer=qualified_peer),
                 "sender": validate_caller_id(sender, field="sender"),
                 "message": validate_message(message, field="message"),
                 "kind": kind,
@@ -1099,6 +1105,7 @@ class RemoteOperationService:
                 "reply_to": _validate_live_handle(reply_to, field="reply_to") if reply_to is not None else None,
                 "wait": wait,
                 "wait_timeout": _peer_wait_timeout(wait_timeout) if wait else 120.0,
+                **({"qualified_peer": True} if qualified_peer else {}),
             },
             timeout=timeout,
         )
