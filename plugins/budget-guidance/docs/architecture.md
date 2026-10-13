@@ -36,3 +36,11 @@ trailing-rate field and the shortest supported trailing window in that reading.
 Warning precedence is: stale, contradictory, overspent, reset due, no trailing
 rate, projected overspend, rate above the effective daily limit, on track.
 Missing required fields produce no calculated block.
+
+The incumbent-session quota helper is separate from static adapter resolution:
+`provider_quota.py` qualifies one explicitly selected provider observation, and
+`provider_pacing.py` qualifies compatible monthly usage before reusing the
+same posture arithmetic. Rate provenance explicitly labels cycle averages as
+estimates; the advice block never grants worker-control or model-eligibility
+authority. See [provider evidence](provider-quota.md) and
+[provider pacing](provider-pacing.md) for the contracts.

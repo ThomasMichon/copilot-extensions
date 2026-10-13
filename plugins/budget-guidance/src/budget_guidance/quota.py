@@ -60,6 +60,7 @@ def _base(
         "reset_at": None,
         "reset_source": None,
         "calculated": None,
+        "rate_evidence": None,
         "diagnostics": [],
         "advice": {
             "mode": "advice-only",

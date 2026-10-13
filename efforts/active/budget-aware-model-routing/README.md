@@ -181,12 +181,12 @@ timestamp is not proof that the provider metadata was refreshed.
   forecasting; diagnose disagreements instead of silently selecting a date.
 - [x] Distinguish token-based credits from premium-request quantities and
   unlimited entitlements before interpreting numeric values.
-- [ ] Calculate sustainable remaining pace and projection from attributable
+- [x] Calculate sustainable remaining pace and projection from attributable
   same-period rate evidence. Label assumed period starts and cycle-average
   estimates; do not manufacture measured daily/weekly rates from one snapshot.
-- [ ] Emit advice for autonomous worker/fleet aggressiveness and overrun warnings,
+- [x] Emit advice for autonomous worker/fleet aggressiveness and overrun warnings,
   without blocking operator-directed work or mutating worker state.
-- [ ] Document explicit, sparing cooperative pacing separately from read-only
+- [x] Document explicit, sparing cooperative pacing separately from read-only
   quota acquisition. Do not add automatic sleeps or suspension control in this
   slice.
 - [ ] Add regressions for changing allowance, selected-account mismatch,
@@ -205,7 +205,7 @@ timestamp is not proof that the provider metadata was refreshed.
 - [x] Acquisition time and provider-observation freshness are distinct; cached
   metadata is not advertised as a confirmed fresh provider reading.
 - [x] Monthly allocations are read per period, not carried forward as constants.
-- [ ] Advice neither blocks operator work nor sleeps, suspends, or changes
+- [x] Advice neither blocks operator work nor sleeps, suspends, or changes
   autonomous workers.
 
 - [x] The posture contract is provider-neutral and contains no real account,
@@ -256,8 +256,28 @@ promotion authority, task queue, or dashboard.
 
 ## Journal
 
+### 2026-10-12 - Same-period cycle-average pacing
+
+- Qualified the selected provider's user-scoped AI-credit monthly usage against
+  its authoritative account consumption, reset, observation ordering, and
+  freshness. Missing cycle starts and incompatible evidence withhold the rate;
+  no previous allocation or calendar-derived period supplies a default.
+- Reused posture arithmetic for explicitly labeled cycle-average estimates,
+  without presenting one snapshot as a measured daily/weekly rate or settlement
+  watermark. Recommendations remain advice-only and cannot infer a worker count
+  from account totals, change workers, or block operator work.
+- Preserved filesystem error causes for quota captures while retaining opaque
+  JSON-parse diagnostic redaction.
+- Live provider acquisition and independent selected-account proof, raw legacy
+  reset reconciliation, provider/external adapters, launch delivery, routing,
+  cross-platform validation, and release/rollout remain open.
+
 ### 2026-10-12 - Provider observation and reset evidence
 
+- PR #6406 merged as `d80fb34e5cee33a75ac1c5fbebfb49689e9f891e` after
+  current-head Copilot approval with zero open findings and successful required
+  checks. This completes the provider-evidence normalization slice, not live
+  provider acquisition, release, rollout, or the broader effort.
 - Added explicit provider/quota selection over the incumbent SDK projection.
   Provider acquisition, access, capacity, observation kind, quantity authority,
   and units remain independent; unsupported or ambiguous evidence does not
@@ -269,6 +289,12 @@ promotion authority, task queue, or dashboard.
   for sustainable pace. Capture files stay unverified and cannot enable that
   calculation. Same-period rate evidence, forecast, routing, and launch delivery
   still remain open.
+- Review exposed an unlimited-entitlement freshness bypass. The shared
+  observation validation now covers finite and unlimited evidence alike; eight
+  regressions fail before the fix, and the corrected plugin suite passes.
+- Next: preserve capture filesystem failure diagnostics, then add attributable
+  same-period cycle-average estimates and advice-only pacing. Keep measured
+  daily/weekly rates, unknown cycle starts, and live-provider proof distinct.
 
 ### 2026-10-12 - Session-owned quota acquisition slice
 

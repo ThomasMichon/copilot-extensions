@@ -102,7 +102,9 @@ def _quota(args: argparse.Namespace) -> int:
             raise ModelError("quota capture must be a regular file")
         try:
             capture = load_json(path, max_bytes=65536)
-        except ModelError:
+        except ModelError as exc:
+            if isinstance(exc.__cause__, OSError):
+                raise exc.__cause__
             raise ModelError(
                 "quota capture must be valid UTF-8 JSON with unique keys within 65536 bytes"
             ) from None
