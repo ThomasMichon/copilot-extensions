@@ -32,6 +32,10 @@ probe. Existing execution timeouts remain unchanged.
 - [ ] Missing fallback yields explicit namespace incompleteness.
 - [ ] One probe is admitted after cooldown; concurrent callers share it.
 - [ ] Native success closes the circuit; failed/fallback-only probe does not.
+- [ ] Intervening native success or a non-timeout failure resets the timeout
+      streak, so nonconsecutive overruns cannot open the circuit.
+- [ ] A failed or fallback-only probe restarts the full 60-second cooldown;
+      callers before that new deadline cannot admit another native probe.
 - [ ] Existing roster/native-holder ownership contracts remain green.
 
 CPU measurement, cumulative role accounting, exact PID/start-time descendant
