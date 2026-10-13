@@ -51,7 +51,7 @@ class CategoryQueueMixin:
         for _label in labels:
             predicates.append(f"EXISTS (SELECT 1 FROM json_each({safe_labels}) WHERE value = ?)")
         with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("BEGIN IMMEDIATE" if apply else "BEGIN")
             selected = conn.execute(
                 f"SELECT id, category, status FROM tasks WHERE {' AND '.join(predicates)} "
                 "ORDER BY id LIMIT ?",

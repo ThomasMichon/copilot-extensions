@@ -638,3 +638,138 @@ def test_reattach_real_coordinator_retains_category_and_attachment_history(queue
     assert queue.attachment_history(new.id)[0].session_id == "new-session"
     assert asdict(queue.get(old.id)) == original
     assert queue.attachment_history(old.id) == attachments
+
+
+def _block_category_scan(queue, monkeypatch, name):
+    import threading
+
+    entered = threading.Event()
+    release = threading.Event()
+    original = queue._connect
+
+    def connect():
+        conn = original()
+        if threading.current_thread().name == name:
+            blocked = False
+
+            def json_valid(raw):
+                nonlocal blocked
+                if not blocked:
+                    blocked = True
+                    entered.set()
+                    if not release.wait(5):
+                        raise RuntimeError("category scan was not released")
+                try:
+                    json.loads(raw)
+                except (ValueError, TypeError):
+                    return 0
+                return 1
+
+            conn.create_function("json_valid", 1, json_valid)
+        return conn
+
+    monkeypatch.setattr(queue, "_connect", connect)
+    return entered, release
+
+
+@pytest.mark.parametrize("operation", ["create", "claim", "heartbeat"])
+@pytest.mark.guard
+def test_category_preview_blocked_scan_does_not_block_other_sqlite_writer(
+    queue, monkeypatch, operation
+):
+    import threading
+
+    task = queue.create("health", **PROVENANCE)
+    if operation == "heartbeat":
+        queue.claim_one("worker/worktree", task_id=task.id, repo=REPO)
+    entered, release = _block_category_scan(queue, monkeypatch, "category-preview")
+    results, errors = [], []
+
+    def preview():
+        try:
+            results.append(queue.classify_maintenance(**PROVENANCE))
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=preview, name="category-preview")
+    thread.start()
+    committed = False
+    try:
+        assert entered.wait(3), "preview must be inside the actual SQLite scan"
+        with sqlite3.connect(queue.db_path, timeout=0.2, isolation_level=None) as writer:
+            try:
+                writer.execute("BEGIN IMMEDIATE")
+                if operation == "create":
+                    writer.execute(
+                        "INSERT INTO tasks(id,title,prompt,status,repo) VALUES (?,?,?,?,?)",
+                        ("independent", "work", "", "queued", REPO),
+                    )
+                elif operation == "claim":
+                    writer.execute(
+                        "UPDATE tasks SET status='claimed',owner='worker/worktree' WHERE id=?",
+                        (task.id,),
+                    )
+                else:
+                    writer.execute(
+                        "UPDATE tasks SET last_seen_at=123,lease_expires_at=456 WHERE id=?",
+                        (task.id,),
+                    )
+                writer.execute("COMMIT")
+                committed = True
+            except sqlite3.OperationalError:
+                writer.execute("ROLLBACK") if writer.in_transaction else None
+        assert thread.is_alive(), "writer must commit before the blocked preview is released"
+    finally:
+        release.set()
+        thread.join(timeout=5)
+    assert not thread.is_alive() and not errors
+    assert committed, "read-only preview reserved the SQLite writer"
+    assert results[0]["applied"] is False and results[0]["changed"] == 0
+    if operation == "create":
+        assert queue.get("independent") is not None
+    elif operation == "claim":
+        assert queue.get(task.id).owner == "worker/worktree"
+    else:
+        assert queue.get(task.id).last_seen_at == 123
+        assert queue.get(task.id).lease_expires_at == 456
+
+
+@pytest.mark.guard
+def test_category_apply_keeps_writer_serialization_and_rechecks_current_token(queue, monkeypatch):
+    import threading
+
+    task = queue.create("health", **PROVENANCE)
+    preview = queue.classify_maintenance(**PROVENANCE)
+    entered, release = _block_category_scan(queue, monkeypatch, "category-apply")
+    results, errors = [], []
+
+    def apply():
+        try:
+            results.append(
+                queue.classify_maintenance(
+                    **PROVENANCE,
+                    apply=True,
+                    preview_token=preview["preview_token"],
+                )
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=apply, name="category-apply")
+    thread.start()
+    try:
+        assert entered.wait(3)
+        with sqlite3.connect(queue.db_path, timeout=0.2, isolation_level=None) as writer:
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                writer.execute("BEGIN IMMEDIATE")
+    finally:
+        release.set()
+        thread.join(timeout=5)
+    assert not thread.is_alive() and not errors
+    assert results[0]["changed"] == 1 and queue.get(task.id).category == "maintenance"
+    new = queue.create("new eligible row", **PROVENANCE)
+    with pytest.raises(TaskError, match="current preview_token"):
+        queue.classify_maintenance(
+            **PROVENANCE, apply=True, preview_token=preview["preview_token"]
+        )
+    assert queue.get(new.id).category == "work"

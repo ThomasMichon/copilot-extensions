@@ -132,7 +132,10 @@ nonzero failure, never a local fallback or an all-clear result.
 Selection beyond the default limit of 500 refuses rather than applying a
 truncated preview; narrow the provenance or deliberately raise the limit.
 
-Apply rechecks the selection under the writer transaction. A changed selected
+Preview uses a deferred read transaction and a consistent WAL snapshot, so a
+slow provenance scan does not reserve the queue writer or block create, claim
+or heartbeat commits. Apply uses an immediate writer transaction and rechecks
+the current selection/token under that serialized authority. A changed selected
 ID set rejects the token. Already-classified rows are no-ops; repeating the same
 apply neither adds duplicate audit events nor changes lifecycle data. Each
 changed row appends a category-classification event with the actor, provenance
