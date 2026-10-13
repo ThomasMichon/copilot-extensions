@@ -1,5 +1,6 @@
 """Host-Copilot is the default; repository inference requires explicit legacy opt-in."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -7,6 +8,25 @@ import pytest
 from agent_containers import copilot_process_auth as auth
 from agent_containers.config import ContainersConfig, FleetConfig, load_config
 from agent_containers.copilot_auth_policy import trusted_auth_mode
+
+
+@pytest.mark.guard
+def test_shipped_starter_selects_host_copilot_without_legacy_migration(monkeypatch):
+    import agent_containers.config as config_module
+    import yaml
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "skills" / "containers-fleet" / "references" / "containers.yaml"
+    )
+    assert yaml.safe_load(path.read_text())["schema_version"] == 2
+    monkeypatch.setattr(config_module, "_config_path", lambda: path)
+    config = load_config()
+    assert config.copilot_cli_account == "your-copilot-login"
+    assert trusted_auth_mode(config, None) == "host-copilot"
+    for fleet in config.fleets.values():
+        if fleet.security_profile == "trusted":
+            assert trusted_auth_mode(config, fleet) == "host-copilot"
 
 
 @pytest.mark.guard

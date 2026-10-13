@@ -77,6 +77,7 @@ def seams(monkeypatch):
     monkeypatch.setattr(detach, "model_copilot_args", lambda existing: [])
     calls = types.SimpleNamespace(
         run=[],
+        environments={},
         reserve=[],
         release=[],
         keeper=[],
@@ -189,6 +190,7 @@ def seams(monkeypatch):
     def fake_run(argv, **kwargs):
         command = argv[-1]
         calls.run.append(command)
+        calls.environments[command] = kwargs.get("env")
         if "curl -fsS" in command:
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
         if "agent-worktrees embody" in command:
@@ -242,6 +244,22 @@ def test_detach_success_provisions_credentials_starts_keeper_and_reports_handle(
     assert seams.release == [("anchor-repo@repo-1", "r1")]
     assert _FakeLock.instances[0].released is True
     assert "GH_TOKEN" not in seams.remote_env[0]
+
+
+def test_detach_ssh_excludes_inference_token_but_preserves_repository_auth(seams, monkeypatch):
+    monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "fake-inference-token")
+    monkeypatch.setenv("GH_TOKEN", "fake-repository-token")
+
+    assert detach.cmd_detach(
+        _args(),
+        require_live_relay_port=lambda: 61234,
+        relay_healthy=lambda port: True,
+    ) == 0
+
+    launch = next(command for command in seams.run if "agent-worktrees embody" in command)
+    environment = seams.environments[launch]
+    assert "COPILOT_GITHUB_TOKEN" not in environment
+    assert environment["GH_TOKEN"] == "fake-repository-token"
 
 
 def test_detach_forwards_the_host_github_token_when_enabled(seams, monkeypatch, capsys):

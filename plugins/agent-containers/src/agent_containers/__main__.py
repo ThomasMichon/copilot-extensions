@@ -499,7 +499,7 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
 
     remote_env = process_auth.stage_env(projection_target, user, launch_env, write_remote_env,
                                         require_owner=True)
-    copilot_auth_env, acp_command = process_auth.prepare_acp_launch(
+    _, acp_command = process_auth.prepare_acp_launch(
         config, fleet, projection_target, user, acp_command, remote_env,
     )
     remote_command = build_remote_command(
