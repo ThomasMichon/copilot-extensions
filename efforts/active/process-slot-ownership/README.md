@@ -144,7 +144,7 @@ verified by this effort's Validation Plan.
 
 ### Continuation C - Reader budgets and circuit-first admission (Phase 6)
 
-- [ ] Implement the operator-approved bounded
+- [x] Implement the operator-approved bounded
       [CLI wall-admission circuit](reader-admission.md), preserving fallback
       and native holder ownership; CPU and process-tree gates stay separate.
 - [ ] Define role keys, expected wall/CPU cost, fan-out limits, and provenance.
@@ -309,3 +309,11 @@ no-fallback requests now re-check executable presence and retain legitimate
 empty absence without launching work or treating it as native recovery.
 Both binstub and explicit-command absence regressions pass; the combined
 selection now passes 117 tests, one skipped.
+
+### 2026-10-12 - Wall admission landed
+
+Merged #6446 as `e28aaab8f` after exact-head approval and green checks.
+The provider absence compatibility edge is covered and clarified in the
+pattern. The CLI wall-admission slice and its focused validation are complete;
+the parent role CPU/wall accounting, wider caller admission, identity-safe
+native tree cleanup and cross-platform release/adoption gates remain open.

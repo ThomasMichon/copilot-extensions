@@ -105,6 +105,9 @@ it does not cancel the native task or claim that its process has exited.
 CLI namespace enumeration has provider-local wall-overrun admission: two
 consecutive native execution timeouts open a 60-second cooldown. Suppressed
 requests use the existing in-process fallback or report namespace incomplete.
+An uninstalled provider remains legitimate empty absence: when no fallback
+exists and its executable is missing, suppression returns an empty list
+without launching work or claiming successful native recovery.
 After cooldown, one single-flight native probe may run; parsed native success
 closes admission, while a failed or fallback-only probe restarts the full
 cooldown. Native success or an intervening non-timeout failure resets the
