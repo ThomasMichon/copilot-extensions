@@ -7,10 +7,11 @@
 - **Status:** Active; Phase 1 + Phase 2 landed; release-promotion regression
   fixed; Phase 3 interoperability proof done; Phase 4 (plugin consumes
   upstream installer on demand) implemented; package relocated to
-  `services/dispatch/` under the `standalone-service-layout` convention --
-  fresh-machine bootstrap validation, the plugin-delivered-flows-unaffected
-  check, a live on-demand-fetch exercise, dropping the fallback installer
-  copy, and the public-install-surface indirection (#6419) all remain open
+  `services/dispatch/` under the `standalone-service-layout` convention;
+  public-install-surface indirection landed and closed #6419; the on-demand
+  fetch path (both the direct upstream fetch and the new proxy indirection
+  on top of it) is now validated for real via clean-room network fetches --
+  dropping the plugin's own offline-fallback installer copy remains open
 - **Vision:** [machine-fleet](../../../visions/machine-fleet/README.md):
   `standalone-service-installation`, role deployments and container managers
   (role instances may run directly or in containers on explicitly admitted
@@ -223,13 +224,19 @@ for review before any implementation.
   marketplace payload at all. Scoped to agent-dispatch only for now, with
   an explicit expectation this becomes a reusable pattern other plugins
   adopt later (a separate, larger effort).
-- [ ] Validate the on-demand fetch path for real (a live first-use
+- [x] Validate the on-demand fetch path for real (a live first-use
   provisioning run against the actual `raw.githubusercontent.com` URL, not
   just static/syntax checks) and confirm the offline fallback still
-  activates correctly when the fetch is unreachable.
+  activates correctly when the fetch is unreachable -- done 2026-10-13, see
+  Journal (both `bash`/`PowerShell`, real network fetch, `dev` ref since
+  `main` is not yet promoted past the pre-migration layout).
 - [ ] Once validated, remove `install.ps1`/`install.sh` from the plugin's
   own payload entirely (thin trigger only) -- the actual "drop the
-  fallback" step named above.
+  fallback" step named above. Still open: today's validation proved the
+  fetch+delegate mechanism works, not that it's safe to remove the offline
+  fallback (that needs its own confirmation that offline/network-
+  restricted hosts are rare enough in practice, or an explicit operator
+  call to accept that tradeoff).
 - [x] **Naming/layout note (2026-10-12):** `agent-dispatch-service/` moved to
   `services/dispatch/` under `docs/patterns/standalone-service-layout.md`'s
   convention (`agent-<topic>` reserved for plugins; standalone packages live
@@ -240,6 +247,13 @@ for review before any implementation.
   below for the full reference sweep. [#6419](https://github.com/ThomasMichon/copilot-extensions/issues/6419)
   tracks the still-open public-install-surface indirection (so a future
   move doesn't require touching this hardcoded URL again).
+- [x] **Public-install-surface indirection landed 2026-10-13** (PR #6559,
+  closes #6419): added the `install/dispatch/bootstrap.{ps1,sh}` stable
+  proxy (resolves+execs the current real `services/dispatch/bootstrap.
+  {ps1,sh}`, local-sibling-first then network fetch) and repointed the
+  plugin's upstream-installer URL at it. See Journal for the design
+  (dedicated `install/` proxy dir, chosen over a unified dispatcher command)
+  and the same-day clean-room validation.
 
 ## Validation Plan
 
@@ -258,8 +272,10 @@ for review before any implementation.
   installer (agent-dispatch-service/bootstrap.{sh,ps1}) on demand instead
   of using its own staged payload copy, with the staged copy retained only
   as an offline fallback during the transition -- done 2026-10-12 (see
-  Phase 4 and the Journal). A real (non-mocked) end-to-end exercise of the
-  network fetch path remains open -- see Phase 4.
+  Phase 4 and the Journal). The real (non-mocked) end-to-end exercise of
+  the network fetch path (and, as of 2026-10-13, the
+  `install/dispatch/bootstrap.{ps1,sh}` stable-proxy indirection on top of
+  it) is now done -- see the 2026-10-13 Journal entries.
 - [ ] Existing plugin-delivered install/update/status/start/stop/uninstall
   flows remain unaffected; this effort adds a parallel path, not a
   replacement.
@@ -687,4 +703,61 @@ _Pending._
   symlink-rmtree flake, confirmed unrelated: it exercises `run-plugin-
   tests.py` with a synthetic `"alpha"` plugin name, nothing this change
   touched).
+
+### 2026-10-13 -- Public-install-surface indirection (closes #6419)
+- Operator asked to pick up the one deliberately-deferred item from the
+  prior move: the public, durable install URL still pointed directly at
+  `services/dispatch/bootstrap.{ps1,sh}`, so a future reorg would again
+  force a hardcoded-URL update. `docs/patterns/standalone-service-layout.md`
+  named two options without picking one; picked the dedicated top-level
+  `install/` proxy directory over a unified `copilot-extensions install
+  <name>` dispatcher, since it needs no other app installed first.
+- Added `install/dispatch/bootstrap.{ps1,sh}`: a thin, stable entry point
+  that resolves and execs the CURRENT real `services/dispatch/bootstrap.
+  {ps1,sh}` -- a local sibling copy when run from a cloned checkout (tests,
+  dev), else a live network fetch. Only this one proxy file's hardcoded
+  real-path needs updating on a future `services/dispatch` move; the
+  published URL (`.../main/install/dispatch/bootstrap.{ps1,sh}`) never
+  changes again.
+- Repointed `plugins/agent-dispatch/scripts/install.{ps1,sh}`'s self-
+  provisioning binstub fetch at the new proxy URL. Added
+  `services/dispatch/tests/test_install_proxy.py` (static shape + git-
+  tracked-executable coverage, mirroring the existing `test_bootstrap_
+  shape.py` philosophy -- no network/git-clone in the unit test itself).
+- Landed as PR #6559 (merged same day); issue #6419 closed.
+- **Same-day clean-room validation of the whole on-demand fetch chain**
+  (closing out this effort's own open Phase-4/Validation-Plan item):
+  real, non-mocked network fetches in disposable environments with zero
+  local state, for BOTH the direct upstream-installer path and the new
+  proxy indirection on top of it:
+  - Bash: a fresh `ubuntu:24.04` Docker container (no local `~/.agent-
+    dispatch*`, no prior clone) fetched `install/dispatch/bootstrap.sh`
+    over HTTPS from `dev`, correctly detected no local sibling and fell
+    through to a live `raw.githubusercontent.com` fetch of the real
+    `services/dispatch/bootstrap.sh`, which cloned the full repo payload
+    and delegated to the existing, already-mature
+    `plugins/agent-dispatch/scripts/install.sh status` -- clean `[SKIP]`
+    output, exit 0, the `status` action forwarded correctly end-to-end.
+  - PowerShell: same chain, forced into the network-fetch branch (proxy
+    copied to a sibling-free temp dir), `-Action status` forwarded
+    correctly through the full clone + delegate chain, exit 0.
+  - **Important finding, not a defect in this change:** `origin/main` has
+    not yet been promoted past the PRE-migration layout -- it still has
+    `agent-dispatch-service/`/`agent-index-service/`, not even
+    `services/dispatch/` from the 2026-10-12 move, let alone today's
+    `install/dispatch/` proxy. The binstub's hardcoded public URL always
+    targets `main` by design (the stable release branch), so the live
+    install flow will not reach today's code until the next `dev -> main`
+    promotion runs (this repo's normal `workflow_dispatch`-gated release
+    cadence, `tools/promote_release.py` -- not something to trigger
+    unilaterally; operator confirmed "promotion should happen on its own,
+    unless it's blocked"). Validated against `dev` explicitly
+    (`AGENT_DISPATCH_SERVICE_REF=dev`) to prove correctness ahead of that
+    promotion.
+  - This satisfies the Validation Plan's "real (non-mocked) end-to-end
+    exercise of the network fetch path" item. Dropping the plugin's own
+    offline-fallback installer copy (the last open Phase-4 item) remains
+    open -- that needs its own confirmation that offline/network-
+    restricted hosts are rare enough to accept the tradeoff, not just proof
+    the primary path works.
 
