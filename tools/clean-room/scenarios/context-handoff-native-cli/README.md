@@ -59,11 +59,26 @@ It rejects failed/skipped/bogus refresh or incorrect task content and never
 mutates the session. `semantic_recovery_validation` is event evidence, not a
 Tier-E verdict or permission to self-heal.
 
+Recorded task reads require a nonempty string path and a genuine-integer,
+positive, ordered range within the source file. Explicit view ranges must match
+the recorded range; returned task content must equal the bounded slice, not
+merely contain it inside an entire-file read. Guidance refresh still permits
+combined sequential reads and does not impose a fixed tool count or ordering
+beyond completed refresh before task work. Transition counts must be genuine
+integers 1 or 2; boolean and floating-point aliases are invalid.
+
 Evidence-integrity checks are conservative. A witness-write claim must identify
 the **first** substantive action's actual destination, not a quoted filename or
 a later write. Native create/edit paths, literal shell redirections and
 option-free two-operand `cp` commands are supported; dynamic destinations, conditional/pipeline writes
 and unsupported writer forms are explicitly uncredited rather than guessed.
+Potential writes through `tee`, other mutators, unknown commands/interpreters or
+unparseable shell input remain substantive invalid work even when their
+destinations cannot be proven. They cannot disappear from refresh-before-work
+checks or be replaced by a later supported action.
+Only the simple `sed -n '<positive-line-range>p' <source>` form is exempted as
+read-only; other scripts, shell substitutions and unsupported commands remain
+potential mutations.
 Checkpoint read-back requires successful root-owned write/read calls, the same
 checkpoint path, matching captured owner/memory-scope/revision/source-window
 metadata, and the read's history position bound to the write event. Missing,
@@ -75,9 +90,7 @@ measurement/artifact lists, and still produce an observed-evidence/judge packet.
 One shared root-ownership predicate applies to clears and supporting calls;
 child-agent activity is quarantined under `non_root_activity` and cannot supply
 root windows, measurements, artifacts or refresh. Source regressions cover each
-of these cases without invoking Copilot or regrading recorded paid runs. The
-source suite has ten cases: the original six plus four review-defect regressions;
-all four new regressions failed against the unchanged recorder before correction.
+of these cases without invoking Copilot or regrading recorded paid runs.
 
 All four recorded independent packets have final FAIL verdicts and remain
 immutable. The semantic scope applied only to its fresh run, not as retroactive

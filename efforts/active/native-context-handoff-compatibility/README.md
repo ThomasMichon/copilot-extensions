@@ -190,7 +190,7 @@ runtime, catalog, installed settings or changefile is changed. Preparation recon
 managed publication/review/merge
 belongs to the coordinator.
 
-**Source validation:** eleven focused unittests, touched-Python Ruff `F,E9`, Python
+**Source validation:** focused deterministic unittests, touched-Python Ruff `F,E9`, Python
 syntax, manifest JSON, effort structure and diff-whitespace checks. The tests
 exercise warning extraction, cursor/action/report completeness, successful
 view/bash content attribution, owning-skill delivery, failed/skipped/bogus
@@ -237,6 +237,26 @@ resident-daemon lifecycle and platform support are unchanged. This is
 below-altitude evidence/tooling documentation, with no new rollout claim.
 
 ## Journal
+
+### 2026-10-12 - Evidence publication review
+
+- Opened #6401 for the generic evidence/tooling tranche; required CI passed
+  on its initial published head. The current-head review identified an
+  unbounded task-read attribution path, unsupported shell mutations omitted
+  from refresh ordering, malformed checkpoint shapes that could interrupt
+  evidence capture, and non-integer transition counts accepted by equality.
+  These findings block merge pending deterministic corrections and review.
+- Added bounded-content attribution, structured action/range checks and strict
+  integer transition validation. Potential shell mutations remain substantive
+  invalid work; an independent correction review reproduced a residual `sed w`
+  bypass, now covered alongside `W`, execution scripts, shell substitutions,
+  newline-separated writers and unsupported `find` output. Only the simple
+  bounded-print `sed` form is treated as read-only. All fifteen deterministic
+  source tests and touched-Python `F,E9` checks pass after these corrections.
+- The corrections affect source evidence validation only. All four historical
+  independent FAIL verdicts and their original packets remain unchanged.
+  No paid trial, native deployment claim or runtime change is authorized by
+  this publication slice; the parent acceptance matrix remains open.
 
 ### 2026-10-12 - Final verdict persistence and publication preparation
 

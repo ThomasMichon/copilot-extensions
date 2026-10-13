@@ -154,11 +154,31 @@ def resolved_read_paths(start, workspace):
     return paths
 
 
-def content_read(start, completion, path, expected, workspace):
+def valid_read_range(bounds, upper=None):
+    return (isinstance(bounds, list) and len(bounds) == 2
+            and all(type(value) is int for value in bounds)
+            and 1 <= bounds[0] <= bounds[1]
+            and (upper is None or bounds[1] <= upper))
+
+
+def content_read(start, completion, path, expected, workspace, view_range=None):
     if not successful(completion) or path not in resolved_read_paths(start, workspace):
         return False
     content = result_text(completion)
-    return isinstance(content, str) and normalized_content(expected) in normalized_content(content)
+    if not isinstance(content, str) or not normalized_content(expected):
+        return False
+    if view_range is not None:
+        if not valid_read_range(view_range):
+            return False
+        args = start["data"].get("arguments", {})
+        if start["data"]["toolName"] == "view" and "view_range" in args:
+            if not valid_read_range(args["view_range"]) or args["view_range"] != view_range:
+                return False
+        # Bounded task reads must not earn credit from a substring of a wider
+        # result. Remove only the captured shell completion footer.
+        bounded = re.sub(r"\n?<shellId: [^\n<>]+ completed with exit code 0>\s*$", "", content)
+        return normalized_content(bounded) == normalized_content(expected)
+    return normalized_content(expected) in normalized_content(content)
 
 
 def task_write(start):
@@ -168,7 +188,43 @@ def task_write(start):
         return True
     if name in ("bash", "shell"):
         command = args.get("command", "")
-        return bool(re.search(r"(?<![2&])>(?!&)|write_text|json\.dump|(?:^|[;&]\s*)cp\s", command))
+        if not isinstance(command, str):
+            return True
+        if re.search(r"(?<![2&])>(?!&)|write_text|json\.dump|[$`]", command):
+            return True
+        try:
+            lexer = shlex.shlex(command.replace("\n", ";"), posix=True, punctuation_chars=";&|")
+            lexer.whitespace_split = True
+            tokens = list(lexer)
+        except ValueError:
+            return True
+        readonly = {"cd", "cat", "head", "tail", "pwd", "ls", "grep", "rg", "wc", "stat",
+                    "echo", "printf", "true", "false", "test", "["}
+        at_start = True
+        for index, token in enumerate(tokens):
+            if token in (";", "&&", "||", "|", "&"):
+                at_start = True
+                continue
+            if not at_start:
+                continue
+            at_start = False
+            executable = Path(token).name
+            if executable == "sed":
+                end = index + 1
+                while end < len(tokens) and tokens[end] not in (";", "&&", "||", "|", "&"):
+                    end += 1
+                operands = tokens[index + 1:end]
+                # Only the fixture's simple bounded-print form is proven
+                # read-only; other scripts can write or execute without -i.
+                if (len(operands) != 3 or operands[0] != "-n"
+                        or re.fullmatch(r"[1-9]\d*(?:,[1-9]\d*)?p", operands[1]) is None
+                        or not operands[2] or operands[2].startswith("-")):
+                    return True
+            elif executable not in readonly:
+                # Unknown commands/interpreters may mutate files. Retain them
+                # as substantive, uncredited work instead of skipping them.
+                return True
+        return False
     return False
 
 
@@ -342,20 +398,32 @@ def recovery_event_errors(events, root, workspace=None):
         if first_work and checkpoint_time and checkpoint_time >= first_work["timestamp"]:
             errors.append("task work preceded successful bound checkpoint read")
         if checkpoint and first_work:
-            action = checkpoint.get("next_action", {})
+            action = checkpoint.get("next_action")
             completion = completions.get(first_work["data"]["toolCallId"])
-            if action.get("operation") == "read":
-                try:
-                    source = root / Path(action["path"]).relative_to(Path(workspace))
-                    lo, hi = action["view_range"]
-                    expected = "\n".join(source.read_text().splitlines()[lo - 1:hi])
-                    if not content_read(first_work, completion, action["path"], expected, workspace):
-                        errors.append("recorded task read content/path/range is not evidenced")
-                except (OSError, KeyError, ValueError):
+            if not isinstance(action, dict):
+                errors.append("recorded task action is not an object")
+            elif action.get("operation") == "read":
+                path, bounds = action.get("path"), action.get("view_range")
+                if (set(action) != {"operation", "path", "view_range"}
+                        or not isinstance(path, str) or not path.strip() or not valid_read_range(bounds)):
                     errors.append("recorded task read has invalid source binding")
+                else:
+                    try:
+                        source = root / Path(path).relative_to(Path(workspace))
+                        lines = source.read_text().splitlines()
+                        if not valid_read_range(bounds, len(lines)):
+                            errors.append("recorded task read range is outside source bounds")
+                        else:
+                            lo, hi = bounds
+                            expected = "\n".join(lines[lo - 1:hi])
+                            if not content_read(first_work, completion, path, expected, workspace, bounds):
+                                errors.append("recorded task read content/path/range is not evidenced")
+                    except (OSError, ValueError):
+                        errors.append("recorded task read has invalid source binding")
             elif action.get("operation") == "write_witness":
                 destinations = write_destinations(first_work, workspace)
-                if (not successful(completion)
+                if (set(action) != {"operation", "path"} or not isinstance(action.get("path"), str)
+                        or not action["path"].strip() or not successful(completion)
                         or destinations != [action.get("path")]):
                     errors.append("first substantive action does not prove a successful write to the recorded witness destination")
             else:
@@ -411,17 +479,22 @@ def cursor_errors(cursor, root):
 
 
 def action_errors(action, cursor, transitions, workspace):
+    if type(transitions) is not int or transitions not in (1, 2):
+        return ["transition count must be a genuine integer 1 or 2"]
     if not isinstance(action, dict):
         return ["next_action must be one structured action object, not prose or a list"]
+    if not isinstance(action.get("path"), str) or not action["path"].strip():
+        return ["next_action path must be a nonempty string"]
     if transitions == 1:
         if set(action) != {"operation", "path", "view_range"} or action.get("operation") != "read":
             return ["first successor action must be a single read, with only operation/path/view_range"]
+        if (not isinstance(cursor, dict) or not isinstance(cursor.get("next_path"), str)
+                or type(cursor.get("next_line")) is not int):
+            return ["successor read cursor binding is invalid"]
         if action["path"] != str(Path(workspace) / cursor["next_path"]):
             return ["successor read path does not match the cursor"]
         bounds = action["view_range"]
-        if (not isinstance(bounds, list) or len(bounds) != 2
-                or any(type(n) is not int for n in bounds)
-                or bounds[0] != cursor["next_line"] or not bounds[0] <= bounds[1] <= 80):
+        if not valid_read_range(bounds, 80) or bounds[0] != cursor["next_line"]:
             return ["successor read range must begin at the exact next line and end by line 80"]
     elif transitions == 2:
         if action != {"operation": "write_witness", "path": str(Path(workspace) / "witness.json")}:
@@ -445,6 +518,11 @@ def common_errors(document, root, task, workspace=None):
     errors.extend(cursor_errors(cursor, root))
     measurements = document.get("trigger_measurements")
     count = document.get("transition_number", document.get("transitions_completed"))
+    for key in ("transition_number", "transitions_completed"):
+        if key in document and (type(document[key]) is not int or document[key] not in (1, 2)):
+            errors.append(f"{key} must be a genuine integer 1 or 2")
+    if type(count) is not int or count not in (1, 2):
+        errors.append("transition count must be a genuine integer 1 or 2")
     if not isinstance(measurements, list) or len(measurements) != count:
         errors.append("trigger_measurements must retain one actual native result per completed transition")
     else:
@@ -454,7 +532,8 @@ def common_errors(document, root, task, workspace=None):
                     errors.append("trigger measurement prompt limit changed")
                 if not 0.30 <= measurement["fraction_remaining"] <= 0.40:
                     errors.append("trigger utilization must be between 60% and 70%")
-                if measurement["context_window"]["number"] != index + 1:
+                if (type(measurement["context_window"]["number"]) is not int
+                        or measurement["context_window"]["number"] != index + 1):
                     errors.append("trigger measurements must cover successive windows in order")
             except (KeyError, TypeError):
                 errors.append("trigger measurement must be the full actual native context result")
@@ -477,7 +556,7 @@ def checkpoint_errors(document, root, task, workspace=None):
 
 def witness_errors(document, root, task, workspace=None):
     errors = common_errors(document, root, task, workspace)
-    if document.get("transitions_completed") != 2:
+    if type(document.get("transitions_completed")) is not int or document["transitions_completed"] != 2:
         errors.append("witness requires exactly two completed transitions")
     if document.get("declaration") != "NOT-JUDGED; parent remains Active":
         errors.append("witness must not declare Tier-E or parent completion")

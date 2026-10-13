@@ -177,6 +177,92 @@ class ValidationTests(unittest.TestCase):
                 next(e for e in bad if e.get("id") == f"complete-{delayed}")["timestamp"] = "1-9-1"
                 self.assertTrue(any(row["errors"] for row in recovery_event_errors(bad, root)))
 
+    def test_recorded_read_requires_exact_range_or_bounded_output(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            events = self.semantic_events(root)
+            path = str(root / "corpus/shard-003.txt")
+            entire = (root / "corpus/shard-003.txt").read_text()
+            for arguments in ({"path": path}, {"path": path, "view_range": [1, 80]},
+                              {"path": path, "view_range": [60, 80]}):
+                bad = copy.deepcopy(events)
+                next(e for e in bad if e.get("id") == "1-4")["data"]["arguments"] = arguments
+                next(e for e in bad if e.get("id") == "complete-1-4")["data"]["result"]["content"] = entire
+                self.assertTrue(recovery_event_errors(bad, root)[0]["errors"], arguments)
+            bad = self.semantic_events(root, True)
+            next(e for e in bad if e.get("id") == "1-4")["data"]["arguments"]["command"] = f"cat '{path}'"
+            next(e for e in bad if e.get("id") == "complete-1-4")["data"]["result"]["content"] = entire
+            self.assertTrue(recovery_event_errors(bad, root)[0]["errors"])
+            wrong_operands = copy.deepcopy(events)
+            next(e for e in wrong_operands if e.get("id") == "1-4")["data"]["arguments"]["view_range"] = [62, 80]
+            self.assertTrue(recovery_event_errors(wrong_operands, root)[0]["errors"])
+            exact_output = copy.deepcopy(events)
+            del next(e for e in exact_output if e.get("id") == "1-4")["data"]["arguments"]["view_range"]
+            self.assertFalse(recovery_event_errors(exact_output, root)[0]["errors"])
+
+    def test_unknown_potential_writers_cannot_disappear_before_refresh(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            target = str(root / "witness.json")
+            for command in (f"printf '{{}}' | tee '{target}'", f"touch '{target}'",
+                            f"mv draft.json '{target}'", f"truncate -s 0 '{target}'",
+                            f"sed -n 'w {target}' task.json", f"sed -n 'W {target}' task.json",
+                            f"sed -n 'e touch {target}' task.json",
+                            f"sed -n -e '1p' -e 'w {target}' task.json",
+                            f"find . -fprint '{target}'", f"printf '{{}}'\ntee '{target}'",
+                            f"echo $(touch '{target}')", f"echo `touch '{target}'`"):
+                events = self.semantic_events(root)
+                mutation = [
+                    {"type": "tool.execution_start", "id": "early-writer", "timestamp": "1-0a",
+                     "data": {"toolCallId": "early-writer", "toolName": "bash", "arguments": {"command": command}}},
+                    {"type": "tool.execution_complete", "id": "early-writer-complete", "timestamp": "1-0b",
+                     "data": {"toolCallId": "early-writer", "success": True, "result": {"content": "{}"}}},
+                ]
+                events[3:3] = mutation
+                observation = recovery_event_errors(events, root)[0]
+                self.assertTrue(observation["errors"], command)
+                self.assertEqual(observation["first_substantive_work"], "early-writer", command)
+
+    def test_malformed_checkpoint_read_action_preserves_error_packet(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evaluation, state, initial = self.analyzer_fixture(Path(temp))
+            workspace = evaluation / "workspace"
+            malformed = [
+                {"operation": "read", "path": str(workspace / "corpus/shard-003.txt"), "view_range": None},
+                {"operation": "read", "path": None, "view_range": [61, 80]},
+                {"operation": "read", "path": [], "view_range": [61, 80]},
+                {"operation": "read", "path": str(workspace / "corpus/shard-003.txt"), "view_range": [0, 80]},
+                {"operation": "read", "path": str(workspace / "corpus/shard-003.txt"), "view_range": [61, True]},
+            ]
+            for action in malformed:
+                events = self.semantic_events(workspace)
+                for event in events:
+                    if event["type"] == "session.context_cleared":
+                        event["timestamp"] = f"{event['id'][-1]}--clear"
+                response = next(e for e in events if e.get("id") == "complete-1-0")
+                response["data"]["result"]["content"] = json.dumps({"content": json.dumps({"next_action": action})})
+                report = self.run_analyzer(evaluation, state, initial[:5] + events)
+                self.assertTrue(report["semantic_recovery_validation"][0]["errors"], action)
+                self.assertTrue((evaluation / "judge-packet.json").exists())
+
+    def test_transition_counts_reject_boolean_and_float_values(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evaluation, state, events = self.analyzer_fixture(Path(temp))
+            root = evaluation / "workspace"
+            task = json.loads((root / "task.json").read_text())
+            checkpoint = json.loads(events[1]["data"]["arguments"]["content"])
+            for count in (True, 1.0):
+                bad = dict(checkpoint, transition_number=count)
+                self.assertTrue(checkpoint_errors(bad, root, task), count)
+            witness = dict(checkpoint, transitions_completed=2,
+                           trigger_measurements=[checkpoint["trigger_measurements"][0],
+                                                 {"context_info": {"promptTokenLimit": 200000},
+                                                  "fraction_remaining": .35, "context_window": {"number": 2}}],
+                           declaration="NOT-JUDGED; parent remains Active", unexercised=["adverse cases"])
+            del witness["transition_number"]
+            self.assertEqual(witness_errors(witness, root, task), [])
+            self.assertTrue(witness_errors(dict(witness, transitions_completed=2.0), root, task))
+
     def test_witness_path_mention_is_not_a_write_destination(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
