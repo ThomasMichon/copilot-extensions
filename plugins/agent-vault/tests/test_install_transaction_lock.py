@@ -336,17 +336,32 @@ def test_posix_pid_fallback_serializes_simultaneous_stale_recovery(tmp_path: Pat
     assert not os.path.lexists(install_dir / ".install.lock.pid.reap")
 
 
-def test_posix_pid_fallback_reclaims_a_reap_mutex_left_by_a_dead_reaper(tmp_path: Path) -> None:
+def test_posix_pid_fallback_fails_closed_on_a_dead_reapers_mutex(tmp_path: Path) -> None:
+    """A reap mutex left by a reaper that died mid-reap is never reclaimed
+    automatically (that would reintroduce the check-then-unlink race):
+    simultaneous contenders all fail closed and leave both links untouched."""
     bash = _posix_bash()
     if bash is None:
         pytest.skip("POSIX bash not available")
     install_dir = tmp_path / "rt"
     install_dir.mkdir()
-    os.symlink(str(_dead_pid()), install_dir / ".install.lock.pid")
-    os.symlink(str(_dead_pid()), install_dir / ".install.lock.pid.reap")
-    result = _run_sh_block(
-        bash, install_dir, "if _enter_install_lock 10; then echo acquired; else echo refused; fi",
-        env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+    stale_owner, stale_reaper = str(_dead_pid()), str(_dead_pid())
+    os.symlink(stale_owner, install_dir / ".install.lock.pid")
+    os.symlink(stale_reaper, install_dir / ".install.lock.pid.reap")
+    script = (
+        "set -euo pipefail\n_fail() { printf 'FAIL:%s\\n' \"$1\"; }\n"
+        f"INSTALL_DIR='{install_dir}'\n" + _block(SH_SCRIPT) + "\n"
+        "if _enter_install_lock 2; then echo acquired; else echo refused; fi\n"
     )
-    assert result.stdout.strip() == "acquired", result.stderr
-    assert not os.path.lexists(install_dir / ".install.lock.pid.reap")
+    contenders = [
+        subprocess.Popen(
+            [bash, "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env={**os.environ, "COPILOT_EXT_NO_FLOCK": "1"},
+        )
+        for _ in range(3)
+    ]
+    for proc in contenders:
+        out, err = proc.communicate(timeout=60)
+        assert out.strip() == "refused", err
+    assert os.readlink(install_dir / ".install.lock.pid") == stale_owner
+    assert os.readlink(install_dir / ".install.lock.pid.reap") == stale_reaper

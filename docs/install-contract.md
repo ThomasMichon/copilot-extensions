@@ -1733,8 +1733,11 @@ lock on `<install-dir>/.install.lock` for every mutating action
 build + publish transaction (Windows: a `FileShare.None` handle; POSIX: `flock` on
 fd 8 (fd 7 for `agent-ssh`), or an atomic pid symlink
 `<install-dir>/.install.lock.pid` where `flock` is unavailable, whose dead owner is
-reaped under a self-healing pid-bearing `.install.lock.pid.reap` mutex so two
-contenders can never both reap and then delete each other's live lock). It is
+reaped under a pid-bearing `.install.lock.pid.reap` mutex so two contenders can
+never both reap and then delete each other's live lock. A `.reap` link left by a
+reaper that died mid-reap is deliberately never reclaimed automatically (that
+would reintroduce the same race); runs fail closed at their deadline until it is
+removed by hand). It is
 acquired **after** the self-stage
 re-exec (the staging parent never holds it) and released in `finally` / an `EXIT`
 trap; the OS releases it if the process dies.

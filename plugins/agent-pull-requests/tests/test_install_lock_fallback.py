@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -66,17 +67,28 @@ def test_simultaneous_stale_recovery_never_overlaps(tmp_path: Path) -> None:
     assert not os.path.lexists(install_dir / ".install.lock.pid.reap")
 
 
-def test_reap_mutex_left_by_a_dead_reaper_is_reclaimed(tmp_path: Path) -> None:
+def test_dead_reapers_mutex_is_never_reclaimed(tmp_path: Path) -> None:
+    """A reap mutex left by a reaper that died mid-reap is never reclaimed
+    automatically (that would reintroduce the check-then-unlink race): every
+    contender keeps waiting (and fails closed at its deadline) without
+    touching either link."""
     bash = _posix_bash()
     if bash is None:
         pytest.skip("POSIX bash not available")
     install_dir = tmp_path / "rt"
     install_dir.mkdir()
-    os.symlink(str(_dead_pid()), install_dir / ".install.lock.pid")
-    os.symlink(str(_dead_pid()), install_dir / ".install.lock.pid.reap")
-    proc = _contender(
-        bash, install_dir, "if _enter_install_lock; then echo acquired; else echo refused; fi\n"
-    )
-    out, err = proc.communicate(timeout=60)
-    assert out.strip() == "acquired", err
-    assert not os.path.lexists(install_dir / ".install.lock.pid.reap")
+    stale_owner, stale_reaper = str(_dead_pid()), str(_dead_pid())
+    os.symlink(stale_owner, install_dir / ".install.lock.pid")
+    os.symlink(stale_reaper, install_dir / ".install.lock.pid.reap")
+    contenders = [
+        _contender(bash, install_dir, "_enter_install_lock && echo acquired\n") for _ in range(3)
+    ]
+    try:
+        time.sleep(3)
+        assert all(proc.poll() is None for proc in contenders)
+        assert os.readlink(install_dir / ".install.lock.pid") == stale_owner
+        assert os.readlink(install_dir / ".install.lock.pid.reap") == stale_reaper
+    finally:
+        for proc in contenders:
+            proc.kill()
+            proc.communicate()

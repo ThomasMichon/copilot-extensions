@@ -760,7 +760,7 @@ _enter_install_lock() {
         __install_lock_fd=7
         return 0
     fi
-    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live __reaper
+    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live
     __deadline=$(( $(date +%s) + __timeout ))
     until ln -s "$$" "$__link" 2>/dev/null; do
         if [[ "$(date +%s)" -ge "$__deadline" ]]; then
@@ -783,13 +783,11 @@ _enter_install_lock() {
             fi
             rm -f "$__link.reap"
         else
-            # Reclaim a reap mutex whose owner died mid-reap so it never wedges.
-            __reaper="$(readlink "$__link.reap" 2>/dev/null || true)"
-            if [[ "$__reaper" =~ ^[0-9]+$ ]] && ! kill -0 "$__reaper" 2>/dev/null; then
-                rm -f "$__link.reap" 2>/dev/null || true
-            else
-                sleep 0.1
-            fi
+            # Another contender is reaping. A reap mutex whose owner died
+            # mid-reap is deliberately never reclaimed automatically (that
+            # would reintroduce the check-then-unlink race); the run fails
+            # closed at its deadline until the stale .reap link is removed.
+            sleep 0.1
         fi
     done
     __install_lock_link="$__link"
