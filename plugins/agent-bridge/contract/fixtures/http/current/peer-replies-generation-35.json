@@ -1,18 +1,18 @@
 {
   "captured_from": {
-    "commit": "9b7b4058d81b76f24debbc805e53ece0877c7f99",
+    "commit": "03a117e3edffd1bd0e9a9464b15839883cae247b",
     "plugin_version": "0.4.1-dev3",
-    "protocol_generation": 34,
+    "protocol_generation": 35,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-    "source_git_blob": "e1e3b4e6fa31a4e5148cfe1ae78f5833abc0601d",
-    "source_sha256": "a69ac9569640cee90a5246923ace9d812a369790a267b1254174052d960ddc52"
+    "source_git_blob": "fa14ffd9f040aa95f6ab0ed10ecfeec29201e963",
+    "source_sha256": "be3b892314c276413057a50c10456ba65b5226c4310d3a22f8a066624c308d58"
   },
   "response": {
-    "protocol_version": 34,
+    "protocol_version": 35,
     "min_protocol_version": 1
   },
   "capability": {
-    "required_protocol_version": 34,
+    "required_protocol_version": 35,
     "required_carrier_operation_version": 4,
     "address": "live:host-a:project-a:wt-a",
     "unavailable_peer_creates_agent": false

@@ -71,6 +71,24 @@ def peer_operation_timeout(timeout: float, *, wait: bool, wait_timeout: float) -
     return max(timeout, wait_timeout + 15.0) if wait else timeout
 
 
+def peer_target_after_lookup(target: str, prompt: str, *, live: bool) -> LivePeerAddress | None:
+    from .send_outcome import SendRefused
+
+    try:
+        address = None if live else LivePeerAddress.parse(target)
+    except ValueError as exc:
+        raise SendRefused(
+            "refused_unavailable", reason="invalid_address", retryable=False,
+            target=target, error=str(exc),
+        ) from exc
+    if address is not None and not prompt.strip():
+        raise SendRefused(
+            "refused_unavailable", reason="empty_message", retryable=False,
+            target=target, error="Refusing to deliver an empty peer message.",
+        )
+    return address
+
+
 def caller_reply_address(args: Namespace, client_factory: Callable[[], BridgeClient],
                          worktree_handle: Callable[[], str | None]) -> str | None:
     import os

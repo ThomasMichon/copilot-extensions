@@ -28,7 +28,7 @@ class _HttpClient(BridgeClient):
         self.http = TestClient(app)
 
     def daemon_supports(self, version):
-        return version <= 34
+        return version <= 35
 
     def _request(self, method, path, data=None, *, params=None, request_timeout=None):
         response = self.http.request(method, path, json=data, params=params)
@@ -201,7 +201,7 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
         output = capsys.readouterr().out
         assert '"replied": true' in output and '"reply": "peer response"' in output
         fixture_path = (Path(__file__).parents[1] / "contract" / "fixtures" / "http"
-                        / "current" / "remote-peer-generation-34.json")
+                        / "current" / "remote-peer-generation-35.json")
         expected = json.loads(fixture_path.read_text(encoding="utf-8"))["response"]
         observed = json.loads(output)
         assert {key: observed[key] for key in expected} == expected
@@ -336,7 +336,7 @@ def _route_through_versioned_carrier(app, hosting_client, carrier_version):
 
 @pytest.mark.parametrize("handle", ["live:host", "live:host:project:wt", "live:host:project:wt:extra"])
 @pytest.mark.parametrize("carrier_version", [3, 4])
-@pytest.mark.parametrize("hosting_version", [32, 34])
+@pytest.mark.parametrize("hosting_version", [32, 35])
 def test_remote_exact_ids_keep_legacy_carrier_and_http_compatibility(
     tmp_path, handle, carrier_version, hosting_version,
 ):
@@ -361,7 +361,7 @@ def test_remote_exact_ids_keep_legacy_carrier_and_http_compatibility(
         hosting.close()
 
 
-@pytest.mark.parametrize("carrier_version,hosting_version", [(3, 34), (4, 32), (4, 34)])
+@pytest.mark.parametrize("carrier_version,hosting_version", [(3, 35), (4, 32), (4, 35)])
 def test_explicit_remote_qualified_mode_is_fenced_and_cannot_hit_a_colliding_exact_id(
     tmp_path, carrier_version, hosting_version,
 ):
@@ -374,7 +374,7 @@ def test_explicit_remote_qualified_mode_is_fenced_and_cannot_hit_a_colliding_exa
         _hosting_app, hosting_client = _bridge(hosting)
         hosting_client.daemon_supports = lambda version: version <= hosting_version
         packets = _route_through_versioned_carrier(source_app, hosting_client, carrier_version)
-        if carrier_version == 4 and hosting_version == 34:
+        if carrier_version == 4 and hosting_version == 35:
             result = source_client.send_remote_live_message(
                 "host", address, sender="peer", message="qualified", qualified_peer=True,
             )

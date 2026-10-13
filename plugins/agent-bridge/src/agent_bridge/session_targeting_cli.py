@@ -210,15 +210,9 @@ def _send(args: argparse.Namespace) -> None:
         core._submit_and_stream(client, args, target, prompt, caller_id=core._caller_id_for(args))
         return
 
-    from .live_peer_address import LivePeerAddress
+    from .live_peer_address import peer_target_after_lookup
     live = client.resolve_live_session(target)
-    try:
-        address = None if live else LivePeerAddress.parse(target)
-    except ValueError as exc:
-        raise SendRefused(
-            "refused_unavailable", reason="invalid_address", retryable=False,
-            target=target, error=str(exc),
-        ) from exc
+    address = peer_target_after_lookup(target, prompt, live=bool(live))
     if live:
         expected_session_id = getattr(args, "expected_session_id", None)
         # The delivery carries expected_session_id, which an alias-aware daemon checks
@@ -247,11 +241,6 @@ def _send(args: argparse.Namespace) -> None:
         _deliver_to_live_session(client, args, live["session_id"], prompt)
         return
     if address is not None:
-        if not prompt.strip():
-            raise SendRefused(
-                "refused_unavailable", reason="empty_message", retryable=False,
-                target=target, error="Refusing to deliver an empty peer message.",
-            )
         _deliver_to_live_session(client, args, target, prompt, remote_address=address)
         return
     if getattr(args, "expected_session_id", None):
@@ -276,7 +265,6 @@ def _caller_worktree_handle() -> str | None:
 
 def _live_reply_to(args: argparse.Namespace) -> str | None:
     from .live_peer_address import caller_reply_address
-
     return caller_reply_address(args, lambda: _core()._get_client(), _caller_worktree_handle)
 
 

@@ -80,7 +80,7 @@ def test_qualified_peer_contract_matches_current_fixture() -> None:
     from agent_bridge.remote_operations import REMOTE_PEER_REPLY_MIN_VERSION
     from agent_bridge.routes.remote import RemoteLiveMessageRequest
 
-    fixture = _fixture("fixtures/http/current/peer-replies-generation-34.json")
+    fixture = _fixture("fixtures/http/current/peer-replies-generation-35.json")
     capability = fixture["capability"]
     assert capability["required_protocol_version"] == bridge_protocol.QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
     assert capability["required_carrier_operation_version"] == REMOTE_PEER_REPLY_MIN_VERSION
@@ -96,7 +96,7 @@ def test_native_bound_wire_is_preserved_at_the_new_peer_generation(owner) -> Non
     from agent_bridge.prompt_models import SubmitPromptRequest, SubmitPromptResponse
 
     previous = _fixture(f"fixtures/http/current/native-bound-extracted-{owner}-generation-33.json")
-    current = _fixture(f"fixtures/http/current/native-bound-extracted-{owner}-generation-34.json")
+    current = _fixture(f"fixtures/http/current/native-bound-extracted-{owner}-generation-35.json")
     assert current["request"] == previous["request"]
     assert current["response"] == previous["response"]
     assert current["capability"] == previous["capability"]
