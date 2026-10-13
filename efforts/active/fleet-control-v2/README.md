@@ -7,7 +7,9 @@
 - **Status:** Active; artifact preflight landed, both-method release trust plan next
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
-- **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts. Existing dependencies #5789, #6030, #5861, #5862 retain ownership.
+- **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts;
+  #6443 Gateway/index vertical slice. Existing dependencies #5789, #6030,
+  #5861, #5862 retain ownership.
 
 ## Guiding Intent
 
@@ -28,6 +30,7 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
 |-------------|---------------------|-------------|
 | Plan steward | Plan/vision reconciliation, issue coordination and review stewardship | Managed planning worktree; umbrella issue |
 | Contract implementer | Release/role contract #6240; first operation/receipt shape slice #6241 | Managed implementation worktree; assigned sub-issues |
+| Gateway/index integrator | End-to-end new Gateway, index client and subscribed credential integration #6443 | Separate managed worktree; #6443 and index consumer #6383 |
 | Existing campaign owners | Routing, standalone client, role deployment and provider integration | Existing campaign issues and canonical efforts |
 | Adopter | Configuration, capacity, enrollment and live activation approval | Explicit downstream adoption workflow |
 
@@ -38,6 +41,11 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
 - **Delegates:** None assigned to runtime implementation by this plan.
 - **Slice ownership:** Never assign a slice already held by another campaign.
   Coordinate #5789/#6030 and the standalone client PR #6133 before touching their files.
+- **Gateway/index slice:** The operator assigned its end-to-end integration to
+  the Gateway/index integrator. This is a contribution to this product, not a
+  competing Gateway or ledger. Existing contract, auth, deployment and migration
+  owners retain their work; inventory unmerged prototypes before duplicating
+  implementation. The integrator owns the slice's PRs, not the whole V2 effort.
 - **Handoff:** Continue from the first unresolved Plan item with its validation
   gates and current owner, not merely from the most recent merged PR.
 - **Canonical home:** This effort and its linked proposal are the upstream
@@ -93,6 +101,17 @@ approved direction. No runtime or live rollout authorization is inferred from
 implementation; live enrollment, deployment and destructive retirement still
 require their own approval.
 
+Subsequent operator assignment, captured verbatim:
+
+> Own the end-to-end new Gateway/index integration slice
+
+The operator explicitly selected the new fleet-manager Gateway and instructed
+that older adopter Gateways remain untouched. The requested index-side container,
+CLI query path and Gateway-to-subscribed-controller token path are captured in
+the [standalone index effort](../agent-index-standalone-service/README.md).
+The [Gateway/index slice](gateway-index-slice.md) below is an
+**agent-recommended implementation elaboration** of that assignment.
+
 ## Plan
 
 All detailed slices are **agent-recommended** and remain subject to review.
@@ -137,6 +156,20 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [ ] Keep accepted agent/mux work, credentials and expensive workloads outside
   coordinator lifetime; all integrated roles share one lifecycle implementation.
 
+### Phase 2a - Gateway/index vertical slice
+- [ ] Review the [slice contract](gateway-index-slice.md) and coordinate #6443,
+  #6383 and retained fleet/auth/deployment owners before runtime changes.
+- [ ] Supply the resident role-selected Gateway and fixed-service index route
+  using the existing release, offer/request and operation/receipt contracts.
+- [ ] Authenticate and authorize client/node/controller principals, service
+  generations and corpus/source grants at admission and backend execution.
+- [ ] Route correlated source-credential requests to an authorized subscribed
+  controller, with refresh, expiry/revocation and explicit disconnect outcomes.
+- [ ] Wire explicit index CLI Gateway transport and detached-worker credential
+  consumption without changing unselected native/SSH behavior.
+- [ ] Prove the real CLI/Gateway/container/controller path, independently
+  persistent index state and scoped negative cases before any native offload.
+
 ### Phase 3 - Transfer authority without duplicate writers
 - [ ] Inventory V1 authorities, state schemas, live hosts, receipts and obligations;
   coordinate imports with their current owners.
@@ -159,6 +192,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
 
 All entries are **agent-recommended implementation gates**, not completed tests.
 
+- [ ] Complete the [Gateway/index slice gates](gateway-index-slice.md#validation-and-adoption-gates):
+  real CLI/query/credential transport, scope enforcement before retrieval,
+  crypto/correlation/revocation, fresh container persistence and live adoption.
 - [ ] Real first-touch Windows/Linux install with no Copilot/plugin/runtime cache;
   offline installed use and precise missing/incompatible/unauthorized failures.
 - [ ] Concurrent activation/admission: one authoritative writer, unique resource
@@ -189,6 +225,16 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-10-12 - Gateway/index ownership assigned
+- Operator explicitly assigned the end-to-end new Gateway/index integration
+  slice, after selecting the new product rather than an older adopter Gateway.
+- Claimed #6443 after deduplicating existing routing, credential and index work.
+  Existing #6240/#6241/#5789/#6030 responsibilities remain intact.
+- Prepared the bounded slice proposal before runtime implementation. Current
+  merged fleet primitives are not cryptographic auth, resident routing or
+  subscribed-controller credential delivery; unmerged prototypes need inventory
+  and coordination before reuse or replacement.
 
 ### 2026-10-11 - Approved direction and plan preparation
 - Operator approved the adversarial redesign, requested organized personal
