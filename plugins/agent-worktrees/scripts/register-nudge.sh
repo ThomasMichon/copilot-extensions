@@ -124,8 +124,6 @@ payload_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 payload_command="$payload_root/bin/payload/agent-worktrees"
 available=0
 [ -x "$payload_command" ] && [ -f "$payload_root/scripts/install.sh" ] && available=1
-command -v agent-worktrees >/dev/null 2>&1 && available=1
-[ -x "$HOME/.local/bin/agent-worktrees" ] && available=1
 [ "$available" -eq 1 ] || emit_empty
 
 # Must be inside a git work tree.

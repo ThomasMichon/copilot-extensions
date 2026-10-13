@@ -160,11 +160,8 @@ function Emit-Empty { Publish-Context '{}'; exit 0 }
 $payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $payloadCommand = Join-Path $payloadRoot 'bin\payload\agent-worktrees.ps1'
 $payloadInstaller = Join-Path $payloadRoot 'scripts\install.ps1'
-$binstub = Join-Path $env:USERPROFILE '.local\bin\agent-worktrees'
 $available = ((Test-Path -LiteralPath $payloadCommand -PathType Leaf) -and
-              (Test-Path -LiteralPath $payloadInstaller -PathType Leaf)) -or
-             [bool](Get-Command agent-worktrees -ErrorAction SilentlyContinue) -or
-             (Test-Path $binstub)
+              (Test-Path -LiteralPath $payloadInstaller -PathType Leaf))
 if (-not $available) { Emit-Empty }
 
 # Must be inside a git work tree.

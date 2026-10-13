@@ -506,12 +506,15 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 - Onboarding now checks its own payload command and installer without
   executing either, instead of trusting the existence of a directory named
   by a shared plugin-name-only pointer. It directs registration through the
-  owning session catalog and retains legacy compatibility checks.
+  owning session catalog. When only a legacy command is available, it stays
+  silent rather than advertising an unavailable catalog entry; the legacy
+  command itself remains untouched.
 - Added real CLI no-write regression coverage for absent and pre-existing
   pointer evidence, active namespaced fixtures, and mutation-entry guards
   on the Python API. Derived copies follow the canonical sync inventory.
 - Local evidence: 127 governance tests passed across Python, POSIX shell,
-  and local PowerShell; 13 onboarding tests passed with PowerShell parity.
+  and local PowerShell; 15 onboarding tests passed with PowerShell parity,
+  including the legacy-only cases added after review.
   The contained devcontainer onboarding run passed 8 tests and skipped
   5 PowerShell cases because that image does not include PowerShell.
   Those skips were exercised by the separate local parity run.

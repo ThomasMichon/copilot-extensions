@@ -945,8 +945,10 @@ does not authorize publication, provisioning, activation, or service startup.
 Resolver-free onboarding checks its own payload command and installer, using
 the same readiness criteria as that payload's session command catalog; it
 never executes a shim to test availability or trusts an arbitrary existing
-runtime directory. Supported legacy availability checks remain compatibility
-probes, not permission to select a peer through ambient command order.
+runtime directory. If its owning payload command is unavailable, onboarding
+stays silent even when a legacy global command exists; it never directs a user
+to an unavailable catalog entry. This does not remove or disable supported
+legacy commands.
 
 Session callers consume the owning plugin's exact catalog `argv`. Durable
 out-of-session callers use explicitly ownership-bound stable launchers.

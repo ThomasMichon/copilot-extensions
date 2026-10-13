@@ -139,7 +139,9 @@ def _run_powershell(
 
 
 @pytest.mark.parametrize("runner", ["bash", "powershell"])
-@pytest.mark.parametrize("case", ["ready", "absent", "missing-installer", "context"])
+@pytest.mark.parametrize(
+    "case", ["ready", "absent", "missing-installer", "context", "legacy-only"]
+)
 def test_register_nudge_uses_own_payload_not_runtime_pointer(
     tmp_path: Path, runner: str, case: str
 ) -> None:
@@ -158,7 +160,7 @@ def test_register_nudge_uses_own_payload_not_runtime_pointer(
     command = root / "bin" / "payload" / (
         "agent-worktrees" if runner == "bash" else "agent-worktrees.ps1"
     )
-    if case != "absent":
+    if case not in ("absent", "legacy-only"):
         command.parent.mkdir(parents=True)
         command.write_text(
             "#!/usr/bin/env bash\nexit 97\n" if runner == "bash" else "exit 97\n",
@@ -167,6 +169,11 @@ def test_register_nudge_uses_own_payload_not_runtime_pointer(
         command.chmod(0o755)
     if case != "missing-installer":
         (scripts / f"install.{extension}").write_text("", encoding="utf-8")
+    if case == "legacy-only":
+        legacy = home / ".local" / "bin" / "agent-worktrees"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        legacy.chmod(0o755)
     foreign = tmp_path / "another-marketplace"
     foreign.mkdir()
     pointer = home / ".copilot-extensions" / "agent-worktrees" / "runtime-root"
@@ -200,6 +207,8 @@ def test_register_nudge_uses_own_payload_not_runtime_pointer(
         assert output == {}
         assert not (home / ".agent-worktrees").exists()
     assert (pointer.read_bytes(), pointer.stat().st_mtime_ns) == pointer_before
+    if case == "legacy-only":
+        assert legacy.read_text(encoding="utf-8") == "#!/usr/bin/env bash\nexit 0\n"
 
 
 def test_register_nudge_context_only_replays_without_mutating(

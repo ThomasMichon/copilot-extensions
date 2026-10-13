@@ -35,15 +35,19 @@ or `probe-legacy` resolution paths on persistent hosts, including doctor wrapper
 that reach them. Inspect existing evidence without executing those paths;
 exercise the diagnostic implementations only in disposable environments.
 
-The source inventory for that restriction is:
+The source inventory for diagnostic recovery is:
 
 - Python: [`_installation_context_mode_cli.py`](../../../libs/installation-context/_installation_context_mode_cli.py)
-  resolves diagnostic mode and calls `_publish_runtime_root_pointer`, defined
-  in [`_installation_context_files.py`](../../../libs/installation-context/_installation_context_files.py).
+  owns `resolve_installation_mode` and `probe_legacy_entrypoint`. The current
+  correction removes their advisory-pointer publication and the private
+  `_publish_runtime_root_pointer` helper formerly defined in
+  [`_installation_context_files.py`](../../../libs/installation-context/_installation_context_files.py).
 - PowerShell: [`installation-context.ps1`](../../../libs/installation-context/installation-context.ps1)
-  calls `Publish-RuntimeRootPointer` from its `status` branch.
+  owns `Resolve-InstallationStatus`; the current correction removes the
+  `status` branch's publication and the `Publish-RuntimeRootPointer` helper.
 - No-Python POSIX: [`installation-context.sh`](../../../libs/installation-context/installation-context.sh)
-  calls `publish_runtime_root_pointer` from its `status` branch.
+  owns `run_status_action`; the current correction removes the `status`
+  branch's publication and the `publish_runtime_root_pointer` helper.
 - Derived copies: [`tools/sync-installation-context.py`](../../../tools/sync-installation-context.py)
   owns the `FILES`, `ADOPTERS`, `STANDALONE_PYTHON_ADOPTERS`, and `vendor_pairs()`
   inventories. They identify standalone payload copies under
@@ -56,7 +60,11 @@ or the vendoring tool. Trace each doctor or `probe-legacy` wrapper to the
 selected implementation and its transitive calls; a wrapper name or an
 apparently read-only outer command does not exempt a call to these publishers.
 The acceptance inventory must account for these copies and affected wrappers
-before the restriction is lifted.
+before the restriction is lifted. Current source no longer publishing a pointer
+does not prove that an installed copy has been updated or that every wrapper
+is non-mutating. The separate merged-implementation and native-platform
+acceptance requirements below still apply; older installed implementations
+may continue to contain those publishers.
 
 **Verified read-only** means all of the following evidence exists for the
 implementation being invoked:
