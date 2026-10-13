@@ -93,6 +93,7 @@ def register_status_routes(
             # otherwise record a second, duplicate answer (see
             # client_steering.py's steer()).
             "steer_idempotency_key": True,
+            "task_categories": 1,
         }
 
     @app.get("/events")

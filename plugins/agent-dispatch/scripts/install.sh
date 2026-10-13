@@ -1336,19 +1336,22 @@ _write_manifest() {
         "$PLUGIN_DIR" "$VENV_DIR" "" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$SRC_VERSION"
 }
 
-# Register the worktree-picker "Tasks" pivot (best-effort; never fatal).
+# Register the independent task-category pivots (best-effort; never fatal).
 _register_pivot() {
-    local src="$PLUGIN_DIR/pivots/agent-dispatch.json"
+    local name src
     local dir="$HOME/.agent-worktrees/pivots"
-    if [[ -f "$src" ]]; then
-        if mkdir -p "$dir" 2>/dev/null && cp -f "$src" "$dir/agent-dispatch.json" 2>/dev/null; then
-            _ok "Picker pivot registered: $dir/agent-dispatch.json"
+    for name in agent-dispatch.json agent-dispatch-maintenance.json; do
+        src="$PLUGIN_DIR/pivots/$name"
+        if [[ -f "$src" ]]; then
+            if mkdir -p "$dir" 2>/dev/null && cp -f "$src" "$dir/$name" 2>/dev/null; then
+                _ok "Picker pivot registered: $dir/$name"
+            else
+                _skip "Could not register picker pivot (agent-worktrees runtime root not writable)"
+            fi
         else
-            _skip "Could not register picker pivot (agent-worktrees runtime root not writable)"
+            _skip "Picker pivot manifest not found at $src"
         fi
-    else
-        _skip "Picker pivot manifest not found at $src"
-    fi
+    done
 }
 
 # -- Coordinator service (systemd user unit; default-on on deploy machines) --
@@ -2402,9 +2405,12 @@ do_uninstall() {
         [[ -e "$STUB" || -e "$BOARD_STUB" ]] && echo "[dry-run] would remove binstubs: $STUB $BOARD_STUB"
         [[ -f "$HOME/.agent-worktrees/pivots/agent-dispatch.json" ]] && \
             echo "[dry-run] would remove pivot: $HOME/.agent-worktrees/pivots/agent-dispatch.json"
+        [[ -f "$HOME/.agent-worktrees/pivots/agent-dispatch-maintenance.json" ]] && \
+            echo "[dry-run] would remove pivot: $HOME/.agent-worktrees/pivots/agent-dispatch-maintenance.json"
     else
         rm -f "$STUB" "$BOARD_STUB"; _ok "Binstubs removed"
         rm -f "$HOME/.agent-worktrees/pivots/agent-dispatch.json" 2>/dev/null || true
+        rm -f "$HOME/.agent-worktrees/pivots/agent-dispatch-maintenance.json" 2>/dev/null || true
     fi
     if [[ "$PURGE" -eq 1 ]]; then
         if [[ "$DRY_RUN" -eq 1 ]]; then

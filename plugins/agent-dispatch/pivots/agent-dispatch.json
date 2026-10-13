@@ -2,7 +2,7 @@
   "schema_version": 1,
   "label": "Tasks",
   "after": "Worktrees",
-  "list": ["agent-dispatch-board", "--machine", "{machine}"],
+  "list": ["agent-dispatch-board", "--machine", "{machine}", "--category", "work"],
   "stream": true,
   "subscribe": true,
   "entry": {
@@ -42,6 +42,12 @@
     ]
   },
   "actions": [
+    {
+      "key": "inspect-evidence",
+      "label": "Inspect evidence — results, progress, statistics and attachments",
+      "run": ["agent-dispatch", "inspect-task", "{task_id}", "--machine", "{machine}"],
+      "description": "Read the full task, result/log references, events, progress, statistics and durable attachment lineage on the owning machine."
+    },
     {
       "key": "steer",
       "label": "Steer — read the card & answer",

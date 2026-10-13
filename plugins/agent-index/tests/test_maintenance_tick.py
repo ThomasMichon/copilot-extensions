@@ -21,6 +21,16 @@ def _load_module():
     return module
 
 
+def test_schedule_template_declares_maintenance_without_classifying_other_scripts():
+    module = _load_module()
+    template = module.schedule_template("github.com/example/harness", "worker")
+    assert template["category"] == "maintenance"
+    assert template["source"] == "schedule"
+    assert template["labels"] == ["agent-index-maintenance"]
+    assert template["target_machine"] == "worker"
+    assert json.loads(template["payload_inline"])["path"] == str(SCRIPT.resolve())
+
+
 def test_plan_maintenance_actions_only_heals_unhealthy_components():
     module = _load_module()
 

@@ -132,6 +132,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
             target_repo=args.target_repo,
             label=args.label,
             evaluator_ref=args.evaluator_ref,
+            category=getattr(args, "category", None),
             limit=args.limit,
         )
     from . import tracking
@@ -280,7 +281,8 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
             "submitted,completed,abandoned,dead_letter"
         )
         with _core()._client(args) as c:
-            tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit)
+            tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit,
+                           category=getattr(args, "category", None))
             def _relay_fetch_many(
                 refs: list[tuple[str, str]]
             ) -> dict[tuple[str, str], dict | None]:
@@ -305,7 +307,8 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
     steer_only = getattr(args, "awaiting_steer", False)
     status = "proposed,claimed,started,suspended" if steer_only else args.status
     with _core()._client(args) as c:
-        tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit)
+        tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit,
+                       category=getattr(args, "category", None))
     from .queue import machine_matches
 
     inbox = [t for t in tasks if machine_matches(t.get("target_machine"), machine)]
@@ -319,7 +322,8 @@ def _cmd_find(args: argparse.Namespace) -> int:
         print(_core()._REPO_UNRESOLVED, file=sys.stderr)
         return 2
     with _core()._client(args) as c:
-        return _core()._emit(_core()._enrich(c.find(args.query, repo=repo, limit=args.limit)))
+        return _core()._emit(_core()._enrich(c.find(
+            args.query, repo=repo, limit=args.limit, category=getattr(args, "category", None))))
 
 def _cmd_sweep(args: argparse.Namespace) -> int:
     repo = _core()._scope_repo(args)
@@ -327,7 +331,8 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         print(_core()._REPO_UNRESOLVED, file=sys.stderr)
         return 2
     with _core()._client(args) as c:
-        return _core()._emit(_core()._enrich(c.sweep(repo=repo, limit=args.limit)))
+        return _core()._emit(_core()._enrich(c.sweep(
+            repo=repo, limit=args.limit, category=getattr(args, "category", None))))
 
 def _cmd_watch(args: argparse.Namespace) -> int:
     with _core()._client(args) as c:

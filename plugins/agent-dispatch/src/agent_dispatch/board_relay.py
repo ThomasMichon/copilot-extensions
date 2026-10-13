@@ -320,11 +320,14 @@ class _Snapshot:
         the affected refs, and the cache actually stored afterward is
         merged with (never a flat replacement of) the prior one."""
         from . import board_cli
+        from .client_errors import DispatchUpgradeRequired
 
         try:
             tasks = board_cli._fetch_raw_tasks_direct(
                 self._args, endpoint=self._endpoint
             )
+        except DispatchUpgradeRequired:
+            raise
         except Exception:
             return None
         cache: dict = {}
@@ -532,7 +535,11 @@ def _finish_connect(
     on the same thread that owns ``out``/``prev``, never the background
     thread that ran :func:`_establish`."""
     snapshot = _Snapshot(args, client.base_url)
-    reconciled = snapshot.full_refetch()
+    try:
+        reconciled = snapshot.full_refetch()
+    except Exception:
+        client.close()
+        raise
     if reconciled is None:
         # Priming failed -- treat as transient (never substitute an empty
         # snapshot, which would make the next recompute tick emit every
@@ -619,10 +626,12 @@ def _drive(
             continue
         # outcome is a _Connected
         client = outcome.client
-        outcome = _event_loop(
-            args, out, outcome.reader, outcome.snapshot, outcome.prev, interval
-        )
-        client.close()
+        try:
+            outcome = _event_loop(
+                args, out, outcome.reader, outcome.snapshot, outcome.prev, interval
+            )
+        finally:
+            client.close()
 
 
 def _event_loop(
@@ -910,4 +919,3 @@ def _reconnect_loop(args, out, prev: list[dict], interval: float) -> int | _Conn
     # Retries exhausted: settle into permanent polling for the rest of this
     # process's life, reusing the exact same poll-and-diff implementation.
     return board_cli.poll_loop(args, out, prev, interval)
-

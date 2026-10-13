@@ -127,6 +127,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
         task = c.create(
             args.title,
             repo=repo,
+            category=getattr(args, "category", "work"),
             prompt=args.prompt,
             proposed=args.proposed,
             requires=args.require or [],
@@ -691,6 +692,7 @@ def _create_args_parent() -> argparse.ArgumentParser:
         "proposed tasks carrying the same key",
     )
     cp.add_argument("--source")
+    cp.add_argument("--category", choices=("work", "maintenance"), default="work")
     cp.add_argument("--origin-ref")
     cp.add_argument("--evaluator-ref")
     cp.add_argument(

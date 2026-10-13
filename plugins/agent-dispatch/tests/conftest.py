@@ -68,5 +68,8 @@ def _isolate_discovery(monkeypatch, tmp_path):
         # otherwise leak in and silently change `consume`'s behavior/
         # transition list out from under tests that don't expect it.
         "COPILOT_AGENT_SESSION_ID",
+        # Authentication helpers belong to the test, never the invoking agent.
+        "AGENT_DISPATCH_CONTROL_TOKEN_COMMAND",
+        "AGENT_DISPATCH_TOKEN_COMMAND",
     ):
         monkeypatch.delenv(var, raising=False)

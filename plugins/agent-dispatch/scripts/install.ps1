@@ -2068,18 +2068,20 @@ function Write-Manifest {
 }
 
 function Register-PickerPivot {
-    $pivotSrc = Join-Path $PluginDir 'pivots\agent-dispatch.json'
     $pivotDir = Join-Path $env:USERPROFILE '.agent-worktrees\pivots'
-    if (Test-Path $pivotSrc) {
-        try {
-            if (-not (Test-Path $pivotDir)) { New-Item -ItemType Directory -Force -Path $pivotDir | Out-Null }
-            Copy-Item -Force $pivotSrc (Join-Path $pivotDir 'agent-dispatch.json')
-            Write-Ok "Picker pivot registered: $pivotDir\agent-dispatch.json"
-        } catch {
-            Write-Skip 'Could not register picker pivot (agent-worktrees runtime root not writable)'
+    foreach ($name in @('agent-dispatch.json', 'agent-dispatch-maintenance.json')) {
+        $pivotSrc = Join-Path $PluginDir "pivots\$name"
+        if (Test-Path $pivotSrc) {
+            try {
+                if (-not (Test-Path $pivotDir)) { New-Item -ItemType Directory -Force -Path $pivotDir | Out-Null }
+                Copy-Item -Force $pivotSrc (Join-Path $pivotDir $name)
+                Write-Ok "Picker pivot registered: $pivotDir\$name"
+            } catch {
+                Write-Skip 'Could not register picker pivot (agent-worktrees runtime root not writable)'
+            }
+        } else {
+            Write-Skip "Picker pivot manifest not found at $pivotSrc"
         }
-    } else {
-        Write-Skip "Picker pivot manifest not found at $pivotSrc"
     }
 }
 
@@ -4119,10 +4121,12 @@ function Invoke-Uninstall {
     }
     if (-not $DryRun) { Write-Ok 'Binstub removed' }
 
-    $pivot = Join-Path $env:USERPROFILE '.agent-worktrees\pivots\agent-dispatch.json'
-    if (Test-Path $pivot) {
-        if ($DryRun) { Write-Host "[dry-run] would remove pivot: $pivot" }
-        else { Remove-Item $pivot -Force -ErrorAction SilentlyContinue }
+    foreach ($name in @('agent-dispatch.json', 'agent-dispatch-maintenance.json')) {
+        $pivot = Join-Path $env:USERPROFILE ".agent-worktrees\pivots\$name"
+        if (Test-Path $pivot) {
+            if ($DryRun) { Write-Host "[dry-run] would remove pivot: $pivot" }
+            else { Remove-Item $pivot -Force -ErrorAction SilentlyContinue }
+        }
     }
 
     if ($Purge) {

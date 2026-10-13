@@ -2819,7 +2819,8 @@ def test_inbox_scopes_cross_lane_to_this_machine(monkeypatch, capsys):
     assert rc == 0
 
     # Cross-lane query: repo is None (all lanes), status defaulted to proposed.
-    assert fake.calls == [{"repo": None, "status": "proposed", "label": None, "limit": 200}]
+    assert fake.calls == [{"repo": None, "status": "proposed", "label": None, "limit": 200,
+                           "category": "work"}]
 
     emitted = json.loads(capsys.readouterr().out)
     ids = {t["id"] for t in emitted}
@@ -2870,6 +2871,7 @@ def test_inbox_awaiting_steer_surfaces_proposed_plus_awaiting(monkeypatch, capsy
             "status": "proposed,claimed,started,suspended",
             "label": None,
             "limit": 200,
+            "category": "work",
         }
     ]
     emitted = json.loads(capsys.readouterr().out)
@@ -4937,7 +4939,7 @@ class TestInboxBoard:
             .read_text(encoding="utf-8")
         )
         assert manifest["list"] == [
-            "agent-dispatch-board", "--machine", "{machine}"
+            "agent-dispatch-board", "--machine", "{machine}", "--category", "work"
         ]
         assert manifest["entry"]["group"] == "group"
         assert manifest["entry"]["badges"] == ["activity", "labels"]

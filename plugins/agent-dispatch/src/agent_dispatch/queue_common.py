@@ -235,6 +235,7 @@ class Task:
     wake_operation_id: str | None = None
     monitor_kind: str | None = None
     monitor_not_before: float | None = None
+    category: str = "work"
 
     @classmethod
     def _from_row(cls, row: sqlite3.Row) -> Task:
@@ -246,6 +247,7 @@ class Task:
             prompt=row["prompt"],
             status=row["status"],
             repo=row["repo"],
+            category=row["category"] if "category" in columns else "work",
             requires=json.loads(row["requires"] or "[]"),
             excludes=json.loads(row["excludes"] or "[]"),
             affinity=json.loads(row["affinity"] or "{}"),
@@ -450,6 +452,7 @@ _COLUMNS: dict[str, str] = {
     "prompt": "TEXT NOT NULL DEFAULT ''",
     "status": "TEXT NOT NULL DEFAULT 'queued'",
     "repo": "TEXT",
+    "category": "TEXT NOT NULL DEFAULT 'work' CHECK(category IN ('work','maintenance'))",
     "requires": "TEXT NOT NULL DEFAULT '[]'",
     "excludes": "TEXT NOT NULL DEFAULT '[]'",
     "affinity": "TEXT NOT NULL DEFAULT '{}'",

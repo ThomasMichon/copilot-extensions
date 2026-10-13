@@ -1,0 +1,98 @@
+# Work and maintenance task categories
+
+Category describes a task's purpose, not its execution kind or routing.
+`work` is the creation default; producers must deliberately request
+`maintenance`. A script, schedule, label, or title alone does not classify a
+task. An additive SQLite column gives existing records the `work` default.
+No records are pruned, and category does not alter status, claims, reservations,
+deduplication, task identity, original timestamps, results or attachment history.
+
+## Creation and reads
+
+```console
+agent-dispatch create "Check service health" --repo example/harness --category maintenance
+agent-dispatch list --repo example/harness --category work
+agent-dispatch list --repo example/harness --category maintenance
+agent-dispatch list --repo example/harness --category all --status completed
+agent-dispatch find health --repo example/harness --category all
+agent-dispatch sweep --repo example/harness --category all
+```
+
+| Surface | Omitted category |
+|---------|------------------|
+| Creation, including schedule templates | `work` |
+| CLI `list`, `inbox`, and `agent-dispatch-board` | `work` |
+| CLI `find` and `sweep` | `all` (preserves cross-category dedup inspection) |
+| Library, HTTP and MCP list/find/sweep | all categories |
+
+All read surfaces accept `work`, `maintenance`, or `all`. The HTTP query is
+`GET /tasks?category=maintenance`; it also applies to `q` and `sweep` requests.
+Category is filtered by the queue **before** its SQL limit, not by hiding rows
+from a bounded mixed-category response. Local and delegated peer boards pass
+the same selector. `get`, results, events, progress and session reverse lookups
+remain category-independent.
+
+Clients require `/health`'s `task_categories: 1` before explicit category
+reads, maintenance creation, or classification. An older coordinator that
+silently ignores unknown query parameters is rejected as upgrade-required.
+Remote CLI forwarding preserves the flag; an older peer CLI refuses the unknown
+flag instead of displaying a misleading unfiltered view. Omitted/work creation
+keeps the old request shape, including managed-create hashes; explicit maintenance
+is part of that request's replay identity. Reclassification does not rewrite the
+accepted request ledger, so an original retry still returns its accepted task.
+
+## Independent Picker contributions
+
+`pivots/agent-dispatch.json` owns **Tasks** and requests `work`.
+`pivots/agent-dispatch-maintenance.json` independently owns **Maintenance tasks** and requests
+`maintenance`. Both use the same board implementation, columns, phase palette,
+streaming, progress and worktree/session enrichment.
+
+Both expose **Inspect evidence**, a read-only `inspect-task` command that reads
+the task, statistics, result/log references, events, accumulated progress and
+full attachment lineage from its owning machine. Maintenance also exposes
+charter, worktree-status, steering and pause/unpause actions. Board recency and
+limit controls are presentation only; use explicit all-category historical
+queries to reach older records. Loading a new contribution still requires the
+normal payload publication and Picker contribution reconciliation; backend
+metadata alone does not change an already-installed Tasks contribution.
+
+The Worktree Manager's built-in **Maintenance** view continues to own worktree
+maintenance and its existing controls. The task contribution's distinct
+**Maintenance tasks** caption avoids colliding with or taking over that view.
+
+## Schedule producers
+
+A schedule entry's optional `category` is copied to every occurrence. Omit it
+for ordinary work; do not blanket-classify schedules or script workers.
+`agent-index/scripts/maintenance_tick.py --schedule-template --repo <lane>
+--machine <host>` prints that producer's explicitly maintenance-category
+schedule entry, including its deployed script reference. It does **not**
+register the schedule, run maintenance, or classify historical tasks.
+Adoption owns placing the printed entry in the appropriate schedule declaration.
+
+## Historical classification
+
+Classification is an explicit control-authorized operation, not a migration or
+startup sweep. It requires an exact repo lane, source and origin reference,
+corroborated by every supplied label. Unmatched or malformed/ambiguous records
+remain unchanged. Worker kind, titles and lack of a session are never evidence.
+
+```console
+agent-dispatch classify-maintenance --repo example/harness --source schedule --origin-ref schedule/health --label health
+```
+
+Inspect the returned task IDs and `preview_token`. Apply the same selector with
+`--apply --preview-token <token>` only after reviewing the preview. The HTTP
+equivalent is `POST /task-categories/classify`, with `repo`, `source`,
+`origin_ref`, `labels`, optional `limit`, `apply`, `preview_token` and `actor`.
+The endpoint uses the coordinator's control credential when configured.
+Selection beyond the default limit of 500 refuses rather than applying a
+truncated preview; narrow the provenance or deliberately raise the limit.
+
+Apply rechecks the selection under the writer transaction. A changed selected
+ID set rejects the token. Already-classified rows are no-ops; repeating the same
+apply neither adds duplicate audit events nor changes lifecycle data. Each
+changed row appends a category-classification event with the actor, provenance
+and preview token. Original audit records, timestamps and accepted managed-create
+request hashes are preserved.

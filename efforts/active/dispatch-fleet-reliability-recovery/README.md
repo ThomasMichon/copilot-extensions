@@ -193,6 +193,15 @@ requested contract.
 
 ## Journal
 
+### 2026-10-13 - Category standing-intent prerequisite
+
+- Proposal #6472 and category vision revision #6482 are merged. The dispatch
+  vision now states orthogonal category metadata, compatible defaults,
+  category-selection-before-bounds and evidence-based historical classification;
+  its Tasks-pane child names independent full-fidelity Maintenance presentation.
+- Category implementation proceeds in its isolated slice. Serial merge, release,
+  integration and the parent completion gate remain with the coordinator.
+
 ### 2026-10-12 - Generic proposal and ownership boundaries
 
 - Read-only evidence identified category/filtering gaps, a whole-cycle deadline

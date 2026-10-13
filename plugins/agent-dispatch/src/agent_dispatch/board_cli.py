@@ -12,6 +12,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from .client_errors import DispatchUpgradeRequired
 from pathlib import Path
 
 from .install_paths import install_dir
@@ -528,6 +529,7 @@ def _fetch_rows_delegated(args: argparse.Namespace) -> list[dict]:
         "--limit",
         str(args.limit),
     ]
+    command.extend(["--category", getattr(args, "category", "work")])
     if args.label:
         command.extend(["--label", args.label])
     env = dict(os.environ)
@@ -537,6 +539,9 @@ def _fetch_rows_delegated(args: argparse.Namespace) -> list[dict]:
         **_no_window_kwargs(),
     )
     if result.returncode != 0:
+        error = result.stderr or ""
+        if "HTTP 426" in error or ("unrecognized arguments" in error and "--category" in error):
+            raise DispatchUpgradeRequired("peer lacks task category support")
         raise RuntimeError(
             (result.stderr or "").strip()
             or f"delegated inbox query exited {result.returncode}"
@@ -567,6 +572,7 @@ def _fetch_raw_tasks_direct(
     this fetch can never read a different coordinator generation's tasks
     than the one the connection's event bus will publish mutations for."""
     query = {
+        "category": getattr(args, "category", "work"),
         "status": (
             "proposed,queued,claimed,started,suspended,"
             "submitted,completed,abandoned,dead_letter"
@@ -576,6 +582,8 @@ def _fetch_raw_tasks_direct(
     if args.label:
         query["label"] = args.label
     endpoint = endpoint or _endpoint()
+    from .client_categories import require_endpoint_categories
+    require_endpoint_categories(endpoint)
     url = f"{endpoint}/tasks?{urllib.parse.urlencode(query)}"
     request = urllib.request.Request(url)
     token = os.environ.get("AGENT_DISPATCH_TOKEN")
@@ -715,6 +723,9 @@ def poll_loop(
             sleep(interval)
             try:
                 curr = _fetch_rows(args)
+            except DispatchUpgradeRequired as exc:
+                _emit_frame({"type": "error", "message": str(exc)}, out)
+                return 1
             except Exception:
                 # A transient re-fetch failure (coordinator hiccup, delegated
                 # subprocess blip) must not kill the live channel -- skip
@@ -794,6 +805,9 @@ def _run_stream(args: argparse.Namespace) -> int:
                 # race. Fall back to the unmodified poll loop for this
                 # connection's whole remaining lifetime.
                 pass
+            except DispatchUpgradeRequired as exc:
+                _emit_frame({"type": "error", "message": str(exc)}, out)
+                return 1
 
     return poll_loop(args, out, rows, interval)
 
@@ -803,6 +817,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--machine", required=True)
     parser.add_argument("--recent-mins", type=int, default=120)
     parser.add_argument("--label")
+    parser.add_argument("--category", choices=("work", "maintenance", "all"), default="work")
     parser.add_argument("--limit", type=int, default=200)
     parser.add_argument(
         "--stream", dest="stream", action="store_true",
@@ -843,6 +858,7 @@ def main(argv: list[str] | None = None) -> int:
             "--limit",
             str(args.limit),
         ]
+        command.extend(["--category", args.category])
         if args.label:
             command.extend(["--label", args.label])
         env = dict(os.environ)
@@ -852,6 +868,7 @@ def main(argv: list[str] | None = None) -> int:
         ).returncode
 
     query = {
+        "category": args.category,
         "status": (
             "proposed,queued,claimed,started,suspended,"
             "submitted,completed,abandoned,dead_letter"
@@ -862,6 +879,8 @@ def main(argv: list[str] | None = None) -> int:
         query["label"] = args.label
     try:
         endpoint = _endpoint()
+        from .client_categories import require_endpoint_categories
+        require_endpoint_categories(endpoint)
         url = f"{endpoint}/tasks?{urllib.parse.urlencode(query)}"
         request = urllib.request.Request(url)
         token = os.environ.get("AGENT_DISPATCH_TOKEN")

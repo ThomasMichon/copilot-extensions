@@ -204,6 +204,7 @@ def build_coordinator_mcp(
         title: str,
         repo: str | None = None,
         prompt: str = "",
+        category: str = "work",
         payload: str | None = None,
         payload_ref: str | None = None,
         requires: list[str] | None = None,
@@ -250,6 +251,7 @@ def build_coordinator_mcp(
             outcome = make(
                 title,
                 repo=lane,
+                category=category,
                 prompt=prompt,
                 payload_inline=payload,
                 payload_ref=payload_ref,
@@ -392,19 +394,21 @@ def build_coordinator_mcp(
     # -- browse --------------------------------------------------------------
 
     @mcp.tool(name="dispatch_find")
-    def find(ctx: Context, query: str, limit: int = 50, repo: str | None = None) -> list[dict]:
+    def find(ctx: Context, query: str, limit: int = 50, repo: str | None = None,
+             category: str | None = None) -> list[dict]:
         """Substring-search task titles/prompts in the lane -- a quick dedup probe."""
         return [
             _bulk_task_dict(t)
-            for t in queue.find(query, repo=_repo(ctx, repo), limit=limit)
+            for t in queue.find(query, repo=_repo(ctx, repo), limit=limit, category=category)
         ]
 
     @mcp.tool(name="dispatch_sweep")
-    def sweep(ctx: Context, limit: int = 500, repo: str | None = None) -> list[dict]:
+    def sweep(ctx: Context, limit: int = 500, repo: str | None = None,
+              category: str | None = None) -> list[dict]:
         """The dedup corpus for the lane: every non-abandoned task, newest first."""
         return [
             _bulk_task_dict(t)
-            for t in queue.sweep(repo=_repo(ctx, repo), limit=limit)
+            for t in queue.sweep(repo=_repo(ctx, repo), limit=limit, category=category)
         ]
 
     # -- recipes -------------------------------------------------------------
@@ -569,6 +573,7 @@ def build_coordinator_mcp(
         label: str | None = None,
         limit: int = 200,
         repo: str | None = None,
+        category: str | None = None,
     ) -> list[dict]:
         """List tasks in the lane, optionally filtered by status/machine/repo/label."""
         return [
@@ -579,6 +584,7 @@ def build_coordinator_mcp(
                 target_machine=target_machine,
                 target_repo=target_repo,
                 label=label,
+                category=category,
                 limit=limit,
             )
         ]

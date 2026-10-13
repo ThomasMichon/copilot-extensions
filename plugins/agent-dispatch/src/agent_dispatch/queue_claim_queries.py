@@ -253,12 +253,18 @@ class QueueClaimQueriesMixin:
         source: str | None = None,
         origin_ref: str | None = None,
         exclusive_key: str | None = None,
+        category: str | None = None,
         limit: int = 200,
     ) -> list[Task]:
         """List tasks, optionally filtered. Newest first."""
         repo = self._canonical_repo(repo)
         clauses: list[str] = []
         params: list[object] = []
+        from .task_categories import category_value
+        category = category_value(category, selection=True)
+        if category is not None:
+            clauses.append("category = ?")
+            params.append(category)
         if repo is not None:
             clauses.append("repo = ?")
             params.append(repo)
@@ -309,25 +315,32 @@ class QueueClaimQueriesMixin:
             ).fetchall()
         return [Task._from_row(r) for r in rows]
 
-    def find(self, text: str, *, repo: str | None = None, limit: int = 50) -> list[Task]:
+    def find(self, text: str, *, repo: str | None = None, limit: int = 50,
+             category: str | None = None) -> list[Task]:
         """Substring search over title/prompt."""
         repo = self._canonical_repo(repo)
         like = f"%{text}%"
         repo_clause = " AND repo = ?" if repo is not None else ""
         repo_param: tuple = (repo,) if repo is not None else ()
+        from .task_categories import category_value
+        category = category_value(category, selection=True)
+        category_clause = " AND category = ?" if category else ""
+        category_param: tuple = (category,) if category else ()
         with self._connect() as conn:
             rows = conn.execute(
                 f"SELECT {_TASK_BULK_SELECT} FROM tasks "
                 "WHERE (title LIKE ? OR prompt LIKE ?)"
                 + repo_clause
+                + category_clause
                 + " ORDER BY created_at DESC LIMIT ?",
-                (like, like, *repo_param, limit),
+                (like, like, *repo_param, *category_param, limit),
             ).fetchall()
         return [Task._from_row(r) for r in rows]
 
-    def sweep(self, *, repo: str | None = None, limit: int = 500) -> list[Task]:
+    def sweep(self, *, repo: str | None = None, limit: int = 500,
+              category: str | None = None) -> list[Task]:
         """Return the dedup corpus: every non-abandoned task, newest first."""
-        return self.list(repo=repo, status=self.SWEEP_STATES, limit=limit)
+        return self.list(repo=repo, status=self.SWEEP_STATES, limit=limit, category=category)
 
     def events(self, task_id: str) -> list[dict[str, object]]:
         """Return the append-only audit trail for a task, oldest first."""

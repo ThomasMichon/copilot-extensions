@@ -20,6 +20,7 @@ from pydantic_core import PydanticCustomError
 
 from . import telemetry
 from .coordinator_auth import _make_control_auth
+from .coordinator_categories import CategorySelection, TaskCategory, register_category_routes
 from .coordinator_loops import DrainGate, DrainRequest
 from .coordinator_verification import register_verification_routes
 from .events import EventBus
@@ -76,6 +77,7 @@ class CreateBody(BaseModel):
     title: str
     repo: str | None = None
     prompt: str = ""
+    category: TaskCategory = "work"
     proposed: bool = False
     requires: list[str] = Field(default_factory=list)
     excludes: list[str] = Field(default_factory=list)
@@ -323,6 +325,8 @@ def register_task_routes(
 ) -> None:
     from .acquisition_receipts import register_routes
     register_routes(app, queue)
+    register_category_routes(app, queue, control_token=control_token,
+                             emit=lambda kind, data: bus.publish({"type": kind, **data}))
     def _require(task: Task | None) -> Task:
         if task is None:
             raise HTTPException(status_code=404, detail="no such task")
@@ -476,14 +480,15 @@ def register_task_routes(
         source: str | None = None,
         origin_ref: str | None = None,
         exclusive_key: str | None = None,
+        category: CategorySelection | None = None,
         q: str | None = None,
         sweep: bool = False,
         limit: int = 200,
     ) -> list[dict]:
         if sweep:
-            return [_bulk_task_dict(t) for t in queue.sweep(repo=repo, limit=limit)]
+            return [_bulk_task_dict(t) for t in queue.sweep(repo=repo, limit=limit, category=category)]
         if q is not None:
-            return [_bulk_task_dict(t) for t in queue.find(q, repo=repo, limit=limit)]
+            return [_bulk_task_dict(t) for t in queue.find(q, repo=repo, limit=limit, category=category)]
         status_filter: str | list[str] | None = None
         if status is not None:
             parts = [s.strip() for s in status.split(",") if s.strip()]
@@ -498,6 +503,7 @@ def register_task_routes(
             source=source,
             origin_ref=origin_ref,
             exclusive_key=exclusive_key,
+            category=category,
             limit=limit,
         )
         return [_bulk_task_dict(t) for t in tasks]

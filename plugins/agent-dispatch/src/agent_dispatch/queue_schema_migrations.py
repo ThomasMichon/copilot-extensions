@@ -85,6 +85,7 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
             raise
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_repo ON tasks(repo)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_category_created ON tasks(category, created_at)")
     # Sentinel-backfill rows created before ``repo`` became required so a
     # legacy task never leaks into a real repo's default-scoped views.
     # Idempotent: after the first run there are no NULL-repo rows (create

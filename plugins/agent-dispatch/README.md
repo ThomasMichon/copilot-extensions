@@ -38,6 +38,13 @@ is unchanged, and health attestation must honor configured coordinator auth.
 > service on both platforms: a **systemd user unit** (Linux) and a **Windows
 > Scheduled Task**.
 
+## Task categories
+
+Task purpose is an orthogonal [work/maintenance category](docs/task-categories.md):
+compatible creation defaults, before-limit selection, independent Tasks and
+Maintenance tasks pivots, full evidence inspection and preview-first historical
+classification. Category separation never prunes task history.
+
 ## Offline CI repair construction
 
 The optional [verified-failure emitter](docs/ci-repair.md) reuses the existing
@@ -197,23 +204,28 @@ at invocation time so a previously constructed prefix cannot bypass deactivation
 Without an explicit context, the historical home-root resolver and POSIX PATH
 fallback are unchanged, including their argv and environment behavior.
 
-### Worktree-picker "Tasks" pivot
+### Worktree-picker task-category pivots
 
 The installer drops a pivot manifest at
 `~/.agent-worktrees/pivots/agent-dispatch.json` so the agent-worktrees Textual
-picker grows a **Tasks** pivot (between Worktrees and Maintenance). It renders the
-status-grouped board through the stdlib-only `agent-dispatch-board` API client
+picker grows a **Tasks** pivot that explicitly requests ordinary work.
+The independent `agent-dispatch-maintenance.json` contribution adds
+**Maintenance tasks** after Tasks, without replacing the built-in worktree
+Maintenance view. Both render the status-grouped board through
+`agent-dispatch-board`, including a capability check before category reads
 (Blocked / Proposed / Started / Queued / Suspended / recently terminal). A separate **ACTIVE** badge appears only
 when embodiment tracking reports an assigned agent executing a turn; **STALLED**
 marks a running turn with no recent activity. That execution badge is independent
 from lifecycle phase -- `Started` alone never implies a live agent. The
 background supervisor publishes this observation into coordinator-owned task
-state; the board client is a sub-second coordinator API read and expires
+state; the board client reads the coordinator directly and expires
 observations older than 90 seconds, so the Picker never shells to
 agent-worktrees or agent-bridge. Enter
 opens a per-task action sub-menu. The seam is a filesystem manifest registry,
 not a Python import -- the plugins live in separate venvs -- so a stale or absent
-picker simply ignores it. Source: `pivots/agent-dispatch.json`.
+picker simply ignores it. Sources: `pivots/agent-dispatch.json` and
+`pivots/agent-dispatch-maintenance.json`; the [category reference](docs/task-categories.md)
+documents defaults, history and full evidence access.
 
 The manifest declares `"stream": true, "subscribe": true` (pivot-streaming-
 transport Phase 1): the Picker runs `agent-dispatch-board --stream` instead of

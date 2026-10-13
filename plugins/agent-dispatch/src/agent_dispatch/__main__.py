@@ -665,8 +665,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     register_steering_commands(sub)
     register_attention_commands(sub)
+    from .category_cli import register_category_commands
+    register_category_commands(sub, client_factory=_client, scope_repo=_scope_repo)
 
     p = sub.add_parser("list", help="list tasks (scoped to the calling repo by default)")
+    p.add_argument("--category", choices=("work", "maintenance", "all"), default="work")
     p.add_argument("--repo", help="lane to list (local name or remote URL); default: calling repo")
     p.add_argument(
         "--status",
@@ -734,6 +737,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="machine-scoped, cross-lane pickable tasks (default: proposed) -- "
         "what this machine can start, across every repo lane",
     )
+    p.add_argument("--category", choices=("work", "maintenance", "all"), default="work")
     p.add_argument(
         "--machine",
         help="machine to scope to; a *remote* machine reads that peer's queue "
@@ -781,6 +785,7 @@ def build_parser() -> argparse.ArgumentParser:
         "find", help="substring search over title/prompt (a quick dedup probe; calling repo)"
     )
     p.add_argument("query")
+    p.add_argument("--category", choices=("work", "maintenance", "all"), default="all")
     p.add_argument(
         "--repo", help="lane to search (local name or remote URL); default: calling repo"
     )
@@ -793,6 +798,7 @@ def build_parser() -> argparse.ArgumentParser:
         "newest first -- read these before creating a task to verify the "
         "work doesn't already exist",
     )
+    p.add_argument("--category", choices=("work", "maintenance", "all"), default="all")
     p.add_argument(
         "--repo", help="lane to sweep (local name or remote URL); default: calling repo"
     )
