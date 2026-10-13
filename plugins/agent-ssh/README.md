@@ -185,6 +185,18 @@ provider/multi-machine system config?** If not, it ships **in-box** under `trans
 marketplace and keeps its hostnames, identifiers, and secrets out of this public
 core (cloudflare). Either way it plugs in through the same `module.yaml` contract.
 
+The WSL registry emitter uses `machine_transport.normalize_machine_entries`
+to select an independent logical WSL machine. Legacy Windows/WSL topology
+projects to `<base>` and `<base>-wsl`; explicit independent declarations keep
+their keys and `physical_host` association. `--machine` accepts the logical
+WSL key/profile or an exact native/physical identity whose WSL sibling is unique.
+Automatic hostname selection is exact, never a prefix/suffix guess. Duplicate
+same-platform profiles, alias collisions, and multiple eligible WSL siblings
+are refused. The emitted SSH `Host` remains the configured profile alias (or
+logical key when absent), and deployment flags retain their existing user,
+port, distro, and identity-file behavior. Physical association is UI metadata,
+not an environment component in downstream peer addresses.
+
 ## The deliverable: name-keyed SSH profiles
 
 Consumers reach a machine by `ssh <name>`. Each transport contributes only its

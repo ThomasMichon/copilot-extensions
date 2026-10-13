@@ -96,6 +96,18 @@ User-root redirection alone does not isolate executable discovery or scheduled
 tasks. The signed-venv health/exit-code matrix uses simulated signatures on both
 platforms; native signature-policy behavior still requires Windows validation.
 
+Agent SSH's cold first-use snapshot provisioning restores real network
+dependencies and is an explicit T3 check, not a default fast unit case.
+Its pytest item budget remains 30 seconds; an unavailable budget is a failed
+or unexercised native lane, never an installation pass. The agent-free
+`tools/clean-room/scenarios/agent-ssh-snapshot` lane exercises the exact local
+candidate with separate bounded stamp/provision phases, removes its original
+source copy, and reads machine-transport from the actual fresh runtime:
+`tools/clean-room/run.ps1 -Scenario agent-ssh-snapshot -HarnessMount <candidate>
+-NameSuffix <unique> -Then down`. Supply the approved feed explicitly on a
+governed host. This Linux-container proof does not claim Windows signature or
+live SSH/WSL deployment coverage.
+
 ```bash
 python tools/run-plugin-tests.py agent-dispatch \
   --test-timeout 20 --subsuite-timeout 180 --plugin-timeout 600 \

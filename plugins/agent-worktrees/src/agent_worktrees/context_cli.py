@@ -373,6 +373,15 @@ def cmd_get(args: argparse.Namespace) -> int:
         output.err(f"Cannot load config: {e}")
         return 1
 
+    if key in {"machine", "owner-ref"}:
+        from .execution_spaces import ExecutionSpaceError, require_current_execution_space
+
+        try:
+            require_current_execution_space(config)
+        except ExecutionSpaceError as exc:
+            output.err(str(exc))
+            return 1
+
     repo = config.default_repo
     project_values = {
         "repo-dir": lambda: repo.anchor,

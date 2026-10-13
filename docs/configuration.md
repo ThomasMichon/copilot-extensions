@@ -51,6 +51,25 @@ then re-run adoption when the machine-local projection needs refreshing.
 
 ## The map
 
+### Logical machines and physical hosts
+
+Machine and SSH ownership belongs to `agent-machines`, `agent-ssh`, and their
+shared `machine-transport` model. A legacy Windows/WSL topology entry is projected
+read-only into two independently addressable logical machines: `<base>` and
+`<base>-wsl`. Explicit execution-space keys and exact SSH profile aliases remain
+unchanged. Key/profile collisions require topology repair, never first-match
+selection. `physical_host` associates the machines for presentation, not
+shared registrations, settings, tasks, sessions, or writable ownership.
+
+Agent Worktrees, Agent Bridge, and Worktree Manager consume the same projection.
+Known-platform local detection can select a projected legacy sibling without
+rewriting machine configuration; explicit scoped selections retain their
+platform safety gates. Historical records are not migrated or relabeled:
+ambiguous or cross-space mutation still refuses. Worktree Manager shows the
+physical host's Win/WSL labels while retaining separate logical source/target
+keys. Peer addresses keep `live:<machine>:<project>:<worktree>`; WSL changes the
+machine key, not the address grammar.
+
 ### In-repo (committed)
 
 | File | Purpose | Written by |

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from remote_login_shell import is_posix_login_shell, wrap_login_shell
 
 from .identity import is_local_machine
-from .registry import MachineEntry, find_machine_entry
+from .registry import AmbiguousMachineError, MachineEntry, find_machine_entry
 
 __all__ = [
     "TransportPlan",
@@ -44,7 +44,8 @@ def default_shell_for_env_name(env_name: str, shell: str) -> str:
 def resolve_ssh_target(entry: MachineEntry) -> tuple[str, str]:
     """Pick the best SSH ``(alias, shell)`` for a remote machine entry.
 
-    Prefers the SSH environment matching ``entry.environment``'s own
+    Logical entries require one exact platform-matching profile, never a
+    first-profile fallback. Legacy entries prefer the environment matching ``entry.environment``'s own
     Windows-vs-POSIX hint; falls back to the first declared environment.
     Returns ``(entry.key, "")`` when the entry declares no SSH environments
     at all -- preserved as-is from this function's original behavior; a
@@ -54,6 +55,14 @@ def resolve_ssh_target(entry: MachineEntry) -> tuple[str, str]:
     """
     if not entry.ssh_environments:
         return entry.key, ""
+
+    if entry.execution_platform:
+        if len(entry.ssh_environments) != 1:
+            raise AmbiguousMachineError(f"machine {entry.key!r} has ambiguous SSH profiles")
+        ssh_env = entry.ssh_environments[0]
+        if ssh_env.name != entry.execution_platform:
+            raise ValueError(f"machine {entry.key!r} has a mismatched SSH platform")
+        return ssh_env.alias, default_shell_for_env_name(ssh_env.name, ssh_env.shell)
 
     env_lower = entry.environment.lower()
     if "windows" in env_lower:

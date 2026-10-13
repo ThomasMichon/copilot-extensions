@@ -143,6 +143,40 @@ def test_package_install_falls_back_when_resolved_uv_cannot_launch(
     assert str(tmp_path) in fallback_args
 
 
+@pytest.mark.skipif(os.name != "nt" or PWSH is None, reason="Windows PowerShell installer coverage")
+def test_uv_receives_the_complete_local_dependency_graph_in_one_call(tmp_path: Path) -> None:
+    install_package = _function_source(
+        INSTALLER.read_text(encoding="utf-8"), "Install-AgentSshPackage", "\n$PluginDir =",
+    )
+    script = tmp_path / "batch.ps1"
+    script.write_text("\n".join([
+        "$ErrorActionPreference = 'Stop'",
+        "$script:calls = @()",
+        install_package,
+        "function Resolve-VenueCopilot { return 'local-venue' }",
+        "function Invoke-UvPipInstallResilient {",
+        "  param($UvCommand, $Arguments, $PayloadDirToScrub)",
+        "  $script:calls += ,@($Arguments)",
+        "  return [pscustomobject]@{ ExitCode = 0; Output = '' }",
+        "}",
+        "$ok = Install-AgentSshPackage -Python 'python' -Source 'plugin' "
+        "-Dependencies @('local-procutil','local-venue','local-machine-transport') -UvCommand 'uv'",
+        "if (-not $ok -or $script:calls.Count -ne 2) { throw 'expected dependency batch and plugin install' }",
+        "foreach ($source in @('pyyaml>=6.0.3','local-procutil','local-venue','local-machine-transport')) {",
+        "  if ($script:calls[0] -notcontains $source) { throw ('missing dependency ' + $source) }",
+        "}",
+        "if ($script:calls[0] -notcontains 'agent-venue-copilot') { throw 'lost forced venue reinstall' }",
+        "if ($script:calls[1] -notcontains '--no-deps' -or $script:calls[1] -notcontains 'plugin') {",
+        "  throw 'plugin must install only after the dependency batch'",
+        "}",
+    ]), encoding="utf-8")
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(script)],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.skipif(
     os.name == "nt" or BASH is None,
     reason="POSIX shell installer coverage",
@@ -172,6 +206,8 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
     (plugin / "libs" / "remote-login-shell" / "pyproject.toml").write_text("", encoding="utf-8")
     (plugin / "libs" / "fleet-contracts").mkdir(parents=True)
     (plugin / "libs" / "fleet-contracts" / "pyproject.toml").write_text("", encoding="utf-8")
+    (plugin / "libs" / "machine-transport").mkdir(parents=True)
+    (plugin / "libs" / "machine-transport" / "pyproject.toml").write_text("", encoding="utf-8")
     marker = tmp_path / "pip-fallback-ran"
     fake_python = tmp_path / "python"
     fake_python.write_text(
@@ -194,6 +230,7 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
                 "_resolve_zdd() { _resolve_vendored_lib zdd; }",
                 "_resolve_remote_login_shell() { _resolve_vendored_lib remote-login-shell; }",
                 "_resolve_fleet_contracts() { _resolve_vendored_lib fleet-contracts; }",
+                "_resolve_machine_transport() { _resolve_vendored_lib machine-transport; }",
                 install_package,
                 "HAVE_UV=0",
                 f"VENV_PYTHON='{fake_python}'",
@@ -223,6 +260,7 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
     assert str(plugin / "libs" / "zdd") in fallback_args
     assert str(plugin / "libs" / "remote-login-shell") in fallback_args
     assert str(plugin / "libs" / "fleet-contracts") in fallback_args
+    assert str(plugin / "libs" / "machine-transport") in fallback_args
     assert str(plugin) in fallback_args
 
 
@@ -271,6 +309,9 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
     canonical_fleet_contracts = repo_root / "libs" / "fleet-contracts"
     canonical_fleet_contracts.mkdir(parents=True)
     (canonical_fleet_contracts / "pyproject.toml").write_text("", encoding="utf-8")
+    canonical_machine_transport = repo_root / "libs" / "machine-transport"
+    canonical_machine_transport.mkdir(parents=True)
+    (canonical_machine_transport / "pyproject.toml").write_text("", encoding="utf-8")
 
     marker = tmp_path / "pip-fallback-ran"
     fake_python = tmp_path / "python"
@@ -294,6 +335,7 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
                 "_resolve_zdd() { _resolve_vendored_lib zdd; }",
                 "_resolve_remote_login_shell() { _resolve_vendored_lib remote-login-shell; }",
                 "_resolve_fleet_contracts() { _resolve_vendored_lib fleet-contracts; }",
+                "_resolve_machine_transport() { _resolve_vendored_lib machine-transport; }",
                 install_package,
                 "HAVE_UV=0",
                 f"VENV_PYTHON='{fake_python}'",
@@ -322,6 +364,7 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
     assert str(canonical_zdd.resolve()) in fallback_args
     assert str(canonical_remote_login_shell.resolve()) in fallback_args
     assert str(canonical_fleet_contracts.resolve()) in fallback_args
+    assert str(canonical_machine_transport.resolve()) in fallback_args
 
 
 def test_powershell_installer_resolves_uv_editable_libs_via_shared_helper() -> None:
@@ -342,3 +385,5 @@ def test_powershell_installer_resolves_uv_editable_libs_via_shared_helper() -> N
     assert "function Resolve-FleetContracts" in installer
     assert "Resolve-VendoredLib -LibName 'fleet-contracts'" in installer
     assert "$fleetContractsDir = Resolve-FleetContracts" in installer
+    assert "Resolve-VendoredLib -LibName 'machine-transport'" in installer
+    assert "$machineTransportDir = Resolve-MachineTransport" in installer

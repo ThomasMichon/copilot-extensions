@@ -15,6 +15,7 @@ from pathlib import Path
 
 import yaml
 from machine_transport import MachineEntry, SSHEnvironment  # noqa: F401 (re-exported)
+from machine_transport import normalize_machine_entries
 from machine_transport import parse_machines_yaml_file as _mt_parse_machines_yaml_file
 
 from .. import engine_client, harness_state, terminal_fragment
@@ -196,7 +197,9 @@ def _load_machines_yaml(repo_dir: str) -> dict[str, MachineEntry]:
     Worktree Manager Picker only showed its own local tab, no remote
     machines, the instant the in-repo file was added). On a key collision
     the canonical in-repo entry wins; collisions aren't expected since the
-    two files are meant to carry disjoint keys.
+    two files are meant to carry disjoint keys. The merged registry then uses
+    the shared read-only logical-machine projection; generated key/alias
+    collisions refuse rather than overwrite another entry.
     """
     root = Path(repo_dir)
     canonical = root / ".agent-worktrees" / "machines.yaml"
@@ -207,13 +210,13 @@ def _load_machines_yaml(repo_dir: str) -> dict[str, MachineEntry]:
         path = machines_yaml_path(repo_dir)  # overlay fallback, or the error path
         if not path.is_file():
             raise FileNotFoundError(f"Machine registry not found at {path}")
-        return _parse_machines_yaml_file(path)
+        return normalize_machine_entries(_parse_machines_yaml_file(path))
     entries: dict[str, MachineEntry] = {}
     if legacy_exists:
         entries.update(_parse_machines_yaml_file(legacy))
     if canonical_exists:
         entries.update(_parse_machines_yaml_file(canonical))
-    return entries
+    return normalize_machine_entries(entries)
 
 
 def load_config() -> ProjectConfig:

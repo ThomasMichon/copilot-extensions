@@ -78,9 +78,10 @@ _resolve_venue_copilot() { _resolve_vendored_lib venue-copilot; }
 _resolve_zdd() { _resolve_vendored_lib zdd; }
 _resolve_remote_login_shell() { _resolve_vendored_lib remote-login-shell; }
 _resolve_fleet_contracts() { _resolve_vendored_lib fleet-contracts; }
+_resolve_machine_transport() { _resolve_vendored_lib machine-transport; }
 
 _install_agent_ssh_package() {
-    local agent_procutil_dir ssh_manager_dir venue_copilot_dir zdd_dir remote_login_shell_dir fleet_contracts_dir
+    local agent_procutil_dir ssh_manager_dir venue_copilot_dir zdd_dir remote_login_shell_dir fleet_contracts_dir machine_transport_dir
     agent_procutil_dir="$(_resolve_agent_procutil)" || {
         _fail 'Cannot locate agent-procutil library'
         return 1
@@ -105,9 +106,14 @@ _install_agent_ssh_package() {
         _fail 'Cannot locate fleet-contracts library'
         return 1
     }
+    machine_transport_dir="$(_resolve_machine_transport)" || {
+        _fail 'Cannot locate machine-transport library'
+        return 1
+    }
     if [[ -n "${UV_CMD:-}" ]]; then
-        local install_target lib_out pkg_out uv_ok=1
-        for install_target in \
+        local lib_out pkg_out
+        if lib_out=$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" \
+            --reinstall-package agent-venue-copilot --quiet \
             "pyyaml>=6.0.3" \
             "$agent_procutil_dir" \
             "$PLUGIN_DIR/libs/dropin-registry" \
@@ -115,29 +121,15 @@ _install_agent_ssh_package() {
             "$venue_copilot_dir" \
             "$zdd_dir" \
             "$remote_login_shell_dir" \
-            "$fleet_contracts_dir"
-        do
-            if [[ "$install_target" == "$venue_copilot_dir" ]]; then
-                lib_out="$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" --reinstall-package agent-venue-copilot "$install_target" --quiet)" || {
-                    [[ -n "$lib_out" ]] && printf '%s\n' "$lib_out" >&2
-                    _step 'uv package install failed -- falling back to python -m pip'
-                    uv_ok=0
-                    break
-                }
-                continue
-            fi
-            if ! lib_out=$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" "$install_target" --quiet); then
-                [[ -n "$lib_out" ]] && printf '%s\n' "$lib_out" >&2
-                _step 'uv package install failed -- falling back to python -m pip'
-                uv_ok=0
-                break
-            fi
-        done
-        if [[ "$uv_ok" -eq 1 ]]; then
+            "$fleet_contracts_dir" \
+            "$machine_transport_dir"); then
             if pkg_out=$(INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="$PLUGIN_DIR" invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" --no-deps "$PLUGIN_DIR" --quiet); then
                 return 0
             fi
             [[ -n "$pkg_out" ]] && printf '%s\n' "$pkg_out" >&2
+            _step 'uv package install failed -- falling back to python -m pip'
+        else
+            [[ -n "$lib_out" ]] && printf '%s\n' "$lib_out" >&2
             _step 'uv package install failed -- falling back to python -m pip'
         fi
     fi
@@ -149,6 +141,7 @@ _install_agent_ssh_package() {
         "$zdd_dir" \
         "$remote_login_shell_dir" \
         "$fleet_contracts_dir" \
+        "$machine_transport_dir" \
         "$PLUGIN_DIR" 2>/dev/null
 }
 
@@ -529,7 +522,7 @@ _materialize_snapshot_vendored_libs() {
     local snapshot_dir="$1"
     mkdir -p "$snapshot_dir/libs"
     local lib source destination
-    for lib in agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts; do
+    for lib in agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport; do
         source="$(_resolve_vendored_lib "$lib")" || {
             _fail "Cannot locate required snapshot library: $lib"
             return 1
@@ -692,7 +685,8 @@ _snapshot_is_reusable() {
         "libs/venue-copilot/pyproject.toml" \
         "libs/zdd/pyproject.toml" \
         "libs/remote-login-shell/pyproject.toml" \
-        "libs/fleet-contracts/pyproject.toml"
+        "libs/fleet-contracts/pyproject.toml" \
+        "libs/machine-transport/pyproject.toml"
     do
         [[ -f "$current_snapshot/$rel" ]] || return 1
     done

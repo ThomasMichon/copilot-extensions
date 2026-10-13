@@ -27,6 +27,10 @@ A delivered message looks like this (a marker in the same family as the runtime'
   exact project/worktree, so it survives session turnover and bridge restart.
   The project may be slash-separated (for example `owner/repo`); machine and
   worktree remain single identity components.
+  Windows and WSL are separate logical machines: `host-a` and `host-a-wsl`.
+  The machine/SSH owners project a legacy Windows/WSL topology into those
+  independent keys and exact profiles. Use `live:host-a-wsl:project-a:peer-worktree`
+  for the WSL peer; there is no extra environment component in a peer address.
   Legacy local worktree handles and exact session ids remain supported. It may
   be absent when the sender cannot receive a live-session reply.
 - `msg-id` — the sender's message id, useful as a correlation reference.
@@ -86,6 +90,11 @@ silently dropping the reply fields. An unavailable qualified peer is never
 interpreted as an agent to create: restore its registration or resume its
 existing session through the normal owner flow. An offline address does not
 promise that a message was queued for a future successor.
+If the caller's qualified identity is still unresolved, the remote call can
+return its waited reply, but omits an automatic local-only side-channel address
+rather than letting another bridge interpret the caller's worktree handle as
+its own. Resolve the caller's registration before relying on asynchronous
+cross-machine replies.
 
 ## Replying over the bridge (asynchronous side-channel)
 

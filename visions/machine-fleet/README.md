@@ -3,7 +3,7 @@
 - **Subject:** A driver-based fleet of machines and services coordinated through an optional central Gateway controller.
 - **Scope:** leaf (cross-cutting child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-12
+- **Last revised:** 2026-10-13
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md), [`docs/configuration.md`](../../docs/configuration.md)
 
 ## Purpose & Intent
@@ -46,6 +46,22 @@ references. Private inventories, accounts, and deployment policy remain with the
 adopter, not the portable controller. Effective configuration and its provenance
 are inspectable; installing connection tooling alone does not enroll a machine
 or enable background services.
+
+### Logical machines and physical association
+
+Windows and WSL on one physical host are separately addressable logical
+machines, conventionally `<base>` and `<base>-wsl`. Machine and SSH owners
+resolve their independent identities and exact connection profiles; downstream
+worktree, bridge and dispatch clients consume that authority rather than adding
+an environment dimension to machine addresses or selecting a first SSH profile.
+An explicitly declared logical key remains canonical regardless of naming
+convention.
+
+Physical association supports host grouping and Win/WSL presentation in
+Worktree Manager, without collapsing source/target identities, registrations,
+settings, sessions or ownership. Existing identity evidence stays intact;
+ambiguous legacy ownership is not permission to migrate or write a sibling's
+state.
 
 ### Substrate drivers
 

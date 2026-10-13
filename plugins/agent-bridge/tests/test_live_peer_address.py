@@ -104,18 +104,36 @@ def test_unavailable_explicit_address_never_spawns(monkeypatch):
 
 @pytest.mark.parametrize("idempotency_key", [pytest.param(None, marks=pytest.mark.guard), "peer-call-1"])
 @pytest.mark.parametrize("project", ["project-a", "owner/repo"])
+@pytest.mark.parametrize("logical_siblings", [False, True])
+@pytest.mark.parametrize("caller_qualified", [True, False])
 def test_two_bridge_call_and_reverse_reply_preserve_addresses(
-    tmp_path, monkeypatch, capsys, idempotency_key, project,
+    tmp_path, monkeypatch, capsys, idempotency_key, project, logical_siblings, caller_qualified,
 ):
+    machine_a, machine_b = "host-a", "host-b"
+    if logical_siblings:
+        from agent_bridge.topology import parse_machines_yaml
+
+        machines = parse_machines_yaml({"machines": {"desk": {
+            "ssh": {"environments": [
+                {"name": "windows", "alias": "desk-win", "shell": "pwsh"},
+                {"name": "wsl", "alias": "desk-ubuntu", "shell": "bash"},
+            ]},
+        }}}, normalize=True)
+        machine_a, machine_b = machines
+        assert machines[machine_a].physical_host == machines[machine_b].physical_host
     a_db, b_db = Database(tmp_path / "a.db"), Database(tmp_path / "b.db")
     try:
         a_app, a_client = _bridge(a_db)
         b_app, b_client = _bridge(b_db)
-        _register(a_db, "a-old", "host-a", project=project)
-        _register(b_db, "b-current", "host-b", project=project, worktree="wt-b")
+        _register(a_db, "a-old", machine_a if caller_qualified else None,
+                  project=project if caller_qualified else None,
+                  worktree="wt-a" if caller_qualified else None)
+        _register(b_db, "b-current", machine_b, project=project, worktree="wt-b")
         _register(a_db, "a-other-machine", "host-c", project=project, now=time.time() + 3)
-        _register(b_db, "b-other-project", "host-b", project="project-b",
+        _register(b_db, "b-other-project", machine_b, project="project-b",
                   worktree="wt-b", now=time.time() + 3)
+        _register(b_db, "b-colliding-source-handle", machine_b, project=project,
+                  worktree="wt-a", now=time.time() + 3)
 
         class Carrier:
             def __init__(self, client):
@@ -129,7 +147,7 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
                 return result
 
         for app, client, host, target_client in (
-            (a_app, a_client, "host-b", b_client), (b_app, b_client, "host-a", a_client),
+            (a_app, a_client, machine_b, b_client), (b_app, b_client, machine_a, a_client),
         ):
             service = RemoteOperationService(SimpleNamespace())
             carrier = Carrier(target_client)
@@ -154,10 +172,10 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
         monkeypatch.setattr(cli, "_worktrees_get", lambda _: "/fixture/wt-a")
         monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "a-old")
         args = argparse.Namespace(
-            target=f"live:host-b:{project}:wt-b", prompt="call", json=True,
+            target=f"live:{machine_b}:{project}:wt-b", prompt="call", json=True,
             no_wait=False, reply_timeout=2.0, idempotency_key=idempotency_key,
         )
-        assert a_client.resolve_remote_live_session("host-b", args.target)["session_id"] == "b-current"
+        assert a_client.resolve_remote_live_session(machine_b, args.target)["session_id"] == "b-current"
         cli._cmd_send(args)
         output = capsys.readouterr().out
         assert '"replied": true' in output and '"reply": "peer response"' in output
@@ -167,9 +185,13 @@ def test_two_bridge_call_and_reverse_reply_preserve_addresses(
         observed = json.loads(output)
         assert {key: observed[key] for key in expected} == expected
         received = b_db.list_pending_live_messages("b-current")
-        assert received[0]["reply_to"] == f"live:host-a:{project}:wt-a"
+        if not caller_qualified:
+            assert received[0]["reply_to"] is None
+            assert b_db.list_pending_live_messages("b-colliding-source-handle") == []
+            return
+        assert received[0]["reply_to"] == f"live:{machine_a}:{project}:wt-a"
         assert b_db.list_pending_live_messages("b-other-project") == []
-        _register(a_db, "a-new", "host-a", project=project, now=time.time() + 1)
+        _register(a_db, "a-new", machine_a, project=project, now=time.time() + 1)
         monkeypatch.setattr(cli, "_get_client", lambda: b_client)
         monkeypatch.setattr(cli, "_live_sender_label", lambda _: "wt-b")
         monkeypatch.setattr(cli, "_worktrees_get", lambda _: "/fixture/wt-b")

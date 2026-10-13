@@ -6,6 +6,36 @@ provider settings that must not be committed to a project. The existing
 `[source]` update-source table and the AHP provider table coexist in this file;
 `worktree-manager source set/reset` preserves all non-source tables.
 
+## Picker logical machine roster
+
+The production Picker reads the project's existing `machines.yaml` registry
+(canonical `.agent-worktrees/machines.yaml`, additive legacy root registry,
+or the existing knowledge overlay fallback). It consumes the shared
+`machine_transport` normalization without rewriting those files.
+
+A legacy Windows/WSL entry named `host` becomes two independent logical
+machines, `host` (Windows) and `host-wsl` (WSL). Both are Profiles source
+columns **and** target rows; WSL is not excluded from the source axis.
+Explicit `execution_platform` entries retain their declared keys and aliases.
+Generated key, alias, or duplicate-profile collisions refuse the roster rather
+than silently selecting one execution space.
+
+`physical_host` groups only visible labels: for example, `desk-win` and
+`ubuntu` associated with `desk` display as `desk Win` and `desk WSL`.
+Source IDs, matrix keys, SSH profiles, and persisted machine ownership retain
+their logical identities. Local detection selects the running platform's
+logical entry, so the Windows and WSL siblings never both become local sources.
+The internal `legacy_key` marker allows an owner-derived legacy projection to
+follow the known local platform; an explicitly declared logical selector on
+the wrong platform fails closed rather than selecting its sibling.
+Standalone native Windows/Linux entries continue to work without a sibling.
+
+This is a read-only compatibility projection, not a persisted-state migration:
+historical rows are not rewritten, existing canonical-over-legacy merge
+precedence remains intact, and no bridge-address or environment dimension is
+added. Transport configuration and provisioning remain owned by their existing
+consumers, not by Picker display grouping.
+
 ## Same-machine AHP provider
 
 AHP is explicitly selected when creating or recreating a hosted session.

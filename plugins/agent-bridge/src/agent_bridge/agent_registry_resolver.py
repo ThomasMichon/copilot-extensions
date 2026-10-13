@@ -128,10 +128,14 @@ class AgentResolver(_ProviderDiscoveryMixin):
     ) -> bool:
         """Match a transport to the selected execution space, not its physical host."""
         machine, platform = self._local_machine, self._local_platform
-        if any(entry.execution_platform for entry in self.machines.values()):
+        if (machine and machine.execution_platform) or any(
+            entry.execution_platform and not entry.legacy_key for entry in self.machines.values()
+        ):
             return bool(
                 machine and execution_space_key == machine.key
             )
+        if execution_space_key and (not machine or execution_space_key != machine.key):
+            return False
         if not ssh_host:
             return True
         import socket
@@ -222,11 +226,20 @@ class AgentResolver(_ProviderDiscoveryMixin):
     ) -> tuple[MachineConfig, SshEnvironment | None]:
         """Resolve shared identities while preserving SSH-alias environment binding."""
         machine = self._machines.get(host)
-        if machine:
-            return machine, None
-        machine = find_machine_entry(self._machines, host, reject_ambiguous=True)
+        if machine is None:
+            machine = find_machine_entry(self._machines, host, reject_ambiguous=True)
         # Keys keep their historical precedence over environment aliases.
         if machine and machine.key.lower() == host.lower():
+            if (
+                machine.legacy_key == machine.key and ssh_environment in {"windows", "wsl"}
+                and machine.execution_platform != ssh_environment
+            ):
+                sibling = find_machine_entry(
+                    self._machines, host, reject_ambiguous=True,
+                    execution_platform=ssh_environment,
+                )
+                if sibling is not None and sibling.legacy_key == machine.legacy_key:
+                    return sibling, None
             return machine, None
         if host.lower() in self._ambiguous_ssh_aliases:
             raise AmbiguousMachineError(f"SSH alias '{host}' is ambiguous in topology")
@@ -236,7 +249,7 @@ class AgentResolver(_ProviderDiscoveryMixin):
             if machine and machine is not alias_machine:
                 raise AmbiguousMachineError(f"Machine '{host}' is ambiguous in topology")
             machine = alias_machine
-            if machine.execution_platform:
+            if machine.execution_platform and not machine.legacy_key:
                 raise ValueError("independent execution-space targeting requires its registered key")
             if ssh_environment and ssh_environment != matched_env.name:
                 raise ValueError(

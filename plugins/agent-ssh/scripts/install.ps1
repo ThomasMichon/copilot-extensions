@@ -226,24 +226,19 @@ function Install-AgentSshPackage {
 
     if ($UvCommand) {
         $resolvedVenueCopilot = Resolve-VenueCopilot
-        foreach ($dependency in @('pyyaml>=6.0.3') + $Dependencies) {
-            if ($resolvedVenueCopilot -and $dependency -eq $resolvedVenueCopilot) {
-                $depResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -Arguments @('--python', $Python, '--reinstall-package', 'agent-venue-copilot', $dependency, '--quiet')
-            } else {
-                $depResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -Arguments @('--python', $Python, $dependency, '--quiet')
-            }
-            if ($depResult.ExitCode -ne 0) {
-                if ($depResult.Output) { Write-Host ($depResult.Output | Out-String) }
-                Write-Step 'uv package install failed -- falling back to python -m pip'
-                $UvCommand = $null
-                break
-            }
+        $dependencyArgs = @('--python', $Python, '--quiet', 'pyyaml>=6.0.3') + $Dependencies
+        if ($resolvedVenueCopilot -and $Dependencies -contains $resolvedVenueCopilot) {
+            $dependencyArgs += @('--reinstall-package', 'agent-venue-copilot')
         }
-        if ($UvCommand) {
+        $depResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -Arguments $dependencyArgs
+        if ($depResult.ExitCode -eq 0) {
             $pkgResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -PayloadDirToScrub $Source -Arguments @('--python', $Python, '--no-deps', $Source, '--quiet')
             if ($pkgResult.ExitCode -eq 0) { return $true }
             if ($pkgResult.Output) { Write-Host ($pkgResult.Output | Out-String) }
             Write-Step "uv package install exited $($pkgResult.ExitCode) -- falling back to python -m pip"
+        } else {
+            if ($depResult.Output) { Write-Host ($depResult.Output | Out-String) }
+            Write-Step 'uv package install failed -- falling back to python -m pip'
         }
     }
 
@@ -312,6 +307,7 @@ function Resolve-VenueCopilot { return (Resolve-VendoredLib -LibName 'venue-copi
 function Resolve-Zdd { return (Resolve-VendoredLib -LibName 'zdd') }
 function Resolve-RemoteLoginShell { return (Resolve-VendoredLib -LibName 'remote-login-shell') }
 function Resolve-FleetContracts { return (Resolve-VendoredLib -LibName 'fleet-contracts') }
+function Resolve-MachineTransport { return (Resolve-VendoredLib -LibName 'machine-transport') }
 
 function Ensure-UvIndex {
     if ($env:UV_INDEX_URL -or $env:UV_DEFAULT_INDEX) { return }
@@ -610,7 +606,7 @@ function Materialize-SnapshotLibs {
     param([Parameter(Mandatory)][string]$SnapshotDir)
     $libsDir = Join-Path $SnapshotDir 'libs'
     if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
-    foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell', 'fleet-contracts')) {
+    foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell', 'fleet-contracts', 'machine-transport')) {
         $source = Resolve-VendoredLib -LibName $lib
         if (-not $source) { throw "Cannot locate required snapshot library: $lib" }
         $destination = Join-Path $libsDir $lib
@@ -704,7 +700,8 @@ function Test-SnapshotReusable {
         'libs\venue-copilot\pyproject.toml',
         'libs\zdd\pyproject.toml',
         'libs\remote-login-shell\pyproject.toml',
-        'libs\fleet-contracts\pyproject.toml'
+        'libs\fleet-contracts\pyproject.toml',
+        'libs\machine-transport\pyproject.toml'
     )) {
         if (-not (Test-Path (Join-Path $SnapshotDir $rel))) { return $false }
     }
@@ -1011,6 +1008,11 @@ if (-not $fleetContractsDir) {
     Write-Fail 'Cannot locate fleet-contracts library'
     exit 1
 }
+$machineTransportDir = Resolve-MachineTransport
+if (-not $machineTransportDir) {
+    Write-Fail 'Cannot locate machine-transport library'
+    exit 1
+}
 $vendoredDependencies = @(
     $agentProcutilDir,
     (Join-Path $PluginDir 'libs\dropin-registry'),
@@ -1018,7 +1020,8 @@ $vendoredDependencies = @(
     $venueCopilotDir,
     $zddDir,
     $remoteLoginShellDir,
-    $fleetContractsDir
+    $fleetContractsDir,
+    $machineTransportDir
 )
 $pkgInstalled = Install-AgentSshPackage `
     -Python $VenvPython `

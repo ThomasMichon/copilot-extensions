@@ -192,7 +192,10 @@ class TestLoadMachinesYaml:
         yaml_path = tmp_path / "machines.yaml"
         yaml_path.write_text(yaml.dump(SAMPLE_MACHINES_YAML))
         machines = load_machines_yaml(yaml_path)
-        assert len(machines) == 3
+        assert len(machines) == 4
+        assert machines["workstation"].execution_platform == "windows"
+        assert machines["workstation-wsl"].execution_platform == "wsl"
+        assert machines["workstation-wsl"].get_ssh_env().alias == "workstation-wsl"
 
     def test_load_missing_file(self, tmp_path: Path):
         machines = load_machines_yaml(tmp_path / "nonexistent.yaml")

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from machine_transport.registry import MachineEntry, SSHEnvironment
+import pytest
+
+from machine_transport.registry import (
+    MachineEntry, SSHEnvironment, normalize_machine_entries, parse_machines_yaml,
+)
+from machine_transport.identity import local_execution_platform
 from machine_transport.transport import (
     TransportPlan,
     default_shell_for_env_name,
@@ -12,6 +17,48 @@ from machine_transport.transport import (
 
 def _loader(entries):
     return lambda: entries
+
+
+def test_logical_profile_transport_never_selects_another_platform():
+    entries = normalize_machine_entries(parse_machines_yaml({"machines": {
+        "desktop": {"ssh": {"environments": [
+            {"name": "wsl", "alias": "guest-route"},
+            {"name": "windows", "alias": "native-route"},
+        ]}},
+    }}))
+    native = get_machine_transport("native-route", config_machine="desktop-wsl", load_entries=_loader(entries))
+    guest = get_machine_transport("guest-route", config_machine="desktop", load_entries=_loader(entries))
+    assert (native.machine_key, native.ssh_alias, native.shell, native.local) == (
+        "desktop", "native-route", "pwsh", False,
+    )
+    assert (guest.machine_key, guest.ssh_alias, guest.shell, guest.local) == (
+        "desktop-wsl", "guest-route", "bash", False,
+    )
+    assert get_machine_transport(
+        "guest-route", config_machine="desktop-wsl", load_entries=_loader(entries),
+    ).local
+
+
+def test_explicit_logical_transport_refuses_multiple_profiles():
+    entry = MachineEntry(
+        "guest", "Guest", execution_platform="wsl",
+        ssh_environments=[SSHEnvironment("wsl", "one"), SSHEnvironment("wsl", "two")],
+    )
+    with pytest.raises(ValueError, match="ambiguous SSH profiles"):
+        resolve_ssh_target(entry)
+
+
+@pytest.mark.parametrize(("system", "release", "distro", "expected"), [
+    ("Windows", "10", "", "windows"),
+    ("Linux", "6.6-microsoft-standard-WSL2", "", "wsl"),
+    ("Linux", "6.6", "Example", "wsl"),
+    ("Linux", "6.6", "", "linux"),
+])
+def test_local_platform_detection_is_owner_only(monkeypatch, system, release, distro, expected):
+    monkeypatch.setattr("machine_transport.identity.platform.system", lambda: system)
+    monkeypatch.setattr("machine_transport.identity.platform.release", lambda: release)
+    monkeypatch.setenv("WSL_DISTRO_NAME", distro)
+    assert local_execution_platform() == expected
 
 
 class TestDefaultShellForEnvName:

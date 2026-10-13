@@ -209,6 +209,13 @@ def _detect_local_machine(
             raise ValueError("local_execution_space does not match this daemon's execution platform")
         return selected, platform
     if scoped:
+        selected = find_machine_entry(
+            machines, hostname, reject_ambiguous=True, execution_platform=platform,
+        )
+        if selected is not None and selected.legacy_key:
+            return selected, platform
+        if not any(machine.execution_platform and not machine.legacy_key for machine in machines.values()):
+            return selected, platform
         raise ValueError(
             "explicit local_execution_space is required for independent registered spaces"
         )

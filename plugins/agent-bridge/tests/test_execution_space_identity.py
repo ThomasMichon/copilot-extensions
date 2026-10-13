@@ -29,6 +29,90 @@ def _spaces():
     }
 
 
+@pytest.mark.parametrize("platform,key", [("windows", "workstation"), ("wsl", "workstation-wsl")])
+def test_legacy_windows_wsl_projection_selects_exact_logical_machine(platform, key):
+    machines = parse_machines_yaml({"machines": {"workstation": {
+        "hostname": "real-host", "auth": {"hooks": [{"name": "relay", "local_port": 1234}]},
+        "ssh": {"ready": True, "environments": [
+            {"name": "windows", "alias": "workstation-win", "shell": "pwsh"},
+            {"name": "wsl", "alias": "workstation-ubuntu", "shell": "bash"},
+        ]},
+    }}}, normalize=True)
+    assert set(machines) == {"workstation", "workstation-wsl"}
+    assert machines[key].auth_hooks[0].name == "relay"
+    assert machines[key].physical_host == "workstation"
+    with patch.object(agent_registry, "_detect_platform", return_value=platform), \
+            patch("socket.gethostname", return_value="real-host"):
+        current, detected = agent_registry._detect_local_machine(machines)
+        resolver = AgentResolver({}, machines)
+    assert current.key == key
+    assert detected == platform
+    windows, win_env = resolver.resolve_ssh_environment("workstation")
+    wsl, wsl_env = resolver.resolve_ssh_environment("workstation-wsl")
+    assert (windows.key, win_env.alias) == ("workstation", "workstation-win")
+    assert (wsl.key, wsl_env.alias) == ("workstation-wsl", "workstation-ubuntu")
+    alias_machine, alias_env = resolver.resolve_ssh_environment("workstation-ubuntu")
+    assert (alias_machine.key, alias_env.name) == ("workstation-wsl", "wsl")
+    legacy_machine, legacy_env = resolver.resolve_ssh_environment("workstation", "wsl")
+    assert (legacy_machine.key, legacy_env.alias) == ("workstation-wsl", "workstation-ubuntu")
+    with pytest.raises(ValueError):
+        resolver.resolve_ssh_environment("workstation-ubuntu", "windows")
+
+
+@pytest.mark.asyncio
+async def test_remote_carrier_acquisition_uses_each_logical_machine_profile(monkeypatch):
+    from agent_bridge import carrier
+    from agent_bridge.remote_operations import RemoteOperationService
+    from ssh_manager import SSHProfileSource
+
+    machines = parse_machines_yaml({"machines": {"desk": {
+        "ssh": {"environments": [
+            {"name": "windows", "alias": "desk-win", "shell": "pwsh"},
+            {"name": "wsl", "alias": "desk-ubuntu", "shell": "bash"},
+        ]},
+    }}}, normalize=True)
+    with patch.object(agent_registry, "_detect_platform", return_value="windows"), \
+            patch("socket.gethostname", return_value="desk"):
+        resolver = AgentResolver({}, machines)
+    acquired = []
+    monkeypatch.setattr(SSHProfileSource, "_resolve_effective_config", lambda self: ())
+
+    async def acquire(key, platform, *, config_source, manager):
+        acquired.append((key, platform, config_source.get_ssh_config().host_alias))
+        return object()
+
+    monkeypatch.setattr(carrier, "acquire_remote_carrier", acquire)
+    service = RemoteOperationService(resolver)
+    await service._lease("desk")
+    await service._lease("desk-wsl")
+    assert acquired == [
+        ("carrier:desk-win", "windows", "desk-win"),
+        ("carrier:desk-ubuntu", "linux", "desk-ubuntu"),
+    ]
+
+
+@pytest.mark.parametrize("hostname,local_key", [("local-host", "laptop"), ("unregistered-host", None)])
+def test_remote_projection_preserves_native_legacy_locality_and_unregistered_read_clients(
+    hostname, local_key,
+):
+    machines = parse_machines_yaml({"machines": {
+        "laptop": {"hostname": "local-host", "ssh": {"environments": [
+            {"name": "windows", "alias": "laptop-ssh", "shell": "pwsh"},
+        ]}},
+        "desk": {"ssh": {"environments": [
+            {"name": "windows", "alias": "desk-win", "shell": "pwsh"},
+            {"name": "wsl", "alias": "desk-ubuntu", "shell": "bash"},
+        ]}},
+    }}, normalize=True)
+    with patch.object(agent_registry, "_detect_platform", return_value="windows"), \
+            patch("socket.gethostname", return_value=hostname):
+        resolver = AgentResolver({}, machines)
+        assert (resolver._local_machine.key if resolver._local_machine else None) == local_key
+        assert not resolver.is_local_transport("desk-ubuntu", execution_space_key="desk-wsl")
+        if local_key:
+            assert resolver.is_local_transport("laptop-ssh", execution_space_key="laptop")
+
+
 def test_explicit_service_selector_roundtrips_without_changing_preferences():
     config = ServiceConfig(local_execution_space="workstation-windows")
     restored = ServiceConfig.model_validate(config.model_dump())

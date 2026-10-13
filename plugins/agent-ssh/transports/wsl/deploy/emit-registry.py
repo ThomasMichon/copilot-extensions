@@ -4,8 +4,8 @@
 The `wsl` transport is local: it reaches the Windows machine's own WSL sshd
 through the `wsl.exe` interop stdio pipe (GSA-safe), so the registry it needs is
 tiny -- a single record for the local machine's WSL target. This script reads the
-harness `machines.yaml`, finds the local machine's `ssh.environments` entry named
-`wsl`, and emits a normalized registry the core `emit-profile` renders into
+harness `machines.yaml`, resolves its logical WSL machine through the shared
+machine model, and emits a normalized registry the core `emit-profile` renders into
 `~/.ssh/config.d/50-agent-ssh-wsl.conf`.
 
 Unlike dtssh there is no live state to resolve: WSL distro/user/port are static.
@@ -22,8 +22,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from machine_transport import (
+    MachineEntry,
+    find_machine_entry,
+    normalize_machine_entries,
+    parse_machines_yaml,
+    resolve_ssh_target,
+)
 
-def _load_machines(path: Path) -> dict[str, Any]:
+
+def _load_machines(path: Path) -> dict[str, MachineEntry]:
     text = path.read_text(encoding="utf-8")
     try:
         import yaml
@@ -31,27 +39,10 @@ def _load_machines(path: Path) -> dict[str, Any]:
     except ModuleNotFoundError:  # pragma: no cover - yaml is a package dep
         import json
         data = json.loads(text)
-    return data or {}
-
-
-def _local_machine_key(machines: dict[str, Any], override: str | None) -> str | None:
-    if override:
-        return override if override in machines else None
-    host = socket.gethostname().lower()
-    if host in machines:
-        return host
-    # tolerate a machines.yaml key that is a prefix/suffix of the OS hostname
-    for key in machines:
-        if host == key.lower() or host.startswith(key.lower()) or key.lower().startswith(host):
-            return key
-    return None
-
-
-def _wsl_env(machine: dict[str, Any]) -> dict[str, Any] | None:
-    for env in (machine.get("ssh", {}) or {}).get("environments", []) or []:
-        if env.get("name") == "wsl":
-            return env
-    return None
+    data = data or {}
+    if isinstance(data, dict) and "machines" not in data:
+        data = {"machines": data}
+    return normalize_machine_entries(parse_machines_yaml(data))
 
 
 def _select_identity_file(machine_key: str, ssh_dir: Path | None = None) -> str | None:
@@ -121,24 +112,31 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, help="Write registry YAML to this path instead of stdout")
     args = ap.parse_args(argv)
 
-    data = _load_machines(args.machines)
-    machines = data.get("machines", data) if isinstance(data, dict) else {}
-    key = _local_machine_key(machines, args.machine)
-    if not key:
+    try:
+        machines = _load_machines(args.machines)
+        machine = find_machine_entry(
+            machines, args.machine or socket.gethostname(),
+            reject_ambiguous=True, execution_platform="wsl",
+        )
+    except ValueError as exc:
+        sys.stderr.write(f"Invalid machine topology: {exc}\n")
+        return 2
+    if machine is None or machine.execution_platform != "wsl":
         sys.stderr.write(
             f"Could not resolve the local machine in {args.machines} "
             f"(hostname={socket.gethostname().lower()!r}); pass --machine <key>.\n"
         )
         return 2
 
-    env = _wsl_env(machines[key])
-    if not env:
-        sys.stderr.write(f"Machine '{key}' has no ssh.environments entry named 'wsl' in {args.machines}.\n")
+    if not machine.ssh_environments:
+        sys.stderr.write(f"Machine '{machine.key}' has no WSL SSH profile in {args.machines}.\n")
         return 2
 
-    name = env.get("alias") or f"{key}-wsl"
-    user = args.user or env.get("user") or os.environ.get("USERNAME") or "agent"
-    identity_file = args.identity_file or _select_identity_file(key)
+    name, _ = resolve_ssh_target(machine)
+    name = name or machine.key
+    env = machine.ssh_environments[0]  # shared resolution has refused duplicate profiles
+    user = args.user or env.user or os.environ.get("USERNAME") or "agent"
+    identity_file = args.identity_file or _select_identity_file(machine.physical_host or machine.key)
     if not identity_file:
         sys.stderr.write(
             "No usable local SSH identity found under ~/.ssh "

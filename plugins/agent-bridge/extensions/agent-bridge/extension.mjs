@@ -32,7 +32,7 @@ import {
 } from "./delivery.mjs";
 import { firstLoadThisSession } from "./announce.mjs";
 import { makeBridgeEndpoint } from "./bridge-endpoint.mjs";
-import { metadataRefresher, processIdentity, resolveMetadataAsync } from "./metadata.mjs";
+import { metadataRefresher, processIdentity, registrationMetadata, resolveMetadataAsync } from "./metadata.mjs";
 
 // --- Constants ---
 const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
@@ -180,7 +180,10 @@ async function bridgeGetJson(path) {
 // Session metadata (machine, worktree, ...), resolved off the event loop from
 // load. Registration waits for it -- never readiness: see serializedRegister.
 const metadataReady = resolveMetadataAsync()
-  .then((meta) => { state.meta = meta; })
+  .then((meta) => {
+    state.meta = meta;
+    if (!meta.machine) extLog("logical machine owner unresolved; session-only registration with bounded retries");
+  })
   .catch((e) => extLog(`metadata resolution failed (degrading, session unaffected): ${e.message}`));
 // A worktree or repo the load-time lookup missed is looked up again (with
 // backoff) before heartbeats, once that first lookup settled.
@@ -199,7 +202,7 @@ const register = serializedRegister(
   async (id) => {
     if (!state.base || !state.token) return false;
     try {
-      const body = { session_id: id, ...processIdentity(), ...(state.meta || {}) };
+      const body = { session_id: id, ...processIdentity(), ...registrationMetadata(state.meta) };
       const res = await fetchBridge("POST", "/api/v1/live-sessions", body);
       if (res.ok) return true;
       if (res.status === 409) {

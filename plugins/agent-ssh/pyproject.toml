@@ -21,9 +21,11 @@ dependencies = [
     "agent-dropin-registry",
     "agent-remote-login-shell",
     "agent-fleet-contracts",
+    "agent-machine-transport",
 ]
 
 [tool.uv.sources]
+agent-machine-transport = { path = "../../libs/machine-transport", editable = true }
 agent-fleet-contracts = { path = "../../libs/fleet-contracts", editable = true }
 # Shared Windows-headless / detached process-spawn kwargs. This is a
 # `uv`-editable canonical reference (vendor-pointer-generalization effort,

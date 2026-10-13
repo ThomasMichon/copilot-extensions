@@ -3,8 +3,59 @@
 from __future__ import annotations
 
 import subprocess
+import os
+import sys
+from pathlib import Path
+
+import pytest
+import yaml
 
 from agent_dispatch import identity
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("platform,key", [("windows", "desk"), ("wsl", "desk-wsl")])
+def test_real_worktrees_probe_preserves_logical_machine_owner_ref(
+    platform, key, tmp_path, monkeypatch,
+):
+    from agent_dispatch import procutil
+
+    root = Path(__file__).resolve().parents[3]
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    (anchor / "machines.yaml").write_text(yaml.safe_dump({"machines": {"desk": {
+        "ssh": {"environments": [
+            {"name": "windows", "alias": "desk-win", "shell": "pwsh"},
+            {"name": "wsl", "alias": "desk-ubuntu", "shell": "bash"},
+        ]},
+    }}}), encoding="utf-8")
+    project = tmp_path / ".project"
+    project.mkdir()
+    (project / "config.yaml").write_text(yaml.safe_dump({
+        "repo_name": "project", "machine": "desk", "platform": platform,
+        "repos": {"project": {
+            "anchor": str(anchor), "worktree_root": str(tmp_path / "trees"),
+        }},
+    }), encoding="utf-8")
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    sources = [root / "plugins" / "agent-worktrees" / "src", *(
+        path for path in (root / "libs").glob("*/src") if path.is_dir()
+    )]
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(map(str, sources))}
+    code = (
+        "import sys; from types import SimpleNamespace; "
+        "from agent_worktrees import config as cfg, context_cli; "
+        f"cfg.detect_platform=lambda: {platform!r}; "
+        "cfg.set_active_project('project'); "
+        "context_cli._core()._infer_worktree_id_from_cwd=lambda config: 'same-worktree'; "
+        "raise SystemExit(context_cli.cmd_get(SimpleNamespace(key=sys.argv[-1])))"
+    )
+    monkeypatch.setattr(procutil, "agent_worktrees_launch_prefix", lambda: [sys.executable, "-c", code])
+    monkeypatch.setattr(procutil, "agent_worktrees_environment", lambda: env)
+    assert identity.resolve_machine() == key
+    assert identity.resolve_identity() == (key, "same-worktree")
 
 
 def test_resolve_identity_via_agent_worktrees(monkeypatch):

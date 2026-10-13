@@ -26,6 +26,15 @@ _project_config_lock = threading.Lock()
 
 def detect_legacy_machine(entries: dict[str, MachineEntry], hostname: str) -> str:
     if any(entry.execution_platform for entry in entries.values()):
+        from .config import detect_platform
+
+        entry = find_machine_entry(
+            entries, hostname, reject_ambiguous=True, execution_platform=detect_platform(),
+        )
+        if entry is not None and entry.legacy_key:
+            return entry.key
+        if not any(item.execution_platform and not item.legacy_key for item in entries.values()):
+            return machine_name(entry) if entry is not None else hostname
         raise ExecutionSpaceError(
             "registered execution spaces require explicit machine configuration; "
             "hostname does not select a local registry"
@@ -58,7 +67,7 @@ def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None,
     if not local:
         error = (
             "cross-space owner ledger mutation is unsupported"
-            if any(entry.execution_platform for entry in registry_for_config(config).values())
+            if _requires_scoped_identity(registry_for_config(config), config.machine, parsed.machine)
             else None
         )
         return None, parsed.worktree_id, error
@@ -114,6 +123,19 @@ def registry_for_config(config: Any) -> dict[str, MachineEntry]:
         raise ExecutionSpaceError(f"execution-space registry is invalid: {exc}") from exc
 
 
+def _requires_scoped_identity(entries: dict[str, MachineEntry], *names: str) -> bool:
+    if any(entry.execution_platform and not entry.legacy_key for entry in entries.values()):
+        return True
+    try:
+        for name in names:
+            entry = find_machine_entry(entries, name, reject_ambiguous=True)
+            if entry is not None and entry.execution_platform:
+                return True
+        return False
+    except ValueError as exc:
+        raise ExecutionSpaceError(str(exc)) from exc
+
+
 def require_owner_identity(owner: str, config: Any, *, canonical_ref: bool = True) -> bool:
     """Return whether an owner is local; reject ambiguous legacy scope names."""
     entries = registry_for_config(config)
@@ -122,7 +144,7 @@ def require_owner_identity(owner: str, config: Any, *, canonical_ref: bool = Tru
         target = find_machine_entry(entries, owner)
     except ValueError as exc:
         raise ExecutionSpaceError(str(exc)) from exc
-    explicit = any(entry.execution_platform for entry in entries.values())
+    explicit = _requires_scoped_identity(entries, config.machine, owner)
     if explicit:
         if current is None or not current.execution_platform or config.machine != current.key:
             raise ExecutionSpaceError(
@@ -147,7 +169,7 @@ def require_owner_identity(owner: str, config: Any, *, canonical_ref: bool = Tru
 
 
 def require_current_execution_space(config: Any) -> None:
-    if any(entry.execution_platform for entry in registry_for_config(config).values()):
+    if _requires_scoped_identity(registry_for_config(config), config.machine):
         require_owner_identity(config.machine, config)
 
 
@@ -156,7 +178,7 @@ def require_record_mutation(record: Any, config: Any) -> None:
 
     if record is None:
         return
-    if not any(entry.execution_platform for entry in registry_for_config(config).values()):
+    if not _requires_scoped_identity(registry_for_config(config), config.machine, record.machine):
         return
     if not require_owner_identity(record.machine, config):
         raise ExecutionSpaceError(

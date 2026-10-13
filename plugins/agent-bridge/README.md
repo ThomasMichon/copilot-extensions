@@ -15,6 +15,18 @@ refuses legacy daemons without an authoritative effective-config snapshot.
 Production capture/attestation is not yet wired; ordinary explicit cutover is
 unchanged. Anonymous health and authenticated control remain distinct contracts.
 
+Windows and WSL on one physical host are independent logical machines.
+The shared machine owner projects a legacy Windows/WSL roster into `host`
+and `host-wsl`, preserving their exact SSH profiles and physical association.
+The bridge's topology loader consumes that projection; its raw parser retains
+legacy parsing compatibility. Known-platform local detection selects a
+projected legacy sibling, while explicitly declared execution spaces still
+require their canonical `local_execution_space` selection. Physical grouping
+is not transport, session or ownership identity.
+The live-session extension obtains the machine key from Agent Worktrees.
+A failed owner lookup remains incomplete and is retried with bounded backoff;
+it never freezes a physical hostname as a guessed logical machine.
+
 [Session preference authority](docs/session-preferences.md) documents optional
 execution-user defaults, the unchanged caller-settings default, and the
 execution/ACP capability limits.

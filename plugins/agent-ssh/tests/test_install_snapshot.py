@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,7 @@ _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _HARNESS_TIMEOUT_SECONDS = 30
 _RUNTIME_LIBS = (
     "agent-procutil", "ssh-manager", "venue-copilot", "zdd", "remote-login-shell",
-    "fleet-contracts",
+    "fleet-contracts", "machine-transport",
 )
 
 
@@ -72,6 +73,7 @@ def _stage_payload(tmp_path: Path) -> Path:
         "zdd",
         "remote-login-shell",
         "fleet-contracts",
+        "machine-transport",
     ):
         shutil.copytree(_PLUGIN_ROOT.parents[1] / "libs" / lib, staged_libs / lib)
     return payload
@@ -92,6 +94,30 @@ def _host_pip_index_url() -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+def _assert_snapshot_transport(snapshot: Path) -> None:
+    for filename in ("__init__.py", "identity.py", "registry.py", "transport.py"):
+        assert (snapshot / "libs" / "machine-transport" / "src" / "machine_transport" / filename).is_file()
+
+
+def _assert_snapshot_transport_install(root: Path, env: dict[str, str]) -> None:
+    """Read the actual dependency in the new runtime, never the cached test venv."""
+    runtime = root / "versions" / _source_version()
+    python = runtime / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    result = subprocess.run(
+        [
+            str(python), "-I", "-c",
+            "import pathlib, machine_transport, agent_ssh, yaml; "
+            "from machine_transport import parse_machines_yaml, resolve_ssh_target; "
+            "assert pathlib.Path(machine_transport.__file__).is_relative_to(pathlib.Path(__import__('sys').prefix)); "
+            "entries = parse_machines_yaml(yaml.safe_load('machines:\\n  snapshot-host:\\n    hostname: snapshot.invalid\\n')); "
+            "assert resolve_ssh_target(entries['snapshot-host']) == ('snapshot-host', ''); "
+            "print(machine_transport.__file__)",
+        ],
+        env=env, capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def _expected_version() -> str:
@@ -144,7 +170,11 @@ def _isolate_path_without_python3(env: dict[str, str]) -> dict[str, str]:
     os.name == "nt" or shutil.which("uv") is None,
     reason="POSIX snapshot coverage",
 )
-@pytest.mark.timeout(120)
+@pytest.mark.timeout(30)
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("network")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
 def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -> None:
     bash = shutil.which("bash")
     if bash is None:
@@ -184,6 +214,8 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
     ).read_text(encoding="utf-8")
     for lib in _RUNTIME_LIBS:
         assert (snapshot / "libs" / lib / "pyproject.toml").is_file()
+    _assert_snapshot_transport(snapshot)
+    assert not (home / ".agent-ssh" / "versions" / _source_version()).exists()
 
     shutil.rmtree(payload)
     shutil.rmtree(tmp_path / "libs")
@@ -199,7 +231,7 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
         env=env,
         capture_output=True,
         text=True,
-        timeout=420,
+        timeout=10,
         check=False,
     )
     assert provision.returncode == 0, provision.stderr
@@ -209,11 +241,12 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
         env=env,
         capture_output=True,
         text=True,
-        timeout=420,
+        timeout=10,
         check=False,
     )
     assert invoke.returncode == 0, invoke.stderr
     assert f"agent-ssh {_expected_version()}" in invoke.stdout
+    _assert_snapshot_transport_install(home / ".agent-ssh", env)
 
 
 @pytest.mark.skipif(
@@ -388,7 +421,7 @@ def test_shared_binstub_generator_quotes_snapshot_installer_path(tmp_path: Path)
     os.name == "nt" or shutil.which("uv") is None,
     reason="POSIX snapshot coverage",
 )
-@pytest.mark.parametrize("missing_library", ["ssh-manager", "fleet-contracts"])
+@pytest.mark.parametrize("missing_library", ["ssh-manager", "fleet-contracts", "machine-transport"])
 def test_stamp_fails_before_publish_when_required_library_missing(
     tmp_path: Path, missing_library: str,
 ) -> None:
@@ -469,7 +502,7 @@ def test_stamp_fails_before_publish_when_payload_copy_fails(tmp_path: Path) -> N
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required")
-@pytest.mark.parametrize("missing_library", ["ssh-manager", "fleet-contracts"])
+@pytest.mark.parametrize("missing_library", ["ssh-manager", "fleet-contracts", "machine-transport"])
 def test_powershell_stamp_fails_before_publish_when_required_library_missing(
     tmp_path: Path, missing_library: str,
 ) -> None:
@@ -840,8 +873,15 @@ def test_stamp_publication_lock_no_flock_fails_closed_without_owner_file(
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required")
-@pytest.mark.timeout(120)
-def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(tmp_path: Path) -> None:
+@pytest.mark.timeout(30)
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("network")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(tmp_path: Path, capfd) -> None:
+    from plugin_test_containment import Limits, run_contained
+
+    started = time.monotonic()
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
@@ -900,11 +940,14 @@ def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(tmp_path: Pat
     assert (snapshot / "scripts" / "installer-engine.ps1").is_file()
     for lib in _RUNTIME_LIBS:
         assert (snapshot / "libs" / lib / "pyproject.toml").is_file()
+    _assert_snapshot_transport(snapshot)
+    assert not (home / ".agent-ssh" / "versions" / _source_version()).exists()
 
     shutil.rmtree(payload)
     shutil.rmtree(tmp_path / "libs")
 
-    invoke = subprocess.run(
+    capfd.readouterr()
+    returncode = run_contained(
         [
             pwsh,
             "-NoProfile",
@@ -914,11 +957,11 @@ def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(tmp_path: Pat
             str(home / ".local" / "bin" / "agent-ssh.ps1"),
             "version",
         ],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=420,
-        check=False,
+        env=env, cwd=home,
+        sandbox=tmp_path / "provision-job",
+        limits=Limits(wall_seconds=max(1, min(20, 25 - (time.monotonic() - started)))),
     )
-    assert invoke.returncode == 0, invoke.stderr
-    assert f"agent-ssh {_expected_version()}" in invoke.stdout
+    captured = capfd.readouterr()
+    assert returncode == 0, captured.out + captured.err
+    assert f"agent-ssh {_expected_version()}" in captured.out
+    _assert_snapshot_transport_install(home / ".agent-ssh", env)

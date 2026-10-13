@@ -1,0 +1,30 @@
+{
+  "name": "agent-ssh-snapshot",
+  "description": "Programmatic first-use provisioning from an exact local source snapshot after the original source copy is removed.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["python3", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "none", "gh": "none", "ado": "none" },
+  "base": "standalone-without-siblings",
+  "validates": [
+    "Stamping preserves every required local dependency in the self-contained snapshot.",
+    "A fresh binstub provisions only from the snapshot after its original source copy is removed.",
+    "The actual installed machine-transport dependency projects independent Windows and WSL profiles."
+  ],
+  "config": {
+    "CR_HARNESS_MOUNT": "read-only local candidate checkout supplied with -HarnessMount",
+    "CR_UV_INDEX": "explicit optional governed dependency feed"
+  },
+  "expected_artifacts": [
+    "~/.agent-ssh/payload-dir",
+    "~/.agent-ssh/versions/<version>",
+    "~/.local/bin/agent-ssh"
+  ],
+  "stages": [
+    { "n": 0, "title": "fresh environment and exact source evidence" },
+    { "n": 1, "title": "stamp the candidate snapshot" },
+    { "n": 2, "title": "first-use provision without the original source" },
+    { "n": 3, "title": "installed logical-machine dependency contract" }
+  ]
+}

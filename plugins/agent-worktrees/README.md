@@ -11,6 +11,17 @@ sibling plugin to use local worktree isolation. Those sibling plugins compose
 gracefully when installed (extra picker pivots, cross-machine delegation,
 CodeSpace/container resolvers), but their absence only disables those features.
 
+Resolved machine topology treats native Windows and WSL as independent logical
+machines, conventionally `host` and `host-wsl`. The shared machine owner
+projects legacy combined entries without editing topology or historical
+records. Local configuration resolution uses the actual platform for those
+projected entries, so `get machine`, new ownership references, and bridge
+registration name the correct logical machine. Explicit execution-space
+configuration retains its existing canonical-key/platform mutation gates;
+physical association never authorizes access to a sibling's ledger.
+Identity probes refuse an invalid explicit registered source rather than
+advertising the physical host or another platform's key.
+
 ## How It Works
 
 On Windows, ordinary and passive status-monitor starts bypass the venv Python

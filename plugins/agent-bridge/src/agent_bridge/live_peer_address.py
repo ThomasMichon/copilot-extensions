@@ -68,8 +68,19 @@ def peer_operation_timeout(timeout: float, *, wait: bool, wait_timeout: float) -
 def send_remote_peer(client: BridgeClient, args: Namespace, address: LivePeerAddress, *, sender: str,
                      reply_to: str | None, kind: str, delivery: str, prompt: str) -> dict[str, Any]:
     """Explicit peer targets never fall through to agent creation."""
+    import sys
+
     from .send_outcome import SendRefused
 
+    if reply_to and not getattr(args, "reply_to", None):
+        try:
+            qualified = LivePeerAddress.parse(reply_to)
+        except ValueError:
+            qualified = None
+        if qualified is None:
+            print("[!] Omitting a local-only automatic reply address from the remote message.",
+                  file=sys.stderr)
+            reply_to = None
     wait = not getattr(args, "no_wait", False)
     wait_timeout = getattr(args, "reply_timeout", 120.0) if wait else 120.0
     result = client.send_remote_live_message(
