@@ -289,6 +289,60 @@ def test_loop_expansion_separates_registered_execution_repo_from_lane(tmp_path, 
         assert str(tmp_path) not in json.dumps(dict(source.spec))
 
 
+@pytest.mark.parametrize("kind", ["effort", "issue", "script"])
+@pytest.mark.parametrize("caller", ["expansion", "document", "discovery"])
+def test_loop_expansion_defers_host_resources_and_worker_identity(
+    tmp_path, monkeypatch, kind, caller,
+):
+    from agent_dispatch import registrar_discovery as discovery
+    from agent_dispatch import repo_config
+    from agent_dispatch.effort_driver_loops import expand_effort_driver_loop
+    from agent_dispatch.registrar_document import expand_declaration_document
+    from agent_dispatch.registrar_pointer import Pointer
+    from agent_dispatch.repository_issue_loops import expand_repository_issue_loop
+    from tests.test_effort_driver_loops import _config as effort_config
+    from tests.test_repository_issue_loops import _config as issue_config
+
+    monkeypatch.setattr(
+        resources, "run_agent_worktrees_capture",
+        lambda *a, **k: pytest.fail("expansion resolved a host resource before lease"),
+    )
+    if kind == "effort":
+        data = effort_config(
+            tmp_path, execution_repo="tools", state_root="repo:state:.",
+            effort_slugs=["unfinished"], worker_identity="missing-until-held",
+        )
+        expand = expand_effort_driver_loop
+        key = "effort_driver_loop"
+    else:
+        data = issue_config(execution_repo="tools", worker_identity="missing-until-held")
+        if kind == "script":
+            data["forge"] = {
+                "provider": "script", "producer_login": "fixture",
+                "command": ["repo:tools:backlog.py"], "cwd": "repo:tools:.",
+            }
+        expand = expand_repository_issue_loop
+        key = "repository_issue_loop"
+    if caller == "expansion":
+        declarations = expand(data, repo_root=tmp_path)
+    elif caller == "document":
+        declarations = expand_declaration_document(
+            data, directory=tmp_path, repo_root=tmp_path,
+        )
+    else:
+        directory = tmp_path / repo_config.CANONICAL_REPO_CONFIG_DIR / "registrar"
+        directory.mkdir(parents=True)
+        (directory / "loop.json").write_text(json.dumps(data), encoding="utf-8")
+        authority, declarations = discovery.discover_trusted([
+            Pointer(name="fixture", kind="repo", location=str(tmp_path)),
+        ])
+        assert authority is discovery.ScanAuthority.COMPLETE
+    source, workers = declarations
+    assert source.spec["cwd"] == "repo:tools:."
+    assert source.spec[key] == data
+    assert workers.repos == "example/project"
+
+
 def test_script_forge_named_fields_survive_cross_repo_inheritance(tmp_path, monkeypatch):
     from agent_dispatch.script_provider import validate_script_forge_config
 

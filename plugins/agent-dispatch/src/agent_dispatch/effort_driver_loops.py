@@ -328,7 +328,7 @@ def expand_effort_driver_loop(
     repo_root: str | Path | None = None,
 ) -> tuple[ProfileDeclaration, ...]:
     """Expand into one emitter + one worker lane."""
-    config = validate_config(data, cwd=repo_root)
+    config = validate_config(data, cwd=repo_root, resolve_resources=False)
     spec: dict[str, Any] = {
         "id": f"{config['name']}-source",
         "interval_seconds": config["tick_interval_seconds"],

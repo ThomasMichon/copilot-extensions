@@ -329,3 +329,16 @@ requested contract.
 - Final script/resource/registration consumer coverage passes 346 tests,
   including positive not-yet-local admission. Fatal lint, module ceilings,
   install-contract and whitespace checks pass.
+
+### 2026-10-13 - High-level expansion defers execution resources
+
+- Actual repository/effort loop expansion still called execution validation
+  before lease admission. Nine regressions reproduced the eager probe through
+  direct expansion, decoded-document expansion and trusted registrar discovery.
+- Both expansion callers now use shape-only validation. Generated specs retain
+  the original loop declaration, including named execution/state resources,
+  script-forge context and deferred worker identity. Held execution remains the
+  resource-resolution boundary.
+- Adjacent loop, resource, declaration and registrar contracts pass 350 tests.
+  This is source evidence, not release or deployment; adoption remains gated on
+  the reviewed promoted contract and actual consumer readiness.

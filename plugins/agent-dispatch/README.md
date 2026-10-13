@@ -814,9 +814,10 @@ using kernel child custody rather than signaling a potentially reused PID;
 unknown custody is refused. Timeout teardown gets at most one additional second and
 unconfirmed teardown is an explicit error. These bounds are separate from
 the script execution timeout. A standby emitter does no resource lookup before
-acquiring its schedule lease. Loading or registering a builtin emitter and validating a
-standby tick check declaration shape only; registry, worker-identity and
-filesystem resolution occur in the held tick.
+acquiring its schedule lease. Expanding repository/effort loops, loading or
+registering a builtin emitter, and validating a standby tick check declaration
+shape only. Expanded specs preserve the declared worker identity and resource
+context; registry, worker-identity and filesystem resolution occur in the held tick.
 
 Shape-only validation still parses resource syntax in emitter argv, cwd and
 side-load argv, and inline evaluator argv/cwd. Malformed resources are refused

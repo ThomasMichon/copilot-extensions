@@ -17,7 +17,10 @@ def expand_repository_issue_loop(
 ) -> tuple[ProfileDeclaration, ...]:
     from .repository_issue_loops import validate_config
 
-    config = validate_config(data, cwd=repo_root, inherited_script_fields=inherited_script_fields)
+    config = validate_config(
+        data, cwd=repo_root, inherited_script_fields=inherited_script_fields,
+        resolve_resources=False,
+    )
     spec: dict[str, Any] = {
         "id": f"{config['name']}-source",
         "interval_seconds": config["tick_interval_seconds"],
