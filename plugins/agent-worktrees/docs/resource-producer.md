@@ -38,8 +38,11 @@ Archived tombstones, orphaned records and finalizing owners cannot receive new
 reservations or accepted producer transfers.
 
 All results carry `"schema":"copilot-extensions.resource-producer","version":1`.
-Success includes `ok`, current `owner`, original `creator`, `token`, full `ref`,
-`phase`, and stored `producer` metadata. Errors include `error` and `message`
+Transactional success includes `ok`, current `owner`, original `creator`, `token`,
+full `ref`, `phase`, and stored `producer` metadata. The read-only `capabilities`
+response instead includes `operations`, `allocation_fencing`, `lifetime`,
+`ref_encoding`, `max_ref_bytes`, and `max_input_bytes`; it resolves no owner and
+has no transactional `ok` or claim fields. Errors include `error` and `message`
 and exit nonzero. Reserve returns an unpredictable token only after its pending
 claim is durably saved. Begin durably arms allocation and returns its private
 `allocation_fence` only after publication. Bind replaces the allocating callback

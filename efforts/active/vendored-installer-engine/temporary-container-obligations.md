@@ -170,10 +170,12 @@ to bypass its invariants or the live cleanup confirmation gate.
 - [x] Source ledger ABI: verify accepted retry after source reaping, recipient/incoming token
       uniqueness and preservation of already closed/transferred recipients in
       isolated regression fixtures.
-- [ ] Prove the real finalize entrypoint refuses an initially empty owner after
+- [x] Source ledger ABI: prove the real finalize entrypoint refuses an initially empty owner after
       reservation but before allocation; prove its final locked check rejects a
       concurrent producer or the producer refuses an already-finalizing owner.
-      Use isolated local tracking/Git fixtures, never an active parent worktree.
+      Proven by isolated local tracking/Git fixtures and a separate-process
+      sidecar-lock contender in `test_resource_producer_finalize.py`, never an
+      active parent worktree. Docker producer integration remains pending below.
 - [ ] Prove running and stopped-but-existing containers block; exact verified
       removal settles; cleanup failure, outage, daemon mismatch, malformed
       response and interrupted allocation remain active.
