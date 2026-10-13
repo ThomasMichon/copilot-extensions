@@ -36,7 +36,7 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from ..registrar import RegistrarError
-from ..repository_resources import resolve_execution_resources
+from ..repository_resources import resolve_execution_resources, validate_resource_arguments
 from . import UNTRUSTED_EXTERNAL_CONTENT_NOTE
 
 # Lifecycle event types the coordinator publishes (see coordinator._emit).
@@ -414,11 +414,19 @@ class ScriptEvaluatorRegistry:
                 raise EvaluatorError(
                     f"script evaluator {name!r} must map to a non-empty argv list"
                 )
+            try:
+                validate_resource_arguments(argv)
+            except ValueError as exc:
+                raise EvaluatorError(str(exc)) from exc
             normalized[name] = tuple(argv)
         self.scripts = normalized
         self.timeout_seconds = float(timeout_seconds)
         if cwd is not None and (not isinstance(cwd, str) or not cwd):
             raise EvaluatorError("script evaluator 'cwd' must be a non-empty string")
+        try:
+            validate_resource_arguments([cwd])
+        except ValueError as exc:
+            raise EvaluatorError(str(exc)) from exc
         self.cwd = cwd
 
     @classmethod

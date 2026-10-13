@@ -31,7 +31,7 @@ from .issue_loop_markers import validate_marker_payload
 from .registrar import RegistrarError
 from .repository_resources import (
     RepositoryResourceSnapshot, is_repository_resource, resolve_execution_resources,
-    split_repository_resource,
+    validate_resource_arguments,
 )
 
 if TYPE_CHECKING:
@@ -267,9 +267,7 @@ def validate_script_forge_config(
         raise RegistrarError(
             "repository-issue-loop forge.backlog: expected a non-empty string"
         )
-    for value in (*command, declared_cwd_value):
-        if is_repository_resource(value):
-            split_repository_resource(value)
+    validate_resource_arguments([*command, declared_cwd_value])
     if not resolve_resources:
         return {
             "command": list(command), "cwd": declared_cwd_value,

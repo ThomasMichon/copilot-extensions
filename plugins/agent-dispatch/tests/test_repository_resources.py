@@ -586,6 +586,98 @@ def test_builtin_standby_still_refuses_malformed_script_config(tmp_path, monkeyp
         }, holder="fixture")
 
 
+@pytest.mark.parametrize("field", ["command", "cwd", "side_load"])
+@pytest.mark.parametrize("caller", ["validator", "registration", "declaration", "loader"])
+def test_direct_emitter_resource_grammar_is_rejected_before_admission(
+    tmp_path, monkeypatch, field, caller,
+):
+    from agent_dispatch.producers.emitter import load_spec, validate_spec
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.registrations import validate_registration
+
+    monkeypatch.setattr(
+        resources, "run_agent_worktrees_capture",
+        lambda *a, **k: pytest.fail("shape validation attempted resource resolution"),
+    )
+    invalid = "repo:tools:../escape"
+    spec = {"id": "fixture", "command": ["python"], "interval_seconds": 60}
+    if field == "command":
+        spec["command"] = [invalid]
+    elif field == "cwd":
+        spec["cwd"] = invalid
+    else:
+        spec["side_load"] = {"command": [invalid, "{change_ref}"]}
+    with pytest.raises(ValueError, match="registered root"):
+        if caller == "validator":
+            validate_spec(spec)
+        elif caller == "registration":
+            validate_registration("emitter", spec)
+        elif caller == "declaration":
+            load_declaration({"name": "fixture", "kind": "emitter", "spec": spec})
+        else:
+            path = tmp_path / "emitter.json"
+            path.write_text(json.dumps(spec), encoding="utf-8")
+            load_spec(path)
+
+
+@pytest.mark.parametrize("field", ["argv", "cwd"])
+@pytest.mark.parametrize("caller", ["registry", "loading", "registration", "declaration"])
+def test_evaluator_resource_grammar_is_rejected_before_admission(monkeypatch, field, caller):
+    from agent_dispatch.producers.evaluator import ScriptEvaluatorRegistry, load_evaluator
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.registrations import validate_registration
+
+    monkeypatch.setattr(
+        resources, "run_agent_worktrees_capture",
+        lambda *a, **k: pytest.fail("shape validation attempted resource resolution"),
+    )
+    invalid = "repo:tools:../escape"
+    spec = {"scripts": {"verify": ["python"]}, "cwd": "repo:tools:."}
+    if field == "argv":
+        spec["scripts"]["verify"] = [invalid]
+    else:
+        spec["cwd"] = invalid
+    registration = {
+        "repo": "example/project", "evaluator_ref": "verify", "evaluator_spec": spec,
+    }
+    with pytest.raises(ValueError, match="registered root"):
+        if caller == "registry":
+            ScriptEvaluatorRegistry.from_spec(spec)
+        elif caller == "loading":
+            load_evaluator(spec, evaluator_ref="verify")
+        elif caller == "registration":
+            validate_registration("evaluator", registration)
+        else:
+            load_declaration({"name": "fixture", "kind": "evaluator", "spec": registration})
+
+
+@pytest.mark.parametrize("kind", ["emitter", "evaluator"])
+def test_valid_direct_resources_are_admitted_without_resolution(monkeypatch, kind):
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.registrations import validate_registration
+
+    monkeypatch.setattr(
+        resources, "run_agent_worktrees_capture",
+        lambda *a, **k: pytest.fail("admission attempted resource resolution"),
+    )
+    if kind == "emitter":
+        spec = {
+            "id": "fixture", "command": ["repo:tools:scripts/tick.py"],
+            "cwd": "repo:tools:.", "interval_seconds": 60,
+            "side_load": {"command": ["repo:tools:scripts/side.py", "{change_ref}"]},
+        }
+    else:
+        spec = {
+            "repo": "example/project", "evaluator_ref": "verify",
+            "evaluator_spec": {
+                "scripts": {"verify": ["repo:tools:scripts/verify.py"]},
+                "cwd": "repo:tools:.",
+            },
+        }
+    validate_registration(kind, spec)
+    assert load_declaration({"name": "fixture", "kind": kind, "spec": spec}).kind == kind
+
+
 def test_field_provenance_and_merge_share_named_snapshot(tmp_path, monkeypatch):
     from agent_dispatch.registrar_document import expand_declaration_document
     from tests.test_repository_issue_loops import _config

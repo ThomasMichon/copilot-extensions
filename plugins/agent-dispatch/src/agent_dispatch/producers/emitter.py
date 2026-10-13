@@ -23,7 +23,9 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from ..client import DispatchClient
-from ..repository_resources import resolve_execution_resources, resolve_resource_argument
+from ..repository_resources import (
+    resolve_execution_resources, resolve_resource_argument, validate_resource_arguments,
+)
 
 
 class EmitterError(ValueError):
@@ -63,6 +65,10 @@ def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False) -> N
         value = spec.get(key)
         if value is not None and (not isinstance(value, str) or not value):
             raise EmitterError(f"'{key}' must be a non-empty string")
+    try:
+        validate_resource_arguments([*(command or []), spec.get("cwd")])
+    except ValueError as exc:
+        raise EmitterError(str(exc)) from exc
     if builtin is not None:
         if command is not None or effort_builtin is not None:
             raise EmitterError(
@@ -144,6 +150,10 @@ def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False) -> N
             raise EmitterError(
                 "'side_load.command' must include a {change_ref} placeholder"
             )
+        try:
+            validate_resource_arguments(command)
+        except ValueError as exc:
+            raise EmitterError(str(exc)) from exc
 
 
 def load_spec(path: str | Path) -> dict[str, Any]:

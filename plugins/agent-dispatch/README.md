@@ -818,6 +818,11 @@ acquiring its schedule lease. Loading or registering a builtin emitter and valid
 standby tick check declaration shape only; registry, worker-identity and
 filesystem resolution occur in the held tick.
 
+Shape-only validation still parses resource syntax in emitter argv, cwd and
+side-load argv, and inline evaluator argv/cwd. Malformed resources are refused
+at loading or registration; valid syntax does not require a locally available
+checkout before admission.
+
 Windows Job custody has native Windows coverage; Linux unreaped-leader custody
 has native Linux coverage. macOS custody remains unverified: named-resource
 probes require Python's `waitid` and `WNOWAIT` support and refuse before spawning

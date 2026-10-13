@@ -317,3 +317,15 @@ requested contract.
   both shape-only and explicit resolution without changing cwd provenance.
 - The affected registration, declaration, resource and emitter contracts pass
   273 tests; fatal lint and whitespace checks pass.
+
+### 2026-10-13 - Direct resource grammar admission
+
+- Twenty emitter/evaluator loader, validator, registry and declaration cases
+  reproduced accepting invalid named-resource grammar before execution.
+- A shared syntax-only helper now covers direct emitter argv/cwd/side-load,
+  evaluator registry argv/cwd, inline evaluator registration and existing
+  script-forge shape validation. No registry or filesystem lookup is added.
+  Positive admission coverage preserves valid not-yet-local named resources.
+- Final script/resource/registration consumer coverage passes 346 tests,
+  including positive not-yet-local admission. Fatal lint, module ceilings,
+  install-contract and whitespace checks pass.

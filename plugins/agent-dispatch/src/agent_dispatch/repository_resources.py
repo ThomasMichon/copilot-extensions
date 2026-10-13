@@ -8,6 +8,7 @@ import re
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from time import monotonic
+from typing import TypeGuard
 
 from .repository_resource_capture import run_agent_worktrees_capture
 from .registrar import RegistrarError
@@ -16,7 +17,7 @@ _PREFIX = "repo:"
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 
-def is_repository_resource(value: object) -> bool:
+def is_repository_resource(value: object) -> TypeGuard[str]:
     return isinstance(value, str) and value.startswith(_PREFIX)
 
 
@@ -34,6 +35,13 @@ def split_repository_resource(value: str) -> tuple[str, str]:
             f"repository resource {value!r} must stay within its registered root"
         )
     return name, str(posix)
+
+
+def validate_resource_arguments(values: Sequence[object]) -> None:
+    """Validate named-resource syntax without registry or filesystem access."""
+    for value in values:
+        if is_repository_resource(value):
+            split_repository_resource(value)
 
 
 def registered_repository_root(
