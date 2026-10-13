@@ -101,9 +101,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "0d5fe5e789c5dc2def908cbaf13eeec59a006a2a10dac23f9c30d3165de7d83e",
-          "semantic": true,
-          "non_semantic_reason": null
+          "sha256": "367f4c93a54ab18272b912fdbb2154cdf5aa599c0919d3ed82d03e5a7756d2c5",
+          "semantic": false,
+          "non_semantic_reason": "Preserves public model imports through re-exports; the generation33 prompt schemas now live in the separately registered prompt_models.py owner."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
@@ -113,9 +113,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "27e05f185721e4a49c25ea77c42c7f775949048885beb88aa02146a8525feae6",
-          "semantic": true,
-          "non_semantic_reason": null
+          "sha256": "a80e04321035b84904757bbf0951f56439e3806b9d066678cf0faa679d3ec1e0",
+          "semantic": false,
+          "non_semantic_reason": "Preserves public route imports and API paths through included prompt router; generation33 prompt admission now lives in the separately registered routes/prompts.py owner."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
@@ -134,6 +134,24 @@
           "sha256": "83728e07defb2ce501055554ec7c26e9707038a04c477e75e18b23525a0620a4",
           "semantic": false,
           "non_semantic_reason": "This guard asserts tolerant reading but does not produce the registered wire shape."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/session_status.py",
+          "sha256": "96e8aec0a62cc68c7db7215d6a575c4ad772ce4a96c5def00b18cc1103f3b335",
+          "semantic": false,
+          "non_semantic_reason": "Mechanical move of the unchanged lifecycle enum; public models.SessionStatus remains a re-export."
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "sha256": "c8fc03580dd580f50bac1307cc3882fcd3a2e29766ddc006aa3f815203ebcdfb",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "sha256": "b9045926e4f96defda6416e321729fdf2e66539f594ee55166314a30e08aa8ee",
+          "semantic": true,
+          "non_semantic_reason": null
         }
       ],
       "fixtures": [
@@ -357,6 +375,18 @@
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-33.json",
           "sha256": "94047bb55133cd66b8fbfb33e7a3d2327ee3ea22ee187e253b82a1952bd252ed",
           "role": "Unchanged roster response re-attested at native-bound prompt generation",
+          "generation": 33
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-prompt_models-generation-33.json",
+          "sha256": "ca531cd2af853976c10727d9b6d58c9400089e49aa2e66cd5014d8ac0690e49e",
+          "role": "Unchanged native-bound prompt wire after mechanical owner extraction",
+          "generation": 33
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/native-bound-extracted-routes-prompts-generation-33.json",
+          "sha256": "6fb25c5704ef6e4d92601e32b423fff98abe1238ba9135b3f7ec55b878383d89",
+          "role": "Unchanged native-bound prompt wire after mechanical owner extraction",
           "generation": 33
         }
       ],
@@ -1152,6 +1182,22 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
           "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
           "capture_method": "Exact committed source bytes and source-neutral fixture serialization"
+        },
+        {
+          "commit": "eb28f72f090b005e3f10a2fa929333c5e892896d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 33,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Committed mechanical extraction, verified by unchanged public route serialization and compatibility tests"
+        },
+        {
+          "commit": "eb28f72f090b005e3f10a2fa929333c5e892896d",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 33,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Committed mechanical extraction, verified by unchanged public route serialization and compatibility tests"
         }
       ],
       "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",
