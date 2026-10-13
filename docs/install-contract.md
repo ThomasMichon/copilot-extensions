@@ -26,6 +26,14 @@ writable runtime or lifecycle artifact. The normative model is defined by
 the requirements below bind installers before the staged runtime migration is
 complete.
 
+Namespaced resource qualification applies to explicit cell installations and
+their lifecycle, including preparation before activation.
+Non-cell hosts retain their supported legacy/default layout and user-global
+plugin commands; they are not required to activate a cell or retire those
+commands. Both modes preserve attributable installation ownership and exact
+command selection. The mode does not authorize last-writer-wins replacement
+of another installation.
+
 1. An installer resolves a validated installation context before writing
    machine-local state. Payload-originated installs inherit attributable
    marketplace provenance; reconciliation, repair, bootstrap, and other
@@ -46,9 +54,11 @@ complete.
    repository roots. Launchers replace conflicting legacy root variables rather
    than inheriting them.
 6. Generic plugin shims live in their owning payload and dispatch directly to
-   that cell's runtime. Machine-global commands are limited to attributable
-   project entry points with ownership receipts; installers never compete for a
-   global generic plugin command last-writer-wins.
+   the selected runtime. On activated-cell hosts, machine-global commands are
+   limited to attributable project entry points with ownership receipts.
+   Non-cell hosts retain supported user-global plugin commands, but consumers
+   still invoke the selected installation's exact command. Installers never
+   compete for a global generic plugin command last-writer-wins.
 7. Missing, ambiguous, or mismatched provenance fails closed. Same-cell sibling
    discovery is explicit, and a same-named peer from another cell is never
    selected through `PATH`, a wildcard installed-plugin scan, or a shared
@@ -1084,9 +1094,10 @@ globally distinguishing marketplace provenance; the variable's presence does
 not replace installation identity, and not every plugin surface receives it.
 
 > **Transition note.** Concrete `~/.agent-*` and `~/.local/bin/agent-*` examples
-> later in this document describe the currently deployed legacy layout. They
-> remain valid only for unchanged legacy installers during the phased migration.
-> New or migrated installer surfaces follow the cell contract above.
+> later in this document describe the supported legacy/default layout on
+> non-cell hosts. Those hosts need not retire that layout. Cell activation,
+> migration, and cell-owned installer surfaces follow the cell contract above;
+> supported default operation is not itself namespaced activation.
 > Until an explicit installer or management caller wires activation and runtime
 > selection, missing user policy means the legacy layout remains authoritative.
 > Context receipts may be stamped without selecting the cell runtime, and the

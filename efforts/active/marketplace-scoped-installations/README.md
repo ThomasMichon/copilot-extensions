@@ -5027,3 +5027,17 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 - Linked the repository's contribution branch policy to `CONTRIBUTING.md`.
   This is documentation clarification only: no diagnostic implementation,
   discovery publication, runtime activation, or phase completion is claimed.
+
+### 2026-10-12 — Normative default-command reconciliation
+
+- Aligned the normative installation-cell pattern and install contract with
+  the accepted simplified-default direction: non-cell hosts retain supported
+  legacy/default layouts and user-global plugin commands; activated cells
+  reserve global command space for attributable project entry points.
+- Kept exact, installation-owned command selection and explicit ownership
+  transfer in both modes. Default support does not authorize ambient
+  same-name fallback or last-writer-wins replacement.
+- Scoped migration/retirement to explicit cell activation and retained the
+  behavioral acceptance gate before blocking enforcement. This reconciles
+  architectural documentation only; no runtime implementation, activation,
+  or diagnostic acceptance evidence is added.
