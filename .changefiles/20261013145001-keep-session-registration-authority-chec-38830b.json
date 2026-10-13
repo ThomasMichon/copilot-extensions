@@ -1,0 +1,9 @@
+{
+  "comment": "Keep session registration authority checks within a safe request budget",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -1461,6 +1461,71 @@ class TestLayeredConfig:
         assert conf.default_repo.knowledge_only is False
         assert cfg.active_project() == "provider"
 
+    def test_load_project_config_authority_only_skips_repository_policy_layers(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        anchor = tmp_path / "owner"
+        (anchor / ".agent-worktrees").mkdir(parents=True)
+        (anchor / ".agent-worktrees" / "machines.yaml").write_text(
+            "machines: {}\n",
+            encoding="utf-8",
+        )
+        from agent_worktrees import repos as repos_mod
+
+        registry = repos_mod.ReposRegistry(
+            repos={
+                "owner": repos_mod.RepoEntry(
+                    name="owner",
+                    repo_class="worktree",
+                    paths={
+                        "windows": str(anchor),
+                        "wsl": str(anchor),
+                        "linux": str(anchor),
+                    },
+                )
+            }
+        )
+        monkeypatch.setattr(repos_mod, "read_registry", lambda: registry)
+        monkeypatch.setattr(
+            cfg,
+            "project_dir",
+            lambda name=None: tmp_path / f".{name or cfg.project_name()}",
+        )
+        global_config = tmp_path / "global.yaml"
+        global_config.write_text(
+            "machine: workstation\nplatform: windows\nsrcroot: C:\\\\src\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(cfg, "global_config_path", lambda: global_config)
+        monkeypatch.setattr(
+            cfg,
+            "_load_inrepo_config",
+            lambda _anchor: pytest.fail("authority load must not read repo policy"),
+        )
+        monkeypatch.setattr(
+            cfg,
+            "_load_knowledge_overlay_config",
+            lambda *_args, **_kwargs: pytest.fail(
+                "authority load must not resolve knowledge overlays"
+            ),
+        )
+        monkeypatch.setattr(
+            cfg,
+            "_control_plane_related_pr_map",
+            lambda: pytest.fail("authority load must not resolve PR overlays"),
+        )
+        cfg.set_active_project("provider")
+
+        conf = cfg.load_project_config("owner", authority_only=True)
+
+        assert conf.repo_name == "owner"
+        assert conf.machine == "workstation"
+        assert conf.platform == "windows"
+        assert conf.default_repo.anchor == str(anchor)
+        assert cfg.active_project() == "provider"
+
     def test_knowledge_only_defaults_false_and_parses_true(
         self, tmp_path: Path, monkeypatch
     ):

@@ -349,8 +349,11 @@ def test_project_record_mutation_holds_a_lock_around_active_project_mutation(
 
     from agent_worktrees import config as _cfg
 
-    def fake_load_project_config(name, *, include_control_plane_related_pr):
+    def fake_load_project_config(
+        name, *, include_control_plane_related_pr, authority_only,
+    ):
         assert include_control_plane_related_pr is False
+        assert authority_only is True
         time.sleep(0.1)
         return _cfg.Config(
             machine="m", platform="wsl", repo_name=name,

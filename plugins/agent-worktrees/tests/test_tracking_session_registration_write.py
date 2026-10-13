@@ -188,6 +188,40 @@ def test_register_session_reaches_a_live_daemon(record_path, monkeypatch, monkey
     assert entry.pid == 123
 
 
+def test_register_session_allows_bounded_receiving_authority_resolution(
+    record_path, monkeypatch, monkeypatch_config,
+):
+    """A healthy owner compute may legitimately spend 1.7 seconds resolving
+    receiving-side authority. The caller must wait for that bounded transaction
+    instead of reporting an ambiguous write after registration was accepted."""
+    from agent_worktrees import locks as _locks
+    from agent_worktrees import status_monitor_runtime as _smr
+
+    load_project_config = cfg.load_project_config
+
+    def _slow_load_project_config(name, **kwargs):
+        time.sleep(1.7)
+        return load_project_config(name, **kwargs)
+
+    monkeypatch.setattr(cfg, "load_project_config", _slow_load_project_config)
+    server = tracking_write.start_server(tracking_write.compute)
+    server.start()
+    try:
+        lock_data = tracking_write.rendezvous_fields(server)
+        monkeypatch.setattr(_locks, "read_lock", lambda path: lock_data)
+        monkeypatch.setattr(_smr, "_status_monitor_enabled", lambda: False)
+
+        linked = tracking.register_session("wt-reg", "sess-authority", pid=321)
+    finally:
+        server.close()
+
+    assert linked is None
+    record = tracking.load_record(record_path)
+    entry = record.session_entry("sess-authority")
+    assert entry is not None
+    assert entry.pid == 321
+
+
 def test_register_session_never_waits_for_a_cold_daemon_boot(
     record_path, monkeypatch, monkeypatch_config,
 ):

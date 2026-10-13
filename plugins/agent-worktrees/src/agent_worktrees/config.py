@@ -1174,9 +1174,19 @@ def load_config(
     *,
     include_control_plane_related_pr: bool = True,
     project: str | None = None,
+    authority_only: bool = False,
 ) -> Config:
-    """Load config; memoized inside ``cached_load_config_scope()`` (see
-    :mod:`agent_worktrees.config_cache`), else identical to the unwrapped loader."""
+    """Load config, or the bounded receiving-authority subset.
+
+    Full loads are memoized inside ``cached_load_config_scope()`` (see
+    :mod:`agent_worktrees.config_cache`). ``authority_only`` requires an
+    explicit or active project and skips repository-policy layers.
+    """
+    if authority_only:
+        name = project or _project_name_safe()
+        if not name:
+            raise ValueError("authority-only config loading requires a project")
+        return _load_project_authority_config(name, path=path)
     with inrepo_config_source.resolution_budget():  # one git-probe budget per whole load
         return memoize_in_scope(
             _load_config_uncached, path,
@@ -1185,8 +1195,81 @@ def load_config(
         )
 
 
+def _load_project_authority_config(
+    name: str, *, path: Path | None = None,
+) -> Config:
+    """Load only the machine identity and anchor needed for authority checks.
+
+    Execution-space fencing does not depend on repository policy, knowledge
+    overlays, profiles, or committed in-repo configuration. Avoid resolving
+    those layers on short resident-daemon write paths, while preserving the
+    same machine-local/global precedence and registered-anchor authority used
+    by the full loader.
+    """
+    path = path or project_dir(name) / "config.yaml"
+    global_raw = config_migrations.migrate_loaded(
+        _load_yaml_safe(global_config_path()), config_migrations.SCHEMA_CONFIG
+    )
+    machine_raw = _load_yaml_safe(path)
+    dropins = _load_config_d(
+        path.parent / "config.d",
+        project_name=name,
+        warn=True,
+    )
+    if dropins:
+        machine_raw = _deep_merge(dropins, machine_raw)
+
+    platform_name = (
+        machine_raw.get("platform")
+        or global_raw.get("platform")
+        or detect_platform()
+    )
+    machine = (
+        machine_raw.get("machine")
+        or global_raw.get("machine")
+        or detect_machine()
+    )
+    machine_repos = machine_raw.get("repos") or {}
+    machine_repo = (
+        machine_repos.get(name) or {}
+        if isinstance(machine_repos, dict)
+        else {}
+    )
+    if not isinstance(machine_repo, dict):
+        machine_repo = {}
+    anchor = machine_repo.get("anchor") or _resolve_anchor_from_registry(
+        name, platform_name
+    )
+    if not anchor:
+        raise ValueError(
+            f"No repo could be resolved for project {name!r} from "
+            f"{path} or the repos registry"
+        )
+    worktree_root = machine_repo.get("worktree_root") or derive_worktree_root(
+        anchor
+    )
+    config = Config(
+        srcroot=machine_raw.get("srcroot") or global_raw.get("srcroot") or "",
+        machine=machine,
+        platform=platform_name,
+        repo_name=name,
+        repos={
+            name: RepoConfig(
+                anchor=str(anchor),
+                worktree_root=str(worktree_root),
+            ),
+        },
+    )
+    from .execution_spaces import canonicalize_legacy_config
+
+    return canonicalize_legacy_config(config)
+
+
 def load_project_config(
-    name: str, *, include_control_plane_related_pr: bool = True
+    name: str,
+    *,
+    include_control_plane_related_pr: bool = True,
+    authority_only: bool = False,
 ) -> Config:
     """Load one project's layered config without inheriting caller identity.
     Args:
@@ -1199,7 +1282,11 @@ def load_project_config(
             itself as its own control plane), this recurses into
             ``_control_plane_related_pr_map`` -> ``load_project_config`` ->
             ``load_config`` -> ``_control_plane_related_pr_map`` without end.
+        authority_only: Resolve only receiving-side machine identity and the
+            registered project anchor needed by execution-space fencing.
     """
+    if authority_only:
+        return _load_project_authority_config(name)
     previous = active_project()
     set_active_project(name)
     try:
