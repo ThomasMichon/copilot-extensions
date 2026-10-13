@@ -18,6 +18,11 @@ index CLI -> new fleet-manager Gateway -> registered index container -> query re
 index worker -> Gateway -> subscribed credential controller -> scoped credential reply
 ```
 
+A **subscribed credential controller** is the authenticated provider-side role
+registered to answer approved source/account/audience credential requests. It is
+not the Gateway coordinator or an index worker. Later references to a controller
+in the credential flow mean this role.
+
 The Gateway remains a fleet-manager role. It does not become a second plugin,
 installer, objective/task ledger, credential issuer, model host or deployment
 manager. Reuse the product's release/lifecycle and canonical operation/receipt
@@ -39,10 +44,11 @@ offload or completion of the broader V2 effort.
   `check_offer()` alone does not establish caller identity or authority.
 - `fleet-index-adapter` is a fixed native health/search consumer prototype.
   It does not authenticate callers or enforce corpus/source grants.
-- `fleet-vault-adapter` is a fixed cached-vault pull prototype. It is not a
-  Gateway-to-subscribed-controller request/delivery service.
-- Legacy credential-relay authorization and decoding an unverified token's
-  `exp` are not JWT/JWKS, audience, role, source or proof-of-possession validation.
+- `fleet-vault-adapter` is a fixed cached-vault pull prototype. It does not
+  dispatch requests to a subscribed credential controller.
+- Legacy credential-relay authorization and unverified token `exp` parsing are
+  not substitutes for JWT/JWKS signature verification, issuer/audience/role/source
+  grant validation or connector proof-of-possession validation.
 
 Inventory existing unpublished auth/connector prototypes and coordinate their
 owners before adding replacement code. Use supported authentication and

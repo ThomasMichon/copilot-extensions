@@ -109,7 +109,8 @@ Subsequent operator assignment, captured verbatim:
 
 The operator explicitly selected the new fleet-manager Gateway and instructed
 that older adopter Gateways remain untouched. The requested index-side container,
-CLI query path and Gateway-to-subscribed-controller token path are captured in
+CLI query path and token requests through the Gateway to a subscribed credential
+controller are captured in
 the [standalone index effort](../agent-index-standalone-service/README.md).
 The [Gateway/index slice](gateway-index-slice.md) below is an
 **agent-recommended implementation elaboration** of that assignment.
@@ -166,7 +167,8 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [ ] Authenticate and authorize client/node/controller principals, service
   generations and corpus/source grants at admission and backend execution.
 - [ ] Route correlated source-credential requests to an authorized subscribed
-  controller, with refresh, expiry/revocation and explicit disconnect outcomes.
+  credential controller, with refresh, expiry/revocation and explicit disconnect
+  outcomes.
 - [ ] Wire explicit index CLI Gateway transport and detached-worker credential
   consumption without changing unselected native/SSH behavior.
 - [ ] Prove the real CLI/Gateway/container/controller path, independently
@@ -235,7 +237,7 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   Existing #6240/#6241/#5789/#6030 responsibilities remain intact.
 - Prepared the bounded slice proposal before runtime implementation. Current
   merged fleet primitives are not cryptographic auth, resident routing or
-  subscribed-controller credential delivery; unmerged prototypes need inventory
+  subscribed credential controller delivery; unmerged prototypes need inventory
   and coordination before reuse or replacement.
 
 ### 2026-10-11 - Approved direction and plan preparation
