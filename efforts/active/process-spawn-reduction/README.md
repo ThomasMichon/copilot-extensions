@@ -111,7 +111,7 @@ a scaling aspiration, not a fixed spawn-rate budget with an approved interval.
 - [x] _(Agent-recommended bounded first slice)_ Batch per-pass fallback object
   comparisons before adding cross-cycle immutable-fact reuse; preserve fresh
   mutable Git observations and prove the one-/many-path process budgets.
-- [ ] Share fresh enrichment across compatible resident list-warm shapes within
+- [x] Share fresh enrichment across compatible resident list-warm shapes within
   one pass, preserving exact-selection/output separation and next-pass reads.
 
 ### Phase 4 - Unit boundaries and release proof
@@ -166,6 +166,40 @@ after equivalence and error semantics are established. Keep native integration
 small and explicit while unit policy tests remain in-process.
 
 ## Journal
+
+### 2026-10-13 - Released list-warm coalescing and real-clock validation
+
+- #6431 passed its current-head review and CI gates, merged, and was included
+  in promotion #6453. The qualifying agent-worktrees release is 1.24.57-dev1,
+  not the earlier 1.24.56-dev1 snapshot that excluded this slice.
+- A normal Copilot payload refresh with debug logging succeeded within the
+  unchanged 120-second limit. The standard unified updater then activated
+  the runtime. Subsequent normal deployment advanced the current payload,
+  runtime marker and attributable resident to 1.24.58-dev1. The resident
+  answered an actual authenticated hook request after updater cleanup in
+  0.24 seconds within the normal 0.5-second request budget.
+- Installed-consumer proofs for both releases imported their actual installed
+  runtime modules and executed the real warm loop, classify IPC and Git.
+  Four fixture demands retained eight direct Git starts in each of two
+  passes and observed a subsequent dirty edit. Transcript, mux and reclaim
+  enrichment remained modeled; this is not a real-host four-shape workload
+  or a stationary host-wide spawn-rate comparison.
+- Found that the original cache-age fixture mutated shared stdlib time.time,
+  also freezing transport deadlines. #6459 isolates that clock and retains
+  the unmocked clock APIs. The corrected source selection passed 16 tests
+  including native IPC, without increasing deadlines; the installed proofs
+  also used the isolated fixture. Earlier direct counts remain counts, not
+  unfrozen request-budget evidence. A separate failed paired benchmark is
+  excluded from successful timing claims.
+- The unified updater exited nonzero because the configured governed feed
+  omitted FastAPI 0.143.0, required by the newer Dispatch runtime. That release
+  is available and not yanked on public PyPI. No feed override, downgrade or
+  shared-cache purge was attempted. Earlier Copilot payload timeouts remain
+  unclassified; a later successful refresh is not a root-cause explanation.
+- The parent remains Active. Real representative daemon workloads,
+  immutable/event-driven cross-cycle reuse, unit collection boundaries,
+  selected-cell/Bash work and independent lifecycle observations remain
+  unresolved; this bounded slice does not satisfy those obligations.
 
 ### 2026-10-12 - Deployment proof and selection-scoped list warming
 

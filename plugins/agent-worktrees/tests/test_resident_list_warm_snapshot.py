@@ -59,7 +59,9 @@ def warm_model(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path)
     monkeypatch.setattr(cfg, "project_name", lambda: "example")
     monkeypatch.setattr(cfg, "_load_config_uncached", lambda: types.SimpleNamespace())
-    monkeypatch.setattr(list_cache, "time", types.SimpleNamespace(time=lambda: 1001.0))
+    cache_clock = types.SimpleNamespace(**vars(time))
+    cache_clock.time = lambda: 1001.0
+    monkeypatch.setattr(list_cache, "time", cache_clock)
     calls = Counter()
     production_classify = core._classify_records
     production_render = core._worktree_to_dict
@@ -139,7 +141,8 @@ def warm_model(tmp_path, monkeypatch):
 @pytest.mark.portfolio_tier("T0")
 def test_cache_clock_does_not_freeze_classify_transport_deadlines(warm_model):
     assert list_cache.time is not time
-    assert classify_daemon.time is time
+    assert isinstance(time.time, types.BuiltinFunctionType)
+    assert list_cache.time.monotonic is time.monotonic
     assert list_cache.time.time() == 1001.0
     assert time.time is not list_cache.time.time
 
