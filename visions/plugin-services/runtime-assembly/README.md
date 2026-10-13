@@ -63,7 +63,9 @@ construction. Each verifies the content identity of every first-party
 artifact and every third-party dependency against the release lock before it
 contributes to a generation. A cache, seed, or accelerant speeds up
 acquisition. It is never a separate trust root, and losing it changes only
-how long acquisition takes.
+how long acquisition takes. If an update leaves the dependency set unchanged,
+assembly reuses artifacts already admitted on the host and needs no access to
+a package index or feed.
 
 ### first-party-only-public-distribution
 

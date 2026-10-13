@@ -254,7 +254,10 @@ For standalone host installation this supervision is the plugin's **own** — a
 plugin brings up and keeps alive **its own daemon** with **no
 installer/configurator control-plane in the loop**. An optional control-plane
 may observe and true-up daemons across the set, but a daemon's standalone
-existence and liveness never depend on it running.
+existence and liveness never depend on it running. Windows, Linux, and macOS
+are each first-class. On each, the integrated profile's per-user supervision
+uses that platform's native facility. No platform gets a weaker lifecycle,
+update, or rollback guarantee.
 
 ### least-privilege-lifecycle-tier
 Every service uses the **lowest lifecycle tier that satisfies its availability
@@ -444,6 +447,22 @@ it, and never re-enable a capability, role, or resident service as a side
 effect. Holding one service at a last-known-good generation is a recorded,
 attributable exception inside the selected release, within that release's
 compatibility rules. It is not a second release.
+
+### release-channels
+Adopters follow a named release channel, such as a soaked, stable channel,
+that is decoupled from how often contributions are promoted. The release
+authority applies the channel. Each update run resolves one named release
+when it starts and converges to that release. A newer release published
+during the run is picked up by a later run, never partway through this one.
+
+### adoptive-migration-to-integrated-profile
+Moving an existing installation onto the integrated profile adopts its
+durable state, configuration, and registrations one service at a time. It
+never reinstalls over them or resets them. A setup that already works keeps
+working at every step. Old registrations are retired only after their
+replacement is verified as serving. There is an explicit, reversible way
+back. Ambiguous ownership is preserved and surfaced, as in installation
+cells' *provenance-safe-transition*.
 
 ### installer-owned-lifecycle-plugin-owned-knowledge
 Acquiring, assembling, activating, and recovering a runtime is installer
@@ -644,6 +663,23 @@ It never runs an older generation against state it cannot safely read.
 Restoring durable state by hand stays an explicit, attributable operator
 action.
 
+### update-cost-proportional-to-change
+How much an update costs depends on what changed, not on how big the suite
+is. Converging an already-current host is close to free: a cheap check of the
+release identity, with no rebuilds, re-resolution, or source round-trips. A
+change rebuilds and restarts only what it affects.
+
+### one-run-converges
+One update run applies everything it fetches. An updater that replaces its
+own logic carries on under the new logic within the same run. A second run is
+never needed to apply what the first one fetched.
+
+### failure-contained-and-named
+A failing source, credential, artifact, or service blocks only what depends on
+it. The rest of the update proceeds. The previous healthy generation of
+anything not updated keeps serving. The run's outcome names exactly what was
+deferred or refused, and why.
+
 ### register-once-cutover-on-update
 A lifecycle supervisor is bound **once** to a stable launcher and remains
 unchanged across ordinary version updates. The launcher resolves the selected
@@ -679,8 +715,11 @@ retain the payload directory as its working directory or depend on mutable files
 there for steady-state service execution. Runtime processes operate from their
 installed generation and durable state locations, so refreshing or replacing
 the payload cannot be blocked by a process the previous payload launched.
-Copilot CLI's own session-scoped loading of skills, hooks, and extensions from
-the payload remains outside this service-runtime guarantee.
+Delivering a new plugin knowledge payload (skills, hooks, extensions) follows
+the same rule for sessions. It is published beside, never over, a payload that
+a running session or process may hold. A live session keeps the payload it
+loaded until it ends or deliberately reloads. Sessions started afterward see
+the new payload.
 
 ### single-instance-lease
 At most **one live daemon owns a given service within one marketplace
@@ -849,7 +888,10 @@ an incomplete change, the same way an undocumented behavior change is.
   owner per lifecycle decision; installer-owned lifecycle with plugins limited
   to knowledge, connection surfaces, and declarations; compatibility enforced
   where commands run; reconciliation of serving state; and state-aware
-  rollback. Moved artifact consumption into the new
+  rollback. Also added update properties: cost proportional to change,
+  convergence in a single run, release channels, failure containment,
+  adoptive and reversible migration, delivery of plugin payloads that does not
+  disturb running sessions, and three-platform parity. Moved artifact consumption into the new
   [Runtime Assembly & Artifact Admission](runtime-assembly/README.md) child.
   Folded up from a coordinated-release redesign review so that existing
   cutover, release-role, and artifact-promotion work can be composed rather
