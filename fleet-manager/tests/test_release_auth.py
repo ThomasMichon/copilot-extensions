@@ -1,4 +1,5 @@
 import base64
+import builtins
 import copy
 import hashlib
 import json
@@ -227,6 +228,21 @@ def test_selected_github_method_never_falls_back_to_valid_pinned_proof():
         authenticate(signed=signed)
 
 
+@pytest.mark.parametrize("error_type", [ImportError, ModuleNotFoundError])
+def test_incomplete_or_incompatible_crypto_import_refuses_without_private_details(monkeypatch, error_type):
+    original = builtins.__import__
+
+    def incompatible(name, *args, **kwargs):
+        if name == "cryptography" or name.startswith("cryptography."):
+            raise error_type("private-native-component-path")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", incompatible)
+    with pytest.raises(PlanError, match="verification capability is unavailable") as error:
+        authenticate()
+    assert "private-native-component-path" not in str(error.value)
+
+
 def test_proof_cannot_supply_its_own_key_or_expand_trusted_scope():
     signed = proof()
     signed["public_key"] = PUBLIC_KEY
@@ -279,7 +295,7 @@ def deny(*args, **kwargs):
 socket.socket = deny
 socket.create_connection = deny
 socket.getaddrinfo = deny
-value = json.loads(open(sys.argv[1], encoding="utf-8").read())
+value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 try:
     result = authenticate_release(canonical(value["manifest"]), value["proof"], value["policy"],
         authority="test-authority", installation="test-installation", role="client", now=150)

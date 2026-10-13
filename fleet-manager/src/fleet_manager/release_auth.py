@@ -101,7 +101,7 @@ def _verify_pinned(manifest_digest, proof, policy, *, role, now):
     try:
         from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-    except ModuleNotFoundError:
+    except ImportError:
         raise PlanError("selected pinned-key verification capability is unavailable") from None
     try:
         Ed25519PublicKey.from_public_bytes(public_key).verify(

@@ -95,6 +95,15 @@ selected policy per installation, the operator selected verbatim:
 
 > both
 
+When asked to authorize a bounded GitHub workflow for authentic test-manifest
+attestations, the operator responded verbatim:
+
+> Let's avoid anything require special GitHub auth. What is this for?
+
+No fixture workflow, new GitHub signing permission or special authentication
+was authorized. Continue offline pinned-key verification; the GitHub-specific
+positive proof gate remains deferred, not completed or silently substituted.
+
 The operator confirmed the slug `fleet-control-v2`. Personal artifact delivery
 is handled outside this public repository. The architecture details, phase
 breakdown and validation below are **agent-recommended** elaborations of the
@@ -614,3 +623,22 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   to `dev` or the explicit `release-verification` extra; no unconditional
   runtime requirement was introduced. Lint, whitespace and the 13-plugin
   install-contract gate passed. Actual PR review/native CI remain next.
+
+### 2026-10-13 - Pinned-key review follow-through
+- #6475's first current-head Copilot review reported a Lite fallback and three
+  findings: incomplete/native crypto import failures, brittle wheel requirement
+  formatting and an unclosed test-input handle. The two Medium findings block
+  merge; neither a timeout nor existing green checks satisfies that review gate.
+- Map explicit `ImportError` (including missing dependencies) to the selected
+  capability refusal and cover both missing/native import failure without
+  leaking details. Parse actual wheel requirements with the packaging parser
+  supplied by pytest, compare normalized names/specifier sets and evaluate
+  optional-extra markers. Read subprocess inputs with a bounded-lifetime helper.
+- A later base change also made the PR conflict; reconcile the published slice
+  with the newer base and rerun its contracts before another review. No review
+  or CI gate is bypassed, and the full effort remains active.
+- Operator asked to avoid special GitHub authentication. No new fixture/signing
+  workflow or permission was authorized. Existing read-only verification may
+  consume an already-authenticated manifest bundle, but an unrelated wheel
+  cannot satisfy the canonical manifest chain. The GitHub-positive gate remains
+  deferred; no claim that both methods are implemented follows from pinned keys.

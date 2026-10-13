@@ -18,6 +18,14 @@ workflow/token, publishing a signed artifact, or deploying a product.
 Gateway principal/JWT/JWKS and connector-proof authentication remain owned by
 #5789; they are not artifact signing credentials.
 
+The operator later asked to avoid anything requiring special GitHub
+authentication; a new test-manifest signing workflow was not authorized.
+Offline pinned-key verification therefore proceeds first. GitHub-positive proof
+is deferred unless an authentic canonical-manifest bundle can be supplied through
+an already-authorized lane without new permissions/authentication. Unrelated
+attested artifacts do not satisfy that gate; supporting both remains planned,
+not silently declared implemented.
+
 ## Recommended boundary
 
 Support **two verification methods**, each behind the same explicit product
