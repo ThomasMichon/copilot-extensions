@@ -68,6 +68,10 @@ directory for listing, entry validation and reads; they do not reopen its pathna
 Source-root changes still report a partial transfer rather than clearing health.
 Transfers check root identity before each candidate open and before its durable
 publication, stopping on root churn without reopening the pinned directory.
+On POSIX, a source entry replaced by a symlink between validation and opening
+is skipped when the no-follow opener reports `ELOOP`; later candidates still
+transfer and any prior good destination copy remains intact. Other source-open
+errors and all destination-publication errors remain transfer failures.
 
 References retain their supplied path for display and reference identity.
 Enumeration anchors a relative configured root to the enumeration-time working

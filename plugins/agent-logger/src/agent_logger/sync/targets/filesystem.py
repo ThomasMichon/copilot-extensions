@@ -11,6 +11,7 @@ copy (size + mtime delta). They differ only in how the root is resolved:
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import logging
@@ -512,7 +513,13 @@ def _copy_process_logs_pinned(
 
                 try:
                     _revalidate_root(source_identity)
-                    with directory.open(name) as stream:
+                    try:
+                        source_handle = directory.open(name)
+                    except OSError as exc:
+                        if exc.errno != errno.ELOOP:
+                            raise
+                        continue
+                    with source_handle as stream:
                         opened = os.fstat(stream.fileno())
                         if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
                             raise ValueError(f"process-log evidence changed while opening: {name}")
