@@ -1,0 +1,9 @@
+{
+  "comment": "Route peer replies by machine/project/worktree without spawning replacement agents; preserve remote reply metadata and call response across session turnover",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

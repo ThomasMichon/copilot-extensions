@@ -1,0 +1,29 @@
+{
+  "captured_from": {
+    "commit": "c44adf312cbd932b6a8cd42a177983fea6e15dc4",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 33,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+    "source_git_blob": "726d0e34422b670c73852140e20fe7ef598dc54d",
+    "source_sha256": "09af274b901b27bef70bc5f7cff71d8b6ca397ba7c0f9c7c889c617c48306078"
+  },
+  "request": {
+    "sender": "wt-a",
+    "message": "call",
+    "reply_to": "live:host-a:project-a:wt-a",
+    "kind": "prompt",
+    "delivery": "steer",
+    "wait": true,
+    "wait_timeout": 2.0,
+    "timeout": 20.0
+  },
+  "response": {
+    "ok": true,
+    "session_id": "b-current",
+    "message_id": 1,
+    "duplicate": false,
+    "replied": true,
+    "reply": "peer response",
+    "stop_reason": "end_turn"
+  }
+}

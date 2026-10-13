@@ -55,8 +55,8 @@ def _fixture(relative: str) -> dict:
 
 
 def test_http_declared_generation_matches_current_fixture() -> None:
-    fixture = _fixture("fixtures/http/current/workspace-creation-generation-34.json")
-    body = fixture["health"]
+    fixture = _fixture("fixtures/http/current/peer-replies-generation-35.json")
+    body = fixture["response"]
     assert body["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
     assert (
         body["min_protocol_version"]
@@ -73,6 +73,22 @@ def test_workspace_creation_fixture_matches_additive_models_and_capability_floor
     assert fixture["capability"]["workspace_creation"] == bridge_protocol.WORKSPACE_CREATION_PROTOCOL_VERSION
     assert fixture["capability"]["owner_qualified_acquisition"] == bridge_protocol.ACQUISITION_WORKSPACE_PROTOCOL_VERSION
     assert fixture["capability"]["native_bound_prompt"] == bridge_protocol.NATIVE_BOUND_PROMPT_PROTOCOL_VERSION
+
+
+def test_qualified_peer_contract_matches_current_fixture() -> None:
+    from agent_bridge.live_peer_address import LivePeerAddress
+    from agent_bridge.remote_operations import REMOTE_PEER_REPLY_MIN_VERSION
+    from agent_bridge.routes.remote import RemoteLiveMessageRequest
+
+    fixture = _fixture("fixtures/http/current/peer-replies-generation-33.json")
+    capability = fixture["capability"]
+    assert capability["required_protocol_version"] == bridge_protocol.QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
+    assert capability["required_carrier_operation_version"] == REMOTE_PEER_REPLY_MIN_VERSION
+    assert str(LivePeerAddress.parse(capability["address"])) == capability["address"]
+    body = RemoteLiveMessageRequest.model_validate(fixture["request"]["json"])
+    assert body.reply_to == capability["address"]
+    assert body.wait and body.wait_timeout == 120
+    assert body.timeout >= body.wait_timeout + 15
 
 
 def test_retirement_recovery_capability_matches_current_fixture() -> None:

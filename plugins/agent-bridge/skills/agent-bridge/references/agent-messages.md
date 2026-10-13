@@ -15,17 +15,18 @@ A delivered message looks like this (a marker in the same family as the runtime'
 `<system_reminder>` / `<system_notification>`):
 
 ```
-<agent-message from="contributor_user@orchestrator" reply-to="anomalous-potato-wsl-20260710-200009-ffc8" msg-id="2">
+<agent-message from="peer-worktree" reply-to="live:host-a:project-a:peer-worktree" msg-id="2">
 …the actual message body…
 </agent-message>
 ```
 
 - `from` — a human-readable label for who sent it (attribution, not routing).
-- `reply-to` — the **routable handle** to answer. Usually a **worktree handle**
-  (an agent is a series of sessions in one worktree, so the handle survives a
-  handoff — the bridge resolves it to whichever session is live now); it may
-  instead be a bare session id. May be absent (then the sender is not itself a
-  live session and cannot receive a reply).
+- `reply-to` — the **routable address** to answer. Registered worktree callers
+  advertise `live:<machine>:<project>:<worktree>`, not a conversation id. The
+  address selects the hosting bridge and its current fresh session for that
+  exact project/worktree, so it survives session turnover and bridge restart.
+  Legacy local worktree handles and exact session ids remain supported. It may
+  be absent when the sender cannot receive a live-session reply.
 - `msg-id` — the sender's message id, useful as a correlation reference.
 - `kind` — the message's **intent** (absent means `prompt`). `prompt` is a work
   directive — act on it. `notify` is informational — no reply or new work
@@ -71,6 +72,17 @@ protocol to learn:
 This is the everyday way to interrogate a peer: one `send`, read the reply, no
 cold sub-agent and no operator relay.
 
+For another machine, use its qualified address with the same command:
+`send live:host-b:project-a:peer-worktree "status?"`. The existing authenticated
+carrier reaches the hosting bridge; both reply metadata and the waited reply
+turn return through it. Remote waits are bounded to 1-600 seconds.
+Qualified addressing requires HTTP protocol 33 and remote carrier operation
+version 4. An older hosting bridge/carrier refuses explicitly rather than
+silently dropping the reply fields. An unavailable qualified peer is never
+interpreted as an agent to create: restore its registration or resume its
+existing session through the normal owner flow. An offline address does not
+promise that a message was queued for a future successor.
+
 ## Replying over the bridge (asynchronous side-channel)
 
 The waited reply above covers most exchanges. Send an **explicit** reply only for
@@ -82,10 +94,11 @@ you use for any agent** — no special tool:
 <agent-bridge catalog argv[0]> send <reply-to> "your reply text"
 ```
 
-The payload-local `send` operation recognizes that `<reply-to>` is a live interactive session
-(by session id or worktree handle) and delivers your message into it (rather than
-treating it as a spawned agent). Your own identity and **worktree handle** are
-attached automatically as the new envelope's `from` and `reply-to`, so the other
+The payload-local `send` operation recognizes the qualified peer address
+(or a legacy local session/worktree handle) and delivers your message into it
+rather than treating it as a spawned agent. Your readable sender label and
+qualified reply address are attached as the new envelope's `from` and
+`reply-to`, so the other
 agent can answer you back — even after you hand off to a fresh session in the same
 worktree — a full peer conversation over warm context, no cold sub-agent, no
 operator relay.
@@ -93,8 +106,9 @@ operator relay.
 Optional flags:
 
 - `--from "<label>"` — override the attribution label.
-- `--reply-to <handle>` — override the address a reply should target (a worktree
-  handle or a session id; defaults to your own worktree handle).
+- `--reply-to <handle>` — override the address a reply should target; defaults
+  to the qualified address from your caller's live registration when available.
+  `from` is only a display label: always answer the exact `reply-to`.
 
 ## Notes
 

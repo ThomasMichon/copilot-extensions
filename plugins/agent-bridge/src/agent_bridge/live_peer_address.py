@@ -1,0 +1,143 @@
+"""Qualified addresses for represented peers, independent of conversation ids."""
+
+from __future__ import annotations
+
+import re
+import asyncio
+from dataclasses import dataclass
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from argparse import Namespace
+    from .client import BridgeClient
+    from .db import Database
+
+_PART = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]*")
+
+
+@dataclass(frozen=True)
+class LivePeerAddress:
+    machine: str
+    project: str
+    worktree: str
+
+    def __str__(self) -> str:
+        return f"live:{self.machine}:{self.project}:{self.worktree}"
+
+    @classmethod
+    def parse(cls, handle: str) -> LivePeerAddress | None:
+        if not handle.startswith("live:"):
+            return None
+        parts = handle.split(":")
+        if (len(parts) != 4 or len(handle) > 256
+                or any(_PART.fullmatch(part) is None for part in parts[1:])):
+            raise ValueError("peer address must be live:<machine>:<project>:<worktree>")
+        return cls(*parts[1:])
+
+    @classmethod
+    def from_registration(cls, row: Mapping[str, object]) -> LivePeerAddress | None:
+        parts = [row.get(key) for key in ("machine", "repo", "worktree_id")]
+        if any(not isinstance(part, str) or not part for part in parts):
+            return None
+        return cls.parse("live:" + ":".join(str(part) for part in parts))
+
+
+def send_remote_peer(client: BridgeClient, args: Namespace, address: LivePeerAddress, *, sender: str,
+                     reply_to: str | None, kind: str, delivery: str, prompt: str) -> dict[str, Any]:
+    """Explicit peer targets never fall through to agent creation."""
+    from .send_outcome import SendRefused
+
+    wait = not getattr(args, "no_wait", False)
+    wait_timeout = getattr(args, "reply_timeout", 120.0)
+    result = client.send_remote_live_message(
+        address.machine, str(address), sender=sender, message=prompt,
+        reply_to=reply_to, kind=kind, delivery=delivery, wait=wait,
+        wait_timeout=wait_timeout,
+        expected_session_id=getattr(args, "expected_session_id", None),
+        idempotency_key=getattr(args, "idempotency_key", None),
+        timeout=max(20.0, wait_timeout + 15.0) if wait else 20.0,
+    )
+    if not result.get("message_id"):
+        raise SendRefused(
+            "refused_unavailable", reason="invalid_receipt", retryable=False,
+            target=str(address), error="Remote peer delivery returned no message receipt.",
+        )
+    return result
+
+
+def resolve_qualified_peer(db: Database, address: LivePeerAddress, *, now: float,
+                           stale_seconds: float) -> dict[str, Any] | None:
+    rows = db.execute_read(
+        "SELECT * FROM live_sessions WHERE machine=? COLLATE NOCASE "
+        "AND repo=? COLLATE NOCASE AND worktree_id=? AND status='live' "
+        "AND updated_at>=? ORDER BY registered_at DESC, updated_at DESC LIMIT 1",
+        (address.machine, address.project, address.worktree, now - stale_seconds),
+    )
+    return dict(rows[0]) if rows else None
+
+
+def peer_reply_requested(payload: dict[str, Any]) -> bool:
+    return (
+        str(payload.get("target") or payload.get("session_id") or "").startswith("live:")
+        or payload.get("reply_to") is not None or payload.get("wait") is True
+    )
+
+
+def peer_wait_timeout(value: Any) -> float:
+    from .remote_errors import RemoteBridgeError
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 1 <= value <= 600:
+        raise RemoteBridgeError(400, "invalid_request", "wait_timeout must be between 1 and 600 seconds")
+    return float(value)
+
+
+async def require_peer_reply_protocol(client: BridgeClient) -> None:
+    from .protocol import QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
+    from .remote_errors import RemoteBridgeError
+    if not await asyncio.to_thread(client.daemon_supports, QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
+        raise RemoteBridgeError(
+            426, "unsupported_version", "the hosting Bridge requires HTTP protocol 33 for peer replies",
+        )
+
+
+async def deliver_remote_peer(client: BridgeClient, payload: dict[str, Any]) -> dict[str, Any]:
+    from .remote_operations import (
+        MAX_IDEMPOTENCY_KEY_LENGTH, MAX_SESSION_ID_LENGTH, LIVE_MESSAGE_DELIVERIES,
+        validate_caller_id, validate_message, validate_optional_bool,
+        validate_optional_id, validate_session_id,
+    )
+    from .remote_errors import RemoteBridgeError
+
+    if peer_reply_requested(payload):
+        await require_peer_reply_protocol(client)
+    target = validate_session_id(payload.get("target"), field="target")
+    sender = validate_caller_id(payload.get("sender"), field="sender")
+    message = validate_message(payload.get("message"), field="message")
+    idempotency_key = validate_optional_id(
+        payload.get("idempotency_key"), field="idempotency_key", maximum=MAX_IDEMPOTENCY_KEY_LENGTH,
+    )
+    expected_session_id = validate_optional_id(
+        payload.get("expected_session_id"), field="expected_session_id", maximum=MAX_SESSION_ID_LENGTH,
+    )
+    reply_to = validate_optional_id(payload.get("reply_to"), field="reply_to", maximum=MAX_SESSION_ID_LENGTH)
+    wait = validate_optional_bool(payload, "wait")
+    reply_options: dict[str, Any] = {}
+    if reply_to is not None:
+        reply_options["reply_to"] = reply_to
+    if wait:
+        reply_options["wait_timeout"] = peer_wait_timeout(payload.get("wait_timeout", 120.0))
+    live = await asyncio.to_thread(client.resolve_live_session, target)
+    if not live:
+        raise RemoteBridgeError(404, "session_not_found", f"live session target {target} was not found")
+    session_id = validate_session_id(live.get("session_id"))
+    kind = payload.get("kind") or "prompt"
+    if kind not in {"notify", "prompt", "status-check"}:
+        raise RemoteBridgeError(400, "invalid_request", "kind is not supported")
+    delivery = payload.get("delivery") or "queue"
+    if delivery not in LIVE_MESSAGE_DELIVERIES:
+        raise RemoteBridgeError(400, "invalid_request", "delivery is not supported")
+    return await asyncio.to_thread(
+        client.send_live_message, session_id, sender=sender, body=message, kind=kind,
+        delivery=delivery, wait=wait, idempotency_key=idempotency_key,
+        expected_session_id=expected_session_id, **reply_options,
+    )

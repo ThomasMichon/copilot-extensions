@@ -244,6 +244,7 @@ def test_watchdog_enabled_default_and_disable(monkeypatch):
 def test_arm_uses_supplied_terminal_action(monkeypatch):
     from agent_bridge import watchdog
 
+    monkeypatch.setenv("AGENT_BRIDGE_WATCHDOG", "1")
     captured = {}
 
     class FakeThread:

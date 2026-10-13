@@ -17,6 +17,22 @@ from .client_worktree_restart import _Base
 class CliModeClientMixin(_Base):
     """Mixin supplying ``BridgeClient``'s CLI-mode reservation and deregister calls."""
 
+    def resolve_live_session(self, handle: str) -> dict[str, Any]:
+        """Resolve an exact session, legacy local worktree, or qualified peer address."""
+        from .client import BridgeClientError
+        from .protocol import QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
+
+        if handle.startswith("live:") and not self.daemon_supports(QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
+            raise BridgeClientError(426, "qualified peer addressing requires HTTP protocol 33")
+        try:
+            return self._request(
+                "GET", "/api/v1/live-sessions/resolve", params={"handle": handle},
+            ) or {}
+        except BridgeClientError as exc:
+            if exc.status == 404:
+                return {}
+            raise
+
     def create_cli_mode_reservation(
         self, worktree_id: str, *, ttl_seconds: float = 300.0,
         venue: dict[str, Any] | None = None,

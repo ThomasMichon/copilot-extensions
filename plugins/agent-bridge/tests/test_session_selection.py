@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -536,8 +537,11 @@ def test_live_reply_to_uses_worktree_handle(monkeypatch):
         lambda key: "/home/x/src/.worktrees/repo/wt-abc" if key == "worktree-dir" else None,
     )
     monkeypatch.setenv("SESSION_ID", "env-sess")
+    monkeypatch.setattr(m, "_get_client", lambda: SimpleNamespace(
+        resolve_live_session=lambda _: {"machine": "host-a", "repo": "project-a", "worktree_id": "wt-abc"},
+    ))
     args = argparse.Namespace(reply_to=None)
-    assert m._live_reply_to(args) == "wt-abc"
+    assert m._live_reply_to(args) == "live:host-a:project-a:wt-abc"
 
 
 def test_live_reply_to_falls_back_to_env_session(monkeypatch):
@@ -545,7 +549,9 @@ def test_live_reply_to_falls_back_to_env_session(monkeypatch):
     # id from the environment.
     monkeypatch.setattr(m, "_worktrees_get", lambda key: None)
     monkeypatch.delenv("AGENT_BRIDGE_SESSION_ID", raising=False)
+    monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
     monkeypatch.setenv("SESSION_ID", "env-sess")
+    monkeypatch.setattr(m, "_get_client", lambda: SimpleNamespace(resolve_live_session=lambda _: {}))
     args = argparse.Namespace(reply_to=None)
     assert m._live_reply_to(args) == "env-sess"
 
@@ -664,8 +670,11 @@ def test_live_sender_label_matches_reply_to_worktree_handle(monkeypatch):
         lambda key: "D:/Src/proj.worktrees/wt-abc123" if key == "worktree-dir" else None,
     )
     args = argparse.Namespace()
+    monkeypatch.setattr(m, "_get_client", lambda: SimpleNamespace(
+        resolve_live_session=lambda _: {"machine": "host-a", "repo": "project-a", "worktree_id": "wt-abc123"},
+    ))
     assert m._live_sender_label(args) == "wt-abc123"
-    assert m._live_reply_to(args) == "wt-abc123"
+    assert m._live_reply_to(args) == "live:host-a:project-a:wt-abc123"
 
 
 def test_live_sender_label_falls_back_when_no_worktree(monkeypatch):

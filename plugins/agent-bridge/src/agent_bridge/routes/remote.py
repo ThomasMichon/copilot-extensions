@@ -84,7 +84,10 @@ class RemoteLiveMessageRequest(BaseModel):
         default=None, min_length=1, max_length=256
     )
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=256)
-    timeout: float = Field(default=20.0, ge=1.0, le=120.0)
+    timeout: float = Field(default=20.0, ge=1.0, le=615.0)
+    reply_to: str | None = Field(default=None, min_length=1, max_length=256)
+    wait: bool = False
+    wait_timeout: float = Field(default=120.0, ge=1.0, le=600.0)
 
 
 def _service(request: Request) -> RemoteOperationService:
@@ -269,6 +272,9 @@ async def remote_send_live_message(
             expected_session_id=body.expected_session_id,
             idempotency_key=body.idempotency_key,
             timeout=body.timeout,
+            reply_to=body.reply_to,
+            wait=body.wait,
+            wait_timeout=body.wait_timeout,
         )
     except RemoteBridgeError as exc:
         _raise(exc)

@@ -1,0 +1,34 @@
+{
+  "captured_from": {
+    "commit": "c44adf312cbd932b6a8cd42a177983fea6e15dc4",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 33,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+    "source_git_blob": "aae57184e778e0fddb9c264bfa8f613fe757e44e",
+    "source_sha256": "9927b3318b55eba2fbb832b94c3b8fb712056fea0d5f9c6e70f1ae2dc656d703"
+  },
+  "response": {
+    "protocol_version": 33,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "required_protocol_version": 33,
+    "required_carrier_operation_version": 4,
+    "address": "live:host-a:project-a:wt-a",
+    "unavailable_peer_creates_agent": false
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/remote/host-b/live-sessions/live:host-b:project-a:wt-b/messages",
+    "json": {
+      "sender": "wt-a",
+      "message": "status?",
+      "reply_to": "live:host-a:project-a:wt-a",
+      "kind": "status-check",
+      "delivery": "steer",
+      "wait": true,
+      "wait_timeout": 120.0,
+      "timeout": 135.0
+    }
+  }
+}

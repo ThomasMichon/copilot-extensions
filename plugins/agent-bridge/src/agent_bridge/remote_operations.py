@@ -29,12 +29,19 @@ from .client import (
 )
 from .protocol import REMOTE_OPERATIONS_PROTOCOL_VERSION
 from .remote_errors import RemoteBridgeError
+from .live_peer_address import (
+    deliver_remote_peer,
+    peer_reply_requested as _peer_reply_requested,
+    peer_wait_timeout as _peer_wait_timeout,
+    require_peer_reply_protocol as _require_peer_reply_protocol,
+)
 
-REMOTE_OPERATION_VERSION = 3
+REMOTE_OPERATION_VERSION = 4
 #: Versions below this reject a request naming ``copilot_args`` (a charter
 #: overlay) rather than silently dropping it on an older carrier.
 REMOTE_COPILOT_ARGS_MIN_VERSION = 3
-_REMOTE_OPERATION_VERSIONS = {1, 2, REMOTE_OPERATION_VERSION}
+REMOTE_PEER_REPLY_MIN_VERSION = 4
+_REMOTE_OPERATION_VERSIONS = {1, 2, 3, REMOTE_OPERATION_VERSION}
 MAX_CALLER_ID_LENGTH = 128
 MAX_HOST_LENGTH = 128
 MAX_SESSION_ID_LENGTH = 256
@@ -393,6 +400,8 @@ class CarrierRequestRouter:
                     "requested_version": version,
                 },
             )
+        if _peer_reply_requested(payload) and version < REMOTE_PEER_REPLY_MIN_VERSION:
+            raise RemoteBridgeError(426, "unsupported_version", "peer replies require carrier operation version 4")
         return operation, payload
 
     async def __call__(
@@ -407,53 +416,7 @@ class CarrierRequestRouter:
                     payload={"result": await self._create_session(client, payload)},
                 )
             if operation == "live_session.send":
-                client = self._client()
-                target = validate_session_id(
-                    payload.get("target"), field="target"
-                )
-                sender = validate_caller_id(
-                    payload.get("sender"), field="sender"
-                )
-                message = validate_message(payload.get("message"), field="message")
-                idempotency_key = validate_optional_id(
-                    payload.get("idempotency_key"),
-                    field="idempotency_key",
-                    maximum=MAX_IDEMPOTENCY_KEY_LENGTH,
-                )
-                expected_session_id = validate_optional_id(
-                    payload.get("expected_session_id"),
-                    field="expected_session_id",
-                    maximum=MAX_SESSION_ID_LENGTH,
-                )
-                live = await asyncio.to_thread(client.resolve_live_session, target)
-                if not live:
-                    raise RemoteBridgeError(
-                        404,
-                        "session_not_found",
-                        f"live session target {target} was not found",
-                    )
-                session_id = validate_session_id(live.get("session_id"))
-                kind = payload.get("kind") or "prompt"
-                if kind not in {"notify", "prompt", "status-check"}:
-                    raise RemoteBridgeError(
-                        400, "invalid_request", "kind is not supported"
-                    )
-                delivery = payload.get("delivery") or "queue"
-                if delivery not in LIVE_MESSAGE_DELIVERIES:
-                    raise RemoteBridgeError(
-                        400, "invalid_request", "delivery is not supported"
-                    )
-                result = await asyncio.to_thread(
-                    client.send_live_message,
-                    session_id,
-                    sender=sender,
-                    body=message,
-                    kind=kind,
-                    delivery=delivery,
-                    wait=False,
-                    idempotency_key=idempotency_key,
-                    expected_session_id=expected_session_id,
-                )
+                result = await deliver_remote_peer(self._client(), payload)
                 return Envelope(
                     EnvelopeType.RESPONSE,
                     payload={"result": result},
@@ -501,6 +464,8 @@ class CarrierRequestRouter:
                 )
                 return Envelope(EnvelopeType.RESPONSE, payload={"result": result})
             if operation == "live_session.resolve":
+                if _peer_reply_requested(payload):
+                    await _require_peer_reply_protocol(self._client())
                 result = await asyncio.to_thread(
                     self._client().resolve_live_session,
                     session_id,
@@ -937,7 +902,9 @@ class RemoteOperationService:
                     # copilot_args (a charter overlay) -- send the lowest version
                     # that still satisfies the request so a not-yet-upgraded remote
                     # carrier keeps working for every call that doesn't need it.
-                    if payload.get("copilot_args") is not None:
+                    if _peer_reply_requested(payload):
+                        version = REMOTE_PEER_REPLY_MIN_VERSION
+                    elif payload.get("copilot_args") is not None:
                         version = REMOTE_COPILOT_ARGS_MIN_VERSION
                     elif operation in {
                         "live_session.send",
@@ -1102,6 +1069,9 @@ class RemoteOperationService:
         expected_session_id: str | None = None,
         idempotency_key: str | None = None,
         timeout: float = 20.0,
+        reply_to: str | None = None,
+        wait: bool = False,
+        wait_timeout: float = 120.0,
     ) -> dict[str, Any]:
         if delivery not in LIVE_MESSAGE_DELIVERIES:
             raise RemoteBridgeError(
@@ -1126,6 +1096,11 @@ class RemoteOperationService:
                     field="idempotency_key",
                     maximum=MAX_IDEMPOTENCY_KEY_LENGTH,
                 ),
+                "reply_to": validate_optional_id(
+                    reply_to, field="reply_to", maximum=MAX_SESSION_ID_LENGTH,
+                ),
+                "wait": wait,
+                "wait_timeout": _peer_wait_timeout(wait_timeout),
             },
             timeout=timeout,
         )

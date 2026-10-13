@@ -644,7 +644,8 @@ class _LiveSessionsMixin:
     ) -> dict[str, Any] | None:
         """Resolve a *handle* -> its current live session row (or None).
 
-        A handle is either an exact ``session_id`` or a **worktree handle**
+        A handle is an exact ``session_id``, a qualified
+        ``live:machine:project:worktree`` address, or a **worktree handle**
         (``worktree_id``). This is the load-bearing addressing primitive for
         D3: an agent is a *series of sessions in one worktree*, so peers address
         it by worktree handle and the bridge resolves that to whichever session
@@ -662,6 +663,11 @@ class _LiveSessionsMixin:
         Returns None when the handle is neither a known session id nor a
         currently-live worktree.
         """
+        from .live_peer_address import LivePeerAddress, resolve_qualified_peer
+
+        address = LivePeerAddress.parse(handle)
+        if address is not None:
+            return resolve_qualified_peer(self, address, now=now, stale_seconds=stale_seconds)
         exact = self.get_live_session(handle)
         if exact is not None:
             return exact

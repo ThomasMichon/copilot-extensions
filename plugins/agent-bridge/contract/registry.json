@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 34,
+        "current": 35,
         "minimum": 1,
-        "previous_generation": 33,
+        "previous_generation": 34,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -40,7 +40,8 @@
           31,
           32,
           33,
-          34
+          34,
+          35
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -92,7 +93,8 @@
         "acquisition_retirement_recovery": 32,
         "native_bound_prompt": 33,
         "owner_qualified_acquisition": 34,
-        "workspace_creation": 34
+        "workspace_creation": 34,
+        "qualified_live_peer": 35
       },
       "durable_records": [],
       "source_paths": [
@@ -122,9 +124,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
-          "sha256": "0681dae3b74117b088261689bcfff87e93e97323eccf41aea1e847e81eabc136",
-          "semantic": false,
-          "non_semantic_reason": "Remote live-message pass-through gained an optional delivery field, then its default changed from \"queue\" to \"steer\"; the registered remote session-create fixture is unchanged."
+          "sha256": "09af274b901b27bef70bc5f7cff71d8b6ca397ba7c0f9c7c889c617c48306078",
+          "semantic": true,
+          "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
@@ -169,6 +171,24 @@
           "sha256": "1f65087acdef6b225ea8cd0056b974ab49e216050a2627ff5459dfba308ee401",
           "role": "Generation-34 keyed workspace evidence",
           "generation": 34
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-33.json",
+          "sha256": "b4b11d2f3291e30114318214a39d75e344859c7be3ef958a33f8e8d66a55e851",
+          "role": "byte-identical agent-roster response re-attested at qualified peer generation",
+          "generation": 33
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-33.json",
+          "sha256": "d984a3c06c2fca0941eec8a251f9bf12455b00c3f7d7e26f7889d85f58abb761",
+          "role": "remote peer request and actual reply receipt from the two-isolated-bridge round trip",
+          "generation": 33
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/peer-replies-generation-33.json",
+          "sha256": "f5991f75b2f4de69b590c39b2087af0456bf12ca266fd9638c27450283642d39",
+          "role": "qualified peer addressing and waited remote reply request; historical acquisition fixtures remain unchanged",
+          "generation": 33
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-32.json",
@@ -436,6 +456,30 @@
         }
       ],
       "provenance": [
+        {
+          "commit": "c44adf312cbd932b6a8cd42a177983fea6e15dc4",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 33,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Re-attest byte-identical agent-roster source and representative response alongside the additive peer reply contract."
+        },
+        {
+          "commit": "c44adf312cbd932b6a8cd42a177983fea6e15dc4",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 33,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "726d0e34422b670c73852140e20fe7ef598dc54d",
+          "capture_method": "Capture the independent remote peer request and receipt exercised by test_two_bridge_call_and_reverse_reply_preserve_addresses."
+        },
+        {
+          "commit": "c44adf312cbd932b6a8cd42a177983fea6e15dc4",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 33,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "aae57184e778e0fddb9c264bfa8f613fe757e44e",
+          "capture_method": "Read committed generation-33 constants; the two-isolated-bridge CLI/carrier round trip verifies reply metadata, reply text, current-head turnover, idempotency and expected-session refusal."
+        },
         {
           "commit": "eab727b8afc4de461934a3e801f75d61ddfb516e",
           "plugin_version": "0.4.1-dev3",

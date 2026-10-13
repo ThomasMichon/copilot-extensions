@@ -384,7 +384,10 @@ async def resolve_live_session(handle: str, request: Request) -> LiveSessionInfo
     the path-param route.
     """
     db = _db(request)
-    row = db.resolve_live_session(handle, now=time.time())
+    try:
+        row = db.resolve_live_session(handle, now=time.time())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if row is None:
         raise HTTPException(
             status_code=404, detail="no live session for handle"

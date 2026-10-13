@@ -210,6 +210,14 @@ def _send(args: argparse.Namespace) -> None:
         core._submit_and_stream(client, args, target, prompt, caller_id=core._caller_id_for(args))
         return
 
+    from .live_peer_address import LivePeerAddress
+    try:
+        address = LivePeerAddress.parse(target)
+    except ValueError as exc:
+        raise SendRefused(
+            "refused_unavailable", reason="invalid_address", retryable=False,
+            target=target, error=str(exc),
+        ) from exc
     live = client.resolve_live_session(target)
     if live:
         expected_session_id = getattr(args, "expected_session_id", None)
@@ -238,6 +246,14 @@ def _send(args: argparse.Namespace) -> None:
             sys.exit(2)
         _deliver_to_live_session(client, args, live["session_id"], prompt)
         return
+    if address is not None:
+        if not prompt.strip():
+            raise SendRefused(
+                "refused_unavailable", reason="empty_message", retryable=False,
+                target=target, error="Refusing to deliver an empty peer message.",
+            )
+        _deliver_to_live_session(client, args, target, prompt, remote_address=address)
+        return
     if getattr(args, "expected_session_id", None):
         raise SendRefused(
             "refused_unavailable", reason="not_found", retryable=False, target=target,
@@ -263,9 +279,20 @@ def _live_reply_to(args: argparse.Namespace) -> str | None:
     if explicit:
         return explicit
     handle = _caller_worktree_handle()
+    session = (os.environ.get("AGENT_BRIDGE_SESSION_ID") or os.environ.get("SESSION_ID")
+               or os.environ.get("COPILOT_AGENT_SESSION_ID"))
+    candidate = os.environ.get("COPILOT_AGENT_SESSION_ID") or session or handle
+    if candidate:
+        from .live_peer_address import LivePeerAddress
+        registration = _core()._get_client().resolve_live_session(candidate)
+        address = LivePeerAddress.from_registration(registration)
+        if address is not None:
+            return str(address)
     if handle:
+        print("[!] Caller registration lacks a qualified reply address; reply-to is local-only.",
+              file=sys.stderr)
         return handle
-    return os.environ.get("AGENT_BRIDGE_SESSION_ID") or os.environ.get("SESSION_ID")
+    return session
 
 
 def _live_sender_label(args: argparse.Namespace) -> str:
@@ -308,7 +335,8 @@ def _live_message_delivery(args: argparse.Namespace) -> str:
     return getattr(args, "delivery", None) or "steer"
 
 
-def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, prompt: str) -> None:
+def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, prompt: str,
+                             *, remote_address=None) -> None:
     from .client import BridgeClientError
     from .send_outcome import emit, live_outcome, refusal_from_live_error
 
@@ -327,17 +355,24 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
     if expected_session_id:
         delivery_options["expected_session_id"] = expected_session_id
     try:
-        result = client.send_live_message(
-            session_id,
-            sender=sender,
-            body=prompt,
-            reply_to=reply_to,
-            kind=kind,
-            delivery=delivery,
-            wait=wait,
-            wait_timeout=wait_timeout,
-            **delivery_options,
-        )
+        if remote_address is not None:
+            from .live_peer_address import send_remote_peer
+            result = send_remote_peer(
+                client, args, remote_address, sender=sender, reply_to=reply_to,
+                kind=kind, delivery=delivery, prompt=prompt,
+            )
+        else:
+            result = client.send_live_message(
+                session_id,
+                sender=sender,
+                body=prompt,
+                reply_to=reply_to,
+                kind=kind,
+                delivery=delivery,
+                wait=wait,
+                wait_timeout=wait_timeout,
+                **delivery_options,
+            )
     except BridgeClientError as exc:
         refused = refusal_from_live_error(exc, session_id)
         if refused is None:
@@ -952,7 +987,7 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     send_p.add_argument("prompt", nargs="?", default=None, help="Prompt text to send (omit and use --prompt-file for multi-line prompts that shouldn't transit the shell's argv)")
     send_p.add_argument("--prompt-file", dest="prompt_file", default=None, metavar="PATH", help="Read the prompt from PATH (or '-' for stdin) instead of the positional argument. Use this for multi-line prompts to avoid shell argv mangling (e.g. PowerShell word-splitting a prompt at the first embedded double-quote). Mutually exclusive with the positional prompt.")
     send_p.add_argument("--sender", "--from", dest="sender", default=None, help="Attribution label when the target is a live interactive session (default: this caller's worktree/user). Legibility only, not routing.")
-    send_p.add_argument("--reply-to", dest="reply_to", default=None, help="Routable handle a reply should target when delivering to a live session -- a worktree handle (survives handoff) or a session id (default: this caller's own worktree handle, else its session id from the environment). Rendered as the envelope's reply-to.")
+    send_p.add_argument("--reply-to", dest="reply_to", default=None, help="Routable peer reply address: live:<machine>:<project>:<worktree>, a legacy local worktree handle, or an exact session id. Defaults to the caller's registered qualified worktree address. Rendered as the envelope's reply-to.")
     send_p.add_argument("--kind", choices=["prompt", "notify", "status-check"], default="prompt", help="Typed intent when delivering to a live session: 'prompt' (a work directive, default) vs 'notify'/'status-check' (asks only for a terse out-of-band ack, never treated as new work).")
     send_p.add_argument("--notify", action="store_true", help="Shorthand for --kind notify (informational; no work expected).")
     send_p.add_argument("--status-check", dest="status_check", action="store_true", help="Shorthand for --kind status-check (asks for a terse status ack).")
