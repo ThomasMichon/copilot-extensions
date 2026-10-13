@@ -153,8 +153,11 @@ verified by this effort's Validation Plan.
       separate gates.
 - [x] Wire the [CLI reader observation lifecycle](reader-cpu-wiring.md)
       and existing telemetry seam without CPU enforcement or new termination.
-- [ ] Add [sample provenance and collector cost](reader-sample-accounting.md)
+- [x] Add [sample provenance and collector cost](reader-sample-accounting.md)
       for measurement-only role-cost calibration before numeric enforcement.
+- [ ] Reduce [collector role totals and provenance](reader-role-accounting.md)
+      under bounded provider epochs, without numeric enforcement
+      _(agent-recommended measurement refinement)_.
 - [ ] Define role keys, expected wall/CPU cost, fan-out limits, and provenance.
 - [ ] Open admission circuits on repeated budget overruns without reclaiming
       live progressing holders; successful bounded probes close them.
@@ -508,3 +511,19 @@ The existing consumer native fixture now also verifies the actual sampling-threa
 counter delta in exported telemetry, ensuring canonical Linux CI exercises that
 direct witness without another subprocess fixture. Its focused Windows
 reader/admission/telemetry/vendoring selection passed 42 tests.
+
+### 2026-10-13 - Sample accounting landed; bounded role reduction next
+
+Merged #6540 as `ae86df24c` after approval with zero open findings on
+`e10a4d14f` and actual code CI success. Both worker-start cache-invalidation
+findings were fixed and explicitly resolved. Final Windows validation passed
+103 procutil tests and all nine Agent Bridge sub-suites (4,287 passed, 97
+skipped). Canonical Linux CI installed psutil 7.2.2 and passed all nine
+sub-suites (4,335 passed, 49 skipped), including direct native collector CPU
+counter export. The sample-accounting contract is complete.
+
+The next agent-recommended increment reduces those sample costs into bounded,
+provider-epoch-scoped collector totals through existing telemetry. It introduces
+neither a membership registry nor numeric budgets; source epochs do not prove
+logical ownership or permit reclamation. Expected-cost/fan-out policy, broader
+reader coverage, global ownership validation and authorized adoption remain open.

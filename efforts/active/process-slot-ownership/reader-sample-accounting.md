@@ -34,23 +34,23 @@ CPU admission limits; it does not authorize either enforcement or termination.
 
 ## Validation
 
-- [ ] New native samples have distinct provenance; cached reuse does not
+- [x] New native samples have distinct provenance; cached reuse does not
       manufacture a new sample or duplicate its reported collector cost.
-- [ ] Recreated samplers for the same root cannot collide in sample identity.
-- [ ] Deterministic clocks verify elapsed wall/thread CPU cost, invalid or
+- [x] Recreated samplers for the same root cannot collide in sample identity.
+- [x] Deterministic clocks verify elapsed wall/thread CPU cost, invalid or
       unavailable clocks and instrumentation failure without lost CPU data.
-- [ ] Failed/cancelled awaits retain actual native completion accounting and
+- [x] Failed/cancelled awaits retain actual native completion accounting and
       preserve exception semantics without unhandled detached failures.
-- [ ] Retained evidence stays bounded under repeated sampling.
-- [ ] Native Windows and Linux fixtures produce truthful collector cost
+- [x] Retained evidence stays bounded under repeated sampling.
+- [x] Native Windows and Linux fixtures produce truthful collector cost
       separately from the reader-owned CPU lower bound.
-- [ ] Existing optional-import, PID/creation, single-flight, cadence, native
+- [x] Existing optional-import, PID/creation, single-flight, cadence, native
       holder, fallback, circuit and telemetry privacy contracts remain green.
 
 Cumulative role reduction, fan-out policy, numeric budgets, admission circuits,
 no-progress/tree reclamation and authorized release/adoption remain parent gates.
 
-## Implementation prepared
+## Implementation landed
 
 The optional procutil API now retains one current/last immutable accounting
 record and an uncancellable native accounting future. Successful observations
@@ -65,4 +65,13 @@ and bounded retention. Native fixtures check collector CPU against the actual
 sampling thread's counter delta; CPU and wall clocks can be quantized
 independently on Windows, so no clipping or CPU-versus-wall ordering is imposed.
 The library and consumer documentation own the resulting API/event contract.
-Linux CI and exact-head review remain pre-merge obligations.
+
+Merged #6540 as `ae86df24c` after exact-head approval with zero open findings
+and actual CI success on `e10a4d14f`. The two mirrored worker-start cache
+invalidation findings were fixed and explicitly resolved in the final review.
+Windows passed the full procutil suite (103 tests), the focused
+reader/admission/telemetry/vendoring selection (42 tests), and all nine
+Agent Bridge sub-suites (4,287 passed, 97 skipped). Canonical Linux code CI
+installed psutil 7.2.2 and passed all nine Agent Bridge sub-suites
+(4,335 passed, 49 skipped), including the direct native thread-counter witness.
+Release and authorized adoption remain separate parent obligations.
