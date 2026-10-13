@@ -1,0 +1,21 @@
+{
+  "comment": "Serialize PID-fallback installer admission with stale-owner cleanup; publish exact-path typed receipts and refuse malformed directory nodes or empty-owner deletion",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

@@ -9,6 +9,7 @@
   report); Phase 3 (fix the top offenders) in progress -->
 - **Umbrella issue:** _pending — file once this effort's plan is reviewed and merged_
 - **Sub-issues:** the downstream tracker (flaky `test_first_use_provision_is_serialized`, filed on Gitea per facility convention, tracked here as the first known concrete item)
+- **Current public repair:** #6463 (installer PID-fallback admission after #6483).
 
 ## Guiding Intent
 
@@ -31,6 +32,17 @@ to be noticed.
 Solo effort — driven directly against `ThomasMichon/copilot-extensions` via
 per-slice worktrees + PRs, no multi-agent coordination required at this
 scope.
+
+The bounded #6463 corrective participants and completion contract are declared
+in [Installer Transaction Admission Repair](../installer-transaction-admission-repair/README.md).
+
+## Coordination
+
+The #6463 worktree binding is explicitly replaced by the canonical bounded
+installer repair effort, not released as completed. Only its integration
+coordinator may commit or publish that repair. This broad telemetry effort
+remains Active for its other objectives; the child repair's completion does not
+complete telemetry or native continuity acceptance.
 
 ## Context
 
@@ -82,6 +94,19 @@ Operator (2026-09-27, verbatim): "File it, and then prepare a handoff to
 tackle getting the CI running reliably and clean. If we have any way to dig
 up flakiness telemetry over run history, let's build out tracking for that,
 find the noisiest and blocking issues, and fix them"
+
+2026-10-13 follow-up, public-safe summary: repair the installer admission race
+under #6463 in an isolated worktree, covering the matching POSIX agent-mcp,
+agent-containers, agent-vault and agent-ssh blocks. Preserve flock, normal
+acquisition, dead-reaper fail-closed behavior, timeouts and exit ownership;
+empty reads never authorize deletion. First reproduce the exact controlled
+overlap, then run actual-script regressions, isolated Linux stress, fresh
+transactions and the targeted source gates. Update related documentation and
+patch changefiles for all four plugins without editing versions. Stop at local
+readiness for independent coordinator review: no commit, rebase, push or PR
+mutation, child agents, paid trials, host runtime/image changes, credentials,
+unrelated product work or historical evidence changes. Stage new files only if
+a validation snapshot needs them; stop if a competing contributor PR appears.
 
 ## Plan
 
@@ -320,7 +345,25 @@ find the noisiest and blocking issues, and fix them"
   picked back up to re-rank/triage them directly -- worth folding into the
   next ranking pass alongside the above.
 
+### Phase 3a - Installer transaction admission (#6463)
+
+This is a below-altitude correction to the existing exclusive-transaction
+contract, not a new installation policy or vision extension. The canonical
+bounded plan and validation live in
+[Installer Transaction Admission Repair](../installer-transaction-admission-repair/README.md).
+
+- [x] Reproduce the empty-owner comparison/acquisition overlap deterministically.
+- [x] Serialize PID-fallback admission and stale cleanup in all four matching blocks.
+- [x] Preserve ordinary acquisition, flock, timeout, exit ownership and dead-mutex behavior.
+- [x] Run focused isolated regressions and stress plus source gates; update docs/changefiles.
+- [x] Deferred to `efforts/active/installer-transaction-admission-repair/README.md`: Integration coordinator independently reviews, lands and confirms required checks and released source.
+
 ## Validation Plan
+
+- [x] #6463: controlled old-code overlap fails, repaired actual scripts serialize.
+- [x] #6463: fresh, stale, contended, malformed-owner, timeout and dead-admission-mutex cases.
+- [x] #6463: all four targeted suites, Ruff F/E9, shell syntax, install contract and module guard.
+- [x] #6463: record unit, simple integration, clean-room and live-venue tiers with skip reasons.
 
 - [x] The telemetry pipeline's own output is spot-checked against this
   session's direct manual findings (the two genuine #4239/#4242 regressions,
@@ -369,6 +412,31 @@ _Pending — Phase 3 findings (which fixes land, and in what order) will
 determine whether this section needs anything beyond the Plan above._
 
 ## Journal
+
+### 2026-10-13 - Installer admission slice locally validated; integration pending
+
+- The pre-fix actual-script overlap was reproduced; all four repaired suites
+  passed (72 passed, 12 PowerShell skips), with 144 serialized fresh/stale stress
+  transactions and passing source gates.
+- The detailed repair evidence and remaining review, landing, required-CI and
+  released-source gates now belong to
+  [Installer Transaction Admission Repair](../installer-transaction-admission-repair/README.md).
+  The worktree binding is replaced with that bounded effort by explicit
+  instruction, not unbound or declared complete.
+- This broad telemetry effort remains **Active**. Its other objectives and the
+  separate native acceptance objective are not transferred or completed.
+  Neither effort authorizes host rollout from this slice.
+
+### 2026-10-13 - Installer transaction admission repair started
+
+- Reused the reviewed Phase 3 corrective-work objective; #6463 is the public
+  coordination token. No competing installer repair PR was found.
+- Required CI run 38416726313 exposed overlapping transactions after #6483.
+  The deterministic actual-script regression reproduces `start start end end`
+  with successful children: a missing owner read must not authorize unlinking
+  a replacement, and acquisitions must respect the short admission mutex.
+- Scope is local implementation and validation only. Publication and final
+  completion remain with the integration coordinator.
 
 ### 2026-10-07 — PR #5571 review round 2: fixed a stale Phase 2 spec entry + an inaccurate code comment
 - Copilot review (round 2, on commit `1da4d344f`) raised four findings:
