@@ -89,11 +89,34 @@ def test_relay_profile_timeout_does_not_wait_for_wrapper_descendants(tmp_path, m
         encoding="utf-8",
     )
     monkeypatch.setattr(relay.shutil, "which", lambda name: str(wrapper))
-    started = time.monotonic()
+    spawn = provider_process.spawn_sync_in_kill_on_close_job
+    started = []
+
+    def spawn_ready_provider(argv, **kwargs):
+        process, job = spawn(argv, **kwargs)
+        try:
+            deadline = time.monotonic() + 10
+            while not ready.is_file():
+                assert process.poll() is None, "provider exited before spawning its descendant"
+                assert time.monotonic() < deadline, "provider fixture did not become ready"
+                time.sleep(0.01)
+        except BaseException:
+            if job is not None:
+                job.close()
+            process.wait(timeout=5)
+            raise
+        # Exercise the two-second pipe deadline after the real descendant exists,
+        # not interpreter startup latency on a loaded Windows host.
+        started.append(time.monotonic())
+        return process, job
+
+    monkeypatch.setattr(
+        provider_process, "spawn_sync_in_kill_on_close_job", spawn_ready_provider,
+    )
 
     assert relay._relay_profile_via_cli("fixture-provider", timeout=2) is None
 
-    elapsed = time.monotonic() - started
+    elapsed = time.monotonic() - started[0]
     assert ready.is_file(), "fixture must spawn the pipe-holding descendant"
     assert elapsed < 6, f"two-second profile deadline took {elapsed:.2f}s"
 
