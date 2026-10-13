@@ -1,7 +1,7 @@
 # Marketplace-Scoped Installations
 
 - **Slug:** `marketplace-scoped-installations`
-- **Repo:** copilot-extensions (PR-required `main`, self-merge)
+- **Repo:** copilot-extensions (PR-required `dev`; `main` is release-only)
 - **Branch(es):** independent per-phase PRs; every implementation PR preserves
   Windows and POSIX compatibility or is an explicitly non-operative foundation
 - **Created:** 2026-08-25
@@ -33,9 +33,11 @@ registries, project-adoption records, or lifecycle ownership.
 
 The durable host-level concept remains **copilot-extensions**, even though the
 primary marketplace carries that same name. Each marketplace contributes an
-independent installation cell beneath that concept. Generic plugin commands stay
-with the payload that supplied the agent capability; machine-global command
-space is reserved for attributable project entry points.
+independent installation cell beneath that concept. Activated/coexisting cells
+use attributable payload or cell-local plugin commands rather than competing
+for a machine-global name. Non-cell hosts retain their supported user-global
+plugin commands alongside attributable project entry points; callers consume
+the selected installation's exact command, not ambient name precedence.
 
 Installation cells are private infrastructure for the runtime-bearing core
 plugin identities defined by the `copilot-extensions` suite. They are not a
@@ -90,9 +92,11 @@ in [`design.md`](design.md).
 Allow public, private, local-directory, and other independently sourced
 marketplaces to provide same-named copilot-extensions systems without accidental
 cross-installation linkage. Runtime location should derive from marketplace
-payload provenance at install-from-payload time. Generic agent tool shims should
-live in their owning payload, while project binstubs may remain globally
-reachable when their ownership is explicit.
+payload provenance at install-from-payload time. Activated/coexisting cells
+use owning-payload or cell-local shims, while non-cell hosts may retain the
+legacy user-global callable surface. Project binstubs may remain globally
+reachable when their ownership is explicit. Exact command selection and
+out-of-session launcher ownership apply in both modes.
 
 The capability remains explicitly opt-in and default-off. During this effort,
 all namespaced install, activation, runtime use, lifecycle, migration, and
@@ -104,13 +108,39 @@ because they provide tools or services.
 
 ## Operating Constraints
 
+### 2026-10-10 direction reconciliation
+
+Operator direction: "Reconcile against current copilot-extensions visions;
+we may not need to be as aggressive with isolation going forward." The
+operator selected **"Simplify default operation; preserve optional
+cross-marketplace coexistence"** after reviewing the alternatives.
+
+This preserves `installation-cells`' provenance and independent ownership
+guarantees when independent installations coexist. It does not require every
+single-install host to activate a cell or retire its user-global commands.
+The current `native-convergence` vision favors one owner per primitive, and
+the `plugin-services` vision requires independent plugins, transient hooks,
+and the least-privileged sufficient lifecycle. Neither mandates a new central
+registry or extra always-running service for command discovery.
+
+The implementation sequence below is agent-recommended and accepted with
+that direction: reuse exact-session command catalogs, keep diagnostics
+read-only, distinguish callable command paths from runtime/state roots, and
+defer blocking enforcement until behavioral acceptance proves the contract.
+The original clean-room-only activation restriction remains in force.
+
 - **Opt-in only:** absent policy and every implicit default preserve legacy
   operation. Repository content, marketplace payloads, installers, bootstrap,
   reconciliation, or first use must never enable namespaced mode.
 - **Clean-room only:** namespaced cells may be created, activated, run, updated,
   rolled back, repaired, migrated, or removed only inside disposable clean-room
-  environments while this effort is active. Persistent machines may perform
-  read-only status/doctor checks but must remain locally unused.
+  environments while this effort is active. Until Phase 8 restores and tests
+  non-mutating diagnostics, do not invoke the known pointer-writing `status`
+  or `probe-legacy` resolution paths on persistent hosts, including through
+  doctor wrappers. During that interim, inspect existing evidence without
+  executing those paths; exercise them only in disposable environments.
+  After that prerequisite lands, verified read-only status/doctor checks
+  are permitted, but persistent cells must remain locally unused.
 - **Suite-private scope:** only runtime-bearing core plugins shipped by the
   `copilot-extensions` suite participate. A second source marketplace may carry
   those plugin identities for isolation proof; payload-only plugins and every
@@ -148,39 +178,15 @@ because they provide tools or services.
   canonical templates.
 - [x] Add session-start command-catalog context so skills and agents receive the
   exact payload-owned invocation path; convert operative bare command examples.
-- [x] **Scope corrected 2026-09-27 (operator directive — see Journal):** this
-  item is **not** "stop installing generic `agent-*` commands into
-  `~/.local/bin`" unconditionally. A plugin's own global-binstub *placement*
-  retires only for a host that actually configures a marketplace-cell
-  install; a legacy/non-cell host keeps it, permanently. The real gate is
-  **universal consumer-side resolution**: every caller that invokes a
-  *different* plugin's command, or invokes any `agent-*` command outside an
-  LLM-mediated skill turn (installers, hooks, cross-plugin script calls,
-  generated helpers like `vault-askpass` that run non-interactively), must
-  resolve the target through the already-built Phase 3 mechanisms —
-  the [installation-resolution `runtimeRoot` resolver](../../../docs/install-contract.md#resolver-result-and-precedence)
-  for non-session callers, and the session command catalog
-  (`emit-command-catalog.{sh,ps1}` → `write_session_guidance.py`) for
-  LLM-mediated skill turns — **and must treat the legacy-fallback
-  `runtimeRoot` exactly like a marketplace-cell root, never special-cased.**
-  Own-payload placement (a plugin's own installer declaring where *it*
-  writes *its own* global binstub, and `agent-worktrees`'s permanent
-  project-command surface) is accepted and out of this item's scope. The
-  [Phase 2 launcher contract inventory](phase-2-launcher-contracts.md) has now
-  **fully reclassified and, where genuinely open, fixed every finding** (not
-  guessed): of 70 original findings, 2 were guard false positives (converted),
-  62 are verified own-payload placement (accepted, no action), and 2
-  (`agent-vault` credential-askpass) are verified currently-correct and
-  explicitly deferred pending that plugin's own future cell-awareness.
-  **Zero findings remain open.** The last genuine gap
-  (`agent-worktrees`'s `register-nudge.{sh,ps1}` marketplace-cell detection)
-  is closed via a new durable, resolver-free runtime-root pointer added to
-  the canonical `libs/installation-context` library (Python/bash/PowerShell
-  parity, synced to all 11 vendoring plugins) — see
-  [install-contract.md § Durable runtime-root
-  pointer](../../../docs/install-contract.md#durable-runtime-root-pointer-resolver-free-consumers) — rather than the heavier resolver dependency
-  `register-nudge.sh` deliberately avoids for its "tools-half box" bootstrap
-  guarantee.
+- [ ] **Reopened 2026-10-10:** complete attributable consumer-side invocation
+  without requiring cell activation on a default single-install host.
+  Preserve user-global placement when cells are disabled; callers consume
+  the selected command's exact `argv`, regardless of placement.
+  `runtimeRoot` denotes runtime/state ownership, not a binstub base directory.
+  The September syntactic inventory is historical evidence, not proof that
+  every consumer is converted. Its plugin-name-only advisory pointer cannot
+  select between independent marketplaces, and directory existence does not
+  prove a command is callable. Phase 8 owns the correction and acceptance.
   - [x] Preserve complete default-legacy fallback coverage while migration is
     incomplete: every runtime `agent-*` stamp publishes every declared payload
     command, and agent-logger's multi-command family delegates through durable
@@ -353,8 +359,13 @@ because they provide tools or services.
 - [x] Migrate or retire legacy services and global generic binstubs only after
   ownership is proven and the new cell passes health checks.
 - [ ] Turn the report-only guards blocking after all runtime plugins conform.
-  **Scope corrected 2026-09-27**: "conform" means every cross-boundary
-  consumer resolves through `runtimeRoot`/session-catalog, not that
+  Revalidated 2026-10-10: keep this pending until Phase 8 behavioral
+  acceptance is complete. A falling syntactic finding count or blanket
+  allowance for installer paths is not the completion criterion.
+  **Current completion contract**: session consumers use source-qualified
+  exact command `argv`; out-of-session consumers use stable launchers bound
+  to explicit installation ownership. `runtimeRoot` is runtime/state
+  ownership, not a callable command directory. Conformance does not mean
   own-payload global-binstub placement lines disappear — those are permanent
   on non-marketplace-cell hosts (see the corrected Phase 2 item above and
   [phase-2-launcher-contracts.md](phase-2-launcher-contracts.md)). The guard
@@ -394,6 +405,38 @@ because they provide tools or services.
       the effort's own proposal docs — no environment-specific identifiers
       found; holds.
 
+### Phase 8 — Simplified defaults and attributable lookup
+
+_Agent-recommended implementation sequence, accepted with the 2026-10-10
+direction reconciliation; coordinated under #1096 and #1103._
+
+- [ ] Restore non-mutating `status` and `probe-legacy` behavior in the
+  canonical installation-context implementations and their derived copies.
+  Publish discovery data at explicit lifecycle boundaries, not as a
+  diagnostic side effect; preserve existing callers until their replacement
+  is tested.
+- [ ] Extend the existing sessionStart command-catalog writer, not a new
+  daemon or global active-marketplace registry. Publish exact callable
+  `argv` with plugin, source, and selected installation identity in the
+  current session's state. Preserve existing payload-local catalog commands
+  and supported user-global commands on non-cell hosts; do not substitute a
+  global alias for an already attributable payload command. Cell commands
+  remain owned by their selected installation. Both modes use the same
+  consumer contract.
+- [ ] Migrate consumers against that contract, including onboarding,
+  readiness, generated credential helpers, peer calls, and out-of-session
+  launchers. Out-of-session callers carry explicit ownership and use a
+  stable lifecycle launcher; they do not adopt an arbitrary session's file
+  or a last-writer-wins plugin-name pointer. Missing or stale ownership must
+  not select another marketplace or silently activate a cell.
+- [ ] Prove the default single-install path remains simple and callable,
+  without namespaced writes, extra daemons, or a control-plane dependency.
+  In disposable environments prove two explicit marketplace installations
+  cannot overwrite each other's discovery, invocation, state, or lifecycle.
+  Include session reload, payload replacement, stale/missing pointer,
+  blocked-governance, and Windows/POSIX parity coverage. Reconcile the
+  original Validation Plan item by item before enabling blocking guards.
+
 ### Bug sweep — linked open bugs (2026-09-24)
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review)._
@@ -414,6 +457,9 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 - [ ] At each operative phase boundary, use read-only status/doctor checks to
   confirm every persistent development and production machine remains in legacy
   mode with no namespaced activation or cell-owned runtime/service state.
+  Prerequisite: Phase 8 must first restore and verify non-mutating diagnostic
+  paths. Until then, do not execute known pointer-writing resolution paths
+  on persistent hosts; use non-executing evidence inspection instead.
 - [ ] Exercise every namespaced install, activation, runtime use, service start,
   update, rollback, repair, migration, and uninstall path only in disposable
   clean-room environments. Unit fixtures may model cells but may not create
@@ -453,6 +499,45 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 [`phase-6-lifecycle.md`](phase-6-lifecycle.md).
 
 ## Journal
+
+### 2026-10-12 — Revalidate the planning continuation against current source
+
+- Preserved the 2026-10-10 direction and its agent-recommended decomposition;
+  this continuation changes the plan, not runtime or installation policy.
+- Current command-catalog emitters already publish exact payload-local `argv`.
+  Keeping legacy user-global commands does not require replacing those catalog
+  entries with global aliases. Source-qualified selection and ownership-bound
+  out-of-session launchers remain Phase 8 acceptance obligations.
+- Read the canonical installation-context implementations without invoking
+  them: Python still publishes the advisory pointer from resolution, while
+  Bash and PowerShell publish it on `status`. The diagnostic prerequisite
+  therefore remains pending, including wrappers reaching those paths.
+- No implementation, deployment, platform acceptance, or blocking-guard
+  completion is claimed. The original Validation Plan remains open.
+
+### 2026-10-10 — Resume against current visions; simplify defaults without retiring coexistence
+
+- Recovered predecessor evidence before choosing new work. No later
+  installation-cell implementation delta was established beyond the
+  September milestones; historical completion claims still need acceptance.
+- Read current `plugin-services/installation-cells`, `plugin-services`,
+  `installer`, and `native-convergence` visions. The installation-cells
+  vision still requires provenance and independent ownership across
+  marketplaces. October revisions favor native primitive ownership,
+  least-privileged lifecycle, and separately governed deployment effects;
+  they do not authorize accidental cross-marketplace resource sharing.
+- Captured the operator-selected direction in Operating Constraints:
+  simplify default operation while preserving optional coexistence.
+  Reopened Phase 2's premature closure and added Phase 8 before execution.
+- The September durable pointer is keyed only by plugin id. It cannot
+  distinguish two marketplaces containing that plugin; its `status`-time
+  publication also contradicts the established non-mutating resolver
+  contract. These are correction targets, not evidence of completed
+  consumer resolution. Runtime/state roots must not be relabeled as
+  command directories.
+- Retained the clean-room-only activation gate and all unresolved
+  acceptance obligations. No production policy, runtime, or service was
+  changed by this reconciliation.
 
 ### 2026-09-27 — Durable runtime-root pointer designed and implemented; Phase 2 launcher-contract inventory now at zero open findings
 

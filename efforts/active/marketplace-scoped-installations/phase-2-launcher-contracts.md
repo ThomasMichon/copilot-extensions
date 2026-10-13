@@ -4,6 +4,30 @@ Back to the [Marketplace-Scoped Installations effort](README.md).
 
 ## Purpose
 
+**2026-10-10 reconciliation:** the September dispositions below are historical
+inventory snapshots, not a completed consumer-invocation acceptance result.
+The effort's reopened Phase 2 item and Phase 8 supersede claims of "zero open
+findings" or full completion. Default user-global placement remains supported;
+independent marketplace selection remains attributable and opt-in.
+
+The plugin-name-only `runtime-root` pointer cannot distinguish multiple source
+marketplaces, and a runtime/state root is not a callable command directory.
+Its advisory existence check must not be promoted into an invocation contract.
+Phase 8 restores read-only diagnostics and uses existing sessionStart command
+catalogs for source-qualified exact `argv`; stable out-of-session launchers
+retain their own explicit installation identity.
+
+**Current invocation contract (2026-10-11):** session consumers use
+source-qualified exact command `argv`; out-of-session consumers use stable
+launchers bound to explicit installation ownership. Both preserve the
+selected installation regardless of legacy or cell placement. A runtime/state
+root is not an executable path. The Phase 8 diagnostic prerequisite forbids
+known pointer-writing resolution paths on persistent hosts until their
+non-mutating behavior is restored and verified.
+
+<details>
+<summary>Historical 2026-09-27 framing (superseded; not an active gate)</summary>
+
 **Scope corrected 2026-09-27** (operator directive, recorded in the main
 README's Journal): this inventory's completion criterion is **not** removing
 every plugin's own global-binstub placement. Placement retires only on a host
@@ -32,6 +56,8 @@ Every finding below now sorts into one of two dispositions:
 The reclassification of all 70 current findings against this two-way split is
 only partially done (see the family table below); finishing it is the next
 concrete slice, not another guess-based sample.
+
+</details>
 
 ## Baseline (historical snapshot, superseded by the 2026-09-25 re-audit below)
 
@@ -403,7 +429,18 @@ forms is a prerequisite for making it blocking in Phase 6.
 
 ## Completion rule
 
-**Corrected 2026-09-27** (supersedes the wording below, kept for history):
+**Current gate (2026-10-11):** Phase 2 remains open until behavioral
+acceptance proves source-qualified exact `argv` selection for session callers
+and explicitly ownership-bound stable launchers for out-of-session callers.
+Legacy user-global placement stays supported on non-cell hosts; coexistence
+cannot depend on ambient command order or a plugin-name-only pointer.
+Phase 8 owns the implementation and acceptance. The September inventory
+counts do not independently satisfy this gate.
+
+<details>
+<summary>September completion criteria and claims (historical, superseded)</summary>
+
+**Corrected 2026-09-27** (historical):
 Phase 2 issue #1103 and this item's checkbox stay open until every
 cross-boundary consumer (a caller invoking a *different* plugin's command, or
 any `agent-*` invocation outside an LLM-mediated skill turn) resolves its
@@ -411,6 +448,10 @@ target through the `runtimeRoot` resolver or session command catalog, treating
 a legacy-fallback root exactly like a marketplace-cell root. Own-payload
 global-binstub *placement* is explicitly **not** part of this gate — it is
 accepted, permanent on non-marketplace-cell hosts, and never itself "removed."
+
+**Historical claim, reopened 2026-10-10:** the following September assessment
+did not establish behavioral acceptance. Phase 8 must prove actual caller
+selection and coexistence before this gate is satisfied.
 
 **Satisfied 2026-09-27, this effort's own inventory (see the disposition
 summary above)**: every one of the 70 tracked findings is now either fixed,
@@ -420,6 +461,8 @@ GitHub `#1103` tracker itself should close is a separate call this pass did
 not make — that issue's own history suggests broader installation-cell
 migration scope beyond this specific launcher-contract inventory; closing it
 is left to an explicit reviewer/operator decision, not inferred here.
+
+</details>
 
 <details>
 <summary>Original wording (historical, no longer the completion criterion)</summary>
