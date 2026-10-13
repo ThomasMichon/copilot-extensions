@@ -95,6 +95,7 @@ def _status(telemetry_env) -> dict:
     return json.loads((home / "update-status.json").read_text("utf-8"))
 
 
+@pytest.mark.guard
 def test_owner_vs_participant_env(telemetry_env):
     owner = ut.Run.from_env_or_new("manager", environ=telemetry_env)
     assert owner.is_owner and owner.enabled
@@ -132,6 +133,7 @@ def test_timeout_maps_to_timeout(telemetry_env):
     assert run.finish(ut.TIMEOUT) == 6
 
 
+@pytest.mark.guard
 def test_permission_error_has_path_op(telemetry_env, tmp_path):
     run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
     denied = str(tmp_path / "owned-by-someone-else" / "file.dll")
@@ -166,11 +168,13 @@ def _os_error(errno_value, *, winerror=None, cls=OSError):
     (_os_error(errno.ENOENT), ut.COMMAND_FAILED, f"os_error_{errno.ENOENT}"),
 ], ids=["posix-eio", "posix-eacces", "posix-eperm", "win-access-denied",
         "win-sharing-violation", "win-lock-violation", "lock-timeout", "enoent"])
+@pytest.mark.guard
 def test_os_error_classification_needs_contention_evidence(exc, outcome, code):
     actual, error = ut.classify_exception(exc)
     assert (actual, error["code"]) == (outcome, code)
 
 
+@pytest.mark.guard
 def test_only_contention_evidence_is_blocked_by_lock():
     assert ut.outcome_for_installer_exit(75)[0] == ut.BLOCKED_BY_LOCK
     assert "close" not in ut.outcomes.fix_for(ut.COMMAND_FAILED, None, ut.IO_ERROR).lower()
@@ -200,12 +204,14 @@ def test_file_lock_timeout_is_lock_timeout(tmp_path):
     assert child.stdout.strip() == "lock_timeout", child.stderr
 
 
+@pytest.mark.guard
 def test_keyboard_interrupt_is_interrupted():
     outcome, error = ut.classify_exception(KeyboardInterrupt())
     assert outcome == ut.COMMAND_FAILED
     assert ut.exit_code_for(outcome, error["code"]) == 130
 
 
+@pytest.mark.guard
 def test_redaction(telemetry_env):
     pat = "gh" + "p_" + "Q" * 36
     fine = "github" + "_pat_" + "Z" * 40
@@ -275,6 +281,7 @@ def _target(component, outcome, required=True, phase="runtime_reconcile"):
             "outcome": outcome, "details": {"required": required}}
 
 
+@pytest.mark.guard
 def test_fold_precedence():
     order = [ut.VERIFIED_CURRENT, ut.REQUIRES_RESTART, ut.IN_PROGRESS,
              ut.CONFIGURATION_LIMITATION, ut.BLOCKED_BY_LOCK, ut.AUTH_REQUIRED,
@@ -300,6 +307,7 @@ def test_fold_precedence():
     assert ut.fold_targets(same)["a@m"]["outcome"] == ut.TIMEOUT
 
 
+@pytest.mark.guard
 def test_exit_code_table():
     assert ut.exit_code_for(ut.VERIFIED_CURRENT) == 0
     assert ut.exit_code_for(ut.REQUIRES_RESTART) == 0
@@ -321,6 +329,7 @@ def test_exit_code_table():
     assert ut.outcome_for_exit_code(2) == (ut.COMMAND_FAILED, ut.USAGE)
 
 
+@pytest.mark.guard
 def test_schema_examples(telemetry_env):
     event_schema, status_schema = _schema("update-event"), _schema("update-status")
     example_event = {"v": 1, "ts": "2026-10-10T04:12:03.512Z",
@@ -353,6 +362,7 @@ def test_schema_examples(telemetry_env):
     assert status["last_failure"]["fix"]
 
 
+@pytest.mark.guard
 def test_golden_fold():
     events, errors = ut.read_events(FIXTURES / "golden-events.jsonl")
     expected = json.loads((FIXTURES / "golden-status.json").read_text("utf-8"))
@@ -366,6 +376,7 @@ def test_golden_fold():
     assert _validate(actual, _schema("update-status")) == []
 
 
+@pytest.mark.guard
 def test_fail_open_when_home_unwritable(tmp_path):
     blocker = tmp_path / "not-a-dir"
     blocker.write_text("x")
@@ -380,6 +391,7 @@ def test_fail_open_when_home_unwritable(tmp_path):
     assert ut.ENV_RUN_ID not in telemetry_env
 
 
+@pytest.mark.guard
 def test_status_write_error_never_raises(telemetry_env, monkeypatch):
     run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
 
@@ -393,6 +405,7 @@ def test_status_write_error_never_raises(telemetry_env, monkeypatch):
     assert ut.ENV_RUN_ID not in telemetry_env
 
 
+@pytest.mark.guard
 def test_persistence_failure_trips_a_per_run_breaker(telemetry_env, monkeypatch):
     run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
     appends = []
@@ -417,6 +430,7 @@ def test_persistence_failure_trips_a_per_run_breaker(telemetry_env, monkeypatch)
     assert status_writes == []
 
 
+@pytest.mark.guard
 def test_status_failure_also_trips_the_breaker(telemetry_env, monkeypatch):
     run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
     status_writes = []
@@ -433,6 +447,7 @@ def test_status_failure_also_trips_the_breaker(telemetry_env, monkeypatch):
     assert len(status_writes) == 1
 
 
+@pytest.mark.guard
 def test_credential_shaped_dict_keys_are_redacted(telemetry_env):
     pat = "gh" + "p_" + "K" * 36
     run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
@@ -455,6 +470,7 @@ def test_credential_shaped_dict_keys_are_redacted(telemetry_env):
     "error.message", "error.path", "error.op", "error.code",
 ])
 @pytest.mark.parametrize("filler", ["x", "\u00e9", "\U0001f600", "\x01"])
+@pytest.mark.guard
 def test_oversize_event_fits_line_limit(telemetry_env, field, filler):
     huge = filler * 20000
     fields = {"error": {"code": "c", "message": "m", "path": "p", "op": "o"}}
@@ -488,6 +504,7 @@ def _record_of_size(size: int) -> dict:
     return record
 
 
+@pytest.mark.guard
 def test_line_limit_counts_the_newline():
     exact = _record_of_size(run_mod.MAX_LINE - 1)
     line = run_mod.encode_event(dict(exact))
@@ -500,6 +517,7 @@ def test_line_limit_counts_the_newline():
     assert json.loads(line)["action"] != over["action"]
 
 
+@pytest.mark.guard
 def test_written_lines_never_exceed_the_limit(telemetry_env):
     run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
     for pad in range(run_mod.MAX_LINE - 400, run_mod.MAX_LINE + 50, 7):
@@ -516,6 +534,7 @@ def test_written_lines_never_exceed_the_limit(telemetry_env):
     (ut.VERIFIED_CURRENT, ut.TIMEOUT, ut.TIMEOUT),
     (None, ut.BLOCKED_BY_LOCK, ut.BLOCKED_BY_LOCK),
 ])
+@pytest.mark.guard
 def test_finish_outcome_reaches_the_open_step(telemetry_env, outcome, target, expected):
     run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
     run.enter("prune")
@@ -526,6 +545,7 @@ def test_finish_outcome_reaches_the_open_step(telemetry_env, outcome, target, ex
     assert [(p["phase"], p["outcome"]) for p in phases] == [("prune", expected)]
 
 
+@pytest.mark.guard
 def test_explicit_skipped_phase_stays_skipped(telemetry_env):
     run = ut.Run.from_env_or_new("engine", environ=telemetry_env)
     with run.phase("verify") as result:
@@ -550,6 +570,7 @@ def test_older_overlapping_run_never_overwrites_newer_status(tmp_path):
     assert status["last_failure"]["run_id"] == run_a.run_id, "A's later completion is kept"
 
 
+@pytest.mark.guard
 def test_newer_run_ordering_tie_breaks_on_run_id():
     started = "2026-01-01T00:00:00.000Z"
     previous = {"run": {"id": "20260101T000000Z-2-bbbb", "started_at": started}}
@@ -576,6 +597,7 @@ class _BrokenStream:
     OSError(9, "Bad file descriptor"),
     UnicodeEncodeError("ascii", "\u2713", 0, 1, "unencodable"),
 ])
+@pytest.mark.guard
 def test_diagnostics_never_escape_a_broken_stderr(telemetry_env, monkeypatch, exc):
     monkeypatch.setattr(sys, "stderr", _BrokenStream(exc))
     monkeypatch.setattr(run_mod, "_WARNED", False)
@@ -610,6 +632,7 @@ def test_older_run_completion_is_merged_into_history(tmp_path):
     assert status["last_success"]["run_id"] == run_a.run_id
 
 
+@pytest.mark.guard
 def test_older_completion_never_replaces_a_later_one():
     later = {"run_id": "B", "ended_at": "2026-01-01T00:00:10.000Z", "duration_ms": 1}
     previous = {"run": {"id": "B"}, "last_success": later, "last_failure": None}
@@ -618,6 +641,7 @@ def test_older_completion_never_replaces_a_later_one():
     assert run_mod._merge_completion(previous, mine, "now") is None
 
 
+@pytest.mark.guard
 def test_fold_keeps_the_detail_of_the_worst_event():
     worse = _target("a@m", ut.TIMEOUT)
     worse["details"]["detail"] = "installer timed out"
@@ -635,6 +659,7 @@ def _failed(component, outcome, code, message, phase="runtime_reconcile"):
     return event
 
 
+@pytest.mark.guard
 def test_fold_remediation_matches_the_summarized_failure():
     timeout = _failed("a@m", ut.TIMEOUT, ut.TIMEOUT, "timed out", phase="payload_refresh")
     denied = _failed("a@m", ut.COMMAND_FAILED, ut.PERMISSION_DENIED,
@@ -650,6 +675,7 @@ def test_fold_remediation_matches_the_summarized_failure():
     assert _validate(status, _schema("update-status")) == []
 
 
+@pytest.mark.guard
 def test_fold_never_pairs_a_worse_event_with_an_older_detail_or_code():
     denied = _failed("a@m", ut.TIMEOUT, ut.PERMISSION_DENIED, "denied earlier")
     worse = _target("a@m", ut.COMMAND_FAILED)
@@ -657,6 +683,7 @@ def test_fold_never_pairs_a_worse_event_with_an_older_detail_or_code():
     assert "detail" not in entry and "error_code" not in entry
 
 
+@pytest.mark.guard
 def test_fold_run_level_failure_keeps_its_own_remediation():
     # The run's own error (worse than any target) is what the summary reports,
     # so the fix must come from it rather than from a lesser target's code.
@@ -673,6 +700,7 @@ def test_fold_run_level_failure_keeps_its_own_remediation():
         ut.CONFIGURATION_LIMITATION, None, ut.PERMISSION_DENIED)
 
 
+@pytest.mark.guard
 def test_fold_never_promotes_an_advisory_failure_to_required():
     required = _target("a@m", ut.VERIFIED_CURRENT)
     advisory = _target("a@m", ut.COMMAND_FAILED, required=False, phase="payload_refresh")

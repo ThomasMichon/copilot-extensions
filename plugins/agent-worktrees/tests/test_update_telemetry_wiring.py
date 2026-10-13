@@ -18,6 +18,8 @@ from agent_worktrees import config as cfg
 from agent_worktrees import reconcile, update_cli, update_events, update_gate, update_options
 from agent_worktrees import update_runtime as runtime
 
+pytestmark = pytest.mark.guard
+
 
 @pytest.fixture(autouse=True)
 def _update_home(tmp_path, monkeypatch):
