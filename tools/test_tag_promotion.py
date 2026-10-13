@@ -145,3 +145,35 @@ def test_prefix_is_shared_with_promote_release():
 
     assert tp.TAG_PREFIX == f"{promote_release.PROMOTION_TAG_PREFIX}-"
     assert promote_release.promote.__kwdefaults__["tag_prefix"] == promote_release.PROMOTION_TAG_PREFIX
+
+def test_inherited_git_dir_does_not_redirect_the_tagging(repo, tmp_path, monkeypatch):
+    work, origin = repo
+    sha = _commit_state(work, {"tag": STEM, "dev_head": DEV_SHA})
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "wrong.git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path))
+    assert _tag(work, sha) == (f"{STEM}-{sha[:8]}", True)
+    monkeypatch.delenv("GIT_DIR")
+    monkeypatch.delenv("GIT_WORK_TREE")
+    assert _remote_tag(origin, f"{STEM}-{sha[:8]}") == sha
+
+
+def _push_lightweight(work: Path, name: str, target: str) -> None:
+    _git(["tag", name, target], work)
+    _git(["push", "-q", "origin", f"refs/tags/{name}"], work)
+    _git(["tag", "-d", name], work)
+
+
+def test_lightweight_remote_tag_on_the_same_commit_is_a_noop(repo):
+    work, _origin = repo
+    sha = _commit_state(work, {"tag": STEM, "dev_head": DEV_SHA})
+    _push_lightweight(work, f"{STEM}-{sha[:8]}", sha)
+    assert _tag(work, sha) == (f"{STEM}-{sha[:8]}", False)
+
+
+def test_lightweight_remote_tag_on_another_commit_refuses(repo):
+    work, _origin = repo
+    sha = _commit_state(work, {"tag": STEM, "dev_head": DEV_SHA})
+    other = _commit_state(work, {"tag": STEM, "dev_head": DEV_SHA})
+    _push_lightweight(work, f"{STEM}-{sha[:8]}", other)
+    with pytest.raises(tp.TagError, match="already exists"):
+        _tag(work, sha)

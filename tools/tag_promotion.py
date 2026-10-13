@@ -21,6 +21,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from coverage_guided_selection.ancestor_resolution import scrubbed_git_env
 from promote_release import PIPELINE_STATE_PATH, PROMOTION_TAG_PREFIX
 
 TAG_PREFIX = f"{PROMOTION_TAG_PREFIX}-"
@@ -31,8 +32,11 @@ class TagError(Exception):
 
 
 def _git(args: list[str], *, cwd: Path, check: bool = True) -> subprocess.CompletedProcess:
+    # Scrub inherited repository-selection variables (GIT_DIR, GIT_WORK_TREE,
+    # ...) so `cwd=repo` really is the repository this fetches, tags and pushes.
     result = subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=False
+        ["git", *args], cwd=cwd, capture_output=True, text=True, check=False,
+        env=scrubbed_git_env(),
     )
     if check and result.returncode != 0:
         raise TagError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
@@ -80,11 +84,19 @@ def tag_promotion(
         raise TagError(f"{PIPELINE_STATE_PATH} at {merge_sha} has no {TAG_PREFIX}* tag stem ({stem!r})")
 
     tag_name = f"{stem}-{merge_sha[:8]}"
-    existing = _git(["ls-remote", remote, f"refs/tags/{tag_name}^{{}}"], cwd=repo).stdout.split()
+    # Ask for both the ref and its peeled form: an annotated tag reports the
+    # commit on `^{}`, a lightweight tag only on the plain ref.
+    listed: dict[str, str] = {}
+    for line in _git(
+        ["ls-remote", remote, f"refs/tags/{tag_name}", f"refs/tags/{tag_name}^{{}}"], cwd=repo
+    ).stdout.splitlines():
+        sha, _, ref = line.partition("\t")
+        listed[ref] = sha
+    existing = listed.get(f"refs/tags/{tag_name}^{{}}") or listed.get(f"refs/tags/{tag_name}")
     if existing:
-        if existing[0] == merge_sha:
+        if existing == merge_sha:
             return tag_name, False
-        raise TagError(f"{tag_name} already exists on {existing[0]}, not {merge_sha}")
+        raise TagError(f"{tag_name} already exists on {existing}, not {merge_sha}")
 
     # A previous run may have created the tag locally and then failed to push.
     local = _git(["rev-parse", "-q", "--verify", f"refs/tags/{tag_name}^{{commit}}"], cwd=repo, check=False)
