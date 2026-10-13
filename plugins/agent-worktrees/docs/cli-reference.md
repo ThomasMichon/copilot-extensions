@@ -705,8 +705,10 @@ matches the old commit, that the files have no local edits, and that no
 untracked or ignored path is in the way of a newly tracked one. If a
 check fails, the ref is left unmoved. After the ref moves, it runs the same
 two-tree `read-tree -m -u` a checkout would (so `core.autocrlf` applies). Linked
-worktrees are never touched. Each bare-anchor result ends with
-`; files=<status>`:
+worktrees are never touched. A result that reaches the file-state checks ends
+with `; files=<status>`. Earlier exits (a detached HEAD, a branch mismatch, a
+missing ref, a fetch failure, divergence, or a failed `update-ref`) leave the
+files untouched and carry no `files=` token:
 
 | Status | Meaning |
 |--------|---------|

@@ -706,6 +706,8 @@ _compute_payload_hash() {
         cd "$PLUGIN_DIR" 2>/dev/null || exit 0
         {
             [[ -f pyproject.toml ]] && sha256sum pyproject.toml 2>/dev/null
+            # The declared project `readme`, embedded in installed metadata.
+            [[ -f README.md ]] && sha256sum README.md 2>/dev/null
             _payload_tree_digests "$PLUGIN_DIR/src" src
             _payload_tree_digests "$PLUGIN_DIR/libs" libs lib
             local __lib

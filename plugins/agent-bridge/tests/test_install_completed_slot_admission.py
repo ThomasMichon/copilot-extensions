@@ -114,6 +114,7 @@ def _fake_plugin(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     (plugin / "src" / "pkg" / "__init__.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (plugin / "README.md").write_text("# pkg\n", encoding="utf-8")
     for lib, sources in (
         ("ssh-manager", 'agent-procutil = { path = "../agent-procutil", editable = true }\n'),
         ("plugin-resolve", ""),
@@ -451,6 +452,17 @@ def test_ps1_shared_lib_only_change_is_not_reused(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+def test_ps1_readme_only_change_is_not_reused(tmp_path: Path) -> None:
+    """The plugin README is the declared project ``readme``; setuptools embeds
+    it in the installed metadata, so changing only it must refuse the slot."""
+    readme = _plugin_source(tmp_path).parents[2] / "README.md"
+    change = f"Add-Content -LiteralPath {_ps_quote(readme)} 'more'\n"
+    result = _run_ps(_ps_harness(tmp_path, "match-active", change + "Invoke-Install"))
+    _assert_outcome(tmp_path, result, _REFUSED)
+    assert "different payload content" in result.stdout, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
 def test_ps1_payload_hash_covers_every_shared_lib_but_not_artifacts(tmp_path: Path) -> None:
     lib_dir = tmp_path / "repo" / "libs" / "ssh-manager"
     action = "Write-Host \"H0=$(Get-PayloadHash)\"\n"
@@ -747,6 +759,15 @@ def test_sh_payload_hash_does_not_depend_on_locale(tmp_path: Path) -> None:
 @pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
 def test_sh_shared_lib_only_change_is_not_reused(tmp_path: Path) -> None:
     change = f"echo 'VALUE = 2' >> {_sh_quote(_posix(_lib_source(tmp_path, 'ssh-manager')))}\n"
+    result = _run_sh(_sh_harness(tmp_path, "match-active", change + "do_install"))
+    _assert_outcome(tmp_path, result, _REFUSED)
+    assert "different payload content" in result.stderr, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant bash is not available")
+def test_sh_readme_only_change_is_not_reused(tmp_path: Path) -> None:
+    readme = _plugin_source(tmp_path).parents[2] / "README.md"
+    change = f"echo more >> {_sh_quote(_posix(readme))}\n"
     result = _run_sh(_sh_harness(tmp_path, "match-active", change + "do_install"))
     _assert_outcome(tmp_path, result, _REFUSED)
     assert "different payload content" in result.stderr, result.stdout + result.stderr

@@ -458,7 +458,8 @@ install fails instead of building over it. A refused completion-marker
 publication fails the install rather than being ignored.
 
 The payload hash compared by admission fingerprints everything the installer
-installs into the slot: the plugin's `pyproject.toml`, `src/` and any plugin-local
+installs into the slot: the plugin's `pyproject.toml` and its declared `README.md`
+(embedded in the installed distribution metadata), `src/` and any plugin-local
 `libs/`, plus every shared library it installs from outside the plugin directory
 (the libraries it installs explicitly, resolved exactly as the build resolves
 them, and the transitive `[tool.uv.sources]` path dependencies, e.g.

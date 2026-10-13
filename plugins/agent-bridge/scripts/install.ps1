@@ -755,10 +755,14 @@ function Get-PayloadHash {
             $sources.Add(@($lib, ('libs/' + (Split-Path -Leaf $lib)), '^tests/'))
         }
         $entries = [System.Collections.Generic.List[string]]::new()
-        $pp = Join-Path $base 'pyproject.toml'
-        if (Test-Path -LiteralPath $pp) {
-            $fh = [BitConverter]::ToString($sha.ComputeHash([System.IO.File]::ReadAllBytes($pp))).Replace('-', '').ToLower()
-            $entries.Add("pyproject.toml:${fh}")
+        # pyproject.toml plus its declared `readme`, which setuptools embeds in
+        # the installed distribution metadata.
+        foreach ($meta in @('pyproject.toml', 'README.md')) {
+            $mp = Join-Path $base $meta
+            if (Test-Path -LiteralPath $mp) {
+                $fh = [BitConverter]::ToString($sha.ComputeHash([System.IO.File]::ReadAllBytes($mp))).Replace('-', '').ToLower()
+                $entries.Add("${meta}:${fh}")
+            }
         }
         foreach ($source in $sources) {
             $dir, $label, $testsPattern = $source
