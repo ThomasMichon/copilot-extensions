@@ -30,8 +30,8 @@ class EmitterError(ValueError):
     """A malformed command-emitter spec."""
 
 
-def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = True) -> None:
-    """Validate a periodic command-emitter spec."""
+def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False) -> None:
+    """Validate shape before admission; only held work resolves resources."""
     if not isinstance(spec, dict):
         raise EmitterError("emitter spec must be a JSON object")
     if not isinstance(spec.get("id"), str) or not spec["id"]:

@@ -306,3 +306,14 @@ requested contract.
 - Corrected MCP native Linux CI and the Windows launch check passed on the
   preceding head. No unconditional retry or bypass was used; the tracked
   independent Windows launch investigation remains owned separately.
+
+### 2026-10-13 - Registration validation remains pre-admission
+
+- Review identified eager callers of emitter validation at registration and
+  declaration loading. Nine validator/registration/declaration regressions
+  reproduced registry probes before any schedule lease.
+- Emitter validation now defaults to shape-only; held builtin ticks retain their
+  execution-time validation and resource resolution. Context forwarding covers
+  both shape-only and explicit resolution without changing cwd provenance.
+- The affected registration, declaration, resource and emitter contracts pass
+  273 tests; fatal lint and whitespace checks pass.

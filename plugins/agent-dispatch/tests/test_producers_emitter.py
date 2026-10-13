@@ -268,7 +268,10 @@ def test_run_tick_dispatches_builtin_effort_driver_loop(monkeypatch):
     assert result["duration_seconds"] == 1.0
 
 
-def test_validate_spec_threads_cwd_into_repository_issue_loop_validation(monkeypatch):
+@pytest.mark.parametrize("resolve_resources", [False, True])
+def test_validate_spec_threads_cwd_into_repository_issue_loop_validation(
+    monkeypatch, resolve_resources,
+):
     """Regression guard: a repository-issue-loop emitter's own ``cwd`` (the
     declaring repo's root, stamped at expansion time) must reach
     ``repository_issue_loops.validate_config`` at tick-validation time too --
@@ -290,12 +293,15 @@ def test_validate_spec_threads_cwd_into_repository_issue_loop_validation(monkeyp
         repository_issue_loop={"kind": "repository-issue-loop"},
         cwd="/repo/root",
     )
-    emitter.validate_spec(spec)
+    emitter.validate_spec(spec, resolve_resources=resolve_resources)
     assert observed["cwd"] == "/repo/root"
-    assert observed["resolve_resources"] is True
+    assert observed["resolve_resources"] is resolve_resources
 
 
-def test_validate_spec_threads_cwd_into_effort_driver_loop_validation(monkeypatch):
+@pytest.mark.parametrize("resolve_resources", [False, True])
+def test_validate_spec_threads_cwd_into_effort_driver_loop_validation(
+    monkeypatch, resolve_resources,
+):
     observed = {}
 
     def fake_validate_config(_config, *, cwd=None, resolve_resources=True):
@@ -312,9 +318,9 @@ def test_validate_spec_threads_cwd_into_effort_driver_loop_validation(monkeypatc
         effort_driver_loop={"kind": "effort-driver-loop"},
         cwd="/state/root",
     )
-    emitter.validate_spec(spec)
+    emitter.validate_spec(spec, resolve_resources=resolve_resources)
     assert observed["cwd"] == "/state/root"
-    assert observed["resolve_resources"] is True
+    assert observed["resolve_resources"] is resolve_resources
 
 
 def test_validate_spec_rejects_malformed_cwd_before_repository_issue_loop_validation():

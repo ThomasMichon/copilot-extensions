@@ -521,8 +521,11 @@ def test_named_recipe_relative_cwd_keeps_read_only_provenance(
 
 
 @pytest.mark.parametrize("kind", ["issue", "effort", "script"])
-def test_builtin_standby_performs_only_shape_validation(tmp_path, monkeypatch, kind):
-    from agent_dispatch.producers.emitter import load_spec, run_tick
+@pytest.mark.parametrize("caller", ["validator", "registration", "declaration"])
+def test_builtin_standby_performs_only_shape_validation(tmp_path, monkeypatch, kind, caller):
+    from agent_dispatch.producers.emitter import load_spec, run_tick, validate_spec
+    from agent_dispatch.registrar import load_declaration
+    from agent_dispatch.registrations import validate_registration
     from tests.test_producers_emitter import FakeClient
     from tests.test_repository_issue_loops import _config as issue_config
     from tests.test_effort_driver_loops import _config as effort_config
@@ -547,6 +550,13 @@ def test_builtin_standby_performs_only_shape_validation(tmp_path, monkeypatch, k
                 "command": ["repo:tools:backlog.py"], "cwd": "repo:tools:.",
             }
         spec["repository_issue_loop"] = config
+    if caller == "validator":
+        validate_spec(spec)
+    elif caller == "registration":
+        validate_registration("emitter", spec)
+    else:
+        declaration = load_declaration({"name": "standby", "kind": "emitter", "spec": spec})
+        assert declaration.spec["id"] == "standby"
     path = tmp_path / "emitter.json"
     path.write_text(json.dumps(spec), encoding="utf-8")
     assert run_tick(client, load_spec(path), holder="fixture")["held"] is False
