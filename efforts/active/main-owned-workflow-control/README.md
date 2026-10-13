@@ -145,8 +145,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
 
 ### Phase 5 - Finish validation and automation consolidation
 
-- [x] Move automated module-size baseline maintenance to reviewed dev PRs,
-  preserving widen-only updates and removing its obsolete main exception (#6438).
+- [x] Land the dev implementation of reviewed, widen-only module-size baseline
+  maintenance and remove its obsolete main exception from source (#6438).
+- [ ] Verify a covering promotion activates the dev-owned baseline producer on
+  default main; record authorized runtime adoption separately.
 - [ ] Record ownership completion separately; it is not the prerequisite for
   Phase 1 reductions proven safe under existing protection.
 - [ ] Establish one exact-input validation contract and compact generated
