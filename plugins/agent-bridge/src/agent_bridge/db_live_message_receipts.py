@@ -35,6 +35,21 @@ class _LiveMessageReceiptsMixin:
         )
         return cur.rowcount
 
+    def mark_live_message_acceptance_busy(self, session_id: str, ids: list[int], now: float) -> int:
+        """Fence ACK-derived busy state against already-observed consumption."""
+        if not ids:
+            return 0
+        placeholders = ",".join("?" for _ in ids)
+        cur = self.execute_write(
+            "UPDATE live_sessions SET turn_state='running', last_activity_at=? "
+            f"WHERE session_id={_CANON} AND EXISTS ("
+            "SELECT 1 FROM live_messages WHERE session_id=live_sessions.session_id "
+            f"AND id IN ({placeholders}) AND delivered_at=? AND consumed_at IS NULL "
+            "AND kind NOT LIKE 'control:%')",
+            (now, session_id, session_id, *ids, now),
+        )
+        return cur.rowcount
+
     def inspect_live_inbox(self, session_id: str, limit: int) -> list[dict[str, Any]]:
         """Bounded cursor-neutral metadata, including accepted but unconsumed input."""
         rows = self.execute_read(

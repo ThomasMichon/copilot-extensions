@@ -75,6 +75,11 @@ def test_sdk_acceptance_does_not_mean_consumption(api, tmp_db):
     assert pending["value"][0]["message_id"] == mid
     assert pending["value"][0]["stage"] == "sdk_accepted"
     assert len(tmp_db.list_pending_live_messages("live-1")) == 0
+    tmp_db.update_live_turn_state("live-1", turn_state="idle", last_activity_at=time.time())
+    next_id, reason = tmp_db.enqueue_live_message_if_fresh(
+        "live-1", sender="peer", body="competing", now=time.time(), require_idle=True,
+    )
+    assert next_id is None and reason == "session_busy"
 
 
 def test_consumption_before_ack_is_monotonic_and_nested_or_foreign_events_do_not_count(api, tmp_db):
@@ -90,12 +95,57 @@ def test_consumption_before_ack_is_monotonic_and_nested_or_foreign_events_do_not
     assert ingested.status_code == 200, ingested.text
     before = tmp_db.live_message_receipt("live-1", mid)
     assert before["stage"] == "consumed" and before["sdk_accepted_at"] is None
+    assert api.get("/api/v1/live-sessions/live-1/messages").json()["messages"] == []
+    tmp_db.update_live_turn_state("live-1", turn_state="idle", last_activity_at=time.time())
     api.post("/api/v1/live-sessions/live-1/messages/ack", json={"ids": [mid]})
+    assert tmp_db.get_live_session("live-1")["turn_state"] == "idle"
     record_consumption(tmp_db, "live-1", [event])
     after = tmp_db.live_message_receipt("live-1", mid)
     assert after["stage"] == "consumed" and after["consumed_at"] == before["consumed_at"]
     assert _send(api)["receipt"] == after
     assert api.get("/api/v1/live-sessions/wt-1/result").json()["state"]["pending_messages"]["value"] == []
+
+
+@pytest.mark.parametrize("delivery", ["queue", "steer", "interrupt"])
+def test_consumed_without_ack_settles_delivery_and_idle_admission(api, tmp_db, delivery):
+    mid = _send(api, delivery=delivery)["message_id"]
+    assert api.get("/api/v1/live-sessions/live-1/messages").json()["messages"][0]["id"] == mid
+    record_consumption(tmp_db, "live-1", [_consumed(mid)])
+    receipt = tmp_db.live_message_receipt("live-1", mid)
+    assert receipt["stage"] == "consumed" and receipt["sdk_accepted_at"] is None
+    assert api.get("/api/v1/live-sessions/live-1/messages").json()["messages"] == []
+    assert _send(api, delivery=delivery)["receipt"] == receipt
+    tmp_db.update_live_turn_state("live-1", turn_state="idle", last_activity_at=time.time())
+    next_id, reason = tmp_db.enqueue_live_message_if_fresh(
+        "live-1", sender="peer", body="next", now=time.time(), require_idle=True,
+    )
+    assert next_id is not None and reason is None
+    refused_id, reason = tmp_db.enqueue_live_message_if_fresh(
+        "live-1", sender="peer", body="competing", now=time.time(), require_idle=True,
+    )
+    assert refused_id is None and reason == "session_busy"
+    assert [row["id"] for row in tmp_db.list_pending_live_messages("live-1")] == [next_id]
+    assert tmp_db.live_message_receipt("live-1", mid) == receipt
+
+
+@pytest.mark.parametrize("retirement", ["takeover", "expired", "wedged"])
+def test_consumed_without_ack_receipt_survives_pending_inbox_retirement(api, tmp_db, retirement):
+    mid = _send(api)["message_id"]
+    record_consumption(tmp_db, "live-1", [_consumed(mid)])
+    before = tmp_db.live_message_receipt("live-1", mid)
+    pending = tmp_db.enqueue_live_message("live-1", "peer", "not consumed", time.time())
+    now = time.time() + 1200
+    if retirement == "takeover":
+        tmp_db.expire_live_sessions_for_worktree("wt-1", now=now)
+    else:
+        if retirement == "wedged":
+            tmp_db.execute_write("UPDATE live_sessions SET status='wedged' WHERE session_id='live-1'")
+        tmp_db.reap_stale_live_sessions(
+            now=now, stale_seconds=600, purge_seconds=86400, pid_alive=lambda _pid: False,
+        )
+    assert tmp_db.live_message_receipt("live-1", mid) == before
+    assert tmp_db.live_message_receipt("live-1", pending) is None
+    assert tmp_db.list_pending_live_messages("live-1") == []
 
 
 def test_receipt_is_session_scoped_and_inbox_read_is_bounded_cursor_neutral(api, tmp_db):
@@ -138,6 +188,8 @@ def test_same_process_rename_preserves_receipt_consumption_and_idempotency(api, 
     assert observed.status_code == 200, observed.text
     assert observed.json()["stage"] == "consumed"
     assert observed.json()["session_id"] == "alias-new"
+    assert api.get("/api/v1/live-sessions/alias-old/messages").json()["messages"] == []
+    assert tmp_db.list_pending_live_messages("alias-new") == []
     retry = api.post("/api/v1/live-sessions/alias-old/messages", json={
         "sender": "peer", "body": "update", "idempotency_key": "rename-message",
     }).json()

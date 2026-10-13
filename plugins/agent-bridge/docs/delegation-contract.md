@@ -57,6 +57,12 @@ delegated-agent facade.
 | Message a represented interactive session | `send <live-handle>`; optional `--wait-reply` | `POST /api/v1/live-sessions/{id}/messages` | Immediate admission receipt; SDK acceptance and consumption are distinct; optional bounded post-consumption reply evidence |
 | Observe a busy represented peer | `read <live-handle> --message-id N --json` | `GET .../result` plus `GET .../messages/{id}/receipt` | Bounded activity, pending inbox metadata, recent output, and a cursor-neutral message receipt (HTTP protocol 33) |
 
+Represented-message consumption removes the input from delivery polling even
+when its separate SDK acknowledgement is lost; it never fabricates that
+acknowledgement. Idle-only acquisition treats unconsumed prompts as pending work,
+including SDK-accepted inputs. A delayed acknowledgement records SDK acceptance
+but cannot overwrite an idle boundary already observed after consumption.
+
 Source anchors:
 
 - CLI grammar and behavior: `src/agent_bridge/__main__.py`.

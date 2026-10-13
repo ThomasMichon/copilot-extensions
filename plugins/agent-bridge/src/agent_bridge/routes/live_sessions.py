@@ -994,11 +994,7 @@ async def ack_live_messages(
     now = time.time()
     acked = db.ack_live_messages(target_session_id, body.ids, now=now)
     if acked:
-        # The extension acks only after ``session.send`` resolves. That is the
-        # bridge's first reliable evidence that a queued/steered prompt reached
-        # the live CLI after an idle turn, so mark the represented session busy
-        # until later mirrored events (or a turn boundary) refine it.
-        db.update_live_turn_state(
-            target_session_id, turn_state="running", last_activity_at=now
-        )
+        # An ACK arriving after consumption must not overwrite a later idle
+        # boundary. Unconsumed acceptance still reserves the upcoming turn.
+        db.mark_live_message_acceptance_busy(target_session_id, body.ids, now)
     return AckMessagesResult(acked=acked)
