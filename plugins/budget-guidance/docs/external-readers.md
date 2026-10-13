@@ -57,6 +57,9 @@ once per acquisition, not once per field or presentation. The resulting config
 contains ordinary static readings, so resolution remains pure and field
 authority, contradictions, freshness, and arithmetic use the existing contract.
 Direct resolution of an unacquired external reference is an explicit error.
+Invocation errors are distinguished from invalid configuration in human output.
+Grant mismatch diagnostics report unmatched/configured counts, not raw grant IDs:
+a malformed invocation can put a path or credential into an identifier slot.
 
 ## Reader contract and bounds
 

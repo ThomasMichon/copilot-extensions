@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -264,3 +265,73 @@ def test_cli_requires_explicit_authority_and_renders_same_posture(tmp_path, caps
         "--reader-command", sys.executable, "-c", f"print({json.dumps(_reading())!r})",
     ]) == 0
     assert json.loads(capsys.readouterr().out)["calculated"]["remaining"] == "60"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX capability refusal")
+@pytest.mark.parametrize("capability", [
+    "WNOHANG", "CLD_EXITED", "waitid", "WNOWAIT", "WEXITED", "P_PID",
+    "waitstatus_to_exitcode", "setpgid", "execv", "kill", "killpg",
+])
+def test_missing_posix_capability_is_a_redacted_error(tmp_path, monkeypatch, capability):
+    import budget_guidance.external_reader as module
+
+    monkeypatch.delattr(module.os, capability, raising=False)
+    reader = _reader(tmp_path, f"print({json.dumps(_reading())!r})")
+    posture = _posture(acquire_config(_config(), {"report": reader}))
+    assert posture["calculated"] is None
+    assert posture["adapters"][0]["error"] == (
+        "bounded reader execution is unsupported on this runtime"
+    )
+
+
+def test_invalid_reader_options_are_not_labeled_invalid_configuration(capsys):
+    assert main(["status", "--reader-id", "report"]) == 2
+    error = capsys.readouterr().err
+    assert "invalid invocation: " in error
+    assert "invalid configuration: " not in error
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX status error")
+def test_status_read_failure_is_explicit_not_a_raw_exception(tmp_path, monkeypatch):
+    import budget_guidance.external_reader as module
+
+    def fail_status(*args):
+        raise ChildProcessError("private-status-detail")
+
+    monkeypatch.setattr(module.os, "waitid", fail_status)
+    reader = _reader(tmp_path, f"print({json.dumps(_reading())!r})")
+    posture = _posture(acquire_config(_config(), {"report": reader}))
+    assert posture["calculated"] is None
+    assert posture["adapters"][0]["error"] == "reader process status could not be read"
+    assert "private-status-detail" not in json.dumps(posture)
+
+
+def test_output_worker_start_failure_still_cleans_up_owned_process(tmp_path, monkeypatch):
+    import budget_guidance.external_reader as module
+
+    processes = []
+    spawn = module.spawn_sync_in_kill_on_close_job
+
+    def tracked_spawn(*args, **kwargs):
+        process, job = spawn(*args, **kwargs)
+        processes.append(process)
+        return process, job
+
+    def fail_start(self):
+        raise RuntimeError("private-thread-detail")
+
+    monkeypatch.setattr(module, "spawn_sync_in_kill_on_close_job", tracked_spawn)
+    monkeypatch.setattr(module.Thread, "start", fail_start)
+    reader = _reader(tmp_path, "import time; time.sleep(10)")
+    posture = _posture(acquire_config(_config(), {"report": reader}))
+    assert posture["adapters"][0]["error"] == "reader output worker could not start"
+    assert posture["calculated"] is None
+    assert processes[0].poll() is not None
+    assert processes[0].stdout.closed
+
+
+def test_unmatched_grant_counts_do_not_echo_potential_path_or_secret(tmp_path):
+    with pytest.raises(ModelError) as raised:
+        acquire_config(_config(), {"secret-invalid-path": _reader(tmp_path, "pass")})
+    assert "1 unmatched; 1 configured" in str(raised.value)
+    assert "secret-invalid-path" not in str(raised.value)

@@ -2,9 +2,8 @@
 
 `budget-guidance` resolves current, provider-neutral usage-budget readings into
 one attributable posture. The offline foundation uses strict
-manual/static adapters provide partial or complete readings, deterministic
-field authority composes them, and one posture drives both JSON and concise
-human status.
+manual/static adapters to provide partial or complete readings. Deterministic
+field authority composes them, and one posture drives both JSON and concise human status.
 
 ```bash
 budget-guidance status --config ./budget.json --json

@@ -91,11 +91,18 @@ def _status(args: argparse.Namespace) -> int:
             or args.reader_output_limit != 65536
         ):
             raise ModelError("reader options require --reader-id and --reader-command")
+    except ModelError as exc:
+        return _emit_model_error(args, exc, human_prefix="invalid invocation: ")
+    try:
         config_path = Path(args.config).expanduser()
         if not config_path.is_file():
             posture = unavailable_posture(at, f"configuration not found: {config_path}")
         else:
-            config = acquire_config(parse_config(load_json(config_path)), readers)
+            config = parse_config(load_json(config_path))
+            try:
+                config = acquire_config(config, readers)
+            except ModelError as exc:
+                return _emit_model_error(args, exc, human_prefix="invalid invocation: ")
             posture = build_posture(config, at)
     except ModelError as exc:
         return _emit_model_error(args, exc, human_prefix="invalid configuration: ")

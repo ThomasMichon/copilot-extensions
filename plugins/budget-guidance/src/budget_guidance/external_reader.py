@@ -77,8 +77,13 @@ def _read_output(stream: BufferedReader, limit: int, result: Queue[bytes | Reade
 
 def _run(reader: CommandReader) -> bytes:
     windows = os.name == "nt"
-    if not windows and not all(
-        hasattr(os, name) for name in ("waitid", "WNOWAIT", "WEXITED", "setpgid")
+    posix_capabilities = (
+        "waitid", "WNOWAIT", "WEXITED", "WNOHANG", "P_PID", "CLD_EXITED",
+        "waitstatus_to_exitcode", "setpgid", "execv", "kill", "killpg",
+    )
+    if not windows and (
+        not all(hasattr(os, name) for name in posix_capabilities)
+        or not all(hasattr(signal, name) for name in ("SIGSTOP", "SIGKILL"))
     ):
         raise ReaderFailure("bounded reader execution is unsupported on this runtime")
     deadline = time.monotonic() + reader.timeout_seconds
@@ -100,8 +105,11 @@ def _run(reader: CommandReader) -> bytes:
         target=_read_output, args=(process.stdout, reader.max_output_bytes, result),
         daemon=True,
     )
-    thread.start()
     try:
+        try:
+            thread.start()
+        except RuntimeError:
+            raise ReaderFailure("reader output worker could not start") from None
         try:
             output = result.get(timeout=max(0, deadline - time.monotonic()))
         except Empty:
@@ -130,6 +138,8 @@ def _run(reader: CommandReader) -> bytes:
             if remaining <= 0:
                 raise ReaderFailure("reader deadline exceeded")
             time.sleep(min(0.01, remaining))
+    except OSError:
+        raise ReaderFailure("reader process status could not be read") from None
     finally:
         try:
             if job is not None:
@@ -142,9 +152,10 @@ def _run(reader: CommandReader) -> bytes:
                 except ProcessLookupError:
                     process.kill()
             process.wait(timeout=5)
-            thread.join(timeout=5)
-            if thread.is_alive():
-                raise ReaderFailure("reader output cleanup could not be confirmed")
+            if thread.ident is not None:
+                thread.join(timeout=5)
+                if thread.is_alive():
+                    raise ReaderFailure("reader output cleanup could not be confirmed")
             process.stdout.close()
         except (OSError, RuntimeError, TimeoutError, subprocess.TimeoutExpired):
             raise ReaderFailure("reader process cleanup could not be confirmed") from None
@@ -196,8 +207,12 @@ def acquire_config(
         adapter.adapter_id for adapter in config.adapters
         if isinstance(adapter, ExternalCommandAdapter)
     }
-    if set(grants) - external_ids:
-        raise ModelError("reader grant does not match a configured external adapter")
+    unexpected = set(grants) - external_ids
+    if unexpected:
+        raise ModelError(
+            "reader grant does not match a configured external adapter "
+            f"({len(unexpected)} unmatched; {len(external_ids)} configured)"
+        )
     if any(not isinstance(reader, CommandReader) for reader in grants.values()):
         raise ModelError("reader grants must be invocation-owned CommandReader values")
     return BudgetConfig(tuple(
