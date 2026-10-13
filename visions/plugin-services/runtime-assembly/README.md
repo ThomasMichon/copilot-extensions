@@ -62,8 +62,10 @@ repair, cache or seed miss, filling a missing artifact, and container image
 construction. Each verifies the content identity of every first-party
 artifact and every third-party dependency against the release lock before it
 contributes to a generation. A cache, seed, or accelerant speeds up
-acquisition. It is never a separate trust root, and losing it changes only
-how long acquisition takes. If an update leaves the dependency set unchanged,
+acquisition. It is never a separate trust root. While another approved
+source for the same artifact is reachable, losing it changes only how long
+acquisition takes; when none is, the outcome is deferred (see
+*deferred-not-degraded*), never a different or unverified result. If an update leaves the dependency set unchanged,
 assembly reuses artifacts already admitted on the host and needs no access to
 a package index or feed.
 
@@ -166,8 +168,8 @@ silently.
 
 ## Provenance
 
-- **2026-10-12** — Authored from a coordinated-release redesign review. The
-  review asked that the existing builder, promotion, and attestation identity
-  get one verified consumer path. It also asked that a governed source lagging
-  a public pin produce an explicit deferred outcome rather than a public
-  fallback.
+- **2026-10-12** — Authored to give the existing builder, promotion, and
+  attestation identity one verified consumer path, so that no entry point,
+  cache, or seed becomes a parallel provenance record or trust root, and so
+  that a governed source lagging a public pin yields an explicit deferred
+  outcome rather than a public fallback.

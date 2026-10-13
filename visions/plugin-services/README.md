@@ -304,6 +304,16 @@ and true-up alignment**, but a plugin **provisions and reconciles itself — and
 supervises its own daemon (see *platform-native-lifecycle*) — with that app
 entirely absent**.
 
+This is the contract of a **standalone addon**, where the plugin's own
+installer is the installer. On a host that adopts the integrated profile, the
+same layered entry points (first-use binstub, session stamp, skill readiness
+check) remain the triggers, but they **delegate** to that product's installer
+and per-user supervisor (see *installer-owned-lifecycle-plugin-owned-knowledge*
+and *one-authority-per-lifecycle-decision*): they request convergence to the
+selected release lock rather than reconciling to their own payload version,
+and they never install, activate, or supervise a runtime themselves. Either
+way there is exactly one installer and one supervisor per runtime on a host.
+
 **Narrow, operator-invoked exception (bootstrap-killswitch):** an explicit,
 resettable, host-local switch lets an operator or agent pause this automatic
 reconcile for the **default (non-namespaced) installation only**, for the
@@ -467,7 +477,10 @@ cells' *provenance-safe-transition*.
 ### installer-owned-lifecycle-plugin-owned-knowledge
 Acquiring, assembling, activating, and recovering a runtime is installer
 work. For a standalone addon that is the addon's own installer. For a host
-that adopts the integrated profile it is that product's installer. A Copilot
+that adopts the integrated profile it is that product's installer. The
+first-use, session-stamp, and readiness entry points of
+*self-provisioning-runtime* are triggers for that one installer, not a second
+installer. A Copilot
 plugin supplies knowledge (skills and guidance), connection surfaces (hooks,
 extension entry points, typed invocation), and bounded, attributable
 declarations of what it needs from a runtime. Plugin content never assembles
@@ -893,9 +906,11 @@ an incomplete change, the same way an undocumented behavior change is.
   adoptive and reversible migration, delivery of plugin payloads that does not
   disturb running sessions, and three-platform parity. Moved artifact consumption into the new
   [Runtime Assembly & Artifact Admission](runtime-assembly/README.md) child.
-  Folded up from a coordinated-release redesign review so that existing
-  cutover, release-role, and artifact-promotion work can be composed rather
-  than duplicated.
+  Stated at intent level so that the existing cutover, release-role, and
+  artifact-promotion work composes into one lifecycle rather than gaining
+  parallel authorities. Scoped *self-provisioning-runtime* to standalone
+  addons, with integrated-profile hosts delegating to one installer and
+  supervisor.
 
 - **2026-10-09** — Clarified the operator-confirmed installation boundary:
   source builds and cleanup remain outside the checkout, while an intentional
