@@ -288,9 +288,10 @@ def _live_reply_to(args: argparse.Namespace) -> str | None:
         address = LivePeerAddress.from_registration(registration)
         if address is not None:
             return str(address)
-    if handle:
+    if candidate or handle:
         print("[!] Caller registration lacks a qualified reply address; reply-to is local-only.",
               file=sys.stderr)
+    if handle:
         return handle
     return session
 

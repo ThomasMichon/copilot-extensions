@@ -263,6 +263,21 @@ def test_unrepresented_hosted_caller_keeps_legacy_bridge_handle(monkeypatch):
     assert cli._live_reply_to(argparse.Namespace()) == "bridge-session"
 
 
+@pytest.mark.parametrize("metadata", [
+    {"machine": "host name", "repo": "project-a", "worktree_id": "wt-a"},
+    {"machine": "host-a", "repo": "project name", "worktree_id": "wt-a"},
+    {"machine": "host-a", "repo": "project-a", "worktree_id": "work tree"},
+])
+def test_unencodable_registration_keeps_legacy_reply_with_warning(monkeypatch, capsys, metadata):
+    monkeypatch.setattr(cli, "_worktrees_get", lambda _: None)
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "caller")
+    monkeypatch.setenv("AGENT_BRIDGE_SESSION_ID", "legacy-bridge-session")
+    monkeypatch.setattr(cli, "_get_client", lambda: SimpleNamespace(resolve_live_session=lambda _: metadata))
+    assert LivePeerAddress.from_registration(metadata) is None
+    assert cli._live_reply_to(argparse.Namespace()) == "legacy-bridge-session"
+    assert "local-only" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("wait_timeout,timeout", [(120.0, 135.0), (600.0, 615.0), (1.0, 20.0)])
 def test_waited_client_defaults_cover_operation_and_read_deadlines(monkeypatch, wait_timeout, timeout):
     captured = {}

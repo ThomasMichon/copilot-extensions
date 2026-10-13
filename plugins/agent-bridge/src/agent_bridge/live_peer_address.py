@@ -42,7 +42,10 @@ class LivePeerAddress:
         parts = [row.get(key) for key in ("machine", "repo", "worktree_id")]
         if any(not isinstance(part, str) or not part for part in parts):
             return None
-        return cls.parse("live:" + ":".join(str(part) for part in parts))
+        try:
+            return cls.parse("live:" + ":".join(str(part) for part in parts))
+        except ValueError:
+            return None
 
 
 def validate_live_handle(value: Any, *, field: str) -> str:
