@@ -453,3 +453,19 @@ requested contract.
   Fault injection covers newer active and subsequently settled allocations:
   selected once, preserved held, never repeatedly selected as pending cleanup.
 - Merge, promotion, rollout and adopter operations remain coordinator-owned.
+
+### 2026-10-13 - #6542 lease-envelope and raw-pair correction
+
+- Reproduced session-only recovery reaching a session end without a cleanup
+  token, and a raw false pair value permitting primary unlink after normalization.
+- Required the normal producer's worktree component for every component-shaped
+  envelope. Kept genuine flat legacy progress supported; complete-worktree /
+  incomplete-session recovery still follows claim, validation, then session end.
+- Required raw sibling YAML to contain none of the pair keys before receipt
+  reconstruction. The raw absence and digest checks share one parsed document;
+  this does not alter the owning record writer or infer repair authority.
+- Added actual consumer regressions for rejected session-only shapes, a positive
+  leased session retry, and post-unlink raw false/empty/null/numeric/unsupported
+  fields preserving both records and the unchanged receipt.
+- Existing release authority, immutable allocation fences, one-shot newer-owner
+  preservation, native consumer proof and coordinator deployment custody remain.

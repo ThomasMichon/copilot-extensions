@@ -265,6 +265,118 @@ def test_recovery_requires_incomplete_structured_component(held, payload):
     assert queue.get_reservation(key).conclusion_detail == raw
 
 
+@pytest.mark.parametrize("kind", ["attempt", "terminal", None])
+def test_session_only_recovery_never_ends_session_without_lease(held, kind):
+    from fastapi.testclient import TestClient
+    from agent_dispatch.client import DispatchClient, DispatchError
+    from agent_dispatch.coordinator import create_app
+    from agent_dispatch.supervisor import Supervisor
+    from tests._helpers import TEST_REPO
+
+    queue, task_id, key = held
+    payload = {
+        "action": "preserved", "reason": "cleanup-retry-exhausted", "attempts": 12,
+        "session_end": {"state": "held", "session_id": "native-session"},
+    }
+    if kind is not None:
+        payload["cleanup_kind"] = kind
+    queue.record_spawn_conclusion(key, conclusion_state="held", conclusion_detail=json.dumps(payload))
+    before = asdict(queue.get_reservation(key))
+    app = create_app(queue, control_token="fixture-control", enable_mcp=False, verification_interval=0)
+    with DispatchClient("http://testserver", control_token="fixture-control") as client:
+        client._http.close()
+        client._http = TestClient(app)
+        rejected = None
+        try:
+            plan = client.recover_held_cleanup(
+                key, expected_generation=queue.get(task_id).generation, current_host="host",
+            )
+            client.recover_held_cleanup(
+                key, expected_generation=queue.get(task_id).generation, current_host="host",
+                apply=True, expected_preview=plan["preview_token"], request_id="session-only",
+                reason="must not schedule an unleased session side effect",
+            )
+        except DispatchError as exc:
+            rejected = exc
+        ended = []
+
+        def end_session(session):
+            ended.append((session, queue.get_reservation(key).cleanup_claim_token))
+            return True
+
+        def no_work(*args, **kwargs):
+            return {"action": "skipped", "reason": "fixture-preservation"}
+
+        supervisor = Supervisor(
+            client, spawn_fn=no_work, local_end_fn=end_session,
+            attempt_conclusion_fn=no_work, conclusion_fn=no_work,
+            repo=TEST_REPO, machine="host", nudge=False,
+        )
+        supervisor.release_requested_bodies()
+        assert ended == []
+        assert rejected is not None and rejected.status_code == 409
+        assert asdict(queue.get_reservation(key)) == before
+        assert queue.cleanup_recovery_history(key) == []
+
+
+def test_session_retry_with_producer_worktree_component_is_leased(held, monkeypatch):
+    from fastapi.testclient import TestClient
+    from agent_dispatch.client import DispatchClient
+    from agent_dispatch.coordinator import create_app
+    from agent_dispatch.supervisor import Supervisor
+    from tests._helpers import TEST_REPO
+
+    queue, task_id, key = held
+    payload = {
+        "cleanup_kind": "attempt",
+        "session_end": {"state": "held", "session_id": "native-session"},
+        "worktree_cleanup": {"state": "complete", "outcome": {"action": "already-primed"}},
+    }
+    queue.record_spawn_conclusion(key, conclusion_state="held", conclusion_detail=json.dumps(payload))
+    before = asdict(queue.get(task_id))
+    apply(held, preview(held))
+    app = create_app(queue, enable_mcp=False, verification_interval=0)
+    with DispatchClient("http://testserver") as client:
+        client._http.close()
+        client._http = TestClient(app)
+        stages = []
+        claim = client.claim_spawn_conclusion_retry
+        validate = client.validate_spawn_conclusion_claim
+
+        def claimed(exact_key):
+            stages.append("claim")
+            return claim(exact_key)
+
+        def validated(exact_key, token):
+            stages.append("validate")
+            return validate(exact_key, token)
+
+        monkeypatch.setattr(client, "claim_spawn_conclusion_retry", claimed)
+        monkeypatch.setattr(client, "validate_spawn_conclusion_claim", validated)
+
+        def end_session(session):
+            stages.append("end")
+            assert session == "native-session"
+            token = queue.get_reservation(key).cleanup_claim_token
+            assert token
+            queue.validate_spawn_conclusion_claim(key, token)
+            return True
+
+        def forbidden(*args, **kwargs):
+            pytest.fail("completed worktree cleanup and business work must not replay")
+
+        supervisor = Supervisor(
+            client, spawn_fn=forbidden, local_end_fn=end_session,
+            attempt_conclusion_fn=forbidden, repo=TEST_REPO, machine="host", nudge=False,
+        )
+        assert supervisor.release_requested_bodies() == 0
+        assert stages == ["claim", "validate", "end"]
+        assert queue.get_reservation(key).conclusion_state == "complete"
+        assert supervisor.release_requested_bodies() == 0
+        assert stages == ["claim", "validate", "end"]
+        assert asdict(queue.get(task_id)) == before
+
+
 @pytest.mark.parametrize("command", ["retry-cleanup", "cleanup-history"])
 def test_cleanup_cli_errors_name_selected_command(monkeypatch, capsys, command):
     import types

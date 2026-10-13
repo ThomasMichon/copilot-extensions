@@ -86,6 +86,9 @@ def _reset_payload(raw):
           or not isinstance(payload.get("reason"), str) or not payload["reason"]
           or type(payload.get("attempts")) is not int):
         raise TaskError("cleanup detail is unknown; recovery requires recorded retry progress")
+    if ("cleanup_kind" in payload or "session_end" in payload or "worktree_cleanup" in payload):
+        if not isinstance(payload.get("worktree_cleanup"), dict):
+            raise TaskError("structured cleanup envelope requires a worktree_cleanup component")
     updated = {**payload, "action": "pending", "reason": "operator-cleanup-retry",
                "attempts": 0, "next_attempt_at": 0}
     components = []

@@ -48,10 +48,15 @@ attempts, generation, result, timestamps, logs and session/worktree attachment
 history are unchanged. The full previous failure envelope and request reason
 are retained transactionally in the cleanup recovery history, including after
 later success replaces the current conclusion detail. Old recorded flat retry
-payloads remain supported. Structured envelopes must identify at least one
-supported housekeeping component, with at least one incomplete component;
+payloads without components remain supported. Structured envelopes must identify
+the normal producer's `worktree_cleanup` component, with at least one incomplete
+housekeeping component;
 `cleanup_kind` alone is not evidence of pending cleanup. Malformed or unsupported
-envelopes fail explicitly.
+envelopes fail explicitly. Session-only envelopes are rejected even when they
+omit `cleanup_kind`: without `worktree_cleanup`, the existing consumer cannot
+guarantee a lease before the session side effect. A complete worktree component
+with an incomplete session component is supported and claims/validates its
+cleanup lease before ending the exact session.
 
 The task generation, exact provenance and allocation fences are rechecked when
 the supervisor claims and validates its cleanup lease and records the outcome.
@@ -81,6 +86,11 @@ one-sided corruption is not repaired by inference. An intermediate `primed`
 outcome with explicit `managed_gc_eligible: false` remains retryable, not complete.
 Receipt pair fields must be non-empty strings with supported complementary
 roles and worktree kind before retained provenance can be reconstructed.
+The raw sibling YAML must contain none of the four pair keys before receipt
+reconstruction, regardless of how record loading normalizes false, empty, null,
+numeric or unsupported values. This absence check and the non-pair digest use
+the same parsed document; malformed or reintroduced pair keys preserve both
+records and the receipt with the ordinary pair-preservation reason.
 Managed garbage collection remains the deletion authority.
 
 ## API

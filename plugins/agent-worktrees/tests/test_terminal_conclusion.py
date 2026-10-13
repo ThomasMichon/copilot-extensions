@@ -1586,6 +1586,47 @@ class TestReciprocalDisposal:
                 assert record_path.read_bytes() == primary_before
                 assert sibling_path.read_bytes() == sibling_before
 
+    def test_pair_progress_rejects_raw_pair_keys_after_unlink(self, tmp_path, monkeypatch):
+        sibling, sibling_path, _ = _pair_sibling(
+            tmp_path, monkeypatch, project="knowledge-proj", harness_machine="host",
+            harness_project="demo", harness_worktree_id="worker-20260901-abcd",
+        )
+        repo, record_path, _ = self._harness(
+            tmp_path, monkeypatch,
+            pair_ref=tracking.format_claim_ref("host", "knowledge-proj", sibling.worktree_id),
+        )
+        original = tracking.save_record
+
+        def crash(record, path=None, **kwargs):
+            if path == record_path and not record.is_paired:
+                raise RuntimeError("injected partial pair")
+            return original(record, path, **kwargs)
+
+        monkeypatch.setattr(tracking, "save_record", crash)
+        with pytest.raises(RuntimeError, match="injected partial pair"):
+            _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                      reservation_key="dispatch-task:task-1:1")
+        monkeypatch.setattr(tracking, "save_record", original)
+        receipt_path = sibling_path.with_suffix(".terminal-pair.json")
+        primary_before = record_path.read_bytes()
+        sibling_before = sibling_path.read_text(encoding="utf-8")
+        receipt_before = receipt_path.read_bytes()
+        assert not any(field in yaml.safe_load(sibling_before)
+                       for field in ("pair_id", "pair_role", "pair_ref", "pair_kind"))
+        for field in ("pair_id", "pair_role", "pair_ref", "pair_kind"):
+            for value in (False, "", None, 0, 1, "unsupported", [], {}):
+                sibling_path.write_text(
+                    sibling_before + f"{field}: {json.dumps(value)}\n", encoding="utf-8",
+                )
+                modified_before = sibling_path.read_bytes()
+                result = _conclude(record_path, repo, policy=tc.DISPATCH_ATTEMPT_POLICY,
+                                   reservation_key="dispatch-task:task-1:1")
+                assert result["reason"] == "pair-sibling-unresolved"
+                assert result["managed_gc_eligible"] is False
+                assert record_path.read_bytes() == primary_before
+                assert sibling_path.read_bytes() == modified_before
+                assert receipt_path.read_bytes() == receipt_before
+
     def test_blocks_on_sibling_with_unpushed_commits(self, tmp_path, monkeypatch):
         """A sibling with no porcelain dirtiness but local-only commits ahead
         of its own upstream must still block -- exactly like the harness

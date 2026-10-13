@@ -22,13 +22,20 @@ def _receipt_path(path: Path) -> Path:
     return path.with_suffix(".terminal-pair.json")
 
 
-def _digest(path: Path) -> str:
+def _document(path: Path) -> dict:
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(document, dict):
         raise ValueError("terminal pair record is not a mapping")
-    for name in _PAIR_FIELDS:
-        document.pop(name, None)
+    return document
+
+
+def _document_digest(document: dict) -> str:
+    document = {name: value for name, value in document.items() if name not in _PAIR_FIELDS}
     return hashlib.sha256(json.dumps(document, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _digest(path: Path) -> str:
+    return _document_digest(_document(path))
 
 
 def _primary_identity(record):
@@ -58,9 +65,12 @@ def reciprocal_snapshot(record, sibling, sibling_path: Path):
             or sibling.owner != record.owner or sibling.resolved_origin != "delegate"):
         return None
     try:
+        document = _document(sibling_path)
+        if any(name in document for name in _PAIR_FIELDS):
+            return None
         receipt = json.loads(_receipt_path(sibling_path).read_text(encoding="utf-8"))
         if (receipt["version"] != 1 or receipt["primary"] != _primary_identity(record)
-                or receipt["sibling_digest"] != _digest(sibling_path)):
+                or receipt["sibling_digest"] != _document_digest(document)):
             return None
         pair = receipt["sibling_pair"]
         if (not isinstance(pair, dict) or set(pair) != set(_PAIR_FIELDS)
