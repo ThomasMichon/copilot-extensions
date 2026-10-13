@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 
-from .operations import OperationIntent, TargetReceipt
+from .operations import AllocationRelease, OperationIntent, TargetReceipt
 from .planning import PlanError, identifier, integer
 
 
@@ -18,7 +18,7 @@ class OperationLedger:
         self.authority, self.installation = authority, installation
         with self._transaction(verify=False) as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, 1, 2, 3):
+            if version not in (0, 1, 2, 3, 4):
                 raise PlanError("unsupported operation ledger schema")
             if version == 0:
                 existing = connection.execute(
@@ -67,7 +67,14 @@ class OperationLedger:
                     "resource TEXT PRIMARY KEY NOT NULL,"
                     "operation_id INTEGER NOT NULL UNIQUE REFERENCES operations(id))"
                 )
-                connection.execute("PRAGMA user_version=3")
+                version = 3
+            if version == 3:
+                connection.execute(
+                    "CREATE TABLE allocation_releases("
+                    "operation_id INTEGER PRIMARY KEY REFERENCES operations(id),"
+                    "resource TEXT NOT NULL,proof BLOB NOT NULL)"
+                )
+                connection.execute("PRAGMA user_version=4")
 
     @staticmethod
     def _check_tables(connection, version):
@@ -82,6 +89,8 @@ class OperationLedger:
             columns["result_streams"] = ("target", "installation", "cursor")
         if version >= 3:
             columns["allocation_claims"] = ("resource", "operation_id")
+        if version >= 4:
+            columns["allocation_releases"] = ("operation_id", "resource", "proof")
         objects = connection.execute(
             "SELECT type,name FROM sqlite_master WHERE name NOT GLOB 'sqlite_*'"
         ).fetchall()
@@ -106,7 +115,7 @@ class OperationLedger:
                 connection.execute("PRAGMA query_only=ON")
             connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             if verify:
-                if connection.execute("PRAGMA user_version").fetchone()[0] != 3:
+                if connection.execute("PRAGMA user_version").fetchone()[0] != 4:
                     raise PlanError("unsupported operation ledger schema")
                 identity = connection.execute("SELECT authority,installation FROM identity").fetchall()
                 if identity != [(self.authority, self.installation)]:
@@ -170,6 +179,10 @@ class OperationLedger:
                     "SELECT resource FROM allocation_claims WHERE operation_id=?", (prior[0],),
                 ).fetchone()
                 if claim is None:
+                    claim = connection.execute(
+                        "SELECT resource FROM allocation_releases WHERE operation_id=?", (prior[0],),
+                    ).fetchone()
+                if claim is None:
                     raise PlanError("previous admission has no allocation claim")
                 if claim[0] != resource:
                     raise PlanError("operation already claims a different resource")
@@ -178,12 +191,50 @@ class OperationLedger:
                 "SELECT 1 FROM allocation_claims WHERE resource=?", (resource,),
             ).fetchone():
                 raise PlanError("allocation resource is already claimed")
+            for (proof,) in connection.execute(
+                "SELECT proof FROM allocation_releases WHERE resource=?", (resource,),
+            ):
+                if value["generation"] <= AllocationRelease(bytes(proof)).to_dict()["generation"]:
+                    raise PlanError("allocation generation must exceed released generations")
             operation_id = self._admit(connection, value, intent)
             connection.execute(
                 "INSERT INTO allocation_claims VALUES(?,?)", (resource, operation_id),
             )
             self._event(connection, operation_id, "allocation-claimed")
             return operation_id
+
+    def release_allocation(self, intent, proof, *, resource, installation):
+        """Caller authenticates exact node evidence before releasing a local claim."""
+        identifier(resource, "allocation resource")
+        identifier(installation, "release installation")
+        value = self._scope(intent)
+        proof.check_intent(intent, resource=resource, installation=installation)
+        with self._transaction() as connection:
+            row = self._find(connection, value)
+            if row is None:
+                raise PlanError("operation was not admitted")
+            OperationIntent(bytes(row[1])).check_repeat(intent)
+            operation_id = row[0]
+            prior = connection.execute(
+                "SELECT proof FROM allocation_releases WHERE operation_id=?", (operation_id,),
+            ).fetchone()
+            if prior is not None:
+                if bytes(prior[0]) != proof.encoded:
+                    raise PlanError("conflicting allocation release evidence")
+                return
+            if connection.execute(
+                "SELECT operation_id FROM allocation_claims WHERE resource=?", (resource,),
+            ).fetchone() != (operation_id,):
+                raise PlanError("operation does not hold the allocation claim")
+            connection.execute(
+                "INSERT INTO allocation_releases VALUES(?,?,?)",
+                (operation_id, resource, proof.encoded),
+            )
+            connection.execute(
+                "DELETE FROM allocation_claims WHERE resource=? AND operation_id=?",
+                (resource, operation_id),
+            )
+            self._event(connection, operation_id, "allocation-released")
 
     def inspect_allocation(self, *, resource):
         """Return local held-claim evidence; absence is not permission to allocate."""
@@ -195,6 +246,19 @@ class OperationLedger:
             ).fetchone()
             return ({"resource": resource, "operation_id": row[0],
                      "intent": OperationIntent(bytes(row[1])).to_dict()} if row else None)
+
+    def allocation_release(self, intent):
+        """Read accepted release evidence, not an absence-based execution grant."""
+        value = self._scope(intent)
+        with self._transaction(write=False) as connection:
+            row = self._find(connection, value)
+            if row is None:
+                raise PlanError("operation was not admitted")
+            OperationIntent(bytes(row[1])).check_repeat(intent)
+            released = connection.execute(
+                "SELECT proof FROM allocation_releases WHERE operation_id=?", (row[0],),
+            ).fetchone()
+            return AllocationRelease(bytes(released[0])) if released else None
 
     def record_receipt(self, intent, receipt):
         """Persist correlated target assertions; sequence alone is not authentication."""

@@ -8,7 +8,7 @@ schedule, execute or settle any operation. No resident Gateway/node or new
 production task queue is installed. They are the first bounded seam of #6241,
 not its transactional ledger or distributed fencing proof.
 
-`fleet_manager.operations.OperationIntent` and `TargetReceipt` retain immutable
+`fleet_manager.operations.OperationIntent`, `TargetReceipt` and `AllocationRelease` retain immutable
 canonical bytes; exports are independent dictionaries. `from_dict` and direct
 construction both validate the strict bounded schema. Shared JSON limits are
 1 MiB, depth 12, 256 entries per object/array, duplicate-key refusal and finite
@@ -64,18 +64,28 @@ the actual effect owner. These records do not perform any of those duties.
 A Gateway DB generation cannot revoke a disconnected target by parsing a receipt.
 UNKNOWN is not permission to automatically replay a non-idempotent effect.
 
-## Next persistence boundary
+## Persistence boundary
 
-The next slice must atomically persist admitted intent, scoped claim, audit and
-outbox; nodes independently persist acceptance/deduplication and target receipts.
-Reconciliation replays receipts, not effects. No transaction spans Git, SSH or
-prompts. Authorization, resource-owner fencing, mixed-version compatibility and
-partition reassignment remain explicit reviewed/runtime proof gates.
+`AllocationRelease` uses schema `fleet-manager.allocation-release`, version 1.
+It retains the intent's exact scope and `workspace.allocate` command, plus
+`request_digest`, the canonical `resource` and retiring node `installation`.
+It has no outcome status, receipt sequence, connector epoch or expiry.
+`check_intent(intent, resource=..., installation=...)` compares every binding.
+Neither constructing nor parsing this shape authenticates retirement.
 
-The first [local operation journal](operation-ledger.md) implements explicit
-intent/outbox/audit and receipt transactions without executing effects. Node
-persistence, authenticated admission, claims and resource fencing remain later
-proof gates.
+The [node journal](node-journal.md) produces this assertion only when its trusted
+cooperative SQLite retirement callback, permanent tombstone and held-owner
+removal commit together. The [Gateway ledger](operation-ledger.md) can consume
+the exact proof after its caller authenticates/authorizes the retiring node.
+It is not an external provider release, cross-host fence or objective settlement.
+
+The [local operation journal](operation-ledger.md) atomically persists admitted
+intent, scoped claims, audit and outbox without executing effects. The separate
+node journal persists acceptance/deduplication, cooperative local ownership and
+target receipts. Reconciliation replays receipts, not effects. No transaction
+spans Git, SSH or prompts. Authenticated admission, external resource-owner
+fencing, mixed-version compatibility and partition reassignment remain explicit
+reviewed/runtime proof gates.
 
 This contract stays inside the standalone product until its mutation protocol
 and lifecycle are proven. Existing `agent-fleet-contracts` remains the owner of

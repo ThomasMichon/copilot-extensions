@@ -31,6 +31,7 @@ def snapshot(path):
     with closing(sqlite3.connect(path)) as connection:
         return {table: connection.execute(f"SELECT * FROM {table}").fetchall()
                 for table in ("operations", "outbox", "audit", "allocation_claims",
+                              "allocation_releases",
                               "receipts", "result_streams")}
 
 
@@ -162,6 +163,7 @@ def test_upgrade_retains_existing_data_without_inventing_claims(tmp_path, versio
     store.admit(intent)
     with closing(sqlite3.connect(path)) as connection:
         connection.execute("DROP TABLE allocation_claims")
+        connection.execute("DROP TABLE allocation_releases")
         if version == 1:
             connection.execute("DROP TABLE result_streams")
         else:
@@ -179,7 +181,7 @@ def test_upgrade_retains_existing_data_without_inventing_claims(tmp_path, versio
         upgraded.admit_allocation(intent, resource="workspace-1")
     upgraded.admit_allocation(request(operation="op-2"), resource="workspace-1")
     with closing(sqlite3.connect(path)) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 4
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
 
 

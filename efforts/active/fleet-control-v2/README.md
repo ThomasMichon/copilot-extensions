@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; allocation claims landed, cooperative effect fencing next
+- **Status:** Active; cooperative local ownership landed, release evidence next
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
 - **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts. Existing dependencies #5789, #6030, #5861, #5862 retain ownership.
@@ -116,7 +116,8 @@ All detailed slices are **agent-recommended** and remain subject to review.
   Intent/receipt contracts and local admission/outbox/audit persistence landed
   in #6357/#6360; explicit node acceptance/effect receipts landed in #6388.
   Durable receiver cursors landed in #6395 and local allocation claims in #6403.
-  Effect-owner fencing and authenticated runtime integration remain open.
+  Cooperative SQLite effect-owner checks landed in #6411. Verified release,
+  external effect-owner fencing and authenticated runtime integration remain open.
 - [ ] Prove objective -> workspace -> host -> prompt -> outcome -> settlement
   locally, then through one Gateway and two separate nodes.
 - [ ] Persist scope/generation fences at cooperative effect owners; define
@@ -344,3 +345,45 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   Next after review/merge is explicit verified release evidence and safe local
   generation transfer, not expiration-based reassignment. Full runtime, partition,
   host-survival, installation and adoption gates remain open.
+
+### 2026-10-13 - Cooperative local ownership landed
+- #6411 merged at `2026-10-13T01:04:24Z`, commit
+  `4b9a0fe246d45d78aec8a4c17dbee13910eda355`, after current-head Copilot APPROVED
+  with zero findings and every required/ordinary check green. The first review
+  window timed out; an explicit request and fresh wait produced the actual verdict.
+  Installed contained suite: 247 passed.
+- Managed sync pulled forward the verified merge. Re-read the full parent
+  Plan/Validation Plan; the cooperative SQLite seam does not prove external
+  fencing, authenticated runtime, partition behavior or complete Phase 2.
+- Next under #6241 is immutable, exact-resource/scope/generation-bound cooperative
+  release evidence with atomic effect-owner retirement and retained tombstones.
+  Gateway release must consume validated matching evidence, never infer it from
+  a terminal outcome or timer. Safe local generation transfer follows only after
+  that release; provider/shared-resource fences remain separate.
+
+### 2026-10-13 - Cooperative retirement and generation transfer prepared
+- Added immutable exact intent/scope/generation/digest/resource/node-installation
+  release evidence. A trusted SQLite-only retirement callback, permanent
+  tombstone and node-owner removal commit together. The Gateway consumes
+  authenticated-by-caller matching evidence with claim removal and audit in one
+  transaction; outcome receipts and elapsed time still never release claims.
+- Exact historical admission/retirement repeats preserve the original operation
+  and proof without resurrecting ownership. Old effects and old proofs cannot
+  affect successors; new allocations require a strictly higher resource-specific
+  generation across identities. Connector epochs are not allocation generations.
+- Known node schemas 1/2 upgrade to 3 and Gateway schemas 1-3 to 4, preserving
+  held claims, accepted work, receipts and cursors without inventing retirement.
+  Unsupported writers and reserved-name/core-column collisions fail closed.
+- Unit and simple installed-package E2E: 284 passed, including real node/Gateway
+  precommit crashes, postcommit lost replies, four concurrent retirement clients,
+  competing successors and stale installed-process effects after reassignment.
+  Lint and install-contract checks passed. Fresh local DB/legacy-upgrade paths
+  exercised; full machine clean-room omitted because no installer/bootstrap
+  changed. Live external-venue omitted because no adopted integrated runtime
+  exists; no enrollment, deployment or credential authority was changed.
+- Documentation-impact review updated the product README and operation/node/
+  ledger contracts. This realizes the reviewed cooperative effect-owner intent,
+  not external/provider fencing or a complete Phase 2. After review/merge,
+  select the authenticated vertical-slice integration boundary with existing
+  routing owners; full baseline/lifecycle/runtime/migration/adoption gates remain
+  open and no parent Plan/Validation checkbox is closed by this primitive.

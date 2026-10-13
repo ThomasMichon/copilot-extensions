@@ -160,8 +160,9 @@ by `agent-fleet-contracts`.
 An explicit Python [local operation journal](docs/operation-ledger.md) now
 persists admission/outbox/audit and correlated receipt updates transactionally.
 Its combined allocation-admission API also persists one exclusive identified
-resource claim with intent/outbox/audit. Claims survive every receipt outcome;
-no release, expiry or reassignment API exists. This is local storage evidence,
+resource claim with intent/outbox/audit. Claims survive every receipt outcome; explicit cooperative retirement evidence
+can release a claim and permit a higher allocation generation. No expiry-based
+release exists. This is local storage evidence,
 not authentication, a signed grant or an effect-owner fence.
 The journal is not automatically installed or activated and supplies no executor
 or resource fencing. Generic admission does not claim allocations.
@@ -177,7 +178,9 @@ spool. External attempts conservatively persist UNKNOWN before execution and
 cannot be retried blindly. Allocations instead require identified held ownership
 at acceptance and within the cooperative SQLite effect transaction; generic
 unbound effects and external allocation attempts are refused. Ownership survives
-outcomes and has no release/expiry API. This protects correctly implemented
+outcomes until a trusted SQLite-only retirement callback commits with permanent
+release evidence and owner removal. Stale effects remain refused after
+reassignment. This protects correctly implemented
 local SQLite adapters, not external workspaces or resources shared across nodes.
 This Python API is not a node service, remote
 executor, authenticated reconnect protocol or distributed fence; no role is

@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 
-from .operations import OperationIntent, TargetReceipt
+from .operations import AllocationRelease, OperationIntent, TargetReceipt
 from .planning import PlanError, identifier, integer
 
 
@@ -54,9 +54,21 @@ class NodeJournal:
                     "operation_id INTEGER NOT NULL UNIQUE REFERENCES operations(id))"
                 )
                 connection.execute("PRAGMA user_version=2")
+                version = 2
+            if version == 2:
+                if connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name='allocation_releases' COLLATE NOCASE"
+                ).fetchone():
+                    raise PlanError("unrecognized node release schema")
+                connection.execute(
+                    "CREATE TABLE allocation_releases("
+                    "operation_id INTEGER PRIMARY KEY REFERENCES operations(id),"
+                    "resource TEXT NOT NULL,proof BLOB NOT NULL)"
+                )
+                connection.execute("PRAGMA user_version=3")
 
-    def _verify(self, connection, *, version=2):
-        if version not in (1, 2) or connection.execute(
+    def _verify(self, connection, *, version=3):
+        if version not in (1, 2, 3) or connection.execute(
             "PRAGMA user_version"
         ).fetchone()[0] != version:
             raise PlanError("unsupported node journal schema")
@@ -65,8 +77,10 @@ class NodeJournal:
             "operations": ("id", "principal", "account", "operation", "intent"),
             "receipts": ("cursor", "operation_id", "sequence", "receipt"),
         }
-        if version == 2:
+        if version >= 2:
             columns["allocation_owners"] = ("resource", "operation_id")
+        if version >= 3:
+            columns["allocation_releases"] = ("operation_id", "resource", "proof")
         for name, expected in columns.items():
             kind = connection.execute(
                 "SELECT type FROM sqlite_master WHERE name=?", (name,),
@@ -174,18 +188,38 @@ class NodeJournal:
             prior = self._find(connection, value)
             if prior:
                 OperationIntent(bytes(prior[1])).check_repeat(intent)
+                release = self._release(connection, prior[0])
+                if release is not None:
+                    release.check_intent(intent, resource=resource, installation=self.installation)
+                    return self._latest(connection, prior[0])
                 self._check_owner(connection, prior[0], resource)
                 return self._latest(connection, prior[0])
             if connection.execute(
                 "SELECT 1 FROM allocation_owners WHERE resource=?", (resource,),
             ).fetchone():
                 raise PlanError("node allocation resource is already owned")
+            self._check_generation(connection, value, resource)
             accepted = self._accept(connection, value, intent)
             operation_id = self._find(connection, value)[0]
             connection.execute(
                 "INSERT INTO allocation_owners VALUES(?,?)", (resource, operation_id),
             )
             return accepted
+
+    @staticmethod
+    def _release(connection, operation_id):
+        row = connection.execute(
+            "SELECT proof FROM allocation_releases WHERE operation_id=?", (operation_id,),
+        ).fetchone()
+        return AllocationRelease(bytes(row[0])) if row else None
+
+    @staticmethod
+    def _check_generation(connection, value, resource):
+        for (proof,) in connection.execute(
+            "SELECT proof FROM allocation_releases WHERE resource=?", (resource,),
+        ):
+            if value["generation"] <= AllocationRelease(bytes(proof)).to_dict()["generation"]:
+                raise PlanError("allocation generation must exceed released generations")
 
     def _allocation_scope(self, intent, resource):
         identifier(resource, "node allocation resource")
@@ -212,6 +246,56 @@ class NodeJournal:
             ).fetchone()
             return OperationIntent(bytes(row[0])) if row else None
 
+    def allocation_release(self, intent):
+        """Read permanent release evidence; no absence-based permission or transport ack."""
+        with self._transaction(write=False) as connection:
+            operation_id, _ = self._accepted(connection, intent)
+            return self._release(connection, operation_id)
+
+    @contextmanager
+    def _cooperative(self, connection):
+        connection.set_authorizer(
+            lambda action, *_: sqlite3.SQLITE_DENY if action in (
+                sqlite3.SQLITE_TRANSACTION, sqlite3.SQLITE_SAVEPOINT,
+                sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH, sqlite3.SQLITE_PRAGMA,
+            ) else sqlite3.SQLITE_OK
+        )
+        try:
+            yield
+        finally:
+            connection.set_authorizer(None)
+
+    def release_cooperative(self, intent, retire, *, resource):
+        """Trusted SQLite-only retirement, tombstone and owner removal commit together."""
+        value = self._allocation_scope(intent, resource)
+        with self._transaction() as connection:
+            operation_id, _ = self._accepted(connection, intent)
+            prior = self._release(connection, operation_id)
+            if prior is not None:
+                prior.check_intent(intent, resource=resource, installation=self.installation)
+                return prior
+            self._check_owner(connection, operation_id, resource)
+            with self._cooperative(connection):
+                if retire(connection) is not None:
+                    raise PlanError("cooperative retirement must return None")
+            self._verify(connection)
+            self._accepted(connection, intent)
+            self._check_owner(connection, operation_id, resource)
+            del value["parameters"]
+            value.update(schema="fleet-manager.allocation-release",
+                         request_digest=intent.request_digest, resource=resource,
+                         installation=self.installation)
+            proof = AllocationRelease.from_dict(value)
+            connection.execute(
+                "INSERT INTO allocation_releases VALUES(?,?,?)",
+                (operation_id, resource, proof.encoded),
+            )
+            connection.execute(
+                "DELETE FROM allocation_owners WHERE resource=? AND operation_id=?",
+                (resource, operation_id),
+            )
+            return proof
+
     def commit_cooperative(self, intent, apply, *, resource=None):
         """Trusted short SQLite-only callback returns a succeeded result reference.
 
@@ -232,16 +316,8 @@ class NodeJournal:
                 return prior
             if status == "unknown":
                 raise PlanError("uncertain effect requires explicit reconciliation")
-            connection.set_authorizer(
-                lambda action, *_: sqlite3.SQLITE_DENY if action in (
-                    sqlite3.SQLITE_TRANSACTION, sqlite3.SQLITE_SAVEPOINT,
-                    sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH, sqlite3.SQLITE_PRAGMA,
-                ) else sqlite3.SQLITE_OK
-            )
-            try:
+            with self._cooperative(connection):
                 result_ref = apply(connection)
-            finally:
-                connection.set_authorizer(None)
             self._verify(connection)
             if value["command"] == "workspace.allocate":
                 self._accepted(connection, intent)

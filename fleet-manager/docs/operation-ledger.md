@@ -52,8 +52,29 @@ An operation can claim only one resource. Repeating identical intent and resourc
 returns the original operation without new audit; changing either fails.
 Resource contention fails without admitting an orphan intent/outbox/audit.
 Claims never expire, and accepted, UNKNOWN, failed or succeeded receipts never
-release them. There is deliberately no release, reassignment or TTL API yet:
-verified effect-owner release/retirement/fencing evidence remains a later gate.
+release them. There is no TTL-based release.
+
+`release_allocation(intent, proof, resource=..., installation=...)` consumes
+immutable `AllocationRelease` evidence from the cooperative node effect owner.
+The caller must first authenticate and authorize the exact retiring
+authority/target/node installation and intent/resource binding. Parsing/digest
+correlation is not authentication. The proof's scope, generation, command,
+content digest, resource and node installation must match; exact admitted intent
+and currently held claim are required. Release evidence, held-claim removal and
+an `allocation-released` audit event commit together, independently of receipt
+status. An audit/storage failure retains the claim and leaves no tombstone.
+
+`allocation_release(intent)` reads the accepted permanent proof or null;
+the operation must be admitted. Exact release replay is idempotent even after
+a successor claims the resource, and cannot release that successor. A conflicting
+proof fails. Original allocation-admission repeats return the original operation
+without recreating its claim. A new allocation must carry a generation strictly
+higher than all recorded releases for that resource, regardless of target,
+principal or account. This is an allocation generation, not a connector epoch.
+No tombstone cleanup, automatic retirement, external/provider release or
+distributed resource fence is supplied. A correctly implemented trusted
+SQLite-only node retirement adapter is the sole producer this contract covers;
+external resources require their actual effect owner to fence/retire them.
 
 `inspect_allocation(resource=...)` reads local held-claim evidence (resource,
 operation row ID and immutable intent), or null. Neither presence nor absence
@@ -99,8 +120,9 @@ changing the supplied identity cannot make an old receipt fresh.
 Schema and authority/installation identity are checked when opening and inside
 every operation transaction. Unsupported versions and unrecognized databases
 are refused. Construction transactionally upgrades this journal's known schema 1
-or 2 to schema 3, adding result cursors where missing and an empty allocation
-claim table; intent, outbox, receipts, audit and existing cursors stay unchanged.
+through 3 to schema 4, adding result cursors/claims where missing and an empty
+release history; intent, outbox, receipts, audit, existing cursors and held
+claims stay unchanged. Historical outcomes never invent releases.
 Foreign table/object inventories (including a node journal) cannot be
 adopted as an earlier schema. A live old-schema reader/writer refuses the upgraded version
 rather than continuing as a second compatible writer. There is no downgrade,
@@ -116,8 +138,8 @@ The separate explicit [node journal](node-journal.md) now owns local acceptance,
 cooperative effect receipts and a result spool; it does not share this database.
 
 **Not yet delivered:** target authentication,
-claim release/reassignment and external effect-owner fences, bounded queue/audit retention,
-authoritative generation transfer, subscriptions, authenticated Gateway/node protocol,
+external effect-owner fences, bounded queue/audit/release retention,
+cross-host authoritative generation transfer, subscriptions, authenticated Gateway/node protocol,
 installer readiness or high availability. The current journal is a local
 building block in one product, not a second deployed queue beside V1.
 The node journal additionally enforces held ownership for its cooperative
@@ -136,4 +158,6 @@ Allocation tests additionally cover separate-process competing and duplicate
 admissions, abrupt exit before claim commit, lost replies after commit, rollback
 of either audit failure, known-schema upgrades and retained claims after every
 receipt status. These are installed-package, local SQLite proofs, not distributed
-resource exclusion or provider fencing.
+resource exclusion or provider fencing. Release regressions add proof correlation,
+atomic retirement/audit rollback, higher local generation transfer and installed
+process crash/lost-reply/contention with no duplicate retirement or stale release.

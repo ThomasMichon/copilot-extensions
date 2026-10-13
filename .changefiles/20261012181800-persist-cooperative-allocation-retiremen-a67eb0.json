@@ -1,0 +1,9 @@
+{
+  "comment": "Persist cooperative allocation retirement evidence and fence released generations",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
