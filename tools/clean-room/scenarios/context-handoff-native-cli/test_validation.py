@@ -1532,8 +1532,38 @@ class ValidationTests(WindowsSeedReadFixtures, unittest.TestCase):
             events = self.semantic_events(root)
             for delayed in ("1-1", "1-2"):
                 bad = copy.deepcopy(events)
-                next(e for e in bad if e.get("id") == f"complete-{delayed}")["timestamp"] = "1-9-1"
+                late = next(e for e in bad if e.get("id") == f"complete-{delayed}")
+                bad.remove(late)
+                work = next(i for i, e in enumerate(bad) if e.get("id") == "1-4")
+                bad.insert(work + 1, late)
                 self.assertTrue(any(row["errors"] for row in recovery_event_errors(bad, root)))
+
+    def test_stream_positions_not_timestamp_labels_control_recovery(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evaluation, state, _ = self.analyzer_fixture(Path(temp))
+            root = evaluation / "workspace"
+            events = self.semantic_events(root)
+            for event in events:
+                event.setdefault("data", {})
+                event["timestamp"] = "metadata-only"
+            self.assertTrue(all(not row["errors"] for row in recovery_event_errors(events, root)))
+            positive = self.run_analyzer(evaluation, state, events)
+            self.assertEqual(len(positive["root_clear_events"]), 2)
+            self.assertTrue(all(not row["errors"] for row in positive["semantic_recovery_validation"]))
+            for delayed in ("1-1", "1-2"):
+                with self.subTest(delayed=delayed):
+                    bad = copy.deepcopy(events)
+                    late = [event for event in bad
+                            if event["data"].get("toolCallId") == delayed
+                            or event["data"].get("interactionId") == delayed]
+                    bad = [event for event in bad if event not in late]
+                    work = next(i for i, event in enumerate(bad) if event.get("id") == "complete-1-4")
+                    for index, event in enumerate(late):
+                        event["timestamp"] = f"earlier-{index}"
+                    bad[work + 1:work + 1] = late
+                    self.assertTrue(recovery_event_errors(bad, root)[0]["errors"])
+                    negative = self.run_analyzer(evaluation, state, bad)
+                    self.assertTrue(negative["semantic_recovery_validation"][0]["errors"])
 
     def test_recorded_read_requires_exact_range_or_bounded_output(self):
         with tempfile.TemporaryDirectory() as temp:

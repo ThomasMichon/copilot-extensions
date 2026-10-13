@@ -476,6 +476,21 @@ below-altitude evidence/tooling documentation, with no new rollout claim.
   container, not first-provision/native external-venue acceptance. No further
   paid trial is authorized; historical results remain immutable. Current-head
   review and required CI still gate publication.
+- The following Balanced review resolved copied-snapshot binding but identified
+  backwards timestamp labels bypassing refresh order and successful atomic
+  redaction leaving stale bindings behind a captured packet. Acceptance,
+  checkpoint binding, recovery windows and refresh-before-work attribution now
+  use validated stream positions. Redaction of bound evidence explicitly
+  invalidates its export receipt and packet until a fresh export; unbound
+  transcript redaction retains unchanged snapshot validity. All one hundred
+  source tests pass in the unpaid isolated Linux lane; portable Windows logic
+  passes seventy-seven with twenty-three Linux-only skips. Actual export/
+  redaction/analyze and late-refresh/earlier-label consumer regressions pass,
+  with no paid native turn or change to the immutable historical FAIL results.
+  Independent actual Linux verification closed both named findings with five
+  targeted consumer checks, including equal-time valid streams, fabricated
+  serialized-position rejection and unchanged unbound-redaction positives.
+  Current-head provider review and required CI remain publication gates.
 - The corrections affect source evidence validation only. All four historical
   independent FAIL verdicts and their original packets remain unchanged.
   No paid trial, native deployment claim or runtime change is authorized by

@@ -12,6 +12,7 @@ import sys
 import time
 import uuid
 import snapshot_io
+from event_parser import event_order
 from validation import (
     checkpoint_errors, checkpoint_readback_errors, event_stream, execution_status, measurement_result, object_result,
     pressure_events, recovery_event_errors, root_event, seed_baseline, workspace_seed_errors, witness_errors,
@@ -532,6 +533,7 @@ def analyze():
             quarantined.extend(events)
             events = []
     events = [event for event in events if root_event(event)]
+    order = event_order(events)
     starts = {event["data"]["toolCallId"]: event for event in events
               if event["type"] == "tool.execution_start"}
     calls = []
@@ -589,7 +591,7 @@ def analyze():
     if not task_ready:
         evidence_errors.append({"source": "task", "error": "authoritative task fields unavailable"})
     measured_results = [row["result"] for row in contexts]
-    acceptance = next((event["timestamp"] for event in events
+    acceptance = next((order(event) for event in events
                        if event["type"] == "user.message"
                        and event["data"].get("content", "").startswith(
                            "Execute the bounded native CLI continuity witness")), None)
@@ -597,7 +599,7 @@ def analyze():
     for row in artifact_calls:
         args = row["start"]["data"]["arguments"]
         if args.get("operation") == "write":
-            if acceptance and row["start"]["timestamp"] < acceptance:
+            if acceptance is not None and order(row["start"]) < acceptance:
                 checkpoints.append({"write_event": row["start"]["id"], "phase": "setup-measurement",
                                     "assessment": "pre-acceptance write, retained in raw native events"})
                 continue
@@ -619,15 +621,15 @@ def analyze():
             for measurement in measurements if isinstance(measurements, list) else []:
                 if measurement not in measured_results:
                     errors.append("checkpoint trigger measurement differs from all actual native results")
-            subsequent = [event for event in events if event["timestamp"] > row["complete"]["timestamp"]]
+            subsequent = [event for event in events if order(event) > order(row["complete"])]
             clear = next((event for event in subsequent if event["type"] == "session.context_cleared"), None)
             readbacks = [candidate for candidate in artifact_calls
                          if candidate["start"]["data"]["arguments"].get("operation") == "read"
-                         and candidate["start"]["timestamp"] > row["complete"]["timestamp"]
-                         and clear and candidate["complete"]["timestamp"] < clear["timestamp"]]
+                         and order(candidate["start"]) > order(row["complete"])
+                         and clear and order(candidate["complete"]) < order(clear)]
             readback_checks = [
                 {"read_event": candidate["start"].get("id"),
-                 "errors": checkpoint_readback_errors(row, candidate, clear, owner)}
+                 "errors": checkpoint_readback_errors(row, candidate, clear, owner, order=order)}
                 for candidate in readbacks
             ]
             content_verified = any(not candidate["errors"] for candidate in readback_checks)
@@ -661,12 +663,12 @@ def analyze():
     recovery = []
     semantic_recovery = recovery_event_errors(events, EVAL / "workspace", workspace, BASELINE)
     for index, clear in enumerate(clears):
-        end = clears[index + 1]["timestamp"] if index + 1 < len(clears) else None
+        end = order(clears[index + 1]) if index + 1 < len(clears) else None
         tools = [event for event in starts.values()
-                 if event["timestamp"] > clear["timestamp"] and (end is None or event["timestamp"] < end)]
+                 if order(event) > order(clear) and (end is None or order(event) < end)]
         delivered_skills = [event for event in events if event["type"] == "skill.context_delivered_ref"
-                            and event["timestamp"] > clear["timestamp"]
-                            and (end is None or event["timestamp"] < end)]
+                            and order(event) > order(clear)
+                            and (end is None or order(event) < end)]
         recovery.append({
             "clear_event": clear["id"],
             "tools_in_recovery_window": tools,
@@ -730,11 +732,29 @@ def redact():
     token = os.environ.get("COPILOT_GITHUB_TOKEN")
     errors = []
     touched = snapshot_io.redact_tree(OUT, token.encode() if token else None, errors)
+    export_path = EVAL / "export-errors.json"
+    export_note = metadata(export_path, "export diagnostics", errors) if export_path.exists() else None
+    if export_note is not None:
+        bindings = export_note.get("snapshot_bindings")
+        if isinstance(bindings, dict):
+            bound_paths = set()
+            for directory in ("session", "workspace", "seed-baseline"):
+                binding = bindings.get(directory)
+                files = binding.get("files") if isinstance(binding, dict) else None
+                if isinstance(files, dict):
+                    bound_paths.update((EVAL / directory).relative_to(OUT).as_posix() + "/" + name
+                                       for name in files if isinstance(name, str))
+            if bound_paths.intersection(touched):
+                errors.append({"source": "credential redaction",
+                               "error": "redaction changed bound evidence; a fresh export is required"})
+                prior_errors = export_note.get("errors")
+                export_note["errors"] = (prior_errors if isinstance(prior_errors, list) else []) + errors
+                export_note["status"] = "INVALID_EXPORT"
+                write(export_path, export_note)
     write(EVAL / "credential-redaction.json", {"borrowed_token_checked": bool(token),
                                             "redacted_files": touched, "errors": errors,
                                             "status": "INVALID_EXPORT" if errors else "checked"})
-    if errors:
-        write_judge_packet(invalid_analysis=True)
+    write_judge_packet(invalid_analysis=bool(errors))
     print(json.dumps({"redacted_files": len(touched), "errors": errors}))
     return errors
 

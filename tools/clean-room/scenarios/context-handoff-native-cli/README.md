@@ -220,6 +220,10 @@ copy receipt includes it; pre-created or subsequently deleted witnesses cannot
 be recovered from a stale destination.
 Regenerated packet validity retains an invalid redaction receipt across later
 analysis/export calls until an actual successful redaction check replaces it.
+Successful redaction of a bound snapshot also invalidates that export receipt
+and packet with an explicit fresh-export requirement: atomic replacement cannot
+retain the original copied-file identity/hash. Redaction of unbound transcript
+bytes does not invalidate an unchanged bound snapshot.
 Failure to execute or decode `copilot config` also becomes a sanitized export
 diagnostic with an invalid packet, rather than aborting before receipts exist.
 Startup answers each recognized prompt kind at most once, selecting the latest
@@ -240,6 +244,10 @@ completion requires a prior same-owner start and cannot precede its timestamp.
 Malformed relationships quarantine the stream before recovery attribution.
 Unfinished starts at final capture and legitimate root/child ID collisions
 remain valid, rather than inventing a completion or cross-owner correlation.
+Acceptance, checkpoint side-of-clear binding, recovery windows and refresh-before-
+work attribution use actual validated stream positions, not timestamp labels.
+Earlier labels on later rows cannot move guidance, skill delivery or checkpoint
+read-back before substantive work; timestamps remain inspection metadata.
 Event rows must contain nonempty id/type/time strings and an explicit data
 object; optional model metadata must be text or null before model aggregation.
 Tool identifiers/argument objects and consumed message/delivery fields

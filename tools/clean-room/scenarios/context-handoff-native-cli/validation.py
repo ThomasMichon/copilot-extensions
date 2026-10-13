@@ -13,7 +13,7 @@ import sys
 from fractions import Fraction
 
 from checkpoint_binding import readback_errors, recovered_checkpoint
-from event_parser import call_relationship_errors, event_stream
+from event_parser import call_relationship_errors, event_order, event_stream
 import snapshot_io
 
 BASELINE_DIR = Path("/opt/copilot-cleanroom/native-cli-baseline")
@@ -210,9 +210,9 @@ def measurement_result(completion):
     return payload, None
 
 
-def checkpoint_readback_errors(write_row, read_row, clear, owner, *, after_clear=False):
+def checkpoint_readback_errors(write_row, read_row, clear, owner, *, order, after_clear=False):
     return readback_errors(write_row, read_row, clear, owner, root_event=root_event,
-                           object_result=object_result, after_clear=after_clear)
+                           object_result=object_result, order=order, after_clear=after_clear)
 
 
 def normalized_content(text):
@@ -583,6 +583,7 @@ def recovery_event_errors(events, root, workspace=None, baseline=None):
     relationship_errors = call_relationship_errors(list(enumerate(events, 1)))
     if relationship_errors:
         return [{"clear_event": None, "errors": [error["error"] for error in relationship_errors]}]
+    order = event_order(events)
     seed, baseline_errors = seed_baseline(baseline)
     if baseline_errors:
         return [{"clear_event": None, "errors": baseline_errors}]
@@ -624,18 +625,18 @@ def recovery_event_errors(events, root, workspace=None, baseline=None):
                     checkpoint, binding_errors = recovered_checkpoint(
                         preclear, events[position], {"start": event, "complete": completion},
                         seed["manifest"]["session_id"], index, root_event=root_event,
-                        object_result=object_result, check_readback=checkpoint_readback_errors)
+                        object_result=object_result, check_readback=checkpoint_readback_errors, order=order)
                     if binding_errors:
                         errors.extend(binding_errors)
                     elif checkpoint is not None:
-                        checkpoint_time = completion["timestamp"]
+                        checkpoint_time = order(completion)
             if content_read(event, completion, str(Path(workspace) / "AGENTS.md"), guidance, workspace):
                 guidance_reads.append(completion)
             elif name == "skill" and args.get("skill") == "context-handoff":
                 delivered = [entry for entry in window if entry["type"] == "skill.context_delivered_ref"
                              and entry["data"].get("source") == "skill-context-handoff"
                              and "/plugins/context-handoff/skills/context-handoff" in entry["data"].get("prefix", "")
-                             and entry["timestamp"] >= event["timestamp"]
+                             and order(entry) > order(event)
                              and successful(completion)
                              and entry["data"].get("interactionId") == completion["data"].get("interactionId")]
                 if successful(completion) and delivered:
@@ -643,6 +644,7 @@ def recovery_event_errors(events, root, workspace=None, baseline=None):
                         "id": completion.get("id"),
                         "delivered_ref": delivered[0].get("id"),
                         "timestamp": max(completion["timestamp"], delivered[0]["timestamp"]),
+                        "stream_position": max(order(completion), order(delivered[0])),
                     })
             elif name == "get_context_remaining" and successful(completion):
                 measurement, error = measurement_result(completion)
@@ -664,11 +666,13 @@ def recovery_event_errors(events, root, workspace=None, baseline=None):
         for label, evidence in (("guidance content refresh", guidance_reads), ("owning targeted skill refresh", skill_refreshes)):
             if not evidence:
                 errors.append(f"missing successful {label}")
-            elif first_work and not any(item["timestamp"] < first_work["timestamp"] for item in evidence):
+            elif first_work and not any(
+                    (item["stream_position"] if label == "owning targeted skill refresh" else order(item))
+                    < order(first_work) for item in evidence):
                 errors.append(f"{label} did not complete before substantive task work")
         if not measurements:
             errors.append("no successful native measurement in the recovered window")
-        if first_work and checkpoint_time and checkpoint_time >= first_work["timestamp"]:
+        if first_work and checkpoint_time is not None and checkpoint_time >= order(first_work):
             errors.append("task work preceded successful bound checkpoint read")
         if checkpoint and first_work:
             action = checkpoint.get("next_action")

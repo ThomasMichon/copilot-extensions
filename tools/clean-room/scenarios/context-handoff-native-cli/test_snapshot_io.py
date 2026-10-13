@@ -203,6 +203,40 @@ class SnapshotTests(unittest.TestCase):
                 self.assertIsNone(json.loads((evaluation / "effective-settings.json").read_text())["contextManagementTools"])
                 self.assertNotIn(canary, (evaluation / "export-errors.json").read_text())
 
+    def test_successful_redaction_invalidates_changed_bound_snapshot(self):
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+            original, evaluation, capsule = self.export_fixture(Path(temporary), stack)
+            stream = Path.home() / ".copilot/session-state/root-fixture/events.jsonl"
+            rows = [json.loads(line) for line in stream.read_text().splitlines()]
+            secret = "synthetic-" + os.urandom(16).hex()
+            rows[0]["data"]["content"] += secret
+            stream.write_text("".join(json.dumps(row) + "\n" for row in rows))
+            self.assertEqual(controller.export()["export_errors"], [])
+            with patch.dict(os.environ, {"COPILOT_GITHUB_TOKEN": secret}):
+                errors = controller.redact()
+            self.assertTrue(errors)
+            self.assertNotIn(secret.encode(), (evaluation / "session/events.jsonl").read_bytes())
+            receipt = json.loads((evaluation / "export-errors.json").read_text())
+            self.assertEqual(receipt["status"], "INVALID_EXPORT")
+            self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"],
+                             "INVALID_EXPORT")
+            controller.analyze()
+            observed = json.loads((evaluation / "observed-evidence.json").read_text())
+            self.assertFalse(observed["root_clear_events"])
+
+    def test_successful_unbound_redaction_retains_captured_snapshot(self):
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+            original, evaluation, capsule = self.export_fixture(Path(temporary), stack)
+            self.assertEqual(controller.export()["export_errors"], [])
+            secret = "synthetic-" + os.urandom(16).hex()
+            unbound = evaluation / "transcript.txt"
+            unbound.write_text(secret)
+            with patch.dict(os.environ, {"COPILOT_GITHUB_TOKEN": secret}):
+                self.assertEqual(controller.redact(), [])
+            self.assertNotIn(secret.encode(), unbound.read_bytes())
+            self.assertEqual(json.loads((evaluation / "judge-packet.json").read_text())["event_export_status"],
+                             "captured")
+
     def test_regular_snapshot_and_redaction(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

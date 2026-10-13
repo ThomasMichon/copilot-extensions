@@ -3,7 +3,7 @@
 import json
 
 
-def readback_errors(write_row, read_row, clear, owner, *, root_event, object_result, after_clear=False):
+def readback_errors(write_row, read_row, clear, owner, *, root_event, object_result, order, after_clear=False):
     errors = []
     for label, row in (("write", write_row), ("read", read_row)):
         if not isinstance(row, dict) or not isinstance(row.get("start"), dict) or not isinstance(row.get("complete"), dict):
@@ -22,11 +22,11 @@ def readback_errors(write_row, read_row, clear, owner, *, root_event, object_res
     if (rargs.get("operation"), rargs.get("path")) != ("read", "checkpoint.md"):
         errors.append("read does not identify the written checkpoint")
     if after_clear:
-        timing = (clear and root_event(clear) and write_row["complete"]["timestamp"] < clear["timestamp"]
-                  < read_row["start"]["timestamp"] <= read_row["complete"]["timestamp"])
+        timing = (clear and root_event(clear) and order(write_row["complete"]) < order(clear)
+                  < order(read_row["start"]) < order(read_row["complete"]))
     else:
-        timing = (clear and root_event(clear) and write_row["complete"]["timestamp"] < read_row["start"]["timestamp"]
-                  <= read_row["complete"]["timestamp"] < clear["timestamp"])
+        timing = (clear and root_event(clear) and order(write_row["complete"]) < order(read_row["start"])
+                  < order(read_row["complete"]) < order(clear))
     if not timing:
         errors.append("read-back is not bound to the expected side of the root clear")
     if written is not None and read is not None:
@@ -54,7 +54,7 @@ def readback_errors(write_row, read_row, clear, owner, *, root_event, object_res
 
 
 def recovered_checkpoint(preclear, clear, read_row, owner, source_window, *,
-                         root_event, object_result, check_readback):
+                         root_event, object_result, check_readback, order):
     starts = [event for event in preclear if event["type"] == "tool.execution_start" and root_event(event)]
     completions = {event["data"]["toolCallId"]: event for event in preclear
                    if event["type"] == "tool.execution_complete" and root_event(event)}
@@ -71,9 +71,9 @@ def recovered_checkpoint(preclear, clear, read_row, owner, source_window, *,
              for event in starts if event["data"]["toolName"] == "session_artifacts"
              and event["data"].get("arguments", {}).get("operation") == "read"
              and event["data"]["arguments"].get("path") == "checkpoint.md"]
-    if not any(not check_readback(written, candidate, clear, owner) for candidate in reads):
+    if not any(not check_readback(written, candidate, clear, owner, order=order) for candidate in reads):
         return None, ["authoritative pre-clear checkpoint read-back is not verified"]
-    errors = check_readback(written, read_row, clear, owner, after_clear=True)
+    errors = check_readback(written, read_row, clear, owner, order=order, after_clear=True)
     metadata, error = object_result(read_row.get("complete"))
     if error:
         errors.append(f"recovered checkpoint: {error}")

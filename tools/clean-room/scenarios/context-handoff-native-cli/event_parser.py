@@ -3,6 +3,11 @@
 import json
 
 
+def event_order(events):
+    positions = {id(event): position for position, event in enumerate(events)}
+    return lambda event: positions[id(event)]
+
+
 def call_owner(event):
     top, nested = event.get("agentId"), event["data"].get("agentId")
     if top is None and nested is None:
