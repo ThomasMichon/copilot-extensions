@@ -548,9 +548,16 @@ lease, so cutover promotion recovers interrupted work without allowing a
 passive candidate to steal an in-flight delivery. The bridge atomically
 rechecks the captured owner-session identity when it enqueues the wake.
 
-By default a supervisor body is a CLI/mux `agent-worktrees embody` session on
-the supervisor host. `--headless-label L` routes selected local labels to a
-headless agent-bridge ACP body instead. In fleet mode,
+Local agent bodies acquire sessions through `agent-bridge`, selecting ACP or
+CLI without a capability fallback that changes mode. Workspace allocation and
+terminal reclamation remain ground-layer responsibilities, not a second
+session-launch implementation in dispatch. The task's queue lane and worker's
+execution project are separate identities; allocation and acquisition must
+retain the same execution workspace. See the
+[shared workspace contract](patterns/workspace-allocation-and-session-acquisition.md)
+and [local session acquisition guide](../plugins/agent-dispatch/docs/session-acquisition.md).
+The contract's stable cross-attempt creation keys are reviewed proposal work,
+not yet a generally available creation option. In fleet mode,
 `agent-dispatch supervise --pool host-a,host-b [--origin <alias>]` keeps the
 reservation and task lease on the origin coordinator while spawning only the body
 on the first live pool host; the default fleet body is still CLI/mux, and

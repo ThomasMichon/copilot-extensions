@@ -382,6 +382,19 @@ Execution legs from different Copilot products and hosting technologies can bind
 to the same worktree model without agent-worktrees learning their launch or
 interaction mechanics.
 
+### replay-safe-workspace-allocation
+
+Allocating a worktree creates an execution space, not a conversation. Every
+caller, including a session-hosting component composing allocation with
+embodiment, uses this same repository-qualified allocation authority.
+
+A caller can retain one logical creation identity across retries and recover
+the same allocation after an interrupted response or competing request.
+Creation identity is distinct from the resulting worktree identity. Changed
+target facts, an unresolved creation outcome, or a retired allocation never
+silently authorize another worktree under the same logical request. Deliberate
+replacement is a new logical revision, not a transport retry.
+
 ### authoritative-head-and-lineage
 
 The current execution head and reciprocal predecessor/successor lineage are

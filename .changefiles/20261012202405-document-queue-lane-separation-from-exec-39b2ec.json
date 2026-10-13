@@ -1,0 +1,9 @@
+{
+  "comment": "Document queue-lane separation from execution workspace and bounded acquisition retries.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
