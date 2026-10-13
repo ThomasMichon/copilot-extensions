@@ -41,6 +41,9 @@ def _install_fake(monkeypatch, handler):
     )
     monkeypatch.setattr(ec.subprocess, "run",
                         lambda cmd, **kw: handler(cmd, kw))
+    monkeypatch.setattr(
+        "worktree_manager.engine_process.run", lambda cmd, **kw: handler(cmd, kw),
+    )
 
 
 def test_engine_environment_removes_parent_python_runtime(monkeypatch):

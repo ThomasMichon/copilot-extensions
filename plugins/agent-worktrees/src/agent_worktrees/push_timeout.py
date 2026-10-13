@@ -82,6 +82,7 @@ def _kill_tree(proc: subprocess.Popen) -> None:
 
 def run_bounded(
     cmd: list[str], *, cwd: str | os.PathLike | None, env: dict, timeout: float | None,
+    inherit_process_group: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run *cmd*, capturing output; on a stall past *timeout*, kill its
     ENTIRE process tree (see module docstring) before re-raising
@@ -96,7 +97,7 @@ def run_bounded(
         text=True, encoding="utf-8", errors="replace", env=env,
         require_job=windows,
         allow_breakaway=False,
-        **(no_window_kwargs() if windows else detached_kwargs()),
+        **(no_window_kwargs() if windows else {} if inherit_process_group else detached_kwargs()),
     )
     try:
         try:

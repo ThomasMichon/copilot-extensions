@@ -10,6 +10,7 @@ import threading
 import pytest
 
 from worktree_manager import engine_client as ec
+from worktree_manager import engine_process
 
 
 PLAN = {"action": "exec", "work_dir": "/checkout", "cmd": ["copilot"], "env": {}}
@@ -24,7 +25,7 @@ def test_foreground_plan_waits_without_aggregate_deadline(monkeypatch, selection
         observed.append(kwargs)
         return subprocess.CompletedProcess(argv, 0, json.dumps(PLAN), "")
 
-    monkeypatch.setattr(ec.subprocess, "run", run)
+    monkeypatch.setattr(engine_process, "run", run)
     assert ec.resolve_launch_plan("demo", **selection).is_exec
     assert observed[0]["timeout"] is None
     assert observed[0]["stdout"] is subprocess.PIPE

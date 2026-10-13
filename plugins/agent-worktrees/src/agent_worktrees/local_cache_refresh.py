@@ -217,8 +217,13 @@ def refresh_local_cache(
         from . import push_timeout
 
         with step("Rendering instruction projections", enabled=timeout is None):
+            inherited_group = (
+                timeout is None and os.name != "nt"
+                and os.environ.get("WORKTREE_MANAGER_ENGINE_OWNS_PROCESS_GROUP") == "1"
+            )
             result = push_timeout.run_bounded(
-                argv, cwd=None, env=dict(os.environ), timeout=render_timeout
+                argv, cwd=None, env=dict(os.environ), timeout=render_timeout,
+                **({"inherit_process_group": True} if inherited_group else {}),
             )
         stderr = (getattr(result, "stderr", "") or "").strip()[:1000]
         try:

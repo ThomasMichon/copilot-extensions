@@ -69,6 +69,25 @@ def test_identity_lookup_shares_overall_budget_without_two_second_cutoff(
     assert render_timeouts == [7]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX launch process-group ownership")
+@pytest.mark.parametrize("timeout,inherited", [(None, True), (10, False)])
+def test_only_foreground_render_inherits_manager_process_group(monkeypatch, tmp_path, timeout, inherited):
+    from agent_worktrees import push_timeout
+
+    observed = []
+    monkeypatch.setenv("WORKTREE_MANAGER_ENGINE_OWNS_PROCESS_GROUP", "1")
+    monkeypatch.setattr(lcr, "_resolve_cli_script", lambda *_args, **_kwargs: tmp_path / "engine.py")
+    monkeypatch.setattr(lcr, "_resolve_own_agent_worktrees_command", lambda: None)
+
+    def run(argv, **kwargs):
+        observed.append(kwargs.get("inherit_process_group", False))
+        return subprocess.CompletedProcess(argv, 0, _renderer_json(), "")
+
+    monkeypatch.setattr(push_timeout, "run_bounded", run)
+    assert lcr.refresh_local_cache(tmp_path, timeout=timeout).status == "ready"
+    assert observed == [inherited]
+
+
 @pytest.mark.parametrize(
     "blocking,changed,returncode,expected",
     [(0, ["local"], 0, "ready"), (1, ["local"], 1, "partial"),

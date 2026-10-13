@@ -243,12 +243,13 @@ def _run(
             if os.name == "nt":
                 kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             if stream_progress:
+                from .engine_process import run as run_preparation
                 from .engine_progress import streamed_stderr
 
                 with streamed_stderr() as (stderr_fd, stderr_path):
                     kwargs.pop("capture_output")
                     kwargs.update(stdout=subprocess.PIPE, stderr=stderr_fd)
-                    proc = subprocess.run(cmd, **kwargs)
+                    proc = run_preparation(cmd, **kwargs)
                     detail = Path(stderr_path).read_text(encoding="utf-8", errors="replace")
                     if detail:
                         proc.stderr = detail

@@ -74,6 +74,11 @@ aggregate plan timeout. Preparation stages and elapsed-time heartbeats stream
 to the launch terminal; the final plan remains JSON on stdout. Individual
 engine operations keep their own failure bounds, and automation can explicitly
 request a bounded plan call.
+Captured preparation owns a kill-on-close Job on Windows and a dedicated
+process group on POSIX. Foreground projection inherits the latter rather than
+detaching from its launch owner, so an explicit timeout or cancellation also
+terminates renderer and Git descendants. The bounded asynchronous backup
+worker keeps its independent lifetime and containment.
 
 Instruction projection is shipped inside agent-worktrees itself. It does not
 require customizing-copilot to be installed or globally enabled: promotion
