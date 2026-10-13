@@ -175,6 +175,19 @@ installation ownership. Dependency cost is measured across fresh installation,
 downloads, resident processes and retained immutable generations, rather than
 judged by package names or direct wheel size alone.
 
+### seasoned-external-dependencies
+
+Every declared external dependency version and every dependency selected for
+installation has been released for at least seven days. This applies to build,
+runtime, development, transitive and selected optional dependencies. A
+repository-owned source dependency is attributable first-party input, not an
+external release; its external dependency closure still observes the same floor.
+Unknown release evidence never grants eligibility. Installation respects the
+adopter's configured feed and its artifact eligibility rather than bypassing it
+or treating availability on a different registry as proof. A stricter release
+age remains stricter; convenience, fallback and dependency-update automation
+never weaken the minimum.
+
 ### compatible-helper-runtime-reuse
 
 Independently shippable payloads may supply shared helpers that installers reuse
@@ -215,6 +228,12 @@ logic**; its **durable state** (databases, indexes, queues, anything the service
 must not lose) lives in a **separate location that a version swap never touches**,
 so cutting over or rolling back the runtime is safe by construction. Replacing a
 running version is governed by *zero-downtime-cutover* below.
+
+A failed selected-dependency installation never publishes a completed runtime,
+active selection or service cutover. Construction cleans up only its owned,
+incomplete candidate and preserves the previous healthy runtime, completed
+slots and concurrent owners. An interrupted or unreclaimed candidate remains
+nonselectable, with a visible failure rather than a success-shaped fallback.
 
 ### discoverable-local-endpoint
 A client reaches a service by **resolving the service's current endpoint from
