@@ -100,8 +100,11 @@ provisioned or healthy. Binding selection proves ownership/governance, not build
 completion or liveness. Existing consumers remain compatible; a source-qualified
 consumer must require `binding.status == "selected"` and retain the catalog's
 argument vector rather than deriving an executable from the runtime root.
-Missing Python on Windows reports an unresolved binding while retaining the
-supported payload command. Stable out-of-session launchers and other runtime
+Windows binding discovery prefers the real Python 3 interpreter reported by
+`py -3`, then a `python3` or `python` application outside `WindowsApps`;
+Store app-execution aliases are not interpreters. Missing Python reports an
+unresolved binding while retaining the supported payload command.
+Stable out-of-session launchers and other runtime
 adopters remain separate migration work.
 
 ## Usage

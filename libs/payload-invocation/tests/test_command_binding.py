@@ -4,10 +4,12 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -296,9 +298,6 @@ def _catalog_environment(fixture: dict) -> dict[str, str]:
     environment = {
         **os.environ, **fixture["environment"],
         "COPILOT_PLUGIN_ROOT": str(fixture["payload"]),
-        # Retail CLR AutoStartProfile parses "(d)" to disable JIT profiling.
-        "DOTNET_MultiCoreJitProfile": "(d)",
-        "COMPlus_MultiCoreJitProfile": "(d)",
         "POWERSHELL_TELEMETRY_OPTOUT": "1",
         "POWERSHELL_UPDATECHECK": "Off",
         "PYTHONDONTWRITEBYTECODE": "1",
@@ -311,26 +310,6 @@ def _catalog_environment(fixture: dict) -> dict[str, str]:
             "AppData/Local/Microsoft/Windows/PowerShell", "AppData/Roaming",
         ):
             (fixture["home"] / relative).mkdir(parents=True, exist_ok=True)
-        if POWERSHELL:
-            host_command = [
-                POWERSHELL, "-NoLogo", "-NoProfile", "-Command",
-                "$null=Get-Command python -ErrorAction SilentlyContinue;"
-                "$null=@{schema='fixture';version=1;commands=@(@{argv=@('example')})}"
-                "|ConvertTo-Json -Depth 8",
-            ]
-            for _ in range(2):
-                subprocess.run(
-                    host_command, env=environment, cwd=fixture["home"],
-                    capture_output=True, text=True, timeout=30, check=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                )
-            before = _snapshot(fixture["home"])
-            subprocess.run(
-                host_command, env=environment, cwd=fixture["home"],
-                capture_output=True, text=True, timeout=30, check=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-            assert _snapshot(fixture["home"]) == before, "PowerShell host-only control writes"
         return environment
     wrapper_dir = fixture["home"] / "test-bin"
     wrapper_dir.mkdir()
@@ -366,13 +345,132 @@ def _catalog_environment(fixture: dict) -> dict[str, str]:
     return environment
 
 
+class _PowerShellHost:
+    """Initialize only the real host before measuring unchanged product scripts."""
+
+    def __init__(self, home: Path, environment: dict[str, str]) -> None:
+        script = home / "initialized-host.ps1"
+        script.write_text(
+            "$ErrorActionPreference='Stop'\n"
+            "[Console]::OutputEncoding=New-Object System.Text.UTF8Encoding($false)\n"
+            "$null=Get-Command py,python3,python -ErrorAction SilentlyContinue\n"
+            "$null=@{schema='fixture';version=1;commands=@(@{argv=@('example')})}"
+            "|ConvertTo-Json -Depth 8\n"
+            "$null='{\"path\":\"fixture\",\"arguments\":[]}'|ConvertFrom-Json\n"
+            # Stopping recording can itself write; it belongs before READY/baseline.
+            "[System.Runtime.ProfileOptimization]::StartProfile($null)\n"
+            "[Console]::WriteLine('{\"ready\":true}')\n"
+            "while ($null -ne ($line=[Console]::ReadLine())) {\n"
+            "    $request=$line|ConvertFrom-Json\n"
+            "    $arguments=@($request.arguments)\n"
+            "    $global:LASTEXITCODE=0\n"
+            "    $code=0; $errors=@(); $output=@()\n"
+            "    try {\n"
+            "        $records=@(& $request.path @arguments *>&1)\n"
+            "        $code=$LASTEXITCODE\n"
+            "        foreach ($record in $records) {\n"
+            "            if ($record -is [System.Management.Automation.ErrorRecord]) {\n"
+            "                $errors+=($record|Out-String)\n"
+            "            } else { $output+=[string]$record }\n"
+            "        }\n"
+            "    } catch { $code=1; $errors+=($_|Out-String) }\n"
+            "    $response=@{returncode=$code;stdout=($output -join \"`n\");"
+            "stderr=($errors -join \"`n\")}|ConvertTo-Json -Compress\n"
+            "    [Console]::WriteLine($response)\n"
+            "}\n",
+            encoding="utf-8",
+        )
+        self.process = subprocess.Popen(
+            [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(script)],
+            env=environment, cwd=home, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, encoding="utf-8",
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        self.lines: queue.Queue[str | None] = queue.Queue()
+        self.errors: list[str] = []
+        self.closed = False
+
+        def read_output() -> None:
+            assert self.process.stdout
+            for line in self.process.stdout:
+                self.lines.put(line)
+            self.lines.put(None)
+
+        def read_errors() -> None:
+            assert self.process.stderr
+            self.errors.extend(self.process.stderr)
+
+        self.readers = [
+            threading.Thread(target=read_output, daemon=True),
+            threading.Thread(target=read_errors, daemon=True),
+        ]
+        for reader in self.readers:
+            reader.start()
+        try:
+            assert self._response() == {"ready": True}
+        except BaseException:
+            self.close()
+            raise
+
+    def _response(self) -> dict:
+        try:
+            line = self.lines.get(timeout=30)
+        except queue.Empty:
+            raise AssertionError("PowerShell fixture host timed out") from None
+        assert line is not None, "PowerShell fixture host exited: " + "".join(self.errors)
+        return json.loads(line)
+
+    def run(self, argv: list[str]) -> subprocess.CompletedProcess:
+        index = argv.index("-File")
+        request = {"path": argv[index + 1], "arguments": argv[index + 2:]}
+        assert self.process.stdin
+        self.process.stdin.write(json.dumps(request) + "\n")
+        self.process.stdin.flush()
+        response = self._response()
+        return subprocess.CompletedProcess(
+            argv, response["returncode"], response["stdout"], response["stderr"],
+        )
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        assert self.process.stdin
+        self.process.stdin.close()
+        try:
+            self.process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait(timeout=10)
+        for reader in self.readers:
+            reader.join(timeout=10)
+            assert not reader.is_alive(), "PowerShell fixture reader did not exit"
+        assert self.process.stdout and self.process.stderr
+        self.process.stdout.close()
+        self.process.stderr.close()
+
+
+@pytest.fixture
+def powershell_host():
+    hosts: list[_PowerShellHost] = []
+
+    def start(fixture: dict, environment: dict[str, str]) -> _PowerShellHost:
+        host = _PowerShellHost(fixture["home"], environment)
+        hosts.append(host)
+        return host
+
+    yield start
+    for host in hosts:
+        host.close()
+
+
 @pytest.mark.parametrize("shell", [
     pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX emitter")),
     pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
 ])
 @pytest.mark.parametrize("owned", [False, True])
 def test_command_binding_real_catalog_read_only(
-    binding_fixture: dict, shell: str, owned: bool,
+    binding_fixture: dict, shell: str, owned: bool, powershell_host,
 ) -> None:
     _prepare_catalog(binding_fixture)
     if owned:
@@ -384,13 +482,15 @@ def test_command_binding_real_catalog_read_only(
         if shell == "bash" else
         [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(payload / "scripts/emit-command-catalog.ps1")]
     )
+    host = powershell_host(binding_fixture, environment) if shell == "powershell" else None
     before = _snapshot(binding_fixture["home"])
     for _ in range(2):
-        completed = subprocess.run(
+        completed = host.run(argv) if host else subprocess.run(
             argv, env=environment, cwd=binding_fixture["home"],
             capture_output=True, text=True, timeout=30, check=True,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
+        assert completed.returncode == 0, completed.stdout + completed.stderr
         envelope = json.loads(completed.stdout)
         match = re.search(r"```json\n(.*)\n```", envelope["additionalContext"])
         assert match, completed.stdout
@@ -402,7 +502,60 @@ def test_command_binding_real_catalog_read_only(
         ]
         assert catalog["commands"][0]["availability"] == "ready"
         assert catalog["binding"]["status"] == ("selected" if owned else "unresolved")
+        assert _snapshot(binding_fixture["home"]) == before
+    if host:
+        host.close()
     assert _snapshot(binding_fixture["home"]) == before
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")
+@pytest.mark.parametrize("launcher", ["py", "python", "alias-only"])
+def test_command_binding_catalog_python_launcher_avoids_app_alias(
+    binding_fixture: dict, launcher: str, powershell_host,
+) -> None:
+    _prepare_catalog(binding_fixture)
+    _publish(binding_fixture)
+    environment = _catalog_environment(binding_fixture)
+    python = sys.executable if os.name == "nt" else str(binding_fixture["home"] / "test-bin/python")
+    launcher_path = binding_fixture["home"] / "py-launcher.ps1"
+    launcher_path.write_text(
+        "if ($args[0] -ne '-3') { throw 'Python launcher must select Python 3' }\n"
+        "if (($args[1..5] -join ' ') -ne '-B -E -X utf8 -c') { throw 'Unexpected probe flags' }\n"
+        "Write-Output $env:TEST_PYTHON\nexit 0\n",
+        encoding="utf-8",
+    )
+    environment.update({
+        "TEST_PYTHON": python, "TEST_LAUNCHER": launcher,
+        "TEST_LAUNCHER_PATH": str(launcher_path),
+    })
+    wrapper = binding_fixture["home"] / "app-alias-fixture.ps1"
+    wrapper.write_text(
+        "function Get-Command {\n"
+        "    param($Name,$CommandType,$ErrorAction)\n"
+        "    if ($Name -eq 'py' -and $env:TEST_LAUNCHER -eq 'py') {\n"
+        "        return @{Source=$env:TEST_LAUNCHER_PATH}\n"
+        "    }\n"
+        "    if ($Name -eq 'python3') { return $null }\n"
+        "    if ($Name -eq 'python') {\n"
+        "        if ($env:TEST_LAUNCHER -eq 'python') { return @{Source=$env:TEST_PYTHON} }\n"
+        "        return @{Source='C:\\Users\\example\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe'}\n"
+        "    }\n"
+        "}\n"
+        "& (Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts/emit-command-catalog.ps1')\n",
+        encoding="utf-8",
+    )
+    host = powershell_host(binding_fixture, environment)
+    completed = host.run([POWERSHELL, "-File", str(wrapper)])
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    envelope = json.loads(completed.stdout)
+    match = re.search(r"```json\n(.*)\n```", envelope["additionalContext"])
+    assert match, completed.stdout
+    binding = json.loads(match.group(1))["binding"]
+    if launcher == "alias-only":
+        assert binding["status"] == "unresolved"
+        assert binding["reason"] == "binding-interpreter-unavailable"
+    else:
+        assert binding["status"] == "selected", binding
 
 
 @pytest.mark.parametrize("shell", [
@@ -411,7 +564,7 @@ def test_command_binding_real_catalog_read_only(
 ])
 @pytest.mark.parametrize("contextual", [False, True])
 def test_command_binding_native_manifest_publication_and_foreign_refusal(
-    binding_fixture: dict, shell: str, contextual: bool,
+    binding_fixture: dict, shell: str, contextual: bool, powershell_host,
 ) -> None:
     _prepare_catalog(binding_fixture)
     runtime = binding_fixture["legacy"]
@@ -473,11 +626,16 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
         program_path = binding_fixture["home"] / "publish-fixture.ps1"
         program_path.write_text(program, encoding="utf-8")
         argv = [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(program_path)]
-    completed = subprocess.run(
-        argv, env=environment, cwd=binding_fixture["home"],
-        capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
+    host = powershell_host(binding_fixture, environment) if shell == "powershell" else None
+
+    def run() -> subprocess.CompletedProcess:
+        return host.run(argv) if host else subprocess.run(
+            argv, env=environment, cwd=binding_fixture["home"],
+            capture_output=True, text=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+
+    completed = run()
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert _resolve(binding_fixture)["status"] == "selected"
     if contextual:
@@ -487,11 +645,7 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
         assert "commandBinding" not in manifest
         assert "commandLifecycle" not in manifest
         assert not (binding_fixture["legacy"] / "deploy-manifest.json").exists()
-        repeated = subprocess.run(
-            argv, env=environment, cwd=binding_fixture["home"],
-            capture_output=True, text=True, timeout=30,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
+        repeated = run()
         assert repeated.returncode == 0, repeated.stdout + repeated.stderr
         assert _resolve(binding_fixture)["status"] == "selected"
         return
@@ -501,13 +655,11 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
         },
     })
     before = _snapshot(binding_fixture["home"])
-    refused = subprocess.run(
-        argv, env=environment, cwd=binding_fixture["home"],
-        capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
+    refused = run()
     assert refused.returncode != 0
     assert "Command ownership" in refused.stderr
+    if host:
+        host.close()
     after = _snapshot(binding_fixture["home"])
     assert after.keys() == before.keys()
     for path, metadata in before.items():

@@ -495,6 +495,31 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 
 ## Journal
 
+### 2026-10-13 — Real launcher selection and initialized-host diagnostic acceptance
+
+- Review on the previous catalog head identified a Store app-execution alias
+  winning over a working Python launcher. Binding discovery now prefers the
+  real Python 3 path returned by `py -3`, then filters aliases from application
+  fallbacks. Regression cases cover launcher plus alias, real Python fallback,
+  and alias-only explicit unresolved binding.
+- Native run [38439977692](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38439977692)
+  disproved the retail CLR `(d)` fixture hypothesis as well: all six failures
+  occurred in the host-only control before product execution. The coupled
+  installer-fixture and bridge precision corrections passed in that run.
+  Earlier warmup and gather-only hypotheses also did not meet this boundary.
+- The approved acceptance shape now initializes one real PowerShell host,
+  stops its CLR recording before a READY handshake, then takes the complete
+  profile baseline externally. Two unchanged diagnostic script calls and host
+  shutdown must preserve bytes, directory membership, and modification times.
+  No product warmup, file exclusion, filesystem restriction, or production
+  policy override is introduced. Manifest publication/refusal uses the same
+  initialized-host fixture; concurrent lifecycle ownership still uses separate
+  actual native processes with its existing runtime-file assertions.
+- The corrected bounded binding/lifecycle/scope selection passed 85 tests,
+  including local PowerShell. This is not native Windows PowerShell 5.1 proof;
+  current-head native CI, review, and aggregate/lockdown gates remain required.
+  Phase 8, release, installed-copy proof, and the overall effort remain open.
+
 ### 2026-10-13 — Native host controls and source-footprint review follow-up
 
 - Current-head review resolved the earlier lifecycle/contextual findings but
