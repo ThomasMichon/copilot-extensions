@@ -512,6 +512,16 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   contracts passed 56 local cases. Current-head review, native Windows
   execution, and required checks remain necessary; full native copy acceptance
   and the broader diagnostic prerequisite remain open.
+- The next exact-head native Windows job
+  [115729114342](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38526848012/job/115729114342)
+  executed all four representative CLI cases and both transport cases, but
+  the aggregate correctly remained blocked: the trusted-CI guard forbids
+  dynamic runner routes. The manual workflow now uses two literal hosted
+  platform jobs with the same eight bounded partitions, without a guard
+  exception. Its workflow reference and derived-copy inventory are consistent.
+  Clone-neutral smoke ownership and Unicode/quoted transport are also covered;
+  the corrected smoke, partition, and trusted-CI selection passed 84 cases.
+  Fresh current-head native/aggregate checks and review remain necessary.
 
 ### 2026-10-13 — Lifecycle-owned catalogs merged; derived native diagnostic acceptance
 

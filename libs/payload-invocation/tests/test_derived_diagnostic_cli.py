@@ -5,6 +5,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,21 @@ def _native_copies() -> list[Path]:
     ]
 
 
+def _smoke_copy(copy: Path) -> bool:
+    return copy.relative_to(ROOT).parts[:2] == ("plugins", "agent-worktrees")
+
+
+@pytest.mark.parametrize("ancestor", ["clone", "agent-worktrees"])
+@pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-vault"])
+def test_derived_diagnostic_smoke_ownership_ignores_clone_ancestors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ancestor: str, plugin: str,
+) -> None:
+    root = tmp_path / ancestor / "source"
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", root)
+    copy = root / "plugins" / plugin / "scripts/installation-context/installation-context.sh"
+    assert _smoke_copy(copy) is (plugin == "agent-worktrees")
+
+
 def _profile_environment(home: Path) -> dict[str, str]:
     environment = _catalog_environment({
         "home": home, "payload": home,
@@ -41,17 +57,14 @@ def _profile_environment(home: Path) -> dict[str, str]:
     for name in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT"):
         environment.pop(name, None)
     if os.name != "nt":
-        import pwd
-
-        account = pwd.getpwuid(os.getuid())
+        uid = os.getuid()
         entry = ":".join((
-            account.pw_name, account.pw_passwd, str(account.pw_uid),
-            str(account.pw_gid), account.pw_gecos, str(home), account.pw_shell,
+            "fixture", "x", str(uid), str(os.getgid()), "fixture", str(home), "/bin/sh",
         ))
         lookup = home / "test-bin/getent"
         lookup.write_text(
             "#!/bin/sh\n"
-            f'[ "$#" -eq 2 ] && [ "$1" = passwd ] && [ "$2" = {account.pw_uid} ]'
+            f'[ "$#" -eq 2 ] && [ "$1" = passwd ] && [ "$2" = {uid} ]'
             " || exit 1\n"
             f"printf '%s\\n' {shlex.quote(entry)}\n",
             encoding="utf-8",
@@ -72,7 +85,7 @@ def _powershell_command(home: Path, script: Path, arguments: list[str]) -> list[
         tokens.extend((flag, literal(value)))
     wrapper.write_text(
         f"& {literal(str(script))} {' '.join(tokens)}\nexit $LASTEXITCODE\n",
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
     assert POWERSHELL is not None
     return [POWERSHELL, "-NoProfile", "-File", str(wrapper)]
@@ -83,7 +96,7 @@ def _powershell_command(home: Path, script: Path, arguments: list[str]) -> list[
 def test_derived_diagnostic_host_preserves_named_arguments(
     tmp_path: Path, exit_code: int,
 ) -> None:
-    home = tmp_path / "space ' quoted home"
+    home = tmp_path / "space ' quoted caf\u00e9 home"
     home.mkdir()
     script = home / "advanced-parameter-fixture.ps1"
     script.write_text(
@@ -93,7 +106,9 @@ def test_derived_diagnostic_host_preserves_named_arguments(
         f"exit {exit_code}\n",
         encoding="utf-8",
     )
-    arguments = ["status", "-PayloadRoot", str(home), "-SourceJson", '{"quote":"a\'b"}']
+    arguments = [
+        "status", "-PayloadRoot", str(home), "-SourceJson", '{"quote":"a\'b","unicode":"\u00e9"}',
+    ]
     command = _powershell_command(home, script, arguments)
     host = _PowerShellHost(home, _profile_environment(home))
     before = _snapshot(home)
@@ -113,7 +128,7 @@ def test_derived_diagnostic_host_preserves_named_arguments(
 @pytest.mark.parametrize("copy", [
     pytest.param(
         copy, id=copy.relative_to(ROOT).as_posix(),
-        marks=() if "agent-worktrees" in copy.parts else pytest.mark.derived_diagnostic_full,
+        marks=() if _smoke_copy(copy) else pytest.mark.derived_diagnostic_full,
     )
     for copy in _native_copies()
 ])

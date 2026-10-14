@@ -174,17 +174,26 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
     )
     assert workflow.get("on", workflow.get(True)) == {"workflow_dispatch": None}
-    job = workflow["jobs"]["derived-diagnostics"]
-    assert job["timeout-minutes"] == 4
-    matrix = job["strategy"]["matrix"]
-    assert set(matrix["os"]) == {"ubuntu-latest", "windows-latest"}
-    assert set(matrix["mode"]) == {"mode_legacy", "mode_active"}
-    assert set(matrix["pointer"]) == {"pointer_absent", "pointer_retained"}
-    assert job["strategy"]["fail-fast"] is False
-    step = next(step for step in job["steps"] if step.get("name") == "All derived native copies")
-    assert "test_derived_diagnostic_cli.py" in step["run"]
-    assert '-k "${{ matrix.mode }} and ${{ matrix.pointer }}"' in step["run"]
-    assert "-m " not in step["run"].rsplit("pytest", 1)[1]
+    routes = {
+        "derived-diagnostics-posix": "ubuntu-latest",
+        "derived-diagnostics-windows": "windows-latest",
+    }
+    assert set(workflow["jobs"]) == set(routes)
+    for name, runner in routes.items():
+        job = workflow["jobs"][name]
+        assert job["runs-on"] == runner
+        assert job["timeout-minutes"] == 4
+        matrix = job["strategy"]["matrix"]
+        assert set(matrix) == {"mode", "pointer"}
+        assert set(matrix["mode"]) == {"mode_legacy", "mode_active"}
+        assert set(matrix["pointer"]) == {"pointer_absent", "pointer_retained"}
+        assert job["strategy"]["fail-fast"] is False
+        step = next(step for step in job["steps"] if step.get("name") == "All derived native copies")
+        assert "test_derived_diagnostic_cli.py" in step["run"]
+        assert '-k "${{ matrix.mode }} and ${{ matrix.pointer }}"' in step["run"]
+        assert "-m " not in step["run"].rsplit("pytest", 1)[1]
+        if runner == "windows-latest":
+            assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
 
 
 def test_foundation_lane_leaves_new_native_matrix_to_its_scoped_step() -> None:
