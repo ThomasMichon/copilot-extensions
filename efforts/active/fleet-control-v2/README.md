@@ -1103,3 +1103,14 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   query/delegation/credential delivery and encrypted role transport still need
   their own owner-agreed implementation and proofs. No full Plan/Validation
   item closes; the parent effort stays Active.
+- First PR review found a real concurrency defect: request timestamps could be
+  admitted out of completion order and produce a false clock-rollback refusal.
+  Replaced per-request timestamps with a required trusted owner clock sampled
+  under the lock before verification and at atomic admission. Trust/token/proof
+  validity is rechecked at that final sample, so slow verification cannot
+  admit expired evidence. Added real-crypto reverse-completion and delayed
+  expiry regressions. Revised focused verification passes 66, and the full
+  contained portfolio passes 670 with six skips in 87.26 seconds under the
+  unchanged 120-second deadline; lint and install-contract gates pass.
+  Re-review and current-head hosted CI remain pending; the earlier review is
+  not a passing verdict.

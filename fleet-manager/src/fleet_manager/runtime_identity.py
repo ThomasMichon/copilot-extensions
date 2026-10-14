@@ -143,10 +143,10 @@ class IdentityVerifier:
     not independent replicas with a common nonce or independent replay caches.
     """
 
-    def __init__(self, *, issuer, audience, jwks, trust_valid_until,
+    def __init__(self, *, issuer, audience, jwks, trust_valid_until, clock,
                  replay_capacity=MAX_REPLAYS):
         if (not _https(issuer) or not _text(audience, 512)
-                or not _time(trust_valid_until)
+                or not _time(trust_valid_until) or not callable(clock)
                 or type(replay_capacity) is not int
                 or not 1 <= replay_capacity <= MAX_REPLAYS):
             raise IdentityError("invalid-trust")
@@ -172,6 +172,7 @@ class IdentityVerifier:
         self._audience = audience
         self._keys = keys
         self._trust_valid_until = trust_valid_until
+        self._clock = clock
         self._capacity = replay_capacity
         self._nonce = secrets.token_urlsafe(32)
         self._replays = {}
@@ -183,19 +184,30 @@ class IdentityVerifier:
         """Server challenge value; expose only on the adopted protected transport."""
         return self._nonce
 
-    def verify(self, access_token, proof, *, method, target_uri, now):
-        """Verify one request using server-derived method/HTTPS URI and epoch time.
+    def _now_locked(self):
+        now = self._clock()
+        if not _time(now):
+            raise IdentityError("invalid-clock")
+        if now < self._last_time:
+            raise IdentityError("clock-rollback")
+        self._last_time = now
+        if now >= self._trust_valid_until:
+            raise IdentityError("authority-unavailable")
+        return now
+
+    def verify(self, access_token, proof, *, method, target_uri):
+        """Verify one request using server-derived method/HTTPS URI and owned clock.
 
         The caller must establish encrypted server-authenticated transport and
         canonical external routing before this call, never from request-supplied
         identity objects or untrusted forwarding headers. No network I/O occurs.
         """
-        if (not _time(now) or not _https(target_uri, target=True)
+        if (not _https(target_uri, target=True)
                 or not isinstance(method, str)
                 or not re.fullmatch(r"[A-Z]{1,16}", method)):
             raise IdentityError("invalid-request-context")
-        if now >= self._trust_valid_until:
-            raise IdentityError("authority-unavailable")
+        with self._lock:
+            self._now_locked()
         header, claims = _parts(access_token, MAX_ACCESS_BYTES)
         if (set(header) != {"alg", "typ", "kid"} or header["alg"] != "ES256"
                 or header["typ"] != "at+jwt" or not _text(header["kid"], 128)):
@@ -207,14 +219,10 @@ class IdentityVerifier:
         if (claims.get("iss") != self._issuer or not _text(claims.get("sub"))
                 or claims.get("aud") != self._audience
                 or not _time(claims.get("iat")) or not _time(claims.get("exp"))
-                or claims["exp"] <= claims["iat"]
-                or claims["iat"] > now + CLOCK_SKEW):
+                or claims["exp"] <= claims["iat"]):
             raise IdentityError("invalid-credential")
-        if now >= claims["exp"]:
-            raise IdentityError("expired-credential")
         if "nbf" in claims and (
-                not _time(claims["nbf"]) or claims["nbf"] >= claims["exp"]
-                or claims["nbf"] > now + CLOCK_SKEW):
+                not _time(claims["nbf"]) or claims["nbf"] >= claims["exp"]):
             raise IdentityError("invalid-credential")
         cnf = claims.get("cnf")
         if (not isinstance(cnf, dict) or set(cnf) != {"jkt"}
@@ -233,7 +241,6 @@ class IdentityVerifier:
         if (set(proof_claims) != required or not _text(proof_claims["jti"], 128)
                 or proof_claims["htm"] != method or proof_claims["htu"] != target_uri
                 or not _time(proof_claims["iat"])
-                or not now - PROOF_AGE - CLOCK_SKEW <= proof_claims["iat"] <= now + CLOCK_SKEW
                 or not _text(proof_claims["nonce"], 43)
                 or not hmac.compare_digest(proof_claims["nonce"], self._nonce)):
             raise IdentityError("invalid-proof")
@@ -244,9 +251,14 @@ class IdentityVerifier:
             raise IdentityError("invalid-token-binding")
         replay_id = (cnf["jkt"], proof_claims["jti"])
         with self._lock:
-            if now < self._last_time:
-                raise IdentityError("clock-rollback")
-            self._last_time = now
+            now = self._now_locked()
+            if now >= claims["exp"]:
+                raise IdentityError("expired-credential")
+            if (claims["iat"] > now + CLOCK_SKEW
+                    or claims.get("nbf", 0) > now + CLOCK_SKEW):
+                raise IdentityError("invalid-credential")
+            if not now - PROOF_AGE - CLOCK_SKEW <= proof_claims["iat"] <= now + CLOCK_SKEW:
+                raise IdentityError("invalid-proof")
             self._replays = {
                 key: expiry for key, expiry in self._replays.items() if expiry >= now
             }

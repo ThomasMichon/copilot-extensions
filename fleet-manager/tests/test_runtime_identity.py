@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import threading
 
 from joserfc import jwt
 from joserfc.jwk import ECKey
@@ -24,6 +25,14 @@ AUDIENCE = "example-gateway"
 TARGET = "https://gateway.example/v1/observations"
 
 
+class Clock:
+    def __init__(self, value=NOW):
+        self.value = value
+
+    def __call__(self):
+        return self.value
+
+
 @pytest.fixture
 def keys():
     return ECKey.generate_key("P-256"), ECKey.generate_key("P-256")
@@ -33,7 +42,8 @@ def verifier(keys, **kwargs):
     public = {**keys[0].as_dict(private=False), "kid": "issuer-1"}
     return IdentityVerifier(
         issuer=ISSUER, audience=AUDIENCE, jwks={"keys": [public]},
-        trust_valid_until=kwargs.pop("trust_valid_until", NOW + 86400 * 31), **kwargs,
+        trust_valid_until=kwargs.pop("trust_valid_until", NOW + 86400 * 31),
+        clock=kwargs.pop("clock", Clock()), **kwargs,
     )
 
 
@@ -60,8 +70,10 @@ def pair(keys, owner, *, now=NOW, access=None, proof=None, access_header=None,
     return token, attestation
 
 
-def check(owner, credentials, *, now=NOW, method="GET", target_uri=TARGET):
-    return owner.verify(*credentials, method=method, target_uri=target_uri, now=now)
+def check(owner, credentials, *, now=None, method="GET", target_uri=TARGET):
+    if now is not None:
+        owner._clock.value = now
+    return owner.verify(*credentials, method=method, target_uri=target_uri)
 
 
 def refuses(owner, credentials, code, **kwargs):
@@ -243,7 +255,7 @@ def test_reject_private_wrong_type_and_malformed_public_key(keys, change):
     public = {**keys[0].as_dict(private=False), "kid": "issuer-1", **change}
     with pytest.raises(IdentityError):
         IdentityVerifier(issuer=ISSUER, audience=AUDIENCE, jwks={"keys": [public]},
-                         trust_valid_until=NOW + 60)
+                         trust_valid_until=NOW + 60, clock=Clock())
 
 
 @pytest.mark.parametrize("context", [
@@ -251,7 +263,7 @@ def test_reject_private_wrong_type_and_malformed_public_key(keys, change):
     {"target_uri": TARGET + "?q=1"}, {"target_uri": TARGET + "#x"},
     {"target_uri": TARGET + "?"}, {"target_uri": TARGET + "#"},
     {"target_uri": "https://user:password@gateway.example/v1/observations"},
-    {"method": "get"}, {"now": True},
+    {"method": "get"},
 ])
 def test_trusted_context_must_be_explicit_https_route(keys, context):
     owner = verifier(keys)
@@ -268,9 +280,9 @@ from joserfc.jwk import ECKey
 from fleet_manager.runtime_identity import IdentityVerifier, IdentityError
 v = json.load(sys.stdin)
 owner = IdentityVerifier(issuer=v['issuer'], audience=v['audience'],
-    jwks=v['jwks'], trust_valid_until=v['now'] + 3600)
+    jwks=v['jwks'], trust_valid_until=v['now'] + 3600, clock=lambda: v['now'])
 try:
-    owner.verify(v['token'], v['proof'], method='GET', target_uri=v['target'], now=v['now'])
+    owner.verify(v['token'], v['proof'], method='GET', target_uri=v['target'])
 except IdentityError as exc:
     assert exc.code == 'invalid-proof'
 else:
@@ -278,7 +290,7 @@ else:
 key = ECKey.import_key(v['proof_key'])
 proof = jwt.encode({'alg':'ES256', 'typ':'dpop+jwt', 'jwk':key.as_dict(private=False)},
     {**v['claims'], 'nonce':owner.nonce}, key)
-identity = owner.verify(v['token'], proof, method='GET', target_uri=v['target'], now=v['now'])
+identity = owner.verify(v['token'], proof, method='GET', target_uri=v['target'])
 assert identity.subject == 'principal-1'
 print('fresh-process-verified')
 """
@@ -307,7 +319,7 @@ from fleet_manager.runtime_identity import IdentityVerifier, IdentityError
 assert 'joserfc' not in sys.modules
 try:
     IdentityVerifier(issuer='https://issuer.example', audience='gateway',
-        jwks=json.load(sys.stdin), trust_valid_until=1900000100)
+        jwks=json.load(sys.stdin), trust_valid_until=1900000100, clock=lambda: 1900000000)
 except IdentityError as exc:
     assert exc.code == 'unsupported-profile'
 else:
@@ -323,3 +335,57 @@ print('stdlib-only-refusal')
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "stdlib-only-refusal"
+
+
+def test_older_concurrent_request_can_finish_after_newer_request(keys, monkeypatch):
+    from fleet_manager import runtime_identity
+
+    owner = verifier(keys)
+    older = pair(keys, owner, proof={"jti": "older"})
+    newer = pair(keys, owner, now=NOW + 1, proof={"jti": "newer"})
+    entered, release = threading.Event(), threading.Event()
+    real_verify = runtime_identity._verify
+
+    def delayed_verify(value, key):
+        if value == older[0]:
+            entered.set()
+            assert release.wait(5)
+        real_verify(value, key)
+
+    monkeypatch.setattr(runtime_identity, "_verify", delayed_verify)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        waiting = pool.submit(check, owner, older)
+        try:
+            assert entered.wait(5)
+            owner._clock.value = NOW + 1
+            assert check(owner, newer).verified_at == NOW + 1
+        finally:
+            release.set()
+        assert waiting.result(timeout=5).verified_at == NOW + 1
+
+
+@pytest.mark.parametrize("advance,expiry,trust,code", [
+    (2, NOW + 1, NOW + 1000, "expired-credential"),
+    (91, NOW + 1000, NOW + 1000, "invalid-proof"),
+    (2, NOW + 1000, NOW + 1, "authority-unavailable"),
+])
+def test_current_time_rechecked_after_real_signature_verification(
+        keys, monkeypatch, advance, expiry, trust, code):
+    from fleet_manager import runtime_identity
+
+    owner = verifier(keys, trust_valid_until=trust)
+    credentials = pair(keys, owner, access={"exp": expiry})
+    real_verify = runtime_identity._verify
+
+    def advancing_verify(value, key):
+        real_verify(value, key)
+        owner._clock.value = NOW + advance
+
+    monkeypatch.setattr(runtime_identity, "_verify", advancing_verify)
+    refuses(owner, credentials, code)
+    assert not owner._replays
+
+
+def test_invalid_trusted_clock_refuses(keys):
+    owner = verifier(keys, clock=Clock(True))
+    refuses(owner, pair(keys, owner), "invalid-clock")

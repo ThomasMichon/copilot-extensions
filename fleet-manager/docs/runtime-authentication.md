@@ -27,11 +27,13 @@ contain private material, conflicting algorithm/use or non-verification
 operations. The caller owns independently authenticated key acquisition,
 rotation, currentness and revocation. This module does no discovery, key URL
 fetching, account selection, login or network I/O. Unknown keys refuse.
+The required trusted `clock` callable returns integer epoch seconds; it is
+sampled under the owner's lock, not taken from individual request timestamps.
 
-Call `verify(access_token, proof, method=..., target_uri=..., now=...)` only
+Call `verify(access_token, proof, method=..., target_uri=...)` only
 **inside an already authenticated encrypted server transport boundary**.
-The adapter supplies its actual method, canonical external HTTPS target URI
-without query or fragment, and trusted integer epoch time. It must validate
+The adapter supplies its actual method and canonical external HTTPS target URI
+without query or fragment. It must validate
 proxy termination and URI normalization itself, not trust forwarded headers.
 Passing a URL into this API does not establish TLS. There is no bearer-only,
 OS-peer or local-outage fallback.
@@ -64,6 +66,11 @@ Admission atomically retains `(proof-key thumbprint, proof ID)` until the proof
 is no longer valid, across access-token renewals. The default cap is 4096 live
 proofs (a caller may reduce it); full capacity explicitly refuses `resource-limit`
 without evicting still-valid entries. A clock rollback after admission refuses.
+The owner samples time before verification and again at atomic replay admission,
+rechecking trust, token and proof validity there. Request completion order does
+not determine clock order: an older concurrent request can finish after a newer
+one without a false rollback. A credential that expires during verification
+cannot enter the replay/admission fence.
 Application retries use a fresh proof and retain the original operation ID and
 content binding; this verifier does not allocate operation IDs. DPoP does not
 sign arbitrary request bodies.
