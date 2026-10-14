@@ -88,8 +88,8 @@ not additional operator requirements or authorization to execute them.
 - [x] Extend the owning vision and reconcile prior reclamation/tidier ownership.
 - [x] Trace the existing daemon and collection boundaries; separate measured
   observations from performance hypotheses.
-- [ ] Land this vision/effort proposal through current-head review and required CI.
-- [ ] Record proposal outcome; retain future execution in #6620 and obtain
+- [x] Land this vision/effort proposal through current-head review and required CI.
+- [x] Record proposal outcome and retain future execution in #6620 behind
   separate operator authorization before entering Phase 2.
 
 ### Phase 2 - Baseline and one explicit lifecycle contract
@@ -204,3 +204,18 @@ implementation clearly gated. It does not mean any Phase 2-5 work is complete.
 - Read-only source tracing and anonymous timing summaries informed the plan.
   No runtime code, machine configuration, deletion policy or automatic
   activation was changed.
+
+### 2026-10-13 - Proposal reviewed and merged
+
+- Vision and plan PR #6623 merged to dev with a current-head approving Copilot
+  review and all required checks successful. Phase 1 planning is complete;
+  this entire effort is not complete.
+- Retained the operator's original spelling in the verbatim Request after
+  explaining the quotation-only review nit; no design or runtime finding
+  remained open.
+- Added a separate observed startup stall to the performance hypotheses:
+  Windows platform/WMI discovery can block configuration resolution before
+  the finalize handler. This is distinct from the recorded lock deferrals,
+  and requires a controlled, service-safe reproduction before a runtime fix.
+- The planning claim ends at proposal publication. Phase 2-5 implementation,
+  activation and rollout remain unassigned and unauthorized under #6620.
