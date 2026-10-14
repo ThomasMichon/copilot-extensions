@@ -271,9 +271,14 @@ locked-down hosts without themselves proving the package-source contract.
       applicable machine seasoning policy remain admission conditions, not
       permission to replace a pin.
 - [ ] Persist an assembly receipt recording the exact lock/profile identity,
-      signed manifest digest, selected versions/wheel hashes, target and
-      applicable policy; it is evidence of the existing provenance, not a
-      second lock or trust root. Reuse admitted unchanged dependencies without
+      selected versions/wheel hashes, target and applicable policy.
+      Artifact-mode receipts bind the signed artifact manifest digest;
+      source-build receipts instead bind the independently validated source
+      release identity/digest, exact fallback installation lock and trigger.
+      Source-mode proof must remain available without an artifact manifest
+      or successful artifact build/sign/publication. Both record the actual
+      assembly mode and evidence of existing provenance, not a second trust
+      root. Reuse admitted unchanged dependencies without
       requiring feed access, as the Runtime Assembly vision requires.
       Re-evaluate when explicit policy or supplied revocation evidence
       invalidates admission. An unadmitted cache entry is not reusable proof.
@@ -482,9 +487,12 @@ verified answer against its actual repository or machine configuration:
       selected artifact lock. Source-build tests separately prove permitted
       local assembly, governed build-dependency acquisition and refusal of
       unsafe source backends, with no public fallback.
-- [ ] Receipt-reuse tests change manifest digest, wheel bytes, target
-      interpreter/platform, lock/profile identity and effective policy independently;
-      each mismatch refuses reuse before slot activation. Matching reuse
+- [ ] Receipt-reuse tests independently change the artifact manifest digest
+      in artifact mode, source release identity/digest and fallback trigger
+      in source mode, and assembly mode, wheel bytes, target
+      interpreter/platform, lock/profile identity and effective policy in
+      both modes. Each mismatch refuses reuse before slot activation.
+      Matching source-mode reuse needs no artifact manifest; matching reuse
       preserves the selected pins and hashes without trusting ambient caches.
 - [ ] Acquisition stress tests independently reach the per-package/total
       acquisition, metadata/wheel byte, temporary-storage and inclusive-time
@@ -502,8 +510,10 @@ verified answer against its actual repository or machine configuration:
       blocked artifact dependencies while source inputs and an admissible
       governed closure remain available: each explicitly falls back, builds
       and health-checks a local venv, records the actual fallback lock/mode,
-      and activates atomically. Tampered artifacts, blocked fallback choices
-      and fallback build failures cannot activate or alter the prior slot.
+      independent source identity/digest and trigger without requiring an
+      artifact manifest, and activates atomically. Tampered artifacts,
+      blocked fallback choices and fallback build failures cannot activate
+      or alter the prior slot.
 - [ ] Release tests inject an optional artifact build/sign/upload failure
       while independent source validation passes. Source promotion and the
       client source path remain usable, artifact publication reports failure

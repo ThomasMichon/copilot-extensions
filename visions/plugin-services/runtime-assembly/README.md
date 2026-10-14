@@ -67,10 +67,14 @@ artifact and every third-party dependency against the release lock before it
 contributes to a generation (or against the authority's exact installation
 lock for a selected source fallback). A cache, seed, or accelerant speeds up
 acquisition. It is never a separate trust root. While another approved
-source for the same artifact is reachable, losing it changes only how long
-acquisition takes; when none is, the outcome is deferred (see
-*deferred-not-degraded*), never a different or unverified result. If an
-update leaves the dependency set unchanged, assembly reuses artifacts already
+source for the same artifact within the selected lock/path is reachable,
+losing it changes only how long acquisition takes. Exhausting those sources
+defers that path; admission never substitutes a different or unverified
+result within it. The installation authority may instead select the separate
+governed source-build path and its explicit exact installation lock (see
+*governed-client-source-fallback*). If neither permitted path succeeds, the
+outcome is deferred or refused (see *deferred-not-degraded*). If an update
+leaves the dependency set unchanged, assembly reuses artifacts already
 admitted on the host and needs no access to a package index or feed.
 
 ### first-party-only-public-distribution
