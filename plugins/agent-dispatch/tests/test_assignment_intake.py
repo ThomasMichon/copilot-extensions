@@ -511,6 +511,7 @@ def test_assignment_tcp_enqueue_latency_capacity_release_and_affinity(server_url
 def test_assignment_tcp_startup_and_reconnect_recover_unannounced_queue(server_url, app):
     bus = app.state.bus
     original = bus.subscribe
+    allow_initial_ready = threading.Event()
     reconnect_waiting = threading.Event()
     allow_reconnect = threading.Event()
     connections = 0
@@ -518,7 +519,10 @@ def test_assignment_tcp_startup_and_reconnect_recover_unannounced_queue(server_u
     async def disconnectable(**kwargs):
         nonlocal connections
         connections += 1
-        if connections > 1:
+        if connections == 1:
+            while not allow_initial_ready.is_set():
+                await asyncio.sleep(0.005)
+        else:
             reconnect_waiting.set()
             while not allow_reconnect.is_set():
                 await asyncio.sleep(0.005)
@@ -543,8 +547,11 @@ def test_assignment_tcp_startup_and_reconnect_recover_unannounced_queue(server_u
         loop.start()
         try:
             wait_for(lambda: spawned == [first["id"]])
-            wait_for(lambda: loop.status()["state"] == "connected")
             wait_for(lambda: loop.status()["reconciles"] >= 1)
+            assert loop.status()["reconciles"] == 1
+            allow_initial_ready.set()
+            wait_for(lambda: loop.status()["state"] == "connected")
+            wait_for(lambda: loop.status()["reconciles"] >= 2)
             bus.publish({"type": "test.disconnect"})
             assert reconnect_waiting.wait(3)
             assert loop.status()["state"] != "connected"
@@ -556,6 +563,7 @@ def test_assignment_tcp_startup_and_reconnect_recover_unannounced_queue(server_u
             wait_for(lambda: loop.status()["state"] == "connected")
             assert spawned == [first["id"], second["id"]]
         finally:
+            allow_initial_ready.set()
             allow_reconnect.set()
             assert loop.stop()
     wait_for(lambda: bus.subscriber_count == 0)

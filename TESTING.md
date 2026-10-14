@@ -83,8 +83,10 @@ byte-identical vendoring check alone does not satisfy that broader gate.
 
 ### Assignment reconnect contracts
 
-The assignment TCP reconnect guard holds the replacement SSE subscription at
-an explicit server-side barrier while creating unannounced work. It releases
+The assignment TCP reconnect guard first holds the initial ready frame until
+startup reconciliation completes, then waits for the independent ready-triggered
+read before disconnecting. It holds the replacement SSE subscription at
+an explicit server-side barrier while creating unannounced work, and releases
 that barrier only after checking the disconnected queue, rather than assuming
 an HTTP request and a fixed sleep fit inside the real reconnect backoff.
 The blocked-spawn presence guard also waits for actual reader readiness;
