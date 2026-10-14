@@ -291,11 +291,12 @@ def _find_unsuppressed_spawns(f: Path) -> tuple[str, list[tuple[int, str]]]:
 
 
 def _own_scope_nodes(node: ast.AST):
-    """``node``'s descendants, not descending into nested function/class bodies."""
+    """``node``'s descendants, not descending into nested scopes (function,
+    lambda and class bodies)."""
     pending = list(ast.iter_child_nodes(node))
     while pending:
         sub = pending.pop()
-        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
             continue
         yield sub
         pending.extend(ast.iter_child_nodes(sub))
@@ -340,23 +341,28 @@ class _DetachedSpawnFinder(ast.NodeVisitor):
         self._names: list[str] = []
         self._funcs: list[ast.AST] = []
         # Aliases per lexical scope, each indexed before its body is visited (a
-        # function may precede the import it uses); a function sees its own and
-        # its enclosing functions' imports, never a sibling's.
+        # function may precede the import it uses). As in Python, a scope sees
+        # its own imports and its enclosing functions' and module's, never a
+        # sibling's or an enclosing class body's.
         modules, popens, helpers = _subprocess_aliases(tree)
-        self._alias_stack: list[tuple[set[str], set[str], set[str]]] = [
-            ({"subprocess", *modules}, popens, {*_DETACH_HELPERS, *helpers})
+        self._alias_stack: list[tuple[tuple[set[str], set[str], set[str]], bool]] = [
+            (({"subprocess", *modules}, popens, {*_DETACH_HELPERS, *helpers}), False)
         ]
 
     def _scoped(self, node: ast.AST, *, func: bool) -> None:
         self._names.append(node.name)  # type: ignore[attr-defined]
         if func:
             self._funcs.append(node)
-            self._alias_stack.append(_subprocess_aliases(node))
+        self._alias_stack.append((_subprocess_aliases(node), not func))
         self.generic_visit(node)
+        self._alias_stack.pop()
         if func:
-            self._alias_stack.pop()
             self._funcs.pop()
         self._names.pop()
+
+    def _visible_aliases(self) -> list[tuple[set[str], set[str], set[str]]]:
+        *outer, innermost = self._alias_stack
+        return [aliases for aliases, is_class in outer if not is_class] + [innermost[0]]
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self._scoped(node, func=False)
@@ -369,9 +375,10 @@ class _DetachedSpawnFinder(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func
-        modules = set().union(*(scope[0] for scope in self._alias_stack))
-        popens = set().union(*(scope[1] for scope in self._alias_stack))
-        helpers = frozenset().union(*(scope[2] for scope in self._alias_stack))
+        visible = self._visible_aliases()
+        modules = set().union(*(scope[0] for scope in visible))
+        popens = set().union(*(scope[1] for scope in visible))
+        helpers = frozenset().union(*(scope[2] for scope in visible))
         is_popen = (
             (isinstance(func, ast.Attribute) and func.attr == "Popen"
              and isinstance(func.value, ast.Name) and func.value.id in modules)

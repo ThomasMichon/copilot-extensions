@@ -530,9 +530,12 @@ def _daemon_problems(problems):
      "    P(['svc'], **detached_kwargs())\nfrom subprocess import Popen as P\n"),
     ("import subprocess\nfrom agent_procutil import detached_kwargs as daemon_flags\n"
      "def start():\n    subprocess.Popen(['svc'], **daemon_flags())\n"),
+    ("from agent_procutil import detached_kwargs\nclass Service:\n"
+     "    import subprocess as sp\n    proc = sp.Popen(['svc'], **detached_kwargs())\n"),
 ], ids=[
     "kwargs-update", "attribute-helper-in-method", "imported-popen-alias", "module-alias",
     "module-alias-imported-after-use", "popen-alias-imported-after-use", "aliased-detach-helper",
+    "class-body-launch",
 ])
 def test_hand_rolled_detached_popen_is_flagged(repo, body):
     _mk_plugin(repo, "agent-daemon", adopts=True, body=body)
@@ -551,7 +554,16 @@ def test_hand_rolled_detached_popen_is_flagged(repo, body):
      "    def helper():\n        return detached_kwargs()\n"
      "    class Box:\n        kwargs = detached_kwargs()\n"
      "    return subprocess.Popen(['tool'], creationflags=0)\n"),
-], ids=["spawn-daemon", "no-detach-helper", "inline-allow-with-reason", "helper-only-in-nested-scope"])
+    ("import subprocess\nfrom agent_procutil import detached_kwargs\ndef outer():\n"
+     "    helper = lambda: detached_kwargs()\n"
+     "    return subprocess.Popen(['tool'], creationflags=0), helper\n"),
+    ("from agent_procutil import detached_kwargs\nclass Service:\n"
+     "    import subprocess as sp\n    def start(self, sp):\n"
+     "        return sp.Popen(['x'], **detached_kwargs())\n"),
+], ids=[
+    "spawn-daemon", "no-detach-helper", "inline-allow-with-reason", "helper-only-in-nested-scope",
+    "helper-only-in-lambda", "class-alias-not-visible-in-method",
+])
 def test_daemon_launches_that_pass(repo, body):
     _mk_plugin(repo, "agent-daemon", adopts=True, body=body)
     assert _daemon_problems(guard.verify()) == []
