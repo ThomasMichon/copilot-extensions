@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, openSync, closeSync, unlinkSync, lstatSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, openSync, closeSync, unlinkSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createControlClient } from "../extensions/agent-remote-driver/control-client.mjs";
@@ -8,14 +8,15 @@ export async function controlSession({ descriptorPath, statePath, action, ownerI
   if (!["status", "claim", "re-hook", "send", "steer", "abort", "release"].includes(action)) {
     throw new Error("Unknown driver command");
   }
-  const descriptorFile = resolve(descriptorPath);
+  const descriptorFile = realpathSync(resolve(descriptorPath));
   const descriptor = JSON.parse(readFileSync(descriptorFile, "utf8"));
   const client = createControlClient(descriptor);
   if (action === "status") return { ok: true, control: await client.health() };
   if (!statePath) throw new Error("A private --state file is required for ownership and mutations");
   const stateFile = resolve(statePath);
   const lockFile = `${stateFile}.lock`;
-  if (stateFile === descriptorFile || lockFile === descriptorFile) {
+  const samePath = (left, right) => process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+  if (samePath(stateFile, descriptorFile) || samePath(lockFile, descriptorFile)) {
     throw new Error("The claim state must not overwrite its discovery descriptor");
   }
   if (["send", "steer"].includes(action) && (typeof content !== "string" || !content)) {
@@ -36,6 +37,12 @@ export async function controlSession({ descriptorPath, statePath, action, ownerI
     try {
       if (!lstatSync(stateFile).isFile() || lstatSync(stateFile).isSymbolicLink()) {
         throw new Error("Claim state must be a regular, non-symlink file");
+      }
+      const descriptorInfo = statSync(descriptorFile, { bigint: true });
+      const stateInfo = statSync(stateFile, { bigint: true });
+      if (samePath(realpathSync(stateFile), descriptorFile) ||
+          (descriptorInfo.ino !== 0n && descriptorInfo.dev === stateInfo.dev && descriptorInfo.ino === stateInfo.ino)) {
+        throw new Error("The claim state must not overwrite its discovery descriptor");
       }
       saved = JSON.parse(readFileSync(stateFile, "utf8"));
     } catch (error) {
@@ -85,7 +92,23 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     });
     console.log(JSON.stringify(result));
   } catch (error) {
-    console.error(`Driver control failed: ${error.code || error.name || "error"}. Check the descriptor, private state and current ownership; never replay an uncertain mutation.`);
+    const effects = {};
+    for (const stage of ["abort", "send"]) {
+      if (["not_started", "dispatched", "completed"].includes(error.details?.effects?.[stage])) {
+        effects[stage] = error.details.effects[stage];
+      }
+    }
+    const mode = error.details?.control?.mode;
+    console.error(JSON.stringify({
+      ok: false,
+      code: typeof error.code === "string" && /^[a-zA-Z_]+$/.test(error.code) ? error.code : error.name || "error",
+      ...(Number.isInteger(error.status) ? { status: error.status } : {}),
+      ...(Object.keys(effects).length ? { effects } : {}),
+      ...(["human", "remote", "available"].includes(mode) ? {
+        control: { mode, ready: error.details.control.ready === true },
+      } : {}),
+      recovery: "Check current ownership and preserved pending state; never replay an uncertain mutation",
+    }));
     process.exitCode = 1;
   }
 }

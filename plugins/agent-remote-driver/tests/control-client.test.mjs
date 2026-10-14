@@ -1,11 +1,28 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync, linkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDriverServer } from "../extensions/agent-remote-driver/driver-server.mjs";
 import { createControlClient } from "../extensions/agent-remote-driver/control-client.mjs";
 import { controlSession } from "../bin/control-session.mjs";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+function runHelper(args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [
+      fileURLToPath(new URL("../bin/control-session.mjs", import.meta.url)), ...args,
+    ], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => child.kill(), 5_000);
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", (error) => { clearTimeout(timer); reject(error); });
+    child.on("close", (status) => { clearTimeout(timer); resolve({ status, stdout, stderr }); });
+  });
+}
 
 async function fixture(fn, native = {}) {
   const calls = [];
@@ -19,7 +36,7 @@ async function fixture(fn, native = {}) {
       server.control.observe({ type: "user.message", id: `message-${calls.length}`, data: { source: options.source } });
       return { accepted: true };
     },
-    abort: async () => ({ aborted: true }),
+    abort: async () => native.abort ? native.abort(server) : { aborted: true },
     subscribe: () => () => {},
   });
   server.control.markReady();
@@ -142,4 +159,40 @@ test("state paths cannot overwrite discovery and malformed state is not silently
     assert.equal(readFileSync(statePath, "utf8"), "{invalid");
     assert.equal(existsSync(`${statePath}.lock`), false);
   });
+});
+
+test("hard-link and Windows case aliases cannot overwrite the discovery descriptor", async () => {
+  await fixture(async ({ descriptorPath, statePath }) => {
+    const before = readFileSync(descriptorPath, "utf8");
+    linkSync(descriptorPath, statePath);
+    await assert.rejects(controlSession({
+      descriptorPath, statePath, action: "re-hook", ownerId: "driver",
+    }), /must not overwrite/);
+    assert.equal(readFileSync(descriptorPath, "utf8"), before);
+    if (process.platform === "win32") {
+      await assert.rejects(controlSession({
+        descriptorPath, statePath: descriptorPath.toUpperCase(), action: "re-hook", ownerId: "driver",
+      }), /must not overwrite/);
+      assert.equal(readFileSync(descriptorPath, "utf8"), before);
+    }
+  });
+});
+
+test("the real CLI retains redacted partial-effect and recovery diagnostics", async () => {
+  await fixture(async ({ descriptorPath, statePath }) => {
+    await controlSession({ descriptorPath, statePath, action: "re-hook", ownerId: "driver" });
+    const result = await runHelper(["abort", "--descriptor", descriptorPath, "--state", statePath]);
+    assert.equal(result.status, 1);
+    assert.equal(result.stdout, "");
+    const diagnostic = JSON.parse(result.stderr);
+    assert.equal(diagnostic.code, "driver_revoked");
+    assert.equal(diagnostic.status, 409);
+    assert.equal(diagnostic.effects.abort, "completed");
+    assert.equal(diagnostic.effects.send, "not_started");
+    assert.equal(diagnostic.control.mode, "human");
+    assert.equal(result.stderr.includes("secret"), false);
+  }, { abort: async (server) => {
+    server.control.observe({ type: "user.message", id: "during-abort", data: { source: "user" } });
+    return { aborted: true };
+  } });
 });

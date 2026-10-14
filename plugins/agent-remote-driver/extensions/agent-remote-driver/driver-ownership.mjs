@@ -194,7 +194,9 @@ export function createDriverOwnership({
   }
 
   function observe(event) {
-    if (event?.type !== "user.message" || (typeof event.agentId === "string" && event.agentId)) return false;
+    if (event?.type !== "user.message" ||
+        [event.agentId, event.data?.agentId, event.data?.parentToolCallId]
+          .some((value) => typeof value === "string" && value.length > 0)) return false;
     if (shortString(event.id)) {
       if (observedInputs.has(event.id)) return false;
       observedInputs.add(event.id);

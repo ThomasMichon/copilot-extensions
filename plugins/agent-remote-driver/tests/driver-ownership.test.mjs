@@ -131,6 +131,8 @@ test("sub-agent and non-user events do not claim root-human takeover", () => {
   const { ownership } = fixture();
   const lease = rehook(ownership);
   assert.equal(ownership.observe({ ...userInput(), agentId: "subagent-1" }), false);
+  assert.equal(ownership.observe({ ...userInput(), data: { agentId: "legacy-subagent" } }), false);
+  assert.equal(ownership.observe({ ...userInput(), data: { parentToolCallId: "legacy-parent" } }), false);
   assert.equal(ownership.observe({ type: "assistant.idle" }), false);
   assert.equal(ownership.snapshot().generation, lease.generation);
 });
