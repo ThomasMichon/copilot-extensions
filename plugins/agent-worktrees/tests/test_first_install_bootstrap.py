@@ -51,7 +51,9 @@ def test_bootstrap_stamps_payload_when_runtime_is_unprovisioned() -> None:
 
     assert 'bash "$_installer" stamp' in sh
     assert "! _aw_provisioned" in sh
-    assert "-File $installer stamp" in ps1
+    assert "& $installer stamp" in ps1
+    assert "& $exe -NoProfile" not in ps1
+    assert "--deferred-runtime --run-lifecycle" in ps1
     assert "Test-AwProvisioned" in ps1
     assert "deploy-manifest.json" in sh
     assert "deploy-manifest.json" in ps1

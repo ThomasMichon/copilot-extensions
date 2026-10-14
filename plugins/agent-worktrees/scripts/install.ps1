@@ -26,6 +26,10 @@
     Exact runtime installation root. Structured context callers must supply the
     root selected by the installation-context resolver.
 
+.PARAMETER BootstrapPython
+    Existing absolute Python executable supplied by the cold hook. Ownership
+    admission still runs through the canonical lifecycle helper.
+
 .PARAMETER RemoveConfig
     On uninstall: also delete project config and worktree session metadata.
 
@@ -45,6 +49,7 @@ param(
     [string]$ProjectName,
 
     [string]$InstallDir,
+    [string]$BootstrapPython,
     [switch]$RemoveConfig,
     [switch]$Force,
     [switch]$ZeroDowntime
@@ -129,8 +134,16 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
         $env:COPILOT_PLUGIN_STAGED_FROM = $null
     }
     $admissionPython = $null
-    $admissionLauncher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
-        Select-Object -First 1
+    if ($BootstrapPython) {
+        if (-not [IO.Path]::IsPathRooted($BootstrapPython) -or -not [IO.File]::Exists($BootstrapPython)) {
+            throw 'The supplied bootstrap Python must be an existing absolute executable.'
+        }
+        $admissionPython = $BootstrapPython
+    }
+    $admissionLauncher = if (-not $admissionPython) {
+        Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+    } else { $null }
     if ($admissionLauncher) {
         $admissionPreviousErrorAction = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
@@ -173,10 +186,17 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
         }
         if ($Action -eq 'stamp') { $admissionArgs += '--deferred-runtime' }
         elseif ($Action -eq 'uninstall') { $admissionArgs += '--teardown' }
-        & $admissionPython @admissionArgs --run-lifecycle -- `
-            (Get-Process -Id $PID).Path -NoLogo -NoProfile -ExecutionPolicy Bypass `
-            -File $PSCommandPath @admissionForward
-        exit $LASTEXITCODE
+        $admissionPreviousErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & $admissionPython @admissionArgs --run-lifecycle -- `
+                (Get-Process -Id $PID).Path -NoLogo -NoProfile -ExecutionPolicy Bypass `
+                -File $PSCommandPath @admissionForward
+            $admissionExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $admissionPreviousErrorAction
+        }
+        exit $admissionExitCode
     }
 }
 # === end command-lifecycle: admission before staging ===
@@ -3843,6 +3863,20 @@ function Reconcile-Binstubs {
 
 # -- Actions --------------------------------------------------------------
 
+function Copy-StampDirectory {
+    param([string]$Source, [string]$Destination)
+    if ([IO.File]::GetAttributes($Source) -band [IO.FileAttributes]::ReparsePoint) {
+        throw "Snapshot source directory is a reparse point: $Source"
+    }
+    [void][IO.Directory]::CreateDirectory($Destination)
+    foreach ($file in [IO.Directory]::EnumerateFiles($Source)) {
+        [IO.File]::Copy($file, [IO.Path]::Combine($Destination, [IO.Path]::GetFileName($file)), $true)
+    }
+    foreach ($directory in [IO.Directory]::EnumerateDirectories($Source)) {
+        Copy-StampDirectory $directory ([IO.Path]::Combine($Destination, [IO.Path]::GetFileName($directory)))
+    }
+}
+
 function Invoke-Stamp {
     # Fast base install (#1393, snapshot slot model): copy the payload SOURCE into
     # ~/.agent-worktrees/snapshots/<ver>/, record markers, and deploy ONLY the
@@ -3862,7 +3896,12 @@ function Invoke-Stamp {
         New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
         $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
         Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+            $destination = [IO.Path]::Combine($snapTmp, $_.Name)
+            if ($_.PSIsContainer) {
+                Copy-StampDirectory $_.FullName $destination
+            } else {
+                [IO.File]::Copy($_.FullName, $destination, $true)
+            }
         }
         Move-Item -LiteralPath $snapTmp -Destination $snapDir
         Write-ServiceOk "Snapshot: $snapDir"

@@ -1,0 +1,9 @@
+{
+  "comment": "Reduce cold session-start catalog and stamp overhead while preserving installation ownership checks.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

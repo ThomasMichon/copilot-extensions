@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -1074,6 +1075,76 @@ def test_early_installer_utilities_are_powershell_51_safe_ascii():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell compatibility")
+def test_native_stamp_directory_copy_preserves_complete_tree(tmp_path: Path):
+    powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
+    if not powershell:
+        pytest.skip("PowerShell is unavailable")
+    source = tmp_path / "source [literal]"
+    destination = tmp_path / "snapshot"
+    (source / ".hidden" / "nested").mkdir(parents=True)
+    (source / "empty").mkdir()
+    (source / ".hidden" / "nested" / "payload.bin").write_bytes(bytes(range(256)))
+    (source / "metadata.json").write_text('{"fixture": true}', encoding="utf-8")
+    installer = INSTALLER.read_text(encoding="utf-8")
+    function = "function Copy-StampDirectory" + installer.split(
+        "function Copy-StampDirectory", 1
+    )[1].split("function Invoke-Stamp", 1)[0]
+    script = tmp_path / "copy.ps1"
+    script.write_text(
+        "$ErrorActionPreference = 'Stop'\n" + function
+        + "\nCopy-StampDirectory $args[0] $args[1]\n", encoding="utf-8"
+    )
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-File", str(script), str(source), str(destination)],
+        capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stderr
+    assert {str(path.relative_to(source)) for path in source.rglob("*")} == {
+        str(path.relative_to(destination)) for path in destination.rglob("*")
+    }
+    for path in source.rglob("*"):
+        if path.is_file():
+            assert (destination / path.relative_to(source)).read_bytes() == path.read_bytes()
+
+
+@pytest.mark.parametrize("paused", [False, True])
+def test_powershell_hook_bootstrap_uses_canonical_lifecycle(tmp_path: Path, paused):
+    powershell = shutil.which("powershell.exe")
+    if not powershell:
+        pytest.skip("Windows PowerShell 5.1 is unavailable")
+    home = tmp_path / "home"
+    home.mkdir()
+    state = tmp_path / "killswitch.json"
+    state.write_text(json.dumps({"active": paused}), encoding="utf-8")
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(PLUGIN),
+        "COPILOT_EXTENSIONS_CONTEXT": "",
+        "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(state),
+    }
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-File", str(PLUGIN / "scripts" / "bootstrap-check.ps1"),
+         "-BootstrapPython", sys.executable],
+        capture_output=True, text=True, env=env, timeout=25,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {}
+    runtime = home / ".agent-worktrees"
+    if paused:
+        assert not runtime.exists()
+        assert "bootstrap-killswitch" in result.stderr
+    else:
+        assert (runtime / "stamped-version").is_file(), result.stderr
+        snapshot = Path((runtime / "payload-dir").read_text().strip())
+        assert (snapshot / "scripts" / "command_binding.py").is_file()
+        assert (home / ".local" / "bin" / "agent-worktrees.cmd").is_file()
+        assert not (runtime / "versions").exists()
+
+
 def test_powershell_51_stamp_succeeds(tmp_path: Path):
     powershell = shutil.which("powershell.exe")
     if not powershell:

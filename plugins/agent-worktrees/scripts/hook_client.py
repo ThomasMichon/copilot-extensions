@@ -313,33 +313,67 @@ def _registration_context(payload: dict, home: Path) -> str:
 
 def _command_catalog_context() -> str:
     scripts = Path(__file__).resolve().parent
-    if os.name == "nt":
-        script = scripts / "emit-command-catalog.ps1"
-        shell = shutil.which("pwsh") or shutil.which("powershell.exe")
-        argv = (
-            [shell, "-NoLogo", "-NoProfile", "-File", str(script)]
-            if shell else []
-        )
-    else:
-        script = scripts / "emit-command-catalog.sh"
-        shell = shutil.which("bash")
-        argv = [shell, str(script)] if shell else []
-    if not argv or not script.is_file():
-        return ""
+    windows = os.name == "nt"
+    script = scripts / ("emit-command-catalog.ps1" if windows else "emit-command-catalog.sh")
+    previous_bytecode = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
     try:
-        completed = subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=2.0,
-            check=False,
-            env={**os.environ, "PYTHONPATH": ""},
+        # The generated declaration is shared with the native catalog emitter.
+        prefix = "# payload-command-catalog-contract: "
+        declaration = next(
+            line[len(prefix):]
+            for line in script.read_text(encoding="utf-8").splitlines()
+            if line.startswith(prefix)
         )
-    except (OSError, subprocess.SubprocessError):
+        contract = json.loads(declaration)
+        if contract["plugin"] != "agent-worktrees":
+            raise ValueError("Catalog declaration belongs to another plugin")
+        suffix = ""
+        shell = "direct"
+        if windows:
+            shim = contract["windowsCatalogShim"]
+            if shim not in {"powershell", "cmd"}:
+                raise ValueError("Unsupported catalog command shim")
+            suffix = ".ps1" if shim == "powershell" else ".cmd"
+            shell = "direct" if shim == "powershell" else "cmd"
+        root = scripts.parent
+        installer = scripts / ("install.ps1" if windows else "install.sh")
+        commands = []
+        for command in contract["commands"]:
+            path = root / (command["relativePath"] + suffix)
+            ready = path.is_file() and installer.is_file()
+            if not windows:
+                ready = ready and os.access(path, os.X_OK)
+            commands.append({
+                "id": command["id"],
+                "argv": [str(path)],
+                "shell": shell,
+                "purpose": command["purpose"],
+                "availability": "ready" if ready else "unavailable",
+            })
+        helper = _load_sibling("command_binding.py")
+        if helper is None:
+            raise ValueError("Payload command binding helper is unavailable")
+        catalog = {
+            "schema": "copilot-extensions.session-command-catalog",
+            "version": 1,
+            "plugin": contract["plugin"],
+            "payload": {"provenance": "payload-local"},
+            "commands": commands,
+            "binding": helper.binding_for_payload(
+                root, contract["plugin"], Path.home() / ".agent-worktrees"
+            ),
+        }
+    except (OSError, UnicodeError, ValueError, KeyError, TypeError, StopIteration) as error:
+        print(f"[agent-worktrees] Command catalog unavailable: {error}", file=sys.stderr)
         return ""
+    finally:
+        sys.dont_write_bytecode = previous_bytecode
     return (
-        _additional_context(completed.stdout)
-        if completed.returncode == 0 else ""
+        _COMMAND_CATALOG_HEADING + "\n\n"
+        "Invoke the exact `argv` below. Do not search `PATH` or substitute a "
+        "same-named command from another payload.\n\n"
+        "```json\n" + json.dumps(catalog, sort_keys=True) + "\n```"
     )
 
 
@@ -530,11 +564,44 @@ def _runtime_python(home: Path) -> Path | None:
 
 
 def _bootstrap_first_install(payload: dict) -> dict:
+    if os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip():
+        return {}
     scripts = Path(__file__).resolve().parent
+    direct_stamp = False
     if os.name == "nt":
         script = scripts / "bootstrap-check.ps1"
         shell = shutil.which("pwsh") or shutil.which("powershell.exe")
-        argv = [shell, "-NoLogo", "-NoProfile", "-File", str(script)] if shell else []
+        argv = [
+            shell, "-NoLogo", "-NoProfile", "-File", str(script),
+            "-BootstrapPython", sys.executable,
+        ] if shell else []
+        installer = scripts / "install.ps1"
+        binding = scripts / "command_binding.py"
+        if shell and installer.is_file() and binding.is_file():
+            state_path = Path(
+                os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE")
+                or Path.home() / ".copilot-extensions" / "bootstrap-killswitch.json"
+            )
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8-sig"))
+            except (OSError, UnicodeError, ValueError):
+                state = None
+            if isinstance(state, dict) and state.get("active") is True:
+                reason = state.get("reason")
+                message = f"ACTIVE -- {reason}" if reason else "ACTIVE"
+                return {"_stderr": (
+                    f"[bootstrap-killswitch] {message}; skipping automatic reconcile.\n"
+                )}
+            argv = [
+                sys.executable, "-I", "-B", "-X", "utf8", str(binding),
+                "--payload-root", str(scripts.parent), "--plugin-id", "agent-worktrees",
+                "--legacy-root", str(Path.home() / ".agent-worktrees"),
+                "--source-payload-root", str(scripts.parent),
+                "--deferred-runtime", "--run-lifecycle", "--",
+                shell, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                "-File", str(installer), "stamp", "-BootstrapPython", sys.executable,
+            ]
+            direct_stamp = True
     else:
         script = scripts / "bootstrap-check.sh"
         shell = shutil.which("bash")
@@ -550,8 +617,17 @@ def _bootstrap_first_install(payload: dict) -> dict:
             check=False,
             capture_output=True,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as error:
+        if direct_stamp:
+            return {"_stderr": f"[agent-worktrees] Bootstrap stamp unavailable: {error}\n"}
         return {}
+    if direct_stamp:
+        diagnostic = (completed.stdout or "") + (completed.stderr or "")
+        if completed.returncode:
+            diagnostic += (
+                f"[agent-worktrees] Bootstrap stamp failed (exit {completed.returncode}).\n"
+            )
+        return {"_stderr": diagnostic} if diagnostic else {}
     result: dict = {}
     stdout = (completed.stdout or "").strip()
     if stdout:
