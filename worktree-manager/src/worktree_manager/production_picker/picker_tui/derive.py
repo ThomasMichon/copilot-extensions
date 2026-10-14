@@ -471,6 +471,18 @@ def _last_active_display(w):
     return _age(ts)
 
 
+def time_fields(w):
+    """Refresh relative presentation without re-deriving unchanged row facts."""
+    return {
+        "live_pulse": _pulse_level(w),
+        "age": _age(
+            w.get("completed_at") if w.get("status") == "finalized" else w.get("started_at")
+        ),
+        "age_secs": _age_secs(w),
+        "used": _last_active_display(w),
+    }
+
+
 def _bucket_from_raw(w):
     """Cleanup bucket for a raw worktree dict.
 
@@ -735,7 +747,6 @@ def norm(
         # line no longer expires -- ``live_rest`` grades its colour (amber
         # awaiting-operator, dim busy, grey idle) but never drops it.
         "live_intent": (w.get("live_intent") or "").strip(),
-        "live_pulse": _pulse_level(w),
         "live_rest": (w.get("live_rest") or "").strip(),
         "awaiting_operator": awaiting_operator,
         "kind": kind,
@@ -746,13 +757,7 @@ def norm(
         "asset_hints": _asset_hints(w),
         "relation": relation_label,
         "reciprocal_relation": reciprocal_relation,
-        "age": _age(
-            w.get("completed_at") if w.get("status") == "finalized"
-            else w.get("started_at")
-        ),
-        "age_secs": _age_secs(w),
-        # #3307 follow-up: recency of last interaction, distinct from AGE.
-        "used": _last_active_display(w),
+        **time_fields(w),
         "sess": _sess(w),
         "turns": w.get("turn_count", 0),
         "session_count": w.get("session_count"),

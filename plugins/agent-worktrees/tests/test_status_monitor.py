@@ -4138,8 +4138,17 @@ def test_installers_invoke_monitor_cutover_after_activation():
         )
 
 
+def _elect_monitor_for_one_iteration(monkeypatch):
+    from agent_worktrees import self_retire, status_monitor_cutover as smc
+
+    retired = iter([False, True, True])
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: 42)
+    monkeypatch.setattr(self_retire, "is_superseded", lambda *args: next(retired))
+
+
+@pytest.mark.parametrize("first_failure", ["sqlite", "election"])
 def test_status_monitor_does_not_acknowledge_failed_authority_and_retries_before_sweep(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, first_failure,
 ):
     import sqlite3
 
@@ -4150,7 +4159,8 @@ def test_status_monitor_does_not_acknowledge_failed_authority_and_retries_before
     monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
     monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
     monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
-    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: "a" * 32)
+    elected = [first_failure != "election"]
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: 42 if elected[0] else None)
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
     monkeypatch.setattr(self_retire, "is_superseded", lambda *args: False)
     monkeypatch.setattr(m.status_monitor_cli, "sweep_mux_pane_args", lambda: None)
@@ -4164,7 +4174,7 @@ def test_status_monitor_does_not_acknowledge_failed_authority_and_retries_before
 
     def fail_once(store, **kwargs):
         attempts.append(store.generation)
-        if len(attempts) == 1:
+        if len(attempts) == 1 and first_failure == "sqlite":
             raise sqlite3.OperationalError("fixture authority locked")
         return activate(store, **kwargs)
 
@@ -4183,6 +4193,7 @@ def test_status_monitor_does_not_acknowledge_failed_authority_and_retries_before
             health = handles[0]("health", {})
             assert health["published"] is False
             assert health["worktrees"]["status"] == "unavailable"
+            elected[0] = True
 
         def current_read_count(self):
             return 0
@@ -4227,7 +4238,7 @@ def test_status_monitor_expires_orphaned_pane_args_before_eligible_sweep(
     monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
     monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
     monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
-    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: None)
+    _elect_monitor_for_one_iteration(monkeypatch)
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
     runtime_states = iter([False, True])
     monkeypatch.setattr(m, "_runtime_superseded", lambda **_kw: next(runtime_states))
@@ -4272,7 +4283,7 @@ def test_status_monitor_backs_off_at_iteration_boundary_without_mutating(
         lambda _path, extra=None: writes.append(extra) or True,
     )
     monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
-    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: None)
+    _elect_monitor_for_one_iteration(monkeypatch)
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
     runtime_states = iter([False, True])
     monkeypatch.setattr(m, "_runtime_superseded", lambda **_kw: next(runtime_states))
@@ -4325,7 +4336,7 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
     monkeypatch.setattr(m, "_load_hook_client_module", lambda: _FakeHookClient())
     monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
     monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
-    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: None)
+    _elect_monitor_for_one_iteration(monkeypatch)
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
     runtime_states = iter([False, True])
     monkeypatch.setattr(m, "_runtime_superseded", lambda **_kw: next(runtime_states))
@@ -4407,7 +4418,7 @@ def test_status_monitor_binds_and_unbinds_resident_push(tmp_path, monkeypatch):
     monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
     monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: True)
     monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
-    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: None)
+    _elect_monitor_for_one_iteration(monkeypatch)
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
     runtime_states = iter([False, True])
     monkeypatch.setattr(m, "_runtime_superseded", lambda **_kw: next(runtime_states))
@@ -4480,7 +4491,7 @@ def test_classify_daemon_started_published_in_lock_and_closed_on_exit(
         lambda _path, extra=None: writes.append(extra) or True,
     )
     monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
-    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: None)
+    _elect_monitor_for_one_iteration(monkeypatch)
     monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
     runtime_states = iter([False, True])
     monkeypatch.setattr(m, "_runtime_superseded", lambda **_kw: next(runtime_states))

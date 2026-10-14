@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import subprocess
 import threading
@@ -75,6 +76,7 @@ class CurrentFeedMixin:
         return not self._cancelled.is_set() and self._gen.get(source.cache_key, 0) == gen
 
     def _feed_commit(self, source, gen, rows) -> None:
+        derive.NOW = _dt.datetime.now()
         with self._lock:
             previous = {row["id"]: row for row in self._records.get(source.cache_key, [])}
         records = []
@@ -84,7 +86,7 @@ class CurrentFeedMixin:
             if old is not None and {
                 key: value for key, value in old_raw.items() if key != "_projection"
             } == {key: value for key, value in row.items() if key != "_projection"}:
-                records.append({**old, "raw": row})
+                records.append({**old, **derive.time_fields(row), "raw": row})
                 continue
             records.append(derive.norm(
                 row, source.machine, source.env,

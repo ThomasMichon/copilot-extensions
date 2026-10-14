@@ -452,12 +452,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         nonlocal hook_server, classify_server, tracking_write_server
         if admission_closed or not published_lock:
             return False
-        if status_monitor_cutover.active_generation_for_pid(os.getpid()) is not None:
-            try:
-                worktrees_runtime.activate()
-            except (ProjectionError, ProjectionUnavailable, OSError) as exc:
-                print(f"current-roster authority unavailable: {exc}", file=sys.stderr)
-                return False
+        try:
+            worktrees_runtime.activate()
+        except (ProjectionError, ProjectionUnavailable, OSError) as exc:
+            print(f"current-roster authority unavailable: {exc}", file=sys.stderr)
+            return False
         if hook_server is None and hook_policy.ready():
             try:
                 hook_server = HookIpcServer(_decide)

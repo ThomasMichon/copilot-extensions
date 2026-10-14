@@ -91,6 +91,55 @@ def test_current_feed_preserves_reorder_and_front_insertion_without_reemitting_u
     assert [row["id"] for row in rows] == front_ids
 
 
+def test_current_feed_refreshes_time_fields_for_reused_and_changed_rows(monkeypatch):
+    from datetime import datetime, timedelta
+
+    from worktree_manager.production_picker.picker_tui import derive
+
+    clock = [datetime(2026, 10, 14, 0, 25, 10)]
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock[0]
+
+    monkeypatch.setattr(loader_feed._dt, "datetime", Clock)
+    monkeypatch.setattr(derive, "NOW", datetime(2026, 10, 13))
+    source = data_ssh.Source("host", "Win", None, local=True)
+    loader = data_ssh.LiveLoader([source])
+    receiver = CurrentFeed()
+    base = {
+        "status": "active", "state": "wip", "dirty": 3,
+        "started_at": "2026-10-14T00:00:00",
+        "last_resumed_at": "2026-10-14T00:20:00",
+        "live_intent": "Working", "live_intent_at": "2026-10-14T00:25:00",
+    }
+    rows = [{"id": "one", **base}, {"id": "two", **base}]
+    norm = derive.norm
+    normalized = []
+
+    def counted(row, *args, **kwargs):
+        normalized.append(row["id"])
+        return norm(row, *args, **kwargs)
+
+    monkeypatch.setattr(derive, "norm", counted)
+    loader._feed_commit(source, 0, receive(receiver, snapshot(rows)))
+    before = loader.records()[0]
+    assert (before["age"], before["used"], before["live_pulse"]) == ("25m", "5m", "fresh")
+    normalized.clear()
+    clock[0] += timedelta(minutes=40)
+    changed = {**rows[1], "title": "Changed"}
+    loader._feed_commit(
+        source, 0, receive(receiver, update([changed], count=2, order=["one", "two"])),
+    )
+    assert normalized == ["two"]
+    for row in loader.records():
+        assert (row["age"], row["used"], row["live_pulse"]) == ("1h", "45m", "stale")
+        assert row["age_secs"] == before["age_secs"] + 2400
+        assert row["raw"]["dirty"] == 3 and row["raw"]["state"] == "wip"
+    assert loader.records()[0]["asset_hints"] is before["asset_hints"]
+
+
 @pytest.mark.parametrize("order", [[], ["unknown"], ["one", "one"], [False]])
 def test_current_feed_rejects_invalid_order_and_preserves_last_good_rows(order):
     receiver = CurrentFeed()

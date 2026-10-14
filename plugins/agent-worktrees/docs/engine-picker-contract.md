@@ -138,6 +138,8 @@ Successor promotion refuses adoption when current-roster authority activation
 fails. The unpublished successor retains retry state; it cannot sweep or
 acknowledge adoption until activation succeeds.
 
+Each committed publication advances the Manager's relative age, last-used and
+pulse presentation, including unchanged rows, without recomputing domain facts.
 The Manager retains explicitly stale last-good rows during reconnect, then
 replaces them only after a complete new-generation snapshot. Each retry starts
 the selected CLI again, re-resolving daemon discovery. A retained route whose

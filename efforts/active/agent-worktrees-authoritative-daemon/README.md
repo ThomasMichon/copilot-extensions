@@ -1059,6 +1059,18 @@ the actual one-shot loader error path, verify a visible failed source rather
 than an uncaught thread exception. The current-roster/feed/SSH selection passes
 171 cases with one platform skip.
 
+Authority startup now always attempts elected activation: absence of the active
+route is a failure, not permission to skip activation and acknowledge adoption.
+Both missing-election and SQLite-failure regressions prove refusal followed by
+successful retry. Existing monitor fixtures now provide an explicit elected
+route and bounded retirement; all 205 monitor cases pass with one platform skip.
+Held commits advance the presentation clock and refresh relative age, last-used
+and pulse fields even when facts are unchanged. The shared normalizer uses the
+same helper, while unchanged factual/asset presentation is still reused. A
+controlled-clock regression covers reused and changed rows without full
+renormalization of the former; 175 current-feed/source/pulse/recency cases pass
+with one platform skip.
+
 ### 2026-10-13 - Phase 6d.2 held feed and actual loader enrollment
 
 The existing authenticated status-monitor control endpoint now offers the
