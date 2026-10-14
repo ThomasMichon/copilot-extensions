@@ -827,6 +827,10 @@ def test_terminal_managed_record_rejects_new_session_activation(
         )},
     )
     monkeypatch.setattr(cli.cfg, "load_project_config", lambda project, **kwargs: config)
+    monkeypatch.setattr(
+        "agent_worktrees.config_authority.load_project_authority_config",
+        lambda project, **kwargs: config,
+    )
     monkeypatch.setattr(cli.cfg, "load_machines_yaml", lambda anchor, **_kwargs: {})
     monkeypatch.setattr(
         tracking.cfg,

@@ -2621,9 +2621,8 @@ class TestOwningTrackingDirResolution:
             lambda: {"harness-proj", "knowledge-proj"},
         )
 
-        # session_register's authority fence (execution_spaces.
-        # require_project_record_mutation) resolves
-        # cfg.load_project_config(record.repo) before any mutation; see
+        # session_register's authority fence resolves the registration-specific
+        # config_authority.load_project_authority_config before any mutation; see
         # conftest.py's monkeypatch_config for the full rationale. A REAL
         # (empty) canonical machines.yaml at each fake anchor keeps
         # ``load_machines_yaml`` from falling through to its own
@@ -2653,6 +2652,10 @@ class TestOwningTrackingDirResolution:
             )
 
         monkeypatch.setattr(_cfg, "load_project_config", _fake_load_project_config)
+        monkeypatch.setattr(
+            "agent_worktrees.config_authority.load_project_authority_config",
+            _fake_load_project_config,
+        )
         return harness_dir, knowledge_dir, _t
 
     def test_yaml_path_uses_records_own_repo_not_ambient_project(
