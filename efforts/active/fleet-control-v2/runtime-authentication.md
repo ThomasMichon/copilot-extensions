@@ -2,7 +2,8 @@
 
 Back to [Fleet Control V2](README.md). Coordination: #5789 / #6443, with
 #5862 observation and #3761 / #352 source/client ownership retained.
-**Agent-recommended proposal, not implemented authentication or enrollment.**
+**Agent-recommended interface proposal with operator-required presence behavior
+below, not implemented authentication or enrollment.**
 
 This refines the existing [machine-fleet vision](../../../visions/machine-fleet/README.md)'s
 `authenticated-scoped-and-revocable`, `capability-scoped-credential-access`,
@@ -73,6 +74,57 @@ principal/enrollment generation, producer incarnation, connector generation,
 service installation/offer generation, allocation fence, source revision and
 observation position. No single counter substitutes for all of them.
 Machines, WSL environments and containers remain distinct logical origins.
+
+## Operator-required presence and unattended continuity
+
+**Default: run as long as possible.** A live user does not periodically prove
+presence to the Gateway. Use the adopted identity/platform provider's own session
+longevity as the presence authority: Entra/Windows sessions are the requested
+case, while the portable interface preserves the equivalent contract for other
+selected providers. This is not permission to treat an arbitrary OS-session
+claim as remote authentication; verified identity and scoped enrollment still
+apply.
+
+Reuse valid credentials and attempt provider-permitted silent refresh/renewal
+for as long as that underlying session supports it. Access-token expiry, a new
+proof, a short view/delegation lease or a transport reconnect does not itself
+require a human check-in. No Gateway-added maximum human-session age, periodic
+step-up, forced sign-out or refresh flow that deliberately requests interaction
+is enabled by default. Authentication timestamps are provenance, not an
+independent Gateway presence countdown.
+
+When the underlying token provider or protected key actually requires a
+presence/interaction challenge, expose `challenge-required` and pause the
+affected new authorization/delivery until its owner resolves that challenge.
+Do not bypass the challenge, extend an expired credential, reuse a revoked one
+or silently select another account. Ordinary network/provider unavailability is
+`temporarily-unavailable`, not a fabricated sign-out or presence challenge;
+bounded silent retry/recovery remains available.
+
+The credential/session owner supplies `acquire_or_renew` with explicit
+principal/account/audience/resource context. Its outcomes distinguish a usable
+credential, actual challenge, denial/revocation and temporary unavailability.
+It does not launch an unattended sign-in UI. Repeated requests for the same
+blocked provider/account coalesce around the actual challenge rather than
+continually prompting the user. Windows lock, sleep, UI inactivity, a closed
+client window or an observation heartbeat timeout is not a new presence rule:
+follow the provider's real session/key-access decision.
+
+Automatic authorization revalidation and proof/lease renewal below are
+**machine operations, not human presence renewal**. The adopted connector,
+provider and service lifecycle owners maintain them; accepted work does not
+depend on a continuously foregrounded operator client. Finite resource/job
+grants and actual credential validity remain enforced and are not silently
+extended by a live user session.
+
+Explicit revocation can cut access short. An optional dead-man switch is
+**off by default**, separately opted into by the user for a visible principal/
+scope, interval and intentional check-in condition. Do not silently enable it
+from idle detection or equate an automatic heartbeat with the chosen human
+check-in. Expiry applies the declared scoped revocation/admission rule; disabling
+or changing it is an explicit user/policy action. Neither revocation nor switch
+expiry proves an already accepted external effect stopped, releases a resource,
+or cancels work without its existing owner contract.
 
 ## Proposed boundary types and methods
 
@@ -251,11 +303,20 @@ identity revocation. Neither implicitly kills already accepted work.
 ## Freshness, bounds and failure semantics
 
 **Recommended initial implementation budgets, to prove before advertising support:**
-access credentials at most 8 KiB; proof at most 4 KiB; no more than two credential/
-proof objects per request; access lifetime at most five minutes; clock skew at
-most 30 seconds; proof age at most 60 seconds; delegation lifetime at most
-30 seconds and never beyond its parent; view renewal at most every 30 seconds
-and always before credential/permit expiry. These are not deployed settings.
+access credentials at most 8 KiB; proof at most 4 KiB; no more than two
+authentication credential/proof objects per request; clock skew at most
+30 seconds; proof age at most 60 seconds; delegation lifetime at most
+30 seconds and never beyond its parent; automatic view renewal at most every
+30 seconds and always before credential/permit expiry. These are not deployed
+settings and do not impose a human-presence lifetime.
+
+Access-token and provider-session lifetimes come from the selected issuer/
+provider. There is no extra universal five-minute access-token cap or
+Gateway-imposed user-session countdown. Short derived grants, proofs and view
+leases renew silently while the provider session and current grants permit it.
+An expired token is replaced through normal authorized renewal, never stretched
+locally; an actual provider challenge is honored rather than manufactured by
+lease churn.
 
 Durable fleet enrollment/policy changes take effect at the next admission or
 known-revocation checkpoint. Local policy, provider identity revocation,
@@ -297,6 +358,11 @@ sign-in, auth downgrade or retry of an uncertain command effect.
    verifier with synthetic issuer/proof keys. Prove wrong issuer/audience/type,
    algorithm/key substitution, stolen token without the proof key, replay,
    expired/not-yet-valid token, stale nonce/clock and restart/cutover fences.
+   Cross many token/proof/view renewals with a long-lived provider session and
+   verify zero Gateway-added presence prompts or forced sign-outs. Then inject
+   the real challenge outcome, revocation, temporary outage and an explicitly
+   opted-in dead-man expiry; prove distinct outcomes and safe resumption.
+   The default has no dead-man check-in, including during lock/sleep/idle/reconnect.
 3. Exercise the actual observation/operation contracts through admission:
    cross-origin/project/entity/field denial, content-bound actor/account lookup,
    generation transition, same-revision availability and snapshot/stream races.

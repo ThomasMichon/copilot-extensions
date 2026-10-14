@@ -193,6 +193,11 @@ one credential forever during connector construction. Validate correlation,
 recipient, audience, scope and expiry before use. Retain existing HTTP pacing and
 pagination. Git delivery uses a reviewed process-local credential mechanism,
 never a token-bearing command line or global environment mutation.
+Refresh is silent machine work while the adopted provider/OS session supports
+it, not a recurring human-presence check. Follow the
+[operator-required longevity default](runtime-authentication.md#operator-required-presence-and-unattended-continuity):
+run as long as possible until an actual provider challenge, explicit revocation
+or an opted-in dead-man policy applies; never bypass a real challenge.
 
 For explicitly selected Gateway credentials, exhaustion or disconnection is a
 truthful bounded wait/failure under the existing queue contract, not anonymous

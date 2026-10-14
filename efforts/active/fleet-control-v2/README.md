@@ -164,6 +164,16 @@ proposal authoring rather than waiting for an existing interface; it does not
 assert that no prototype exists, authorize an unreviewed auth implementation,
 transfer another owner's active code, or enroll/deploy a live role.
 
+The operator then clarified presence defaults verbatim:
+
+> Make sure that the live user does not have to continuously re-validate presence. We'll want to treat Entra/Windows' own session longevity as presence, and run until the underlyting tokens finally issue presence challenges. We'll rely on explicit revocation, or maybe the user opting into a dead-man switch, to "cut short" access if desired. Default is "run as long as possible"
+
+This longevity/default is **operator-required**, not an optional agent
+recommendation. Token/proof/authorization renewal is silent machine work while
+the underlying provider session permits it; it is not periodic human presence
+validation. Actual provider challenges and revocation remain binding, and the
+dead-man switch is explicit opt-in rather than a default session timeout.
+
 ## Plan
 
 All detailed slices are **agent-recommended** and remain subject to review.
@@ -287,6 +297,9 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 - [ ] Complete the [runtime auth interface proof](runtime-authentication.md#implementation-and-validation-gate):
   real identity/proof verification, current policy/enrollment, scoped backend/
   observation enforcement, revocation/recovery and provider/recipient isolation.
+  Prove long-lived provider/OS sessions renew without Gateway-added presence
+  prompts, with real challenge, explicit revocation and optional dead-man
+  outcomes distinct from token/lease churn or temporary unavailability.
 - [ ] Real first-touch Windows/Linux install with no Copilot/plugin/runtime cache;
   offline installed use and precise missing/incompatible/unauthorized failures.
 - [ ] Concurrent activation/admission: one authoritative writer, unique resource
@@ -1007,3 +1020,12 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   plans. Unit/process/clean-room/live implementation tiers are not run or claimed
   for this docs-only proposal; their proof obligations are specified.
   No parent implementation or Validation item closes.
+- The operator clarified that provider/Windows session longevity is presence:
+  default run as long as possible, without continuous user revalidation.
+  Updated the proposal to distinguish silent token/proof/view renewal from
+  actual provider challenges, removed the extra five-minute access lifetime,
+  and made a scoped dead-man switch opt-in/off by default. Revocation and
+  real validity/grant boundaries remain enforced; temporary outage, idle,
+  lock/sleep and reconnect are not invented human-presence requirements.
+  Captured the full clarification verbatim and added longevity/challenge/
+  revocation/opt-in validation obligations.
