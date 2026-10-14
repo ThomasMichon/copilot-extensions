@@ -271,7 +271,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-35.json",
-          "sha256": "6c890479ec139475abcc41e4f0b62249d729175eadfec5abe559fdee5d61f6da",
+          "sha256": "6a32ef224ce3ffb120b944a862c6fff24245c9819ffd6e7963a99ccaa0c28c00",
           "role": "unchanged roster response re-attested at current receipt generation",
           "generation": 35
         },
@@ -289,15 +289,15 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/acquisition-protocol.json",
-          "sha256": "43814ec43eaf7ef3c3e53b0758246ebcc303804da40a5f83f71586e5667cd219",
-          "role": "current additive acquisition capability constants and refusal contract",
-          "generation": 34
+          "sha256": "94a272cc078dafd76bd87b528404a437f59f78cc46430393fa66d40d6b5d5349",
+          "role": "Committed generation-36 receipt evidence; prior capability floors retained",
+          "generation": 36
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/live-message-receipt.json",
-          "sha256": "fdda659af443251c8d7d4acc5c6974044eda0c6c3feaea7bf2afe64b8678cfce",
-          "role": "current receipt capability and typed live-message admission request/response",
-          "generation": 34
+          "sha256": "9b5e172c99cb015d95aa6d2300defb70a0fdeea00b175046078203880777d2a1",
+          "role": "Committed generation-36 receipt evidence; prior capability floors retained",
+          "generation": 36
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-32/acquisition-protocol.json",
@@ -561,12 +561,6 @@
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-peer-generation-35.json",
           "sha256": "5fb3f4c56a7316d6386a2f7c2db60494836b6dc75d7f0bbaf24e1fd3fa9934a1",
           "role": "Generation-35 remote-peer evidence; prior capability floors retained",
-          "generation": 35
-        },
-        {
-          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-generation-35.json",
-          "sha256": "6a32ef224ce3ffb120b944a862c6fff24245c9819ffd6e7963a99ccaa0c28c00",
-          "role": "Generation-35 agents-list evidence; prior capability floors retained",
           "generation": 35
         },
         {
@@ -958,9 +952,93 @@
           "sha256": "445ffcf9384c61e7b1761dc8d781ad64ad3add8527817b919c6ac271b03ce499",
           "role": "Independently expected progress and freshness projection, verified through actual manager rehydration with live failure followed by historical success.",
           "generation": 38
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/peer-replies-generation-36.json",
+          "sha256": "d72bcc29b920e997ce0749a9eb61c30d18e870d7bdf57d21317a8c17a56652c6",
+          "role": "Committed generation-36 receipt evidence; prior capability floors retained",
+          "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/workspace-creation-generation-36.json",
+          "sha256": "f31a46ae6468426e08167834fe94210dcf142232b5df5d565de34f697800d0b9",
+          "role": "Committed generation-36 receipt evidence; prior capability floors retained",
+          "generation": 36
         }
       ],
       "provenance": [
+        {
+          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/live_message_models.py",
+          "source_git_blob": "b24f0c1b2b53d2cb9dcf92ae63a44d65f8052ba8",
+          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
+        },
+        {
+          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "2007b3898cd0ac376ae6447f672528c801598b3a",
+          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
+        },
+        {
+          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/session_start_models.py",
+          "source_git_blob": "90f2a01f70488a96e6f5160bfbf12cbfe66d65b6",
+          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
+        },
+        {
+          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/prompts.py",
+          "source_git_blob": "85233f1327e3e2ad55dbbe2dd9ce28f35e3e2396",
+          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
+        },
+        {
+          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/prompt_models.py",
+          "source_git_blob": "aac919244ab7d5519d656196f172c01c5740b56d",
+          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
+        },
+        {
+          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "509cd247c1a3f6340e36b6328abc29b17c152195",
+          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
+        },
+        {
+          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "9356238d6e96a829081e636bf4fb13bae2e63d4f",
+          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
+        },
+        {
+          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
+        },
+        {
+          "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/cli_mode_models.py",
+          "source_git_blob": "9941f066986c7b1427c4bfa70401412ac9789512",
+          "capture_method": "Capture committed additive receipt generation 36; assert unchanged producer bytes against prior frozen shapes except the advertised protocol constants; retain immutable native33, workspace34 and qualified-peer35 evidence."
+        },
         {
           "commit": "9aa7aa03f5ba2762eba4c92d02bf7b6c6b425934",
           "plugin_version": "0.4.1-dev3",
@@ -3009,7 +3087,7 @@
       "tracked_issue": "https://github.com/ThomasMichon/copilot-extensions/issues/1448",
       "reason": "The delegation effort owns lifecycle vocabulary and product semantics; the compatibility registry must not redefine them.",
       "reference_path": "plugins/agent-bridge/docs/delegation-contract.md",
-      "reference_sha256": "dbfab84d3b3927bd110cf9c4df869d84279995fa7b6448edf124f1a39f372641"
+      "reference_sha256": "028cbfbfa8ada1acb354fd00f4b6e6d329b1b4181e8c88bcad0ab6741073ed7c"
     },
     {
       "id": "agent-bridge.event-history-identity",

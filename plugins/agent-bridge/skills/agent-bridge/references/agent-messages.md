@@ -76,7 +76,7 @@ recent output separately:
 - `--no-wait` is still available, including for bridge-owned ACP sends.
 - On an old daemon, missing receipt support is explicit: `delivered: null`,
   and `read --message-id` refuses with an unsupported-protocol error.
-  Current receipt inspection requires HTTP protocol 35. If retention disappears
+  Current receipt inspection requires HTTP protocol 36. If retention disappears
   after admission, the response preserves the known admission evidence with
   `receipt_current: false` and `receipt_error`; an unavailable duplicate's
   historical receipt is explicitly `null`, never fabricated.
