@@ -33,12 +33,20 @@ def enter(phase: str) -> None:
         _run.enter(phase)
 
 
+def redact(text: str) -> str:
+    """``text`` with credentials masked; without the library, at least URL
+    userinfo and authorization headers."""
+    if _ut is not None:
+        return _ut.redact(text)
+    text = re.sub(r"(?i)(authorization\s*:)[^\r\n]*", r"\1 ***", text)
+    return re.sub(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s@]+@", r"\1***@", text)
+
+
 def bounded(text: str, limit: int, *, tail: bool = False) -> str:
     """Redact, then truncate: a cut taken first can leave a credential fragment
     (for example the middle of URL userinfo) that the redactor no longer
     recognizes."""
-    if _ut is not None:
-        text = _ut.redact(text)
+    text = redact(text)
     return text[-limit:] if tail else text[:limit]
 
 

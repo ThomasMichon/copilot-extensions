@@ -364,6 +364,16 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
             "    \"$py\" \"${args[@]}\" 2>&1 || { [[ -n \"$strict\" ]] && return 1; }\n}\n"
             "main() {\n    _versioned_mark_complete || exit 1\n}\n",
         ),
+        (
+            "install.ps1",
+            _PS1_HELPER + "    if (Invoke-VersionedMarkComplete) {\n        Activate\n    }\n",
+        ),
+        (
+            "install.ps1",
+            _PS1_HELPER + "    if (Invoke-VersionedMarkComplete) { Activate } else { Write-Warn 'x' }\n",
+        ),
+        ("install.ps1", _PS1_HELPER + "    $ok = Invoke-VersionedMarkComplete\n"),
+        ("install.sh", _SH_HELPER + "main() {\n    out=\"$(_versioned_mark_complete)\"\n}\n"),
     ],
     ids=[
         "sh-swallowed-pipeline", "sh-bare-call", "ps1-bare-call",
@@ -377,6 +387,8 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
         "ps1-helper-conditional-failure", "ps1-call-conditional-exit",
         "sh-or-conditional-exit", "sh-if-not-nested-conditional-return",
         "sh-helper-conditional-return",
+        "ps1-positive-if-no-else", "ps1-positive-if-else-warns", "ps1-assigned-result",
+        "sh-command-substitution",
     ],
 )
 def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text) -> None:
@@ -422,10 +434,23 @@ def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text)
             "    \"$py\" \"${args[@]}\" 2>&1 | sed 's/^/  /'\n}\n"
             "main() {\n    _versioned_mark_complete || exit 1\n}\n",
         ),
+        (
+            "install.ps1",
+            _PS1_HELPER + "    if (Invoke-VersionedMarkComplete -PayloadHash $h) {\n        Activate\n"
+            "    } else {\n        Write-Fail 'x'\n        exit 1\n    }\n",
+        ),
+        (
+            "install.ps1",
+            _PS1_HELPER + "<# Invoke-VersionedMarkComplete publishes the marker. #>\n"
+            "# Invoke-VersionedMarkComplete runs after the health gate.\n"
+            "    Write-Host 'see Invoke-VersionedMarkComplete'\n"
+            "    if (-not (Invoke-VersionedMarkComplete)) { exit 1 }\n",
+        ),
     ],
     ids=[
         "sh-checked", "ps1-checked", "ps1-captured-exit-code", "sh-if-not-checked-nested",
-        "sh-if-else-checked", "sh-pipefail-tail",
+        "sh-if-else-checked", "sh-pipefail-tail", "ps1-positive-if-else-fails",
+        "mentions-in-comments-and-strings",
     ],
 )
 def test_checked_completion_marker_publication_passes(tmp_path, name, text) -> None:

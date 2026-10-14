@@ -338,8 +338,16 @@ def _mark_complete_result_violations(plugins_dir: Path) -> list[str]:
                 f"{rel}: the completion-marker helper does not fail when the mark-complete "
                 "writer fails"
             )
+        # Blank PowerShell block comments (keeping line numbers) so prose that
+        # names the helper is not mistaken for a call.
+        text = re.sub(r"<#.*?#>", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
         lines = text.split("\n")
         for lineno, line in enumerate(lines, 1):
+            # Strings are prose, except a double-quoted `$(...)` that runs the helper.
+            code = re.sub(r"'(?:[^']|'')*'", "''", line)
+            code = re.sub(r'"(?:[^"`$]|`.|\$(?!\())*"', '""', code).split("#", 1)[0]
+            if _MARK_COMPLETE_DEF.match(line) or not _MARK_COMPLETE_MENTION.search(code):
+                continue
             if _MARK_COMPLETE_CALL.match(line):
                 statement = line
                 index = lineno
@@ -356,9 +364,15 @@ def _mark_complete_result_violations(plugins_dir: Path) -> list[str]:
                 stops = _fails_unconditionally(
                     _braced_body(tail[tail.index("{", tail.index(_PS1_HELPER)):])
                 )
+            elif _MARK_COMPLETE_IF_PS1.search(line):
+                stops = _ps1_else_fails("\n".join(lines[lineno - 1:lineno + 40]))
             elif match := _MARK_COMPLETE_SH_IF.match(line):
                 stops = _sh_failure_branch_stops(lines[lineno - 1:], negated=bool(match.group(1)))
             else:
+                violations.append(
+                    f"{rel}:{lineno}: unrecognized completion-marker call form; call it as a "
+                    "checked statement (`helper || exit 1`) or in an if/else that fails"
+                )
                 continue
             if not stops:
                 violations.append(
@@ -369,6 +383,23 @@ def _mark_complete_result_violations(plugins_dir: Path) -> list[str]:
 
 
 _PS1_HELPER = "Invoke-VersionedMarkComplete"
+_MARK_COMPLETE_MENTION = re.compile(
+    r"(?<![\w-])(?:_versioned_mark_complete|Invoke-VersionedMarkComplete)(?![\w-])"
+)
+_MARK_COMPLETE_DEF = re.compile(
+    r"^\s*(?:_versioned_mark_complete\(\)\s*\{|function\s+Invoke-VersionedMarkComplete\b)"
+)
+_MARK_COMPLETE_IF_PS1 = re.compile(r"\b(?:if|elseif)\s*\(\s*\(?\s*Invoke-VersionedMarkComplete\b")
+
+
+def _ps1_else_fails(text: str) -> bool:
+    """For ``if (Invoke-VersionedMarkComplete) { ... }``: the ``else`` block is
+    the failure branch, and it must fail unconditionally; no ``else`` ignores
+    the failure."""
+    start = text.index("{", text.index(_PS1_HELPER))
+    after = text[start + len(_braced_body(text[start:])) + 2:]
+    branch = re.match(r"\s*else\s*\{", after)
+    return bool(branch) and _fails_unconditionally(_braced_body(after[branch.end() - 1:]))
 _MARK_COMPLETE_IF_NOT = re.compile(r"\bif\s*\(\s*-not\s*\(\s*Invoke-VersionedMarkComplete\b")
 # A failure branch must report failure: a non-zero or status-variable
 # exit/return, ``return $false`` or ``throw`` -- never ``return 0``/``exit 0``
