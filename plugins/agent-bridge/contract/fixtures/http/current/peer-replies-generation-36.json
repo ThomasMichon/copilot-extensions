@@ -12,8 +12,8 @@
     "min_protocol_version": 1
   },
   "capability": {
-    "required_protocol_version": 35,
-    "required_carrier_operation_version": 4,
+    "required_protocol_version": 36,
+    "required_carrier_operation_version": 5,
     "address": "live:host-a:project-a:wt-a",
     "unavailable_peer_creates_agent": false
   },

@@ -254,6 +254,12 @@
           "sha256": "178c24707f1957706aeb80466f067e9591c206ec215cc6596730234ba115a942",
           "semantic": true,
           "non_semantic_reason": null
+        },
+        {
+          "path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+          "sha256": "c685f0755107582cad5b274621d32c2dfc66654f67b5d0148da8a92fbc323884",
+          "semantic": true,
+          "non_semantic_reason": null
         }
       ],
       "fixtures": [
@@ -955,7 +961,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/peer-replies-generation-36.json",
-          "sha256": "d72bcc29b920e997ce0749a9eb61c30d18e870d7bdf57d21317a8c17a56652c6",
+          "sha256": "17e6679fbeed2a56684d93e9409671c1412916d90afc56bf9ceb4b8ad9331009",
           "role": "Committed generation-36 receipt evidence; prior capability floors retained",
           "generation": 36
         },
@@ -964,9 +970,23 @@
           "sha256": "f31a46ae6468426e08167834fe94210dcf142232b5df5d565de34f697800d0b9",
           "role": "Committed generation-36 receipt evidence; prior capability floors retained",
           "generation": 36
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-message-receipt-generation-36.json",
+          "sha256": "f358c0403ea4cee994786e990c613e31a8d6dbaf219f45665e42bf05d13e58a7",
+          "generation": 36,
+          "role": "Bridge-owned receipt-backed remote wait fields; external carrier envelope unchanged"
         }
       ],
       "provenance": [
+        {
+          "commit": "c6f00b2348a172bba3b7bc7cac1d7b1ad64c91a1",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 36,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/remote_operations.py",
+          "source_git_blob": "7ee9ecda25dfbd806565c2935cc497b159675d09",
+          "capture_method": "Freeze committed operation-version selection; actual two-bridge tests compare the emitted waited packet and prove older hosting bridges/carriers refuse before admission."
+        },
         {
           "commit": "76a3d0efb845aa87bfda8bd2484827be2b13045f",
           "plugin_version": "0.4.1-dev3",

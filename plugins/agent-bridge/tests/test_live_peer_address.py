@@ -326,6 +326,11 @@ async def test_remote_receipt_wait_selects_its_carrier_version(wait, version):
         kind="prompt", wait=wait, qualified_peer=True,
     )
     assert requests[0]["version"] == version
+    if wait:
+        fixture_path = (Path(__file__).parents[1] / "contract" / "fixtures" / "http"
+                        / "current" / "remote-message-receipt-generation-36.json")
+        expected = json.loads(fixture_path.read_text(encoding="utf-8"))["request"]
+        assert {key: requests[0][key] for key in expected} == expected
 
 
 @pytest.mark.asyncio

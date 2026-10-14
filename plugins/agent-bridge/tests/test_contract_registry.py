@@ -86,15 +86,21 @@ def test_workspace_creation_fixture_matches_additive_models_and_capability_floor
     assert fixture["capability"]["native_bound_prompt"] == bridge_protocol.NATIVE_BOUND_PROMPT_PROTOCOL_VERSION
 
 
-def test_qualified_peer_contract_matches_current_fixture() -> None:
+@pytest.mark.parametrize("generation", [35, bridge_protocol.HTTP_PROTOCOL_VERSION])
+def test_qualified_peer_contract_matches_current_fixture(generation) -> None:
     from agent_bridge.live_peer_address import LivePeerAddress
-    from agent_bridge.remote_operations import REMOTE_PEER_REPLY_MIN_VERSION
+    from agent_bridge.remote_operations import REMOTE_PEER_REPLY_MIN_VERSION, REMOTE_RECEIPT_REPLY_MIN_VERSION
     from agent_bridge.routes.remote import RemoteLiveMessageRequest
 
-    fixture = _fixture("fixtures/http/current/peer-replies-generation-35.json")
+    fixture = _fixture(f"fixtures/http/current/peer-replies-generation-{generation}.json")
     capability = fixture["capability"]
-    assert capability["required_protocol_version"] == bridge_protocol.QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
-    assert capability["required_carrier_operation_version"] == REMOTE_PEER_REPLY_MIN_VERSION
+    assert capability["required_protocol_version"] == (
+        bridge_protocol.QUALIFIED_LIVE_PEER_PROTOCOL_VERSION if generation == 35
+        else bridge_protocol.LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION
+    )
+    assert capability["required_carrier_operation_version"] == (
+        REMOTE_PEER_REPLY_MIN_VERSION if generation == 35 else REMOTE_RECEIPT_REPLY_MIN_VERSION
+    )
     assert str(LivePeerAddress.parse(capability["address"])) == capability["address"]
     body = RemoteLiveMessageRequest.model_validate(fixture["request"]["json"])
     assert body.reply_to == capability["address"]
