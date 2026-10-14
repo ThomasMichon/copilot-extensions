@@ -18,6 +18,6 @@
   "consent_base64": "AQ==",
   "refused_exit_code": 78,
   "exec_preserves_pid": true,
-  "component_digest": "0d952bfad0986ce84cdc9410ed1c63c178057f736e2307c20409c4bc67ade3df",
+  "component_digest": "925d0b6b3bb1f128aba364f0c2404435e6f7e2e06e2004365a853b76efef032b",
   "capability_scope": "Linux target-local final context; actual ACP readback remains mandatory"
 }

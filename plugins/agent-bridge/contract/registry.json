@@ -1522,7 +1522,7 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-authority-v1.json",
-          "sha256": "b6d666037f156935896d2f9880f9d625d4a53affd3bccf82f07feb8669e7b03e",
+          "sha256": "4918365b5708140bd697f7fe805561d2443664669b726614917d9bbf66b309cc",
           "role": "launch-bound wrapper v1 authority and receipt-v2 validity vectors",
           "generation": 1
         },
@@ -1534,13 +1534,13 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-exec.json",
-          "sha256": "9ec6bd46bba34b0621758f7a34b89d89e54c4b04a563d1951d5122973e98ad55",
+          "sha256": "02d74b7971981ad159474014ad6056eec27b11b782f8d316e6a51dfe9b2347ca",
           "role": "terminal exec consent, private environment closure and PID preservation",
           "generation": 1
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/session-host/current/wrapper-consent.json",
-          "sha256": "1be0e738c5c2128aa347313845b6c8c9152085d3fc4e507f78b080011ca91338",
+          "sha256": "f4d86c320cc5a8f5aa6433203bd773c655f20405e65cbf325b8bc9f1903eb7af",
           "role": "complete staged authority closure and consent-owner failure ordering",
           "generation": 1
         },
