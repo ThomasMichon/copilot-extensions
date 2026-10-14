@@ -35,7 +35,7 @@ PATTERNS = [re.search(r"grep -Eq \\\n\s*'([^'\n]+)'", step).group(1) for step in
 def test_native_jobs_preserve_dev_scope_budget_and_required_aggregate():
     assert PATTERNS[0] == PATTERNS[1]
     for name, job in zip(("test-runner-linux", "test-runner-windows"), JOBS):
-        budget = 7 if name == "test-runner-windows" else 5
+        budget = 9 if name == "test-runner-windows" else 5
         assert (
             "    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' "
             f"&& inputs.promotion_run == '' && 15 || {budget} }}}}\n"

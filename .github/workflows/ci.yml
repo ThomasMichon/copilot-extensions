@@ -965,6 +965,27 @@ jobs:
         with:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v9.0.0
+      - name: Test worktree-manager
+        working-directory: worktree-manager
+        run: uv run --extra dev pytest -q
+      - name: Test materialized Manager collection
+        working-directory: worktree-manager
+        run: uv run --extra dev pytest -q ../tools/test_worktree_manager_collection.py
+
+  repositories-configuration:
+    name: Repositories Configuration (native owner + Manager)
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: ubuntu-latest
+    # Keep the real native owner/UI contract out of the six-minute full Manager
+    # lane: preparing its CLI alone took 57 seconds in the first live run.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Repositories Configuration CI contract
+        run: uv run --with pytest --with pyyaml python -m pytest -q tools/test_repositories_configuration_ci_scope.py
       - id: repositories-configuration
         name: Detect native Repositories Configuration changes
         shell: bash
@@ -975,7 +996,7 @@ jobs:
           if ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           elif git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq \
-            '^(\.github/workflows/ci\.yml|plugins/agent-worktrees/(src/agent_worktrees/repos[^/]*\.py|pivots/repositories-config\.json|tests/test_repos_configuration\.py|tests/test_repos_registry_transaction\.py)|worktree-manager/(src/worktree_manager/production_picker/picker_tui/(configuration_context|engine_configuration_preview|tasks)\.py|tests/production_picker/test_repositories_configuration\.py))$'; then
+            '^(\.github/workflows/ci\.yml|tools/(test_repositories_configuration_ci_scope|run-plugin-tests|run-standalone-tests|standalone_consumers|plugin_test_containment)\.py|plugins/agent-worktrees/(src/agent_worktrees/(repos[^/]*|config[^/]*|related[^/]*|state_root[^/]*|installer[^/]*|registry_paths)\.py|pivots/repositories-config\.json|tests/test_repos_configuration\.py|tests/test_repos_registry_transaction\.py)|worktree-manager/(src/worktree_manager/production_picker/picker_tui/(configuration[^/]*|engine_configuration_preview|tasks)\.py|tests/production_picker/test_repositories_configuration\.py))$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -986,14 +1007,12 @@ jobs:
         run: |
           python tools/run-plugin-tests.py agent-worktrees -k "repos_configuration or repos_registry_transaction"
           echo "python=$GITHUB_WORKSPACE/.test-venvs/linux/agent-worktrees/bin/python" >> "$GITHUB_OUTPUT"
-      - name: Test worktree-manager
-        working-directory: worktree-manager
+      - name: Test real Repositories Configuration UI
         env:
           REPOSITORIES_CONFIG_TEST_PYTHON: ${{ steps.repositories-owner.outputs.python }}
-        run: uv run --extra dev pytest -q
-      - name: Test materialized Manager collection
-        working-directory: worktree-manager
-        run: uv run --extra dev pytest -q ../tools/test_worktree_manager_collection.py
+          PYTEST_ADDOPTS: -k repositories_configuration
+        if: steps.repositories-configuration.outputs.run == 'true'
+        run: python tools/run-standalone-tests.py worktree-manager --prepare --admission-wait 60 --timeout 120
 
   agent-dispatch-service:
     name: agent-dispatch-service (out-of-plugin)
@@ -1877,6 +1896,7 @@ jobs:
       - windows-hooks
       - construction-macos
       - worktree-manager
+      - repositories-configuration
       - agent-dispatch-service
       - agent-index-service-linux
       - agent-index-service-windows

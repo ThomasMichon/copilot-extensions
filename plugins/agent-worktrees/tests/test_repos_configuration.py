@@ -39,6 +39,7 @@ def native(tmp_path, monkeypatch):
             "repos": {
                 "sample": {
                     "class": "worktree", repos._current_platform(): str(tmp_path / "repository"),
+                    "remote": "https://github.com/example/sample.git",
                     "agent": False, "custom_owner_metadata": {"secret": SECRET},
                 },
                 "stale": {"class": "reference", repos._current_platform(): str(tmp_path / "gone")},
@@ -214,17 +215,61 @@ def test_request_errors_never_echo_raw_values(native):
         apply("sample", "sample", "set", SECRET, "")
 
 
-@pytest.mark.parametrize("route", ["related: [broken", "related:\n  external: 42\n"])
-def test_invalid_native_route_inspection_stays_unknown_not_valid_empty(native, route):
+@pytest.fixture(params=["base", "marketplace"])
+def route_policy(native, monkeypatch, request):
+    from agent_worktrees import project_state, registry_paths
+
     policy = native / "repository" / ".copilot-extensions" / "agent-worktrees"
+    if request.param == "marketplace":
+        payload = Path(__file__).resolve().parents[1]
+        helper = registry_paths._helper()._load_context_helper(payload)
+        cell = helper.stamp_context(
+            payload_root=payload, plugin_id="agent-worktrees",
+            payload_version=json.loads((payload / "plugin.json").read_text(encoding="utf-8"))["version"],
+            payload_origin="explicit", expected_namespace_generation=0,
+            expected_install_generation=0, durable_home=native / "durable",
+            source_descriptor={"source": "github", "repo": "example/marketplace"},
+            marketplace_key="fixture", environment={},
+        )
+        for name in ("repos.yaml", "config.yaml"):
+            (Path(cell["pluginRoot"]) / name).write_bytes((native / ".agent-worktrees" / name).read_bytes())
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", cell["installReceipt"])
+        monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(payload))
+        monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
+        project_state.ensure_project_state("sample")
+        policy.mkdir(parents=True)
+        (policy / "related.yaml").write_text("related:\n  external:\n", encoding="utf-8")
+        policy = policy / "marketplaces" / cell["marketplaceId"]
     policy.mkdir(parents=True)
-    (policy / "related.yaml").write_text(route, encoding="utf-8")
+    return policy / "related.yaml"
+
+
+@pytest.mark.parametrize("route", [
+    "related: [broken", "related:\n  external: 42\n",
+    "related:\n  external:\n  external:\n",
+])
+def test_invalid_native_route_inspection_stays_unknown_not_valid_empty(native, route_policy, route):
+    from agent_worktrees.repos_configuration_catalog import catalog
+
+    route_policy.write_text(route, encoding="utf-8")
     before = tree(native)
-    result = request("catalog")
-    assert result.returncode == 0, result.stderr
-    state = next(row["configuration"] for row in json.loads(result.stdout)["entries"] if row["id"] == "sample")
+    state = next(row["configuration"] for row in catalog("sample")["entries"] if row["id"] == "sample")
     assert state["route"]["status"] == "unknown"
     assert state["findings"][0]["code"] == "native-inspection-unavailable"
+    assert tree(native) == before
+
+
+def test_native_minimal_related_link_is_valid(native, route_policy):
+    from agent_worktrees.repos_configuration_catalog import catalog
+    from agent_worktrees.repos_configuration_sources import defaults
+
+    route_policy.write_text("related:\n  external:\n", encoding="utf-8")
+    assert defaults("sample").login == "inherited"
+    before = tree(native)
+    rows = {row["id"]: row for row in catalog("sample")["entries"]}
+    assert not rows["sample"]["configuration"]["findings"]
+    assert rows["external"]["participation"] == "related"
+    assert rows["external"]["configuration"]["route"]["status"] == "present"
     assert tree(native) == before
 
 
@@ -242,6 +287,23 @@ def test_default_dropin_and_machine_precedence(native):
     assert [source["value"] for source in state["sources"]] == ["inherited", "dropin", "machine"]
     assert [source["wins"] for source in state["sources"]] == [False, False, True]
     assert repos.copilot_account_for("sample", project="sample", strict=True) == "machine"
+
+
+def test_catalog_source_winners_are_independent_per_repository(native):
+    path = repos._repos_yaml_path()
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["repos"]["sample"]["copilot_account"] = "chosen"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    result = request("catalog")
+    assert result.returncode == 0, result.stderr
+    rows = {row["id"]: row["configuration"] for row in json.loads(result.stdout)["entries"]}
+    overridden = rows["sample"]["sources"]
+    inherited = rows["stale"]["sources"]
+    assert [source["value"] for source in overridden] == ["inherited", "chosen"]
+    assert [source["wins"] for source in overridden] == [False, True]
+    assert [source["masked"] for source in overridden] == [True, False]
+    assert [source["wins"] for source in inherited] == [True]
+    assert [source["masked"] for source in inherited] == [False]
 
 
 def test_native_routes_binding_and_real_tracked_pair_present_stale_absent(native):
@@ -307,6 +369,20 @@ def test_native_routes_binding_and_real_tracked_pair_present_stale_absent(native
         assert SECRET not in result.stdout + result.stderr
         assert tree(native) == before
         if expected == "present":
+            for missing in paths.values():
+                missing.rmdir()
+                before_missing = tree(native)
+                result = request("catalog", "--workspace", str(paths["sample"]))
+                assert result.returncode == 0, result.stderr
+                state = next(
+                    row["configuration"] for row in json.loads(result.stdout)["entries"]
+                    if row["id"] == "sample"
+                )
+                assert state["pair"]["status"] == "stale"
+                assert state["pair"]["writable_workspace"] is False
+                assert state["pair"]["workspace"] != str(native / "knowledge")
+                assert tree(native) == before_missing
+                missing.mkdir()
             retired = tracking.load_record(records["knowledge"])
             retired.status = "finalized"
             tracking.save_record(retired, records["knowledge"])

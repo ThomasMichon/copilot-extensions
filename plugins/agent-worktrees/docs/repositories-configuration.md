@@ -11,6 +11,9 @@ resolved state anchor and actual tracked writable pair are separate facts.
 The cards show absent, stale, unsupported and unknown/error states explicitly.
 An anchor is never presented as a paired writable checkout. No workspace means
 pair inspection is unsupported, rather than inferred from the CLI's CWD.
+Both tracked checkout directories must still exist for a pair to be writable.
+Route inspection validates the native selected base and marketplace-overlay
+layers, including duplicate keys, while accepting native bare minimal links.
 Route/pair editing and plugin enablement remain unsupported: use their owning
 capabilities, not a generic source-file editor.
 
@@ -73,7 +76,8 @@ coverage uses the production Textual editor and the actual native owner CLI,
 not a substitute owner implementation. Set `REPOSITORIES_CONFIG_TEST_PYTHON`
 to the isolated agent-worktrees test interpreter before running the Manager's
 `test_repositories_configuration.py`. The change-scoped Linux CI job prepares
-that interpreter and enables the same lane; a normal standalone Manager suite
+that interpreter and enables the same lane in a separate, required five-minute
+Repositories Configuration job; a normal standalone Manager suite
 without a separately prepared owner reports the integration case as skipped.
 
 These checks use redirected roots and sentinel secrets, compare complete source

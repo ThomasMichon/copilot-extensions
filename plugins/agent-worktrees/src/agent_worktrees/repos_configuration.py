@@ -60,7 +60,7 @@ def compose_preference(
     if entry is None:
         raise ConfigurationError("not-registered", "The repository is not registered.")
     explicit = identity(entry.copilot_account, allow_empty=True)
-    sources = [*inherited.sources]
+    sources = [dict(source) for source in inherited.sources]
     if explicit:
         sources.append({
             "id": "repository-local-override", "kind": "machine-local",

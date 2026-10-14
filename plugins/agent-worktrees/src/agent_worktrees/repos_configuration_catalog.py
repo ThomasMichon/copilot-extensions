@@ -39,11 +39,19 @@ def inspect_project(project: str, workspace: str) -> Inspection:
             *[related.config_contribution_anchor(s.anchor, s.origin) for s in sources],
         ]
         for source in anchors:
-            for path in (related.related_path(source), related.legacy_related_path(source)):
+            paths = (
+                (related.legacy_related_path(source),)
+                if related._looks_like_plugin_anchor(Path(source)) else
+                (related._repo_base_related_path(Path(source)),
+                 related._repo_marketplace_overlay_related_path(Path(source)))
+            )
+            for path in paths:
+                if path is None:
+                    continue
                 raw = mapping(path)
                 entries = raw.get("related", {})
                 if not isinstance(entries, dict) or any(
-                    not isinstance(entry, dict) for entry in entries.values()
+                    entry is not None and not isinstance(entry, dict) for entry in entries.values()
                 ):
                     raise ConfigurationError("invalid-route-source", "A route source needs owner repair.")
         result.routes = related.read_related_grafted(anchors).related
@@ -67,14 +75,18 @@ def inspect_project(project: str, workspace: str) -> Inspection:
                     checkout is not None and checkout.status in ("finalized", "archived", "abandoned")
                     for checkout in (pair.current, sibling)
                 )
+                missing = pair.paired and any(
+                    checkout is None or not Path(checkout.path).is_dir()
+                    for checkout in (pair.current, sibling)
+                )
                 result.pair = {
-                    "status": "stale" if pair.error and pair.paired else
+                    "status": "stale" if pair.paired and (pair.error or missing) else
                     "present" if pair.paired else "absent",
                     "workspace": sibling.path if sibling else None,
                     "role": sibling.role if sibling else None,
                     "workspace_status": sibling.status if sibling else None,
                     "writable_workspace": bool(
-                        pair.paired and not pair.error and not retired
+                        pair.paired and not pair.error and not retired and not missing
                         and sibling and sibling.kind == "worktree"
                     ),
                     "reason": "Inspect the native tracked pair before writing personal state.",

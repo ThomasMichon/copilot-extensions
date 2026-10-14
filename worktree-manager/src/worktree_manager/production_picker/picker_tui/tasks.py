@@ -36,6 +36,7 @@ from collections.abc import Mapping, Sequence
 
 from agent_procutil import no_window_flags
 
+from ...engine_client import _engine_environment
 from .command_transport import resolve_command as _resolve_command
 from .configuration_context import run_list
 from .pivots import RegisteredPivot, format_template, parse_list_payload
@@ -82,7 +83,7 @@ def _child_process_env() -> dict[str, str]:
     removed, safe to hand to *any other* plugin's CLI. See the module
     docstring for why this matters -- without it, a pivot action can fail with
     a spurious cross-plugin "payload context mismatch"."""
-    env = dict(os.environ)
+    env = _engine_environment()
     for key in _CHILD_ENV_UNSET:
         env.pop(key, None)
     return env

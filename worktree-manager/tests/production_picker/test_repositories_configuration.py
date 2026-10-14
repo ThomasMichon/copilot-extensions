@@ -61,6 +61,17 @@ def test_unbound_configuration_project_is_visible_error_not_a_hung_load(monkeypa
     assert not runtime._inflight
 
 
+def test_configuration_owner_does_not_inherit_manager_python_runtime(monkeypatch):
+    for key in ("PYTHONHOME", "PYTHONPATH", "PYTHONEXECUTABLE", "VIRTUAL_ENV",
+                "UV_INTERNAL__PYTHONHOME", "__PYVENV_LAUNCHER__", "COPILOT_PLUGIN_ROOT"):
+        monkeypatch.setenv(key, "foreign-runtime")
+    monkeypatch.setenv("AGENT_HOME", "preserved-native-state")
+    child = tasks._child_process_env()
+    assert child["AGENT_HOME"] == "preserved-native-state"
+    assert child["PYTHONUTF8"] == child["PYTHONSAFEPATH"] == "1"
+    assert "foreign-runtime" not in child.values()
+
+
 def snapshot(root):
     return {
         str(path.relative_to(root)): path.read_bytes() if path.is_file() else None
@@ -116,7 +127,8 @@ def test_native_repositories_ui_real_cli_cancel_set_reset_and_concurrent_ordinar
     def ordinary_write():
         result = subprocess.run(
             [*prefix, "repos", "account", "set", "example", "concurrent"],
-            capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+            capture_output=True, text=True, timeout=15, env=tasks._child_process_env(),
+            **no_window_kwargs(),
         )
         assert result.returncode == 0, result.stderr
 
@@ -178,7 +190,8 @@ def test_native_repositories_ui_real_cli_cancel_set_reset_and_concurrent_ordinar
                 str(Path(".agent-worktrees") / "repos.lock"),
             }
             app.screen.action_close()
-            await _wait(pilot, lambda: engine._task_rows()[0]["effective"] == "chosen")
+            await _wait(pilot, lambda: bool(engine._task_rows())
+                        and engine._task_rows()[0]["effective"] == "chosen")
             (registry / "config.yaml").write_text("default_copilot_account: changed-inheritance\n", encoding="utf-8")
             edit(engine, "reset")
             await proposed(app, pilot)
@@ -187,7 +200,8 @@ def test_native_repositories_ui_real_cli_cancel_set_reset_and_concurrent_ordinar
             raw = yaml.safe_load((registry / "repos.yaml").read_text(encoding="utf-8"))
             assert "copilot_account" not in raw["repos"]["sample"]
             app.screen.action_close()
-            await _wait(pilot, lambda: engine._task_rows()[0]["effective"] == "changed-inheritance")
+            await _wait(pilot, lambda: bool(engine._task_rows())
+                        and engine._task_rows()[0]["effective"] == "changed-inheritance")
             edit(engine, "set")
             await proposed(app, pilot, "stale-choice")
             await asyncio.to_thread(ordinary_write)
