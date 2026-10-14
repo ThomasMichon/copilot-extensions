@@ -200,6 +200,13 @@ locked-down hosts without themselves proving the package-source contract.
       VCS and external-path requirements before their targets are acquired.
       Require intact distribution identity, wheel tags and file hashes;
       metadata-sidecar hints do not replace verification of actual bytes.
+- [ ] Declare finite per-package and total candidate counts, streamed
+      metadata/wheel byte limits, total temporary-storage limits and one
+      inclusive acquisition/resolution deadline before fetching. Bound
+      recursion and concurrent work by those same budgets. Exhaustion fails
+      closed without activation; success, failure and cancellation all clean
+      up invocation-owned partial inputs. Select measured defaults before
+      enabling the lane rather than assuming unlimited feed histories.
 - [ ] Resolve and install solely from the inspected local wheel set, with
       network disabled for those operations and no ambient cache, index,
       override or build-backend escape. Retain the standard resolver's
@@ -232,12 +239,13 @@ locked-down hosts without themselves proving the package-source contract.
 - [ ] Document the artifact contract, rollback behavior, and feed-lag
       diagnosis for operators.
 
-## Open Design Questions (resolve concretely in Phase 2, not here)
+## Open Design Questions and Resolved Promotion Decisions
 
 Earlier review rounds on this effort surfaced several real design gaps
 worth preserving as named open questions, deliberately **not** pre-solved in
-this planning document - Phase 2 is where each gets a concrete, verified
-answer against the actual repository/CI configuration:
+this planning document. Promotion decisions belong to Phase 2; consumer
+feed/admission decisions belong to Phase 3. Each requires a concrete,
+verified answer against its actual repository or machine configuration:
 
 - **Feed model:** promotion runs on public CI and cannot certify
   installability from any one consumer's private governed feed - the
@@ -401,6 +409,12 @@ answer against the actual repository/CI configuration:
       interpreter/platform, feed identity and effective policy independently;
       each mismatch refuses reuse before slot activation. Matching reuse
       preserves the selected pins and hashes without trusting ambient caches.
+- [ ] Acquisition stress tests independently reach the per-package/total
+      candidate, metadata/wheel byte, temporary-storage and inclusive-time
+      limits, including recursive/cyclic histories and cancellation. Each
+      refuses without activation and cleans up partial inputs; completed
+      reuse and caller-owned inputs remain intact. Cold/warm measurements
+      justify finite default budgets before consumer enablement.
 - [ ] Manifest/trust-root tests reject a wrong payload/ABI/platform, an
       altered artifact digest, or a mismatched dependency closure before
       activation.
@@ -459,7 +473,7 @@ third-party dependency against PyPI's actual release history
 Lag varies from 0 to 65+ days across just 3 real dependencies of one
 plugin - it is not a fixed constant tunable with a single universal age
 window. This revises the Lag-tolerant version selection Open Design
-Question above: Phase 2 should query the governed feed's own currently
+Question above: Phase 3 should query the governed feed's own currently
 available versions at install time, not apply an assumed age constant.
 
 **3. Timing and storage - wheel-based install is faster, markedly so
