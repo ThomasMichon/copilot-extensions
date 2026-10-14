@@ -523,7 +523,7 @@ def test_creation_lease_is_released_by_kernel_after_process_exit(creation):
 
 
 @pytest.mark.guard
-@pytest.mark.parametrize("change", ["live", "binding", "identity"])
+@pytest.mark.parametrize("change", ["live", "binding", "identity", "status"])
 def test_creation_refuses_conflicting_retained_companion(creation, monkeypatch, capsys, change):
     child_id = creation.record.worktree_id + "-k"
     checkout = creation.roots["knowledge"] / child_id
@@ -547,8 +547,11 @@ def test_creation_refuses_conflicting_retained_companion(creation, monkeypatch, 
                 str(creation.anchors["harness"]), "", "harness", True, True, True,
             ),
         )
-    else:
+    elif change == "identity":
         child.branch = "worktree/unrelated"
+        tracking.save_record(child)
+    else:
+        child.status = "pushed"
         tracking.save_record(child)
     monkeypatch.setattr(
         permissions, "clone_permissions", lambda *a: pytest.fail("conflicted companion mutated"),
@@ -583,6 +586,32 @@ def test_creation_refuses_moved_or_mismatched_parent(creation, monkeypatch, caps
     )
     code, report = _run(creation, capsys, fix=True)
     assert code == 1 and report["error"]
+    assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("status", ["pushed", "orphaned", "complete"])
+def test_creation_refuses_lifecycle_advanced_parent(creation, monkeypatch, capsys, status):
+    creation.record.status = status
+    tracking.save_record(creation.record)
+    monkeypatch.setattr(
+        permissions, "clone_permissions", lambda *a: pytest.fail("advanced lifecycle mutated"),
+    )
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 1 and "active local session" in report["error"]
+    assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+
+
+def test_creation_detached_git_head_returns_refusal_report(native_creation, monkeypatch, capsys):
+    creation = native_creation
+    git_ops.git("checkout", "--detach", cwd=creation.record.worktree_path)
+    monkeypatch.setattr(
+        permissions, "clone_permissions", lambda *a: pytest.fail("detached checkout mutated"),
+    )
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 1 and report["error_type"] == "GitError"
+    assert "symbolic-ref" in report["error"]
+    assert not report["repaired"] and "prepared" not in report
     assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
 
 

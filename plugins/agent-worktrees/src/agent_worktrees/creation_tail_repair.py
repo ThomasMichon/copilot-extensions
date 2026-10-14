@@ -46,10 +46,10 @@ def _validate(config: cfg.Config, path: Path, seed_id: str | None):
         record.worktree_id != path.stem or record.repo != config.repo_name
         or record.machine != config.machine or record.platform != config.platform
         or record.kind != "session"
-        or record.status in {"complete", "completed", "finalized"}
+        or record.status != "active"
         or getattr(config.default_repo, "knowledge_only", False)
     ):
-        raise ValueError("creation repair requires this project's local session worktree")
+        raise ValueError("creation repair requires this project's active local session worktree")
     checkout = Path(record.worktree_path)
     expected_path = Path(config.default_repo.worktree_root) / record.worktree_id
     if (
@@ -168,9 +168,9 @@ def _retained_sibling(
         if (
             Path(child.worktree_path).resolve() != expected_path.resolve()
             or not expected_path.is_dir() or expected_path.is_symlink()
-            or child.status in {"complete", "completed", "finalized"}
+            or child.status != "active"
         ):
-            raise ValueError("retained paired checkout is missing, moved, or terminal")
+            raise ValueError("retained paired checkout is missing, moved, or no longer active")
         _same_repository(root.path, child.worktree_path, branch=child.branch)
         found = child
     return found
@@ -350,6 +350,7 @@ def targeted_doctor(args) -> int:
                 )
     except (
         OSError, ValueError, RuntimeError, TypeError, yaml.YAMLError, subprocess.TimeoutExpired,
+        git_ops.GitError,
     ) as exc:
         report.update(error=str(exc), error_type=type(exc).__name__)
     if getattr(args, "json", False):

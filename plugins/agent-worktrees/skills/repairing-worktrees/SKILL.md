@@ -110,11 +110,12 @@ an explicit, exact identity:
 ```
 
 This targeted scope neither starts Copilot nor takes, replaces, or finishes the
-prompt. It requires a confirmed cold, nonterminal local session worktree and
+prompt. It requires a confirmed cold local session worktree still in its original
+`active` creation state and
 an unclaimed New intent; Resume intents and ambiguous handoffs refuse. It uses
 the normal permission, pairing, composition, and projection machinery. An
 existing reciprocal companion is reused, never recreated; an untracked,
-conflicting, moved, terminal, or live retained companion refuses. Other doctor
+conflicting, moved, lifecycle-advanced, or live retained companion refuses. Other doctor
 repair scopes and GC cannot be combined with it.
 
 Reports do not render guidance (`projection_status: not_checked`). Fix verifies
