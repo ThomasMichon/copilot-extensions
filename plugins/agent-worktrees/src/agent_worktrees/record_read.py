@@ -183,6 +183,8 @@ def read_exact_record(worktree_id: str) -> dict[str, object]:
             if isinstance(binding, dict) and "version" in binding:
                 if type(binding["version"]) is not int:
                     raise ValueError(f"Record {key} version must be an integer")
+        # Compatibility parsing may stringify fields, expanding shared aliases.
+        _json_value(data)
         record = tracking.parse_record_data(data, path=record_path)
         leg = tracking.derive_execution_leg(record)
         worktree = {

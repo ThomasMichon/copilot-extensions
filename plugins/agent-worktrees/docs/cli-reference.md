@@ -81,6 +81,8 @@ unsupported scalar types, non-finite numbers, and cyclic YAML are malformed.
 JSON conversion is bounded to 64 nesting levels, 10,000 expanded nodes and
 1 MiB of encoded data. Shared aliases count on every expansion; exceeding any
 budget returns `record-malformed` rather than allocating unbounded output.
+The same budgets are checked on raw record values before compatibility parsing
+can stringify them, as well as on the returned metadata.
 Keys are never silently coerced or collapsed during JSON conversion.
 Recognized legacy backends use the existing parsed version-1 representation.
 Explicit binding schema versions must be integers, not booleans, floats,

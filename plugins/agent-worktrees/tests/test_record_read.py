@@ -633,6 +633,29 @@ def test_record_read_bounds_json_expansion(record_fixture, kind):
     assert path.read_bytes() == before
 
 
+@pytest.mark.parametrize("field", ["endpoint_url", "protocol_version", "created_at"])
+def test_record_read_bounds_recognized_backend_before_compatibility_parsing(
+    record_fixture, valid_provider_binding, monkeypatch, field,
+):
+    data, path = record_fixture
+    value = ["leaf"]
+    for _ in range(17):
+        value = [value, value]
+    data["session_backend"] = {**valid_provider_binding, field: value}
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    before = path.read_bytes()
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("oversized raw data reached the coercing compatibility parser")
+
+    monkeypatch.setattr(tracking, "parse_record_data", forbidden)
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 1
+    assert result["error"]["code"] == "record-malformed"
+    assert result["worktree"] is None
+    assert path.read_bytes() == before
+
+
 def test_record_read_legacy_backend_translation_is_not_written(record_fixture):
     data, path = record_fixture
     data["session_backend"] = {
