@@ -127,6 +127,9 @@ handoff throughout recovery; normal launch planning refuses a held lease too.
 The companion's admission lease is held from before allocation through the final
 readiness check. Cold launches without a staged prompt hold that same lease
 across setup and the backend lifetime, so an earlier launch plan cannot race repair.
+Cold bare launches use the same fence while retaining their exact staged seed
+without delivery. A confirmed live Open bypasses seed planning, not the cold
+execution fence, so reattachment stays available without mutating launch intent.
 The kernel releases it after process exit, without guessing that a PID is stale.
 Direct seed-mutating clients require receiving verb version 4; structured request
 staging requires version 3, so an older daemon cannot silently omit this fence.

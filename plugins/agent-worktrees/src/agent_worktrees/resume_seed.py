@@ -7,7 +7,11 @@ from . import launch_admission, launch_seed_state
 from pathlib import Path
 
 
-def seed_for_attempt(path: Path, record, args) -> launch_seed_state.LaunchSeed | None:
+def seed_for_attempt(
+    path: Path, record, args, *, verdict: LiveVerdict | None = None,
+) -> launch_seed_state.LaunchSeed | None:
+    if plain_live_open(args, verdict):
+        return None
     if not getattr(args, "dry_run", False):
         launch_admission.check(path)
     explicit = getattr(args, "seed", None)

@@ -379,6 +379,27 @@ def test_no_seed_plan_refuses_new_intent_without_consuming_it(creation, monkeypa
     assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
 
 
+@pytest.mark.guard
+@pytest.mark.parametrize("change", ["superseded", "cleared"])
+def test_bare_plan_preserved_identity_refuses_changed_intent(creation, monkeypatch, change):
+    from agent_worktrees import launch_seed_exec
+
+    path = creation.record.yaml_path
+    if change == "superseded":
+        launch_seed_state.stage(path, kind="resume", text="newer intent")
+    else:
+        launch_seed_state.remove(path)
+    before = launch_seed_state.peek(path)
+    monkeypatch.setattr(
+        launch_seed_exec.subprocess, "Popen",
+        lambda *a, **kw: pytest.fail("stale bare plan launched"),
+    )
+    assert launch_seed_exec.launch(
+        path, ["copilot"], admission_only=True, preserve_seed_id=creation.seed.seed_id,
+    ) == 3
+    assert launch_seed_state.peek(path) == before
+
+
 @pytest.mark.parametrize("result", ["pair_error", "swallowed"])
 def test_creation_new_pair_requires_successful_composition(
     native_creation, monkeypatch, capsys, result,

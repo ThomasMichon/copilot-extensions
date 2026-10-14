@@ -397,18 +397,24 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
 
     interactive = not getattr(args, "json", False) and not getattr(args, "base", False)
     verdict = None
+    if not args.dry_run:
+        try:
+            verdict = sessions.verify_worktree_active(record)
+        except Exception:
+            verdict = None
     try:
-        staged_seed = seed_for_attempt(record.yaml_path, record, args)
+        staged_seed = seed_for_attempt(record.yaml_path, record, args, verdict=verdict)
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
         error = f"Could not stage launch prompt: {exc}"
         output.err(error)
         _emit_plan({"action": "error", "error": error, "exit_code": 3})
         return 3
     if (interactive and not args.dry_run) or staged_seed:
-        try:
-            verdict = sessions.verify_worktree_active(record)
-        except Exception:
-            verdict = None
+        if args.dry_run:
+            try:
+                verdict = sessions.verify_worktree_active(record)
+            except Exception:
+                verdict = None
         if staged_seed is not None and plain_live_open(args, verdict):
             staged_seed = None
         if staged_seed is not None:
@@ -595,8 +601,11 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             launch_cmd, record.yaml_path, seed_id=staged_seed.seed_id,
         )
         print("   Launch prompt staged until Copilot handoff.")
-    elif staged_seed is None and not (verdict and verdict.active):
-        launch_cmd = deferred_command(launch_cmd, record.yaml_path, admission_only=True)
+    elif not (verdict and verdict.active):
+        launch_cmd = deferred_command(
+            launch_cmd, record.yaml_path, admission_only=True,
+            preserve_seed_id=staged_seed.seed_id if staged_seed else None,
+        )
 
     print()
 

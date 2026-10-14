@@ -88,6 +88,115 @@ def _args(**overrides):
     return argparse.Namespace(**base)
 
 
+def _resume_plan(config, record, monkeypatch, capfd, *, surface, command=None, **kwargs):
+    from agent_worktrees import resolve_launch_cli as rlc
+
+    args = _args(
+        json=surface == "json", dry_run=False, no_fast_forward=True,
+        profile=None, **kwargs,
+    )
+    command = command if command is not None else ["copilot"]
+    monkeypatch.setattr(m, "_build_launch_cmd", lambda *a, **kw: command)
+    if surface == "json":
+        code = resolve_cli.cmd_resolve(args)
+        payload = json.loads(capfd.readouterr().out)
+        return code, payload.get("launch", payload)
+    monkeypatch.setattr(rlc, "_dispatch_validate_profile_assignment_config", lambda *a: None)
+    monkeypatch.setattr(rlc.sessions, "resolve_resume_target", lambda *a: None)
+    monkeypatch.setattr(rlc.tracking, "stamp_mux_live", lambda *a, **kw: None)
+    monkeypatch.setattr(rlc.tracking, "stamp_bound_live", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        rlc, "_dispatch_launch_profile_selection",
+        lambda *a, **kw: SimpleNamespace(profile=None, assignment=None),
+    )
+    monkeypatch.setattr(rlc, "_dispatch_reflect_assignment", lambda *a: None)
+    monkeypatch.setattr(rlc, "_dispatch_apply_assignment_env", lambda env, selection: env)
+    monkeypatch.setattr(rlc, "_build_launch_cmd", lambda *a, **kw: command)
+    monkeypatch.setattr(rlc, "_build_env", lambda *a, **kw: {})
+    monkeypatch.setattr(rlc, "_repo_session_env", lambda *a: {})
+    monkeypatch.setattr(rlc, "_preflight_launch", lambda *a: SimpleNamespace(error=None))
+    plans = []
+    monkeypatch.setattr(rlc, "_emit_plan", plans.append)
+    code = rlc._resolve_resume_context(rlc.ResolveLaunchContext(
+        config=config, args=args, record=record,
+    ))
+    return code, plans[-1]
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
+@pytest.mark.parametrize("intent", ["plain", "typed", "seed_id"])
+def test_live_open_held_backend_admission_preserves_intent_and_refuses_mutation(
+    tmp_path, monkeypatch, capfd, surface, intent,
+):
+    from agent_worktrees import launch_admission
+
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path, auto_fast_forward=False)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path, codename="already-set",
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    saved = launch_seed_state.stage(record.yaml_path, kind="new", text="retain the original")
+    before = launch_seed_state.state_path(record.yaml_path).read_bytes()
+    monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: LiveVerdict(active=True))
+    changes = (
+        {"seed": "do not replace"} if intent == "typed"
+        else {"seed_id": saved.seed_id} if intent == "seed_id" else {}
+    )
+    with launch_admission.guard(record.yaml_path):
+        code, plan = _resume_plan(
+            config, record, monkeypatch, capfd, surface=surface, **changes,
+        )
+    if intent == "plain":
+        assert code == 0 and plan["cmd"] == ["copilot"] and not plan["seed_pending"]
+    else:
+        assert code == 3 and "launch admission is busy" in plan["error"]
+    assert launch_seed_state.state_path(record.yaml_path).read_bytes() == before
+    assert launch_seed_state.peek(record.yaml_path) == saved
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
+def test_preplanned_bare_launch_is_fenced_and_preserves_retained_seed(
+    tmp_path, monkeypatch, capfd, surface,
+):
+    from agent_worktrees import launch_admission
+
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path, auto_fast_forward=False)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path, codename="already-set",
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    before_seed = launch_seed_state.stage(record.yaml_path, kind="new", text="retained private intent")
+    before = launch_seed_state.state_path(record.yaml_path).read_bytes()
+    consumer = [sys.executable, "-c", "print('bare-backend-started')"]
+    code, plan = _resume_plan(
+        config, record, monkeypatch, capfd, surface=surface, command=consumer, bare_resume=True,
+    )
+    assert code == 0 and "--admission-only" in plan["cmd"]
+    assert "--preserve-seed-id" in plan["cmd"] and before_seed.seed_id in plan["cmd"]
+    assert not plan["seed_pending"] and "--interactive" not in plan["cmd"]
+    options = {
+        "capture_output": True, "text": True, "timeout": 15,
+        "env": {
+            **os.environ,
+            "PYTHONPATH": str(Path(resolve_cli.__file__).resolve().parents[1]),
+        },
+        "creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    }
+    with launch_admission.guard(record.yaml_path):
+        blocked = subprocess.run(plan["cmd"], **options)
+    assert blocked.returncode == 3 and "launch admission is busy" in blocked.stderr
+    assert "bare-backend-started" not in blocked.stdout
+    admitted = subprocess.run(plan["cmd"], **options)
+    assert admitted.returncode == 0, admitted.stderr
+    assert admitted.stdout.strip() == "bare-backend-started"
+    assert launch_seed_state.state_path(record.yaml_path).read_bytes() == before
+    assert launch_seed_state.peek(record.yaml_path) == before_seed
+
+
 @pytest.mark.parametrize("no_mux", [False, True])
 def test_explicit_resume_seed_is_staged_with_history_and_provenance(
     tmp_path: Path, monkeypatch, capfd, no_mux,

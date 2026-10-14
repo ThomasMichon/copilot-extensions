@@ -691,9 +691,11 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         require_record_mutation(record, config)
     except ExecutionSpaceError as exc:
         return output._json_error(str(exc), exit_code=3)
+    with step("Verifying worktree liveness", worktree_id=worktree_id):
+        verdict = sessions.verify_worktree_active(record)
     try:
         with step("Preparing launch prompt", worktree_id=worktree_id):
-            staged_seed = seed_for_attempt(yaml_path, record, state.args)
+            staged_seed = seed_for_attempt(yaml_path, record, state.args, verdict=verdict)
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
         return output._json_error(f"Could not stage launch prompt: {exc}", exit_code=3)
     launch_preflight = _preflight_launch(config, state.args, record.worktree_path)
@@ -713,7 +715,6 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         )
         if not restored.get("ok"):
             return output._json_error(restored.get("reason", "could not restore the session"))
-    with step("Verifying worktree liveness", worktree_id=worktree_id):
         verdict = sessions.verify_worktree_active(record)
     if staged_seed is not None and plain_live_open(state.args, verdict):
         staged_seed = None
@@ -796,8 +797,11 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     seed_pending = bool(staged_seed and not getattr(state.args, "bare_resume", False))
     if seed_pending:
         launch_cmd = deferred_command(launch_cmd, yaml_path, seed_id=staged_seed.seed_id)
-    elif staged_seed is None and not verdict.active:
-        launch_cmd = deferred_command(launch_cmd, yaml_path, admission_only=True)
+    elif not (verdict and verdict.active):
+        launch_cmd = deferred_command(
+            launch_cmd, yaml_path, admission_only=True,
+            preserve_seed_id=staged_seed.seed_id if staged_seed else None,
+        )
 
     launch = {
         "action": "exec",
