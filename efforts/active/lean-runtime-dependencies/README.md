@@ -108,7 +108,7 @@ marked agent-recommended; exploratory backend replacements are not commitments.
   _(agent-recommended; coordinate artifact ownership with #4876)_
 - [ ] Make restricted-SSH Paramiko provisioning genuinely opt-in.
   _(agent-recommended)_
-- [ ] Replace full-table pandas statistics materialization with projected
+- [x] Replace full-table pandas statistics materialization with projected
   bounded aggregation. _(agent-recommended)_
 - [ ] Decide syntax grammar extras and unseeded installer profiles from measured
   benefit; retain supported fallback installation. _(agent-recommended)_
@@ -303,3 +303,40 @@ shared mutable venv is presumed acceptable.
 - This changes status-query execution, not storage layout or service ownership.
   No fresh installer, production endpoint, embedding model or live deployment
   was exercised. Linux validation remains a PR CI obligation.
+
+### 2026-10-14 - Bounded statistics merged and next dependency slice
+- #6686 merged to `dev` as `cbbef0837` after current-head approval and complete
+  CI, including the actual Linux index suite. Marked bounded aggregation done.
+  Release promotion and any authorized deployment remain separate.
+- Next: make restricted-SSH Paramiko provisioning genuinely explicit while
+  preserving existing configured provider-exec capabilities and update behavior.
+  Inspect current installer/config profile ownership before selecting a mechanism;
+  no new mutable shared runtime or machine-global default is presumed.
+
+### 2026-10-14 - Persistent optional restricted-SSH profiles
+- Chose a persistent installation profile rather than a transient environment
+  switch or a second always-on helper. This closes the reviewed
+  `capability-sized-runtime-dependencies` intent without extending it.
+- New Containers installations default to base. Explicit provider-exec selection
+  persists across updates; an existing unprofiled selected runtime with Paramiko
+  preserves that capability. Neither incidental repository configuration nor a
+  shared mutable environment selects the dependency closure.
+- Both native installers use one stdlib profile coordinator with canonical
+  source admission, construction/retention leases, immutable completion and
+  marker activation. Slots bind package version plus profile. A failed requested
+  extra never silently activates base; completed slots are reused, not rewritten.
+- Windows contained coverage: 774 passed, 20 skipped. Actual isolated first-touch
+  installs proved base and provider-exec, the whole PowerShell installer, ordinary
+  profile retention, base rollback, real CLI dispatch and plain-pip local-library
+  resolution. The tests cover source conflicts, failure retention, legacy
+  capability migration, bounded diagnostics and current-profile bootstrap.
+- Same-interpreter fresh package-file measurements: base 18 distributions /
+  23.29 MiB versus provider-exec 25 / 36.30 MiB: 7 distributions and 13.01 MiB
+  logical recorded-file delta. Both include pip/setuptools. These are not full
+  venv, compressed-download or hardlink-aware physical-allocation measurements.
+- Linux shell execution remains assigned to PR CI. No Docker daemon or macOS
+  lane is available locally; the isolated fresh-root checks exercise first touch
+  without modifying any deployed installation. No production rollout, listener,
+  container, lease or service activation is part of this slice.
+- Publication, Linux CI and review remain pending; the Plan item is not yet
+  claimed complete.
