@@ -829,12 +829,35 @@ def _open_daemon_log(log_file: str) -> BinaryIO:
     return log_fh
 
 
+def _header_field(value: object) -> str:
+    """Escape control and line-break characters so a field stays on one line.
+
+    Lone surrogates (undecodable POSIX path bytes) pass through here and are
+    escaped by the ``backslashreplace`` encode in :func:`_daemon_log_header`.
+    """
+    text = str(value)
+    if text.isprintable():
+        return text
+    return "".join(
+        ch if ch.isprintable() or 0xD800 <= ord(ch) <= 0xDFFF
+        else ch.encode("unicode_escape").decode("ascii")
+        for ch in text
+    )
+
+
 def _daemon_log_header(stamp: str, cwd: str, executable: str, display: str | None) -> bytes:
-    """The durable launch header: never the argv tail or the environment."""
-    header = f"{stamp} spawn_daemon cwd={cwd} executable={executable}"
+    """The durable launch header: never the argv tail or the environment.
+
+    Always exactly one line, and never fails to encode, whatever bytes a valid
+    path holds.
+    """
+    header = (
+        f"{stamp} spawn_daemon cwd={_header_field(cwd)} "
+        f"executable={_header_field(executable)}"
+    )
     if display:
-        header += " display=" + " ".join(str(display).split())
-    return (header + "\n").encode()
+        header += " display=" + _header_field(" ".join(str(display).split()))
+    return (header + "\n").encode("utf-8", errors="backslashreplace")
 
 
 def spawn_daemon(
