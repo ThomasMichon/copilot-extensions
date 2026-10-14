@@ -257,6 +257,31 @@ Phase 3 contract, not a new parallel lifecycle framework.
 
 ## Journal
 
+### 2026-10-14 -- Native CI candidate published as a draft
+
+The Python-owned runtime-admission and deployed dev-lifecycle candidate is
+published in #6707 as a functional draft. Publication reconciled current
+command-lifecycle admission and resident-roster reads with the candidate's
+source/authority separation and generation evidence. Both sides' behavior
+is retained; the tightened Worktrees runtime and dispatcher module ceilings
+remain unchanged. Release intent now includes the standalone worktree-manager
+consumer as well as the thirteen runtime plugins.
+
+After reconciliation, the exact non-adopter selection passed 425 contracts
+with three skips, covering lifecycle, generation, reconciliation, monitor
+cutover and resident-read behavior. Native deployed Windows restoration remains
+unproved: refresh construction previously exceeded the unchanged UV deadline
+before source deletion or deployed release. Isolated backend or stream-capture
+success does not close that gate.
+
+The existing full CI workflow was dispatched without inputs or matrix changes
+as [run 38557786361](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38557786361),
+against candidate `22aa858bf36d2c908c162f274ec6de0838c7a7b8`. Its nine-plugin
+Ubuntu matrix includes the full Worktrees suite. The run's result is pending,
+not inferred from dispatch acceptance. The draft is not ready for review or
+merge; source-free deployed release, the complete adopter portfolio, normal
+promotion and authorized installed proof remain open.
+
 ### 2026-10-13 -- Codespaces module-launch health prerequisite merged
 
 #6565 merged into `dev` as
