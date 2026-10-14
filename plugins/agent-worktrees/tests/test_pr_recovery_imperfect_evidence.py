@@ -99,3 +99,28 @@ def test_changed_imperfect_evidence_invalidates_confirmation(
     changed = preview(wid, config, first["confirmation"])
     assert changed["confirmation"] != first["confirmation"]
     assert not list(metadata(wt).glob("*break-glass*.json"))
+
+
+@pytest.mark.parametrize("kind", ["blob", "tree", "tag"])
+def test_recreated_non_commit_evidence_ref_requires_fresh_confirmation(
+    pr_repo: PrRepo, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    config, wid, wt, _remote, saved, _branch, _published = backed_publication(pr_repo, monkeypatch)
+    collection = json.loads(pr_recovery._path(str(wt)).read_bytes())
+    point = collection["checkpoints"][collection["latest"]]
+    git("update-ref", "-d", point["local_ref"], point["local_head"], cwd=wt)
+    first = preview(wid, config)
+    blob = git("hash-object", "-w", str(wt / "unpublished.txt"), cwd=wt)
+    if kind == "tree":
+        object_id = git("rev-parse", "HEAD^{tree}", cwd=wt)
+    elif kind == "tag":
+        git("tag", "-a", "non-commit-evidence", "-m", "blob evidence", blob, cwd=wt)
+        object_id = git("rev-parse", "refs/tags/non-commit-evidence", cwd=wt)
+    else:
+        object_id = blob
+    git("update-ref", point["local_ref"], object_id, cwd=wt)
+    changed = preview(wid, config, first["confirmation"])
+    assert changed["confirmation"] != first["confirmation"]
+    assert changed["operation"]["evidence_status"] == "unusable"
+    assert record(wid).pr.head_sha == saved
+    assert not list(metadata(wt).glob("*break-glass*.json"))

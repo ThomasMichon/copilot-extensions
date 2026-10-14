@@ -56,7 +56,7 @@ def _evidence_snapshot(pr: tracking.PRRecord, cwd: str) -> tuple[str, bool]:
             if isinstance(ref, str) and ref:
                 result = git_ops.git(
                     "--no-replace-objects", "rev-parse", "--verify", "--end-of-options",
-                    f"{ref}^{{commit}}", cwd=cwd, check=False, isolated_repository=True,
+                    ref, cwd=cwd, check=False, isolated_repository=True,
                 )
                 refs[field] = (result.returncode, result.stdout.strip())
     return _fingerprint({"bytes": hashlib.sha256(raw).hexdigest(), "refs": refs}), False
