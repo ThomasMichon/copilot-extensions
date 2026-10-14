@@ -178,6 +178,8 @@ async def acquire_github_usage(
         raise ModelError("expected GitHub login must be a valid account handle")
     if type(year) is not int or type(month) is not int:
         raise ModelError("GitHub report year and month must be integers")
+    if not 1000 <= year <= 9999:
+        raise ModelError("GitHub report year must have four digits")
     try:
         date(year, month, 1)
     except (ValueError, OverflowError) as exc:

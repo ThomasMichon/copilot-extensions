@@ -257,6 +257,7 @@ def test_transport_failure_is_redacted_but_unexpected_host_error_propagates() ->
     {"expected_login": "../user"}, {"expected_login": ""},
     {"year": True}, {"month": 13}, {"timeout": True}, {"timeout": 31},
     {"timeout": float("nan")}, {"year": 10**100},
+    {"year": 1}, {"year": 999}, {"year": 10000},
 ])
 def test_invalid_invocation_fails_before_network(kwargs: dict) -> None:
     client = Client()

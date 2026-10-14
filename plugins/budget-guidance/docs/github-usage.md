@@ -37,6 +37,8 @@ The returned account and explicit monthly period must match, and unexpected
 product/model/day filters are refused. A mismatch on `/user` prevents the
 report request entirely. Both reads share one deadline, at most 30 seconds;
 each response is bounded to 64 KiB and the report to 256 line items.
+The explicit year must have four digits (1000 through 9999), and the month
+must be 1 through 12; malformed invocations fail before either request.
 Cancellation owns this acquisition only; it does not close or stop the host's
 shared client. Unexpected host programming errors propagate.
 
