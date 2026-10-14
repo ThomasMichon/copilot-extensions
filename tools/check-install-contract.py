@@ -334,19 +334,39 @@ def _mark_complete_result_violations(plugins_dir: Path) -> list[str]:
             violations.append(f"{rel}: the completion-marker helper swallows a failed mark-complete")
         lines = text.split("\n")
         for lineno, line in enumerate(lines, 1):
-            if not _MARK_COMPLETE_CALL.match(line):
+            if _MARK_COMPLETE_CALL.match(line):
+                statement = line
+                index = lineno
+                while re.search(r"(?:\\|`)[ \t]*$", statement) and index < len(lines):
+                    statement = statement.rstrip()[:-1] + " " + lines[index]
+                    index += 1
+                stops = "||" in statement and _STOPS.search(statement.split("||", 1)[1])
+            elif _MARK_COMPLETE_IF_NOT.search(line):
+                tail = "\n".join(lines[lineno - 1:lineno + 20])
+                stops = bool(_STOPS.search(_braced_body(tail[tail.index("{", tail.index(_PS1_HELPER)):])))
+            else:
                 continue
-            statement = line
-            index = lineno
-            while re.search(r"(?:\\|`)[ \t]*$", statement) and index < len(lines):
-                statement = statement.rstrip()[:-1] + " " + lines[index]
-                index += 1
-            if "||" not in statement:
+            if not stops:
                 violations.append(
                     f"{rel}:{lineno}: completion-marker publication result is ignored; "
                     "stop activation when it fails"
                 )
     return violations
+
+
+_PS1_HELPER = "Invoke-VersionedMarkComplete"
+_MARK_COMPLETE_IF_NOT = re.compile(r"\bif\s*\(\s*-not\s*\(\s*Invoke-VersionedMarkComplete\b")
+_STOPS = re.compile(r"\b(?:exit|return|throw)\b")
+
+
+def _braced_body(text: str) -> str:
+    """The ``{...}`` block that ``text`` starts with (unbalanced: the rest)."""
+    depth = 0
+    for index, char in enumerate(text):
+        depth += {"{": 1, "}": -1}.get(char, 0)
+        if depth == 0:
+            return text[1:index]
+    return text[1:]
 
 
 def _verify_installer_engine_sync() -> list[str]:

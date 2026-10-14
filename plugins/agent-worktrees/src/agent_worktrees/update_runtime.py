@@ -14,8 +14,8 @@ import time
 from collections.abc import Collection, Mapping
 from pathlib import Path
 
-from . import config as cfg
 from . import bare_anchor_sync, git_ops, output, update_events
+from . import config as cfg
 from .installer_capabilities import posix_zero_downtime_flag_supported
 from .update_gate import (  # noqa: F401 - re-exported for callers and tests
     MACHINE_GATED_SKIP,
@@ -676,8 +676,11 @@ def _fast_forward_project_anchors() -> None:
             continue
         if bare_anchor_sync.is_bare(anchor_path):
             # No work tree: the dirty check / merge below can't run there.
-            state, detail = bare_anchor_sync.sync_bare_anchor(
-                anchor, repo.default_branch, remote=repo.remote)
+            try:
+                state, detail = bare_anchor_sync.sync_bare_anchor(
+                    anchor, repo.default_branch, remote=repo.remote)
+            except Exception as exc:  # e.g. a fetch timeout: report, keep updating
+                state, detail = "error", str(exc) or type(exc).__name__
             (output.ok if state == "synced" else output.warn if state == "error" else output.info)(
                 f"{anchor}: {state} ({detail})"
             )

@@ -1403,7 +1403,7 @@ def sync_repo(entry: RepoEntry, plat: str | None = None) -> tuple[str, str]:
         # credential override when it differs from the active `gh` account.
         # `sync_repo`'s ambient-credential fetch previously bypassed that,
         # failing private repos owned by a non-active account (dotfiles#2069).
-        git_ops.fetch("origin", cwd=path, timeout=180)
+        git_ops.fetch("origin", cwd=path, timeout=180, isolated_repository=True)
         if not target:
             return ("skipped", "no branch to fast-forward")
         ff = _git(path, "merge", "--ff-only", f"origin/{target}")

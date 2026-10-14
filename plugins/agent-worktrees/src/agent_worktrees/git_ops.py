@@ -687,20 +687,20 @@ DEFAULT_FETCH_TIMEOUT = 30.0
 
 
 def fetch(
-    remote: str, *, cwd: str | Path, timeout: float | None = DEFAULT_FETCH_TIMEOUT
+    remote: str, *, cwd: str | Path, timeout: float | None = DEFAULT_FETCH_TIMEOUT,
+    isolated_repository: bool = False,
 ) -> None:
     """Fetch from a remote (auto-authenticating cross-account remotes; #29).
 
-    Bounded by ``timeout`` (default :data:`DEFAULT_FETCH_TIMEOUT`) so an
-    unreachable remote can't hang the caller indefinitely: a stall past the
-    bound is surfaced as a :class:`GitError` (returncode 124, the timeout
-    convention), which every current caller already handles as a best-effort
-    fetch failure. Pass ``timeout=None`` for the historical unbounded behavior.
+    Bounded by ``timeout`` (default :data:`DEFAULT_FETCH_TIMEOUT`) so an unreachable
+    remote can't hang the caller: a stall past the bound is surfaced as a
+    :class:`GitError` (returncode 124), which every caller handles as a best-effort
+    fetch failure; ``timeout=None`` is unbounded.
     """
     try:
         git(
             *_auth_config_args(remote, cwd=cwd), "fetch", remote, "--quiet",
-            cwd=cwd, timeout=timeout,
+            cwd=cwd, timeout=timeout, isolated_repository=isolated_repository,
         )
     except subprocess.TimeoutExpired as exc:
         raise GitError(

@@ -788,7 +788,9 @@ _versioned_mark_complete() {
     if [[ -x "$VENV_DIR/bin/python" ]]; then
         py="$VENV_DIR/bin/python"
     else
-        py="$(_bootstrap_python)" || py=""
+        # The freshly built slot's own interpreter: it already passed the health
+    # gate, and an ambient one may be absent or unusable.
+    if [[ -x "$VENV_DIR/bin/python" ]]; then py="$VENV_DIR/bin/python"; else py="$(_bootstrap_python)" || py=""; fi
     fi
     if [[ -z "$py" ]]; then
         _fail "No python available to publish the completion marker for runtime slot versions/$SRC_VERSION"

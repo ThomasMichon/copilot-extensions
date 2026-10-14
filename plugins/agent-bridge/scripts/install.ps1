@@ -1014,8 +1014,8 @@ function Enter-InstallLock {
         } catch [System.IO.IOException] {
             # Only a sharing/lock violation means "another install holds it" ->
             # retry until the deadline. Any OTHER IOException (disk full, FS
-            # error) is a real fault: warn + degrade to lock-free rather than
-            # masking it as contention and spinning silently (ce#802 review).
+            # error) is a real fault: fail closed (exit 1) rather than masking it
+            # as contention and spinning silently, and never install unlocked.
             $win32 = $_.Exception.HResult -band 0xFFFF
             if ($win32 -eq 32 -or $win32 -eq 33) {   # ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION
                 if ((Get-Date) -ge $deadline) { return $false }

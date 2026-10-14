@@ -249,10 +249,18 @@ def _scripts(tmp_path: Path, name: str, text: str) -> Path:
             "function Invoke-VersionedMarkComplete {\n    return $true\n}\n"
             "    Invoke-VersionedMarkComplete `\n        -PayloadHash $payloadHash\n",
         ),
+        ("install.sh", "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n    _versioned_mark_complete || true\n}\n"),
+        ("install.sh", "_versioned_mark_complete() {\n    return 0\n}\nmain() {\n    _versioned_mark_complete || _warn 'x'\n}\n"),
+        (
+            "install.ps1",
+            "function Invoke-VersionedMarkComplete {\n    return $true\n}\n"
+            "    if (-not (Invoke-VersionedMarkComplete)) {\n        Write-Warn 'marker not published'\n    }\n",
+        ),
     ],
     ids=[
         "sh-swallowed-pipeline", "sh-bare-call", "ps1-bare-call",
         "sh-multiline-swallow", "ps1-ignored-call-with-arguments", "ps1-continued-ignored-call",
+        "sh-or-true", "sh-or-warn-only", "ps1-warn-only-body",
     ],
 )
 def test_ignored_completion_marker_failures_are_violations(tmp_path, name, text) -> None:

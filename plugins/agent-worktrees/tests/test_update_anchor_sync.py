@@ -369,3 +369,22 @@ def test_failed_anchor_fetch_is_reported(anchor_repo, monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert "fetch from origin failed" in captured.out + captured.err
+
+def test_bare_anchor_sync_failure_is_reported_without_aborting_update(
+    anchor_repo, monkeypatch, capsys
+):
+    from agent_worktrees import bare_anchor_sync
+
+    _seed, anchor = anchor_repo
+    _git("config", "core.bare", "true", cwd=anchor)
+    _install_config(monkeypatch, anchor)
+
+    def _timeout(*_a, **_k):
+        raise subprocess.TimeoutExpired(["git", "fetch"], 180)
+
+    monkeypatch.setattr(bare_anchor_sync, "sync_bare_anchor", _timeout)
+
+    m._fast_forward_project_anchors()
+
+    captured = capsys.readouterr()
+    assert "error" in captured.out + captured.err
