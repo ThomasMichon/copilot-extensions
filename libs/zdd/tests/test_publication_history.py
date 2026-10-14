@@ -18,6 +18,47 @@ def _publish(root, pid, port):
     )
 
 
+@pytest.mark.parametrize("row", ["active", "previous"])
+@pytest.mark.parametrize("value", [{}, False])
+@pytest.mark.parametrize("operation", ["witness", "publish", "guarded", "atomic"])
+def test_mutation_refuses_unparseable_endpoint_custody(
+    tmp_path, row, value, operation,
+):
+    endpoint = _publish(tmp_path, 101, 61001)
+    table = routing.read_table(tmp_path)
+    table["previous"] = table["active"].copy()
+    table[row] = value
+    original = json.dumps(table).encode()
+    path = routing.routing_table_path(tmp_path)
+    path.write_bytes(original)
+    with pytest.raises(routing.ActivePublicationRefused, match="endpoint unverifiable"):
+        if operation == "witness":
+            routing.publication_witness(tmp_path, deadline=time.monotonic() + 1)
+        elif operation == "publish":
+            _publish(tmp_path, 202, 61002)
+        elif operation == "guarded":
+            routing.publish_active_with_previous_guarded(
+                tmp_path, bind="127.0.0.1", port=61002, pid=202,
+                expected_active=endpoint,
+            )
+        else:
+            routing._atomic_write(path, {"active": endpoint.to_dict()})
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("row", ["active", "previous"])
+@pytest.mark.parametrize("value", [{}, []])
+def test_atomic_write_refuses_invalid_proposed_endpoint(tmp_path, row, value):
+    _publish(tmp_path, 101, 61001)
+    path = routing.routing_table_path(tmp_path)
+    original = path.read_bytes()
+    following = routing.read_table(tmp_path)
+    following[row] = value
+    with pytest.raises(routing.ActivePublicationRefused, match="endpoint unverifiable"):
+        routing._atomic_write(path, following)
+    assert path.read_bytes() == original
+
+
 @pytest.mark.parametrize("caller_history", [False, True])
 def test_atomic_write_preserves_input_and_uses_persisted_custody(tmp_path, caller_history):
     witness = routing.publication_witness(tmp_path, deadline=time.monotonic() + 1)

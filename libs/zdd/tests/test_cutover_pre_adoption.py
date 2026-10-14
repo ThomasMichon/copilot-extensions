@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 
@@ -642,6 +643,62 @@ def test_pre_adoption_accepts_consistent_previous_only_selection(tmp_path, monke
     result = orch.run(health_timeout=1, drain_timeout=1)
     assert result.ok and result.committed
     assert events.index("drain-9281") < events.index("publish-9290")
+
+
+@pytest.mark.parametrize("row", ["active", "previous"])
+@pytest.mark.parametrize("value", [
+    {}, [], False, "", {"bind": "127.0.0.1", "port": "invalid"},
+    {"bind": "127.0.0.1", "port": 9281, "process_start_time": "invalid"},
+    {"bind": "127.0.0.1", "port": float("inf")},
+])
+def test_pre_adoption_refuses_malformed_endpoint_rows_before_any_mutation(
+    tmp_path, monkeypatch, row, value,
+):
+    orch, events, _ = orchestrator(tmp_path, monkeypatch)
+    monkeypatch.setattr(routing, "_pid_alive", lambda pid: True)
+    table = routing.read_table(tmp_path)
+    table["previous"] = table["active"].copy()
+    table[row] = value
+    path = routing.routing_table_path(tmp_path)
+    original = json.dumps(table).encode()
+    path.write_bytes(original)
+    spawned = []
+    spawn = orch.spawn_passive
+    orch.spawn_passive = lambda port: spawned.append(port) or spawn(port)
+
+    result = orch.run(health_timeout=1, drain_timeout=1)
+
+    assert not result.ok and "endpoint" in result.error
+    assert not spawned and events == []
+    assert path.read_bytes() == original
+    assert breadcrumb.read_breadcrumb(tmp_path) is None
+
+
+@pytest.mark.parametrize("row", ["active", "previous"])
+def test_pre_adoption_refuses_endpoint_damage_introduced_during_drain(
+    tmp_path, monkeypatch, row,
+):
+    orch, events, _ = orchestrator(tmp_path, monkeypatch)
+    client = orch.make_client("http://127.0.0.1:9281")
+    drain = client.drain
+    damaged = None
+    path = routing.routing_table_path(tmp_path)
+
+    def damage_during_drain(**kwargs):
+        nonlocal damaged
+        report = drain(**kwargs)
+        table = routing.read_table(tmp_path)
+        table[row] = {}
+        damaged = json.dumps(table).encode()
+        path.write_bytes(damaged)
+        return report
+
+    monkeypatch.setattr(client, "drain", damage_during_drain)
+    result = orch.run(health_timeout=1, drain_timeout=1)
+    assert not result.ok and "endpoint unverifiable" in result.error
+    assert not result.committed and "shutdown-9281" not in events
+    assert path.read_bytes() == damaged
+    assert "confirmed-new-exit" in events
 
 
 def test_pre_adoption_refuses_a_routing_adapter_without_a_guarded_publication(

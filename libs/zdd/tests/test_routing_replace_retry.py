@@ -44,7 +44,9 @@ def test_transient_windows_sharing_conflict_retries(tmp_path, monkeypatch, winer
     from zdd import routing_persistence
 
     path = tmp_path / "active.json"
-    path.write_text('{"active":"old"}', encoding="utf-8")
+    old = {"active": {"bind": "127.0.0.1", "port": 9281, "pid": 111}}
+    new = {"active": {"bind": "127.0.0.1", "port": 9290, "pid": 222}}
+    path.write_text(json.dumps(old), encoding="utf-8")
     replacement = "windows_replace" if sys.platform == "win32" else "os.replace"
     real_replace = (
         routing_persistence.windows_replace if sys.platform == "win32"
@@ -63,11 +65,13 @@ def test_transient_windows_sharing_conflict_retries(tmp_path, monkeypatch, winer
 
     monkeypatch.setattr(f"zdd.routing_persistence.{replacement}", replace)
     monkeypatch.setattr(routing.time, "sleep", sleeps.append)
-    routing._atomic_write(path, {"active": "new"})
+    routing._atomic_write(path, new)
     assert len(calls) == 3
     assert sleeps == [0.05]
-    assert routing.read_table(tmp_path)["active"] == "new"
-    assert routing.read_table(tmp_path)["publication_history"]["saturated"] is True
+    assert routing.read_table(tmp_path)["active"] == new["active"]
+    history = routing.read_table(tmp_path)["publication_history"]
+    assert not history["saturated"]
+    assert [entry["pid"] for entry in history["entries"]] == [111, 222]
 
 
 @pytest.mark.parametrize("winerror,attempts", [(5, 20), (87, 1), (None, 1)])
@@ -75,7 +79,9 @@ def test_permanent_failure_propagates_and_preserves_old_route(
     tmp_path, monkeypatch, winerror, attempts,
 ):
     path = tmp_path / "active.json"
-    path.write_text('{"active":"old"}', encoding="utf-8")
+    old = {"active": {"bind": "127.0.0.1", "port": 9281, "pid": 111}}
+    new = {"active": {"bind": "127.0.0.1", "port": 9290, "pid": 222}}
+    path.write_text(json.dumps(old), encoding="utf-8")
     calls = []
     error = PermissionError("permanent failure")
     if winerror is not None:
@@ -89,6 +95,6 @@ def test_permanent_failure_propagates_and_preserves_old_route(
     monkeypatch.setattr(f"zdd.routing_persistence.{replacement}", replace)
     monkeypatch.setattr(routing.time, "sleep", lambda _: None)
     with pytest.raises(PermissionError, match="permanent failure"):
-        routing._atomic_write(path, {"active": "new"})
+        routing._atomic_write(path, new)
     assert len(calls) == attempts
-    assert routing.read_table(tmp_path) == {"active": "old"}
+    assert routing.read_table(tmp_path) == old

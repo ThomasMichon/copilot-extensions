@@ -418,7 +418,7 @@ class CutoverOrchestrator:
         # behind (the state that wedged the pipeline). Best-effort -- it only acts
         # when the active endpoint has no listener *and* a dead pid, so a healthy
         # or still-starting daemon is never disturbed. Logs its own reap.
-        if conditional is None:
+        if conditional is None and not self.drain_before_publish:
             try:
                 self.routing.reap_stale_active(self.config_dir, service=self.service)
             except Exception:  # noqa: BLE001 -- watchdog is best-effort, never fatal
@@ -435,6 +435,12 @@ class CutoverOrchestrator:
             old_for_cas = conditional.old
         elif self.drain_before_publish:
             selection_table = self.routing.read_table(self.config_dir)
+            try:
+                routing._validate_endpoint_rows(selection_table)
+            except routing.ActivePublicationRefused as exc:
+                result.error = str(exc)
+                result.steps.append(f"refused: {result.error}")
+                return result
             raw_active = selection_table.get("active") if selection_table else None
             old_for_cas = Endpoint.from_dict(raw_active) if isinstance(raw_active, dict) else None
         elif self.refuse_old is not None:

@@ -102,6 +102,11 @@ An unreadable/corrupt routing table is a typed `ActivePublicationRefused` for
 writers and a failed result before spawn for ordinary cutover. Read-only
 client fallback remains tolerant; mutation must not infer an empty namespace
 from unavailable custody evidence.
+This also applies to present, non-null `active` or `previous` rows that cannot
+be parsed as endpoints, including empty objects and non-object values. Mutation
+validates both persisted and proposed rows; missing or null rows remain valid
+absence. A malformed row introduced during drain cannot be overwritten by
+guarded publication.
 Passive adapters bind termination to the breadcrumb's original process token,
 not a newly sampled token. Their five-second exit confirmation waits on the
 same pidfd/Windows handle used to signal; acceptance alone is not successful
@@ -251,6 +256,9 @@ Stateful adopters may opt into `drain_before_publish=True`. The predecessor
 then drains before the publication adapter promotes the passive and publishes
 its route; forced incomplete drains are refused. That adapter still owns
 exact-instance promotion, final-state adoption, and selection reconciliation.
+This ordering skips legacy watchdog route healing and validates both endpoint
+rows before spawning or draining; unattributable custody requires owner-led
+recovery rather than fallback predecessor selection.
 On rollback, the orchestrator confirms the successor's exit before restoring
 and undraining the predecessor. It records whether this attempt actually
 invoked predecessor drain, after constructing the client and resolving its
