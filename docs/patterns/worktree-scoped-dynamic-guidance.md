@@ -341,6 +341,12 @@ vendor those files byte-identically into agent-worktrees' own
 the authoring plugin and packaged consumers in the release/changefile guards.
 There is one authoring source, not a maintained fork.
 
+The projection CLI explicitly anchors adjacent imports to its resolved payload
+directory. Manager safe-path isolation (`PYTHONSAFEPATH`, `-P`, or `-I`) therefore
+does not remove the renderer's own modules, and checkout modules cannot shadow
+them. This does not disable the launcher's import isolation or add the working
+directory to the import path.
+
 A shipped standalone agent-worktrees installation never discovers, imports,
 or executes a sibling customizing-copilot payload. Its own installation
 identity selects its own engine. Only a verified monorepo-shaped development

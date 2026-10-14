@@ -8,6 +8,9 @@ import json
 import sys
 from pathlib import Path
 
+# Safe-path launchers omit the script directory from Python's import path.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from instruction_projections import (
     BLOCKING,
     Result,

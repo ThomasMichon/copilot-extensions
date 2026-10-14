@@ -1,0 +1,13 @@
+{
+  "comment": "Anchor packaged projection CLI imports under safe-path launch isolation",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

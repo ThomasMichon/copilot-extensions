@@ -69,7 +69,8 @@ def test_packaged_engine_rejects_path_escape(tmp_path, monkeypatch, field):
         assets.projection_cli_script(payload)
 
 
-def test_standalone_payload_renders_with_no_customizing_plugin(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("safe_path", [False, True])
+def test_standalone_payload_renders_with_no_customizing_plugin(tmp_path, monkeypatch, capsys, safe_path):
     payload = materialized_payload(tmp_path, monkeypatch)
     monkeypatch.setattr(installer, "_payload_root", lambda: payload)
     monkeypatch.setattr(local_cache_refresh, "_resolve_own_agent_worktrees_command", lambda: None)
@@ -95,6 +96,16 @@ def test_standalone_payload_renders_with_no_customizing_plugin(tmp_path, monkeyp
     (copilot / "config.json").write_text(json.dumps({"trustedFolders": [str(repo)]}), encoding="utf-8")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("PYTHONPATH", str(repo))
+    if safe_path:
+        monkeypatch.setenv("PYTHONSAFEPATH", "1")
+    else:
+        monkeypatch.delenv("PYTHONSAFEPATH", raising=False)
+    (repo / "instruction_projections.py").write_text(
+        'raise AssertionError("renderer imported an untrusted checkout module")\n',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     result = local_cache_refresh.prepare_for_launch(repo)
     assert result.status == "ready", result.diagnostic
