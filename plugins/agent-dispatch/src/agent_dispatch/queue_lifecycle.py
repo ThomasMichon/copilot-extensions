@@ -136,6 +136,13 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
 
+            if expected_generation is not None and (
+                task.generation != expected_generation
+                or task.owner_session_id != expected_owner_session_id
+            ):
+                conn.execute("COMMIT")
+                raise TaskError(f"task {task_id!r} ownership incarnation changed")
+
             if task.status in {Status.SUBMITTED, Status.COMPLETED} and encoded_result is not None:
                 completing_owner = task.completed_by
                 if completing_owner is None:
@@ -211,12 +218,6 @@ class QueueLifecycleMixin(QueueProgressMixin):
             if task.owner not in (None, worker_id):
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")
-            if expected_generation is not None and (
-                task.generation != expected_generation
-                or task.owner_session_id != expected_owner_session_id
-            ):
-                conn.execute("COMMIT")
-                raise TaskError(f"task {task_id!r} ownership incarnation changed")
             retire_waiters = getattr(self, "_retire_waiters_for_transition", None)
             if callable(retire_waiters):
                 wake_enqueued = retire_waiters(

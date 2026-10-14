@@ -271,6 +271,34 @@ def test_scoped_token_rejected_when_generation_changes_with_same_identity(api, q
     assert response.status_code == 403
 
 
+@pytest.mark.parametrize("require_verification", [False, True])
+def test_scoped_completion_cannot_backfill_a_replacement_sessions_terminal_result(
+    api, queue, monkeypatch, require_verification,
+):
+    task_id, token = _claim_and_start(api)
+    original = queue.complete_with_outcome
+
+    def replacement_completes_first(*args, **kwargs):
+        with queue._connect() as conn:
+            conn.execute(
+                "UPDATE tasks SET owner_session_id='replacement', require_verification=? "
+                "WHERE id=?", (require_verification, task_id),
+            )
+        original(task_id, "worker-1")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(queue, "complete_with_outcome", replacement_completes_first)
+    response = api.post(
+        f"/tasks/{task_id}/complete",
+        json={"worker_id": "worker-1", "result": {"text": "stale result"}},
+        headers={TASK_SCOPE_HEADER: token},
+    )
+    assert response.status_code == 409, response.text
+    current = queue.get(task_id)
+    assert current.result is None
+    assert current.status == ("submitted" if require_verification else "completed")
+
+
 def test_restricted_worker_over_real_http(queue):
     task_id = queue.create("assigned work", repo=TEST_REPO).id
     app = create_app(queue, token=TOKEN, control_token=CONTROL_TOKEN, enable_mcp=False)

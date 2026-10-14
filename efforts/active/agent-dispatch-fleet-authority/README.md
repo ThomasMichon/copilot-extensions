@@ -207,47 +207,23 @@ inventing new durable state.
   passed) to confirm no regression to the unchanged full-bearer path.
 
 ### Phase 2 -- Push assignment notification with poll backstop
-**Implementation correction:** the coordinator already has `/events`, a
-thread-safe `EventBus`, and a subscription-ready frame. Reuse that outbound SSE
-push contract with ready-then-reconcile, bounded reconnect and slower periodic
-reconciliation. The new long-poll endpoint sketched below is superseded; it is
-not needed to satisfy the operator's push-first requirement.
+Operator decision: push-first delivery with slower polling as a correctness
+backstop. Reuse the coordinator's existing `/events`, `EventBus`, and
+subscription-ready frame; no additional long-poll endpoint is needed.
 
-Operator decision: try push for throughput, keep poll as a long-interval
-backstop (not poll-only). Builds on the `queue_run_waiters.py` durable-
-waiter + wake-on-commit idiom already in this codebase (used today for
-detached-run resume), applied to a new predicate.
-
-- [ ] Add an **assignment waiter**: a new coordinator endpoint (e.g.
-  `GET /tasks/await-assignment`) that long-polls -- blocks server-side,
-  bounded by a request timeout (e.g. 30-60s), until a `queued` task
-  matching the caller's affinity (`target_machine`, satellite/peer
-  identity) appears, then returns it immediately; on timeout it returns an
-  empty result and the caller re-issues. This is **outbound-only from the
-  supervisor's perspective** -- it never opens an inbound listener on the
-  satellite/peer, preserving the existing no-inbound-listener contract
-  (`federation_runner.py`'s satellite gate) a webhook would have broken.
-- [ ] Wire the wake side through the existing
-  `queue_notifications.QueueNotificationMixin` idiom: a new queue-commit
-  notifier fires when a task is enqueued/reassigned with a `target_machine`
-  affinity, releasing any blocked `await-assignment` call(s) matching that
-  affinity (mirroring how `run_waiters` already wakes on commit for a
-  different predicate).
-- [ ] Update `SatelliteWorkIntake`/the ordinary peer work-intake loop to
-  call `await-assignment` as its primary signal, falling back to today's
-  periodic poll at a **longer** interval than today's default as a
-  backstop -- covers connection drops, coordinator restarts, and anything
-  the long-poll itself misses. Keep the existing poll path's code
-  unchanged (same affinity read, `satellite_work_intake.py:195-225`) --
-  only the trigger cadence/source changes.
-- [ ] Decide bounded concurrency/fairness: a long-poll holds a server
-  worker/connection for its timeout window; cap concurrent waiters (one
-  per distinct target_machine/affinity is the expected shape for this
-  fleet size) and document the limit.
-- [ ] Unit tests: a waiter registered before a matching task is enqueued
-  wakes promptly; one registered with no matching task times out cleanly
-  and the poll backstop still finds the task on its next cycle; multiple
-  waiters with different affinities don't cross-wake each other.
+- [ ] Subscribe outbound to coordinator SSE and reconcile the authoritative
+  queue after each ready frame, including reconnect, so pre-subscription work
+  cannot fall into a gap.
+- [ ] Coalesce relevant enqueue, assignment and capacity-release notifications
+  by machine/repository affinity; wake the existing intake/supervision loop
+  without making the event stream another claim authority.
+- [ ] Keep slower periodic reconciliation for missed events and disconnected
+  streams. Bound reconnect/backoff and report degraded subscription health.
+  Presence heartbeats remain independent of work-intake blocking.
+- [ ] Bound each subscription's queue, read/keepalive timing and shutdown.
+  Disable or repoint subscriptions with their owning role/configuration.
+- [ ] Test actual enqueue-to-wake latency, pre-ready and reconnect gaps, event
+  coalescing, cross-affinity isolation, missed-event poll recovery and teardown.
 
 ### Phase 3 -- Projected relay component
 - [ ] Implement the relay as an **operating mode of the existing local
@@ -274,8 +250,8 @@ detached-run resume), applied to a new predicate.
   (401/403, not merely ignored) attempting any other task or the shared-
   bearer-only routes.
 
-### Phase 4 -- Centralization deployment pattern (configuration, not new code)
-**Authority correction:** discovery and a standby role do not replicate queue
+### Phase 4 -- Central authority and local projections
+Discovery and a standby role do not replicate queue
 data or fence independent database writers. This phase requires implementation
 and tests, not just configuration documentation. Centrally owned tasks retain
 one central write authority; a local projection cannot claim them offline or
@@ -288,15 +264,12 @@ fenced at the durable state owner before activation.
   `services/dispatch` instance (container or native) as the pinned
   `AGENT_DISPATCH_SHARED_URL`; every other machine's agent-dispatch
   configured `peer` or `satellite` only (never `coordinator`/`standby`)
-  against that URL. This requires **no new code** -- `config.
-  FEDERATION_ROLES` already supports exactly this as a config value.
+  against that URL, with explicit authenticated service authority.
 - [ ] For a machine that genuinely needs to keep running its own local
-  coordinator (e.g. offline-capable), document the federation reading of
-  "syncing/projecting data to ensure authority is clear": configure it as
-  a `standby`-eligible peer against the shared URL so the fenced-epoch
-  lease (already shipped) is the actual authority arbiter, and ensure
-  Phase 1's fencing-guard wiring means a fenced-out local coordinator's
-  stale writes are genuinely rejected, not merely directory-invisible.
+  coordinator, implement explicitly local-only task authority alongside
+  read projections/references for centrally owned tasks. Central mutations
+  must reach the central writer; outages never promote the independent
+  local database. Fence any deliberate ownership transfer at the durable owner.
 - [ ] Clean-room scenario: extend `agent-dispatch-cutover` (or add a new
   scenario) to prove a `peer`/`satellite`-configured machine correctly
   federates against a central `services/dispatch` container -- i.e. this
@@ -324,9 +297,8 @@ deferred.
 - [x] Phase 1: unit tests for token mint/verify/invalidation + fencing-guard
   rejection, run against the real `coordinator_tasks.py` routes (not just
   the token/fencing library functions in isolation). Done -- see Journal.
-- [ ] Phase 2: a long-poll waiter wakes promptly on a matching enqueue, and
-  the poll backstop still finds work if the wake is missed -- proven with
-  a real timing test, not just a mocked notifier call.
+- [ ] Phase 2: real SSE enqueue-to-wake timing, ready/reconnect reconciliation,
+  cross-affinity isolation and missed-event recovery through slower polling.
 - [ ] Phase 3: a real clean-room container holding only a task-scoped
   token can only touch its own task; cross-task/cross-worker attempts are
   rejected.
@@ -389,6 +361,12 @@ recorded against each open fork._
   exact routes, authenticated-ingress prerequisites, transactional fences and
   deployment limitations. This is a below-altitude correction to the reviewed
   task-authority boundary, not new standing intent.
+- PR #6665 review identified a remaining terminal-result backfill race: the
+  completion retry branch wrote a non-null result before the incarnation
+  check. Reproduced both completed and submitted cases, moved the check ahead
+  of all completion mutations, and verified the completion/token selection:
+  174 passed. Replaced superseded long-poll and unsafe standby checklists with
+  one executable SSE/projection plan rather than leave contradictory notes.
 
 ### 2026-10-13 -- Kickoff + research pass
 - Operator directive: build containerization support for agent-dispatch
