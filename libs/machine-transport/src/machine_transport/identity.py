@@ -17,11 +17,22 @@ through :func:`is_local_machine` instead.
 from __future__ import annotations
 
 import socket
+import os
+import platform
 from collections.abc import Callable, Mapping
 
 from .registry import MachineIdentity, find_machine_entry
 
-__all__ = ["is_local_machine"]
+__all__ = ["is_local_machine", "local_execution_platform"]
+
+
+def local_execution_platform() -> str:
+    """Detect the current logical platform without probing or launching WSL."""
+    if platform.system() == "Windows":
+        return "windows"
+    if os.environ.get("WSL_DISTRO_NAME") or "microsoft" in platform.release().casefold():
+        return "wsl"
+    return "linux"
 
 
 def is_local_machine(

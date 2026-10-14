@@ -12,6 +12,8 @@ from machine_transport.registry import (
     machine_name,
     merge_machines_yaml,
     parse_machines_yaml_file,
+    parse_machines_yaml,
+    normalize_machine_entries,
 )
 
 
@@ -19,6 +21,109 @@ def _write(tmp_path: Path, body: str, name: str = "machines.yaml") -> Path:
     p = tmp_path / name
     p.write_text(body, encoding="utf-8")
     return p
+
+
+def test_legacy_wsl_projection_preserves_native_and_exact_profiles():
+    entries = normalize_machine_entries(parse_machines_yaml({"machines": {
+        "desktop": {
+            "alias": "native-compat", "hostname": "generated-host",
+            "ssh": {"environments": [
+                {"name": "windows", "alias": "native-route", "shell": "pwsh"},
+                {"name": "wsl", "alias": "guest-route", "user": "developer", "port": 2201},
+            ]},
+        },
+    }}))
+    assert set(entries) == {"desktop", "desktop-wsl"}
+    native, guest = entries["desktop"], entries["desktop-wsl"]
+    assert (native.execution_platform, guest.execution_platform) == ("windows", "wsl")
+    assert native.physical_host == guest.physical_host == "desktop"
+    assert machine_name(native) == "desktop"
+    assert machine_name(guest) == "desktop-wsl"
+    assert find_machine_entry(entries, "native-compat") is native
+    assert find_machine_entry(entries, "native-route") is native
+    assert find_machine_entry(entries, "guest-route") is guest
+    assert guest.ssh_environments == [SSHEnvironment("wsl", "guest-route", user="developer", port=2201)]
+    with pytest.raises(ValueError, match="does not select an execution space"):
+        find_machine_entry(entries, "generated-host")
+    assert find_machine_entry(entries, "generated-host", execution_platform="windows") is native
+    assert find_machine_entry(entries, "generated-host", execution_platform="wsl") is guest
+    assert find_machine_entry(entries, "desktop", execution_platform="wsl") is guest
+    assert normalize_machine_entries(entries) == entries
+
+
+def test_explicit_logical_entries_keep_nonconventional_keys_and_physical_association():
+    entries = normalize_machine_entries(parse_machines_yaml({"machines": {
+        "native-custom": {
+            "execution_platform": "windows", "physical_host": "desktop",
+            "hostname": "os-name", "compatibility_aliases": ["old-native"],
+            "ssh": {"environments": [{"name": "windows", "alias": "native-profile"}]},
+        },
+        "guest-custom": {
+            "execution_platform": "wsl", "physical_host": "desktop",
+            "ssh": {"environments": [{"name": "wsl", "alias": "guest-profile"}]},
+        },
+    }}))
+    assert set(entries) == {"native-custom", "guest-custom"}
+    assert find_machine_entry(entries, "old-native").key == "native-custom"
+    assert find_machine_entry(entries, "guest-profile").key == "guest-custom"
+    assert find_machine_entry(entries, "desktop", execution_platform="wsl").key == "guest-custom"
+    assert find_machine_entry(entries, "os-name", execution_platform="wsl").key == "guest-custom"
+    assert {entry.physical_host for entry in entries.values()} == {"desktop"}
+
+
+@pytest.mark.parametrize("environments", [
+    [{"name": "windows", "alias": "same"}, {"name": "wsl", "alias": "same"}],
+    [{"name": "wsl", "alias": "one"}, {"name": "wsl", "alias": "two"}],
+    [{"name": "linux", "alias": "native"}, {"name": "wsl", "alias": "guest"}],
+])
+def test_normalization_refuses_profile_collisions_or_ambiguous_platforms(environments):
+    with pytest.raises(ValueError, match="ambiguous|unknown native platform"):
+        normalize_machine_entries(parse_machines_yaml({
+            "machines": {"desktop": {"ssh": {"environments": environments}}},
+        }))
+
+
+def test_normalization_refuses_generated_key_collision():
+    raw = {"machines": {
+        "desktop": {"ssh": {"environments": [{"name": "wsl", "alias": "guest"}]}},
+        "desktop-wsl": {"execution_platform": "wsl", "physical_host": "other"},
+    }}
+    with pytest.raises(ValueError, match="logical machine key.*ambiguous"):
+        normalize_machine_entries(parse_machines_yaml(raw))
+
+
+def test_known_platform_still_refuses_multiple_independent_guests():
+    entries = normalize_machine_entries(parse_machines_yaml({"machines": {
+        key: {"execution_platform": "wsl", "physical_host": "desktop"}
+        for key in ("guest-one", "guest-two")
+    }}))
+    with pytest.raises(ValueError, match="ambiguous wsl entries"):
+        find_machine_entry(entries, "desktop", execution_platform="wsl")
+    assert find_machine_entry(entries, "guest-two", execution_platform="wsl").key == "guest-two"
+
+
+def test_identity_suffixes_are_not_stripped_or_inferred():
+    entries = normalize_machine_entries(parse_machines_yaml({"machines": {"desktop-wsl": {}}}))
+    assert entries["desktop-wsl"].execution_platform == ""
+    assert find_machine_entry(entries, "desktop") is None
+
+
+def test_known_platform_does_not_fall_back_to_wrong_logical_entry():
+    entries = normalize_machine_entries(parse_machines_yaml({"machines": {
+        "guest": {"execution_platform": "wsl", "physical_host": "desktop"},
+    }}))
+    for selector in ("guest", "desktop"):
+        with pytest.raises(ValueError, match="no windows logical entry"):
+            find_machine_entry(entries, selector, execution_platform="windows")
+
+
+def test_known_platform_can_select_hostname_without_optional_physical_host():
+    entries = normalize_machine_entries(parse_machines_yaml({"machines": {
+        "guest": {"execution_platform": "wsl", "hostname": "os-host"},
+    }}))
+    assert find_machine_entry(entries, "os-host", execution_platform="wsl").key == "guest"
+    with pytest.raises(ValueError, match="does not select an execution space"):
+        find_machine_entry(entries, "os-host")
 
 
 class TestParseMachinesYamlFile:

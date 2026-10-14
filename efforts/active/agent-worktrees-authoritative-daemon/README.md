@@ -62,6 +62,16 @@
 
 ## Guiding Intent
 
+**Read-side bound (operator clarification, 2026-10-12):** ordinary reporting of
+daemon-cached worktree status is O(state-schema), not O(journal, ledger, list,
+claims graph, or fleet). The authoritative writer pushes claims-derived facts
+and monitoring membership into independently readable current-state
+projections; readers select the current handoff head directly rather than
+walking succession history. The exact request and proposed acceptance live in
+the coupled [per-worktree read contract](../per-worktree-activity-state/schema-bounded-read-contract.md).
+This strengthens the existing authority direction; an in-memory cache of a
+growing record alone does not satisfy it.
+
 Today, worktree-lifetime state (identity, claims, lineage, disposition,
 session bindings) is durably owned by agent-worktrees' YAML tracking
 records, read and written directly by `tracking.py` from dozens of call
@@ -198,26 +208,29 @@ invariants inside the daemon's own request handlers, in one place, exactly
 as they are enforced today inside `tracking.py`'s own functions — this
 migration should move *where* that logic runs, not weaken what it enforces.
 
-**In-memory state is the live truth; SQLite/YAML is persistence only.** The
-daemon holds each open worktree's current record in memory (warm on boot
-from the durable YAML, exactly as `worktree_status_cache.py` warm-restores
-today) and answers every read from memory, never from disk on the request
-path. Every accepted mutation updates memory first (so a caller's own
-"read your write" is immediate and consistent within one process) and
-schedules — synchronously before the mutation's response returns, per
+**In-memory state is the live truth; durable storage is persistence only.**
+The daemon holds current state in memory and serves ordinary status through
+an independently addressable O(state-schema) projection, not by copying its
+whole historical record. Every accepted mutation updates memory first (so a
+caller's own "read your write" is immediate and consistent within one process)
+and schedules — synchronously before the mutation's response returns, per
 *no-writer-bypasses-the-daemon* and *durable-files-are-persistence-not-a-
-side-door* in the vision — a write of that worktree's own YAML file. A
-worktree's persistence is exactly the same file `tracking.py` already
-writes today (`~/.<project>/worktrees/<id>.yaml`); this effort does not
-introduce a new on-disk format the operator or a break-glass script would
-need to relearn.
+side-door* in the vision — durable publication of the affected current-state
+projection and its generation/readiness. Existing worktree YAML remains a
+compatibility/history persistence surface; its growing collections cannot
+be the ordinary status lookup or restoration source. The persistence
+design must support bounded point reads of durable current state. Recovery
+that needs older records belongs to the owner-controlled restoration/repair
+path, with unready state explicit until bounded serving is available.
 
 **Degrade path stays available, explicitly marked.** When no daemon is
-reachable, a **read** still degrades to today's direct-file computation
-(`load_record`/`list_records`) — `direct-read-is-a-degrade-not-a-peer`
-requires that path to exist for resilience, but the response is marked
-degraded so a caller doesn't quietly treat a possibly-stale direct read as
-daemon-fresh. A **write** attempted with no daemon reachable is the one
+reachable, an **ordinary status read** may return only an independently
+addressable bounded durable projection, marked degraded/advisory rather
+than daemon-fresh, or explicit unavailable/unready state. It must not fall
+back to `load_record`/`list_records`, journal replay or graph reconstruction.
+`direct-read-is-a-degrade-not-a-peer` preserves resilience without exempting
+that read from the schema-bound contract; explicit inspection/repair may
+still read historical files. A **write** attempted with no daemon reachable is the one
 sharp edge this design must resolve deliberately (see Open Questions) rather
 than silently falling back to a direct file write that would violate
 `no-writer-bypasses-the-daemon`.
@@ -913,6 +926,12 @@ than hypothetical:
       caller-side session/mux enrichment, and Group C reconcile overlays.
       The execution detail is agent-recommended and must clear review before
       implementation; live-daemon errors never authorize direct computation.
+- [ ] **Schema-bounded read-side acceptance:** integrate the coupled
+      [current-state contract](../per-worktree-activity-state/schema-bounded-read-contract.md)
+      into 6d. Push claims-derived state through the existing write authority;
+      no ordinary reader or advisory fallback reconstructs it from ledgers,
+      historical arrays, journals, or a fleet scan. Preserve independent
+      explicit graph/repair APIs and the staged lifecycle producer gate.
 - [x] Update `classify_daemon.py`'s and `worktree_status_compute.py`'s own
       module docstrings to describe the consolidated architecture, so a
       future reader doesn't rediscover this effort's own "two daemons, one
@@ -920,6 +939,10 @@ than hypothetical:
 
 ## Validation Plan
 
+- [ ] Meet the coupled [O(state-schema) validation](../per-worktree-activity-state/schema-bounded-read-contract.md#validation-plan)
+      while ledger, history, graph and fleet cardinalities grow independently.
+      A shared compute implementation, TTL or small returned payload alone is
+      not a pass for this read-side requirement.
 - [ ] Phase 1: this design reviewed (operator + this repo's automated PR
       review) before Phase 2 code lands.
 - [ ] Phase 2: unit tests proving in-memory-first consistency (a write's
@@ -958,6 +981,16 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-10-12 — Materialized schema-bounded read-side goal
+
+The operator explicitly requires constant-schema current-state reads, pushed
+claims-derived state and direct current handoff-head selection. The canonical
+agent-worktrees vision and the coupled per-worktree-activity-state amendment
+record that goal and the proposed scaling proof. Phase 6d retains authority and
+consumer integration; #5664 retains handoff/lifecycle slot migration.
+No implementation, new daemon, live rollout or cleanup is performed by this
+documentation amendment, and neither effort is complete.
 
 ### 2026-10-08 — Phase 6d: scoped the remaining authority/stream cutover
 

@@ -57,16 +57,17 @@ class TestBuildMuxNewSessionArgv:
         assert argv[b + 1] == str(wrapper)
         assert argv[b + 2:] == ["--aw-wt", "id1", "copilot"]
 
-    def test_psmux_runs_command_directly_no_identity_prefix(self):
+    def test_psmux_runs_command_directly_no_identity_prefix(self, tmp_path):
         argv = sessions.build_mux_new_session_argv(
             "id2", "C:/w", ["pwsh.exe", "-File", "s.ps1"], None, mux="psmux",
+            pane_wrapper=str(tmp_path / "missing-pane-wrapper.ps1"),
         )
         assert argv[:2] == ["psmux", "new-session"]
         assert "-d" in argv
         i = argv.index("-s")
         assert argv[i + 1] == "wt-id2"
         assert "env" not in argv
-        # psmux runs the command verbatim (not collapsed) so `--allow-all`
+        # Without a wrapper, psmux runs the command verbatim so `--allow-all`
         # reaches Copilot; see _mux_pane_cmd / #102.
         assert argv[-3:] == ["pwsh.exe", "-File", "s.ps1"]
 

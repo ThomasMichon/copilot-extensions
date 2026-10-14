@@ -35,6 +35,7 @@ def _args(**kw) -> Namespace:
 
 def _config() -> tuple[ContainersConfig, FleetConfig]:
     config = ContainersConfig(
+        copilot_auth_mode="legacy",
         forward_gh_token=False,
         relay_enabled=True,
         relay_port=9857,
@@ -137,6 +138,59 @@ def _call(
         creation_flags=lambda: 0,
     )
     return rc, seen
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("receipt", ["missing", "resumed", "created"])
+def test_attached_failed_connection_uses_receipt_before_cleanup(monkeypatch, receipt):
+    from agent_containers import copilot_process_auth as auth
+    from agent_containers import ssh_transport
+
+    target = _target()
+    cleaned = []
+    consumed = []
+    monkeypatch.setattr(auth, "prepare_launch", lambda *a, **k: "/launch/auth.env")
+    monkeypatch.setattr(ssh_transport, "container_environment", lambda *a: {"PATH": "/bin"})
+    monkeypatch.setattr(ssh_transport, "write_remote_env", lambda *a: "/launch/general.env")
+    monkeypatch.setattr(ssh_transport, "cleanup_remote_env", lambda *a: cleaned.append(a[-1]))
+
+    def created(*args):
+        if receipt == "missing":
+            raise RuntimeError("missing launch receipt")
+        return receipt == "created"
+
+    monkeypatch.setattr(auth, "attached_created_child", created)
+    monkeypatch.setattr(auth, "wait_for_consumption", lambda *a: consumed.append(a[-1]))
+    kwargs = dict(
+        target=target, monkeypatch=monkeypatch,
+        subprocess_run=lambda *a, **k: SimpleNamespace(returncode=255),
+    )
+    if receipt == "missing":
+        with pytest.raises(RuntimeError, match="missing launch receipt"):
+            _call(_args(no_relay=True), **kwargs)
+        assert cleaned == []
+    else:
+        assert _call(_args(no_relay=True), **kwargs)[0] == 255
+        assert cleaned == ["/launch/auth.env", "/launch/general.env"]
+    assert bool(consumed) is (receipt == "created")
+
+
+@pytest.mark.guard
+def test_attached_existing_session_cleans_unused_auth_without_waiting(monkeypatch):
+    from agent_containers import copilot_process_auth as auth
+    from agent_containers import ssh_transport
+
+    target = _target()
+    target.fleet.copilot_cli_account = "inference-user"
+    cleaned = []
+    monkeypatch.setattr(auth, "prepare_launch", lambda *a, **k: "/launch/auth.env")
+    monkeypatch.setattr(auth, "attached_created_child", lambda *a: False)
+    monkeypatch.setattr(auth, "wait_for_consumption", lambda *a: pytest.fail("existing child"))
+    monkeypatch.setattr(ssh_transport, "container_environment", lambda *a: {"PATH": "/bin"})
+    monkeypatch.setattr(ssh_transport, "write_remote_env", lambda *a: "/launch/general.env")
+    monkeypatch.setattr(ssh_transport, "cleanup_remote_env", lambda *a: cleaned.append(a[-1]))
+    assert _call(_args(no_relay=True), target=target, monkeypatch=monkeypatch)[0] == 0
+    assert "/launch/auth.env" in cleaned
 
 
 class TestCmdCopilotAnchorDefault:

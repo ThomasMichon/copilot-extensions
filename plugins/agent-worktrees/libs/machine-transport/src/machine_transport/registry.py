@@ -23,7 +23,7 @@ behavior change, not a pure de-duplication.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
@@ -36,6 +36,8 @@ __all__ = [
     "SSHEnvironment",
     "find_machine_entry",
     "machine_name",
+    "normalize_machine_entries",
+    "machine_identity_names",
     "merge_machines_yaml",
     "parse_machines_yaml",
     "parse_machines_yaml_file",
@@ -98,6 +100,8 @@ class MachineEntry:
     copilot: bool = True
     execution_platform: str = ""
     physical_host: str = ""
+    compatibility_aliases: tuple[str, ...] = ()
+    legacy_key: str = ""
 
 
 def parse_machines_yaml_file(
@@ -227,6 +231,11 @@ def parse_machines_yaml(
             raise ValueError(f"execution space '{key}' physical_host must be a string")
         if execution_platform and any(env.name != execution_platform for env in ssh_envs):
             raise ValueError(f"execution space '{key}' cannot contain another space's SSH environment")
+        compatibility_aliases = data.get("compatibility_aliases", []) or []
+        if not isinstance(compatibility_aliases, (list, tuple)) or any(
+            not isinstance(value, str) or not value.strip() for value in compatibility_aliases
+        ):
+            raise ValueError(f"machine '{key}' compatibility_aliases must contain nonempty strings")
         entries[key] = MachineEntry(
             key=key,
             display_name=str(data.get("display_name") or key),
@@ -241,9 +250,93 @@ def parse_machines_yaml(
             copilot=bool(data.get("copilot", True)),
             execution_platform=execution_platform,
             physical_host=physical_host,
+            compatibility_aliases=tuple(value.strip() for value in compatibility_aliases),
         )
     _validate_execution_space_keys(entries)
     return entries
+
+
+def machine_identity_names(entry: MachineIdentity) -> tuple[str, ...]:
+    """Explicit selection identities, excluding physical metadata for logical entries."""
+    values = (entry.key,)
+    if not getattr(entry, "execution_platform", ""):
+        values += (entry.hostname,)
+    values += (entry.alias,)
+    if not getattr(entry, "execution_platform", ""):
+        values += (entry.display_name,)
+    values += (
+        *getattr(entry, "compatibility_aliases", ()),
+        *(env.alias for env in getattr(entry, "ssh_environments", ())),
+    )
+    return tuple(dict.fromkeys(value for value in values if isinstance(value, str) and value))
+
+
+def normalize_machine_entries(
+    entries: Mapping[str, MachineEntry],
+) -> dict[str, MachineEntry]:
+    """Project legacy Windows/WSL hosts into independently addressable machines.
+
+    This is a read-only projection, not a persisted identity migration. Explicit
+    execution-space keys and SSH aliases are never rewritten. A legacy WSL
+    declaration supplies the Windows association; other mixed platforms, duplicate
+    profiles, and generated-key/alias collisions require explicit topology repair.
+    """
+    result: dict[str, MachineEntry] = {}
+
+    def add(entry: MachineEntry) -> None:
+        if entry.execution_platform and (
+            not entry.key or any(char.isspace() for char in entry.key)
+            or any(separator in entry.key for separator in ("/", "\\", "#"))
+        ):
+            raise ValueError("execution-space keys must be nonempty canonical names, not paths or references")
+        if any(key.casefold() == entry.key.casefold() for key in result):
+            raise AmbiguousMachineError(f"logical machine key {entry.key!r} is ambiguous")
+        result[entry.key] = entry
+
+    for entry in entries.values():
+        platforms = [env.name for env in entry.ssh_environments]
+        for platform_name in ("windows", "wsl", "linux"):
+            if platforms.count(platform_name) > 1:
+                raise AmbiguousMachineError(
+                    f"machine {entry.key!r} has ambiguous {platform_name} SSH profiles"
+                )
+        if entry.execution_platform or "wsl" not in platforms:
+            if entry.execution_platform and any(
+                name != entry.execution_platform for name in platforms
+            ):
+                raise ValueError(f"machine {entry.key!r} has a mismatched SSH platform")
+            add(entry)
+            continue
+        if any(name not in ("windows", "wsl") for name in platforms):
+            raise AmbiguousMachineError(
+                f"machine {entry.key!r} mixes WSL with an unknown native platform; "
+                "declare independent execution_platform entries"
+            )
+        physical_host = entry.physical_host or entry.key
+        add(replace(
+            entry, execution_platform="windows", physical_host=physical_host,
+            legacy_key=entry.key,
+            ssh_environments=[env for env in entry.ssh_environments if env.name == "windows"],
+        ))
+        add(replace(
+            entry, key=f"{entry.key}-wsl", alias="", compatibility_aliases=(),
+            execution_platform="wsl", physical_host=physical_host,
+            legacy_key=entry.key,
+            environment="wsl",
+            ssh_environments=[env for env in entry.ssh_environments if env.name == "wsl"],
+        ))
+
+    owners: dict[str, str] = {}
+    for entry in result.values():
+        for name in machine_identity_names(entry):
+            prior = owners.setdefault(name.casefold(), entry.key)
+            if prior != entry.key:
+                raise AmbiguousMachineError(
+                    f"topology identity {name!r} is ambiguous across machine entries: "
+                    f"{', '.join(sorted((prior, entry.key)))}"
+                )
+    _validate_execution_space_keys(result)
+    return result
 
 
 def _validate_execution_space_keys(entries: Mapping[str, MachineEntry]) -> None:
@@ -281,6 +374,7 @@ def machine_name(entry: MachineEntry) -> str:
 
 def find_machine_entry(
     entries: Mapping[str, _Machine], name: str, *, reject_ambiguous: bool = False,
+    execution_platform: str | None = None,
 ) -> _Machine | None:
     """Look up a machine by key, alias, ``hostname`` field, or
     ``display_name`` (case-insensitive).
@@ -295,6 +389,55 @@ def find_machine_entry(
     """
     if not name:
         return None
+    if execution_platform is not None:
+        if execution_platform not in ("windows", "wsl", "linux"):
+            raise ValueError("invalid execution_platform")
+        # Only an owner with known execution context may use physical association.
+        # First resolve explicit identities; platform mismatch selects a sibling,
+        # never falls through to an unrelated physical hostname.
+        selected = (
+            find_machine_entry(entries, name, reject_ambiguous=reject_ambiguous)
+            if any(
+                name.casefold() in {value.casefold() for value in machine_identity_names(entry)}
+                for entry in entries.values()
+            ) else None
+        )
+        if selected and getattr(selected, "execution_platform", "") == execution_platform:
+            return selected
+        physical = (getattr(selected, "physical_host", "") or selected.key) if selected else ""
+        physical_matches = {
+            (getattr(entry, "physical_host", "") or entry.key).casefold()
+            for entry in entries.values()
+            if name.casefold() in {
+                entry.hostname.casefold(), getattr(entry, "physical_host", "").casefold(),
+            }
+        } if selected is None else set()
+        candidates = [
+            entry for entry in entries.values()
+            if getattr(entry, "execution_platform", "") == execution_platform
+            and (
+                entry is selected
+                or (physical and getattr(entry, "physical_host", "").casefold() == physical.casefold())
+                or (
+                    selected is None
+                    and (getattr(entry, "physical_host", "") or entry.key).casefold() in physical_matches
+                )
+            )
+        ]
+        if len(candidates) > 1:
+            raise AmbiguousMachineError(
+                f"Machine {name!r} has ambiguous {execution_platform} entries"
+            )
+        if candidates:
+            return candidates[0]
+        if (selected and getattr(selected, "execution_platform", "")) or any(
+            getattr(entry, "execution_platform", "") and name.casefold() in {
+                entry.hostname.casefold(), getattr(entry, "physical_host", "").casefold(),
+            }
+            for entry in entries.values()
+        ):
+            raise ValueError(f"machine {name!r} has no {execution_platform} logical entry")
+        return selected if selected and not getattr(selected, "execution_platform", "") else None
     if name in entries:
         return entries[name]
     name_lower = name.lower()
@@ -312,9 +455,7 @@ def find_machine_entry(
     if not any(getattr(entry, "execution_platform", "") for entry in entries.values()):
         matches: list[_Machine] = []
         for key, entry in entries.items():
-            if any(value and value.lower() == name_lower for value in (
-                key, entry.alias, entry.hostname, entry.display_name,
-            )):
+            if any(value.lower() == name_lower for value in machine_identity_names(entry)):
                 if not reject_ambiguous:
                     return entry
                 matches.append(entry)
@@ -326,7 +467,10 @@ def find_machine_entry(
         return keyed[0]
     aliases = [
         entry for entry in entries.values()
-        if entry.alias and entry.alias.lower() == name_lower
+        if any(isinstance(value, str) and value and value.lower() == name_lower for value in (
+            entry.alias, *getattr(entry, "compatibility_aliases", ()),
+            *(env.alias for env in getattr(entry, "ssh_environments", ())),
+        ))
     ]
     if len(aliases) > 1:
         raise AmbiguousMachineError(f"ambiguous execution-space alias {name!r}; select a registered key")

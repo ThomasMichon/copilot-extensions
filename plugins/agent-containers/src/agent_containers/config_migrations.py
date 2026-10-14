@@ -17,8 +17,10 @@ exemplars):
 * the installer (``init``) calls ``run_migrations`` once (eager) to stamp/upgrade
   the machine-local file on disk.
 
-Baseline (R3): registered at **v1** with no migrators -- the first migrate merely
-stamps ``schema_version: 1``. Import-guarded: absent lib => safe no-op.
+Version 2 makes the prior authentication posture explicit: old configurations
+without selected Copilot accounts become legacy; already selected accounts
+become host-Copilot. New version-2 configurations keep strict host defaults.
+Import-guarded: absent lib => safe no-op.
 """
 
 from __future__ import annotations
@@ -36,12 +38,30 @@ except ImportError:  # pragma: no cover - lib is vendored at install time
 
 
 SCHEMA_CONTAINERS = "agent-containers/containers"
-CONTAINERS_VERSION = 1
+CONTAINERS_VERSION = 2
+
+
+def _v1_to_v2(doc: dict[str, Any]) -> dict[str, Any]:
+    result = dict(doc)
+    result.setdefault(
+        "copilot_auth_mode", "host-copilot" if result.get("copilot_cli_account") else "legacy",
+    )
+    fleets = result.get("fleets")
+    if isinstance(fleets, dict):
+        result["fleets"] = {
+            name: {
+                **fleet,
+                **({"copilot_auth_mode": "host-copilot"}
+                   if fleet.get("copilot_cli_account") and "copilot_auth_mode" not in fleet else {}),
+            } if isinstance(fleet, dict) else fleet
+            for name, fleet in fleets.items()
+        }
+    return result
 
 
 def _build_registry() -> Any:
     reg = SchemaRegistry()
-    reg.register(SCHEMA_CONTAINERS, current_version=CONTAINERS_VERSION)
+    reg.register(SCHEMA_CONTAINERS, current_version=CONTAINERS_VERSION, migrators={1: _v1_to_v2})
     return reg
 
 

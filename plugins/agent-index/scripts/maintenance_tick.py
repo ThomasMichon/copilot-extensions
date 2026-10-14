@@ -8,6 +8,34 @@ import time
 import urllib.request
 from collections.abc import Sequence
 from typing import Any
+from pathlib import Path
+
+
+def schedule_template(repo: str, machine: str, *, interval_seconds: int = 1800) -> dict:
+    """Producer-owned schedule metadata; adoption decides whether/where to register it."""
+    if not repo.strip() or not machine.strip() or interval_seconds <= 0:
+        raise ValueError("template requires repo, machine and positive interval")
+    return {
+        "id": "agent-index-maintenance", "title": "Run agent-index maintenance",
+        "repo": repo, "target_machine": machine, "category": "maintenance",
+        "source": "schedule", "labels": ["agent-index-maintenance"],
+        "interval_seconds": interval_seconds,
+        "payload_inline": json.dumps({"path": str(Path(__file__).resolve())}),
+    }
+
+
+def template_main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Print maintenance schedule metadata; no registration")
+    parser.add_argument("--schedule-template", action="store_true", required=True)
+    parser.add_argument("--repo", required=True)
+    parser.add_argument("--machine", required=True)
+    parser.add_argument("--interval-seconds", type=int, default=1800)
+    args = parser.parse_args()
+    print(json.dumps(schedule_template(args.repo, args.machine,
+                                     interval_seconds=args.interval_seconds), indent=2))
+    return 0
 
 #: Bounded wait for this tick's own triggered reindex to finish before giving
 #: up and letting the service keep running it in the background (the NEXT
@@ -311,4 +339,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import sys
+    raise SystemExit(template_main() if "--schedule-template" in sys.argv else main())

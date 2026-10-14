@@ -107,55 +107,22 @@ def resolve_context(
         result["action"] = "resolve"
         return result
 
-    payload_value = payload_root or environment.get("COPILOT_PLUGIN_ROOT")
-    if payload_value is None:
-        _fail("resolve requires --payload-root or COPILOT_PLUGIN_ROOT.")
-    payload_input = Path(payload_value)
-    if not _path_is_fully_qualified(payload_input):
-        _fail("The payload root must be absolute.")
-    payload = canonical_path(payload_input, must_exist=True)
-    if not payload.is_dir():
-        _fail(f"The payload root must be an existing directory: {payload}")
-    inherited_payload = environment.get("COPILOT_PLUGIN_ROOT")
-    if inherited_payload:
-        if not _path_is_fully_qualified(inherited_payload):
-            _fail("COPILOT_PLUGIN_ROOT must be absolute.")
-        if not paths_equal(payload, inherited_payload):
-            _fail("COPILOT_PLUGIN_ROOT conflicts with --payload-root.")
-
-    if source_descriptor is not None:
-        if not plugin_id:
-            _fail("Explicit source resolution requires --plugin-id.")
-        evidence = {
-            "source": normalize_source(source_descriptor),
-            "pluginId": plugin_id,
-            "readableName": marketplace_key or "marketplace",
-            "locator": None,
-        }
-    else:
-        evidence = _resolve_installed_evidence(payload, copilot, project)
-        if evidence is None:
-            evidence = _resolve_directory_evidence(payload, plugin_id)
-        if evidence is None:
-            _fail(
-                f"Cannot establish marketplace provenance for payload '{payload}'. "
-                "Supply an explicit source descriptor for management/development mode."
-            )
-        if plugin_id and plugin_id != evidence["pluginId"]:
-            _fail(
-                f"Expected plugin '{plugin_id}', payload evidence identifies "
-                f"'{evidence['pluginId']}'."
-            )
-
-    source = evidence["source"]
-    identity = source_identity(source, evidence["readableName"])
-    resolved_plugin_id = str(evidence["pluginId"])
-    _assert_plugin_id(resolved_plugin_id)
+    provenance = resolve_payload_source(
+        payload_root=payload_root,
+        plugin_id=plugin_id,
+        copilot_home=copilot,
+        project_root=project,
+        source_descriptor=source_descriptor,
+        marketplace_key=marketplace_key,
+        environment=environment,
+    )
+    payload = Path(provenance["payloadRoot"])
+    resolved_plugin_id = provenance["pluginId"]
     existing = _find_existing_source(
         durable,
-        identity["fingerprint"],
-        identity["marketplaceId"],
-        evidence["locator"],
+        provenance["sourceFingerprint"],
+        provenance["marketplaceId"],
+        provenance["locator"],
     )
     rebind = [
         entry
@@ -165,22 +132,17 @@ def resolve_context(
     if rebind:
         owners = ", ".join(str(entry["marketplaceId"]) for entry in rebind)
         _fail(
-            f"Source '{identity['fingerprint']}' already owns cell/locator '{owners}'; "
+            f"Source '{provenance['sourceFingerprint']}' already owns cell/locator '{owners}'; "
             "explicit rebind or new-cell intent is required."
         )
-    cell_root = canonical_path(durable / "marketplaces" / identity["marketplaceId"])
+    cell_root = canonical_path(durable / "marketplaces" / provenance["marketplaceId"])
     plugin_root_path = canonical_path(cell_root / "plugins" / resolved_plugin_id)
     return {
         "action": "resolve",
-        "source": {
-            "kind": identity["kind"],
-            "canonical": identity["canonical"],
-            "ref": identity["ref"],
-            "record": identity["record"],
-        },
-        "sourceFingerprint": identity["fingerprint"],
-        "marketplaceId": identity["marketplaceId"],
-        "marketplaceSlot": identity["marketplaceId"],
+        "source": provenance["source"],
+        "sourceFingerprint": provenance["sourceFingerprint"],
+        "marketplaceId": provenance["marketplaceId"],
+        "marketplaceSlot": provenance["marketplaceId"],
         "pluginId": resolved_plugin_id,
         "payloadRoot": str(payload),
         "cellRoot": str(cell_root),
@@ -195,7 +157,7 @@ def resolve_context(
         "reposRoot": str(canonical_path(cell_root / "repos")),
         "namespaceReceipt": str(canonical_path(cell_root / "namespace.json")),
         "installReceipt": str(canonical_path(plugin_root_path / "install.json")),
-        "locator": evidence["locator"],
+        "locator": provenance["locator"],
         "existingCells": existing,
         "rebindRequired": False,
         "operative": False,

@@ -9,51 +9,21 @@ resolver.
 
 from __future__ import annotations
 
-import os
-import shutil
 import subprocess
 import time
 from pathlib import Path
 
 import pytest
+from native_shell_support import bash_path as _bash_path
+from native_shell_support import run_headless
 
+pytestmark = [
+    pytest.mark.portfolio_tier("T3"),
+    pytest.mark.effect("process"),
+    pytest.mark.effect("filesystem"),
+]
 PLUGIN = Path(__file__).resolve().parents[1]
 INVOKE_SH = PLUGIN / "scripts" / "invoke-payload-runtime.sh"
-
-
-def _bash() -> str | None:
-    candidate = shutil.which("bash")
-    if candidate is None:
-        return None
-    if os.name == "nt" and "WindowsApps" in candidate:
-        return None
-    try:
-        probe = subprocess.run(
-            [candidate, "-c", "exit 7"], capture_output=True, timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if probe.returncode != 7:
-        return None
-    if os.name == "nt":
-        # Every test in this file resolves tmp_path through _bash_path(),
-        # which shells out to `cygpath` -- a resolved `bash.EXE` that
-        # satisfies the exit-code probe above (the WSL launcher stub does,
-        # even with no distro registered) is NOT necessarily a conformant
-        # POSIX environment with `cygpath` on its own PATH. Probe it here so
-        # an unusable bash degrades to a clean skip, matching the WindowsApps
-        # shadow-alias guard above, instead of every test asserting a
-        # `cygpath: command not found` failure.
-        try:
-            cygpath_probe = subprocess.run(
-                [candidate, "-c", "cygpath -u -- /"],
-                capture_output=True, timeout=30,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return None
-        if cygpath_probe.returncode != 0:
-            return None
-    return candidate
 
 
 def _prune_functions_source() -> str:
@@ -64,31 +34,13 @@ def _prune_functions_source() -> str:
 
 
 def _run(bash: str, script: str, timeout: float = 15) -> subprocess.CompletedProcess:
-    return subprocess.run(
+    return run_headless(
         [bash, "-c", script], capture_output=True, text=True, timeout=timeout,
     )
 
 
-def _bash_path(bash: str, path: Path) -> str:
-    """POSIX-style path for *path*, as the real script always sees it (its
-    own paths come from ``$HOME``/``$RUNTIME_ROOT``, already POSIX-formatted
-    under both WSL and git-bash) -- unlike pytest's native ``WindowsPath``
-    fixtures, whose backslashes bash's own glob engine can't parse as a
-    directory separator."""
-    if os.name != "nt":
-        return str(path)
-    result = subprocess.run(
-        [bash, "-c", 'cygpath -u -- "$1"', "_", str(path)],
-        capture_output=True, text=True, timeout=30,
-    )
-    assert result.returncode == 0, result.stderr
-    return result.stdout.strip()
-
-
-@pytest.mark.skipif(_bash() is None, reason="a conformant Bash is unavailable")
-def test_posix_maybe_prune_skips_small_file(tmp_path: Path):
-    bash = _bash()
-    assert bash is not None
+def test_posix_maybe_prune_skips_small_file(tmp_path: Path, native_bash: str):
+    bash = native_bash
     log = tmp_path / "activity.jsonl"
     log.write_text('{"ts": "2026-01-01T00:00:00+00:00"}\n', encoding="utf-8")
     script = (
@@ -101,10 +53,8 @@ def test_posix_maybe_prune_skips_small_file(tmp_path: Path):
     assert list(tmp_path.glob("*.prune-marker.*")) == []
 
 
-@pytest.mark.skipif(_bash() is None, reason="a conformant Bash is unavailable")
-def test_posix_maybe_prune_skips_when_no_runtime_resolved(tmp_path: Path):
-    bash = _bash()
-    assert bash is not None
+def test_posix_maybe_prune_skips_when_no_runtime_resolved(tmp_path: Path, native_bash: str):
+    bash = native_bash
     log = tmp_path / "activity.jsonl"
     log.write_text("x" * 600_000, encoding="utf-8")
     script = f'{_prune_functions_source()}\nboot_trace_maybe_prune "{_bash_path(bash, log)}"\n'
@@ -115,14 +65,14 @@ def test_posix_maybe_prune_skips_when_no_runtime_resolved(tmp_path: Path):
     )
 
 
-@pytest.mark.skipif(_bash() is None, reason="a conformant Bash is unavailable")
-def test_posix_maybe_prune_dispatches_detached_and_does_not_block(tmp_path: Path):
+def test_posix_maybe_prune_dispatches_detached_and_does_not_block(
+    tmp_path: Path, native_bash: str,
+):
     """A large file with a resolved runtime must claim exactly one marker
     for the current window and return almost immediately -- the dispatched
     worker runs detached, never inline on this path (between keypresses) --
     and the dispatched child must actually have launched successfully."""
-    bash = _bash()
-    assert bash is not None
+    bash = native_bash
     log = tmp_path / "activity.jsonl"
     log.write_text("x" * 600_000, encoding="utf-8")
     # A stub "python" standing in for the real interpreter: proves the
@@ -162,15 +112,13 @@ def test_posix_maybe_prune_dispatches_detached_and_does_not_block(tmp_path: Path
     assert stub_marker.read_text(encoding="utf-8").strip() == "ran"
 
 
-@pytest.mark.skipif(_bash() is None, reason="a conformant Bash is unavailable")
-def test_posix_maybe_prune_detaches_via_setsid_when_available(tmp_path: Path):
+def test_posix_maybe_prune_detaches_via_setsid_when_available(tmp_path: Path, native_bash: str):
     """The dispatched worker must get a real new session (surviving
     terminal teardown / SSH disconnect / process-group signals), not just a
     backgrounded `( cmd & )` that stays in the caller's own session --
     proven here by a fake `setsid` on PATH that records it was invoked
     before exec-ing through to the real stub."""
-    bash = _bash()
-    assert bash is not None
+    bash = native_bash
     log = tmp_path / "activity.jsonl"
     log.write_text("x" * 600_000, encoding="utf-8")
     stub_marker = tmp_path / "worker-ran"
@@ -209,10 +157,8 @@ def test_posix_maybe_prune_detaches_via_setsid_when_available(tmp_path: Path):
     assert stub_marker.exists(), "the real worker must still run through setsid's exec"
 
 
-@pytest.mark.skipif(_bash() is None, reason="a conformant Bash is unavailable")
-def test_posix_claim_prune_marker_exclusive_per_window(tmp_path: Path):
-    bash = _bash()
-    assert bash is not None
+def test_posix_claim_prune_marker_exclusive_per_window(tmp_path: Path, native_bash: str):
+    bash = native_bash
     log = tmp_path / "activity.jsonl"
     log_posix = _bash_path(bash, log)
     script = (
@@ -226,10 +172,8 @@ def test_posix_claim_prune_marker_exclusive_per_window(tmp_path: Path):
     assert "second=1" in result.stdout
 
 
-@pytest.mark.skipif(_bash() is None, reason="a conformant Bash is unavailable")
-def test_posix_claim_prune_marker_cleans_up_older_windows(tmp_path: Path):
-    bash = _bash()
-    assert bash is not None
+def test_posix_claim_prune_marker_cleans_up_older_windows(tmp_path: Path, native_bash: str):
+    bash = native_bash
     log = tmp_path / "activity.jsonl"
     old_marker = tmp_path / "activity.jsonl.prune-marker.1"
     old_marker.write_text("", encoding="utf-8")

@@ -726,6 +726,25 @@ def validate_source_binding(manifest: dict, root: Path) -> None:
         raise PromotionArtifactError(f"cannot validate candidate artifact sources: {exc}") from exc
 
 
+def validate_composed_artifacts(
+    directory: Path, *, scratch: Path, content_tree: str,
+    dev_head: str, main_before: str,
+    source_policy: str | None = None, min_age_days: int | None = None,
+) -> dict:
+    """Validate a composed index through its canonical checkout representation."""
+    with tempfile.TemporaryDirectory(prefix="promotion-artifact-validation-") as temporary:
+        candidate = Path(temporary).resolve()
+        _run(
+            ["git", "checkout-index", "--all", f"--prefix={candidate}{os.sep}"], cwd=scratch,
+        )
+        return validate_artifacts(
+            directory, content_tree=content_tree,
+            dev_head=dev_head, main_before=main_before, projects=candidate_projects(candidate),
+            candidate_root=candidate,
+            source_policy=source_policy, min_age_days=min_age_days,
+        )
+
+
 def validate_candidate_artifacts(
     directory: Path, *, repo: Path, dev_head: str, main_before: str,
     source_policy: str | None = None, min_age_days: int | None = None,
@@ -738,15 +757,17 @@ def validate_candidate_artifacts(
     scratch = promotion.add_scratch_worktree(dev_head, repo=repo)
     try:
         state = promotion._read_pipeline_state(main_before, repo=repo)
-        promotion.consume_pending_changes(
+        summary = promotion.consume_pending_changes(
             scratch, main_head=main_before, repo=repo,
             last_dev_head=(state.get("last_promotion") or {}).get("dev_head"),
             trusted_source=Path(__file__).resolve().parent.parent,
         )
-        return validate_artifacts(
-            directory, content_tree=promotion.build_promotion_tree(scratch),
-            dev_head=dev_head, main_before=main_before, projects=candidate_projects(scratch),
-            candidate_root=scratch,
+        content_tree = promotion.build_promotion_tree(
+            scratch, control=summary.get("control_preserved"),
+        )
+        return validate_composed_artifacts(
+            directory, scratch=scratch, content_tree=content_tree,
+            dev_head=dev_head, main_before=main_before,
             source_policy=source_policy, min_age_days=min_age_days,
         )
     except promotion.PromotionError as exc:

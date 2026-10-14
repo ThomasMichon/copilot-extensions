@@ -253,11 +253,11 @@ class FleetConfig:
     # Per-fleet override of the GitHub account whose own Copilot CLI login on
     # THIS host backs the container's Copilot inference auth specifically
     # (COPILOT_GITHUB_TOKEN) -- independent of forward_gh_token's GH_TOKEN,
-    # which remains the container's git/gh identity. None (default) means
-    # this fleet does not separate the two; Copilot CLI then falls back to
-    # GH_TOKEN (if forwarded) per its own env-var precedence. See
+    # which remains the container's git/gh identity. Host-Copilot mode requires
+    # an explicitly selected account; legacy behavior must be opted into. See
     # ContainersConfig.copilot_cli_account_for.
     copilot_cli_account: str | None = None
+    copilot_auth_mode: str | None = None
     # "clone" (Model A, default) or "mount" (Model B, future).
     code_model: str = "clone"
     # Trusted, image-backed fleets only (validate_restricted rejects these on
@@ -449,16 +449,15 @@ class ContainersConfig:
     exec_user: str = "vscode"
     workspace_folder: str = "/workspace"
     acp_command: str | None = None
-    # Forward the host `gh auth token` into the container as GH_TOKEN so the
-    # in-container Copilot CLI is authenticated headlessly.
+    # Forward the independent repository `gh` identity to normal gh/Git tools.
     forward_gh_token: bool = True
     # Global default: GitHub account whose own Copilot CLI login on this host
     # backs every trusted fleet's Copilot inference auth (COPILOT_GITHUB_TOKEN)
-    # as a SEPARATE identity from GH_TOKEN/git-PR authorship. None (default)
-    # means no fleet separates the two unless it sets its own
-    # FleetConfig.copilot_cli_account. See copilot_cli_account_for and
+    # as a SEPARATE identity from GH_TOKEN/git-PR authorship. Unset is refused
+    # by host-Copilot launch admission. See copilot_cli_account_for and
     # resolver.host_copilot_cli_token.
     copilot_cli_account: str | None = None
+    copilot_auth_mode: str = "host-copilot"
     # On-demand credential relay: deploy in-container shims at connect that fetch
     # tokens from the host relay through the trusted SSH reverse forward. Fixes
     # rush dev-deploy (Azure storage) by serving the host az-login identity.
@@ -538,8 +537,8 @@ class ContainersConfig:
 
         Restricted fleets never receive host credentials of any kind, same
         hard boundary as credentials_for. A per-fleet value wins over the
-        global default; both default to None (no separate inference identity
-        -- Copilot CLI falls back to GH_TOKEN/GITHUB_TOKEN if forwarded).
+        global default. None is not permission for repository-token inference;
+        host-Copilot launch admission refuses it.
         """
         if fleet and fleet.restricted:
             return None
@@ -718,7 +717,11 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
     # the machine-local copy. A repo/cwd copy is only migrated in memory here.
     from . import config_migrations
 
+    before_mode = data.get("copilot_auth_mode")
     data = config_migrations.migrate_loaded(data)
+    if before_mode is None and data.get("copilot_auth_mode") == "legacy":
+        log.warning("Existing configuration migrated to explicit legacy Copilot auth; "
+                    "select host-copilot and its intended account for inference isolation")
 
     config.exec_user = data.get("exec_user", config.exec_user)
     config.workspace_folder = data.get("workspace_folder", config.workspace_folder)
@@ -729,6 +732,9 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
     if "copilot_cli_account" in data:
         raw_account = data["copilot_cli_account"]
         config.copilot_cli_account = str(raw_account) if raw_account else None
+    from .copilot_auth_policy import validate_auth_mode
+    if "copilot_auth_mode" in data:
+        config.copilot_auth_mode = validate_auth_mode(data["copilot_auth_mode"])
     relay = data.get("relay", {}) or {}
     if isinstance(relay, dict):
         config.relay_enabled = bool(relay.get("enabled", config.relay_enabled))
@@ -860,6 +866,10 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
                 else None
             ),
             copilot_cli_account=raw.get("copilot_cli_account") or None,
+            copilot_auth_mode=(
+                validate_auth_mode(raw["copilot_auth_mode"])
+                if "copilot_auth_mode" in raw else None
+            ),
             code_model=raw.get("code_model", "clone"),
             host_workspace_path=raw.get("host_workspace_path"),
             host_home_path=raw.get("host_home_path"),

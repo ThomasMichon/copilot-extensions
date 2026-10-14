@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from machine_transport.registry import MachineEntry, SSHEnvironment
+import pytest
+
+from machine_transport.registry import (
+    MachineEntry, SSHEnvironment, normalize_machine_entries, parse_machines_yaml,
+)
+from machine_transport.identity import local_execution_platform
 from machine_transport.transport import (
     TransportPlan,
     default_shell_for_env_name,
@@ -12,6 +17,48 @@ from machine_transport.transport import (
 
 def _loader(entries):
     return lambda: entries
+
+
+def test_logical_profile_transport_never_selects_another_platform():
+    entries = normalize_machine_entries(parse_machines_yaml({"machines": {
+        "desktop": {"ssh": {"environments": [
+            {"name": "wsl", "alias": "guest-route"},
+            {"name": "windows", "alias": "native-route"},
+        ]}},
+    }}))
+    native = get_machine_transport("native-route", config_machine="desktop-wsl", load_entries=_loader(entries))
+    guest = get_machine_transport("guest-route", config_machine="desktop", load_entries=_loader(entries))
+    assert (native.machine_key, native.ssh_alias, native.shell, native.local) == (
+        "desktop", "native-route", "pwsh", False,
+    )
+    assert (guest.machine_key, guest.ssh_alias, guest.shell, guest.local) == (
+        "desktop-wsl", "guest-route", "bash", False,
+    )
+    assert get_machine_transport(
+        "guest-route", config_machine="desktop-wsl", load_entries=_loader(entries),
+    ).local
+
+
+def test_explicit_logical_transport_refuses_multiple_profiles():
+    entry = MachineEntry(
+        "guest", "Guest", execution_platform="wsl",
+        ssh_environments=[SSHEnvironment("wsl", "one"), SSHEnvironment("wsl", "two")],
+    )
+    with pytest.raises(ValueError, match="ambiguous SSH profiles"):
+        resolve_ssh_target(entry)
+
+
+@pytest.mark.parametrize(("system", "release", "distro", "expected"), [
+    ("Windows", "10", "", "windows"),
+    ("Linux", "6.6-microsoft-standard-WSL2", "", "wsl"),
+    ("Linux", "6.6", "Example", "wsl"),
+    ("Linux", "6.6", "", "linux"),
+])
+def test_local_platform_detection_is_owner_only(monkeypatch, system, release, distro, expected):
+    monkeypatch.setattr("machine_transport.identity.platform.system", lambda: system)
+    monkeypatch.setattr("machine_transport.identity.platform.release", lambda: release)
+    monkeypatch.setenv("WSL_DISTRO_NAME", distro)
+    assert local_execution_platform() == expected
 
 
 class TestDefaultShellForEnvName:
@@ -86,18 +133,18 @@ class TestResolveSshTarget:
 
 class TestWrapRemoteCommand:
     def test_wraps_posix_shells(self):
-        assert wrap_remote_command("bash", "aperture-labs") == "bash -lc aperture-labs"
-        assert wrap_remote_command("sh", "aperture-labs") == "sh -lc aperture-labs"
-        assert wrap_remote_command("zsh", "aperture-labs") == "zsh -lc aperture-labs"
+        assert wrap_remote_command("bash", "example-command") == "bash -lc example-command"
+        assert wrap_remote_command("sh", "example-command") == "sh -lc example-command"
+        assert wrap_remote_command("zsh", "example-command") == "zsh -lc example-command"
 
     def test_quotes_the_inner_command(self):
-        wrapped = wrap_remote_command("bash", "aperture-labs list --json")
-        assert wrapped == "bash -lc 'aperture-labs list --json'"
+        wrapped = wrap_remote_command("bash", "example-command list --json")
+        assert wrapped == "bash -lc 'example-command list --json'"
 
     def test_never_wraps_pwsh_or_unrecognized_shell(self):
-        assert wrap_remote_command("pwsh", "aperture-labs") == "aperture-labs"
-        assert wrap_remote_command("", "aperture-labs") == "aperture-labs"
-        assert wrap_remote_command("cmd", "aperture-labs") == "aperture-labs"
+        assert wrap_remote_command("pwsh", "example-command") == "example-command"
+        assert wrap_remote_command("", "example-command") == "example-command"
+        assert wrap_remote_command("cmd", "example-command") == "example-command"
 
 
 class TestGetMachineTransport:
@@ -139,7 +186,7 @@ class TestGetMachineTransport:
         plan = get_machine_transport(
             "borealis", config_machine="aurora-cloud2", load_entries=_loader(entries),
         )
-        assert plan.wrap("aperture-labs") == "bash -lc aperture-labs"
+        assert plan.wrap("example-command") == "bash -lc example-command"
 
     def test_remote_windows_plan_wrap_passes_through_untouched(self):
         entries = {
@@ -151,7 +198,7 @@ class TestGetMachineTransport:
         plan = get_machine_transport(
             "atlas-core", config_machine="aurora-cloud2", load_entries=_loader(entries),
         )
-        assert plan.wrap("aperture-labs") == "aperture-labs"
+        assert plan.wrap("example-command") == "example-command"
 
     def test_unknown_machine_is_unresolved(self):
         plan = get_machine_transport(

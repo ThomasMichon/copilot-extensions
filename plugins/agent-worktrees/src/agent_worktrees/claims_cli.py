@@ -408,7 +408,7 @@ def _dispatch_claim(verb: str, verb_args: dict):
         verb_args,
         read_lock_data=lambda: _locks.read_lock(_smr._monitor_lock_path()),
         ensure_monitor=_smr._ensure_status_monitor if _smr._status_monitor_enabled() else None,
-        min_version=2,
+        min_version=3,
     )
 
 
@@ -933,13 +933,7 @@ def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
     readiness = state_root_mod.coordination_readiness(config)
 
     outbound = [
-        {
-            "kind": c.kind,
-            "ref": c.ref,
-            "state": c.state,
-            "created_at": c.created_at,
-            **({"note": c.note} if c.note else {}),
-        }
+        c.to_public_dict()
         for c in rec.resources
     ]
     inbound = _core_helper("_dispatch_assigned_tasks", _dispatch_assigned_tasks)(

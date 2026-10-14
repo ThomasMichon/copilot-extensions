@@ -4,10 +4,12 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent, serial per-slice PRs against `dev`
 - **Created:** 2026-10-11
-- **Status:** Active; artifact preflight landed, both-method release trust plan next
+- **Status:** Active; pinned-key verifier landed, role lifecycle next; GitHub proof deferred
 - **Vision:** machine-fleet `unified-coordination-product`; agent-fabric and plugin-services explicit integrated-product profile
 - **Umbrella issue:** #6236
-- **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts. Existing dependencies #5789, #6030, #5861, #5862 retain ownership.
+- **Sub-issues:** #6240 release/lifecycle; #6241 command/receipt contracts;
+  #6443 Gateway/index vertical slice. Existing dependencies #5789, #6030,
+  #5861, #5862 retain ownership.
 
 ## Guiding Intent
 
@@ -28,6 +30,7 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
 |-------------|---------------------|-------------|
 | Plan steward | Plan/vision reconciliation, issue coordination and review stewardship | Managed planning worktree; umbrella issue |
 | Contract implementer | Release/role contract #6240; first operation/receipt shape slice #6241 | Managed implementation worktree; assigned sub-issues |
+| Gateway/index integrator | End-to-end new Gateway, index client and subscribed credential integration #6443 | Separate managed worktree; #6443 and index consumer #6383 |
 | Existing campaign owners | Routing, standalone client, role deployment and provider integration | Existing campaign issues and canonical efforts |
 | Adopter | Configuration, capacity, enrollment and live activation approval | Explicit downstream adoption workflow |
 
@@ -38,6 +41,13 @@ neither live enrollment nor deployment, destructive retirement or capacity acces
 - **Delegates:** None assigned to runtime implementation by this plan.
 - **Slice ownership:** Never assign a slice already held by another campaign.
   Coordinate #5789/#6030 and the standalone client PR #6133 before touching their files.
+  Client-only installation lifecycle #6424 also retains ownership; the
+  Gateway/index slice consumes it rather than opening a parallel installer.
+- **Gateway/index slice:** The operator assigned its end-to-end integration to
+  the Gateway/index integrator. This is a contribution to this product, not a
+  competing Gateway or ledger. Existing contract, auth, deployment and migration
+  owners retain their work; inventory unmerged prototypes before duplicating
+  implementation. The integrator owns the slice's PRs, not the whole V2 effort.
 - **Handoff:** Continue from the first unresolved Plan item with its validation
   gates and current owner, not merely from the most recent merged PR.
 - **Canonical home:** This effort and its linked proposal are the upstream
@@ -85,6 +95,15 @@ selected policy per installation, the operator selected verbatim:
 
 > both
 
+When asked to authorize a bounded GitHub workflow for authentic test-manifest
+attestations, the operator responded verbatim:
+
+> Let's avoid anything require special GitHub auth. What is this for?
+
+No fixture workflow, new GitHub signing permission or special authentication
+was authorized. Continue offline pinned-key verification; the GitHub-specific
+positive proof gate remains deferred, not completed or silently substituted.
+
 The operator confirmed the slug `fleet-control-v2`. Personal artifact delivery
 is handled outside this public repository. The architecture details, phase
 breakdown and validation below are **agent-recommended** elaborations of the
@@ -92,6 +111,18 @@ approved direction. No runtime or live rollout authorization is inferred from
 "prepare". The subsequent direction authorizes driving the recommended contract
 implementation; live enrollment, deployment and destructive retirement still
 require their own approval.
+
+Subsequent operator assignment, captured verbatim:
+
+> Own the end-to-end new Gateway/index integration slice
+
+The operator explicitly selected the new fleet-manager Gateway and instructed
+that older adopter Gateways remain untouched. The requested index-side container,
+CLI query path and token requests through the Gateway to a subscribed credential
+controller are captured in
+the [standalone index effort](../agent-index-standalone-service/README.md).
+The [Gateway/index slice](gateway-index-slice.md) below is an
+**agent-recommended implementation elaboration** of that assignment.
 
 ## Plan
 
@@ -111,11 +142,13 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [ ] Define a fleet-manager release manifest for thin client, Gateway and node
   roles; reuse existing lifecycle code rather than implementing parallel installers.
   Declaration and offline snapshot inspection landed in #6285; actual product
-  assembly, signature verification and lifecycle activation remain pending.
+  assembly and lifecycle activation remain pending.
   Role-selected actual artifact integrity preflight landed in #6437 as a prerequisite;
   client packaging/diagnostics/managed installation remain owned by #6424.
-  The [both-method release authentication plan](release-authentication.md) is
-  the next reviewed slice; it grants no live trust-root or signing authority.
+  The [both-method release authentication plan](release-authentication.md)
+  landed in #6451 and pinned-key manifest verification in #6475.
+  GitHub-positive proof is deferred under the operator's authentication constraint;
+  no live trust-root, signing or activation authority follows from verification.
 - [ ] Prove independent setup/update/doctor/recovery and bounded activation,
   with no installation or update from Copilot hooks.
 - [ ] Prove thin client installation has no controller/container-manager effects;
@@ -129,7 +162,8 @@ All detailed slices are **agent-recommended** and remain subject to review.
   Durable receiver cursors landed in #6395 and local allocation claims in #6403.
   Cooperative SQLite effect-owner checks landed in #6411 and explicit local
   retirement/release/generation transfer in #6418. External effect-owner fencing
-  and authenticated runtime integration remain open.
+  and authenticated runtime integration remain open. Installed two-node journal
+  process recovery is a bounded prerequisite, not resident Gateway/node proof.
 - [ ] Prove objective -> workspace -> host -> prompt -> outcome -> settlement
   locally, then through one Gateway and two separate nodes.
 - [ ] Persist scope/generation fences at cooperative effect owners; define
@@ -137,9 +171,27 @@ All detailed slices are **agent-recommended** and remain subject to review.
 - [ ] Keep accepted agent/mux work, credentials and expensive workloads outside
   coordinator lifetime; all integrated roles share one lifecycle implementation.
 
+### Phase 2a - Gateway/index vertical slice
+- [ ] Review the [slice contract](gateway-index-slice.md) and coordinate #6443,
+  #6383 and retained fleet/auth/deployment owners before runtime changes.
+- [ ] Supply the resident role-selected Gateway and fixed-service index route
+  using the existing release, offer/request and operation/receipt contracts.
+- [ ] Authenticate and authorize client/node/controller principals, service
+  generations and corpus/source grants at admission and backend execution.
+- [ ] Route correlated source-credential requests to an authorized subscribed
+  credential controller, with refresh, expiry/revocation and explicit disconnect
+  outcomes.
+- [ ] Wire explicit index CLI Gateway transport and detached-worker credential
+  consumption without changing unselected native/SSH behavior.
+- [ ] Prove the real CLI/Gateway/container/controller path, independently
+  persistent index state and scoped negative cases before any native offload.
+
 ### Phase 3 - Transfer authority without duplicate writers
 - [ ] Inventory V1 authorities, state schemas, live hosts, receipts and obligations;
   coordinate imports with their current owners.
+  The [bounded source inventory and migration gates](v1-migration.md) document
+  inspected storage seams and unresolved owner/live-evidence prerequisites;
+  source reports and selected existing tests do not complete this inventory.
 - [ ] Implement restartable import/reconciliation, explicit admission freeze,
   and verified adoption or drain without dual authoritative writes.
 - [ ] Establish per-domain drain deadline and owner/escalation decisions; do not
@@ -159,6 +211,9 @@ All detailed slices are **agent-recommended** and remain subject to review.
 
 All entries are **agent-recommended implementation gates**, not completed tests.
 
+- [ ] Complete the [Gateway/index slice gates](gateway-index-slice.md#validation-and-adoption-gates):
+  real CLI/query/credential transport, scope enforcement before retrieval,
+  crypto/correlation/revocation, fresh container persistence and live adoption.
 - [ ] Real first-touch Windows/Linux install with no Copilot/plugin/runtime cache;
   offline installed use and precise missing/incompatible/unauthorized failures.
 - [ ] Concurrent activation/admission: one authoritative writer, unique resource
@@ -189,6 +244,16 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 [Architecture and migration contract](architecture.md).
 
 ## Journal
+
+### 2026-10-12 - Gateway/index ownership assigned
+- Operator explicitly assigned the end-to-end new Gateway/index integration
+  slice, after selecting the new product rather than an older adopter Gateway.
+- Claimed #6443 after deduplicating existing routing, credential and index work.
+  Existing #6240/#6241/#5789/#6030 responsibilities remain intact.
+- Prepared the bounded slice proposal before runtime implementation. Current
+  merged fleet primitives are not cryptographic auth, resident routing or
+  subscribed credential controller delivery; unmerged prototypes need inventory
+  and coordination before reuse or replacement.
 
 ### 2026-10-11 - Approved direction and plan preparation
 - Operator approved the adversarial redesign, requested organized personal
@@ -488,3 +553,197 @@ All entries are **agent-recommended implementation gates**, not completed tests.
   implementation with package ownership agreed before shared metadata changes.
   #6424 owns the client lifecycle and #5789 principal/connector authentication.
   No signing key, live trust root, workflow/token or deployment was changed.
+
+### 2026-10-13 - Release authentication plan reviewed; verifier seam coordinated
+- #6451 merged at `2026-10-13T05:33:50Z`, commit
+  `e0ba68ce7982c97a1a12a7eb49616c70ad6b6e91`, after required CI passed.
+  The current-head Copilot COMMENTED review had zero findings and explicitly
+  reported a Lite fallback because the full agentic review did not start
+  before its timeout. This meets the documented owner-authored clean-Comment
+  gate; it is not evidence of a full agentic review. No CI gate was bypassed.
+- Re-read every parent Plan/Validation item. Reviewed intent does not close
+  release authentication, lifecycle activation or any Phase 1-4/full validation
+  item; the effort and worktree remain active.
+- #6424's lifecycle owner agreed the optional verification capability boundary:
+  default client dependencies stay empty, verifier imports stay lazy, and
+  unavailable selected verification refuses rather than downgrading to
+  integrity-only preflight. Parser, build resources, doctor and installer
+  remain with that owner. Exact optional-extra/API coordination precedes any
+  shared metadata change.
+- Next is the bounded #6240 policy/proof and pinned-key cryptographic slice;
+  real GitHub attestation evidence and lifecycle integration remain distinct
+  gates. No trust roots, signing workflow or live deployment were changed.
+
+### 2026-10-13 - Bounded pinned-key verification prepared
+- Added a separate, lazy-import verification API and explicit trusted
+  policy/signed-byte contract. Real Ed25519 verification authenticates the
+  exact canonical manifest digest, signed authority/sequence/lifetime and
+  configured key role/validity/revocation policy. No missing or selected
+  GitHub method falls back to another method. GitHub verification itself is
+  still unimplemented and explicitly refuses.
+- The positive fixture was generated independently by Node's signer; no
+  private fixture key was retained. Tampered bytes/signature, wrong key,
+  revoked/disallowed/expired policy, duplicate/noncanonical encoding,
+  scope mismatch and configured rollback-floor replay all refuse.
+- Native Windows installed contained suite: 410 passed, one native FIFO
+  platform skip. Real verification ran outside the checkout with Python
+  socket entry points denied; an isolated `-I -S` child loaded the installed
+  package without site packages and proved actual absent-crypto refusal.
+  This is not OS-level network isolation, clean-machine installation or
+  native Linux evidence. Full machine clean-room is deferred because no
+  installer/bootstrap changes; no live signing/deployment lane is authorized.
+- The first run explicitly exposed missing crypto support in the managed
+  test environment and an oversized parametrized test name on Windows.
+  Installed the chosen crypto dependency only into that test environment
+  and used bounded test IDs; no failures were skipped. Shared production/dev
+  metadata remains untouched pending the exact #6424 extra/API confirmation.
+  Fresh declared-dependency CI validation and publication await that agreement.
+- Extended the independently generated signing fixture to bind real component
+  bytes, exercised all three role closures and changed-file refusal, and ran
+  the installed isolated client through authentication plus actual artifact
+  preflight against the same manifest. Focused verifier suite: 48 passed.
+  This proves the pinned-method chain, not GitHub verification or immutable
+  staging/activation; the full both-method gate remains open.
+- Documentation impact covers the product README, new authentication contract
+  and this canonical journal/index. No parent Phase 1-4/Validation item is
+  closed by a prepared verifier, and no live trust or activation changed.
+
+### 2026-10-13 - Exact optional dependency seam approved
+- #6432's client resource/diagnostic prerequisite merged at
+  `2026-10-13T06:26:04Z`, commit `ca7b3e5630673bf2dee2c7519c950575ad91b825`;
+  its owner explicitly retained the optional verification seam and the
+  independently owned managed lifecycle. The operator then explicitly approved
+  the proposed `release-verification = ["cryptography>=46,<47"]`, matching
+  crypto development dependency and `authenticate_release(...)` API.
+- Integrated that prerequisite, preserving its build dependencies and resource/
+  diagnostic implementation. Added only the agreed optional/development metadata
+  and directly dependent wheel-metadata assertion. Default dependencies remain
+  empty; parser, build helper, doctor and installer logic were not changed.
+- Next gate is installed validation using declared dependencies, actual review
+  and required CI. No trust enrollment, signing workflow or rollout is approved
+  by this package-metadata decision.
+- Fresh managed native Windows environment, provisioned solely from the
+  declared development dependencies: 450 passed, one native FIFO platform skip,
+  in 44.62 seconds. The real built wheel's metadata proves crypto is restricted
+  to `dev` or the explicit `release-verification` extra; no unconditional
+  runtime requirement was introduced. Lint, whitespace and the 13-plugin
+  install-contract gate passed. Actual PR review/native CI remain next.
+
+### 2026-10-13 - Pinned-key review follow-through
+- #6475's first current-head Copilot review reported a Lite fallback and three
+  findings: incomplete/native crypto import failures, brittle wheel requirement
+  formatting and an unclosed test-input handle. The two Medium findings block
+  merge; neither a timeout nor existing green checks satisfies that review gate.
+- Map explicit `ImportError` (including missing dependencies) to the selected
+  capability refusal and cover both missing/native import failure without
+  leaking details. Parse actual wheel requirements with the packaging parser
+  supplied by pytest, compare normalized names/specifier sets and evaluate
+  optional-extra markers. Read subprocess inputs with a bounded-lifetime helper.
+- A later base change also made the PR conflict; reconcile the published slice
+  with the newer base and rerun its contracts before another review. No review
+  or CI gate is bypassed, and the full effort remains active.
+- Operator asked to avoid special GitHub authentication. No new fixture/signing
+  workflow or permission was authorized. Existing read-only verification may
+  consume an already-authenticated manifest bundle, but an unrelated wheel
+  cannot satisfy the canonical manifest chain. The GitHub-positive gate remains
+  deferred; no claim that both methods are implemented follows from pinned keys.
+- Preserved #6443's independently assigned Gateway/index ownership while
+  resolving the effort-index conflict; its participant and plan amendments
+  remain intact. Reconciled the newly merged #6435 artifact-admission vision:
+  this consumer adds no publisher or parallel provenance/identity and does not
+  claim production signing support from test signatures.
+- Rebased installed contained suite: 452 passed, one native FIFO platform skip,
+  in 40.83 seconds. Focused import/metadata review regressions also passed
+  (61 selected tests). Publication and fresh current-head review/required CI
+  remain the next gate; no parent completion item was closed.
+
+### 2026-10-13 - Pinned-key verification landed; remaining authority gates retained
+- #6475 merged at `2026-10-13T10:02:24Z`, commit
+  `dcd46884f223892ec36d8e43170a5c9e11793545`, after actual current-head
+  Copilot APPROVED review with zero findings (Balanced effort), all three
+  threads resolved and every required CI check passed. The Windows/Linux
+  installed fleet test steps actually ran and succeeded; aggregate status alone
+  was not used as evidence of those consumer tests. No CI gate was bypassed.
+- An author thread-reply COMMENTED review was not mistaken for Copilot approval;
+  the older dismissed approval on the prior head also did not satisfy the gate.
+  The reviewed import/metadata/input-handle fixes and final 452-pass native
+  suite are retained. Verified #6236 and #6240 remain open after merge.
+- Re-read the full parent Plan/Validation, including #6443's assigned Gateway/
+  index slice. No complete Phase 1-4/full validation item is closed by the
+  verifier. Product assembly, current publisher proof, owned immutable staging,
+  lifecycle activation, authenticated runtime, V1 migration and adoption remain
+  open. GitHub-positive proof stays deferred, not silently replaced by fixtures.
+- Prepared a bounded, source-only V1 authority inventory through three
+  read-only evidence tracks: agency records/Git leases, dispatch task/audit/
+  wake/reservation storage, and bridge sessions/delivery/acquisition/host custody.
+  Independently exercised their existing contained contracts: worktrees
+  69 passed, dispatch 246 passed, bridge 67 passed with one platform skip.
+  This proves selected local contracts, not live-host inventory, general absence
+  of migration APIs, external fencing or safe import/authority transfer.
+- Next Phase 1 stretch coordinates the shared verified-staging/admission seam
+  with #6424 and the release/assembly owners before implementation; it must
+  reuse approved release identities and existing lifecycle primitives, not
+  introduce another publisher or installer. #6443 owns resident Gateway/index
+  integration. No deployment, trust enrollment or retirement was performed.
+
+### 2026-10-13 - Shared staging owner confirmed; migration evidence bounded
+- #6424's owner confirmed the common role-selected authenticated staging seam:
+  retain the manifest/scope/policy binding and immutable selected bytes,
+  re-authenticate current policy/freshness and re-hash before construction or
+  activation. Sequence and slot ownership remain lifecycle checks, not grants
+  from a serialized verification report. Gateway/node assembly can consume the
+  reviewed common contract later; no competing staging/installer was started.
+- Coordinated this distinct source-only Phase 3 proposal under #6236.
+  The [V1 migration record](v1-migration.md) preserves the bounded three-domain
+  inventory and selected contract evidence, distinguishes source generations/
+  delivery ACKs from effect fences/settlement, and names owner-approved
+  snapshot, freeze, responsibility-conservation, adoption/drain and retirement
+  gates. Existing #6076/#6419 acquisition/layout work retains its ownership.
+- No live state was imported, writer frozen, host adopted or registration
+  retired. All Phase 1-4/full validation items remain open. This documentation
+  slice adds no runtime behavior; unit/E2E/clean-room/live implementation tiers
+  are not claimed. Next is proposal review and current-owner interface agreement
+  before migration adapters; role lifecycle and Gateway/index work continue
+  with their assigned owners.
+
+### 2026-10-13 - Migration proposal reviewed and merged
+- #6513 merged at `2026-10-13T11:03:11Z`, commit
+  `c8fe1b62ec504ab6ec5247b26907b717f8379024`, after actual current-head
+  Copilot APPROVED review with zero findings (Balanced effort). All checks
+  completed successfully or legitimately skipped, including the aggregate
+  required PR gate and workflow lockdown guard. No CI gate was bypassed.
+- Re-read every parent Plan/Validation item and pulled forward with managed
+  sync. The bounded source inventory and proposed migration sequence are now
+  reviewed, not implemented; no full Phase 1-4/Validation item is complete.
+- Relayed the shared staging contract to #6443. #6424 retains its implementation;
+  #5789's unpublished auth/connector reuse interface still requires agreement.
+  Migration adapters likewise require current-owner export/freeze/custody
+  agreement. No competing runtime, live import, deployment or retirement began.
+
+### 2026-10-14 - Separate-process two-node journal recovery
+- Added a bounded installed-package integration test under #6241: a real node
+  process holds its original operation at UNKNOWN while a second node commits
+  one cooperative SQLite effect. A separate Gateway receiver process exits
+  either during the second stream's audit transaction or after both commits.
+  Replacement receivers resume the independent durable cursors, retain the
+  original operations and reconcile explicit terminal evidence without duplicate
+  effects or audit. Imports are isolated and verified under the test interpreter.
+- Native contained full portfolio: 454 passed and one existing native FIFO skip,
+  42.08 seconds within the unchanged 120-second aggregate deadline. Both new
+  crash variants passed. An initial collection failure exposed a stale managed
+  test-package installation; the canonical runner's explicit preparation
+  refreshed that test environment before the passing runs. Shared installed
+  runtimes were not changed.
+- Unit and simple local-process integration tiers were exercised. This changes
+  tests/documentation only, not first-touch installation or live deployment;
+  clean-room provisioning and a live external venue were not exercised for this
+  slice. Synthetic resolution evidence and file-based test signaling are not
+  authentication or a real transport. Full objective/workspace/agent execution,
+  authenticated Gateway/two-node operation, lifecycle, migration and adoption
+  gates remain open; no Plan or Validation checkbox is closed.
+- Common authenticated staging remains owned by #6424/#6569. Its current
+  consumer contract returns component identities and bounded immutable
+  `read_artifact(component, current_policy)` byte snapshots, not reusable public
+  staging paths. Role consumers must retain their own admitted construction,
+  custody, health, sequence and activation checks. No competing installer,
+  publisher, Gateway, credential or authentication implementation was started.

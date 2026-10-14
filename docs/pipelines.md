@@ -109,7 +109,12 @@ resolving a toolchain or executing a build.
 Using only those trusted tools, it recomposes the bound dev/main snapshot
 (including version bumps and materialization), discovers the plugin/vendored
 source closure, checks distribution names and versions, and recomputes each
-payload hash from that candidate data. Candidate-supplied hashes and
+payload hash from that candidate data. Before hashing, it checks out the
+composed index through Git so declared checkout attributes, including CRLF
+scripts, match the fresh candidate checkout used by the exporter. It does not
+normalize payload hashes or waive byte equality. The promoter uses the same
+canonical composed-index validator before creating a release candidate.
+Candidate-supplied hashes and
 first-party labels alone never establish source provenance. The publisher
 repeats this source binding against the actual merged snapshot.
 It rejects duplicate, extra, missing, non-regular or unsafe members, with a
@@ -159,6 +164,15 @@ those bundles' attestations; unrelated or missing files fail closed.
 `promote_release.py --python-artifacts-dir <dir>`
 recomputes composition and refuses missing/corrupt/mis-targeted artifacts
 before pushing a candidate, including repeating the archive-content checks.
+Until the shared composed-index reader reaches trusted `main`, the workflow's
+temporary promoter adapter supplies the canonical checkout to the legacy
+validator. It runs with an isolated Python import path rooted in the pinned
+trusted checkout, preserves the promoter's arguments and error boundary, and
+does not wrap a CLI that already has the shared reader. The DEV workflow copy
+is preparation only: bootstrapping the trusted MAIN workflow still requires
+separate explicit authorization. Remove both temporary workflow adapters once
+the repaired CLI is released; neither permits executing candidate tools or
+relaxing artifact evidence.
 A no-content-change or paused run builds and
 publishes nothing.
 
@@ -213,10 +227,9 @@ candidate. Other workflow refs cannot enter the signing job.
   target for ordinary contribution — a CI promotion pipeline wholesale-
   regenerates it from `dev`'s current tip on a green build (see
   [Promotion: dev → main](#promotion-dev--main) below). `main` is PR-gated,
-  not push-gated: direct pushes are blocked for everyone, and only three
+  not push-gated: direct pushes are blocked for everyone, and only four
   narrow, verified PR shapes are accepted — the promotion pipeline's own
-  PR, a workflow-file-ONLY bootstrap PR, or
-  `module-size-baseline-widen.yml`'s own automated PR (see
+  PR, a workflow-file-ONLY bootstrap PR, or rollback bookkeeping/revert PRs (see
   [Never admin-merge a PR into `main`](#never-admin-merge-a-pr-into-main)
   below for exactly what each shape requires).
 
@@ -477,10 +490,86 @@ account — it's an Enterprise-only feature.)
 > completes and a subsequent PR confirms the check actually reports
 > successfully — only then is it flipped to `active`.
 
+### Required dev source metadata
+
+`source-attribution` is a distinct check in the same trusted
+`workflow-lockdown-guard.yml` workflow. Its script is checked out at
+`github.workflow_sha`, never the PR head, and reads the current description
+through the GitHub API. Body/base edits and metadata changes reevaluate the
+same head; repository automation and manually opened PRs are covered too.
+Both native enforcement and refresh fail closed when multiple open dev PRs
+share a head commit: GitHub's commit-scoped checks cannot safely express
+independent per-PR results. Each PR needs a distinct head. Refresh snapshots
+include current same-head PR membership, so a peer joining or leaving during
+publication invalidates the result just like a concurrent metadata edit.
+Freshness rereads normally query only PRs associated with that head commit,
+not the entire repository's open-PR list. If this endpoint omits the current
+PR (as it can for a commit already on the default branch), a full current
+listing is required rather than assuming a unique head.
+The association response supplies current PR metadata too; normal refreshes
+do not add a separate per-PR GET to each freshness read. New checks remain
+pending during pacing and are completed only after a fresh matching snapshot.
+The 150-distinct-head contract counts every read, write and pagination request
+(902 total), below the standard 1,000-request Actions quota for that pass.
+Backfill also enforces a 950-request per-run budget, including every pagination
+page, metadata read, check write and retry. It reserves failure-fencing requests
+before inspecting a head, including deduplication of an existing result, so
+exhaustion cannot strand a pending check or leave an inspected but unverifiable
+completed success as the latest result. Transport retries are disabled in all
+trusted metadata script steps; policy retries consume the same budget. A larger or
+unstable batch stops with an explicit incomplete-refresh error instead of
+hammering the exhausted quota or reporting that every PR was checked.
+Retry after the rate-limit reset, or refresh remaining PRs through their normal
+metadata events; native per-PR enforcement remains independent of this batch.
+The trusted checkout's integrity-locked CommonMark and HTML parsers identify
+actual HTML comments, excluding fenced/indented code and quoted examples even
+inside continuation list items. HTML containers cannot conceal additional
+source comments; attribute strings and raw-text elements are not comments.
+All metadata jobs install these pinned dependencies
+with `npm ci --ignore-scripts`; no PR-head package or lifecycle script runs.
+CONTRIBUTING.md and failure output publish the accepted codename, workflow and
+native gh-aw origin forms and concrete manual repair steps. Encryption remains
+optional, and syntax validation is not proof of actual source ownership.
+
+`source-attribution-departures.yml` reevaluates remaining dev PRs on a head
+that another PR leaves by pushing, closing, or retargeting away from dev.
+Its trusted, checks-writing job has a distinct non-required name and publishes
+the actual source context only for current dev peers. It is not branch-filtered,
+so a retarget away from dev is observable; it never creates a skipped
+`source-attribution` or `workflow-lockdown-guard` result that could bless a peer.
+This clears collision failures without requiring an unrelated edit to the
+remaining PR. It uses the same validator, freshness checks and request budget.
+
+Pushes to the default release branch and trusted manual dispatches refresh the
+distinct context on current open dev PR heads without editing their descriptions
+or labels. Unchanged metadata/validator decisions are deduplicated and writes
+are paced. This refresh closes the rollout gap for already-open PRs whose old
+green lockdown runs never examined attribution.
+An unstable or unreadable PR fails its refresh without starving later heads;
+the job reports sanitized failures after processing the batch.
+Refresh publication starts pending, rereads metadata before and after completing
+its result, and supersedes any changed/unverifiable snapshot with a failure
+before a bounded retry. A delayed refresh must not leave a stale successful
+result after a concurrent description or metadata edit.
+Completed check conclusions are not rewritten: superseding failure uses a new
+check, and only an unfinished original is closed out directly.
+
+**Activation is separate from implementation merge.** After promotion to
+`main`, verify a real source-check failure and a body-only repair from the
+actual trusted workflow. Only then extend the existing no-bypass required-check
+ruleset with `source-attribution`, preserving its other checks and conditions.
+Do not report enforcement live based only on a dev merge or an unrelated
+same-named check. The existing context-name/publisher forgery residual risk
+described above applies here too.
+
+Source-policy decisions do not waive protected-path authorization, review, or
+other required CI. Agents repair missing metadata and do not apply or remove
+operator-only policy labels.
+
 ### Everyone else
 
 Anyone who hasn't been invited as a collaborator at all **gets no
-automatic CI, no automatic Copilot review, and no agentic-workflow
+automatic code CI, no automatic Copilot review, and no agentic-workflow
 support**, only the strictest built-in fork-PR-approval gate (Settings →
 Actions → General → "Fork pull request workflows" → **"Require approval
 for all outside collaborators"**), which already blocks every Actions run
@@ -488,13 +577,15 @@ for all outside collaborators"**), which already blocks every Actions run
 the trusted review job's own collaborator check (above) for review. A
 Maintainer can still manually approve a run or request a review for an
 outside PR at their discretion — this only removes the automatic path for
-someone the repo owner never invited.
+someone the repo owner never invited. Trusted metadata checks may still run
+without executing any fork/PR-head content.
 
-**This also means an unapproved fork PR against `main` gets zero automated
-feedback**, including from `main-gate` (below) — GitHub holds the *entire*
+**The legacy CI invocation for an unapproved fork PR against `main` is held**,
+including its `main-gate` (below) — GitHub holds the *entire*
 `ci.yml` run, every job included, in `action_required` until a maintainer
-approves it. `.github/workflows/base-branch-reminder.yml` exists
-specifically to close that gap: see
+approves it. `.github/workflows/base-branch-reminder.yml` supplies the safe
+reminder and a trusted, metadata/Git-data-only gate without running fork code:
+see
 [If you opened a PR against `main` by mistake](#if-you-opened-a-pr-against-main-by-mistake).
 
 ## Automated workflows reference
@@ -504,21 +595,23 @@ does. Grouped by role; see each file's own header comment for full
 rationale and any known limitations.
 
 **PR-related gating** (not all run on every PR — `ci.yml` runs on every
-PR; the review and lockdown workflows target only `dev`; the reminder
+PR; trusted review, lockdown, and source-attribution PR checks target `dev`,
+with source-attribution refreshes on `main` push/manual dispatch; the reminder
 targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `ci.yml` | `pull_request`, `push` (`main`/`dev`), `workflow_dispatch` | The fast smoke-CI suite (guards, lint, per-plugin tests) that gates every PR. Contains `main-gate` (rejects a non-promotion PR against `main`) and the `PR gate` fixed-name required-check aggregate, including native Windows archive-source/chronicler smoke when `agent-logger` is selected. |
-| `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` | One trusted run hosts the unchanged required `workflow-lockdown-guard` check and the Maintainer-only review fallback, with independent jobs and job-scoped review permissions/concurrency. Workflow and check names stay unchanged; no PR code executes. |
-| `base-branch-reminder.yml` | `pull_request_target` → `main` | Posts a one-time comment asking a non-owner author to retarget a PR against `main` to `dev` (see [If you opened a PR against `main` by mistake](#if-you-opened-a-pr-against-main-by-mistake)). Never checks out or executes PR code. |
+| `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` (including body/label edits), `push` → `main`, `workflow_dispatch` | Independent trusted jobs host the existing required `workflow-lockdown-guard` check, the separate `source-attribution` metadata check, and the Maintainer-only review fallback. Default-branch push/manual runs refresh source-attribution checks for already-open `dev` PRs; job-scoped permissions/concurrency preserve the review boundary. No PR code executes. |
+| `source-attribution-departures.yml` | `pull_request_target` (`synchronize`, `closed`, `edited`) | Trusted metadata-only refresh of remaining dev PRs on a departed shared head, including retargets away from dev. Publishes no required-context skipped jobs and never executes PR content. |
+| `base-branch-reminder.yml` | `pull_request_target` → `main` | Hosts the trusted `main source gate`, the existing one-time retarget reminder, and staged identifier reporting for owner-authored PRs that pass admission. Gate permissions are contents-read only; any checkout is pinned trusted main, and PR commits are fetched only as Git data. No PR code executes. Legacy CI admission/scanner callers remain until the replacement producers are released and proven. |
 | `trusted-ci.yml` | `pull_request_target`, paths-scoped to `.github/workflows/trusted-ci.yml`/`libs/**`/`agent-bridge`/`tools/**` | Opt-in (`vars.TRUSTED_SELF_HOSTED_CI`), collaborator-gated self-hosted CI lane for paths too sensitive/expensive for the standard runner pool; includes its own file so a change to the gate itself also re-runs it. |
 
 **Reactive, post-CI (triggered by `ci.yml` completing):**
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `promote-trigger.yml` | `workflow_run: ["CI"]` | One trusted invocation hosts independent dev-ancestry dispatch and fork-safe identifier scanning jobs. PR CI completions never start the ancestry-filter runner: synthetic PR success is not committed dev advancement. Successful push/manual completions still prove ancestry rather than trusting branch metadata. Job-scoped permissions and independent concurrency preserve the original trust boundary; PR objects are inert data only. |
+| `promote-trigger.yml` | `workflow_run: ["CI"]` | One trusted invocation hosts independent dev-ancestry dispatch, fork-safe identifier scanning and committed-dev module baseline maintenance. Baseline PRs target dev only; pinned trusted tooling reads the completed dev input as data, with isolated Python, credential-free checkouts and baseline-only publication. Success/failure completions can widen existing ceilings without admitting new offenders; stale inputs skip. Automation never lowers or removes ceilings; tightening remains deliberate manual work. A stale higher ceiling is tolerated under ordinary review rather than exact-baseline equality or global strict-base CI. The release PAT is confined to PR publication. No extra verification dispatch is needed because that PAT triggers ordinary PR CI/review. |
 
 **The promotion pipeline (dev → main):**
 
@@ -527,14 +620,11 @@ targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
 | `validate-and-promote.yml` | `repository_dispatch: [dev-advanced]`, `workflow_dispatch` | The pipeline itself: `gate` (confirm the dispatch really reflects `dev`'s current tip) → full validation suite → `promote` (open a generated `release/promote-<run id>` PR against `main`, auto-merge via `APERTURE_RELEASE_TOKEN`). See [Promotion: dev → main](#promotion-dev--main). |
 | `purge-consumed-changefiles.yml` | `schedule` (daily), `repository_dispatch: [purge-changefiles-requested]` | Standalone daily (or on-demand) companion to the promotion pipeline: opens the "clear consumed changefiles on dev" housekeeping PR for whatever changefiles a promotion has already consumed by then -- pure housekeeping, not per-promotion and never load-bearing for promotion correctness. |
 
-**Scheduled sweeps and watchdogs** (not triggered by PR events — though
-`module-size-baseline-widen.yml` itself opens/updates a PR as its own
-output, and `stale-branch-sweep.yml` acts on already-merged PRs' branches):
+**Scheduled sweeps and watchdogs** (`stale-branch-sweep.yml` acts on
+already-merged PRs' branches):
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `module-size-baseline-widen.yml` | `push` → `main` | Post-merge, main-only companion to the module-size guard: widens the shrink-only baseline when a legitimate growth landed, via its own reviewable PR — never inside a PR branch's own CI run against its own diff. |
-| `module-size-baseline-widen-verify.yml` | `workflow_dispatch` | Manual verification harness for the above. |
 | `module-health-watchdog.yml` | `schedule` (daily), `workflow_dispatch` | Proactively finds the single worst module-size-ceiling offender (organic drift no PR-time gate catches) and files/updates one tracking issue for it. |
 | `stale-branch-sweep.yml` | `schedule` (weekly), `workflow_dispatch` | Deletes merged-PR branches still lingering on `origin` — the automated form of the one-time 3000+-branch cleanup. |
 | `installation-context-full.yml` | `schedule` (daily), `workflow_dispatch` | Full-sweep variant of the installation-context contract smoke check `ci.yml` runs per-PR. |
@@ -561,6 +651,30 @@ ever polls `main`. The promotion pipeline
 `promote-trigger.yml`) is **triggered by a green `dev` build, not a
 schedule** — there is a real wait between a merge landing on `dev` and a
 promotion actually shipping it to `main`, not an instant release.
+
+### Inert main-control preservation support
+
+The composer and trusted artifact recomposition share
+`tools/promotion_control.py`. With no control manifest on either input, existing
+composition is unchanged. No manifest is enabled by this implementation.
+
+A future owner-reviewed `.github/promotion-control.json` on pinned `main` uses
+schema `copilot-extensions.promotion-control`, integer `version: 1`, and a
+nonempty `files` array of exact lowercase `.github/workflows/<name>.yml` or
+`.yaml` paths (at most 64). The manifest itself is preserved automatically.
+Only non-executable regular Git blobs are admitted; duplicate keys/paths,
+case aliases, traversal, unsafe candidate destinations and missing declared
+files fail closed. Source, helper, test and documentation paths are not allowed.
+`dev` cannot introduce or redefine the declaration. Preserved bytes come from
+the pinned main commit, after ordinary versioning and materialization, and
+their blob IDs appear in the promotion summary and pipeline provenance.
+
+Removing a workflow from the trusted declaration returns it to normal dev
+composition; its actual retirement must be reviewed explicitly. This mechanism
+does not establish admission authorization, atomic merge freshness, wrapper/helper
+compatibility or control-preserving rollback. Those contracts and their live
+rejection/recovery proof are prerequisites to activating a manifest; existing
+validation and candidate gates remain required.
 
 ### A red `dev` build ships nothing
 
@@ -591,6 +705,14 @@ waiting for its exact generated PR to merge. Enabling auto-merge alone is not
 delivery: the waiter verifies the PR identity and reports a bounded timeout,
 closed-unmerged state or provider error as a failure. The release tag uses that
 PR's actual merge commit, even if `main` advances again before tagging.
+`tools/tag_promotion.py` provides the intended naming for that tag:
+`<stem>-<merge sha8>`, where the stem (`promote-<UTC timestamp>`) is the
+`last_promotion.tag` recorded in the merged commit's own
+`.github/release-pipeline-state.json`, so a tag and the state it releases
+agree. It refuses to tag when that state names a different promoted `dev`
+commit or the tag already points elsewhere, and a re-run on the same commit is
+a no-op. Until the workflow's tag step calls it, that step still names the tag
+from a fresh `date -u` timestamp plus the merge sha.
 
 ```bash
 gh pr list --repo ThomasMichon/copilot-extensions --search "is:merged head:release/promote-" --limit 5
@@ -651,9 +773,9 @@ commit, then resume once `dev` has an actual fix) rather than hand-editing
 ## Never admin-merge a PR into `main`
 
 `main` only ever moves via a `release/promote-*` PR, a genuine
-workflow-file-ONLY bootstrap PR, or `module-size-baseline-widen.yml`'s own
-automated PR (see the `main-gate` job in `ci.yml`), and `main-gate`
-recognizes and passes **all three** of those on its own — unassisted, no
+workflow-file-ONLY bootstrap PR, or rollback bookkeeping/revert PRs
+(see the `main-gate` job in `ci.yml`), and `main-gate`
+recognizes and passes **all four** shapes on its own — unassisted, no
 override needed. That means `gh pr merge --admin` (or the
 equivalent `--admin` flag on any PR-merge tool) has **no legitimate use
 against an ordinary contribution or promotion PR** once this gate is in
@@ -681,9 +803,35 @@ would disagree with those on a diverged branch (e.g. wrongly rejecting a
 workflow-only PR solely because `main` independently gained an unrelated
 file after the branch forked).
 
+The same unchanged admission program is staged in
+`base-branch-reminder.yml`, using the existing `main source gate` context.
+Its job is independent of the reminder and has only contents-read permission.
+Promotion and non-owner cases need no checkout; owner workflow/state/rollback
+cases check out pinned trusted main and fetch the PR commit as Git objects,
+never as an executable working tree. The original CI producer remains during
+rollout because `pull_request_target` loads its definition from default main:
+removing legacy CI before a covering promotion would strand that very promotion
+behind a missing required context. Only after live producer proof may main PRs
+stop allocating CI. Full main-push validation, contributor CI, fork approval and
+deep/platform lanes are not removed by this staging change.
+The existing post-CI caller and an admitted-owner-only job in this host share
+`.github/actions/identifier-leak-guard/`: the same trusted scanner reads changed,
+non-removed PR blobs without checking out PR code. Filenames travel as JSON-string
+records end-to-end (`--paths-jsonl`), preserving newlines and other Git filename
+characters rather than splitting them into nonexistent paths. The same reporter publishes
+the `identifier leak guard` context with full match details. It fences stale heads
+before scanning and again before reporting. Only a working but unconfigured guard
+is neutral; infrastructure failures fail, including checkout/action-loading
+failures reported by thin caller-side steps independent of local files.
+Non-owner and rejected main PRs do not enter this secret-backed scan; the existing
+fork approval boundary is not widened. The legacy post-CI caller remains during
+staging. Prove the default-main admission and scanner producers on a covering
+promotion before removing main-PR CI; full main-push CI is not a substitute for
+the generated-content scan.
+
 ### If you opened a PR against `main` by mistake
 
-`main-gate` (above) only ever runs as part of `ci.yml`, a plain
+The legacy `main-gate` in `ci.yml` is part of a plain
 `pull_request`-triggered workflow — for a first-time or otherwise
 unapproved external contributor, GitHub holds that *entire* workflow run
 in `action_required` until a maintainer manually approves it, so such a
@@ -692,13 +840,14 @@ contributor can get zero automated feedback at all.
 narrow, `pull_request_target`-triggered job (not subject to the
 fork-approval gate) posts a one-time comment asking the author to retarget
 to `dev`, for any PR against `main` not authored by the repo owner. It
-never checks out or executes the PR's own code and never runs tests — its
-only effect is that one comment, so it adds no capability a
-non-collaborator didn't already have.
+never checks out or executes the PR's own code and never runs tests or requests
+review. The independent contents-read gate in the same trusted invocation can
+report the existing admission decision without approving a fork's code execution.
+On `synchronize`, admission and the admitted-owner scan run; the reminder retains
+its original event scope and one-time-comment behavior.
 
-It recognizes `main-gate`'s own five legitimate automated-PR shapes (the
-release pipeline's own PR, a workflow-only bootstrap PR,
-`module-size-baseline-widen.yml`'s automated PR, and `rollback_release.py`'s
+It recognizes `main-gate`'s own four legitimate automated-PR shapes (the
+release pipeline's own PR, a workflow-only bootstrap PR, and `rollback_release.py`'s
 own pause/resume state-commit PR and revert rollback PR) by the same
 branch-name and diff-content (or branch-name and commit-count, for the
 revert shape) signature `main-gate` itself checks, not merely by

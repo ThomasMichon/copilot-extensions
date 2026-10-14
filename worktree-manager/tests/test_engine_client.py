@@ -41,6 +41,9 @@ def _install_fake(monkeypatch, handler):
     )
     monkeypatch.setattr(ec.subprocess, "run",
                         lambda cmd, **kw: handler(cmd, kw))
+    monkeypatch.setattr(
+        "worktree_manager.engine_process.run", lambda cmd, **kw: handler(cmd, kw),
+    )
 
 
 def test_engine_environment_removes_parent_python_runtime(monkeypatch):
@@ -895,6 +898,38 @@ def test_resolve_without_seed_omits_seed_flag(monkeypatch):
     _install_fake(monkeypatch, handler)
     ec.resolve_launch_plan("dotfiles", new=True, seed=None)
     ec.resolve_launch_plan("dotfiles", new=True, seed="")
+
+
+@pytest.mark.parametrize("new", [False, True])
+@pytest.mark.parametrize("target,seed,timeout,expected", [
+    ("target", "task", 30, 240),
+    ("target", "task", 500, 500),
+    ("target", "task", None, None),
+    (None, "task", None, None),
+    ("target", None, None, None),
+    (None, "task", 30, 30),
+    ("target", None, 30, 30),
+    ("target", "", 30, 30),
+    (None, None, 500, 500),
+])
+def test_resolve_remote_prompt_timeout_floor(new, target, seed, timeout, expected, monkeypatch):
+    seen = []
+
+    def run_json(project, args, *, timeout, stream_progress):
+        assert stream_progress is True
+        seen.append(timeout)
+        return {
+            **_RESUME_PLAN, "seed_pending": bool(seed),
+            "seed_id": "intent" if seed else None,
+            "seed_kind": ("new" if new else "resume") if seed else None,
+        }
+
+    monkeypatch.setattr(ec, "run_json", run_json)
+    ec.resolve_launch_plan(
+        "dotfiles", new=new, worktree_id=None if new else "wt-a",
+        target_machine=target, seed=seed, timeout=timeout,
+    )
+    assert seen == [expected]
 
 
 def test_resolve_base_sends_base_flag(monkeypatch):

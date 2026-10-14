@@ -70,6 +70,64 @@ def test_unknown_machine_preserves_raw_fallback(tmp_path):
     assert identity.topology_path is None
 
 
+def test_legacy_windows_wsl_identity_and_gate_aliases_are_independent(tmp_path):
+    repo = tmp_path / "repo"
+    _topology(repo, {"desktop": {
+        "hostname": "generated-host", "alias": "native-compat",
+        "ssh": {"environments": [
+            {"name": "windows", "alias": "native-profile"},
+            {"name": "wsl", "alias": "guest-profile"},
+        ]},
+    }})
+    native = resolve_machine("desktop", topology_repos=[repo])
+    guest = resolve_machine("guest-profile", topology_repos=[repo])
+    assert (native.canonical, guest.canonical) == ("desktop", "desktop-wsl")
+    assert native.physical_host == guest.physical_host == "desktop"
+    assert (native.execution_platform, guest.execution_platform) == ("windows", "wsl")
+    assert "native-compat" in native.accepted
+    assert guest.accepted == ("desktop-wsl", "guest-profile")
+    assert resolve_machine(
+        "generated-host", topology_repos=[repo], execution_platform="wsl",
+    ).canonical == "desktop-wsl"
+    with pytest.raises(ManifestError, match="does not select an execution space"):
+        resolve_machine("generated-host", topology_repos=[repo])
+
+
+def test_automatic_local_identity_uses_owner_platform_detection(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    _topology(repo, {"desktop": {
+        "hostname": "generated-host",
+        "ssh": {"environments": [{"name": "wsl", "alias": "guest-profile"}]},
+    }})
+    monkeypatch.setattr("agent_machines.identity.platform.node", lambda: "generated-host")
+    monkeypatch.setattr("agent_machines.identity.local_execution_platform", lambda: "wsl")
+    assert resolve_machine(topology_repos=[repo]).canonical == "desktop-wsl"
+    monkeypatch.setattr("agent_machines.identity.local_execution_platform", lambda: "windows")
+    assert resolve_machine(topology_repos=[repo]).canonical == "desktop"
+
+
+def test_explicit_logical_identity_preserves_physical_relationship(tmp_path):
+    repo = tmp_path / "repo"
+    _topology(repo, {
+        "native": {"execution_platform": "windows", "physical_host": "desktop"},
+        "guest": {"execution_platform": "wsl", "physical_host": "desktop"},
+    })
+    guest = resolve_machine("guest", topology_repos=[repo])
+    assert guest.canonical == "guest"
+    assert guest.physical_host == "desktop"
+    assert guest.accepted == ("guest",)
+
+
+def test_known_platform_does_not_choose_among_same_platform_entries(tmp_path):
+    repo = tmp_path / "repo"
+    _topology(repo, {
+        key: {"execution_platform": "wsl", "physical_host": "desktop"}
+        for key in ("guest-one", "guest-two")
+    })
+    with pytest.raises(ManifestError, match="ambiguous wsl entries"):
+        resolve_machine("desktop", topology_repos=[repo], execution_platform="wsl")
+
+
 def test_malformed_topology_is_advisory_and_preserves_fallback(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()

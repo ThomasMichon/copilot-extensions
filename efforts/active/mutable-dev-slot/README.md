@@ -38,6 +38,16 @@ are read-only; implementation slices receive exclusive file ownership, and the
 coordinator integrates and publishes the combined change. Phased adopters do
 not imply that the portfolio or another concurrently owned effort is complete.
 
+The operator authorized the coordinator to take over the remaining first-adopter
+lifecycle on 2026-10-13. Preserve existing implementation and open pull requests;
+the transfer does not supersede adjacent dependency/identity or other adopter
+work. Construction and the complete runtime lifecycle belong in the existing
+installer-engine home, with Python owning actual construction/retention
+descriptors and its subprocess tree through publication, promotion/drain or
+rollback settlement. Native entrypoints initially continue to own pre-Python
+bootstrap and OS integration. This changes ownership, not the full-adopter
+completion gate.
+
 ## Context
 
 This repo's runtime is deliberately **immutable and versioned**
@@ -72,6 +82,19 @@ Operator follow-on, verbatim (2026-10-08):
 The runtime-admission/coalescing execution detail below is agent-recommended
 under that request and the existing immutability contract; it is not a new
 operator directive to remove the explicit claimed-dev exception.
+
+Operator follow-on, verbatim (2026-10-13):
+> Focus on driving phase 3
+
+When asked to choose between retaining the previous reservation and taking
+ownership of the remaining first-adopter lifecycle, the operator selected,
+verbatim:
+> take-over
+
+The selected option was "Authorize takeover of the remaining first-adopter
+lifecycle"; the coordination prompt explicitly retained existing implementation
+and open pull requests. The implementation sequence remains the reviewed
+Phase 3 contract, not a new parallel lifecycle framework.
 
 ## Plan
 
@@ -161,9 +184,9 @@ operator directive to remove the explicit claimed-dev exception.
       publication, without importing the source-checkout implementation.
       The 2026-10-12 revised-legacy delivery journal below records that proof.
 
-- [ ] Review the shared
+- [ ] Finish executing the shared, reviewed
       [runtime-admission/build-coalescing slice](phase-3-runtime-admission.md)
-      before per-plugin code changes, then execute it through the shared core
+      through the shared core
       and phased adopter changes. This closes published-slot overwrite and
       transient first-builder contention at their owning seams, while preserving
       the full per-plugin guard/dev/distinct-generation repair gate below.
@@ -233,6 +256,140 @@ operator directive to remove the explicit claimed-dev exception.
       this worktree mid-effort.
 
 ## Journal
+
+### 2026-10-13 -- Codespaces module-launch health prerequisite merged
+
+#6565 merged into `dev` as
+`1ed68902d3b50999368c7e3f3eda0d14e1447330` after exact-head Copilot approval
+with zero open findings and every required check successful. Both Codespaces
+installers now gate ordinary and claimed-dev publication on the actual isolated
+`python -I -m agent_codespaces --help` entrypoint. Successful package import is
+not sufficient: a partial namespace package can import while its CLI entrypoint
+is absent or broken. A completed numbered slot that fails launch is refused
+before venv/package construction, including forced updates. Completion evidence
+and selection remain unchanged; no published identity is repaired in place.
+
+The relevant contained Windows installer/development lanes passed 65 tests with
+21 platform skips. The final launch matrix passed six native cases with six
+platform skips, covering healthy launch admission, namespace packages, broken
+entrypoint imports, source/PYTHONPATH shadowing, invalid interpreters and
+pre-construction refusal. All 13 install contracts and touched Python lint
+passed. Two existing recovery fixtures now prove the already-landed canonical
+selected-incomplete distinct-generation refusal and preservation, rather than
+expecting a selected/rollback-pinned identity to be rebuilt in place.
+
+The exact-candidate, agent-free Linux clean-room scenario passed all five
+assertions: fresh real provisioning, installed module origin/content matching
+the candidate, importable but unlaunchable namespace evidence, actual forced
+update refusal, and byte-identical completion/selection evidence. The runner
+removed the disposable container. Earlier attempts failed on CRLF fixture
+bytes, public-index TLS and build-backend writes against a read-only development
+mount; they are not passing evidence. The successful scenario uses LF, the
+explicitly supplied configured index and the established writable,
+byte-identical candidate-copy pattern, without dependency-floor overrides or
+deployed-runtime patches. Exhaustive activation cases remain opt-in T3.
+
+Normal promotion and authorized installed proof are still pending. The
+separately driven #6454 update acceptance remains blocked on normal release
+gates, with the latest observed receiving-side configuration repair already
+owned under #6556. This journal does not authorize a second updater or
+claim the merged health correction is deployed.
+
+First-adopter publication-result propagation #6447 is also merged, but neither
+that milestone nor the Codespaces health prerequisite completes an adopter.
+Healthy completed-slot content admission, real construction/coalescing and
+retention descriptor lifetimes, dev/release, distinct-generation repair and
+generation propagation remain open. The Python-owned installer-engine lifecycle
+and existing bridge refusal slice retain their current owners. The next stretch
+is complete first-adopter integration and its actual lifecycle validation;
+all full-adopter Plan/Validation checkboxes and the parent Status remain Active.
+
+The operator subsequently authorized takeover of the remaining first-adopter
+lifecycle after supported attribution lookups did not resolve its live owner.
+The coordinator now retains that remaining implementation and validation
+obligation directly, while preserving existing code, open PRs and adjacent
+adopter ownership. This is not permission to overwrite another contributor's
+active expression or declare the Phase 3 gate complete.
+
+### 2026-10-13 - Finite-provider deadline prerequisite delivered
+
+The finite-profile probe correction #6404 merged as
+`c6e35fdd` and cleared normal release promotion #6453, whose generated
+`main` snapshot is `8db6b8dc`. The authorized unified update selected and
+activated agent-bridge `0.9.55`. Three native deadline regressions passed
+using that installed generation's interpreter, with import origins asserted
+against installed site-packages rather than the source checkout. Serving
+health reports readiness, topology readiness and credential-relay readiness;
+the actual cutover reports successful relay adoption. This closes #6399's
+provider deadline and live acceptance obligation.
+
+The same whole updater finished with explicit exit `1`, not successful
+convergence: agent-dispatch `0.17.1` required FastAPI `>=0.143.0`, while the
+configured package index exposed only versions through `0.142.2`. The
+separately owned #6454 compatibility correction merged in #6458, but its
+normal promotion, unified update and selected/running coordinator proof remain
+with that submitting worker. No index override, dependency-floor override,
+runtime hotpatch or additional updater retry is implied by the provider proof.
+
+The existing shared-core and first-adopter owner retains construction/
+retention descriptor integration and the Python-owned runtime lifecycle in
+the existing installer-engine home. Explicit dev/release,
+distinct-generation repair, generation propagation, complete installer
+adoption on both entrypoints, and portfolio validation remain open. No Plan
+or Validation Plan checkbox is completed by this prerequisite; this effort
+remains Active.
+
+### 2026-10-13 -- Retention released and installed primitive verified
+
+Normal promotion #6441 merged as
+`9539eda8f9b34003a3ddcfcc59d09f02bafa5eb6`. Its pinned dev snapshot
+`a27d57dc2ddc83fc1a8e92a0a026e5f64b5cb7b2` contains retention #6381, and the
+released Worktrees helper is byte-identical to that retention commit's
+canonical helper. This promotion does not yet contain publication #6425.
+
+The authorized ordinary unified updater selected agent-worktrees
+`1.24.56-dev1`. An isolated probe used that installed interpreter and helper,
+verified installed module provenance and the exact released Git blob, and
+proved native GC/toss/slot exclusion, unchanged slot mtime, normal retention
+release and process-death release, construction-to-retention handoff, and dev
+rollback-reference transfer. Temporary fixture slots and child processes were
+cleaned up; no source-checkout helper substituted for the installed one.
+
+Whole-update convergence is not successful: the updater exited 1 when the
+configured index could not resolve agent-dispatch's released FastAPI minimum.
+That distinct blocker is tracked in #6454. Successful payload and other runtime
+phases do not erase it. No alternate index, dependency override, installed-file
+patch, or service restart was used to bypass the refusal.
+
+Shared retention release/installed primitive proof is complete; the
+retention-only workspace is finalized. First-adopter and portfolio gates
+remain unchecked. The operator selected Python ownership of construction and
+the full runtime lifecycle for the complete Worktrees adopter, using the
+existing installer-engine home rather than a parallel framework. Native
+pre-Python bootstrap and OS integration remain initially; signed-Python policy,
+configured indexes, frozen inputs, installation-cell authority, subprocess
+ownership and actual cutover/drain or rollback lifetimes must be preserved and
+validated. This decision is not an implementation or deployment claim.
+
+### 2026-10-13 -- Create-once completion publication merged
+
+#6425 merged into `dev` as
+`84d42eb1c6dfd690d49d46458fe19cc0d3b452b4` after current-head approval with
+zero open findings and all 30 applicable CI checks successful. Numbered
+completion publication now preserves exact existing evidence and refuses
+conflicting or malformed evidence. Only explicitly claimed dev slots permit
+replacement. The canonical helper and all 13 copies preserve the standalone
+offline contract. The contained native Windows selection passed 223 tests
+with five platform skips; the executable contracts passed for all 13 plugins.
+
+This remains a shared-core milestone, not completed installer adoption.
+Normal promotion and authorized installed proof remain pending. The first
+complete adopter remains agent-worktrees on both entrypoints. Its publication
+callers currently discard helper failure, so propagation of publication and
+prerequisite failures is the next integration prerequisite, before descriptor
+lifetime, dev/release, and distinct-generation repair integration. Existing
+host/WSL source ownership and release-pipeline recovery ownership are preserved.
+The effort and all full-adopter validation checkboxes remain Active.
 
 ### 2026-10-13 — Canonical candidate and rollback retention merged
 

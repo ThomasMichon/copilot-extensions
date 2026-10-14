@@ -6,7 +6,8 @@
   (promoted to `main` by the CI pipeline); Phase 7 work branches off `dev`
   per the current contributor flow.
 - **Created:** 2026-09-22
-- **Status:** Active (reopened 2026-10-02 for Phase 7 — see Journal)
+- **Status:** Active (reopened 2026-10-02 for Phase 7; Phase 8 superseded by
+  main-owned-workflow-control Phase 5 — see Journal)
 - **Vision:** none yet for the pipeline itself — this effort may spawn a
   `visions/release-pipeline` entry once the design settles; revisit at
   Phase 2/3 boundary. It is, however, the named realization vehicle for the
@@ -49,6 +50,7 @@ time.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Operator + driving agent | Design, build tooling, drive phases | `copilot-extensions` worktree on this machine |
+| Baseline prevention driver | Historical Phase 8 proposal/evidence; remaining activation transferred to the canonical campaign | #6430 / main-owned-workflow-control Phase 5 |
 
 _Expand this table if/when work is split across additional participants
 (e.g. a dedicated worktree for the CI pipeline vs. one for CONTRIBUTING/AGENTS.md
@@ -677,6 +679,18 @@ Full design (Request, Context, Plan, Design points, Validation Plan):
       post-generation promotion invariant. See the sibling doc for the full
       checklist, design decisions, and validation matrix.
 
+### Phase 8 - Dev-owned module-size baseline updates
+
+Historical proposal and supersession evidence:
+[phase-8-dev-owned-module-baselines.md](phase-8-dev-owned-module-baselines.md).
+
+- [x] Review the bounded baseline-authority proposal (#6436).
+- [x] Supersede duplicate implementation #6493 with merged #6438's
+      operator-selected widening-only policy.
+- [x] Transfer remaining compatible validation and actual activation to #6430
+      and [main-owned-workflow-control Phase 5](../main-owned-workflow-control/README.md#phase-5---finish-validation-and-automation-consolidation);
+      the current-main audit does not establish deployed prevention.
+
 ## Validation Plan
 
 - [x] Generator run against current (pre-split) `main` reproduces the
@@ -801,6 +815,14 @@ Full design (Request, Context, Plan, Design points, Validation Plan):
 Full validation matrix:
 [phase-7-vendorable-changefiles.md](phase-7-vendorable-changefiles.md#validation-plan).
 
+### Phase 8 validation
+
+The historical bounded matrix is retained in
+[phase-8-dev-owned-module-baselines.md](phase-8-dev-owned-module-baselines.md#validation-plan).
+Its remaining compatible obligations are transferred to #6430 and the canonical
+main-owned-workflow-control Phase 5. Existing release gates and other
+participants' phase ownership remain unchanged.
+
 ## Proposal
 
 
@@ -808,6 +830,15 @@ _Pending — Phase 1 design work will produce concrete tool choices and
 generator contract details here or in a linked sub-doc._
 
 ## Journal
+
+### 2026-10-13 - Phase 8 superseded by the canonical campaign
+
+Plan #6436 merged. The operator selected merged implementation #6438 and
+authorized closing duplicate #6493 while retaining its branch/evidence.
+The Phase 8 sibling records the actual-main audit: the old baseline writer and
+admission exception still remain at `9c4d6acade64`. Compatible validation and
+covering-release activation obligations are explicitly transferred to #6430 and
+main-owned-workflow-control Phase 5; this effort remains Active.
 
 ### 2026-09-22 — Kickoff
 - Effort created from a two-round design conversation (see Request). Opened
@@ -2645,9 +2676,6 @@ than fully pre-solved in the plan — operator direction: land the plan now
 and resolve those with tests during implementation.
 
 Phase 7 implementation can now begin.
-
-
-
 
 
 

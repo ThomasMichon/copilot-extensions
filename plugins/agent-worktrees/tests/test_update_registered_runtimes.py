@@ -11,6 +11,7 @@ plugin's ``scripts/install.* update`` on version drift (or unconditionally under
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import types
 from pathlib import Path
@@ -92,6 +93,15 @@ def _isolate_enabled_plugin_scopes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(reconcile, "read_installed_plugins", lambda: [])
     monkeypatch.setattr(m, "_INVOCATION_CWD", Path("/missing/invocation"))
     monkeypatch.delenv(m._UPDATE_CONTEXT_ENV, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_machine_gate_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default to "no gate manifest anywhere" so the host's own gate config
+    (an anchor repo resolved through the real repos registry) never leaks in."""
+    monkeypatch.setattr(reconcile, "load_runtime_gate", lambda repo_dir: {})
+    monkeypatch.setattr(reconcile, "gate_manifest_present", lambda repo_dir: False)
+    monkeypatch.setattr(cfg, "detect_machine", lambda repo_dir=None: "test-box")
 
 
 def _install_config(monkeypatch: pytest.MonkeyPatch, anchor: str = "/repo/anchor") -> None:
@@ -857,3 +867,280 @@ def test_module_names_reads_manifest(tmp_path):
     )
     assert m._module_names(tmp_path) == {"agent-bridge", "x"}
     assert m._module_names(tmp_path / "nope") == set()
+
+
+# ---------------------------------------------------------------------------
+# Machine gate: ``update`` honors ``machine-gated`` exactly like launch reconcile
+# ---------------------------------------------------------------------------
+
+def _gate(monkeypatch, *, allowed: dict[str, set[str]], present: bool,
+          machine: str = "this-box") -> list[Path]:
+    """Install a gate manifest stub; returns the repo dirs it was resolved from."""
+    seen: list[Path] = []
+
+    def load(repo_dir):
+        seen.append(Path(repo_dir))
+        return {k: set(v) for k, v in allowed.items()}
+
+    monkeypatch.setattr(reconcile, "load_runtime_gate", load)
+    monkeypatch.setattr(reconcile, "gate_manifest_present", lambda repo_dir: present)
+    monkeypatch.setattr(cfg, "detect_machine", lambda repo_dir=None: machine)
+    return seen
+
+
+def _gated_codespaces(monkeypatch, *, deployed="0.1.0", payload="0.2.0"):
+    _install_config(monkeypatch)
+    _stub_reconcile(
+        monkeypatch,
+        enabled=["agent-codespaces"],
+        scopes={"agent-codespaces": "machine-gated"},
+        deployed={"agent-codespaces": deployed},
+        payload={"agent-codespaces": payload},
+    )
+
+
+def test_gated_runtime_allowed_on_this_machine_reconciles(monkeypatch):
+    _gated_codespaces(monkeypatch)
+    seen = _gate(monkeypatch, allowed={"agent-codespaces": {"this-box"}}, present=True)
+    calls = _capture_installers(monkeypatch)
+
+    assert m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=False)
+
+    assert "agent-codespaces" in _installed_names(calls)
+    # The gate is resolved from the repository that enables the plugin.
+    assert seen == [Path("/repo/anchor")]
+
+
+def test_gated_runtime_not_allowed_is_skipped_with_clear_status(monkeypatch):
+    _gated_codespaces(monkeypatch)
+    _gate(monkeypatch, allowed={"agent-codespaces": {"other-box"}}, present=True)
+    calls = _capture_installers(monkeypatch)
+
+    status = m._reconcile_one_runtime(
+        "agent-codespaces", "linux", force=False, gate_context=Path("/repo/anchor")
+    )
+
+    assert status == update_runtime.MACHINE_GATED_SKIP
+    assert calls == []
+
+
+def test_machine_detection_failure_blocks_instead_of_using_the_hostname(monkeypatch):
+    """Repository-aware detection raises on purpose (explicit execution space
+    required, invalid registry); update must not fall back to a raw hostname
+    the gate might allow."""
+    _gated_codespaces(monkeypatch)
+    _gate(monkeypatch, allowed={"agent-codespaces": {"raw-host"}}, present=True)
+
+    def detect(repo_dir=None):
+        if repo_dir is not None:
+            raise RuntimeError("explicit execution space required")
+        return "raw-host"
+
+    monkeypatch.setattr(cfg, "detect_machine", detect)
+    calls = _capture_installers(monkeypatch)
+
+    status = m._reconcile_one_runtime(
+        "agent-codespaces", "linux", force=False, gate_context=Path("/repo/anchor")
+    )
+
+    assert status.startswith("machine detection failed")
+    assert calls == []
+    assert not m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=False)
+    assert calls == []
+
+
+def test_unresolvable_enabling_repo_blocks_instead_of_using_cwd(monkeypatch, tmp_path):
+    """Without a resolvable enabling repository, an unrelated working directory
+    with no gate manifest must not authorize a machine-gated runtime."""
+    _gated_codespaces(monkeypatch)
+    _gate(monkeypatch, allowed={}, present=False)
+
+    def _boom(*_a, **_k):
+        raise ValueError("no project configured")
+
+    monkeypatch.setattr(cfg, "load_config", _boom)
+    monkeypatch.chdir(tmp_path)
+    calls = _capture_installers(monkeypatch)
+
+    status = m._reconcile_one_runtime("agent-codespaces", "linux", force=False, gate_context=None)
+
+    assert status.startswith("machine detection failed")
+    assert "could not resolve the repository" in status
+    assert calls == []
+
+
+def test_gated_skip_is_reported_and_not_a_failure(monkeypatch, capsys):
+    _gated_codespaces(monkeypatch)
+    _gate(monkeypatch, allowed={"agent-codespaces": {"other-box"}}, present=True)
+    calls = _capture_installers(monkeypatch)
+
+    ok = m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=False)
+
+    assert ok is True
+    assert calls == []
+    out = capsys.readouterr().out
+    assert "agent-codespaces" in out
+    assert update_runtime.MACHINE_GATED_SKIP in out
+
+
+def test_force_does_not_override_the_machine_gate(monkeypatch):
+    _gated_codespaces(monkeypatch, deployed="0.2.0", payload="0.2.0")
+    _gate(monkeypatch, allowed={"agent-codespaces": {"other-box"}}, present=True)
+    calls = _capture_installers(monkeypatch)
+
+    m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=True)
+
+    assert calls == []
+
+
+def test_present_manifest_that_omits_the_plugin_skips(monkeypatch):
+    _gated_codespaces(monkeypatch)
+    _gate(monkeypatch, allowed={"agent-bridge": {"this-box"}}, present=True)
+    calls = _capture_installers(monkeypatch)
+
+    m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=False)
+
+    assert calls == []
+
+
+def test_no_gate_manifest_anywhere_provisions_locally(monkeypatch):
+    _gated_codespaces(monkeypatch)
+    _gate(monkeypatch, allowed={}, present=False)
+    calls = _capture_installers(monkeypatch)
+
+    m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=False)
+
+    assert "agent-codespaces" in _installed_names(calls)
+
+
+def test_payload_only_scope_unchanged_and_never_consults_gate(monkeypatch):
+    _install_config(monkeypatch)
+    _stub_reconcile(
+        monkeypatch,
+        enabled=["agent-example"],
+        scopes={"agent-example": "none"},
+        deployed={"agent-example": None},
+        payload={"agent-example": "1.0.0"},
+    )
+    monkeypatch.setattr(
+        reconcile, "load_runtime_gate",
+        lambda repo_dir: (_ for _ in ()).throw(AssertionError("gate consulted")),
+    )
+    calls = _capture_installers(monkeypatch)
+
+    assert m._reconcile_one_runtime("agent-example", "linux", force=True) == "payload-only"
+    assert calls == []
+
+
+def test_universal_scope_never_consults_gate(monkeypatch):
+    _install_config(monkeypatch)
+    _stub_reconcile(
+        monkeypatch,
+        enabled=["agent-codespaces"],
+        scopes={"agent-codespaces": "universal"},
+        deployed={"agent-codespaces": "0.1.0"},
+        payload={"agent-codespaces": "0.2.0"},
+    )
+    monkeypatch.setattr(
+        reconcile, "load_runtime_gate",
+        lambda repo_dir: (_ for _ in ()).throw(AssertionError("gate consulted")),
+    )
+    calls = _capture_installers(monkeypatch)
+
+    m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=False)
+
+    assert "agent-codespaces" in _installed_names(calls)
+
+
+def test_gate_decision_is_delegated_to_reconcile_runtime_allowed(monkeypatch):
+    _gate(monkeypatch, allowed={"agent-codespaces": {"this-box"}}, present=True)
+    recorded: list[tuple] = []
+
+    def fake_allowed(scope, name, machine, gate, *, gate_present=True):
+        recorded.append((scope, name, machine, gate, gate_present))
+        return False
+
+    monkeypatch.setattr(reconcile, "runtime_allowed", fake_allowed)
+
+    assert update_runtime._machine_gate_blocks(
+        "agent-codespaces", "machine-gated", Path("/repo/anchor")
+    ) is True
+    assert recorded == [
+        ("machine-gated", "agent-codespaces", "this-box",
+         {"agent-codespaces": {"this-box"}}, True)
+    ]
+
+
+def test_gate_without_enabling_repo_falls_back_to_project_anchor(monkeypatch):
+    _install_config(monkeypatch, anchor="/projects/anchor")
+    seen = _gate(monkeypatch, allowed={"agent-codespaces": {"this-box"}}, present=True)
+
+    assert update_runtime._machine_gate_blocks(
+        "agent-codespaces", "machine-gated", None
+    ) is False
+    assert seen == [Path("/projects/anchor")]
+
+
+def test_module_runtime_not_allowed_is_skipped(monkeypatch, tmp_path):
+    ext_root = tmp_path / "installed-plugins" / "copilot-extensions"
+    plugin_dir = ext_root / "agent-worktrees"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "modules.json").write_text(
+        json.dumps({"modules": [{"name": "agent-bridge", "source": "agent-bridge"}]})
+    )
+    module_dir = ext_root / "agent-bridge"
+    (module_dir / "scripts").mkdir(parents=True)
+    (module_dir / "scripts" / "install.sh").write_text("#!/bin/sh\n")
+    (module_dir / "plugin.json").write_text(
+        json.dumps({"name": "agent-bridge", "runtimeScope": "machine-gated"})
+    )
+    seen = _gate(monkeypatch, allowed={"agent-bridge": {"other-box"}}, present=True)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        subprocess, "run", lambda argv, **kwargs: calls.append(list(argv)) or _ok()
+    )
+    targets = {
+        "agent-bridge": update_runtime._RegisteredPluginTarget(
+            context=Path("/repo/anchor"),
+            activation=update_runtime._PluginActivation.ACTIVE,
+        )
+    }
+
+    ok = update_runtime._update_modules(plugin_dir, "linux", None, targets=targets)
+
+    assert ok is True
+    assert calls == []
+    assert seen == [Path("/repo/anchor")]
+
+
+def test_module_runtime_allowed_still_updates(monkeypatch, tmp_path):
+    ext_root = tmp_path / "installed-plugins" / "copilot-extensions"
+    plugin_dir = ext_root / "agent-worktrees"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "modules.json").write_text(
+        json.dumps({"modules": [{"name": "agent-bridge", "source": "agent-bridge"}]})
+    )
+    module_dir = ext_root / "agent-bridge"
+    (module_dir / "scripts").mkdir(parents=True)
+    (module_dir / "scripts" / "install.sh").write_text("#!/bin/sh\n")
+    (module_dir / "plugin.json").write_text(
+        json.dumps({"name": "agent-bridge", "runtimeScope": "machine-gated"})
+    )
+    _gate(monkeypatch, allowed={"agent-bridge": {"this-box"}}, present=True)
+    monkeypatch.setattr(
+        reconcile, "runtime_installer_environment",
+        lambda name, pdir: (dict(os.environ), tmp_path / "runtime"),
+    )
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        subprocess, "run", lambda argv, **kwargs: calls.append(list(argv)) or _ok()
+    )
+    targets = {
+        "agent-bridge": update_runtime._RegisteredPluginTarget(
+            context=Path("/repo/anchor"),
+            activation=update_runtime._PluginActivation.ACTIVE,
+        )
+    }
+
+    assert update_runtime._update_modules(plugin_dir, "linux", None, targets=targets)
+    assert any(str(a).endswith("install.sh") for c in calls for a in c)

@@ -1592,16 +1592,14 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     recovery = breadcrumb.recover_stale_cutover(
         routing_dir(), make_recovery_client, health_check=liveness_check
     )
-    if getattr(args, "recover", False):
-        if args.json:
-            _emit(recovery)
-        elif recovery.get("recovered"):
-            print(f"[OK] {recovery.get('reason')}")
-        else:
-            print(f"[>] {recovery.get('reason')}")
-        return 0
-    if recovery.get("recovered") and not args.json:
-        print(f"[>] Recovered a prior aborted cutover: {recovery.get('reason')}")
+    from .deploy_recovery import render_recovery
+
+    recovery_exit = render_recovery(
+        recovery, json_output=args.json,
+        recover_only=getattr(args, "recover", False), emit=_emit,
+    )
+    if recovery_exit is not None:
+        return recovery_exit
 
     cutover_started = True
     orch = CutoverOrchestrator(

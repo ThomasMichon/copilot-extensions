@@ -138,6 +138,79 @@ def _run_powershell(
     )
 
 
+@pytest.mark.parametrize("runner", ["bash", "powershell"])
+@pytest.mark.parametrize(
+    "case", ["ready", "absent", "missing-installer", "context", "legacy-only"]
+)
+def test_register_nudge_uses_own_payload_not_runtime_pointer(
+    tmp_path: Path, runner: str, case: str
+) -> None:
+    home = tmp_path / "home"
+    repo = tmp_path / "example"
+    root = tmp_path / "owning-payload"
+    scripts = root / "scripts"
+    scripts.mkdir(parents=True)
+    home.mkdir()
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    shell = _bash() if runner == "bash" else _powershell()
+    extension = "sh" if runner == "bash" else "ps1"
+    script = scripts / f"register-nudge.{extension}"
+    shutil.copyfile(PLUGIN / "scripts" / script.name, script)
+    command = root / "bin" / "payload" / (
+        "agent-worktrees" if runner == "bash" else "agent-worktrees.ps1"
+    )
+    if case not in ("absent", "legacy-only"):
+        command.parent.mkdir(parents=True)
+        command.write_text(
+            "#!/usr/bin/env bash\nexit 97\n" if runner == "bash" else "exit 97\n",
+            encoding="utf-8",
+        )
+        command.chmod(0o755)
+    if case != "missing-installer":
+        (scripts / f"install.{extension}").write_text("", encoding="utf-8")
+    if case == "legacy-only":
+        legacy = home / ".local" / "bin" / "agent-worktrees"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        legacy.chmod(0o755)
+    foreign = tmp_path / "another-marketplace"
+    foreign.mkdir()
+    pointer = home / ".copilot-extensions" / "agent-worktrees" / "runtime-root"
+    pointer.parent.mkdir(parents=True)
+    pointer.write_text(str(foreign) + "\n", encoding="utf-8")
+    pointer_before = (pointer.read_bytes(), pointer.stat().st_mtime_ns)
+    environment = _scrubbed_env(home)
+    git = shutil.which("git")
+    assert git is not None
+    environment["PATH"] = os.pathsep.join(
+        dict.fromkeys((str(Path(git).parent), str(Path(shell).parent)))
+    )
+    if case == "context":
+        environment["COPILOT_EXTENSIONS_CONTEXT"] = str(tmp_path / "install.json")
+    argv = (
+        [shell, str(script)]
+        if runner == "bash"
+        else [shell, "-NoProfile", "-File", str(script)]
+    )
+    result = subprocess.run(
+        argv, input="{}", cwd=repo, env=environment,
+        capture_output=True, text=True, check=False, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)
+    if case == "ready":
+        assert "exact session-catalog command" in output["additionalContext"]
+        assert "register example ." in output["additionalContext"]
+        assert foreign.as_posix() not in output["additionalContext"]
+    else:
+        assert output == {}
+        assert not (home / ".agent-worktrees").exists()
+    assert (pointer.read_bytes(), pointer.stat().st_mtime_ns) == pointer_before
+    if case == "legacy-only":
+        assert legacy.read_text(encoding="utf-8") == "#!/usr/bin/env bash\nexit 0\n"
+
+
 def test_register_nudge_context_only_replays_without_mutating(
     tmp_path: Path,
 ) -> None:

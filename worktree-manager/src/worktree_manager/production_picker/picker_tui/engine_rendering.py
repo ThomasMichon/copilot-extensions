@@ -5,11 +5,15 @@ from __future__ import annotations
 from rich.text import Text
 from textual.app import ComposeResult
 
+from .deferred_row import DeferredRow
 from .engine_helpers import C_BAND, C_BTN_SEL, C_DIM, C_DISABLED, C_ENV, C_FAINT, C_HINT, C_HINT_ON, C_LABEL, C_LOAD, C_META, C_PULSE, C_READY, C_SECTION, C_SPIN, C_TAB_ACTIVE, C_TAB_FOCUS_ON, C_TABOFF, C_WARN, VERSION, VRow, _size_mb
 from .engine_regions import _PickerButtons, _PickerMachine, _PickerNativeData, _PickerPivots, _PickerSegment, _PickerStickyHeader
 
-class PickerScreenRenderingMixin:
-    def build_body(self, width):
+from .engine_navigation_rendering import PickerNavigationRenderingMixin
+
+
+class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
+    def build_body(self, width, *, deferred=False):
         vrows = []
         cur_band = None
         cur_section = None
@@ -31,15 +35,21 @@ class PickerScreenRenderingMixin:
 
         sel = self.sel
         if self._kind() == "worktrees":
-            self.worktrees_view.build(add, width, sel)
+            self.worktrees_view.build_chrome(add, width, sel)
+            self.worktrees_view.build_data(add, width, sel, deferred=deferred)
         elif self._kind() == "maintenance":
             self.maintenance_view.build(add, width, sel)
         elif self._kind() == "registered":
             self.tasks_view.build(add, width, sel)
+        elif self._kind() == "config_section":
+            self._current_view().build(add, width, sel)
         else:
             self.profiles_view.build(add, width, sel)
         return vrows
     def _current_view(self):
+        if self._kind() == "config_section":
+            from .engine_configuration import ConfigurationSectionView
+            return ConfigurationSectionView(self)
         return {
             "worktrees": self.worktrees_view,
             "maintenance": self.maintenance_view,
@@ -127,7 +137,11 @@ class PickerScreenRenderingMixin:
             vrows.append(vr)
             return vr
 
-        self._current_view().build_data(add, width, use_sel)
+        view = self._current_view()
+        if view is self.worktrees_view:
+            view.build_data(add, width, use_sel, deferred=True)
+        else:
+            view.build_data(add, width, use_sel)
         return vrows
     def _build_chrome_vrows(self, width, sel=None):
         """Chrome-only VRows (machine-scope + button rows) -- no data body.
@@ -335,54 +349,10 @@ class PickerScreenRenderingMixin:
             t.append(mk, style=self._hl(mkb, sel, focused))
         t.append(" ")
         return t
-    def tab_bar(self, width, focused):
-        # Group consecutive flat entries by machine (the 'All' entry stands
-        # alone) so a multi-env machine renders its name once.
-        groups = []
-        prev = None
-        for i, (label, m, e, ok) in enumerate(self.machines):
-            tab = self.source_tabs[i] if self.source_tabs else {}
-            group_key = (
-                m
-                if tab.get("source_kind") in (None, "machine-ssh")
-                else tab.get("source_id")
-            )
-            if label != "All" and group_key == prev:
-                groups[-1].append(i)
-            else:
-                groups.append([i])
-            prev = group_key if label != "All" else None
-        blocks = [self._machine_group(g, focused) for g in groups]
-        blen = [b.cell_len for b in blocks]
-        ng = len(groups)
-        selg = next((gi for gi, g in enumerate(groups) if self.machine_idx in g), 0)
-        gap = 3
-        budget = width - 6   # reserve for ‹ / › overflow markers
-        lo = hi = selg
-        used = blen[selg]
-        while True:
-            grew = False
-            if hi + 1 < ng and used + gap + blen[hi + 1] <= budget:
-                hi += 1
-                used += gap + blen[hi]
-                grew = True
-            if lo - 1 >= 0 and used + gap + blen[lo - 1] <= budget:
-                lo -= 1
-                used += gap + blen[lo]
-                grew = True
-            if not grew:
-                break
-        t = Text(" ")
-        t.append("‹ " if lo > 0 else "  ", style=C_HINT)
-        for k in range(lo, hi + 1):
-            if k > lo:
-                t.append(" " * gap)
-            t.append_text(blocks[k])
-        t.append(" ›" if hi < ng - 1 else "  ", style=C_HINT)
-        t.append(" " * max(0, width - t.cell_len))
-        return t
     def status_text(self, compact=False):
         t = Text()
+        if self._kind() == "config_section":
+            return Text("Configuration", style=C_LABEL)
         if self._kind() == "worktrees":
             secs = dict((lbl, len(rows)) for lbl, rows in self.current_list()[1])
             a = secs.get("Active", 0)
@@ -468,7 +438,7 @@ class PickerScreenRenderingMixin:
         t.append_text(use)
         t.append(" " * max(0, W - t.cell_len))
         return t
-    def _frame_segments(self):
+    def _frame_segments(self, *, include_body=True):
         """Compute the four screen segments -- header / chrome / body / footer --
         as lists of ``Text`` line-rows, plus the working width ``W`` (#88 NF2).
 
@@ -480,7 +450,7 @@ class PickerScreenRenderingMixin:
         """
         W = self.size.width or 100
         H = self.size.height or 30
-        key = self._render_sig(W, H)
+        key = (self._render_sig(W, H), include_body)
         cache = self._frame_cache
         if cache is not None and cache[0] == key:
             return cache[1]
@@ -488,20 +458,31 @@ class PickerScreenRenderingMixin:
         foot = self.footer(W)
         # chrome rows: title, htabs, header-border, stats, bottom-border, footer
         body_h = max(1, H - len(top) - 4)
-        vrows = self.build_body(W)
-        self._ensure_visible(vrows, body_h)
-        window = vrows[self.top: self.top + body_h]
-        sticky = self._sticky(vrows, body_h)
-        for i, s in enumerate(sticky):
-            if i < len(window):
-                window[i] = s
-            else:
-                window.append(s)
-        body_lines = [vr.text if isinstance(vr, VRow) else vr for vr in window]
-        while len(body_lines) < body_h:
-            body_lines.append(Text(""))
-        more_above = self.top > 0
-        below = len(vrows) - (self.top + body_h)
+        body_lines = []
+        more_above = False
+        below = 0
+        if include_body:
+            vrows = self.build_body(W, deferred=True)
+            self._ensure_visible(vrows, body_h)
+            window = vrows[self.top: self.top + body_h]
+            sticky = self._sticky(vrows, body_h)
+            for i, s in enumerate(sticky):
+                if i < len(window):
+                    window[i] = s
+                else:
+                    window.append(s)
+            body_lines = [vr.text if isinstance(vr, VRow) else vr for vr in window]
+            body_lines = [line.as_text() if isinstance(line, DeferredRow) else line
+                          for line in body_lines]
+            while len(body_lines) < body_h:
+                body_lines.append(Text(""))
+            more_above = self.top > 0
+            below = len(vrows) - (self.top + body_h)
+        elif self._nf_mounted:
+            native = self.query_one("#nf-body-data", _PickerNativeData)
+            y = native.scroll_offset.y
+            more_above = y > 0
+            below = native.virtual_size.height - y - native.size.height
         header_border = self._border_row(W, "▲", more_above)
         bottom_border = self._border_row(W, "▼", below > 0)
         stats = self._stats_row(W)
@@ -674,20 +655,6 @@ class PickerScreenRenderingMixin:
         t.append(" ")
         t.append("─" * max(0, rightn), style=C_DIM)
         return t
-    def _stats_row(self, W):
-        """Left: the region's sub-pivot hint (◀ machine ▶ etc). Right: the
-        section counts (with a glyph-compact fallback when narrow)."""
-        hint = "Host  ◀▶" if self._kind() == "profiles" else "Machine  Ctrl ◀▶"
-        use = self.status_text(False)
-        if 1 + len(hint) + 3 + use.cell_len + 1 > W:
-            use = self.status_text(True)
-        t = Text(" ")
-        t.append(hint, style=C_DIM)
-        gap = W - t.cell_len - use.cell_len - 1
-        t.append(" " * max(1, gap))
-        t.append_text(use)
-        t.append(" " * max(0, W - t.cell_len))
-        return t
     def _hint_row(self, W, direction, active, count):
         arrow = "▲" if direction == "up" else "▼"
         t = Text()
@@ -851,6 +818,8 @@ class PickerScreenRenderingMixin:
             return ("◀▶ back to pivots · Enter: open Configuration"
                     " · ↑↓ move · Tab region")
         if zone == "M":
+            if self._in_configuration():
+                return "◀▶ section · Enter: focus content · Esc: return to previous view"
             m, e, _ = self.cur_machine()
             scope = "All machines" if self.is_all() else f"{m} {e}"
             return (f"◀▶ switch machine (on {scope}) · Enter: focus actions"

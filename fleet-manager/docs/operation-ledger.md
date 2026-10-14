@@ -156,7 +156,14 @@ an uncommitted transaction, concurrent duplicate clients, admission/receipt audi
 failure rollback, replay/order refusal and identity/schema rejection. Receiver
 process tests cover lost replies after commit and abrupt exit before cursor
 commit, plus atomic page rollback, two independent node spools and exact
-scope/generation/digest denial. They do not
+scope/generation/digest denial. The installed two-node recovery test holds one
+real node process at UNKNOWN while another commits its cooperative SQLite effect.
+A separate receiver exits during or after the fast node's page transaction;
+replacement receivers resume each stream's own durable cursor without duplicate
+audit or effects. Explicit test evidence then resolves the original UNKNOWN
+operation; elapsed time and receipt replay never authorize its retry. The fixture
+uses local journals and a test-only resolution signal, not resident services,
+network transport or authenticated target evidence. These tests do not
 prove power-loss durability, arbitrary Git/SSH/prompt exactly-once, multi-machine
 partitions, credential security or live service cutover.
 Allocation tests additionally cover separate-process competing and duplicate

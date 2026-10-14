@@ -2,40 +2,15 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
-
+from native_shell_support import bash_path as _bash_path
+from native_shell_support import run_headless
 
 PLUGIN = Path(__file__).resolve().parents[1]
 INSTALL_SH = PLUGIN / "scripts" / "install.sh"
 INSTALL_PS1 = PLUGIN / "scripts" / "install.ps1"
-
-
-def _bash() -> str | None:
-    candidate = shutil.which("bash")
-    if candidate is None:
-        return None
-    if os.name == "nt" and "WindowsApps" in candidate:
-        return None
-    try:
-        probe = subprocess.run(
-            [candidate, "-c", "exit 7"],
-            capture_output=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if os.name == "nt":
-        cygpath = subprocess.run(
-            [candidate, "-c", "command -v cygpath >/dev/null 2>&1"],
-            timeout=30,
-        )
-        if cygpath.returncode != 0:
-            return None
-    return candidate if probe.returncode == 7 else None
 
 
 def _bash_resolver_source() -> str:
@@ -47,25 +22,13 @@ def _bash_resolver_source() -> str:
     return "resolve_executable_command_path() {" + body + "\n}\n"
 
 
-def _bash_path(bash: str, path: Path) -> str:
-    if os.name != "nt":
-        return str(path)
-    result = subprocess.run(
-        [bash, "-c", 'cygpath -u -- "$1"', "_", str(path)],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert result.returncode == 0, result.stderr
-    return result.stdout.strip()
-
-
-@pytest.mark.skipif(_bash() is None, reason="a conformant Bash is unavailable")
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
 def test_bash_resolver_ignores_aliases_and_functions_for_path_command(
-    tmp_path: Path,
+    tmp_path: Path, native_bash: str,
 ) -> None:
-    bash = _bash()
-    assert bash is not None
+    bash = native_bash
     executable = tmp_path / "copilot"
     executable.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     executable.chmod(0o755)
@@ -85,7 +48,7 @@ def test_bash_resolver_ignores_aliases_and_functions_for_path_command(
             f"PATH={shlex_quote(bash_dir)}:$PATH\n"
             "resolve_executable_command_path copilot\n"
         )
-        result = subprocess.run(
+        result = run_headless(
             [bash, "-c", script],
             capture_output=True,
             text=True,
@@ -95,17 +58,18 @@ def test_bash_resolver_ignores_aliases_and_functions_for_path_command(
         assert result.stdout.strip().casefold() == bash_executable.casefold()
 
 
-@pytest.mark.skipif(_bash() is None, reason="a conformant Bash is unavailable")
-def test_bash_resolver_rejects_function_without_path_command() -> None:
-    bash = _bash()
-    assert bash is not None
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_bash_resolver_rejects_function_without_path_command(native_bash: str) -> None:
+    bash = native_bash
     script = (
         "set -euo pipefail\n"
         f"{_bash_resolver_source()}\n"
         "copilot_only_function() { :; }\n"
         "if resolve_executable_command_path copilot_only_function; then exit 9; fi\n"
     )
-    result = subprocess.run(
+    result = run_headless(
         [bash, "-c", script],
         capture_output=True,
         text=True,
@@ -120,20 +84,13 @@ def shlex_quote(value: str) -> str:
     return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
-def _powershell() -> str | None:
-    return (
-        (shutil.which("powershell.exe") if os.name == "nt" else None)
-        or shutil.which("pwsh")
-        or shutil.which("powershell")
-    )
-
-
-@pytest.mark.skipif(_powershell() is None, reason="PowerShell is unavailable")
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
 def test_powershell_resolver_handles_command_types_and_rejects_function(
-    tmp_path: Path,
+    tmp_path: Path, native_powershell: str,
 ) -> None:
-    powershell = _powershell()
-    assert powershell is not None
+    powershell = native_powershell
     application = tmp_path / "copilot.exe"
     batch = tmp_path / "copilot.cmd"
     external_script = tmp_path / "copilot.ps1"
@@ -261,7 +218,7 @@ try {
     FunctionError = $functionError
 } | ConvertTo-Json -Depth 8 -Compress
 """
-    result = subprocess.run(
+    result = run_headless(
         [powershell, "-NoProfile", "-Command", script],
         capture_output=True,
         text=True,
@@ -290,7 +247,7 @@ try {
     ]
 
     forwarded = ["plugin", "install", "example@marketplace"]
-    external_result = subprocess.run(
+    external_result = run_headless(
         [*commands["external"], *forwarded],
         capture_output=True,
         text=True,
@@ -301,7 +258,7 @@ try {
     assert json.loads(external_result.stdout) == forwarded
 
     if os.name == "nt":
-        batch_result = subprocess.run(
+        batch_result = run_headless(
             [*commands["batch"], *forwarded],
             capture_output=True,
             text=True,

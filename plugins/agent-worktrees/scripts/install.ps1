@@ -689,8 +689,11 @@ function Invoke-VersionedActivateInner {
        so the caller can abort. No-op ($true) in legacy mode. #>
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    if (-not (Test-Path $py)) { return $true }
+    $py = if (Test-Path -LiteralPath $VenvPython -PathType Leaf) { $VenvPython } else { $LinkPython }
+    if (-not (Test-Path -LiteralPath $py -PathType Leaf)) {
+        Write-ServiceErr "Runtime interpreter missing for versions/$SrcVersion -- refusing activation"
+        return $false
+    }
     # A bare `import agent_worktrees` is NOT a sufficient health check: the
     # `agent_worktrees` directory merely EXISTING makes it importable as a
     # PEP 420 namespace package even when it holds zero `.py` files (e.g. an
@@ -774,7 +777,7 @@ function Invoke-VersionedActivateInner {
     } finally {
         $env:AGENT_RT_ROOT = $savedRtRoot
     }
-    Invoke-VersionedMarkComplete
+    if (-not (Invoke-VersionedMarkComplete)) { return $false }
     # Touch the just-superseded slot's mtime IMMEDIATELY after resolving it,
     # BEFORE activate() runs (see #4451): installs run
     # concurrently by design, so a delay here (activate + status-monitor-
@@ -1561,14 +1564,29 @@ function Invoke-VersionedMarkComplete {
        so "marker present" == "healthy, complete build". A crashed / watchdog-
        killed install never reaches here, leaving its slot markerless and thus
        tossable + retryable (#935). No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return }
+    if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) { return }
+    if (-not $py -or -not (Test-Path -LiteralPath $py -PathType Leaf)) {
+        Write-ServiceErr "Completion publication requires bootstrap Python -- refusing activation"
+        return $false
+    }
     $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
     $ph = Get-PayloadHash
-    if ($ph) { $mcArgs += @('--payload-hash', $ph) }
-    & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
+    if (-not $ph) {
+        Write-ServiceErr "Runtime input fingerprint unavailable -- refusing completion publication"
+        return $false
+    }
+    $mcArgs += @('--payload-hash', $ph)
+    $result = Invoke-NativeCapture { & $py @mcArgs }
+    if ($result.Output) {
+        ($result.Output -split '\r?\n') | ForEach-Object { Write-Host "  ...    $_" }
+    }
+    if ($result.ExitCode -ne 0) {
+        Write-ServiceErr "Completion publication failed for versions/$SrcVersion -- refusing activation"
+        return $false
+    }
+    return $true
 }
 
 function Test-SlotAlreadyComplete {
@@ -2164,6 +2182,23 @@ function Deploy-Package {
         $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-machine-transport' -PkgDir $machineTransportDir
         if ($libRes.ExitCode -ne 0) {
             Write-ServiceErr "machine-transport library install failed (exit $($libRes.ExitCode))"
+            if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
+            $ErrorActionPreference = $prevEAP
+            return $false
+        }
+    }
+
+    # Vendored update-telemetry lib (agent-update-telemetry / module
+    # update_telemetry). Same dev/release-layout fallback as machine-transport
+    # above; stdlib-only, so it has no ordering constraint of its own.
+    $updateTelemetryDir = Join-Path $PluginDir 'libs\update-telemetry'
+    if (-not (Test-Path (Join-Path $updateTelemetryDir 'pyproject.toml'))) {
+        $updateTelemetryDir = Join-Path $PluginDir '..\..\libs\update-telemetry'
+    }
+    if (Test-Path (Join-Path $updateTelemetryDir 'pyproject.toml')) {
+        $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-update-telemetry' -PkgDir $updateTelemetryDir
+        if ($libRes.ExitCode -ne 0) {
+            Write-ServiceErr "update-telemetry library install failed (exit $($libRes.ExitCode))"
             if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
             $ErrorActionPreference = $prevEAP
             return $false

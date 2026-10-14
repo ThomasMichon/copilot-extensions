@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from agent_bridge import agent_registry_namespace as namespace
+from agent_bridge.reader_command import OwnedReaderCommand
 from agent_bridge.agent_registry_namespace import (
     CliNamespaceResolver, NamespaceAgentInfo, NamespaceListIncomplete, NamespaceResolver,
 )
@@ -56,7 +57,7 @@ async def test_native_timeout_suppression_and_successful_recovery(
         fallback.list = AsyncMock(return_value=[])
     provider = CliNamespaceResolver("test", "provider", fallback)
     run = Mock(side_effect=subprocess.TimeoutExpired(["provider"], 3))
-    monkeypatch.setattr(namespace.subprocess, "run", run)
+    monkeypatch.setattr(OwnedReaderCommand, "run", run)
 
     async def request() -> None:
         if fallback_enabled:
@@ -98,7 +99,7 @@ async def test_failed_probe_fallback_does_not_close_or_skip_cooldown(
     fallback.list = AsyncMock(return_value=[])
     provider = CliNamespaceResolver("test", "provider", fallback)
     run = Mock(side_effect=subprocess.TimeoutExpired(["provider"], 3))
-    monkeypatch.setattr(namespace.subprocess, "run", run)
+    monkeypatch.setattr(OwnedReaderCommand, "run", run)
     await provider.list(timeout=3)
     await provider.list(timeout=3)
     now[0] = 60
@@ -164,7 +165,7 @@ async def test_native_failure_and_success_reset_provider_streak(
         timeout,
         timeout,
     ])
-    monkeypatch.setattr(namespace.subprocess, "run", run)
+    monkeypatch.setattr(OwnedReaderCommand, "run", run)
     for _ in range(3):
         with pytest.raises(NamespaceListIncomplete):
             await provider.list(timeout=3)
@@ -189,7 +190,7 @@ async def test_missing_provider_preserves_legitimate_absence_during_cooldown(
     monkeypatch.setattr(namespace, "time", SimpleNamespace(monotonic=lambda: 10.0))
     monkeypatch.setattr(namespace.shutil, "which", lambda name: None)
     run = Mock()
-    monkeypatch.setattr(namespace.subprocess, "run", run)
+    monkeypatch.setattr(OwnedReaderCommand, "run", run)
     provider = CliNamespaceResolver(
         "test", "missing-provider",
         command=["missing-executable", "--provider"] if explicit_command else None,

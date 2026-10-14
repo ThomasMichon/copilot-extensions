@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Iterator
 
 import yaml
 
-from .caller_session import gate_caller_session_id
+from .client_session_start import SessionStartClientMixin
 from .client_cli_mode import CliModeClientMixin
 from .client_session_stop import SessionStopClientMixin
 from .client_worktree_restart import WorktreeRestartMixin
@@ -145,7 +145,7 @@ class SseStream(Iterator[dict[str, Any]]):
             response.close()
 
 
-class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMixin):
+class BridgeClient(SessionStartClientMixin, CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMixin):
     """Sync HTTP client for the agent-bridge REST API."""
 
     def __init__(
@@ -732,25 +732,6 @@ class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMi
             {"summary": summary, "phase": phase, "blocker": blocker, "pr": pr},
         ) or {}
 
-    def resolve_live_session(self, handle: str) -> dict[str, Any]:
-        """GET /api/v1/live-sessions/resolve?handle=...; {} if unresolvable.
-
-        Resolves a handle (an exact ``session_id`` OR a **worktree handle**) to
-        its current live session -- the D3 addressing primitive that lets a peer
-        address an agent by worktree and reach whichever session is live now, so
-        ``reply-to`` survives a handoff. Used by ``send`` to detect a live target
-        (worktree handle or session id) before falling back to an ACP agent.
-        """
-        try:
-            return self._request(
-                "GET", "/api/v1/live-sessions/resolve",
-                params={"handle": handle},
-            ) or {}
-        except BridgeClientError as exc:
-            if exc.status == 404:
-                return {}
-            raise
-
     def resolve_live_result_target(self, handle: str) -> dict[str, Any]:
         """Resolve a represented live or wedged target for result inspection."""
         self._require_represented_result_snapshots()
@@ -985,100 +966,6 @@ class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMi
             },
         ) or {}
 
-    def start_session(
-        self,
-        *,
-        agent: str | None = None,
-        charter: str | None = None,
-        target_dir: str | None = None,
-        caller_id: str | None = None,
-        caller_session_id: str | None = None,
-        sender_repo: str | None = None,
-        caller_owner_ref: str | None = None,
-        force_new: bool = False,
-        parity_fault: str | None = None,
-        worktree_id: str | None = None,
-        env: dict[str, str] | None = None,
-        model: str | None = None,
-        effort: str | None = None,
-        preference_source: str | None = None,
-        context: str | None = None,
-        copilot_args: list[str] | None = None,
-        request_timeout: float | None = None,
-    ) -> dict[str, Any]:
-        """POST /api/v1/sessions
-
-        ``worktree_id`` targets an *existing* worktree (a session roll). When
-        set, the server enforces the session-lifecycle head guard: a create
-        into a worktree whose ground-layer head is active or whose numbered
-        handoff is pending is refused (409 ``worktree_head_active`` /
-        ``worktree_head_pending``) with no break-glass of its own (Phase 3)
-        -- ``resume_worktree(reclaim=True)`` resumes-or-creates it instead.
-
-        ``charter`` binds a ``.github/agents/<charter>.agent.md`` overlay via
-        ``copilot_args`` (``--agent <charter>``). ``env`` adds per-session env
-        overrides for the spawned Copilot CLI (e.g. BYOK provider selection).
-        ``caller_session_id`` is sent only to a daemon that records it.
-        """
-        body: dict[str, Any] = {}
-        from .protocol import TARGET_PREFERENCES_PROTOCOL_VERSION
-        from .session_preferences import SOURCE_ENV, CONTEXT_ENV, SOURCES
-
-        selected_source = preference_source if preference_source is not None else (env or {}).get(SOURCE_ENV)
-        if selected_source is not None and selected_source not in SOURCES:
-            raise ValueError("unsupported preference_source")
-        if selected_source is not None or context is not None or (env or {}).get(CONTEXT_ENV):
-            if not self.daemon_supports(TARGET_PREFERENCES_PROTOCOL_VERSION):
-                raise BridgeClientError(426, "The daemon does not support execution preference policy")
-        if preference_source is not None:
-            body["preference_source"] = preference_source
-        if context is not None:
-            body["context"] = context
-        if agent:
-            body["agent"] = agent
-        if args := (["--agent", charter, *(copilot_args or [])] if charter else copilot_args):
-            body["copilot_args"] = args
-        for key, value in (
-            ("target_dir", target_dir), ("caller_id", caller_id), ("sender_repo", sender_repo),
-            ("caller_session_id", gate_caller_session_id(self, caller_session_id)),
-            ("caller_owner_ref", caller_owner_ref),
-        ):
-            if value:
-                body[key] = value
-        if force_new:
-            body["force_new"] = True
-        if parity_fault:
-            from .protocol import FAILED_ACP_HANDSHAKE_PROTOCOL_VERSION
-
-            if not self.daemon_supports(
-                FAILED_ACP_HANDSHAKE_PROTOCOL_VERSION
-            ):
-                raise BridgeClientError(
-                    426,
-                    "The active agent-bridge daemon does not support failed "
-                    "ACP handshake parity injection. Update the agent-bridge "
-                    "runtime before running this fault scenario.",
-                )
-            body["parity_fault"] = parity_fault
-        if worktree_id:
-            body["worktree_id"] = worktree_id
-        if env:
-            body["env"] = env
-        if model:
-            body["model"] = model
-        if effort:
-            body["effort"] = effort
-        # Always declare this client's HTTP contract version so a (cross-host)
-        # receiver can gate capability across version skew (dotfiles #632).
-        from .protocol import HTTP_PROTOCOL_VERSION
-
-        body["protocol_version"] = HTTP_PROTOCOL_VERSION
-        return self._request(
-            "POST",
-            "/api/v1/sessions",
-            body,
-            request_timeout=request_timeout,
-        ) or {}
 
     def submit_prompt(
         self,
@@ -1499,20 +1386,6 @@ class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMi
             params={"caller_id": caller_id},
         ) or {}
 
-    def resolve_remote_live_session(
-        self, host: str, target: str
-    ) -> dict[str, Any]:
-        """Resolve an exact session or worktree handle on a hosting Bridge."""
-        self._require_remote_operations()
-        return self._request(
-            "GET",
-            self._remote_path(
-                host,
-                "/live-sessions/"
-                + urllib.parse.quote(target, safe=""),
-            ),
-        ) or {}
-
     def create_remote_session(
         self,
         host: str,
@@ -1602,9 +1475,19 @@ class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMi
         expected_session_id: str | None = None,
         idempotency_key: str | None = None,
         timeout: float = 20.0,
+        reply_to: str | None = None,
+        wait: bool = False,
+        wait_timeout: float = 120.0,
+        qualified_peer: bool = False,
     ) -> dict[str, Any]:
         """Deliver to a represented remote session through the carrier."""
         self._require_remote_commands()
+        from .live_peer_address import peer_operation_timeout
+        from .protocol import QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
+        timeout = peer_operation_timeout(timeout, wait=wait, wait_timeout=wait_timeout)
+        if (qualified_peer or reply_to is not None or wait):
+            if not self.daemon_supports(QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
+                raise BridgeClientError(426, f"remote peer replies require HTTP protocol {QUALIFIED_LIVE_PEER_PROTOCOL_VERSION}")
         return self._request(
             "POST",
             self._remote_path(
@@ -1621,6 +1504,10 @@ class BridgeClient(CliModeClientMixin, SessionStopClientMixin, WorktreeRestartMi
                 "expected_session_id": expected_session_id,
                 "idempotency_key": idempotency_key,
                 "timeout": timeout,
+                "reply_to": reply_to,
+                "wait": wait,
+                "wait_timeout": wait_timeout if wait else 120.0,
+                **({"qualified_peer": True} if qualified_peer else {}),
             },
             request_timeout=timeout + 15.0,
         ) or {}

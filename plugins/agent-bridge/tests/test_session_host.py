@@ -2765,12 +2765,46 @@ async def test_local_spawner_secures_with_nonce(tmp_path):
                 _os.kill(spawned.child_pid, signal.SIGKILL)
 
 
+async def _ready_host_state(state_file):
+    import json
+    last_error = None
+    for _ in range(200):
+        try:
+            data = json.loads(state_file.read_text())
+        except (FileNotFoundError, PermissionError, json.JSONDecodeError) as exc:
+            last_error = exc
+        else:
+            if data.get("port") and data.get("child_pid"):
+                return data
+        await asyncio.sleep(0.05)
+    pytest.fail(f"host never became ready: {last_error!r}")
+
+
+@pytest.mark.asyncio
+async def test_startup_poll_observes_readable_state_not_only_existence(monkeypatch):
+    import json
+    outcomes = iter([PermissionError("writer still owns the file"), FileNotFoundError(),
+                     json.JSONDecodeError("partial", "", 0), '{"port":123,"child_pid":456}'])
+
+    class State:
+        def read_text(self):
+            value = next(outcomes)
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+    async def yield_once(_delay):
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", yield_once)
+    assert await _ready_host_state(State()) == {"port": 123, "child_pid": 456}
+
+
 @pytest.mark.asyncio
 async def test_far_side_runner_resolves_and_hosts(tmp_path, monkeypatch):
     """The far-side runner resolves an agent locally, hosts it in a Session Host,
     and secures the endpoint with the nonce -- the program every boundary Spawner
     launches (elevation / ssh / CodeSpace), validated in-process."""
-    import json
     import os
     import signal
     import sys
@@ -2802,15 +2836,8 @@ async def test_far_side_runner_resolves_and_hosts(tmp_path, monkeypatch):
     ))
     child_pid = None
     try:
-        port = None
-        for _ in range(200):
-            if state_file.exists():
-                data = json.loads(state_file.read_text() or "{}")
-                if data.get("port") and data.get("child_pid"):
-                    port, child_pid = data["port"], data["child_pid"]
-                    break
-            await asyncio.sleep(0.05)
-        assert port and child_pid, "far-side host never became ready"
+        data = await _ready_host_state(state_file)
+        port, child_pid = data["port"], data["child_pid"]
 
         # Wrong nonce refused.
         bad = await SessionHostClient.connect(port=port)
@@ -2843,7 +2870,6 @@ async def test_session_host_bundle_runs_and_secures(tmp_path):
     """The content-hashed zipapp bundle builds with a stable hash, runs as a host
     owning a child, and is nonce-gated -- the version-alignment mechanism for the
     CodeSpace/mesh far side (it runs the host's exact bytes)."""
-    import json
     import os
     import signal
     import subprocess
@@ -2866,15 +2892,8 @@ async def test_session_host_bundle_runs_and_secures(tmp_path):
          "--", sys.executable, "-c", _STREAMER], env=env)
     child_pid = None
     try:
-        port = None
-        for _ in range(200):
-            if sf.exists():
-                d = json.loads(sf.read_text() or "{}")
-                if d.get("port") and d.get("child_pid"):
-                    port, child_pid = d["port"], d["child_pid"]
-                    break
-            await asyncio.sleep(0.05)
-        assert port and child_pid, "bundle host never became ready"
+        data = await _ready_host_state(sf)
+        port, child_pid = data["port"], data["child_pid"]
 
         bad = await SessionHostClient.connect(port=port)
         with pytest.raises(ConnectionError):

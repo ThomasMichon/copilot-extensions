@@ -3,9 +3,9 @@
 **Serves:** *Vision installer* §Behaviors/`out-of-plugin-delivery`; the
 `agent-dispatch-standalone-container` and `agent-index-standalone-service`
 efforts' own convention surveys.
-**Exemplars:** `agent-dispatch-service/`, `agent-index-service/`,
-`worktree-manager/`, `fleet-manager/` (pre-existing, grandfathered — see
-Status below).
+**Exemplars:** `services/dispatch/` (formerly `agent-dispatch-service/`),
+`services/index/` (formerly `agent-index-service/`), `worktree-manager/`,
+`fleet-manager/` (pre-existing, grandfathered — see Status below).
 
 ## Problem
 
@@ -14,7 +14,7 @@ payload rather than through the Copilot plugin pipe — see
 [`out-of-plugin-delivery`](../../visions/installer/README.md#out-of-plugin-delivery))
 needs a top-level repo directory distinct from `plugins/<name>/`. The
 convention that emerged organically (`agent-dispatch-service/`,
-`agent-index-service/`) stutters: `agent-<topic>` is already the plugin's own
+`agent-index-service/`, now migrated — see Status) stutters: `agent-<topic>` is already the plugin's own
 name (`plugins/agent-<topic>/`), so prefixing the standalone twin with the
 same `agent-` and suffixing `-service` produces a name that differs from its
 plugin sibling only by an easily-missed suffix, while adding no information a
@@ -24,7 +24,7 @@ A second, related problem: the **public, durable install entry point** for a
 standalone service (the one-line `curl … | bash` / `iex …` a user runs, or
 any URL a plugin's own installer hardcodes to fetch it, as
 `plugins/agent-dispatch/scripts/install.{ps1,sh}`'s first-use provisioning
-now does for `agent-dispatch-service/bootstrap.{ps1,sh}`) is easy to
+does for `services/dispatch/bootstrap.{ps1,sh}`) is easy to
 couple directly to the package's current repo path. Once published, that URL
 is a compatibility surface future reorganizations must not silently break.
 
@@ -73,19 +73,30 @@ keep stable.**
 
 ## Status
 
-This is a **convention for new standalone service packages going forward**,
-not a mandate to move anything that already exists. `agent-dispatch-service/`,
-`agent-index-service/`, `worktree-manager/`, and `fleet-manager/` are
-grandfathered under their current top-level names. Migrating
-`agent-dispatch-service/` and `agent-index-service/` to `services/dispatch/`
-and `services/index/` respectively — including picking and implementing one
-of the two indirection mechanisms above so the move doesn't break the
-bootstrap URL `plugins/agent-dispatch/scripts/install.{ps1,sh}` already
-hardcodes — is tracked as a separate, explicit follow-up:
-[#6419](https://github.com/ThomasMichon/copilot-extensions/issues/6419).
-`worktree-manager/` and `fleet-manager/` predate even the
-`agent-*-service` convention this pattern retires and are a distinct,
-unscoped case; this pattern does not decide whether they move.
+**Migrated (2026-10-12).** `agent-dispatch-service/` and `agent-index-service/`
+now live at `services/dispatch/` and `services/index/` respectively --
+distribution names, console-script entry points, and Python package/module
+names are unchanged (only the top-level directory moved); every path
+reference across CI workflows, `tools/standalone_consumers.py`,
+Dockerfiles, docs, and the hardcoded upstream-installer URL
+`plugins/agent-dispatch/scripts/install.{ps1,sh}` added was updated in the
+same change. `worktree-manager/` and `fleet-manager/` predate even the
+`agent-*-service` convention this pattern retires and remain a distinct,
+unscoped case this pattern does not decide.
+
+**Public-install-surface indirection implemented (2026-10-13).** Picked the
+dedicated top-level `install/` proxy directory over a unified
+`copilot-extensions install <name>` dispatcher, since it needs no other app
+installed first. `install/dispatch/bootstrap.{ps1,sh}` is now the one
+durable public URL (`.../main/install/dispatch/bootstrap.{ps1,sh}`);
+it does nothing but resolve and exec whatever `services/dispatch/bootstrap.{ps1,sh}`
+currently is (local sibling copy when run from a checkout, else fetched over
+the network), so only that one proxy file's hardcoded real-path needs
+updating on a future move -- no external caller's URL changes.
+`plugins/agent-dispatch/scripts/install.{ps1,sh}`'s self-provisioning
+binstub was repointed at the new proxy URL accordingly. A future standalone
+service gets the same pattern: `install/<topic>/bootstrap.{ps1,sh}` proxying
+to `services/<topic>/bootstrap.{ps1,sh}`.
 
 ## Rationale
 

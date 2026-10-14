@@ -461,6 +461,36 @@ def _warm_list_cache_for_active_project(*, interval: float = 15) -> int:
 
 def cmd_list(args: argparse.Namespace) -> int:
     """List worktrees from tracking records."""
+    _lc_key = None
+    _project = None
+    if (
+        args.json
+        and not getattr(args, "cache_only", False)
+        and not getattr(args, "stream", False)
+        and not getattr(args, "glance", False)
+        and not getattr(args, "worktree_id", None)
+        and not getattr(args, "codename", None)
+        and not getattr(args, "refresh", False)
+    ):
+        _project = cfg.project_name()
+        _lc_key = list_cache.cache_key(
+            args,
+            project=_project,
+            tracking_status=getattr(args, "tracking_status", "all"),
+        )
+        list_cache.note_demand(
+            _lc_key,
+            args,
+            project=_project,
+            tracking_status=getattr(args, "tracking_status", "all"),
+        )
+        if not getattr(args, "fresh", False):
+            cached = list_cache.read_fresh(_lc_key)
+            if cached is not None:
+                output._json_output(cached)
+                return 0
+        if _status_monitor_enabled():
+            _ensure_status_monitor()
     records = _core_helper("_list_records_for_args", _list_records_for_args)(args)
     worktree_id = getattr(args, "worktree_id", None)
     codename_arg = getattr(args, "codename", None)
@@ -528,33 +558,6 @@ def cmd_list(args: argparse.Namespace) -> int:
             delegate_cli.annotate_delegate_graph(worktrees)
             output._json_output({"worktrees": worktrees})
             return 0
-        _lc_key = None
-        _project = None
-        if not worktree_id:
-            try:
-                _project = cfg.project_name()
-                _lc_key = list_cache.cache_key(
-                    args,
-                    project=_project,
-                    tracking_status=getattr(args, "tracking_status", "all"),
-                )
-            except Exception:
-                _lc_key = None
-                _project = None
-        if _lc_key and _project:
-            list_cache.note_demand(
-                _lc_key,
-                args,
-                project=_project,
-                tracking_status=getattr(args, "tracking_status", "all"),
-            )
-            if _status_monitor_enabled():
-                _ensure_status_monitor()
-        if _lc_key and not getattr(args, "fresh", False):
-            _cached = list_cache.read_fresh(_lc_key)
-            if isinstance(_cached, dict) and "worktrees" in _cached:
-                output._json_output(_cached)
-                return 0
         profile_assignment.maintain()
         with cfg.cached_load_config_scope():
             _payload = _core_helper("_build_list_json_payload", _build_list_json_payload)(

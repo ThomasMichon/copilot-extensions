@@ -5,6 +5,8 @@ import json
 import os
 import subprocess
 import sys
+import sysconfig
+import venv
 from pathlib import Path
 
 import pytest
@@ -59,34 +61,233 @@ def test_prepare_composes_local_core_and_declared_service_extras(tmp_path, monke
     python = tmp_path / ".test-venvs" / "service" / "bin" / "python"
     python.parent.parent.mkdir(parents=True)
 
-    runner.prepare("agent-index-service", python, smoke=smoke)
+    runner.prepare("services/index", python, smoke=smoke)
 
     assert calls[0] == ["uv", "venv", "--allow-existing", str(python.parent.parent)]
     assert calls[1][:5] == ["uv", "pip", "install", "--python", str(python)]
     core_extra = "" if smoke else "[store,server]"
     service_extra = "[test]" if smoke else "[native,test]"
     assert str(tmp_path / "plugins" / "agent-index") + core_extra in calls[1]
-    assert calls[1][-1] == str(tmp_path / "agent-index-service") + service_extra
+    assert calls[1][-1] == str(tmp_path / "services/index") + service_extra
     assert not Path(calls[1][calls[1].index("--override") + 1]).exists()
 
 
-def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch):
+def test_manager_preparation_retains_source_payload_layout(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    calls = []
+    monkeypatch.setattr(runner.subprocess, "run", lambda argv, **kwargs: calls.append(argv))
+    python = tmp_path / ".test-venvs" / "worktree-manager" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    (python.parent.parent / "pyvenv.cfg").write_text("home = fixture-base\n")
+    python.touch()
+    runner.prepare("worktree-manager", python)
+    assert calls[-1][-2:] == ["--editable", str(tmp_path / "worktree-manager") + "[dev]"]
+
+
+@pytest.mark.parametrize("component", [
+    "services/index", "agent-dispatch-service",
+])
+def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch, component):
     monkeypatch.setattr(runner, "REPO", tmp_path)
     called = []
     monkeypatch.setattr(runner, "acquire", lambda wait, root: called.append(wait))
 
     with pytest.raises(SystemExit) as exc:
         runner.main([
-            "agent-index-service", "--prepare", "--python", str(tmp_path / "host" / "python")
+            component, "--prepare", "--python", str(tmp_path / "host" / "python")
         ])
 
     assert exc.value.code == 2
     assert called == []
 
 
+def test_legacy_dispatch_name_uses_canonical_preparation_lease_and_tests(tmp_path, monkeypatch):
+    legacy, canonical = "agent-dispatch-service", "services/dispatch"
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    root = tmp_path / canonical
+    (root / "tests").mkdir(parents=True)
+    python = runner.default_python(canonical)
+    events = []
+
+    class Lease:
+        def release(self):
+            events.append(("release",))
+
+    def acquire(wait, environment_root):
+        assert environment_root == python.parent.parent.resolve()
+        assert environment_root.is_dir()
+        events.append(("lease", wait))
+        return Lease()
+
+    def prepare(component, selected_python, *, smoke):
+        assert component == canonical
+        assert selected_python == python
+        assert smoke is False
+        events.append(("prepare", smoke))
+        python.parent.mkdir(parents=True, exist_ok=True)
+        python.touch()
+        (python.parent.parent / "pyvenv.cfg").touch()
+
+    def run(command, **kwargs):
+        assert command[:5] == [str(python), "-I", "-m", "pytest", "-q"]
+        assert kwargs["cwd"] == root
+        assert kwargs["env"]["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+        assert all(Path(path).is_relative_to(root / "tests") for path in command[5:-2])
+        assert command[5] == str(root / "tests")
+        events.append(("run",))
+        return 0
+
+    monkeypatch.setattr(runner, "acquire", acquire)
+    monkeypatch.setattr(runner, "prepare", prepare)
+    monkeypatch.setattr(runner, "run_contained", run)
+    args = [legacy, "--prepare", "--admission-wait", "60"]
+    assert runner.main(args) == 0
+    assert events == [("lease", 60.0), ("prepare", False), ("run",), ("release",)]
+    assert not (tmp_path / ".test-venvs" / sys.platform / legacy).exists()
+    assert legacy not in runner.STANDALONE_CONSUMERS
+
+
+def fixture_python(environment):
+    venv.EnvBuilder(with_pip=False).create(environment)
+    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    result = subprocess.run(
+        [str(python), "-I", "-c",
+         "import json, sysconfig; print(json.dumps(sysconfig.get_path('purelib')))"],
+        capture_output=True, text=True, check=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    site = Path(json.loads(result.stdout))
+    assert site.is_absolute()
+    site = site.resolve(strict=True)
+    assert site.is_relative_to(environment.resolve(strict=True)) and site.is_dir()
+    dependency_paths = list(dict.fromkeys([
+        str(Path(pytest.__file__).resolve().parent.parent),
+        sysconfig.get_path("purelib"), sysconfig.get_path("platlib"),
+    ]))
+    (site / "test-harness.pth").write_text(
+        "\n".join(dependency_paths) + "\n", encoding="utf-8",
+    )
+    return python
+
+
+def test_fixture_python_uses_child_install_scheme(tmp_path, monkeypatch):
+    real_get_path = sysconfig.get_path
+
+    def parent_get_path(name, *args, **kwargs):
+        if name == "purelib" and kwargs.get("vars") and not kwargs.get("scheme"):
+            return str(tmp_path / "parent-only-install-scheme")
+        return real_get_path(name, *args, **kwargs)
+
+    monkeypatch.setattr(sysconfig, "get_path", parent_get_path)
+    python = fixture_python(tmp_path / "child")
+    result = subprocess.run(
+        [str(python), "-I", "-c", "import pytest; print(pytest.__file__)"],
+        capture_output=True, text=True, check=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert Path(result.stdout.strip()).resolve() == Path(pytest.__file__).resolve()
+
+
+@pytest.mark.parametrize("escape", ["dotdot", "symlink"])
+def test_fixture_python_rejects_resolved_site_outside_environment(tmp_path, monkeypatch, escape):
+    environment = tmp_path / "child"
+    environment.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    reported = environment / ".." / "outside"
+    if escape == "symlink":
+        reported = environment / "site-link"
+        try:
+            reported.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            pytest.skip("Directory symlink creation is unavailable")
+    real_run = subprocess.run
+
+    def report_site(argv, **kwargs):
+        if "get_path('purelib')" in argv[-1]:
+            return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(str(reported)))
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", report_site)
+    with pytest.raises(AssertionError):
+        fixture_python(environment)
+    assert not (outside / "test-harness.pth").exists()
+
+
+def test_fixture_python_accepts_environment_beneath_symlinked_parent(tmp_path):
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    parent = tmp_path / "parent-link"
+    try:
+        parent.symlink_to(actual, target_is_directory=True)
+    except OSError:
+        pytest.skip("Directory symlink creation is unavailable")
+    environment = parent / "child"
+    python = fixture_python(environment)
+    assert python.exists()
+    assert len(list(actual.rglob("test-harness.pth"))) == 1
+
+
+def exercise_native_legacy_service_cli(tmp_path):
+    pairs = runner.COMPONENT_ALIASES
+    for canonical in pairs.values():
+        root = tmp_path / canonical
+        tests = root / "tests"
+        tests.mkdir(parents=True)
+        environment = tmp_path / ".test-venvs" / sys.platform / canonical
+        fixture_python(environment)
+        (tests / "test_contract.py").write_text(
+            "import os, sys, pytest\nfrom pathlib import Path\n"
+            "def test_contract():\n"
+            f"    assert Path.cwd() == Path({str(root)!r})\n"
+            f"    assert Path(sys.prefix).resolve() == Path({str(environment.resolve())!r})\n"
+            f"    assert Path(pytest.__file__).resolve() == Path({str(Path(pytest.__file__).resolve())!r})\n"
+            "    assert os.environ['COPILOT_EXTENSIONS_TEST_CONTAINED'] == '1'\n"
+            "    Path('executed.txt').write_text('canonical')\n",
+            encoding="utf-8",
+        )
+    script = (
+        "import importlib.util, sys\nfrom pathlib import Path\n"
+        f"sys.path.insert(0, {str(SCRIPT.parent)!r})\n"
+        f"spec = importlib.util.spec_from_file_location('standalone_runner', {str(SCRIPT)!r})\n"
+        "runner = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(runner)\n"
+        f"runner.REPO = Path({str(tmp_path)!r})\n"
+        f"for legacy in {tuple(pairs)!r}:\n"
+        "    assert runner.main([legacy, '--timeout', '10']) == 0\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", script], capture_output=True, text=True, timeout=30,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    for legacy, canonical in pairs.items():
+        assert (tmp_path / canonical / "executed.txt").read_text() == "canonical"
+        assert not (tmp_path / ".test-venvs" / sys.platform / legacy).exists()
+
+
+def test_native_legacy_service_cli_runs_canonical_tests_without_separate_environments(tmp_path):
+    python = fixture_python(tmp_path / "harness")
+    script = (
+        "import importlib.util, sys, sysconfig, pytest\nfrom pathlib import Path\n"
+        f"sys.path.insert(0, {str(SCRIPT.parent)!r})\n"
+        "assert Path(pytest.__file__).resolve().parent.parent != "
+        "Path(sysconfig.get_path('purelib')).resolve()\n"
+        f"spec = importlib.util.spec_from_file_location('fixture_tests', {str(Path(__file__).resolve())!r})\n"
+        "fixture = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(fixture)\n"
+        f"fixture.exercise_native_legacy_service_cli(Path({str(tmp_path)!r}))\n"
+    )
+    result = subprocess.run(
+        [str(python), "-I", "-c", script], capture_output=True, text=True, timeout=30,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_prepare_rejects_managed_launcher_with_host_environment(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
-    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    (tmp_path / "services/index" / "tests").mkdir(parents=True)
     python = tmp_path / ".test-venvs" / "fake" / "bin" / "python"
     python.parent.mkdir(parents=True)
     python.touch()
@@ -99,14 +300,17 @@ def test_prepare_rejects_managed_launcher_with_host_environment(tmp_path, monkey
     monkeypatch.setattr(runner, "acquire", lambda *_: Lease())
     monkeypatch.setattr(runner, "prepare", lambda *_a, **_k: pytest.fail("unexpected preparation"))
     with pytest.raises(SystemExit) as exc:
-        runner.main(["agent-index-service", "--prepare", "--python", str(python)])
+        runner.main(["services/index", "--prepare", "--python", str(python)])
     assert exc.value.code == 2
     assert released == [True]
 
 
 @pytest.mark.parametrize("smoke", [False, True])
-def test_run_is_contained_and_releases_interpreter_environment_lease(tmp_path, monkeypatch, smoke):
-    root = tmp_path / "agent-index-service"
+@pytest.mark.parametrize("component", ["services/index", "agent-index-service"])
+def test_run_is_contained_and_releases_interpreter_environment_lease(
+    tmp_path, monkeypatch, smoke, component,
+):
+    root = tmp_path / "services/index"
     (root / "tests").mkdir(parents=True)
     python = tmp_path / "test-python"
     python.touch()
@@ -150,7 +354,7 @@ def test_run_is_contained_and_releases_interpreter_environment_lease(tmp_path, m
 
     monkeypatch.setattr(runner, "run_contained", run)
     args = [
-        "agent-index-service", "--python", str(python),
+        component, "--python", str(python),
         "--environment-root", str(environment_root),
     ]
     if smoke:
@@ -161,18 +365,73 @@ def test_run_is_contained_and_releases_interpreter_environment_lease(tmp_path, m
     assert acquisitions == [(0.0, environment_root)]
 
 
-def test_smoke_rejects_undefined_component_before_admission(monkeypatch):
+def test_legacy_index_name_prepares_canonical_component(tmp_path, monkeypatch):
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    (tmp_path / "services/index" / "tests").mkdir(parents=True)
+    python = runner.default_python("services/index")
+    python.parent.mkdir(parents=True)
+    (python.parent.parent / "pyvenv.cfg").write_text("home = fixture-base\n")
+    python.touch()
+    prepared = []
+    released = []
+
+    class Lease:
+        def release(self):
+            released.append(True)
+
+    monkeypatch.setattr(runner, "acquire", lambda *_: Lease())
+    monkeypatch.setattr(
+        runner, "prepare",
+        lambda component, interpreter, **kwargs: prepared.append((component, interpreter, kwargs)),
+    )
+    monkeypatch.setattr(runner, "run_contained", lambda *_a, **_k: 0)
+    assert runner.main(["agent-index-service", "--prepare", "--admission-wait", "60"]) == 0
+    assert prepared == [("services/index", python, {"smoke": False})]
+    assert released == [True]
+
+
+def test_unknown_component_is_rejected_before_admission(monkeypatch):
+    monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
+    with pytest.raises(SystemExit) as exc:
+        runner.main(["unknown-service"])
+    assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("component", [
+    "worktree-manager", "services/dispatch", "agent-dispatch-service",
+])
+def test_smoke_rejects_undefined_component_before_admission(monkeypatch, component):
     monkeypatch.setattr(runner, "acquire", lambda wait, root: pytest.fail("unexpected admission"))
     with pytest.raises(SystemExit) as exc:
-        runner.main(["worktree-manager", "--smoke"])
+        runner.main([component, "--smoke"])
     assert exc.value.code == 2
+
+
+def test_venv_interpreter_symlink_is_not_resolved_out_of_its_environment(tmp_path, monkeypatch):
+    root = tmp_path / "worktree-manager"
+    (root / "tests").mkdir(parents=True)
+    base = tmp_path / "base-python"
+    base.touch()
+    python = tmp_path / ".test-venvs" / "worktree-manager" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    (python.parent.parent / "pyvenv.cfg").write_text("home = fixture-base\n")
+    try:
+        python.symlink_to(base)
+    except OSError:
+        pytest.skip("Symlink creation is unavailable")
+    monkeypatch.setattr(runner, "REPO", tmp_path)
+    monkeypatch.setattr(runner, "acquire", lambda wait, root: type("Lease", (), {"release": lambda self: None})())
+    commands = []
+    monkeypatch.setattr(runner, "run_contained", lambda command, **kwargs: commands.append(command) or 0)
+    assert runner.main(["worktree-manager", "--python", str(python)]) == 0
+    assert commands[0][0] == str(python)
 
 
 @pytest.mark.parametrize("timeout", ["nan", "inf", "-inf", "0", "-1"])
 def test_nonfinite_or_nonpositive_timeout_rejected_before_admission(monkeypatch, timeout):
     monkeypatch.setattr(runner, "acquire", lambda wait, root: pytest.fail("unexpected admission"))
     with pytest.raises(SystemExit) as exc:
-        runner.main(["agent-index-service", f"--timeout={timeout}"])
+        runner.main(["services/index", f"--timeout={timeout}"])
     assert exc.value.code == 2
 
 
@@ -181,19 +440,19 @@ def test_invalid_admission_wait_rejected_before_preparation(monkeypatch, wait):
     monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
     monkeypatch.setattr(runner, "prepare", lambda *_a, **_k: pytest.fail("unexpected preparation"))
     with pytest.raises(SystemExit) as exc:
-        runner.main(["agent-index-service", "--prepare", f"--admission-wait={wait}"])
+        runner.main(["services/index", "--prepare", f"--admission-wait={wait}"])
     assert exc.value.code == 2
 
 
 def test_nonstandard_custom_launcher_requires_explicit_root_without_execution(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
-    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    (tmp_path / "services/index" / "tests").mkdir(parents=True)
     python = tmp_path / "invalid-python"
     python.touch()
     monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
 
     monkeypatch.setattr(runner.subprocess, "run", lambda *_a, **_k: pytest.fail("candidate executed"))
-    assert runner.main(["agent-index-service", "--python", str(python)]) == 1
+    assert runner.main(["services/index", "--python", str(python)]) == 1
 
 
 @pytest.mark.parametrize("arguments", [
@@ -203,7 +462,7 @@ def test_nonstandard_custom_launcher_requires_explicit_root_without_execution(tm
 def test_explicit_root_does_not_bypass_preparation_guard(monkeypatch, arguments):
     monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
     with pytest.raises(SystemExit) as exc:
-        runner.main(["agent-index-service", *arguments])
+        runner.main(["services/index", *arguments])
     assert exc.value.code == 2
 
 
@@ -218,14 +477,14 @@ def test_standard_root_discovery_never_executes_candidate(tmp_path, monkeypatch)
 
 def test_explicit_root_cannot_override_discoverable_environment(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
-    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    (tmp_path / "services/index" / "tests").mkdir(parents=True)
     python = tmp_path / "environment" / "bin" / "python"
     python.parent.parent.mkdir()
     (python.parent.parent / "pyvenv.cfg").touch()
     monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
     with pytest.raises(SystemExit) as exc:
         runner.main([
-            "agent-index-service", "--python", str(python),
+            "services/index", "--python", str(python),
             "--environment-root", str(tmp_path / "wrong-environment"),
         ])
     assert exc.value.code == 2
@@ -234,7 +493,7 @@ def test_explicit_root_cannot_override_discoverable_environment(tmp_path, monkey
 @pytest.mark.parametrize("directory", ["bin", "Scripts"])
 def test_opaque_standard_named_launcher_accepts_explicit_environment(tmp_path, monkeypatch, directory):
     monkeypatch.setattr(runner, "REPO", tmp_path)
-    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    (tmp_path / "services/index" / "tests").mkdir(parents=True)
     python = tmp_path / "wrappers" / directory / "python"
     python.parent.mkdir(parents=True)
     python.touch()
@@ -250,22 +509,22 @@ def test_opaque_standard_named_launcher_accepts_explicit_environment(tmp_path, m
     monkeypatch.setattr(runner, "run_contained", lambda *_a, **_k: 0)
     monkeypatch.setattr(runner.subprocess, "run", lambda *_a, **_k: pytest.fail("candidate probed"))
     assert runner.main([
-        "agent-index-service", "--python", str(python), "--environment-root", str(actual),
+        "services/index", "--python", str(python), "--environment-root", str(actual),
     ]) == 0
     assert acquired == [actual]
     acquired.clear()
-    assert runner.main(["agent-index-service", "--python", str(python)]) == 1
+    assert runner.main(["services/index", "--python", str(python)]) == 1
     assert acquired == []
 
 
 def test_custom_absent_root_is_not_created(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "REPO", tmp_path)
-    (tmp_path / "agent-index-service" / "tests").mkdir(parents=True)
+    (tmp_path / "services/index" / "tests").mkdir(parents=True)
     root = tmp_path / "absent-custom-root"
     monkeypatch.setattr(runner, "acquire", lambda *_: pytest.fail("unexpected admission"))
     with pytest.raises(SystemExit) as exc:
         runner.main([
-            "agent-index-service", "--python", str(tmp_path / "launcher"),
+            "services/index", "--python", str(tmp_path / "launcher"),
             "--environment-root", str(root),
         ])
     assert exc.value.code == 2
@@ -299,7 +558,7 @@ def test_posix_owned_child_survives_worker_exit_only_until_outer_cleanup(tmp_pat
 import json,os,sys,subprocess
 from pathlib import Path
 sys.path[:0] = {[
-    str(repo / "agent-index-service" / "tests"),
+    str(repo / "services/index" / "tests"),
     str(repo / "libs" / "agent-procutil" / "src"),
 ]!r}
 from _service_process import owned_python
@@ -335,7 +594,7 @@ def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
         step["run"] for step in ci["checks"]["steps"] if step.get("id") == "version-bump-engine"
     )
     assert r"standalone_consumers\.py" in detector
-    for path in ("agent-index-service/", "plugins/agent-index/", "libs/", "tools/"):
+    for path in ("services/index/", "plugins/agent-index/", "libs/", "tools/"):
         assert path in discovery
     for name in ("agent-index-service-linux", "agent-index-service-windows"):
         assert ci[name]["needs"] == "discover"

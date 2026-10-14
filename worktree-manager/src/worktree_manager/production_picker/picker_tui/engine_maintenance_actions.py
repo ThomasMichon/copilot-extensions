@@ -7,9 +7,8 @@ import threading
 from .engine_dialogs import ScopeDlgScreen
 from .engine_live_screens import ProgressScreen
 
-# Local New prompts use the same staged backend handoff with or without mux.
-# Bare/Anchor have no supported worktree Copilot handoff; remote seed relay
-# remains unsupported by the engine.
+# Local and SSH New prompts share target-owned staging, with or without mux.
+# Bare/Anchor have no supported worktree Copilot prompt handoff.
 _SEED_PROMPT_ENABLED = True
 
 class PickerScreenMaintenanceActionsMixin:
@@ -356,6 +355,16 @@ class PickerScreenMaintenanceActionsMixin:
         if zone == "V":
             self.sel = ("PR", 0) if self._kind() == "profiles" else ("M", 0)
         elif zone == "M":
+            if self._kind() == "config_section":
+                self.sel = ("BTN", 0)
+                return
+            if self._kind() == "registered":
+                rows = self._task_rows()
+                self.sel = ("T", 0) if rows else ("M", 0)
+                return
+            if self._kind() == "profiles":
+                self.sel = self._pr_head()
+                return
             buttons = self.button_set()
             records = self._wt_visible_records()
             if buttons:
@@ -367,7 +376,9 @@ class PickerScreenMaintenanceActionsMixin:
             self.sel = ("BTN", 0)
         elif zone == "BTN":
             btn = self.active_button()
-            if btn == "N":
+            if btn == "ConfigEdit":
+                self._activate_config_section()
+            elif btn == "N":
                 # New worktree… opens the options dialog directly (#1346).
                 self._open_optmenu()
             elif btn == "NC":
@@ -444,14 +455,9 @@ class PickerScreenMaintenanceActionsMixin:
                "verb": "New worktree", "confirm": "Create",
                "prompt": f"Creates on {tm} {te} · options (none required):",
                "opts": opts}
-        # A remote target resolves via `--machine`, which the engine's own
-        # resolve CLI rejects alongside `--seed` -- the prompt field would
-        # be collected for nothing, so it is never even offered there (same
-        # reasoning `_SEED_PROMPT_ENABLED` documents for Anchor/Bare/No Mux,
-        # which ARE offered here since they're live checkboxes in this same
-        # dialog, not known until Confirm is pressed).
-        is_remote = (tm, te) != self.src.LOCAL
-        show_prompt = _SEED_PROMPT_ENABLED and not is_remote
+        # Both local and SSH launches stage confirmed text on the target.
+        # Anchor/Bare remain unsupported prompt modes, checked on confirmation.
+        show_prompt = _SEED_PROMPT_ENABLED
         scr = ScopeDlgScreen(dlg, show_prompt=show_prompt)
 
         def _after(confirmed):

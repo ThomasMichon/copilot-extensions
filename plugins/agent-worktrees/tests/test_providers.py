@@ -2238,7 +2238,8 @@ class TestGitHubProvider:
 
         def checks(status_state, runs):
             return self._snapshot_dispatch(
-                pr={}, status={"state": status_state, "statuses": [{"id": 1}]},
+                pr={}, status={"state": status_state,
+                               "statuses": [{"id": 1, "state": status_state}]},
                 check_runs={"check_runs": runs})
 
         # a passing legacy status but a failing check-run -> failure

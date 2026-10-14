@@ -73,7 +73,7 @@ env:
 jobs:
   main-gate:
     name: main source gate
-    # The gate for any PR targeting `main`. Exactly five shapes are legitimate:
+    # The gate for any PR targeting `main`. Exactly four shapes are legitimate:
     # (1) the promotion pipeline's own PR (a release/promote-<run id> branch,
     #     opened via the APERTURE_RELEASE_TOKEN PAT -- a personal fine-grained
     #     token minted under the maintainer's own account, this repo having no
@@ -85,12 +85,7 @@ jobs:
     #     a fix to those files must occasionally land on main directly, ahead
     #     of the next real promotion -- the pipeline can't fix itself via its
     #     own not-yet-working promotion path otherwise; or
-    # (3) module-size-baseline-widen.yml's own automated PR (fixed branch
-    #     name `automation/module-size-baseline-widen`, also opened via the
-    #     APERTURE_RELEASE_TOKEN PAT so it's PR_AUTHOR == the repo owner too,
-    #     and whose diff is never anything but the one generated baseline
-    #     JSON file); or
-    # (4) tools/rollback_release.py's own pause/resume state-commit PR
+    # (3) tools/rollback_release.py's own pause/resume state-commit PR
     #     (branch name `release-pipeline/state-<epoch ms>`, same PAT, whose
     #     diff is never anything but the one pipeline-state JSON file). This
     #     shape was added after a real gap found during the 2026-10-04
@@ -100,20 +95,20 @@ jobs:
     #     bypass every single time `pause`/`resume --push` ran -- see
     #     `tools/rollback_release.py`'s own module docstring and
     #     `docs/pipelines.md`'s pause/resume section for the full story; or
-    # (5) tools/rollback_release.py's own `revert` rollback PR (branch name
+    # (4) tools/rollback_release.py's own `revert` rollback PR (branch name
     #     `release-pipeline/rollback-<epoch ms>`, same PAT) -- a wholesale
     #     revert of main's tree to its pre-promotion state, generated as a
     #     single `commit-tree` call (`_write_state_commit`/`revert`'s own
     #     "never a force-push/history-rewrite" commit message), so unlike
-    #     shape (4) its diff is NOT single-file by nature; recognized
+    #     shape (3) its diff is NOT single-file by nature; recognized
     #     instead by branch-name pattern plus the PR carrying exactly ONE
     #     commit (`github.event.pull_request.commits == 1`) -- a real,
     #     hand-assembled multi-commit PR can never match a mechanically
-    #     generated single `commit-tree` push. Added alongside shape (4)
+    #     generated single `commit-tree` push. Added alongside shape (3)
     #     after the same main-history-rewrite effort found `revert --push`
     #     hits the identical gap.
     #
-    # Shapes (2), (3), (4), and (5) are enforced by DIFF CONTENT or commit-shape here,
+    # Shapes (2), (3), and (4) are enforced by DIFF CONTENT or commit-shape here,
     # not by admin/human bypass --
     # this is deliberate, prompted by a real incident (an unrelated
     # vision-doc PR landed directly on `main` via `gh pr merge --admin`,
@@ -155,7 +150,7 @@ jobs:
           REPO_OWNER: ${{ github.repository_owner }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          # Used only by shape (5) below -- the PR's own total commit count,
+          # Used only by shape (4) below -- the PR's own total commit count,
           # straight from the webhook payload (no extra API call needed).
           PR_COMMITS: ${{ github.event.pull_request.commits }}
         run: |
@@ -164,7 +159,7 @@ jobs:
             exit 0
           fi
           if [ "$PR_AUTHOR" != "$REPO_OWNER" ]; then
-            echo "::error::This PR targets 'main' and is not the promotion pipeline's own PR. main only ever moves via a release/promote-* PR, a workflow-file-only bootstrap PR, module-size-baseline-widen.yml's own automated PR, or rollback_release.py's own state-commit/revert PR (all by the repo owner). Please retarget this PR's base branch to 'dev' -- see docs/pipelines.md > Release & Versioning."
+            echo "::error::This PR targets 'main' and is not the promotion pipeline's own PR. main only ever moves via a release/promote-* PR, a workflow-file-only bootstrap PR, or rollback_release.py's own state-commit/revert PR (all by the repo owner). Please retarget this PR's base branch to 'dev' -- see docs/pipelines.md > Release & Versioning."
             exit 1
           fi
           # Merge-base-relative (three-dot semantics), not a literal
@@ -183,23 +178,7 @@ jobs:
             echo "::error::No changed files detected between base and head -- refusing to land on main."
             exit 1
           fi
-          # Third legitimate shape: module-size-baseline-widen.yml's own
-          # automated, purely-mechanical PR (see that workflow) -- it opens
-          # from a fixed branch name, authored under this same PAT (hence
-          # PR_AUTHOR == REPO_OWNER, checked above; the PAT's owning account
-          # MUST equal this repo's owner or this gate rejects the PR), and
-          # its diff is never anything but the one generated baseline file.
-          # Checked by exact branch name AND single-file diff content
-          # together (not one alone) so this narrow exception can't be
-          # widened by pushing unrelated content onto that branch name, or
-          # by a real PR simply touching that one file.
-          if [[ "$HEAD_REF" == "automation/module-size-baseline-widen" \
-                && "$changed" == "tools/module-size-baseline.json" ]]; then
-            echo "Automated module-size-baseline-widen PR -- OK. Files:"
-            echo "$changed"
-            exit 0
-          fi
-          # Fourth legitimate shape: tools/rollback_release.py's own
+          # Third legitimate shape: tools/rollback_release.py's own
           # pause/resume state-commit PR (see that tool's `_write_state_commit`
           # / `_land_via_pr`) -- branch name is always `release-pipeline/
           # state-<epoch ms>` (never reused, never hand-typed), and its diff
@@ -207,21 +186,19 @@ jobs:
           # (`.github/release-pipeline-state.json`, `PIPELINE_STATE_PATH` in
           # that tool). Checked by branch-name PATTERN (not exact match --
           # the timestamp varies every run) AND single-file diff content
-          # together, same shape as the module-size-baseline-widen check
-          # above, for the same reason: neither alone should be enough to
-          # widen this narrow exception.
+          # together: neither alone should be enough to widen this narrow exception.
           if [[ "$HEAD_REF" == release-pipeline/state-* \
                 && "$changed" == ".github/release-pipeline-state.json" ]]; then
             echo "Automated rollback_release.py state-commit PR -- OK. Files:"
             echo "$changed"
             exit 0
           fi
-          # Fifth legitimate shape: tools/rollback_release.py's own
+          # Fourth legitimate shape: tools/rollback_release.py's own
           # `revert` rollback PR (see that tool's `revert`/`_land_via_pr`)
           # -- branch name is always `release-pipeline/rollback-<epoch ms>`
           # (never reused, never hand-typed), generated as a SINGLE
           # mechanical `commit-tree` call that wholesale-restores main's
-          # pre-promotion tree. Unlike shape (4), this diff is deliberately
+          # pre-promotion tree. Unlike shape (3), this diff is deliberately
           # NOT single-file (a real tree-wide revert can touch many files),
           # so it cannot be checked by diff content the same way. Branch
           # name and commit count alone are NOT enough here, though -- any
@@ -275,7 +252,7 @@ jobs:
           if [ -n "$non_workflow" ]; then
             echo "::error::This PR touches file(s) outside .github/workflows/, so it cannot use the workflow-only bootstrap exception:"
             echo "::error::$non_workflow"
-            echo "::error::main only ever moves via a release/promote-* PR, a workflow-file-ONLY bootstrap PR, module-size-baseline-widen.yml's own automated PR, or rollback_release.py's own state-commit/revert PR. Please retarget this PR's base branch to 'dev' -- see docs/pipelines.md > Release & Versioning."
+            echo "::error::main only ever moves via a release/promote-* PR, a workflow-file-ONLY bootstrap PR, or rollback_release.py's own state-commit/revert PR. Baseline updates target dev. Please retarget this PR's base branch to 'dev' -- see docs/pipelines.md > Release & Versioning."
             exit 1
           fi
           echo "Workflow-file-only bootstrap PR by the repo owner -- OK. Files:"
@@ -296,6 +273,11 @@ jobs:
         run: python -m pip install --upgrade pip pytest pyyaml ruff
       - name: Version consistency
         run: python tools/check-version-consistency.py
+      - name: Required source metadata contract tests
+        run: |
+          npm ci --prefix .github/actions --ignore-scripts --no-audit --no-fund
+          node --test .github/actions/required-pr-attribution.test.cjs
+          python -m pytest -q tools/test_required_source_attribution_workflow.py
       - name: Changefile presence (touched plugins must have a pending changefile; PR-into-dev only)
         # Every plugin whose content -- or a vendored lib it ships -- changes in
         # a PR targeting `dev` must carry a pending changefile (tools/changefile.py),
@@ -487,7 +469,7 @@ jobs:
       - name: Promotion exact-PR merge wait regression tests
         run: python -m pytest -q tools/test_promotion_merge_wait.py
       - name: Trusted PR policy contract tests
-        run: python -m pytest -q tools/test_trusted_pr_policy.py tools/test_post_ci_policy.py
+        run: python -m pytest -q tools/test_trusted_pr_policy.py tools/test_post_ci_policy.py tools/test_identifier_guard_workflow.py tools/test_check_no_internal_identifiers.py
       - name: Payload invocation generated files
         run: python libs/payload-invocation/generate.py --all --check
       - name: Payload invocation foundation tests
@@ -498,21 +480,13 @@ jobs:
       - id: installation-context
         name: Detect installation-context changes
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="${{ github.event.pull_request.base.sha }}"
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            base="${{ github.event.before }}"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if git diff --name-only "$base"...HEAD | grep -Eq \
-            '^(libs/installation-context/|plugins/(agent-codespaces|agent-containers|agent-index|agent-machines|agent-worktrees)/scripts/installation-context/|tools/sync-installation-context.py$)'; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
+          run="$(python tools/installation_context_ci_scope.py --base "$BASE_SHA" --head "$HEAD_SHA" --event "$EVENT_NAME")"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
       - name: Installation context contract smoke
         if: steps.installation-context.outputs.run == 'true'
         run: >-
@@ -558,8 +532,10 @@ jobs:
         # not a mocked transport) -- both are already runtime dependencies of
         # the `agent-index` plugin that adapter proves itself against, so
         # installing them here adds no new supply-chain surface.
+        # Procutil's optional metrics fixture must execute in this lane;
+        # install its backend explicitly without changing default consumers.
         run: >-
-          python -m pip install pytest-asyncio fastapi uvicorn &&
+          python -m pip install pytest-asyncio fastapi uvicorn "psutil>=7.0" &&
           python -m pytest -q libs/work-coalescing-singleton/tests &&
           python -m pytest -q libs/lazy-cli-dispatch/tests &&
           python -m pytest -q libs/credential-relay/tests &&
@@ -724,7 +700,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$base"...HEAD | grep -Eq \
-            '^(\.github/workflows/validate-and-promote\.yml|tools/(promote_release\.py|test_promote_release\.py|promotion_python_artifacts\.py|publish_python_artifacts\.py|test_promotion_python_artifacts\.py|test_promotion_wheel_sources\.py|artifact_validation_requirements\.txt|build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|smoke_public_toolchain\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_seasoned_public_feed\.py|test_build_python_artifacts\.py))$'; then
+            '^(\.github/workflows/validate-and-promote\.yml|tools/(promote_release\.py|test_promote_release\.py|promotion_control\.py|test_promotion_control\.py|promotion_python_artifacts\.py|publish_python_artifacts\.py|test_promotion_python_artifacts\.py|test_promotion_workflow_adapter\.py|test_promotion_wheel_sources\.py|artifact_validation_requirements\.txt|build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|smoke_public_toolchain\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_seasoned_public_feed\.py|test_build_python_artifacts\.py))$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -740,7 +716,9 @@ jobs:
         run: >-
           python -m pytest -q tools/test_build_python_artifacts.py tools/test_seasoned_public_feed.py
           tools/test_public_toolchain_source.py tools/test_promote_release.py
+          tools/test_promotion_control.py
           tools/test_promotion_python_artifacts.py tools/test_promotion_wheel_sources.py
+          tools/test_promotion_workflow_adapter.py
       - uses: astral-sh/setup-uv@v9.0.0
         if: steps.python-artifact-builder.outputs.run == 'true'
       - name: Fresh seasoned-public toolchain and shared real wheel builds
@@ -847,7 +825,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "$base"...HEAD | grep -Eq \
-            '^(\.github/workflows/validate-and-promote\.yml|tools/(promote_release\.py|test_promote_release\.py|promotion_python_artifacts\.py|publish_python_artifacts\.py|test_promotion_python_artifacts\.py|test_promotion_wheel_sources\.py|artifact_validation_requirements\.txt|build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_build_python_artifacts\.py))$'; then
+            '^(\.github/workflows/validate-and-promote\.yml|tools/(promote_release\.py|test_promote_release\.py|promotion_control\.py|test_promotion_control\.py|promotion_python_artifacts\.py|publish_python_artifacts\.py|test_promotion_python_artifacts\.py|test_promotion_workflow_adapter\.py|test_promotion_wheel_sources\.py|artifact_validation_requirements\.txt|build_python_artifacts\.py|artifact_builder_cli\.py|build_toolchain_lock\.py|public_toolchain_source\.py|governed_feed_trust\.py|uv_editable_ref\.py|seasoned_public_feed\.py|test_public_toolchain_source\.py|test_build_python_artifacts\.py))$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -865,7 +843,8 @@ jobs:
         if: steps.python-artifact-builder.outputs.run == 'true'
         run: >-
           uv run --with pytest --with pyyaml python -m pytest -q
-          tools/test_promotion_python_artifacts.py tools/test_promotion_wheel_sources.py
+          tools/test_promotion_control.py tools/test_promotion_python_artifacts.py tools/test_promotion_wheel_sources.py
+          tools/test_promotion_workflow_adapter.py
 
   windows-hooks:
     name: Git hooks (Windows)
@@ -940,7 +919,7 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Test agent-dispatch-service with installed plugin and host containment
-        run: python tools/run-standalone-tests.py agent-dispatch-service --prepare --admission-wait 60 --timeout 180
+        run: python tools/run-standalone-tests.py services/dispatch --prepare --admission-wait 60 --timeout 180
 
   test-runner-linux:
     name: test runner (ubuntu-latest)
@@ -1052,7 +1031,7 @@ jobs:
         run: |
           MODE="--smoke"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then MODE=""; fi
-          python tools/run-standalone-tests.py agent-index-service --prepare --admission-wait 60 $MODE
+          python tools/run-standalone-tests.py services/index --prepare --admission-wait 60 $MODE
 
   agent-index-service-windows:
     name: agent-index-service (windows-latest, out-of-plugin)
@@ -1071,7 +1050,7 @@ jobs:
         run: |
           MODE="--smoke"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then MODE=""; fi
-          python tools/run-standalone-tests.py agent-index-service --prepare --admission-wait 60 $MODE
+          python tools/run-standalone-tests.py services/index --prepare --admission-wait 60 $MODE
 
   test-runner-windows:
     name: test runner (windows-latest)
@@ -1086,6 +1065,43 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
+      - id: installation-context
+        name: Detect installation-context changes
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          run="$(python tools/installation_context_ci_scope.py --base "$BASE_SHA" --head "$HEAD_SHA" --event "$EVENT_NAME")"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+      - name: Source provenance and read-only diagnostics (Windows)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        env:
+          INSTALLATION_CONTEXT_POWERSHELL: powershell
+        run: >-
+          uv run --with pytest --with pyyaml python -m pytest -q
+          tools/test_installation_context_ci_scope.py
+          libs/installation-context/tests/test_installation_mode_governance.py
+          libs/installation-context/tests/test_diagnostic_consumers.py
+          libs/installation-context/tests/test_payload_source.py
+          -k "payload_source or installation_context_ci_scope or status_and_probe_cli_parity_and_read_only or diagnostic_api_never_enters_mutation or active_namespaced_cli_is_visible_and_probe_refuses or explicit_powershell or derived_diagnostic_api_read_only or peer_governance_wrapper_read_only"
+      - name: Manager read-only wrapper (Windows)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        env:
+          PYTEST_ADDOPTS: -k runtime_inspection_uses_real_read_only_primitive
+        run: >-
+          python tools/run-standalone-tests.py worktree-manager --prepare
+          --admission-wait 60 --timeout 120
+      - name: Reconciliation read-only wrapper (Windows)
+        if: steps.installation-context.outputs.run == 'true'
+        timeout-minutes: 2
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          -k runtime_resolution_real_helper_read_only
+          --admission-wait 60 --timeout 120
       - id: runner-contracts
         name: Detect runner contract changes
         shell: bash
@@ -1204,7 +1220,7 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             MODE="--changed --base ${{ github.event.pull_request.base.sha }}"
             if git diff --quiet "${{ github.event.pull_request.base.sha }}" HEAD -- \
-              agent-index-service/ plugins/agent-index/ libs/ tools/ \
+              services/index/ plugins/agent-index/ libs/ tools/ \
               .github/workflows/ci.yml .github/workflows/validate-and-promote.yml; then
               echo "standalone_service=false" >> "$GITHUB_OUTPUT"
             else

@@ -359,7 +359,7 @@ changefiles and auto-bumps."
       reverse (over-coverage) checking the same as a `pyproject.toml`-backed
       vendorable, AND is actually auto-bumped by the aggregator (not merely
       accepted as a valid changefile target).
-- [ ] `module-size-baseline-widen-verify.yml` and `validate-and-promote.yml`
+- [ ] The baseline PR's ordinary `ci.yml` and `validate-and-promote.yml`
       both still pass after the `check-version-consistency.py` migration —
       the former no longer calls a retired file, the latter calls the new
       post-generation invariant at the right point in the promotion flow.

@@ -9,6 +9,16 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 ## The turn-key runner
 
+The standalone runner accepts the legacy `agent-index-service` and
+`agent-dispatch-service` component names as aliases for `services/index` and
+`services/dispatch`, respectively. It normalizes aliases before environment
+admission, dependency preparation, and smoke/full selection, so a released
+promotion workflow can validate a development snapshot after the service move.
+New invocations should use the canonical service paths. The native runner
+contract executes both aliases in canonical contained fixture environments
+from an isolated parent whose pytest dependencies reside outside its interpreter
+scheme, exercising the layered dependency layout without installing packages.
+
 The review-request workflow's fast contract uses
 `node --test tools/test_copilot_review_gate.cjs`. To exercise its exact script
 against the bundled `actions/github-script` runtime as well, download
@@ -90,6 +100,27 @@ User-root redirection alone does not isolate executable discovery or scheduled
 tasks. The signed-venv health/exit-code matrix uses simulated signatures on both
 platforms; native signature-policy behavior still requires Windows validation.
 
+The Codespaces module-launch matrix is an opt-in T3 contract:
+`python tools/run-plugin-tests.py agent-codespaces --allow-explicit-tiers -k activation_requires_installed_module_launch`.
+A focused completed-namespace pre-construction refusal remains in the ordinary
+installer suite. For exact-candidate Linux provisioning and forced-update
+refusal on a disposable fresh machine, run
+`tools/clean-room/run.ps1 -Scenario agent-codespaces-launch-health -HarnessMount <candidate> -NameSuffix <unique> -Then down`.
+This agent-free scenario requires no credentials or live CodeSpace and tests
+the actual installed `python -I -m agent_codespaces --help` entrypoint.
+
+Agent SSH's cold first-use snapshot provisioning restores real network
+dependencies and is an explicit T3 check, not a default fast unit case.
+Its pytest item budget remains 30 seconds; an unavailable budget is a failed
+or unexercised native lane, never an installation pass. The agent-free
+`tools/clean-room/scenarios/agent-ssh-snapshot` lane exercises the exact local
+candidate with separate bounded stamp/provision phases, removes its original
+source copy, and reads machine-transport from the actual fresh runtime:
+`tools/clean-room/run.ps1 -Scenario agent-ssh-snapshot -HarnessMount <candidate>
+-NameSuffix <unique> -Then down`. Supply the approved feed explicitly on a
+governed host. This Linux-container proof does not claim Windows signature or
+live SSH/WSL deployment coverage.
+
 ```bash
 python tools/run-plugin-tests.py agent-dispatch \
   --test-timeout 20 --subsuite-timeout 180 --plugin-timeout 600 \
@@ -100,12 +131,67 @@ python tools/run-plugin-tests.py agent-dispatch \
 Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
 than repeatedly importing file groups that contain no selected tests.
 
+Managed-worktree removal fixtures accept the canonical project loader's
+keyword-only overlay selection while retaining synthetic receiving-side
+configuration; they never discover installed project or plugin registries.
+Both explicit overlay values also run in the required PR guard lane.
+
+Execution-space registry tests retain the supplied receiving configuration
+through the real YAML overlay reader and reject malformed registries. A fresh
+Python subprocess also exercises the machine getter's missing-registry path
+and verifies that configuration is loaded exactly once. Packaged-wrapper
+previews use the actual wrapper manifest and canonical assets, without copying
+unrelated runtime sources or reading the checkout's pending changefiles.
+Native landing tests exercise explain and finalize separately against the same
+repository scenario, retaining both real Git contracts within each item budget.
+The landing fixture isolates the unrelated CodeSpace-claim warning; that
+provider adapter has its own dedicated tests.
+
+Agent-worktrees installer command resolution, pipefail execution and POSIX
+background-prune tests are explicit T3 native contracts. Collection never probes
+Bash or PowerShell. A lazy session fixture admits native shells only after
+`--allow-explicit-tiers`; direct pytest also requires
+`COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS=1`. Windows admission prefers Git
+Bash and rejects WindowsApps/System32 WSL launchers before executing anything.
+Fallback lookup removes those launcher directories before searching PATH, so
+an earlier WSL shadow cannot hide a later portable Git Bash.
+The exit-code, pipefail and Windows cygpath probes run once per admitted session,
+headlessly with five-second bounds. Native semantic tests and path conversion
+remain real; ordinary tests mock the admission policy and forbid process
+creation during fresh imports. The pipefail text drift guard remains default.
+
+```powershell
+python tools\run-plugin-tests.py agent-worktrees -k native_shell_collection
+python tools\run-plugin-tests.py agent-worktrees --allow-explicit-tiers -k 'installer_copilot_resolution or installer_pipefail or invoke_payload_runtime_posix'
+```
+
+The keyed workspace-creation regressions have an opt-in native companion.
+It runs the real create parser/handler, Git allocation, tracking writer, and
+creation journal in a fresh synthetic owner, then replays from a second Python
+process. No Copilot session or host registration is created. Run it with:
+
+```powershell
+$env:AGENT_WORKTREES_CREATION_NATIVE = '1'
+python tools\run-plugin-tests.py agent-worktrees -k creation_requests --test-timeout 120
+python tools\run-plugin-tests.py agent-bridge -k workspace_creation --test-timeout 120
+```
+
+The bridge companion uses the same fresh-owner fixture across real create,
+exact-record/head reads and explicit `bind-session` subprocess calls. It also
+exercises a real dispatch queue's lost allocation response, restart and changed
+routing, proving one execution checkout despite a different queue lane. Bridge
+SessionManager/SQLite and durable first-turn admission are real; Copilot ACP/
+provider I/O is simulated. This is connected first-touch evidence, not a
+deployed binstub, full host installation or live model transcript check.
+
 Resident list-warm snapshot policy tests keep process calls mocked and verify
 exact output shapes, filter/project separation, next-pass freshness, unavailable
 classification, and unchanged standalone reads. Their bounded native companion
 executes the real warm loop, classify client/server transport and Git classifier
 against a fresh divergent checkout; transcript, mux and reclaim enrichment are
 modeled separately. The fixture refuses a bypass of the classify transport.
+Its cache clock is isolated from the shared standard-library clock, so the
+native transport's request deadlines remain real.
 Four same-selection shapes retain eight direct Git starts in each of two
 unchanged passes, then observe a subsequent dirty edit. Run that lane explicitly:
 
@@ -123,6 +209,38 @@ plugin grows. The installer's 10-second process-tree watchdog runs inside a
 The stalled descendant/captured-pipe case lives separately in
 `test_first_install_bootstrap_watchdog.py` and runs only in the full suite,
 not the required guard lane.
+
+Worktree Manager's native viewport regression uses 1,100 live synthetic
+worktrees, with 40 visible by default, both without workers and with 1,100
+loaded worker rows. It checks Show Hidden and the actual pulse refresh through
+the real Textual compositor, bounds formatting by the viewport, retains
+one-line option geometry and exercises off-screen selection/content updates,
+late worker changes, focus and scrolling. Worker scopes are indexed once per
+build, keyed by each pivot's effective scope: account-wide worker rows are
+indexed once even in the cross-machine All view; machine-scoped rows stay
+separate. Native title, detail and worker rows
+remain deferred during incremental repaint too. Native chrome does not build
+the data body; deterministic capture resolves its selected window with Rich
+styles intact.
+The ordinary regression enforces access counts rather than host-speed timing.
+For an explicit local 200 ms rebuild/pulse-to-painted check, collect only the
+benchmark file and run each shape in its own contained process, matching one
+production application. Wait for the default view to paint before measuring a
+mode change. Process CPU and GC costs are reported, never subtracted from the
+wall-time gate; no GC policy is changed:
+
+```powershell
+$target = (Resolve-Path worktree-manager\tests\production_picker\test_native_viewport.py).Path
+$ignore = Get-ChildItem worktree-manager\tests -Filter 'test*.py' -Recurse -File |
+    Where-Object FullName -ne $target |
+    ForEach-Object { '--ignore="' + $_.FullName + '"' }
+$env:WORKTREE_MANAGER_RENDER_BUDGET = '1'
+foreach ($shape in 'False', 'True') {
+    $env:PYTEST_ADDOPTS = '-s -k ' + $shape + ' ' + ($ignore -join ' ')
+    python tools\run-standalone-tests.py worktree-manager --prepare
+    if ($LASTEXITCODE -ne 0) { throw 'Native viewport budget failed' }
+}
+```
 
 FINAL stamp regressions use one immutable real-Git template and isolated
 per-test copies. The changed-plugin guard lane runs four smoke cases:
@@ -567,6 +685,18 @@ demand through the `Installation context full` workflow. This keeps unrelated
 pull requests incremental and keeps the required fast lane independent from the
 size of the long-form regression portfolio.
 
+Native Windows diagnostic evidence is a separate, bounded selection inside
+the existing `test runner (windows-latest)` job. It runs actual `status` and
+`probe-legacy` CLI calls, existing/absent pointer checks, and mutation-entry
+guards from `test_installation_mode_governance.py`; it is not inferred from
+the job merely finishing successfully. The step has a two-minute budget,
+uses Windows PowerShell 5.1 via
+`INSTALLATION_CONTEXT_POWERSHELL=powershell`, and shares the
+`tools/installation_context_ci_scope.py` path detector with Linux. Canonical
+and derived implementation changes trigger it; unrelated docs do not.
+An explicitly requested unavailable shell fails collection rather than
+silently skipping the evidence. No exhaustive adapter matrix is added to PR CI.
+
 Run the relevant suite yourself before pushing a runtime change — there is
 intentionally **no** automatic push/PR gate. Fast structural/contract checks are
 marked `@pytest.mark.guard` (marketplace + picker integrity, shipped-manifest
@@ -618,7 +748,9 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
 - **agent-containers:** config, lifecycle, the lease broker, and the resolver.
 - **agent-mcp:** config loading, auth injectors, transports, bridge framing, the
   decorator pipeline; the code-mode Node tests skip automatically when `node` is
-  absent.
+  absent. The native POSIX cutover integration waits for the exact spawned
+  daemon's published control endpoint, not just `active.json` existence:
+  conservative custody history may precede publication of the active route.
 - **agent-ssh:** transport rendering, managed OpenSSH fragment source identity,
   tri-state reconciliation, stale/duplicate quarantine, bounded warnings,
   report-only doctor parity, and reachability-vs-hygiene separation.

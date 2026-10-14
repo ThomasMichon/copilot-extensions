@@ -130,6 +130,7 @@ def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrappe
         credentials_for=lambda fleet: (True, True),
         acp_command_for=lambda fleet: command,
         copilot_cli_account_for=lambda fleet: None,
+        copilot_auth_mode="legacy",
     )
     fleet = types.SimpleNamespace(security_profile="trusted")
     ssh = SSHConfig(
@@ -192,9 +193,7 @@ def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrappe
     deploy.assert_called_once_with("instance-fixture", ado=True)
 
 
-def test_session_host_prepare_forwards_a_separate_copilot_cli_account_token(capsys):
-    """A configured copilot_cli_account reaches staged launch_env as
-    COPILOT_GITHUB_TOKEN, distinct from (and alongside) GH_TOKEN."""
+def test_session_host_prepare_uses_process_auth_not_host_environment(capsys):
     from agent_containers.session_host_context import TrustedContext
 
     config = types.SimpleNamespace(
@@ -226,6 +225,10 @@ def test_session_host_prepare_forwards_a_separate_copilot_cli_account_token(caps
             "agent_containers.resolver.host_copilot_cli_token",
             return_value="copilot-secret",
         ),
+        patch(
+            "agent_containers.copilot_process_auth.prepare_launch",
+            return_value="/launch/auth.env",
+        ) as auth,
         patch("agent_containers.__main__._relay_healthy", return_value=True),
         patch(
             "agent_containers.__main__.write_remote_env",
@@ -252,7 +255,13 @@ def test_session_host_prepare_forwards_a_separate_copilot_cli_account_token(caps
     assert "copilot-secret" not in json.dumps(result)
     staged = write_env.call_args.args[2]
     assert staged["GH_TOKEN"] == "github-secret"
-    assert staged["COPILOT_GITHUB_TOKEN"] == "copilot-secret"
+    assert "COPILOT_GITHUB_TOKEN" not in staged
+    assert "copilot_auth_env" not in result
+    assert "/launch/auth.env.d" in result["acp_command"]
+    auth.assert_called_once_with(
+        config, fleet, "instance-fixture", "vscode",
+        cleanup_owner="/tmp/agent-containers/env-123",
+    )
 
 
 def test_session_host_prepare_fails_closed_with_no_matching_copilot_cli_login(capsys):
@@ -262,7 +271,7 @@ def test_session_host_prepare_fails_closed_with_no_matching_copilot_cli_login(ca
 
     config = types.SimpleNamespace(
         relay_port=9857,
-        credentials_for=lambda fleet: (True, True),
+        credentials_for=lambda fleet: (True, False),
         acp_command_for=lambda fleet: "copilot --acp --stdio",
         copilot_cli_account_for=lambda fleet: "inference-user",
     )
@@ -286,6 +295,7 @@ def test_session_host_prepare_fails_closed_with_no_matching_copilot_cli_login(ca
         ),
         patch("agent_containers.__main__.host_gh_token", return_value="github-secret"),
         patch("agent_containers.resolver.host_copilot_cli_token", return_value=None),
+        patch("agent_containers.__main__.write_remote_env", return_value=None),
     ):
         rc = main([
             "session-host-prepare",

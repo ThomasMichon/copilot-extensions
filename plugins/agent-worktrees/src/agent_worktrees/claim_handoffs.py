@@ -8,6 +8,7 @@ needed to offer, inspect, accept, decline, and cancel an exact bundle safely.
 
 from __future__ import annotations
 
+import copy
 import json
 import secrets
 from collections.abc import Callable
@@ -18,6 +19,7 @@ from pathlib import Path
 import yaml
 
 from . import claim_history, config as cfg, tracking
+from .claim_handoff_admission import snapshot_claim as _claim_snapshot
 from .claim_handoff_accept_support import (
     acquire_bundle_fence,
     load_accept_bundle,
@@ -56,7 +58,7 @@ class ClaimBundle:
     state: str
     source: str
     consumer: str
-    claims: tuple[dict[str, str], ...]
+    claims: tuple[dict, ...]
     offered_at: str
     updated_at: str
     reason: str = ""
@@ -69,7 +71,7 @@ class ClaimBundle:
             "state": self.state,
             "source": self.source,
             "consumer": self.consumer,
-            "claims": [dict(claim) for claim in self.claims],
+            "claims": [copy.deepcopy(claim) for claim in self.claims],
             "offered_at": self.offered_at,
             "updated_at": self.updated_at,
         }
@@ -122,7 +124,7 @@ def _bundle_from_dict(raw: object) -> ClaimBundle:
     _qualified_ref(consumer, "bundle consumer")
     if not isinstance(claims_raw, list) or not claims_raw:
         raise ClaimHandoffError("claim bundle must contain at least one claim")
-    claims: list[dict[str, str]] = []
+    claims: list[dict] = []
     refs: set[str] = set()
     for item in claims_raw:
         if not isinstance(item, dict):
@@ -148,6 +150,8 @@ def _bundle_from_dict(raw: object) -> ClaimBundle:
             "state": claim_state,
             "note": note,
         })
+        if "producer" in item:
+            claims[-1]["producer"] = copy.deepcopy(item["producer"])
     reason = raw.get("reason", "")
     if not isinstance(reason, str):
         raise ClaimHandoffError("claim bundle reason must be a string")
@@ -236,16 +240,6 @@ def _load_actor_record(
     return path, record
 
 
-def _claim_snapshot(claim: tracking.ResourceClaim) -> dict[str, str]:
-    return {
-        "kind": claim.kind,
-        "ref": claim.ref,
-        "created_at": claim.created_at,
-        "state": claim.state or "active",
-        "note": claim.note,
-    }
-
-
 def _bundle_state(bundle: ClaimBundle, state: str, *, reason: str | None = None) -> ClaimBundle:
     return replace(
         bundle,
@@ -316,15 +310,11 @@ def _accept_child_path(
 
 
 def _validate_supported_claims(bundle: ClaimBundle) -> None:
-    unsupported = sorted(
-        snapshot["kind"]
-        for snapshot in bundle.claims
-        if snapshot["kind"] not in _SUPPORTED_ACCEPT_KINDS
+    from .claim_handoff_admission import validate_supported_claims
+    validate_supported_claims(
+        bundle, supported_kinds=_SUPPORTED_ACCEPT_KINDS,
+        qualified_ref=_qualified_ref, error_type=ClaimHandoffError,
     )
-    if unsupported:
-        raise ClaimHandoffError(
-            "claim bundle contains unsupported claim kinds: " + ", ".join(unsupported)
-        )
 
 
 def _parse_remote_bundle(stdout: str) -> ClaimBundle | None:
@@ -356,6 +346,9 @@ def accept_source(bundle_id: str, *, actor: str) -> ClaimBundle:
                 error_type=ClaimHandoffError)
             if bundle.state == "accepted":
                 return bundle
+            if any("producer" in claim for claim in bundle.claims):
+                from .producer_handoff import accept_producers
+                return accept_producers(bundle_id, actor=actor)
             source_ref = _qualified_ref(bundle.source, "bundle source")
             source_path = _record_path(source_ref)
             if not source_path.exists():
@@ -581,6 +574,11 @@ def offer(
                     raise ClaimHandoffError(
                         "source does not own claims: " + ", ".join(sorted(missing))
                     )
+                from .claim_handoff_admission import validate_producer_offer
+                validate_producer_offer(
+                    [by_ref[ref] for ref in refs], source_ref, consumer_ref,
+                    error_type=ClaimHandoffError,
+                )
                 inactive = [
                     ref for ref in refs if not by_ref[ref].is_unsettled
                 ]
@@ -712,6 +710,9 @@ def accept(
         source_ref = _qualified_ref(bundle.source, "bundle source")
         consumer_ref = _qualified_ref(bundle.consumer, "bundle consumer")
         require_handoff_consumer(bundle, machine, ClaimHandoffError)
+        if any("producer" in claim for claim in bundle.claims):
+            from .producer_handoff import accept_producers
+            return accept_producers(bundle_id, actor=actor)
         if _same_machine(source_ref.machine, consumer_ref.machine, project=consumer_ref.project):
             if bundle.state != "accepted":
                 bundle = accept_source(bundle_id, actor=actor)

@@ -127,8 +127,8 @@ from . import services as _svc
 from . import session_context as session_context_mod  # noqa: F401 -- compatibility re-export
 from . import state_root as state_root_mod
 from .copilot_launch_prefs import resolve_launch_pref_flags
+from .process_launcher import apply_process_launcher
 from .update_stage import cmd_stage_update, discover_plugin_dir as _discover_plugin_dir
-
 # front_door_cli's own names are re-exported eagerly (not deferred to
 # _load_full_command_surface() below) because main() calls several of them
 # -- _extract_project_flag, _guard_project_scope, _resolve_active_project,
@@ -1126,10 +1126,9 @@ def _worktree_to_dict(
     # to rank by real recency-of-use rather than original creation age; a
     # never-resumed worktree simply omits the field (callers fall back to
     # ``started_at``).
-    if rec.last_resumed_at:
-        d["last_resumed_at"] = rec.last_resumed_at
-    if rec.codename:
-        d["codename"] = rec.codename
+    for field in ("last_resumed_at", "codename", "creation_nonce"):
+        if value := getattr(rec, field):
+            d[field] = value
     # Session ownership is durable record state, not live-scan enrichment.
     # Cache-only Picker rows must therefore carry the registered session count
     # and current head before any events/mux/process scan runs.  The head is the
@@ -1225,13 +1224,7 @@ def _worktree_to_dict(
         d["pair_kind"] = rec.pair_kind
     if rec.resources:
         d["resources"] = [
-            {
-                "kind": c.kind,
-                "ref": c.ref,
-                "created_at": c.created_at,
-                "state": c.state,
-                **({"note": c.note} if c.note else {}),
-            }
+            c.to_public_dict()
             for c in rec.resources
         ]
     if getattr(rec, "profile_assignments", None):
@@ -1961,93 +1954,7 @@ from .worktree_creation import (  # noqa: E402 -- re-export position matches ori
 )
 
 
-def _self_owner_ref(work_dir: str | None) -> str | None:
-    """Qualified ClaimRef of the worktree rooted at ``work_dir`` (None if not one).
-
-    The identity a launched session advertises via ``AGENT_WORKTREES_OWNER_REF``
-    so any resource it creates (a nested ``create``, a borrowed CodeSpace)
-    inherits *this* worktree as owner and the finalize gate can hold it
-    accountable (resource-obligation-settlement Ph6). Returns None for a
-    non-worktree path (e.g. the repo anchor) -- resources created there are
-    top-level, not owned -- and is fully best-effort (never raises).
-    """
-    if not work_dir:
-        return None
-    try:
-        # Resolve the worktree id the authoritative way -- git-identity first
-        # (root-independent, matches `get owner-ref`), then a tracked-path match.
-        wd = Path(work_dir)
-        wid = _worktree_id_from_git(wd) or tracking.find_worktree_id_by_cwd(str(wd))
-        if not wid:
-            return None
-        config = cfg.load_config()
-        try:
-            project = cfg.project_name()
-        except Exception:
-            project = config.repo_name
-        session = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
-        return tracking.format_claim_ref(config.machine, project, wid, session)
-    except Exception:
-        return None
-
-
-def _build_env(
-    profile: cfg.CopilotProfile | None,
-    session_env: dict[str, str] | None = None,
-    work_dir: str | None = None,
-) -> dict[str, str]:
-    """Build env dict with auto-injected vars, repo session_env, then profile.
-
-    Convention-based vars (like COPILOT_CUSTOM_INSTRUCTIONS_DIRS) are set
-    first, then the repo's ``session_env`` (e.g. COPILOT_FEATURE_FLAGS), then
-    profile env merges on top.  For path-list vars like
-    COPILOT_CUSTOM_INSTRUCTIONS_DIRS, profile values are appended rather
-    than replacing the auto-injected value.
-
-    When ``work_dir`` names a managed worktree, its qualified ClaimRef is
-    exported as ``AGENT_WORKTREES_OWNER_REF`` so any resource an agent creates
-    inside the launched session inherits this worktree as owner (Ph6 ambient
-    owner identity). A non-worktree ``work_dir`` (the anchor) or a failure to
-    resolve it simply omits the var.
-    """
-    env: dict[str, str] = {}
-
-    # Auto-inject: dynamic instructions live in ~/.{project}
-    project_dir = str(cfg.project_dir())
-    env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] = project_dir
-
-    # Arm the PR-workflow git-hook shims for this launch when the repo uses PR
-    # mode. The shims are inert unless AGENT_WORKTREES_HOOKS=1 is present; scope
-    # it to the launched session env (not a global/user var) so external and
-    # recovery git operations stay unguarded by default (#234 defect 1).
-    try:
-        if cfg.load_config().default_repo.pr.enabled:
-            env["AGENT_WORKTREES_HOOKS"] = "1"
-    except Exception:
-        pass
-
-    # Ambient owner identity (Ph6): advertise the launched worktree's own
-    # ClaimRef so a resource it creates inherits it as owner. Each launch stamps
-    # SELF (overwriting any inherited value), so a chain A->B->C inherits one hop
-    # at each level. Best-effort; omitted for a non-worktree path (anchor).
-    owner_self = _self_owner_ref(work_dir)
-    if owner_self:
-        env["AGENT_WORKTREES_OWNER_REF"] = owner_self
-
-    # Repo-declared session env (below the profile so a profile can override).
-    if session_env:
-        env.update(session_env)
-
-    # Merge profile env, appending for path-list keys
-    if profile and profile.env:
-        _PATH_LIST_KEYS = {"COPILOT_CUSTOM_INSTRUCTIONS_DIRS"}
-        for k, v in profile.env.items():
-            if k in _PATH_LIST_KEYS and k in env:
-                env[k] = env[k] + os.pathsep + v
-            else:
-                env[k] = v
-
-    return env
+from .launch_environment import _build_env, _self_owner_ref  # noqa: E402,F401 -- compatibility exports
 
 
 def _repo_session_env(config: cfg.Config, work_dir: str = "") -> dict[str, str]:
@@ -2356,7 +2263,7 @@ def _build_launch_cmd(
     if recovery:
         prefix.append("--recovery")
     prefix.append("--")
-    return prefix + cmd
+    return prefix + apply_process_launcher(cmd, args, LaunchPreflightError)
 
 
 def _emit_parent_context_hint(record, *, to_stderr: bool = False) -> None:
@@ -2426,7 +2333,7 @@ from .worktree_identity import (  # noqa: E402 -- re-export position matches ori
     _adopt_linked_worktree,  # noqa: F401 -- session_binding_cli accesses via __main__
     _infer_worktree_id_from_cwd,  # noqa: F401 -- re-exported for unit tests
     _infer_worktree_id_from_worktree_root,  # noqa: F401 -- re-exported for unit tests
-    _worktree_id_from_git,
+    _worktree_id_from_git,  # noqa: F401 -- compatibility export for launch_environment
     _worktree_path_for_id,  # noqa: F401 -- re-exported for context_cli
     resolve_worktree_id_by_codename,  # noqa: F401 -- re-exported for session_metadata_cli
 )
@@ -5388,6 +5295,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     list_cli.add_parsers(sub)
     claims_cli.add_parsers(sub)
+    resource_producer_cli.add_parsers(sub)
     follow_ups_cli.add_parsers(sub)
     session_metadata_cli.add_parsers(sub)
 
@@ -5545,6 +5453,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'bind-session': ('session_binding_cli', 'cmd_bind_session'),
     'claimant-liveness': ('session_metadata_cli', 'cmd_claimant_liveness'),
     'claims': ('claims_cli', 'cmd_claims'),
+    'resource-producer': ('resource_producer_cli', 'cmd_resource_producer'),
     'cleanup': ('cleanup_gc_cli', 'cmd_cleanup'),
     'codename-lookup': ('session_metadata_cli', 'cmd_codename_lookup'),
     'conclude-disposable': ('session_tracking_cli', 'cmd_conclude_disposable'),
@@ -5697,6 +5606,7 @@ _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "pr_state_cli",
     "reap_cli",
     "reclaim_cli",
+    "resource_producer_cli",
     "session_binding_cli",
     "session_inspection_cli",
     "session_metadata_cli",
@@ -5843,6 +5753,7 @@ def _load_full_command_surface() -> None:
     global handoff_cli, handoff_diagnostics, handoff_successor_repair_cli, installation_cli, list_cli, maintenance_cli, doctor_render, picker_profiles_cli, plan_pre_launch, pr_cli
     global pr_state_cli, reap_cli, reap_orphan_launcher_shells, reclaim_cli, reclaim_one, related_cli, repos_cli, resolve_cli
     global identifier_blocklist_cli
+    global resource_producer_cli
     global resolve_launch_cli, resolve_machine_cli, resolve_picker_cli, resolve_system_cli, services_cli, session_binding_cli, session_inspection_cli, session_metadata_cli
     global session_tracking_cli, status_bar_cli, status_cli, status_monitor_cli, status_monitor_reap_stale, status_monitor_runtime, status_updater_cli, sweep_finished_session_worktrees
     global sweep_managed_worktrees
@@ -5872,6 +5783,7 @@ def _load_full_command_surface() -> None:
         reap_cli,
         reclaim_cli,
         related_cli,
+        resource_producer_cli,
         resolve_cli,
         resolve_launch_cli,
         resolve_machine_cli,
@@ -6285,6 +6197,7 @@ def _load_full_command_surface() -> None:
         "copilot": cmd_copilot,
         "list": cmd_list,
         "claims": cmd_claims,
+        "resource-producer": resource_producer_cli.cmd_resource_producer,
         "follow-ups": cmd_follow_ups,
         "claimant-liveness": cmd_claimant_liveness,
         "codename-lookup": cmd_codename_lookup,

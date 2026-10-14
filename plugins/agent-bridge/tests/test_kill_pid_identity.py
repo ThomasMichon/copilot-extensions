@@ -329,6 +329,7 @@ def test_kill_pid_windows_terminates_root_and_live_descendants(monkeypatch):
     """Windows tree semantics (previously ``taskkill /T``) are preserved:
     descendants are enumerated and each re-verified/terminated through its
     own identity-bound token, not a bare PID-only ``taskkill``."""
+    monkeypatch.setattr(m.os, "getpid", lambda: 9999)
     monkeypatch.setattr(m, "_pid_is_agent_bridge", lambda pid: True)
     monkeypatch.setattr(m.sys, "platform", "win32")
     monkeypatch.setattr(
@@ -532,6 +533,7 @@ def test_kill_pid_tree_windows_kills_descendants_deepest_first_then_root(monkeyp
     generation verification entirely: once a parent pid is dead,
     re-querying its current identity returns nothing, and every one of
     its children would be (incorrectly) rejected as unverifiable."""
+    monkeypatch.setattr(m.os, "getpid", lambda: 9999)
     monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "root-token")
     monkeypatch.setattr(
         m,
@@ -573,6 +575,7 @@ def test_kill_pid_tree_windows_never_terminates_its_own_executing_process(monkey
     left to finish stopping it. Its identity is still verified like any
     other descendant (traversal stays correct); only the actual
     termination call is skipped."""
+    monkeypatch.setattr(m.os, "getpid", lambda: 5001)
     monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "root-token")
     monkeypatch.setattr(
         m,

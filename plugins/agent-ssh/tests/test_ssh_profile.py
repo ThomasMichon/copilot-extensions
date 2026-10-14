@@ -221,6 +221,101 @@ def test_wsl_emit_registry_from_machines_yaml() -> None:
     assert "ProxyCommand wsl.exe -d Ubuntu -u agent exec nc 127.0.0.1 2200" in fragment
 
 
+@pytest.mark.parametrize("selector", ["guest-custom", "guest-profile", "desktop", "os-host"])
+def test_wsl_emit_registry_independent_logical_profile(tmp_path, selector, capsys):
+    from machine_transport import find_machine_entry, resolve_ssh_target
+
+    mod = _load_wsl_emit_registry()
+    topology = tmp_path / "machines.yaml"
+    topology.write_text(yaml.safe_dump({"machines": {
+        "desktop": {
+            "execution_platform": "windows", "physical_host": "desktop", "hostname": "os-host",
+            "ssh": {"environments": [{"name": "windows", "alias": "native-profile"}]},
+        },
+        "guest-custom": {
+            "execution_platform": "wsl", "physical_host": "desktop",
+            "ssh": {"environments": [{"name": "wsl", "alias": "guest-profile", "user": "developer"}]},
+        },
+    }}), encoding="utf-8")
+    assert mod.main([
+        "--machines", str(topology), "--machine", selector,
+        "--identity-file", "~/.ssh/id_test", "--port", "2207",
+    ]) == 0
+    registry = yaml.safe_load(capsys.readouterr().out)
+    entries = mod._load_machines(topology)
+    native = find_machine_entry(entries, "native-profile")
+    guest = find_machine_entry(entries, registry["machines"][0]["name"])
+    assert native.key == "desktop"
+    assert guest.key == "guest-custom"
+    assert native.physical_host == guest.physical_host == "desktop"
+    assert resolve_ssh_target(native) == ("native-profile", "pwsh")
+    assert resolve_ssh_target(guest) == ("guest-profile", "bash")
+    assert registry["machines"][0]["port"] == 2207
+    fragment = ssh_profile.render_fragment(registry, _load_transport("wsl"))
+    assert "Host guest-profile" in fragment
+    assert "ProxyCommand wsl.exe -d Ubuntu -u developer exec nc 127.0.0.1 2207" in fragment
+
+
+@pytest.mark.parametrize("environments", [
+    [{"name": "wsl", "alias": "one"}, {"name": "wsl", "alias": "two"}],
+    [{"name": "windows", "alias": "same"}, {"name": "wsl", "alias": "same"}],
+])
+def test_wsl_emit_registry_refuses_ambiguous_profiles(tmp_path, capsys, environments):
+    mod = _load_wsl_emit_registry()
+    topology = tmp_path / "machines.yaml"
+    topology.write_text(yaml.safe_dump({"machines": {
+        "desktop": {"ssh": {"environments": environments}},
+    }}), encoding="utf-8")
+    assert mod.main([
+        "--machines", str(topology), "--machine", "desktop",
+        "--identity-file", "~/.ssh/id_test",
+    ]) == 2
+    assert "ambiguous" in capsys.readouterr().err
+
+
+def test_wsl_emit_registry_does_not_guess_hostname_prefix(tmp_path, monkeypatch, capsys):
+    mod = _load_wsl_emit_registry()
+    topology = tmp_path / "machines.yaml"
+    topology.write_text(yaml.safe_dump({"machines": {
+        "desktop": {"ssh": {"environments": [{"name": "wsl", "alias": "guest"}]}},
+    }}), encoding="utf-8")
+    monkeypatch.setattr(mod.socket, "gethostname", lambda: "desktop-other")
+    assert mod.main([
+        "--machines", str(topology), "--identity-file", "~/.ssh/id_test",
+    ]) == 2
+    assert "Could not resolve" in capsys.readouterr().err
+
+
+def test_wsl_emit_registry_cli_round_trip(tmp_path):
+    """Fresh input exercises the actual script import/CLI contract without SSH."""
+    from machine_transport import find_machine_entry, normalize_machine_entries, parse_machines_yaml
+
+    topology = {"machines": {"desktop": {
+        "ssh": {"environments": [
+            {"name": "windows", "alias": "native-profile"},
+            {"name": "wsl", "alias": "guest-profile", "user": "developer"},
+        ]},
+    }}}
+    source = tmp_path / "machines.yaml"
+    source.write_text(yaml.safe_dump(topology), encoding="utf-8")
+    proc = subprocess.run(
+        [
+            sys.executable, str(ROOT / "transports" / "wsl" / "deploy" / "emit-registry.py"),
+            "--machines", str(source), "--machine", "desktop-wsl",
+            "--identity-file", "~/.ssh/id_fixture",
+        ],
+        capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert proc.returncode == 0, proc.stderr
+    registry = yaml.safe_load(proc.stdout)
+    entries = normalize_machine_entries(parse_machines_yaml(topology))
+    assert find_machine_entry(entries, registry["machines"][0]["name"]).key == "desktop-wsl"
+    fragment = ssh_profile.render_fragment(registry, _load_transport("wsl"))
+    assert "Host guest-profile" in fragment
+    assert "IdentityFile ~/.ssh/id_fixture" in fragment
+
+
 def _keypair(root: Path, name: str) -> None:
     (root / name).write_text("private", encoding="utf-8")
     (root / f"{name}.pub").write_text("public", encoding="utf-8")

@@ -30,20 +30,24 @@ file has shrunk) or *removes* one entirely (when a file has shrunk to or
 below the cap); it never raises an entry, even if a file has grown -- that
 case is a guard failure to fix, not baseline noise to absorb.
 
-The one exception is the opt-in ``--allow-widen`` flag:
+The opt-in ``--allow-widen`` flag additionally permits widening:
 concurrent-agent development can legitimately grow several already-baselined
 files within the same short window (a shared module touched by parallel,
 unrelated PRs), which then forces every subsequent PR -- even ones that never
 touched the grown file -- to carry an unrelated manual baseline-widening
 diff just to pass CI. ``--refresh-baseline --allow-widen`` additionally
 *raises* a ceiling up to a file's current size when it is over its recorded
-ceiling. This is still never silent: it is restricted by convention (see
-``.github/workflows/module-size-baseline-widen.yml``) to a scheduled/
-post-merge run directly against ``main`` after the fact, producing its own
-reviewable PR -- **never** something a PR branch's own CI run does to its
-own diff, which would let a PR silently launder its own growth past review.
+ceiling while retaining manual tightening. Automation instead uses
+``--refresh-baseline --widen-only``: it raises existing ceilings but never
+lowers or removes an entry, including after a file shrinks below the cap.
+This avoids a stale tightening proposal blocking later code growth.
+Excessively high ceilings are tolerated until a deliberate manual refresh.
+The trusted post-merge CI-completion run against committed ``dev`` produces
+its own dev-targeted reviewable PR (see ``.github/workflows/promote-trigger.yml``)
+-- **never** something a PR branch's own CI run applies to its own diff,
+which would let a PR silently launder its own growth past review.
 
-**PR-time scoping (``--changed-since REF``).** ``--allow-widen`` closes the
+**PR-time scoping (``--changed-since REF``).** Post-merge widening closes the
 gap *after* it opens, but there is still a window between another PR's merge
 growing a shared file past its ceiling and the widen job's own PR landing --
 during which *every* PR's ordinary (non-``--allow-widen``) CI run sees the
@@ -92,6 +96,11 @@ Usage::
                                                              # once the base branch has moved.
     python tools/check-module-size.py --refresh-baseline  # tighten after shrinking a file
     python tools/check-module-size.py --refresh-baseline --allow-widen  # post-merge only; see above
+    python -I trusted/tools/check-module-size.py --repository candidate --refresh-baseline --widen-only
+
+``--repository`` selects a data checkout without importing or running its
+tooling. Automation pins the invoked script to the trusted workflow commit,
+uses isolated Python, and publishes only the baseline JSON through dev review.
 
 Exit code 0 = conformant, 1 = a file exceeds its cap/ceiling.
 """
@@ -190,7 +199,10 @@ def _changed_py_files(base_ref: str, head_ref: str = "HEAD") -> set[str]:
 
 
 def _line_count(path: str) -> int:
-    text = (REPO / path).read_text(encoding="utf-8", errors="replace")
+    source = REPO / path
+    if source.is_symlink() or not source.resolve().is_relative_to(REPO):
+        raise ValueError(f"{path}: source modules must be regular files inside the checkout")
+    text = source.read_text(encoding="utf-8", errors="replace")
     if not text:
         return 0
     # A trailing newline should not count as an extra, empty final line.
@@ -280,7 +292,7 @@ def check(baseline: dict[str, int], *, only_paths: set[str] | None = None) -> li
 
 
 def refresh_baseline(
-    baseline: dict[str, int], *, allow_widen: bool = False,
+    baseline: dict[str, int], *, allow_widen: bool = False, widen_only: bool = False,
 ) -> dict[str, int]:
     """Tighten (and, with ``allow_widen``, ratchet up) the baseline.
 
@@ -294,16 +306,24 @@ def refresh_baseline(
     newly grandfathers a file that has never been baselined before, even if
     that file now exceeds the cap. A brand-new offender is a genuinely new
     hard-cap violation (split it or, per the module docstring, a deliberate
-    manual JSON edit), never something the automated, main-only widen job
+    manual JSON edit), never something the automated, dev-only widen job
     should silently absorb; that would let ordinary (non-widen) growth past
     the cap sneak in through the automation's own back door. Plain
     ``refresh_baseline`` (``allow_widen=False``) keeps its prior behaviour of
     recording a new offender, since it is always a manual, deliberate,
     reviewed invocation.
+
+    ``widen_only=True`` is the automated mode: it raises existing entries
+    without lowering, removing or adding any entry. Manual refresh modes
+    retain their previous tightening behavior.
     """
     updated = dict(baseline)
     for path in sorted(_tracked_py_files()):
         lines = _line_count(path)
+        if widen_only:
+            if path in updated and lines > updated[path]:
+                updated[path] = lines
+            continue
         if path in updated:
             if lines <= CAP_LINES:
                 del updated[path]  # graduated: no longer needs grandfathering
@@ -320,18 +340,28 @@ def refresh_baseline(
 
 
 def main() -> int:
+    global REPO, BASELINE_PATH
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--repository", type=Path,
+        help="Read and update this checkout as data, using the invoked trusted tooling.",
+    )
     parser.add_argument(
         "--refresh-baseline",
         action="store_true",
         help="Rewrite the baseline, tightening any shrunk entries (never widens).",
     )
     parser.add_argument(
+        "--widen-only",
+        action="store_true",
+        help="With --refresh-baseline, only raise existing ceilings; never tighten or add entries.",
+    )
+    parser.add_argument(
         "--allow-widen",
         action="store_true",
         help=(
             "With --refresh-baseline, also raise a grown file's ceiling to its "
-            "current size. Post-merge/main-only by convention -- never run this "
+            "current size. Post-merge/dev-only by convention -- never run this "
             "against a PR branch's own diff (see module docstring)."
         ),
     )
@@ -362,15 +392,40 @@ def main() -> int:
         ),
     )
     args = parser.parse_args()
+    if args.repository is not None:
+        REPO = args.repository.resolve()
+        if not REPO.is_dir():
+            parser.error("--repository must name a checkout directory")
+        root = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], cwd=REPO,
+            capture_output=True, text=True, encoding="utf-8",
+            timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if root.returncode != 0 or Path(root.stdout.strip()).resolve() != REPO:
+            parser.error("--repository must name a Git checkout root")
+        BASELINE_PATH = REPO / "tools" / "module-size-baseline.json"
+        if (
+            BASELINE_PATH.is_symlink()
+            or not BASELINE_PATH.resolve().is_relative_to(REPO)
+            or (BASELINE_PATH.exists() and not BASELINE_PATH.is_file())
+        ):
+            parser.error("the target baseline must be a regular path inside the checkout")
     if args.allow_widen and not args.refresh_baseline:
         parser.error("--allow-widen requires --refresh-baseline")
+    if args.widen_only and not args.refresh_baseline:
+        parser.error("--widen-only requires --refresh-baseline")
+    if args.widen_only and args.allow_widen:
+        parser.error("--widen-only and --allow-widen select different refresh modes")
     if args.changed_since and args.refresh_baseline:
         parser.error("--changed-since is incompatible with --refresh-baseline")
 
     baseline = _load_baseline()
 
     if args.refresh_baseline:
-        updated = refresh_baseline(baseline, allow_widen=args.allow_widen)
+        updated = refresh_baseline(
+            baseline, allow_widen=args.allow_widen, widen_only=args.widen_only,
+        )
         if updated != baseline:
             _write_baseline(updated)
             print(f"[OK] refreshed {BASELINE_PATH.relative_to(REPO)}")
@@ -420,4 +475,14 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except subprocess.CalledProcessError as exc:
+        print(f"[FAIL] module size: {exc.stderr.strip() if exc.stderr else exc}", file=sys.stderr)
+        sys.exit(1)
+    except subprocess.TimeoutExpired as exc:
+        print(f"[FAIL] module size: Git timed out after {exc.timeout} seconds", file=sys.stderr)
+        sys.exit(1)
+    except (ValueError, OSError) as exc:
+        print(f"[FAIL] module size: {exc}", file=sys.stderr)
+        sys.exit(1)

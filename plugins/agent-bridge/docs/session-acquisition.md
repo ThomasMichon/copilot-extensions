@@ -2,8 +2,9 @@
 
 Phase 6 of `efforts/active/agent-bridge-cli-mode-sessions` consolidates dispatch
 session acquisition beneath bridge. `agent-bridge acquire --request-file -`
-accepts version-1 JSON on stdin and calls `POST /api/v1/acquisitions`.
-HTTP protocol **31** gates current clients, including post-preparation
+accepts version-1 or workspace-qualified version-2 JSON on stdin and calls
+`POST /api/v1/acquisitions`.
+HTTP protocol **34** gates current clients, including post-preparation
 retirement/holder revalidation; older daemons refuse capability
 instead of falling back to create. Legacy unbound/explicit-fresh `create`
 semantics are unchanged. This slice supports **local** CLI and ACP; remote/
@@ -17,9 +18,58 @@ the producing task lane. Bridge creation for a worktree-capable project
 composes the ground layer's allocation with embodiment in that same workspace.
 An existing workspace with authoritative sessionless history may receive its
 first conversation through the ordinary admission path; no takeover is implied.
-Stable cross-attempt creation keys are proposed separately by the
-[workspace continuity effort](../../../efforts/active/workspace-acquisition-continuity/README.md);
-the delivery-ID journal described below is not that allocation-key API.
+The optional standalone `create --creation-key` boundary below owns allocation
+replay; the delivery-ID journal described here remains task acquisition authority.
+
+## Standalone keyed creation
+
+`agent-bridge create <agent> --creation-key <opaque-key>` composes the ground
+owner's `create --creation-key` allocation with ACP embodiment. Protocol **34**
+and `POST /api/v1/sessions/workspace-creations` are required; an older daemon
+cannot silently ignore the key through the legacy sessions endpoint. Unkeyed
+creation keeps its existing fresh-create behavior. Keyed creation currently
+supports local worktree-backed agents only; SSH, provider and CLI-mode venues
+refuse explicitly rather than dropping the key or changing execution mode.
+
+The ground request uses `--no-owner --interface acp --origin delegate`, plus
+an explicitly supplied caller owner reference. A direct ground caller using the
+same key must supply the same effective allocation facts. Alternatively,
+`--worktree-id <id>` embodies an existing allocation without running create.
+That first-conversation path requires an owner-returned creation nonce, an
+explicit zero-session history, an authoritative empty head, and no represented,
+owned or uncertain execution leg. Missing legacy proof and foreign/live holders
+refuse; this path is not takeover or dispatch fresh-recovery authorization.
+That complete holder check runs again after awaited owner revalidation, before
+native-start registration. The existing SQLite launch gate also fences ordinary
+bridge and live-session registrations during that await.
+
+The installation's SQLite embodiment journal binds the key, effective target
+and execution options before allocation effects, and reserves its original
+session identity before native start. Exact replay retains project, worktree,
+path, native conversation and optional first-turn admission. Pending allocation
+replays only the ground owner's same key; ambiguous native start requires
+reconciliation of the recorded session, never another `session/new`.
+Changed facts conflict. Removed/retired workspace or native results refuse,
+not fresh-create. Standalone embodiment grants no task/claim authority.
+The qualified caller worktree, not its current session fragment, qualifies
+ownership facts, matching ground allocation across a caller restart.
+
+An optional creation prompt is admitted with a stable delivery ID through the
+existing ACP durable turn skeleton. A lost response or concurrent replay returns
+that original turn instead of submitting another one, including while it runs.
+Completed replay is read-only with respect to native binding and turn
+admission; missing completed-turn evidence refuses instead of resubmitting.
+It settles only its own stranded launch gate if interruption occurred after
+the completed receipt was persisted; another request's gate is never released.
+A typed drain refusal at the session manager's pre-effect guard restores the
+retained allocation and releases its own gate, allowing same-key continuation
+after cutover. Unknown native-start exceptions remain pending instead.
+An established cold native conversation is strictly resumed only to admit
+its still-unadmitted original prompt, with recreation disabled.
+The journal composes the existing per-worktree async lock and OS executor lease;
+it introduces no resident service or independent session host.
+
+## Task acquisition request and result
 
 `acquisition_contract.AcquisitionRequest` version 1 carries explicit `cli` or
 `acp` mode, target, task ID and generation, worktree ID, allocation provenance
@@ -34,6 +84,14 @@ intent still refuse validation. Admission independently verifies the known
 task/reservation/native bindings. A new field that changes safety or continuity
 semantics requires a new negotiated protocol, not an ignorable extension.
 No mode defaults to CLI.
+
+Version 2 additionally requires a nonempty execution project and worktree path.
+Admission compares both to dispatch's persisted allocation provenance, then
+checks the exact worktree owner's `repo` and `path` before native-head reads.
+Conflicting or missing owner facts refuse without searching another registry.
+Protocol 34 is required for version 2; the route continues serving version-1
+requests from protocol-30/31/32 clients with their existing safety checks.
+Version-1 request digests remain byte-compatible with persisted history.
 
 The default local CLI worker target `task-worker` is a stable task-affinity
 label, not an ACP registry prerequisite. Its execution target comes from the
@@ -132,8 +190,7 @@ then revalidates the exact task/reservation/generation/retirement fence after
 target preparation and before launch. Revocation or a changed holder prevents
 creation. See the dispatch acquisition guide for the exact permission,
 concluded-reservation, liveness-attestation and deployment requirements.
-Current acquisition clients require protocol 31, refusing a protocol-30 daemon
-before sending retirement authorization. A protocol-31 daemon continues serving
+Retirement revalidation requires protocol 31. A protocol-31 daemon continues serving
 protocol-30 acquisition requests with its stronger holder/retirement checks.
 A bridge binding from an older generation of the same task remains resumable
 when current owner facts authorize it. A future/stale admission generation
@@ -172,9 +229,8 @@ CLI recovery from `launching` revalidates the persisted native identity against
 its live registration and current head, without requiring the reused process
 to have acquired the retry's driver label. Already-admitted turns settle
 without a duplicate delivery or a new process.
-Updated acquisition clients require protocol 32 for this retirement-recovery
-guarantee and refuse an older daemon before sending a request. The protocol-32
-route explicitly continues accepting protocol-30 and protocol-31 requests.
+Retirement recovery requires protocol 32. Current acquisition clients require
+protocol 34 and refuse an older daemon before sending a request.
 
 `acquisition_journal.AcquisitionJournal` uses the bridge database's existing
 SQLite connection/write machinery, with a separate internal attempt table.
@@ -182,6 +238,13 @@ One delivery ID binds the complete request digest. A partial unique index
 permits only one pending acquisition per target/worktree. Completed retries
 return the original validated result without authorizing another delivery.
 Rebinding a delivery ID is a typed refusal.
+
+Only an exact digest-bound `refused/prepared` receipt for a deterministic
+workspace/CLI-capability refusal can certify `effect=not_started`. A carried
+native identity or earlier pending/launched/completed receipt prevents that
+classification. Missing owner capability, busy holders, unknown effects and
+launch-stage refusals remain unclassified and require reconciliation. A
+refusal code by itself is never a no-launch attestation.
 
 A process interruption leaves a durable pending attempt. It has **no automatic
 expiration**: elapsed time does not prove whether launch or delivery happened.

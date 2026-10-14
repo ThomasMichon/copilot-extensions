@@ -710,23 +710,38 @@ if [[ ( "$ACTION" == "cell-provision" || "$ACTION" == "slot-cutover" ) &&
         LOCK_LINK="$LOCK_PLUGIN_ROOT/.payload-provision.lock.pid"
         until ln -s "$$" "$LOCK_LINK" 2>/dev/null; do
             owner="$(readlink "$LOCK_LINK" 2>/dev/null || true)"
+            if [[ -z "$owner" ]]; then
+                # The link vanished after the failed `ln -s` (or is not a
+                # symlink): never unlink then -- lock creators are not
+                # serialized by the reap mutex, so an unlink could delete a
+                # live lock taken meanwhile. Just retry.
+                sleep 0.1
+                continue
+            fi
             if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                 sleep 1
             elif ln -s "$$" "$LOCK_LINK.reap" 2>/dev/null; then
-                # Review finding (round 10, on the stamp lock's identical
-                # sibling pattern below): a plain readlink-then-rm here is a
-                # TOCTOU race -- another process could reap the same stale
-                # link and create its own live one between our two readlink
-                # calls, and this rm -f would then delete THAT live lock. A
-                # PID-bearing symlink (same pattern as the main lock, NOT a
-                # bare `mkdir`) is atomic AND self-healing: only one process
-                # at a time can hold it, and if ITS owner dies before
-                # cleanup, the `elif` branch below reclaims it instead of
-                # wedging every future reap attempt forever (round-11
-                # finding on the round-10 fix itself). Re-verify the link is
-                # still the SAME stale value we observed before removing it.
-                if [[ "$(readlink "$LOCK_LINK" 2>/dev/null || true)" == "$owner" ]]; then
-                    rm -f "$LOCK_LINK"
+                # Stale-owner recovery is serialized by this reap mutex. A
+                # plain readlink-then-rm would be a TOCTOU race: another
+                # process could reap the same stale link and take its own live
+                # lock between the two reads, and the rm -f would then delete
+                # that live lock. The mutex is a PID-bearing symlink (like the
+                # main lock, not a bare `mkdir`) so it is atomic and
+                # self-healing: only one process at a time holds it, and if
+                # its owner dies before cleanup the `elif` branch below
+                # reclaims it rather than wedging every later reap attempt.
+                # Unlink only if the link still holds the owner judged stale
+                # above and that owner is still not live: a dead owner cannot
+                # release its own link and only serialized reapers remove a
+                # stale one, so that value is stable under this mutex. An
+                # absent link, or one naming a different (possibly
+                # just-released) holder, is never removed.
+                owner_now="$(readlink "$LOCK_LINK" 2>/dev/null || true)"
+                if [[ -n "$owner_now" && "$owner_now" == "$owner" ]]; then
+                    case "$owner_now" in
+                        *[!0-9]*) rm -f "$LOCK_LINK" ;;
+                        *) kill -0 "$owner_now" 2>/dev/null || rm -f "$LOCK_LINK" ;;
+                    esac
                 fi
                 rm -f "$LOCK_LINK.reap"
             elif [[ "$(readlink "$LOCK_LINK.reap" 2>/dev/null || true)" =~ ^[0-9]+$ ]] &&
@@ -1579,21 +1594,38 @@ if [[ "$ACTION" == "stamp" ]]; then
         _stamp_lock_link="$INSTALL_DIR/.stamp.lock.pid"
         until ln -s "$$" "$_stamp_lock_link" 2>/dev/null; do
             owner="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
+            if [[ -z "$owner" ]]; then
+                # The link vanished after the failed `ln -s` (or is not a
+                # symlink): never unlink then -- lock creators are not
+                # serialized by the reap mutex, so an unlink could delete a
+                # live lock taken meanwhile. Just retry.
+                sleep 0.1
+                continue
+            fi
             if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                 sleep 1
             elif ln -s "$$" "$_stamp_lock_link.reap" 2>/dev/null; then
-                # Review finding (round 10): a plain readlink-then-rm is a
-                # TOCTOU race -- another process could reap the same stale
-                # link and create its own live one between our two readlink
-                # calls, and this rm -f would then delete THAT live lock. A
-                # PID-bearing symlink (NOT a bare `mkdir`) is atomic AND
-                # self-healing: if ITS owner dies before cleanup, the next
-                # `elif` branch below reclaims it instead of wedging every
-                # future reap attempt forever (round-11 finding on the
-                # round-10 fix itself). Re-verify the link is still the SAME
-                # stale value we observed before removing it.
-                if [[ "$(readlink "$_stamp_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
-                    rm -f "$_stamp_lock_link"
+                # Stale-owner recovery is serialized by this reap mutex. A
+                # plain readlink-then-rm would be a TOCTOU race: another
+                # process could reap the same stale link and take its own live
+                # lock between the two reads, and the rm -f would then delete
+                # that live lock. The mutex is a PID-bearing symlink (like the
+                # main lock, not a bare `mkdir`) so it is atomic and
+                # self-healing: only one process at a time holds it, and if
+                # its owner dies before cleanup the `elif` branch below
+                # reclaims it rather than wedging every later reap attempt.
+                # Unlink only if the link still holds the owner judged stale
+                # above and that owner is still not live: a dead owner cannot
+                # release its own link and only serialized reapers remove a
+                # stale one, so that value is stable under this mutex. An
+                # absent link, or one naming a different (possibly
+                # just-released) holder, is never removed.
+                owner_now="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
+                if [[ -n "$owner_now" && "$owner_now" == "$owner" ]]; then
+                    case "$owner_now" in
+                        *[!0-9]*) rm -f "$_stamp_lock_link" ;;
+                        *) kill -0 "$owner_now" 2>/dev/null || rm -f "$_stamp_lock_link" ;;
+                    esac
                 fi
                 rm -f "$_stamp_lock_link.reap"
             elif [[ "$(readlink "$_stamp_lock_link.reap" 2>/dev/null || true)" =~ ^[0-9]+$ ]] &&
@@ -1696,7 +1728,8 @@ fi
 
 # -- 2b. Preinstall uv-editable canonical libs (non-uv fallback) -------
 # `agent-dropin-registry`/`agent-plugin-resolve`/`agent-plugin-activation`/
-# `agent-procutil` are `uv`-editable canonical references (vendor-pointer-
+# `agent-procutil` and the shared machine transport dependencies are
+# `uv`-editable canonical references (vendor-pointer-
 # generalization effort, Phase 1: no local copy in a dev checkout at all).
 # When `uv` is unavailable, the fallback below uses bare `python -m pip
 # install`, which does NOT honor `[tool.uv.sources]` -- without a
@@ -1708,6 +1741,8 @@ for _lib_entry in \
     'dropin-registry:agent-dropin-registry' \
     'plugin-resolve:agent-plugin-resolve' \
     'agent-procutil:agent-procutil' \
+    'remote-login-shell:agent-remote-login-shell' \
+    'machine-transport:agent-machine-transport' \
     'plugin-activation:agent-plugin-activation'; do
     _lib_dir_name="${_lib_entry%%:*}"
     _lib_pkg_name="${_lib_entry#*:}"

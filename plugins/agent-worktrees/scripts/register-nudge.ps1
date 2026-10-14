@@ -155,24 +155,13 @@ if ($ContextOnly) {
 
 function Emit-Empty { Publish-Context '{}'; exit 0 }
 
-# Only nudge when agent-worktrees is available to register with (the
-# self-provisioning tool binstub is on PATH or deployed, OR the durable
-# runtime-root pointer -- see install-contract.md "Durable runtime-root
-# pointer" -- names a currently-existing root, e.g. a marketplace-cell
-# install with no legacy binstub at all). Resolver-free by design: a plain
-# file read, no JSON parsing, so this still works on a tools-half box. The
-# pointer is advisory and may be missing or stale; either way this stays
-# fail-open exactly as it already does for every other uncertainty here --
-# a missing/stale pointer just falls through to "not available".
-$binstub = Join-Path $env:USERPROFILE '.local\bin\agent-worktrees'
-$available = [bool](Get-Command agent-worktrees -ErrorAction SilentlyContinue) -or (Test-Path $binstub)
-if (-not $available) {
-    $pointer = Join-Path $env:USERPROFILE '.copilot-extensions\agent-worktrees\runtime-root'
-    if (Test-Path $pointer) {
-        $pointerRoot = (Get-Content -LiteralPath $pointer -TotalCount 1 -ErrorAction SilentlyContinue)
-        if ($pointerRoot -and (Test-Path -LiteralPath $pointerRoot)) { $available = $true }
-    }
-}
+# Match the owning payload's command-catalog readiness without executing its
+# shim or resolving another marketplace through a shared runtime-root pointer.
+$payloadRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$payloadCommand = Join-Path $payloadRoot 'bin\payload\agent-worktrees.ps1'
+$payloadInstaller = Join-Path $payloadRoot 'scripts\install.ps1'
+$available = ((Test-Path -LiteralPath $payloadCommand -PathType Leaf) -and
+              (Test-Path -LiteralPath $payloadInstaller -PathType Leaf))
 if (-not $available) { Emit-Empty }
 
 # Must be inside a git work tree.
@@ -205,7 +194,7 @@ if (Test-Path $marker) { Emit-Empty }
 New-Item -ItemType Directory -Path $markerDir -Force | Out-Null
 Set-Content -LiteralPath $marker -Value '' -NoNewline
 
-$msg = "This repo ($name) is not a registered agent-worktrees project. To enable isolated, concurrent worktree sessions (create/finalize + the PR flow), register it once from the repo root: agent-worktrees register $name . This is an onboarding nudge only -- nothing has been registered, and agent-worktrees never auto-adopts a repo."
+$msg = "This repo ($name) is not a registered agent-worktrees project. To enable isolated, concurrent worktree sessions (create/finalize + the PR flow), register it once from the repo root using this payload's exact session-catalog command with arguments: register $name . This is an onboarding nudge only -- nothing has been registered, and agent-worktrees never auto-adopts a repo."
 
 $obj = @{ additionalContext = $msg }
 Publish-Context ($obj | ConvertTo-Json -Compress)

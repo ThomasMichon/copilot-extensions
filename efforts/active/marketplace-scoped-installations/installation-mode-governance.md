@@ -16,12 +16,97 @@ effective-mode contracts are normative only in
 
 During this effort, namespaced installation and usage are clean-room-only.
 Persistent development and production machines remain in legacy mode with no
-namespaced activation, runtime, state, service, or migration. Read-only
-status/doctor inspection is permitted. The policy applies only to
+namespaced activation, runtime, state, service, or migration. Inspection follows
+the [Phase 8 diagnostic prerequisite](#phase-8-diagnostic-prerequisite).
+The policy applies only to
 runtime-bearing core plugin identities from the `copilot-extensions` suite.
 Independent marketplaces may carry those identities for source-isolation proof;
 payload-only plugins and unrelated plugins remain out of scope, including
 plugins that expose tools or services.
+
+## Phase 8 diagnostic prerequisite
+
+This section is the single source for the effort's persistent-host diagnostic
+restriction and its acceptance criteria. It does not change the normative
+installation-mode contract or authorize namespaced use on persistent hosts.
+
+Until the prerequisite is met, do not execute the known pointer-writing `status`
+or `probe-legacy` resolution paths on persistent hosts, including doctor wrappers
+that reach them. Inspect existing evidence without executing those paths;
+exercise the diagnostic implementations only in disposable environments.
+
+The source inventory for diagnostic recovery is:
+
+- Python: [`_installation_context_mode_cli.py`](../../../libs/installation-context/_installation_context_mode_cli.py)
+  owns `resolve_installation_mode` and `probe_legacy_entrypoint`. The current
+  correction removes their advisory-pointer publication and the private
+  `_publish_runtime_root_pointer` helper formerly defined in
+  [`_installation_context_files.py`](../../../libs/installation-context/_installation_context_files.py).
+- PowerShell: [`installation-context.ps1`](../../../libs/installation-context/installation-context.ps1)
+  owns `Resolve-InstallationStatus`; the current correction removes the
+  `status` branch's publication and the `Publish-RuntimeRootPointer` helper.
+- No-Python POSIX: [`installation-context.sh`](../../../libs/installation-context/installation-context.sh)
+  owns `run_status_action`; the current correction removes the `status`
+  branch's publication and the `publish_runtime_root_pointer` helper.
+- Derived copies: [`tools/sync-installation-context.py`](../../../tools/sync-installation-context.py)
+  owns the `FILES`, `ADOPTERS`, `STANDALONE_PYTHON_ADOPTERS`, and `vendor_pairs()`
+  inventories. They identify standalone payload copies under
+  `plugins/<adopter>/scripts/installation-context/`, packaged Python copies
+  under `plugins/<adopter>/src/<package>/`, and the standalone Manager copies
+  under `worktree-manager/src/worktree_manager/`.
+
+This is a source-inspection route, not permission to run a status/probe command
+or the vendoring tool. Trace each doctor or `probe-legacy` wrapper to the
+selected implementation and its transitive calls; a wrapper name or an
+apparently read-only outer command does not exempt a call to these publishers.
+The acceptance inventory must account for these copies and affected wrappers
+before the restriction is lifted. Current source no longer publishing a pointer
+does not prove that an installed copy has been updated or that every wrapper
+is non-mutating. The separate merged-implementation and native-platform
+acceptance requirements below still apply; older installed implementations
+may continue to contain those publishers.
+
+**Verified read-only** means all of the following evidence exists for the
+implementation being invoked:
+
+1. Regression tests exercise the actual `status`, `probe-legacy`, and affected
+   doctor entry points in disposable fixtures, not only mocked resolver results.
+   Cover canonical Python, PowerShell, no-Python POSIX, and their derived copies.
+2. Before/after fixture manifests prove diagnostic calls do not create, replace,
+   or modify installation/discovery pointers, policy, ownership receipts,
+   activation records, runtime/state files or directories, or service/task
+   registrations. Guard mutation entry points so an attempted publication,
+   provisioning, or service ensure/start fails the test even if it would be
+   idempotent. Existing discovery evidence and absent evidence are both covered.
+3. Tests preserve the established result shape, reason/status precedence,
+   missing/stale/foreign ownership refusal, and existing caller behavior.
+   Explicit lifecycle publication is tested separately, never as a diagnostic
+   side effect.
+4. The fix is merged, and the effort journal links its implementation PR,
+   covered entry-point/copy inventory, test commands, and passing Windows and
+   native POSIX evidence. A report-only scan, successful status output, or a
+   single-platform result does not satisfy this prerequisite.
+
+After that evidence is recorded, the verified entry points may perform
+read-only status/doctor inspection on persistent hosts. The namespaced
+activation and usage restriction remains unchanged; passing this prerequisite
+does not complete Phase 8 or the effort.
+
+### Acceptance inventory
+
+This inventory records source and execution evidence, not authorization to
+invoke an older installed copy. The prerequisite remains open.
+
+| Surface | Actual entry points and selected bytes | Evidence and remaining gate |
+|---------|----------------------------------------|-----------------------------|
+| Canonical diagnostic CLI | Python `status` / `probe-legacy`, PowerShell `Resolve-InstallationStatus`, POSIX `run_status_action` | [#6497](https://github.com/ThomasMichon/copilot-extensions/pull/6497) removes the publishers. `test_status_and_probe_cli_parity_and_read_only` runs both real commands with absent and retained pointer evidence and compares bytes and modification times. `test_diagnostic_api_never_enters_mutation` guards Python lifecycle mutation entry points in legacy and active-cell fixtures. |
+| Native Windows implementation | Explicit Windows PowerShell 5.1 plus Windows Python | [#6518](https://github.com/ThomasMichon/copilot-extensions/pull/6518), [run 38391704358, job 115276823227](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38391704358/job/115276823227): the actual `Read-only diagnostics (Windows)` step passed, with 26 passed and three POSIX-only cases skipped. A green job with skipped diagnostic steps is not equivalent evidence. |
+| Native POSIX implementation | Python and no-Python POSIX helper; local PowerShell parity is supplementary | #6497's [Linux guard job 115254466358](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38382376832/job/115254466358) executed installation-context smoke and vendoring checks. Local governance selection passed 127 tests. This does not establish native Windows behavior or installed-copy freshness. |
+| Derived implementations | `vendor_pairs()` in `tools/sync-installation-context.py`: 11 standalone plugin helper trees, eight packaged Python trees, and Manager's packaged Python tree | `test_derived_diagnostic_api_read_only` uses the dynamic inventory to execute all 20 Python copies in legacy/active fixtures with absent/retained pointers, mutation tripwires, and byte/directory/modification-time snapshots. Local and [#6527's corrected-head native Windows selection](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38400697289/job/115310816437) passed. Vendoring proves the PowerShell/POSIX copies match canonical bytes; their per-copy CLI execution remains pending. |
+| Manager runtime inspection | `marketplace_cells_enabled` and `resolve_installed_plugin_command` in `worktree-manager/src/worktree_manager/agent_plugin_runtime.py`, loading Manager's own vendored primitive | `test_runtime_inspection_uses_real_read_only_primitive` exercises the real primitive in disposable active-cell fixtures, with absent and retained foreign pointers, guarded lifecycle mutation entry points, and byte/directory/modification-time snapshots. Local and #6527's corrected-head native Windows two-case selections passed. Wider refusal/legacy no-write cases remain unproven by this selection. |
+| Agent Worktrees reconciliation | `_run_installation_mode_helper` and `resolve_runtime_installation` in `plugins/agent-worktrees/src/agent_worktrees/reconcile.py` invoke the selected plugin payload's real `probe-legacy` helper | `test_runtime_resolution_real_helper_read_only` exercises both wrappers with real child helpers, absent/retained pointers, retained legacy state, and snapshots. POSIX pins the child account-directory lookup before executing the unchanged CLI; Windows uses the fixture profile and test-only host-profiling control. The helper reports authoritative missing-policy evidence at the fixture's canonical path, without injected policy. The isolated Linux selection passed; final native Windows and wider refusal proof remain pending. This resolution step does not prove that the entire lifecycle reconciliation command is read-only. |
+| Peer invocation governance | `_governance` in `libs/peer-launch/peer_launch.py`, including its packaged adopters, calls the selected primitive's `resolve_installation_mode` | `test_peer_governance_wrapper_read_only` executes the canonical wrapper and its eight packaged copies against their own real primitives. Allowed active and refused unactivated receipts, absent/retained pointers, mutation tripwires, and snapshots passed locally and in #6527's corrected-head native Windows selection. The later invocation may intentionally launch a process; do not classify that whole operation as a diagnostic merely because its governance check is read-only. |
+| Persistent installed copies | The exact implementation each authorized consumer would invoke | Release-content and managed-update proof remain pending. Do not execute the restricted diagnostic paths to discover whether an old copy was updated. |
 
 ## Decision and rationale
 
@@ -96,7 +181,9 @@ can be placed under one cell plugin root for scoped surgery.
 
 Marker existence wins even when the sidecar cannot be parsed. Ownerless, dead,
 or otherwise stale maintenance is reported and never automatically cleared.
-Read-only status and doctor remain available. Mutation during maintenance
+Status and doctor inspection during maintenance follows the
+[Phase 8 diagnostic prerequisite](#phase-8-diagnostic-prerequisite).
+Mutation during maintenance
 requires a management command's explicit authorization flag; an environment
 variable or inherited process context is not authorization.
 

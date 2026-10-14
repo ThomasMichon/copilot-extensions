@@ -12,11 +12,20 @@ from .cli_mode_models import (  # noqa: F401 -- re-exported public models
     CliModeReservationInfo,
     CreateCliModeReservationRequest,
     LiveSessionVenue,
+    RegisterLiveSessionRequest,
 )
 from .install_paths import effective_config_dir
 from .protocol import HTTP_PROTOCOL_MIN_SUPPORTED, HTTP_PROTOCOL_VERSION
-from .preference_models import PreferencePolicyFields, PreferenceRequestFields
+from .preference_models import PreferencePolicyFields
+from .session_start_models import StartSessionRequest  # noqa: F401 -- public model re-export
 from .execution_identity_models import ExecutionSpaceConfigFields
+from .session_status import SessionStatus
+from .prompt_models import (  # noqa: F401 -- preserved public model imports
+    PendingPrompt,
+    PendingQueueResponse,
+    SubmitPromptRequest,
+    SubmitPromptResponse,
+)
 
 # -- Platform defaults -------------------------------------------------------
 
@@ -36,19 +45,6 @@ def default_port() -> int:
 
 
 # -- Session status ----------------------------------------------------------
-
-
-class SessionStatus(str, Enum):
-    """Lifecycle states for an agent-bridge session."""
-
-    CREATED = "created"
-    STARTING = "starting"
-    RUNNING = "running"
-    IDLE = "idle"
-    STOPPING = "stopping"
-    STOPPED = "stopped"
-    FAILED = "failed"
-    ENDED = "ended"
 
 
 class AttentionReason(str, Enum):
@@ -195,77 +191,6 @@ TurnInfo.model_rebuild()
 # -- API requests ------------------------------------------------------------
 
 
-class StartSessionRequest(PreferenceRequestFields):
-    """Request to start a new agent session."""
-
-    agent: str | None = None
-    target_dir: str | None = None
-    topology: str | None = None
-    worktree_id: str | None = None  # agent-worktrees worktree ID for session roll
-    caller_id: str | None = None  # caller identity for session affinity
-    caller_session_id: str | None = None  # creating Copilot session's id; invalid -> dropped
-    sender_repo: str | None = None  # caller's repo (agent-worktrees `get project`
-    #                                 in the CLI cwd) -- bare-venue default source
-    caller_owner_ref: str | None = None  # resource-obligation-settlement Ph3c: the
-    #                                      caller's qualified ClaimRef (agent-worktrees
-    #                                      `get owner-ref`), stamped as the bridge
-    #                                      worktree's owner_ref so its finalize
-    #                                      settles the caller's obligation
-    force_new: bool = False  # skip caller_id reuse and always create a fresh session
-    # Harness-only remote launch fault. The sessions route accepts the sole
-    # supported value only for an exclusive ``venue-parity:`` caller using
-    # ``force_new``; ordinary callers cannot alter the far-side ACP command.
-    parity_fault: str | None = None
-    # Per-session model / reasoning-effort override (``agent-bridge create
-    # --model/--effort``). Copilot ignores ``--model`` under ``--acp``, so these
-    # feed ``session/set_config_option`` at highest precedence over the daemon
-    # default (``AcpClient._apply_model_config``). None / omitted keeps the default.
-    model: str | None = None
-    effort: str | None = None
-    # Per-session MCP servers mounted into the ACP session at session/new, giving
-    # this session a bespoke, run-bound toolset (e.g. an AI code-review
-    # toolset). Each entry is an ACP MCP server spec; ``type`` selects the
-    # transport and defaults to ``stdio``:
-    #   {"type": "stdio", "name": ..., "command": ..., "args": [...], "env": {...}}
-    #   {"type": "http" | "sse", "name": ..., "url": ..., "headers": {...}}
-    # None / omitted preserves the historic empty-toolset behavior.
-    mcp_servers: list[dict[str, Any]] | None = None
-    # Extra ``copilot`` CLI args APPENDED to the resolved agent's copilot_args
-    # for THIS session only (e.g. a per-run ``--additional-mcp-config @<file>``
-    # to mount a run-bound MCP toolset the argv way -- copilot honors this over
-    # --acp, unlike the ACP session/new ``mcp_servers`` path). The registered
-    # agent's own args are preserved; these are added after them. None / omitted
-    # changes nothing.
-    copilot_args: list[str] | None = None
-    # Per-session environment overrides merged into the spawned Copilot CLI's
-    # process env (on top of the resolved agent's declared ``env``). The primary
-    # use is BYOK provider selection -- pointing a session's brain at a local
-    # inference front (``COPILOT_PROVIDER_BASE_URL`` / ``COPILOT_MODEL`` /
-    # ``COPILOT_OFFLINE``) without hand-editing provider config -- but any env a
-    # caller wants set for this session only is honored. Merged after the agent's
-    # own env so a per-session value wins; None / omitted changes nothing.
-    env: dict[str, str] | None = None
-    # The caller's HTTP wire-contract protocol version (dotfiles #632). A caller
-    # predating negotiation omits it -> the receiving daemon treats it as
-    # unversioned. Lets a (cross-host) receiver know which capabilities the
-    # sender speaks; the response advertises the receiver's version in turn.
-    protocol_version: int | None = None
-
-
-class SubmitPromptRequest(BaseModel):
-    """Request to submit a prompt to a session.
-
-    ``queue`` opts into durable send-or-queue (#4114): a busy session's prompt
-    is persisted (``pending_prompts``) and delivered FIFO on the next settle,
-    surviving remount, crash and restart, instead of a 409 (the default).
-    ``caller_id`` tags the queued row. With ``queue``, ``no_resume`` refuses a
-    stopped session (409 ``session_stopped``) instead of resuming it (gen 25).
-    """
-
-    prompt: str
-    queue: bool = False
-    caller_id: str | None = None
-    no_resume: bool = False
 
 
 class ResumeSessionRequest(BaseModel):
@@ -325,39 +250,7 @@ class StartSessionResponse(PreferencePolicyFields):
     # Present only for an explicit harness-owned start fault. Contains boolean
     # cleanup evidence; never process output, credentials, or provider details.
     parity_fault_result: dict[str, Any] | None = None
-
-
-class SubmitPromptResponse(BaseModel):
-    """Result of a prompt submission to ``session_id`` (a successor when the submit
-    handed an over-critical idle session off). Immediate run: ``turn_index`` is
-    the started turn. Durable send-or-queue (``queued=True``, #4114): the prompt
-    was persisted rather than run, ``turn_index`` is None and ``queue_id`` /
-    ``position`` place it in the FIFO queue.
-    """
-
-    status: SessionStatus
-    session_id: str | None = None
-    turn_index: int | None = None
-    queued: bool = False
-    queue_id: int | None = None
-    position: int | None = None
-
-
-class PendingPrompt(BaseModel):
-    """One durable queued follow-up awaiting delivery (#4114)."""
-
-    id: int
-    session_id: str
-    caller_id: str | None = None
-    prompt: str
-    created_at: float
-
-
-class PendingQueueResponse(BaseModel):
-    """Snapshot of a session's durable pending-prompt queue."""
-
-    session_id: str
-    pending: list[PendingPrompt]
+    creation: dict[str, Any] | None = None
 
 
 class ResyncSessionResponse(BaseModel):
@@ -525,22 +418,6 @@ class SessionListResponse(BaseModel):
 
 
 # -- Live interactive-session registry (extension-backed) --------------------
-
-
-class RegisterLiveSessionRequest(BaseModel):
-    """Registration payload from the bundled agent-bridge extension."""
-
-    session_id: str
-    machine: str | None = None
-    cwd: str | None = None
-    worktree_id: str | None = None
-    repo: str | None = None
-    branch: str | None = None
-    pid: int | None = None
-    role: str | None = None
-    driven_by: str | None = None
-    venue: LiveSessionVenue | None = None
-    process_started_at: float | None = None  # with pid: one process instance; routes refuse non-finite
 
 
 class LiveSessionInfo(BaseModel):

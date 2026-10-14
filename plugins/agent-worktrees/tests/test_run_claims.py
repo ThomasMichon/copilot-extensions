@@ -203,8 +203,8 @@ class TestJournalRunClaim:
             srcroot=str(tmp_path), machine="anomalous-potato", platform="wsl", repo_name="spo-core",
             repos={"spo-core": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path))},
         )
-        monkeypatch.setattr(cfg, "load_project_config", lambda project: config)
-        monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: {})
+        monkeypatch.setattr(cfg, "load_project_config", lambda project, **kwargs: config)
+        monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: {})
         monkeypatch.setattr("agent_worktrees.config.tracking_dir",
                             lambda: tmp_path)
         monkeypatch.setattr("agent_worktrees.config.load_config",

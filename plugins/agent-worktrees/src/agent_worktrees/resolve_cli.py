@@ -14,6 +14,7 @@ from .launch_trace import append_launch_event
 from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
 from .launch_seed_exec import deferred_command
 from .worktree_creation import LaunchSeedStagingFailure
+from .launch_progress import step
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
 
 
@@ -181,7 +182,8 @@ class ResolveCommandState:
 
     def load_config(self) -> cfg.Config:
         if self.config is None:
-            self.config = cfg.load_config()
+            with step("Resolving launch configuration", enabled=not self.ordinary_picker):
+                self.config = cfg.load_config()
         return self.config
 
     def _resolve_codename_selector(self) -> None:
@@ -292,11 +294,13 @@ def add_parsers(sub) -> None:
     )
     parser.add_argument("--profile", help="Copilot backend profile name (skips Tab toggle)")
     parser.add_argument(
-        "--defer-new-seed", action="store_true", default=True,
+        "--defer-new-seed", action="store_true", default=None,
         help="Keep creation prompts queued until the returned command executes",
     )
     parser.add_argument("--stage-launch-seed", action="store_true", help="Require typed launch-seed staging")
     parser.add_argument("--seed-id", default=None, help="Execute this already-staged launch intent")
+    parser.add_argument("--launch-request-b64", default=None, help="Accept a structured target-local launch request")
+    parser.add_argument("--launch-request-status", default=None, help="Inspect an admitted target-local launch request")
     parser.add_argument("--machine", default=None, help="Target machine name (bypasses machine picker)")
     parser.add_argument(
         "--environment",
@@ -338,8 +342,8 @@ def add_parsers(sub) -> None:
     parser.add_argument(
         "--seed",
         default=None,
-        help="With --new or --worktree-id (not supported alongside "
-        "--machine or --bare-resume): a prompt delivered as the session's "
+        help="With --new or --worktree-id (not --bare-resume): local or "
+        "non-preview --json --machine prompt admission, delivered as the session's "
         "first (--new) or next (--worktree-id resume) interactive turn "
         "once Copilot is actually ready. With --worktree-id, carried "
         "durably as a `--interactive` argument on the resume launch's own "
@@ -357,6 +361,15 @@ def add_parsers(sub) -> None:
 
 def cmd_resolve(args: argparse.Namespace) -> int:
     """Resolve a launch plan and emit it as JSON."""
+    if (
+        getattr(args, "launch_request_b64", None) is not None
+        or getattr(args, "launch_request_status", None) is not None
+    ):
+        from .launch_request import cmd_request
+
+        return cmd_request(args)
+    if getattr(args, "defer_new_seed", None) is None:
+        args.defer_new_seed = True
     append_launch_event("resolve_handler_start")
     try:
         state = ResolveCommandState.from_args(args)
@@ -382,20 +395,14 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         output.err(message)
         return 2
 
-    if state.requested_machine and requested_seed:
-        # Validated here, before the JSON/non-JSON split: the non-JSON
-        # dispatcher checks state.use_new before state.requested_machine
-        # (below) and would otherwise silently create/resume a LOCAL
-        # seeded worktree instead of honoring (or rejecting) --machine --
-        # a confusing result regardless of --seed. The JSON path's own
-        # reason still applies too: its remote dispatch relays a naively
-        # space-joined command string with zero shell quoting, unsafe for
-        # an arbitrary --seed value. Applies to both --new and
-        # --worktree-id (resume) targets alike.
-        message = (
-            "--seed is not yet supported for a remote --machine target; "
-            "use --seed on this machine only, or omit --machine."
-        )
+    if state.requested_machine and requested_seed and (
+        not state.use_json or getattr(state.args, "seed_id", None)
+        or getattr(state.args, "dry_run", False)
+    ):
+        # Remote text uses structured non-preview JSON admission. The
+        # interactive resolver must not fall through into a local creation;
+        # an existing staged identity is executed only on its owning target.
+        message = "--seed with --machine requires non-preview JSON admission; staged identities execute on the target."
         if state.use_json:
             return output._json_error(message)
         output.err(message)
@@ -596,11 +603,12 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 remote_args.append("--restore")
         if getattr(state.args, "target_no_mux", False):
             remote_args.append("--no-mux")
-        rc = _emit_remote_plan_for_env(
-            config,
-            state.requested_machine,
-            getattr(state.args, "environment", None) or "",
-            remote_args,
+        route_args = (config, state.requested_machine,
+                      getattr(state.args, "environment", None) or "", remote_args)
+        seed = getattr(state.args, "seed", None)
+        rc = (
+            _emit_remote_plan_for_env(*route_args, seed=seed)
+            if seed else _emit_remote_plan_for_env(*route_args)
         )
         if rc is not None:
             return rc
@@ -684,7 +692,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     except ExecutionSpaceError as exc:
         return output._json_error(str(exc), exit_code=3)
     try:
-        staged_seed = seed_for_attempt(yaml_path, record, state.args)
+        with step("Preparing launch prompt", worktree_id=worktree_id):
+            staged_seed = seed_for_attempt(yaml_path, record, state.args)
     except (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome) as exc:
         return output._json_error(f"Could not stage launch prompt: {exc}", exit_code=3)
     launch_preflight = _preflight_launch(config, state.args, record.worktree_path)
@@ -704,7 +713,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         )
         if not restored.get("ok"):
             return output._json_error(restored.get("reason", "could not restore the session"))
-    verdict = sessions.verify_worktree_active(record)
+    with step("Verifying worktree liveness", worktree_id=worktree_id):
+        verdict = sessions.verify_worktree_active(record)
     if staged_seed is not None and plain_live_open(state.args, verdict):
         staged_seed = None
     if staged_seed is not None and not getattr(state.args, "bare_resume", False):
@@ -717,7 +727,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 "but will not be automatically submitted twice.", exit_code=3,
             )
     try:
-        with tracking._RecordLock(yaml_path, require_sidecar=True):
+        with step("Recording worktree resume", worktree_id=worktree_id), tracking._RecordLock(
+            yaml_path, require_sidecar=True,
+        ):
             record = tracking.load_record(yaml_path)
             require_record_mutation(record, config)
             tracking.mark_resumed(record, save=False)
@@ -740,36 +752,41 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     no_resume = getattr(state.args, "no_resume", False)
     last_session = None
     if not no_resume:
-        last_session = sessions.find_latest_session_id_fast(record.worktree_path, record.sessions)
+        with step("Resolving resume session", worktree_id=worktree_id):
+            last_session = sessions.find_latest_session_id_fast(record.worktree_path, record.sessions)
     explicit_profile = _resolve_profile(config, state.args)
     try:
-        selection = _launch_profile_selection(
-            config,
-            state.args,
-            record,
-            lane="new",
-            generation_key=f"new:{record.worktree_id}",
-            explicit_profile=explicit_profile,
-            resume_session=last_session,
-        )
+        with step("Selecting launch profile", worktree_id=worktree_id):
+            selection = _launch_profile_selection(
+                config,
+                state.args,
+                record,
+                lane="new",
+                generation_key=f"new:{record.worktree_id}",
+                explicit_profile=explicit_profile,
+                resume_session=last_session,
+            )
     except profile_assignment.ProfileAssignmentError as exc:
         return output._json_error(str(exc), exit_code=3)
     _reflect_assignment(record, selection)
-    launch_cmd = _build_launch_cmd(
-        config,
-        state.args,
-        record.worktree_path,
-        profile=selection.profile,
-        preflight=launch_preflight,
-    )
-    env = _apply_assignment_env(
-        _build_env(
-            selection.profile,
-            _repo_session_env(config, record.worktree_path),
-            work_dir=record.worktree_path,
-        ),
-        selection,
-    )
+    with step("Building launch command", worktree_id=worktree_id):
+        launch_cmd = _build_launch_cmd(
+            config,
+            state.args,
+            record.worktree_path,
+            profile=selection.profile,
+            preflight=launch_preflight,
+        )
+    with step("Preparing launch environment", worktree_id=worktree_id):
+        env = _apply_assignment_env(
+            _build_env(
+                selection.profile,
+                _repo_session_env(config, record.worktree_path),
+                work_dir=record.worktree_path,
+                config=config,
+            ),
+            selection,
+        )
 
     if last_session:
         launch_cmd.append(f"--resume={last_session}")
@@ -800,7 +817,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     project = config.repo_name
     if project:
         launch["project"] = project
-    output._json_output({"worktree": _worktree_to_dict(record), "launch": launch})
+    with step("Emitting launch plan", worktree_id=worktree_id):
+        output._json_output({"worktree": _worktree_to_dict(record), "launch": launch})
     return 0
 
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "copilot-extensions-worktree-manager"
-version = "0.6.27-dev1"
+version = "0.6.28-dev1"
 description = "Standalone, out-of-plugin control plane (installer, configurator & worktree launcher) for the copilot-extensions harness."
 readme = "README.md"
 license = "MIT"
@@ -66,6 +66,10 @@ dependencies = [
     # ``machine_transport``). Used by the production Picker's
     # local-vs-remote dispatch decisions (data_local.is_local/data_ssh.is_local).
     "agent-machine-transport",
+    # Shared update-run telemetry: JSONL events, folded status file, and the
+    # update exit-code table (module ``update_telemetry``). Used by
+    # ``worktree-manager update``, which owns the run the engine joins.
+    "agent-update-telemetry",
 ]
 
 [tool.uv.sources]
@@ -118,6 +122,13 @@ agent-remote-login-shell = { path = "libs/remote-login-shell" }
 # `main`-branch release (tools/materialize_main.py) ever gets a real local
 # copy.
 agent-machine-transport = { path = "libs/machine-transport" }
+# Shared update-run telemetry (module ``update_telemetry``). This is a
+# `uv`-editable canonical reference (vendor-pointer-generalization effort,
+# Phase 1): `path` escapes this project's own root and resolves live to
+# `libs/update-telemetry`, so this `dev`-branch checkout has nothing to keep
+# manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
+agent-update-telemetry = { path = "libs/update-telemetry" }
 
 [project.scripts]
 worktree-manager = "worktree_manager.__main__:console_entry"

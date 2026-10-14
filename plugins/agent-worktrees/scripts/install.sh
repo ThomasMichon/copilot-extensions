@@ -682,7 +682,10 @@ _versioned_activate_inner() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_PYTHON"
-    [[ -x "$py" ]] || return 0
+    if [[ ! -f "$py" || ! -x "$py" ]]; then
+        err "Runtime interpreter missing for versions/$SRC_VERSION -- refusing activation"
+        return 1
+    fi
     # A bare `import agent_worktrees` is NOT a sufficient health check: the
     # `agent_worktrees` directory merely EXISTING makes it importable as a PEP
     # 420 namespace package even when it holds zero `.py` files (e.g. an
@@ -768,7 +771,7 @@ _versioned_activate_inner() {
             unset AGENT_RT_ROOT
         fi
     fi
-    _versioned_mark_complete
+    _versioned_mark_complete || return $?
     # Touch the just-superseded slot's mtime IMMEDIATELY after resolving it,
     # BEFORE activate() runs (see #4451): installs run
     # concurrently by design, so a delay here (activate + status-monitor-
@@ -1546,13 +1549,32 @@ _versioned_mark_complete() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
+    if ! py="$(_bootstrap_python)" || [[ -z "$py" ]]; then
+        err "Completion publication requires bootstrap Python -- refusing activation"
+        return 1
+    fi
     local ph
-    ph="$(_payload_hash)"
+    if ! ph="$(_payload_hash)" || [[ -z "$ph" ]]; then
+        err "Runtime input fingerprint unavailable -- refusing completion publication"
+        return 1
+    fi
     local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /' || true
+    args+=(--payload-hash "$ph")
+    local rc
+    if "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'; then
+        rc=0
+    else
+        local -a pipeline_status=("${PIPESTATUS[@]}")
+        rc="${pipeline_status[0]}"
+        if [[ "${pipeline_status[1]}" -ne 0 ]]; then
+            rc="${pipeline_status[1]}"
+            err "Completion output formatter failed (exit $rc; publisher exit ${pipeline_status[0]}) -- refusing activation"
+        fi
+    fi
+    if [[ "$rc" -ne 0 ]]; then
+        err "Completion publication failed for versions/$SRC_VERSION -- refusing activation"
+    fi
+    return "$rc"
 }
 
 _test_slot_already_complete() {
@@ -1738,6 +1760,18 @@ deploy_package() {
         if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-machine-transport \
                 "$machine_transport_dir" --quiet; then
             err "machine-transport library install failed"
+            return 1
+        fi
+    fi
+
+    # Vendored update-telemetry lib (agent-update-telemetry / module
+    # update_telemetry). Same materialized-release guard as machine-transport
+    # above; stdlib-only, so it has no ordering constraint of its own.
+    local update_telemetry_dir="$PLUGIN_DIR/libs/update-telemetry"
+    if [[ -f "$update_telemetry_dir/pyproject.toml" ]]; then
+        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-update-telemetry \
+                "$update_telemetry_dir" --quiet; then
+            err "update-telemetry library install failed"
             return 1
         fi
     fi

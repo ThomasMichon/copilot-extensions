@@ -1298,7 +1298,12 @@ def verify_worktree_active(record) -> LiveVerdict:
     live_ids: list[str] = []
     bare = False
     try:
-        bound = reclaim.resolve_bound_copilots(worktree_id=wt_id)
+        bound = reclaim.resolve_bound_copilots(
+            worktree_id=wt_id,
+            session_ids=[
+                entry.session_id for entry in (getattr(record, "sessions", None) or ())
+            ],
+        )
         live_ids = sorted({b["session_id"] for b in bound if b.get("session_id")})
         bare = any(b.get("homing") == "bare" for b in bound)
     except Exception:

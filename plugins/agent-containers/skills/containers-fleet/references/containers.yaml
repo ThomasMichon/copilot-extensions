@@ -4,13 +4,18 @@
 # ~/.agent-containers/containers.yaml, then (only when agent-worktrees is present
 # and bound to external state) a knowledge-overlay containers.yaml.
 
-schema_version: 1
+schema_version: 2
 
 # Global defaults; fleets may override workspace_folder, exec_user, and
 # acp_command individually.
 exec_user: vscode
 workspace_folder: /workspace
 forward_gh_token: true
+# Independent host Copilot login used only for inference. Replace this example
+# with a Copilot account already signed in on the host; gh/Git keep their own
+# repository credentials. Missing host login refuses a new Copilot launch.
+copilot_auth_mode: host-copilot
+copilot_cli_account: your-copilot-login
 image_prefixes:
   - vsc-                              # fallback discovery for VS Code devcontainers
 

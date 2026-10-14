@@ -27,6 +27,7 @@ from .registrar import (
     load_declaration,
 )
 from .worker_identities import load_worker_identity
+from .repository_resources import RepositoryResourceSnapshot, execution_root, is_repository_resource
 
 _TERMINAL = frozenset({"completed", "abandoned", "dead_letter"})
 _ACTIVE_STATUSES = "proposed,queued,claimed,started,suspended,submitted"
@@ -40,6 +41,7 @@ _KNOWN_KEYS = frozenset(
         "tick_interval_seconds",
         "effort_slugs",
         "state_root",
+        "execution_repo",
         "task_label",
         "pool",
         "filters",
@@ -107,11 +109,16 @@ def _resolve_state_root(
     state_root: str | None,
     *,
     cwd: str | Path | None,
+    snapshot: RepositoryResourceSnapshot | None = None,
 ) -> str:
     if state_root is None:
         if cwd is None:
             return str(Path.cwd().resolve())
         return str(Path(cwd).resolve())
+    if is_repository_resource(state_root):
+        return (snapshot or RepositoryResourceSnapshot()).resolve(
+            state_root, directory=True, execution=False,
+        )
     root = Path(state_root)
     if not root.is_absolute():
         if cwd is None:
@@ -125,6 +132,7 @@ def validate_config(
     data: Mapping[str, Any],
     *,
     cwd: str | Path | None = None,
+    resolve_resources: bool = True,
 ) -> dict[str, Any]:
     """Validate/normalize a declaration. ``cwd`` (declaring repo root, if
     known) threads a named ``worker_identity`` to its repo-local override and
@@ -138,6 +146,10 @@ def validate_config(
         )
     if data.get("kind") != "effort-driver-loop":
         raise RegistrarError("effort-driver-loop kind must be 'effort-driver-loop'")
+    snapshot = RepositoryResourceSnapshot()
+    cwd = execution_root(
+        data.get("execution_repo"), cwd, snapshot=snapshot, resolve_resources=resolve_resources,
+    )
     name = _string(data, "name")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
         raise RegistrarError("effort-driver-loop name: use letters, digits, '.', '_' or '-'")
@@ -169,7 +181,14 @@ def validate_config(
         not isinstance(raw_state_root, str) or not raw_state_root
     ):
         raise RegistrarError("effort-driver-loop state_root: expected a non-empty string")
-    state_root = _resolve_state_root(raw_state_root, cwd=cwd)
+    if raw_state_root and is_repository_resource(raw_state_root):
+        from .repository_resources import split_repository_resource
+
+        split_repository_resource(raw_state_root)
+    state_root = (
+        _resolve_state_root(raw_state_root, cwd=cwd, snapshot=snapshot)
+        if resolve_resources else raw_state_root
+    )
 
     pool = data.get("pool")
     if not isinstance(pool, Mapping):
@@ -236,7 +255,7 @@ def validate_config(
             "guidance, not both"
         )
     identity_name = ""
-    if worker_identity:
+    if worker_identity and resolve_resources:
         identity = load_worker_identity(worker_identity, cwd=Path(cwd) if cwd else None)
         guidance = identity.rules
         identity_name = identity.name
@@ -287,6 +306,7 @@ def validate_config(
         "tick_interval_seconds": tick_interval,
         "effort_slugs": list(effort_slugs),
         "state_root": state_root,
+        **({"execution_repo": data["execution_repo"]} if "execution_repo" in data else {}),
         "task_label": task_label,
         "pool": pool,
         "filters": filters_payload(placement),
@@ -308,14 +328,16 @@ def expand_effort_driver_loop(
     repo_root: str | Path | None = None,
 ) -> tuple[ProfileDeclaration, ...]:
     """Expand into one emitter + one worker lane."""
-    config = validate_config(data, cwd=repo_root)
+    config = validate_config(data, cwd=repo_root, resolve_resources=False)
     spec: dict[str, Any] = {
         "id": f"{config['name']}-source",
         "interval_seconds": config["tick_interval_seconds"],
         "lease_scope": f"effort-driver-loop:{config['name']}",
         "effort_driver_loop": dict(data),
     }
-    if repo_root is not None:
+    if data.get("execution_repo") is not None:
+        spec["cwd"] = f"repo:{data['execution_repo']}:."
+    elif repo_root is not None:
         spec["cwd"] = str(Path(repo_root).resolve())
     common = {
         "owner": config["owner"],

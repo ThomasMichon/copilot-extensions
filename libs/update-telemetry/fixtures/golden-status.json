@@ -1,0 +1,89 @@
+{
+  "schema": "copilot-extensions.update-status",
+  "version": 1,
+  "updated_at": "2026-10-10T04:14:31.000Z",
+  "run": {
+    "id": "20261010T041200Z-1234-abcd",
+    "owner": "manager:1234",
+    "trigger": "manual",
+    "started_at": "2026-10-10T04:12:00.000Z",
+    "ended_at": "2026-10-10T04:14:31.000Z",
+    "duration_ms": 151000,
+    "host": "example-host",
+    "platform": "linux",
+    "events_path": "/home/user/.copilot-extensions/update/runs/20261010T041200Z-1234-abcd/events.jsonl",
+    "event_parse_errors": 1,
+    "outcome": "timeout",
+    "exit_code": 6,
+    "phases": [
+      {
+        "phase": "manager_self_update",
+        "started_at": "2026-10-10T04:12:00.100Z",
+        "duration_ms": 5000,
+        "outcome": "verified_current"
+      },
+      {
+        "phase": "payload_refresh",
+        "started_at": "2026-10-10T04:12:05.200Z",
+        "duration_ms": 24800,
+        "outcome": "verified_current"
+      },
+      {
+        "phase": "runtime_reconcile",
+        "started_at": "2026-10-10T04:12:30.100Z",
+        "duration_ms": 119900,
+        "outcome": "timeout"
+      }
+    ]
+  },
+  "last_success": {
+    "run_id": "20261009T010000Z-99-beef",
+    "ended_at": "2026-10-09T01:05:00.000Z",
+    "duration_ms": 300000
+  },
+  "last_failure": {
+    "run_id": "20261010T041200Z-1234-abcd",
+    "ended_at": "2026-10-10T04:14:31.000Z",
+    "outcome": "timeout",
+    "summary": "agent-index@copilot-extensions: timeout (timed out)",
+    "fix": "Re-run the update; if one installer keeps timing out, raise its <NAME>_INSTALL_DEADLINE_SEC (or COPILOT_PLUGIN_INSTALL_DEADLINE_SEC)."
+  },
+  "restart_required": false,
+  "restart_reasons": [],
+  "advisories": [
+    {
+      "component": "retired-plugin@copilot-extensions",
+      "outcome": "command_failed",
+      "summary": "plugin state error"
+    }
+  ],
+  "plugins": {
+    "agent-bridge@copilot-extensions": {
+      "changed": true,
+      "required": true,
+      "outcome": "verified_current",
+      "durations_ms": {
+        "runtime_reconcile": 17840
+      }
+    },
+    "agent-index@copilot-extensions": {
+      "changed": false,
+      "required": true,
+      "outcome": "timeout",
+      "detail": "timed out",
+      "error_code": "timeout",
+      "notes": [
+        "timeout"
+      ],
+      "durations_ms": {
+        "runtime_reconcile": 60000
+      }
+    },
+    "retired-plugin@copilot-extensions": {
+      "changed": false,
+      "required": false,
+      "outcome": "command_failed",
+      "detail": "plugin state error"
+    }
+  }
+}

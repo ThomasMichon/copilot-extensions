@@ -26,7 +26,10 @@ _REMOTE_ACCEPT_TIMEOUT = 15.0
 def same_machine(a: str, b: str, *, project: str | None = None) -> bool:
     """Authorize canonical local refs through receiving-side project settings."""
     try:
-        config = cfg.load_project_config(project) if project else cfg.load_config()
+        config = (
+            cfg.load_project_config(project, include_control_plane_related_pr=False)
+            if project else cfg.load_config(include_control_plane_related_pr=False)
+        )
     except (OSError, ValueError) as exc:
         raise ExecutionSpaceError(f"cannot establish handoff execution-space authority: {exc}") from exc
     return require_owner_identity(a, config) and require_owner_identity(b, config)
@@ -63,7 +66,9 @@ def require_handoff_consumer(bundle, machine: str, error_type: type[Exception]) 
     if consumer is None or source is None:
         raise error_type("claim bundle has invalid source or consumer identity")
     try:
-        config = cfg.load_project_config(consumer.project)
+        config = cfg.load_project_config(
+            consumer.project, include_control_plane_related_pr=False,
+        )
         if not require_owner_identity(consumer.machine, config) or not require_owner_identity(machine, config):
             raise error_type("claim bundle consumer is not the current registered execution space")
         if (

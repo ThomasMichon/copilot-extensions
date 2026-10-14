@@ -619,6 +619,22 @@ opt-out). Useful flags: `--no-open` (push only),
 the result carries `pr_open_error` so you can fall back to Steps 2-3 below. A
 repo **without** provider credentials configured uses the manual flow unchanged.
 
+**Manual PR metadata is still the author's responsibility.** If another tool
+opens the PR, prepare its UTF-8 description from the managed source worktree
+with `<agent-worktrees catalog argv[0]> attribution-prepare --body-file
+authored-pr.md`, save the prepared output, and pass it to the existing
+provider's description update flow. The command emits a marker when no body
+file is supplied and does not mutate remote PRs. See
+[pr-attribution.md](pr-attribution.md) for format and optional adopter tags.
+
+When a repository's required CI rejects missing source attribution, repair the
+description rather than adding a dummy commit or bypassing its PR tools again.
+If the preparation command is not yet installed, append the documented source
+comment using the actual assigned public codename from worktree creation or
+listing. Never invent a source, expose raw identifiers, or silently weaken an
+intentional opt-out. Ask the operator when no publishable source exists.
+Agents must not apply or remove operator-only policy labels to bypass CI.
+
 **Branch-name leak class.** The hidden marker above is not the only surface
 that can carry a private identifier -- the PR head's *branch name* is public
 too. Whenever `pr.source_attribution` isn't exactly `true`, `create-pr` hard-

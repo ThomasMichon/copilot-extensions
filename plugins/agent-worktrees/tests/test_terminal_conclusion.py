@@ -826,8 +826,8 @@ def test_terminal_managed_record_rejects_new_session_activation(
             remote=repo.remote, default_branch=repo.default_branch,
         )},
     )
-    monkeypatch.setattr(cli.cfg, "load_project_config", lambda project: config)
-    monkeypatch.setattr(cli.cfg, "load_machines_yaml", lambda anchor: {})
+    monkeypatch.setattr(cli.cfg, "load_project_config", lambda project, **kwargs: config)
+    monkeypatch.setattr(cli.cfg, "load_machines_yaml", lambda anchor, **_kwargs: {})
     monkeypatch.setattr(
         tracking.cfg,
         "tracking_dir",
@@ -999,7 +999,7 @@ def test_cli_remove_rejects_embedded_identity_mismatch(
     monkeypatch.setattr(
         cli.cfg,
         "load_project_config",
-        lambda _project: types.SimpleNamespace(repo_name="demo"),
+        lambda _project, **kwargs: types.SimpleNamespace(repo_name="demo"),
     )
     monkeypatch.setattr(
         cli.tracking,
@@ -1037,7 +1037,7 @@ def test_cli_remove_is_idempotent_when_record_disappears_after_lookup(
     monkeypatch.setattr(
         cli.cfg,
         "load_project_config",
-        lambda _project: types.SimpleNamespace(repo_name="demo"),
+        lambda _project, **kwargs: types.SimpleNamespace(repo_name="demo"),
     )
     monkeypatch.setattr(
         cli.tracking,
@@ -1072,7 +1072,7 @@ def test_cli_remove_is_idempotent_when_record_disappears_during_conclusion(
         "_project_for_tracking_file",
         lambda _path: "demo",
     )
-    monkeypatch.setattr(cli.cfg, "load_project_config", lambda _project: config)
+    monkeypatch.setattr(cli.cfg, "load_project_config", lambda _project, **kwargs: config)
     monkeypatch.setattr(cli, "_repo_for_record", lambda _config, _record: repo)
 
     def disappear(*_args, **_kwargs):
@@ -1116,7 +1116,7 @@ def test_cli_remove_runs_exact_managed_sweep_after_eligibility(
         "_project_for_tracking_file",
         lambda _path: "demo",
     )
-    monkeypatch.setattr(cli.cfg, "load_project_config", lambda _project: config)
+    monkeypatch.setattr(cli.cfg, "load_project_config", lambda _project, **kwargs: config)
     monkeypatch.setattr(cli, "_repo_for_record", lambda _config, _record: repo)
     monkeypatch.setattr(
         cli.terminal_conclusion,
@@ -1177,7 +1177,7 @@ def test_cli_remove_surfaces_fresh_managed_sweep_skip(
         "_project_for_tracking_file",
         lambda _path: "demo",
     )
-    monkeypatch.setattr(cli.cfg, "load_project_config", lambda _project: config)
+    monkeypatch.setattr(cli.cfg, "load_project_config", lambda _project, **kwargs: config)
     monkeypatch.setattr(cli, "_repo_for_record", lambda _config, _record: repo)
     monkeypatch.setattr(
         cli.terminal_conclusion,
@@ -1234,7 +1234,7 @@ def test_cli_remove_accepts_concurrent_exact_removal(
         "_project_for_tracking_file",
         lambda _path: "demo",
     )
-    monkeypatch.setattr(cli.cfg, "load_project_config", lambda _project: config)
+    monkeypatch.setattr(cli.cfg, "load_project_config", lambda _project, **kwargs: config)
     monkeypatch.setattr(cli, "_repo_for_record", lambda _config, _record: repo)
     monkeypatch.setattr(
         cli.terminal_conclusion,

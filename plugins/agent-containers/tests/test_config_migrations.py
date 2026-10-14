@@ -36,7 +36,7 @@ def test_run_migrations_stamps_machine_local_file(tmp_path, monkeypatch):
     first = config_migrations.run_migrations()
     assert any(r.changed for r in first)
     text = runtime_cfg.read_text(encoding="utf-8")
-    assert "# fleet config" in text  # comment preserved by the textual stamp
+    assert "copilot_auth_mode: legacy" in text
     assert f"schema_version: {config_migrations.current_version()}" in text
     assert "exec_user: bob" in text
 

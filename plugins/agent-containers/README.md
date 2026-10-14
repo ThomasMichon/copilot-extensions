@@ -212,6 +212,7 @@ are therefore preserved fail-closed until their bounded heartbeat expires.
 ```yaml
 exec_user: vscode
 workspace_folder: /workspaces/myrepo
+copilot_cli_account: inference-user   # intended host Copilot login; no gh fallback
 forward_gh_token: true
 image_prefixes:
   - vsc-myrepo-                  # narrow discovery to your devcontainer image
@@ -225,18 +226,19 @@ fleets:
 
 ### Separating Copilot CLI inference identity from git/PR identity
 
-By default, `forward_gh_token`'s GH_TOKEN does double duty for a trusted
-fleet: it is both the in-container `git`/`gh` identity AND (per Copilot
-CLI's own env-var precedence: `COPILOT_GITHUB_TOKEN` > `GH_TOKEN` >
-`GITHUB_TOKEN`) the identity Copilot CLI itself authenticates inference
-requests as. Some setups want these to be two DIFFERENT GitHub accounts --
-e.g. a dedicated/dev account backs git commits and PRs while a separate
-seat's Copilot subscription backs the actual model calls. Set
+Trusted launches default to `copilot_auth_mode: host-copilot`. This mode
+requires the intended host Copilot account and its current token, independently
+of the in-container `git`/`gh` identity. An unset account or missing source
+refuses the launch, even if `GH_TOKEN`, `GITHUB_TOKEN`, ambient inference
+credentials or an existing container login are available. No arbitrary account
+is selected to repair an unset policy. Set
 `copilot_cli_account` (globally or per-fleet) to the GitHub account whose
 own Copilot CLI login on THIS HOST should back `COPILOT_GITHUB_TOKEN`,
 independent of whatever GH_TOKEN carries:
 
 ```yaml
+schema_version: 2
+copilot_auth_mode: host-copilot       # default; no repository-token fallback
 copilot_cli_account: inference-user   # global default for every trusted fleet
 fleets:
   myrepo:
@@ -254,11 +256,77 @@ refreshed by agent-containers itself. The operator keeps it current simply
 by running `copilot login` as that account on this host; agent-containers
 only ever reads whatever is currently there, and fails closed (refuses to
 launch, naming the exact fallback command below) if that account has no
-live login yet. `None` (the default, for both the global and per-fleet
-settings) means no fleet separates the two identities -- Copilot CLI falls
-back to whatever GH_TOKEN/GITHUB_TOKEN already carries, the pre-existing
-behavior. Restricted fleets never receive this (or any) host credential,
+live login yet. An unset `copilot_cli_account` is an admission failure in the
+default host-Copilot mode, not a request to use repository credentials.
+Restricted fleets never receive this (or any) host credential,
 same hard boundary as `forward_gh_token`.
+
+Compatibility is explicit: `copilot_auth_mode: legacy` (global or per-fleet)
+opts into the old native/container/repository authentication behavior. It does
+not promise host-Copilot identity or inference-token isolation and is never an
+implicit fallback from a failed host-Copilot launch. A per-fleet mode overrides
+the global mode; an invalid mode refuses configuration. Restricted inference
+does not use either trusted authentication mode and remains unchanged.
+
+Existing version-1/unversioned configurations are migrated compatibly to an
+explicit mode: already selected Copilot accounts retain `host-copilot`; other
+old configurations retain `legacy` with a visible warning. The loader migrates
+in memory only; the existing authorized installer migration stamps the
+machine-local copy, never a repository copy. This does not make legacy the
+default of a new version-2 configuration or permit fallback from host mode.
+To adopt the new isolation contract deliberately, set `schema_version: 2`,
+`copilot_auth_mode: host-copilot`, and the intended `copilot_cli_account`.
+
+For an explicit `copilot_cli_account`, trusted ACP, Session Host child, and
+attached/detached CLI launches re-read that existing host source for each launch. Only
+the native Copilot process receives the selected inference token: a private,
+one-use launch file is consumed by a narrow executable wrapper, not sourced
+into the Session Host, `embody`, tmux, container, or session environment.
+Successful CLI startup must confirm the native child consumed its file before
+cleanup removes the executable wrapper; an `embody` return alone is not proof
+of native startup. Explicit create-or-resume receipts distinguish a new native
+child from rejoining a running session: a rejoin cleans unused launch inputs
+without claiming the existing process's authentication was refreshed.
+The attended CLI writes that nonsecret result before attaching.
+SSH failure, interruption, or a missing receipt does not prove that a detached
+child was never created. Those ambiguous outcomes retain the scoped launch
+inputs for the bounded abandoned-input reaper; only confirmed consumption,
+an explicit resume receipt, or failure before submitting the remote launch
+allows immediate cleanup. Receipt handling is independent of the SSH exit code.
+Session Host authentication lives in the existing launch handle's companion
+directory, so the original `session-host-cleanup --remote-env` call removes it
+even when an older bridge knows no additional authentication response fields.
+Consumption has its own explicit receipt; token-file absence alone is not
+success. Abandoned UUID-scoped inputs and companion directories are reaped
+after a conservative one-hour staging lease, while fresh inputs and matching
+active PID/start-time bindings are preserved. Unknown names and symlinked
+scopes are not swept.
+Copilot receives `--secret-env-vars=COPILOT_GITHUB_TOKEN`, which strips that
+value from its normal shell and MCP child environments. Existing `GH_TOKEN`,
+`GITHUB_TOKEN`, Git credential helpers, and relay identities are independent
+and remain available to downstream tools.
+
+The target's native `copilot --help` must confirm `--secret-env-vars` support
+before staging authentication. Missing source tokens or unsupported CLI
+capabilities refuse the launch; they never fall back to the Git identity.
+ACP commands must directly execute PATH-resolved `copilot` (including the
+target-preference launcher template), optionally after one `cd ... &&` and/or
+`exec`, not an absolute executable override, custom command or shell pipeline.
+Attached/detached launches
+require an agent-worktrees runtime accepting `--copilot-process-launcher`;
+an older runtime rejects that option before launching. Direct `copilot`
+templates and normalized setup are supported; custom executable templates and
+configured `copilot_path` overrides refuse rather than bypass isolation.
+Caller-supplied `--secret-env-vars` overrides or `--` separators are likewise
+refused for these authenticated launches.
+
+This is accidental-inheritance isolation in a **trusted** venue, not a hard
+credential-custody boundary: trusted agents can access their inference
+credential. It neither changes the existing source parser nor proves a
+vendor storage/expiry/refresh schema. Synthetic launch tests establish
+per-launch source rereads, child argv/environment isolation and fail-closed
+behavior, not live OAuth or inference success. Restricted native-proxy
+launches remain separate and never receive a host inference token.
 
 **Worst case: no live login exists anywhere for the configured account yet.**
 Run the device-code flow INSIDE a running container of the target fleet

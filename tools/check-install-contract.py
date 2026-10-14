@@ -18,6 +18,11 @@ Each plugin with a runtime installer must, per language variant:
      `install-contract:v3 versioned-venv` block), so a version bump builds a
      fresh versions/<v> slot and swaps a `.venv`/`venv` link instead of ever
      mutating a live runtime's venv.
+  6. declare a reconcilable ``runtimeScope`` in ``plugin.json``: every plugin's
+     declared scope must be one the reconciler accepts, and a plugin that ships a
+     runtime installer (``scripts/install.*`` or ``scripts/init.*``) must declare
+     ``universal`` or ``machine-gated`` -- never ``none`` or nothing -- so the
+     launch-time reconcile and ``update`` keep its runtime current.
 
 The enforced entrypoint pair is the plugin's *canonical* installer: `install.*`
 when present (it carries an `update` action), otherwise `init.*` for plugins
@@ -232,6 +237,76 @@ def _entrypoint_base(plugin: Path) -> str | None:
     return None
 
 
+# The ``runtimeScope`` values the reconciler accepts -- kept in lockstep with
+# ``agent_worktrees.reconcile.VALID_SCOPES`` by tools/test_check_install_contract.py.
+VALID_RUNTIME_SCOPES = ("universal", "machine-gated", "none")
+RECONCILED_RUNTIME_SCOPES = ("universal", "machine-gated")
+
+
+def _runtime_scope_violations(plugins_dir: Path) -> list[str]:
+    """Validate each plugin's declared ``runtimeScope`` (docs/install-contract.md).
+
+    A declared scope must be one the reconciler accepts (an unknown value is
+    silently treated as ``none``). A plugin that ships a runtime installer must
+    declare a reconciled scope: with ``none`` (or no declaration) neither the
+    launch-time reconcile nor ``update`` ever rebuilds its runtime, so a payload
+    update leaves the deployed runtime stale.
+    """
+    violations: list[str] = []
+    for plugin in sorted(p for p in plugins_dir.iterdir() if p.is_dir()):
+        manifest = plugin / "plugin.json"
+        if not manifest.is_file():
+            continue
+        name = plugin.name
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            violations.append(f"{name}: plugin.json is unreadable ({exc})")
+            continue
+        if not isinstance(data, dict):
+            violations.append(f"{name}: plugin.json is not a JSON object")
+            continue
+        scope = data.get("runtimeScope")
+        if "runtimeScope" in data and scope not in VALID_RUNTIME_SCOPES:
+            violations.append(
+                f"{name}: runtimeScope {scope!r} is not one of "
+                f"{', '.join(VALID_RUNTIME_SCOPES)}"
+            )
+            continue
+        base = _entrypoint_base(plugin)
+        if base is not None and scope not in RECONCILED_RUNTIME_SCOPES:
+            declared = "undeclared" if scope is None else repr(scope)
+            violations.append(
+                f"{name}: ships a runtime installer (scripts/{base}.*) but runtimeScope "
+                f"is {declared} -- declare 'universal' or 'machine-gated' so the "
+                "launch-time reconcile and 'update' keep its runtime current"
+            )
+    return violations
+
+
+# `exec 8>"$f" 2>/dev/null` (no command) applies EVERY redirection to the
+# current shell, so it silently discards all of the installer's later stderr --
+# including its own failure messages. Group it instead:
+# `{ exec 8>"$f"; } 2>/dev/null` keeps fd 8 and restores stderr.
+_EXEC_STDERR_SWALLOW = re.compile(r'\bexec\s+\d+[<>]\s*(?:&-|&\d+|"[^"]*"|\S+)\s+2>\s*/dev/null')
+
+
+def _exec_stderr_swallow_violations(plugins_dir: Path) -> list[str]:
+    violations: list[str] = []
+    for path in sorted(plugins_dir.glob("*/scripts/*.sh")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if _EXEC_STDERR_SWALLOW.search(line):
+                violations.append(
+                    f"{path.relative_to(plugins_dir.parent).as_posix()}:{lineno}: "
+                    "`exec N>... 2>/dev/null` redirects the shell's stderr for the rest "
+                    "of the script; use `{ exec N>...; } 2>/dev/null`"
+                )
+    return violations
+
+
 def _verify_installer_engine_sync() -> list[str]:
     spec = importlib.util.spec_from_file_location("sync_installer_engine", INSTALLER_ENGINE_SYNC)
     if spec is None or spec.loader is None:
@@ -357,6 +432,9 @@ def check() -> int:
     if not plugins:
         print("No plugins with install scripts found.", file=sys.stderr)
         return 1
+
+    violations.extend(_runtime_scope_violations(PLUGINS_DIR))
+    violations.extend(_exec_stderr_swallow_violations(PLUGINS_DIR))
 
     persistent_environment_blocks: dict[str, str | None] = {}
     for path in sorted(PLUGINS_DIR.rglob("*.ps1")):

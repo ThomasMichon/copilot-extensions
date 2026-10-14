@@ -6,9 +6,8 @@ hardcode the axes (the prototype's ``engine.HOST_COLS`` / ``_TARGET_ENVS``),
 both data sources derive them here so adding a machine to ``machines.yaml``
 updates the matrix automatically (effort ``worktree-picker-tty-overhaul``).
 
-- **HOST columns** = every ``copilot`` machine's *native-terminal* environment
-  -- Windows or native Linux. A WSL environment is reached *through* a Windows
-  host's terminal, so it is never its own host column.
+- **HOST columns** = every ``copilot`` logical machine's execution environment,
+  including independently addressable WSL machines.
 - **TARGET rows** = every ``copilot`` machine x environment (WSL included);
   each becomes two rows (agent / shell) in the engine.
 
@@ -17,12 +16,17 @@ the engine then falls back to its built-in default axes.
 """
 from __future__ import annotations
 
+from machine_transport import (
+    find_machine_entry,
+    local_execution_platform,
+)
+
 from .. import project_config as cfg
 
 # machines.yaml environment name -> the picker's short env label (and C_ENV key).
 _ENV_LABEL = {"windows": "Win", "wsl": "WSL", "linux": "Linux"}
-# Native-terminal envs that can be a HOST column (never a remote-only WSL).
-_HOST_ENVS = {"windows", "linux"}
+# Execution environments that can be a HOST column.
+_HOST_ENVS = {"windows", "wsl", "linux"}
 # Compact host-column env suffix.
 _HOST_SHORT = {"Win": "Win", "WSL": "WSL", "Linux": "Lx"}
 
@@ -32,6 +36,8 @@ def _entries():
     try:
         config = cfg.load_config()
         return cfg.load_machines_yaml(config.default_repo.anchor)
+    except ValueError:
+        raise
     except Exception:
         return {}
 
@@ -45,20 +51,57 @@ def _copilot_envs():
         for env in getattr(m, "ssh_environments", []) or []:
             name = (env.name or "").lower()
             yield m, name, _ENV_LABEL.get(name, name.title() or "?")
+        if m.execution_platform and not m.ssh_environments:
+            name = m.execution_platform
+            yield m, name, _ENV_LABEL.get(name, name.title())
+
+
+def display_machine(entry):
+    """Physical association is cosmetic; all matrix keys stay logical."""
+    return entry.physical_host or entry.key
+
+
+def apply_display_machine(sources, entry):
+    for source in sources:
+        source.display_machine = display_machine(entry)
+        source.source_label = f"{source.display_machine} / {source.env}"
+
+
+def local_entry(entries, config_machine, hostname, execution_platform):
+    """Resolve the running execution space, not every sibling on its host."""
+    selected = find_machine_entry(entries, config_machine, reject_ambiguous=True)
+    if (
+        selected is not None and selected.execution_platform
+        and selected.execution_platform != execution_platform
+        and not selected.legacy_key
+    ):
+        raise ValueError(
+            f"configured machine {config_machine!r} is not the local {execution_platform} space"
+        )
+    for name in (config_machine, hostname):
+        if not name:
+            continue
+        entry = find_machine_entry(
+            entries, name, reject_ambiguous=True,
+            execution_platform=execution_platform,
+        )
+        if entry is not None:
+            return entry
+    return None
 
 
 def host_cols():
     """Profiles HOST columns: ``[(label, machine_key, env_label), ...]``.
 
-    One per copilot machine's native-terminal env (Windows / native Linux). The
+    One per copilot machine's execution env (Windows / WSL / native Linux). The
     persisted/matched identity is the machine's **roster key** (its canonical
-    full name); the visible header uses that same full name.
+    full name); the visible header uses its physical association when declared.
     """
     out = []
     for m, name, elabel in _copilot_envs():
         if name in _HOST_ENVS:
             short = _HOST_SHORT.get(elabel, elabel)
-            out.append((f"{m.key}\u00b7{short}", m.key, elabel))
+            out.append((f"{display_machine(m)}\u00b7{short}", m.key, elabel))
     return out
 
 
@@ -84,20 +127,18 @@ def local_host():
     from . import data_local
 
     host_key = socket.gethostname().split(".")[0].lower()
-    plat = cfg.detect_platform()
+    plat = local_execution_platform()
     try:
         config = cfg.load_config()
         config_machine = (config.machine or "").lower()
     except Exception:
         config_machine = ""
-    for m, name, elabel in _copilot_envs():
-        is_local_machine = (
-            m.key.lower() == host_key
-            or (getattr(m, "hostname", "") or "").lower() == host_key
-            or m.key.lower() == config_machine
-            or (getattr(m, "alias", "") or "").lower() == config_machine
-        )
-        if is_local_machine and name == plat:
-            return (m.key, elabel)
+    entries = _entries()
+    m = local_entry(entries, config_machine, host_key, plat)
+    if m is not None and m.copilot:
+        for env in m.ssh_environments:
+            name = (env.name or "").lower()
+            if name == plat:
+                return (m.key, _ENV_LABEL.get(name, name.title()))
+        return (m.key, _ENV_LABEL.get(plat, plat.title()))
     return data_local.LOCAL
-

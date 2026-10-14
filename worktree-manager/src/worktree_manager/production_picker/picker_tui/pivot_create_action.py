@@ -109,6 +109,22 @@ def _parse_create_fields(
             if allow_other:
                 field["allow_other"] = True
         condition = item.get("show_when")
+        if "default" in item:
+            default = item["default"]
+            if ftype == "multichoice":
+                if not isinstance(default, list) or any(
+                    not isinstance(value, str) or (
+                        not allow_other and value not in field.get("options", ())
+                    )
+                    for value in default
+                ):
+                    raise ManifestError(f"{where}[{i}].default must name declared options")
+            elif not isinstance(default, str) or (
+                ftype == "choice" and not allow_other
+                and default not in field.get("options", ())
+            ):
+                raise ManifestError(f"{where}[{i}].default is invalid for its field type")
+            field["default"] = default
         if condition is not None:
             if (
                 not isinstance(condition, Mapping)

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from . import breadcrumb, routing
+from .diagnostic_recovery import IdentityTerminator
 
 __all__ = [
     "DaemonCandidate",
@@ -154,12 +155,13 @@ def lock_data_is_live(data: dict | None) -> bool:
     return str(recorded) == str(current)
 
 
-def _terminate_windows_if_identity(pid: int, expected_start_time: str) -> dict:
+def _terminate_windows_if_identity(
+    pid: int, expected_start_time: str, exit_timeout: float | None = None,
+) -> dict:
     import ctypes
     from ctypes import wintypes
+    from .diagnostic_exit import PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, SYNCHRONIZE
 
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    PROCESS_TERMINATE = 0x0001
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     k32.OpenProcess.restype = wintypes.HANDLE
@@ -177,7 +179,8 @@ def _terminate_windows_if_identity(pid: int, expected_start_time: str) -> dict:
     k32.GetProcessTimes.restype = wintypes.BOOL
 
     handle = k32.OpenProcess(
-        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE, False, pid
+        PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE
+        | (SYNCHRONIZE if exit_timeout is not None else 0), False, pid,
     )
     if not handle:
         return {
@@ -210,29 +213,48 @@ def _terminate_windows_if_identity(pid: int, expected_start_time: str) -> dict:
                 "identity_verified": False,
                 "method": "windows-handle-identity-mismatch",
             }
-        return {
-            "killed": bool(k32.TerminateProcess(handle, 1)),
+        killed = bool(k32.TerminateProcess(handle, 1))
+        result = {
+            "killed": killed,
             "identity_verified": True,
             "method": "windows-verified-handle",
         }
+        if exit_timeout is not None:
+            from .diagnostic_exit import wait_windows
+
+            result["exit_confirmed"] = killed and wait_windows(k32, handle, exit_timeout)
+        return result
     finally:
         k32.CloseHandle(handle)
 
 
-def _terminate_posix_if_identity(pid: int, expected_start_time: str) -> dict:
+def _terminate_posix_if_identity(
+    pid: int, expected_start_time: str, exit_timeout: float | None = None,
+) -> dict:
     import signal
 
     pidfd_open = getattr(os, "pidfd_open", None)
     pidfd_send_signal = getattr(signal, "pidfd_send_signal", None)
     if not callable(pidfd_open) or not callable(pidfd_send_signal):
+        if platform.system() != "Linux":
+            return {
+                "killed": False,
+                "identity_verified": False,
+                "method": "pidfd-unavailable",
+            }
+        from .singleton_linux import _open_pidfd, _send_pidfd_signal
+
+        pidfd_open = _open_pidfd
+        pidfd_send_signal = _send_pidfd_signal
+    try:
+        fd = pidfd_open(pid)
+    except NotImplementedError:
         return {
             "killed": False,
             "identity_verified": False,
             "method": "pidfd-unavailable",
         }
-    try:
-        fd = pidfd_open(pid, 0)
-    except OSError:
+    except (OSError, NotImplementedError):
         return {
             "killed": False,
             "identity_verified": False,
@@ -253,17 +275,27 @@ def _terminate_posix_if_identity(pid: int, expected_start_time: str) -> dict:
                 "identity_verified": True,
                 "method": "pidfd-signal-failed",
             }
-        return {
+        result = {
             "killed": True,
             "identity_verified": True,
             "method": "pidfd",
         }
+        if exit_timeout is not None:
+            from .diagnostic_exit import wait_posix
+
+            result["exit_confirmed"] = wait_posix(fd, exit_timeout)
+        return result
     finally:
         os.close(fd)
 
 
-def terminate_pid_if_identity(pid: int, expected_start_time: str | None) -> dict:
+def terminate_pid_if_identity(
+    pid: int, expected_start_time: str | None, *, exit_timeout: float | None = None,
+) -> dict:
     """Terminate only through an OS object bound to the verified process."""
+    from .diagnostic_exit import validate_timeout
+
+    validate_timeout(exit_timeout)
     if pid <= 0 or not expected_start_time:
         return {
             "killed": False,
@@ -271,8 +303,12 @@ def terminate_pid_if_identity(pid: int, expected_start_time: str | None) -> dict
             "method": "identity-unavailable",
         }
     if platform.system() == "Windows":
-        return _terminate_windows_if_identity(pid, str(expected_start_time))
-    return _terminate_posix_if_identity(pid, str(expected_start_time))
+        terminate = _terminate_windows_if_identity
+    else:
+        terminate = _terminate_posix_if_identity
+    if exit_timeout is None:
+        return terminate(pid, str(expected_start_time))
+    return terminate(pid, str(expected_start_time), exit_timeout)
 
 
 @dataclass(frozen=True)
@@ -285,7 +321,7 @@ class DiagnosticContext:
     acquire_cutover_guard: Callable[[float], Any] | None = None
     repair_supported: bool = True
     reachability_check: Callable[[str, int], bool] | None = None
-    terminate_pid_if_identity: Callable[[int, str | None], dict] = terminate_pid_if_identity
+    terminate_pid_if_identity: IdentityTerminator = terminate_pid_if_identity
     lock_is_live: Callable[[dict | None], bool] = lock_data_is_live
     make_client: Callable[[str], Any] | None = None
     health_check: Callable[[str, int], bool] | None = None
@@ -479,7 +515,7 @@ def _inspect_abandoned_passive(
     return (
         {
             "kind": "abandoned_passive",
-            "summary": "stale cutover breadcrumb names a never-promoted passive daemon",
+            "summary": "stale cutover breadcrumb names a passive candidate",
             "repairable": repairable,
             "blocked_reason": (
                 None
@@ -642,6 +678,11 @@ def _audit_daemon_health(
 
     findings: list[dict[str, object]] = []
     try:
+        from .diagnostic_recovery import conditional_recovery_report
+
+        conditional_report = conditional_recovery_report(ctx)
+        if conditional_report is not None:
+            return conditional_report
         try:
             candidates = _candidate_map(ctx.list_candidates())
         except (OSError, subprocess.SubprocessError) as exc:
@@ -691,6 +732,9 @@ def _audit_daemon_health(
         duplicate = _inspect_duplicates(ctx, candidates, owner, excluded)
         if duplicate is not None:
             findings.append(duplicate)
+        from .diagnostic_recovery import mark_custody_refusals
+
+        mark_custody_refusals(findings, table or {}, record or {})
     finally:
         if guard is not None and hasattr(guard, "release"):
             guard.release()
@@ -736,11 +780,13 @@ def _target_pid_sequence(report: dict[str, object]) -> list[tuple[str, dict[str,
     return targets
 
 
-def apply_daemon_health(
+def _apply_daemon_health_locked(
     ctx: DiagnosticContext,
     *,
     now: datetime | None = None,
 ) -> dict[str, object]:
+    from .diagnostic_recovery import terminate_unpromoted
+
     guard, guard_error = _try_acquire_cutover_guard(ctx)
     if ctx.acquire_cutover_guard is not None and guard is None:
         blocked = _audit_daemon_health(ctx, now=now, cutover_state="busy")
@@ -789,7 +835,7 @@ def apply_daemon_health(
                     }
                 )
                 break
-            recovery = breadcrumb.recover_stale_cutover(
+            recovery = breadcrumb._recover_stale_cutover_locked(
                 ctx.config_dir,
                 ctx.make_client,
             )
@@ -854,8 +900,8 @@ def apply_daemon_health(
                     )
                     attempted.add(item["pid"])
                     continue
-                termination = ctx.terminate_pid_if_identity(
-                    item["pid"], item.get("start_time")
+                termination = terminate_unpromoted(
+                    ctx, item["pid"], item.get("start_time")
                 )
                 actions.append(
                     {
@@ -914,8 +960,8 @@ def apply_daemon_health(
                 )
                 attempted.add(item["pid"])
                 continue
-            termination = ctx.terminate_pid_if_identity(
-                item["pid"], item.get("start_time")
+            termination = terminate_unpromoted(
+                ctx, item["pid"], item.get("start_time")
             )
             actions.append(
                 {
@@ -943,3 +989,11 @@ def apply_daemon_health(
     finally:
         if guard is not None and hasattr(guard, "release"):
             guard.release()
+
+
+def apply_daemon_health(
+    ctx: DiagnosticContext, *, now: datetime | None = None,
+) -> dict[str, object]:
+    from .diagnostic_recovery import guarded_apply
+
+    return guarded_apply(ctx, now=now)

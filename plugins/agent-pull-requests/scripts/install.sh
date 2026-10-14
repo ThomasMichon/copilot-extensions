@@ -50,22 +50,57 @@ _enter_install_lock() {
     mkdir -p "$INSTALL_DIR" 2>/dev/null || true
     if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
         __install_lock_fd=8
-        exec 8>"$INSTALL_DIR/.install.lock" 2>/dev/null || return 1
+        { exec 8>"$INSTALL_DIR/.install.lock"; } 2>/dev/null || return 1
         flock -w 300 8 || return 1
         return 0
     fi
     __install_lock_link="$INSTALL_DIR/.install.lock.pid"
+    local __owner __live __deadline __now
+    __deadline=$(( $(date +%s) + 300 ))
     until ln -s "$$" "$__install_lock_link" 2>/dev/null; do
-        local __owner __live
+        if [[ "$(date +%s)" -ge "$__deadline" ]]; then
+            __install_lock_link=""
+            return 1
+        fi
         __owner="$(readlink "$__install_lock_link" 2>/dev/null || true)"
+        if [[ -z "$__owner" ]]; then
+            # The link vanished after the failed `ln -s` (its holder released
+            # it or a reaper removed it), or the path is not a symlink this
+            # lock can attribute. Never unlink here: lock creators are not
+            # serialized by the reap mutex, so an unlink could delete a live
+            # lock taken meanwhile. Retry; an unattributable path fails
+            # closed at the deadline.
+            sleep 0.1
+            continue
+        fi
         case "$__owner" in
-            *[!0-9]*|"") __live=0 ;;
+            *[!0-9]*) __live=0 ;;
             *) if kill -0 "$__owner" 2>/dev/null; then __live=1; else __live=0; fi ;;
         esac
-        if [[ "$__live" == 0 && "$(readlink "$__install_lock_link" 2>/dev/null || true)" == "$__owner" ]]; then
-            rm -f "$__install_lock_link"
-        else
+        if [[ "$__live" == 1 ]]; then
             sleep 1
+        elif ln -s "$$" "$__install_lock_link.reap" 2>/dev/null; then
+            # Serialize stale-owner recovery so two contenders can't both reap
+            # and then delete each other's live lock.
+            # Unlink only if the link still holds the owner judged stale above
+            # and that owner is still not live: a dead owner cannot release its
+            # own link and only serialized reapers remove a stale one, so that
+            # value is stable under this mutex. An absent link, or one naming a
+            # different (possibly just-released) holder, is never removed.
+            __now="$(readlink "$__install_lock_link" 2>/dev/null || true)"
+            if [[ -n "$__now" && "$__now" == "$__owner" ]]; then
+                case "$__now" in
+                    *[!0-9]*) rm -f "$__install_lock_link" ;;
+                    *) kill -0 "$__now" 2>/dev/null || rm -f "$__install_lock_link" ;;
+                esac
+            fi
+            rm -f "$__install_lock_link.reap"
+        else
+            # Another contender is reaping. A reap mutex whose owner died
+            # mid-reap is deliberately never reclaimed automatically (that
+            # would reintroduce the check-then-unlink race); the run fails
+            # closed at its deadline until the stale .reap link is removed.
+            sleep 0.1
         fi
     done
 }

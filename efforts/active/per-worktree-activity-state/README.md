@@ -11,8 +11,13 @@
 ## Guiding Intent
 
 The resident `status-monitor` daemon must never re-derive correctness-relevant
-state by scanning an unbounded, shared journal. Per-worktree state belongs in
-a transactionally-updated slot on that worktree's own record; a journal
+state by scanning an unbounded, shared journal. Ordinary daemon-cached status
+reads must be O(state-schema), independent of every journal, ledger, list,
+handoff sequence, claims graph, and fleet size. Current state belongs in an
+independently readable, transactionally-updated per-worktree projection; merely
+adding slot fields inside a growing record is not sufficient. Claims-derived
+state is pushed by its owner, and only the current handoff head is selected
+directly. A journal
 (global or per-worktree) exists only for human/on-demand diagnostics ("what
 just happened", a `doctor`-style flow), never as a source of truth an
 automatic sweep depends on.
@@ -81,6 +86,15 @@ Also already correct and NOT in scope to change:
 
 ## Request
 
+2026-10-12 read-side clarification, verbatim; original spelling is retained:
+
+> We need as a durable goal that reading worktree state to report daemon-cached status must still itself be O(1), where the 1 here is simply the size of the *schema* for a worktree state, but not be of any journal, ledger, or list (the computed claims graph is something which should be pushed to this state, not computed on-the-fly). The handoff squence is only interesting when repairing a workflow, but only the current handoff-head should be read directly from a slot for each worktree.
+
+The [schema-bounded read contract](schema-bounded-read-contract.md) records the
+coupled monitoring direction, fresh diagnostic evidence, and explicitly
+agent-recommended acceptance cases. It is a proposal, not implementation or
+permission to bypass the staged producer-enrollment gate.
+
 (Operator, verbatim premise across the inception exchange)
 
 > What we need is that when a new daemon stands up, it needs to: 1) Drop a
@@ -148,6 +162,24 @@ requirements and validation gates are in
 No manual service restart or stale-runtime process killing is authorized.
 
 ## Plan
+
+### Read-side contract amendment
+
+- [ ] Review the [schema-bounded current-state contract](schema-bounded-read-contract.md)
+      alongside the existing producer-enrollment plan before implementing the
+      read-side cutover. Preserve #3761's single write authority and existing
+      lifecycle custody; do not create a parallel status database or daemon.
+- [ ] Make the current handoff-head projection independently readable.
+      Per-token fields in `SessionHandoff` may remain producer/diagnostic state,
+      but ordinary reads must not load or scan `record.handoffs` to select the
+      current head.
+- [ ] Integrate the claims-derived projection and active-root monitoring
+      membership with #3761's authoritative write path. A status read consumes
+      pushed state, never a ledger traversal or per-request graph computation.
+      Explicit full-history and graph inspection remain separate operations.
+- [ ] Meet the [cardinality-independent acceptance cases](schema-bounded-read-contract.md#validation-plan)
+      before declaring journal-to-slot migration sufficient. Bounded returned
+      data, a cached parser, or fewer subprocesses alone do not prove O(schema).
 
 ### Phase 1 — Direct handoff-lifecycle slots
 - [ ] **Stage producer enrollment before activating backfill**
@@ -331,19 +363,30 @@ No manual service restart or stale-runtime process killing is authorized.
       snapshot, and that no deadlock occurs under contention.
 
 ### Phase 2 — Rewire hot-path consumers onto slots
-- [ ] `__main__._pending_handoff_retire_requests` -- read `record.handoffs`
-      directly for both the retire-decision fields and the spawn-identity
+- [ ] `__main__._pending_handoff_retire_requests` -- split current-head
+      status selection from outstanding-retirement work selection. The
+      automatic sweep reads an independently addressable, owner-maintained
+      next-due unresolved-retirement cursor, including bounded retire-decision
+      fields and the spawn-identity
       fields (`spawn_old_pane`, `spawn_predecessor_pid`,
       `spawn_predecessor_start_time`, `spawn_expected_mux_session`),
       keeping the existing fresh `mux_binding_for_session()` lookup as the
-      preferred override when it resolves; stop calling
+      preferred execution-time identity guard when it resolves; stop calling
       `activity.read_events`/`handoff_trace.read_trace` for
-      decision-making.
+      ordinary decision-making. Advancing the handoff head must not remove
+      an older unresolved duty from automatic processing. The mutation/retry
+      owner durably maintains and advances the cursor as duties become due,
+      settle or defer, with retry fairness; the sweep consumes bounded work
+      per turn without scanning history or materializing an all-duties list.
+      Explicit `handoffs-check` repair retains enumeration of every outstanding
+      duty rather than inheriting the bounded automatic-selection shape.
+      Current status still reads only the direct current handoff-head slot.
 - [ ] `status_monitor_runtime._monitor_pending_handoff_request` -- read
-      `record.handoffs`'s spawn/retire fields **and** the new
+      the direct current handoff-head's spawn/retire fields **and** the new
       `request_predecessor_session_id` / `request_session_state_path` /
       `request_predecessor_pid` fields directly; stop calling
-      `activity.read_events` for `handoff_requested` lookups.
+      `activity.read_events` or scanning the handoff list for
+      `handoff_requested` lookups.
 - [ ] `sessions_pane_retire.already_attempted_handoff_tokens` -- same.
 - [ ] `handoff_cutover._maybe_emit_stage_13` -- its `retired` check (an
       unbounded, no-`limit` scan for `handoff_predecessor_retire`/`outcome
@@ -441,6 +484,11 @@ archived-journal discovery, standalone-install retention floor):
 
 ## Validation Plan
 
+- [ ] The [schema-bounded read validation](schema-bounded-read-contract.md#validation-plan)
+      passes for cold, warm, restart, and advisory-degrade paths, including
+      current-head selection, pushed claims state, and active-claims monitoring.
+      Its scaling and access-count tests are agent-recommended implementation
+      details; the O(schema) boundary itself is operator-required.
 - [ ] Unit tests for the new `SessionHandoff` fields and the rewritten
       abandon-after-N-failures logic (Phase 1).
 - [ ] A crash-ordering test: simulate a failure between the slot commit and
@@ -501,6 +549,17 @@ implementation starts. Phase 1's existing local slot/backfill groundwork
 remains unpublished and is not evidence of production readiness.
 
 ## Journal
+
+### 2026-10-12 — Schema-bounded reads and monitoring eligibility clarified
+
+The operator made the read-side bound explicit: the constant is the status
+schema, not a journal, ledger, list, or computed claims graph. The direct
+current handoff head replaces sequence traversal on ordinary reads.
+[The amendment](schema-bounded-read-contract.md) preserves the exact request,
+fresh source-pinned profiler findings, and proposed scaling acceptance.
+The existing Phase 2 list-reading language is narrowed accordingly.
+This is documentation-only; producer enrollment, implementation, migration and
+live acceptance remain open with their existing owners.
 
 ### 2026-10-07 — Kickoff
 - Live-diagnosed the real CPU-burn root cause (not the originally-assumed

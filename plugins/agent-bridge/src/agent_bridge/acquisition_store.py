@@ -67,10 +67,19 @@ class AcquisitionStore:
     def gate(
         self, request: AcquisitionRequest, session: str | None, native: str | None,
     ) -> None:
+        self.gate_workspace(
+            request.worktree_id, request.delivery_id, request.mode, session, native, cli_driver(request),
+        )
+
+    def gate_workspace(
+        self, worktree_id: str, delivery_id: str, mode: str,
+        session: str | None, native: str | None, driver: str,
+    ) -> None:
+        """Share the native launch fence without fabricating task authority."""
         inserted = self.db.execute_write(
             "INSERT INTO acquisition_launch_gates VALUES (?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(worktree_id) DO NOTHING",
-            (request.worktree_id, request.delivery_id, request.mode, session, native, cli_driver(request)),
+            (worktree_id, delivery_id, mode, session, native, driver),
         )
         if inserted.rowcount != 1:
             raise AcquisitionRefused("launch_gate_held", "another acquisition holds the launch gate")
@@ -78,20 +87,23 @@ class AcquisitionStore:
         rows = self.db.execute_read(
             "SELECT id FROM sessions WHERE json_extract(target_json, '$.worktree_id')=? "
             "AND status IN ('created','starting','running','idle') AND id != COALESCE(?, '')",
-            (request.worktree_id, session),
+            (worktree_id, session),
         )
         if rows:
-            self.release_gate(request)
+            self.release_workspace_gate(worktree_id, delivery_id)
             raise AcquisitionRefused("live_holder", "an owned start raced acquisition")
-        live = self.db.list_fresh_live_sessions(request.worktree_id, now=time.time())
+        live = self.db.list_fresh_live_sessions(worktree_id, now=time.time())
         if any(row["session_id"] != native for row in live):
-            self.release_gate(request)
+            self.release_workspace_gate(worktree_id, delivery_id)
             raise AcquisitionRefused("live_holder", "a represented start raced acquisition")
 
     def release_gate(self, request: AcquisitionRequest) -> None:
+        self.release_workspace_gate(request.worktree_id, request.delivery_id)
+
+    def release_workspace_gate(self, worktree_id: str, delivery_id: str) -> None:
         self.db.execute_write(
             "DELETE FROM acquisition_launch_gates WHERE worktree_id=? AND delivery_id=?",
-            (request.worktree_id, request.delivery_id),
+            (worktree_id, delivery_id),
         )
 
     def retirement_recovery_proven(

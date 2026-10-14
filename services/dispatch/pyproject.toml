@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-dispatch-service"
+version = "0.1.0-dev1"
+description = "Standalone, Copilot-independent distribution of the agent-dispatch coordinator daemon."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Thomas Michon" }]
+# The coordinator lifecycle (CLI, `serve` command, installer) already lives
+# entirely in the `agent-dispatch` package itself; this standalone
+# distribution does not reimplement any of it -- it is a thin wrapper that
+# depends on the same package the Copilot plugin ships, plus the
+# Copilot-independent bootstrap scripts beside this file.
+#
+# Deliberately NO [tool.uv.sources] override here (unlike most standalone/
+# plugin packages' editable libs/<lib> pointers): agent-dispatch is a
+# PLUGIN, not a shared lib, and tools/materialize_main.py's uv-editable
+# materializer only ever vendors an escaping libs/<lib> reference by design
+# (its containment check requires the resolved path be exactly
+# canonical_root/libs/<lib> -- see its own module docstring). An escaping
+# pointer at ../plugins/agent-dispatch hard-refused release promotion
+# (`agent-dispatch references ../plugins/agent-dispatch ... which is not
+# canonical_root/libs/agent-dispatch -- refusing`). tools/run-standalone-
+# tests.py's prepare() supplies the local path sources a dev-branch test
+# install needs instead, the same way it already does for
+# agent-index-service's identical situation (its own dependency on the
+# agent-index plugin).
+dependencies = [
+    "agent-dispatch>=0.1.2.dev205",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99

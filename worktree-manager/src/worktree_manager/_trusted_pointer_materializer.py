@@ -632,9 +632,9 @@ def materialize_uv_editable_ref_into(
             )
             continue
         canonical_relative = Path("libs") / lib
-        if (source_consumer_dir.absolute() == canonical_root_r / "agent-dispatch-service"
+        if (source_consumer_dir.absolute() == canonical_root_r / "services" / "dispatch"
                 and name == lib == "agent-dispatch"
-                and raw_path == "../plugins/agent-dispatch"):
+                and raw_path == "../../plugins/agent-dispatch"):
             bad_source = _find_symlinked_ancestor(source_consumer_dir, canonical_root_r)
             if bad_source is not None:
                 log.append(f"SKIP {dest_consumer_dir}: {bad_source} is a symlink -- refusing")

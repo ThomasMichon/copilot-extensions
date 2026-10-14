@@ -67,6 +67,23 @@ health. It is **per-project** (run it through each project's binstub, e.g.
    <project> worktrees doctor --fix --gc-sessions
    ```
 
+For one malformed record, use `doctor --repair-record <full-worktree-id> --json`
+instead of a broad `--fix`. This runs only YAML inspection for that project's
+exact record, never session backfill, lifecycle reconciliation, daemon repair
+or garbage collection. Add `--fix` only after reviewing the result.
+
+Legacy unquoted multiline `bound_agent` text additionally requires an explicit
+boundary: inspect the record, identify the first real field after that text,
+then use `doctor --repair-record <id> --bound-agent-end-field pair_id --json`
+(replace `pair_id` with the actual following field). A missing, repeated,
+unverifiable or later-than-first known field boundary refuses; no field boundary
+is guessed. The repair quotes
+only the delimited text, preserves surrounding fields, holds native record and
+publication-authority locks, and retains the exact original bytes in a
+content-addressed `.yaml.repair-<digest>.bak` beside the record (created exclusively
+with mode `0600`; existing non-private POSIX backups refuse reuse). Contention or
+a changed record requires a fresh inspection. Never hand-edit tracking YAML.
+
 Run it per project (`dotfiles`, `test-chamber`, …) — the command scopes to the
 current project's tracking store; the Copilot session-state/store it cleans is
 shared across projects, so the guards (current + registered session ids) protect

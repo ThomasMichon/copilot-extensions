@@ -128,7 +128,12 @@ def find_supervised_workers(pivots, pivot_runtimes, machine, wid):
     wid = str(wid or "").strip().lower()
     if not wid:
         return []
-    out = []
+    return supervised_workers_by_worktree(pivots, pivot_runtimes, machine).get(wid, [])
+
+
+def supervised_workers_by_worktree(pivots, pivot_runtimes, machine):
+    """Index each ready worker scope once, preserving pivot and row order."""
+    out = {}
     for d in pivots:
         reg = d.get("pivot")
         spec = getattr(reg, "worker", None) if reg is not None else None
@@ -142,9 +147,10 @@ def find_supervised_workers(pivots, pivot_runtimes, machine, wid):
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            if str(row.get(spec.worktree_field) or "").strip().lower() != wid:
+            wid = str(row.get(spec.worktree_field) or "").strip().lower()
+            if not wid:
                 continue
-            out.append({
+            out.setdefault(wid, []).append({
                 "pivot": reg.name,
                 "id": str(row.get(getattr(reg, "id_field", "id")) or "").strip(),
                 "label": str(row.get(spec.label_field) or "").strip(),
@@ -178,6 +184,7 @@ __all__ = [
     "entry_matches",
     "find_claiming_task",
     "find_supervised_workers",
+    "supervised_workers_by_worktree",
     "format_form_template",
     "format_template",
     "installed_plugins_dir",

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "copilot-extensions.update-event",
+  "title": "One line of an update run's events.jsonl",
+  "type": "object",
+  "required": ["v", "ts", "run_id", "seq", "pid", "proc", "phase", "component", "event"],
+  "properties": {
+    "v": {"const": 1},
+    "ts": {"type": "string"},
+    "run_id": {"type": "string"},
+    "seq": {"type": "integer"},
+    "pid": {"type": "integer"},
+    "proc": {
+      "enum": ["harness", "manager", "engine", "engine-reexec", "installer", "hook", "bundle"]
+    },
+    "phase": {
+      "enum": [
+        "run", "lock", "auth_report", "auth_fallback", "auth_cleanup", "anchor_sync",
+        "payload_refresh", "manager_self_update", "engine_runtime", "module_update",
+        "runtime_reconcile", "binstubs", "prune",
+        "verify", "report", "snapshot", "payload_recovery", "bootstrap", "reexec",
+        "runtime_plan", "runtime_build", "runtime_activate"
+      ]
+    },
+    "component": {"type": "string"},
+    "event": {"enum": ["start", "end", "retry", "warn", "info"]},
+    "action": {"type": "string"},
+    "argv": {"type": "array", "items": {"type": "string"}},
+    "duration_ms": {"type": "integer"},
+    "outcome": {
+      "enum": [
+        "verified_current", "requires_restart", "in_progress", "configuration_limitation",
+        "blocked_by_lock", "auth_required", "timeout", "command_failed", "skipped"
+      ]
+    },
+    "exit_code": {"type": "integer"},
+    "attempt": {"type": "integer"},
+    "bytes": {"type": "integer"},
+    "changed": {"type": "boolean"},
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {"type": "string"},
+        "message": {"type": "string", "maxLength": 2048},
+        "os_errno": {"type": "integer"},
+        "winerror": {"type": "integer"},
+        "path": {"type": "string"},
+        "op": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "details": {"type": "object"}
+  },
+  "additionalProperties": false
+}

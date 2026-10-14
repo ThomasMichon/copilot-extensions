@@ -19,6 +19,14 @@ _spec = importlib.util.spec_from_file_location("payload_invocation_generate", SC
 generator = importlib.util.module_from_spec(_spec)
 assert _spec and _spec.loader
 _spec.loader.exec_module(generator)
+# Fixture setup uses the receipt owner API; invocation still exercises the real PowerShell dispatcher.
+_context_spec = importlib.util.spec_from_file_location(
+    "payload_invocation_context", REPO / "libs" / "installation-context" / "installation_context.py",
+)
+assert _context_spec and _context_spec.loader
+installation_context = importlib.util.module_from_spec(_context_spec)
+sys.modules[_context_spec.name] = installation_context
+_context_spec.loader.exec_module(installation_context)
 
 
 def _manifest(tmp_path: Path) -> Path:
@@ -475,11 +483,18 @@ def _copied_agent_machines_payload(tmp_path: Path) -> Path:
     return payload
 
 
-def _agent_procutil_src(payload: Path) -> Path:
-    local = payload / "libs" / "agent-procutil" / "src"
+def _agent_library_src(payload: Path, name: str) -> Path:
+    local = payload / "libs" / name / "src"
     if local.is_dir():
         return local
-    return REPO / "libs" / "agent-procutil" / "src"
+    return REPO / "libs" / name / "src"
+
+
+def _agent_machines_import_sources(payload: Path) -> list[str]:
+    return [str(payload / "src")] + [
+        str(_agent_library_src(payload, name))
+        for name in ("plugin-resolve", "agent-procutil", "machine-transport", "remote-login-shell")
+    ]
 
 
 def _directory_marketplace_agent_machines_payload(tmp_path: Path) -> Path:
@@ -520,7 +535,6 @@ def _directory_marketplace_agent_machines_payload(tmp_path: Path) -> Path:
 def _stamp_agent_machines_context(
     tmp_path: Path,
     payload: Path,
-    pwsh: str,
     *,
     explicit_source: bool = True,
     durable_home: Path | None = None,
@@ -528,54 +542,24 @@ def _stamp_agent_machines_context(
     version = json.loads(
         (payload / "plugin.json").read_text(encoding="utf-8")
     )["version"]
-    arguments = [
-        pwsh,
-        "-NoProfile",
-        "-File",
-        str(REPO / "libs" / "installation-context" / "installation-context.ps1"),
-        "stamp",
-    ]
-    if explicit_source:
-        arguments.extend(
-            [
-                "-SourceJson",
-                '{"source":"github","repo":"example-org/example-marketplace"}',
-                "-MarketplaceKey",
-                "example",
-            ]
-        )
-    arguments.extend(
-        [
-            "-PluginId",
-            "agent-machines",
-            "-PayloadRoot",
-            str(payload),
-            "-PayloadVersion",
-            version,
-            "-PayloadOrigin",
-            "explicit",
-            "-ExpectedNamespaceGeneration",
-            "0",
-            "-ExpectedInstallGeneration",
-            "0",
-            "-DurableHome",
-            str(durable_home or tmp_path / "durable"),
-        ]
+    result = installation_context.stamp_context(
+        payload_version=version, payload_origin="explicit",
+        expected_namespace_generation=0, expected_install_generation=0,
+        plugin_id="agent-machines", payload_root=payload,
+        durable_home=durable_home or tmp_path / "durable",
+        source_descriptor=(
+            {"source": "github", "repo": "example-org/example-marketplace"}
+            if explicit_source else None
+        ),
+        marketplace_key="example" if explicit_source else None,
     )
-    result = subprocess.run(
-        arguments,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return Path(json.loads(result.stdout)["installReceipt"])
+    return Path(result["installReceipt"])
 
 
 def _activate_agent_machines_context(
     tmp_path: Path,
     home: Path,
     context: Path,
-    pwsh: str,
     *,
     durable_home: Path | None = None,
 ) -> Path:
@@ -597,44 +581,17 @@ def _activate_agent_machines_context(
     )
     environment = os.environ.copy()
     environment.update({"HOME": str(home), "USERPROFILE": str(home)})
-    result = subprocess.run(
-        [
-            pwsh,
-            "-NoProfile",
-            "-File",
-            str(REPO / "libs" / "installation-context" / "installation-context.ps1"),
-            "activation-cas",
-            "-Context",
-            str(context),
-            "-ExpectedMarketplaceId",
-            install["marketplaceId"],
-            "-ExpectedPluginId",
-            "agent-machines",
-            "-ExpectedNamespaceGeneration",
-            str(namespace["generation"]),
-            "-ExpectedInstallGeneration",
-            str(install["generation"]),
-            "-ExpectedActivationGeneration",
-            "0",
-            "-ActivationMode",
-            "namespaced",
-            "-ActivationState",
-            "active",
-            "-LegacyDisposition",
-            "absent",
-            "-LegacyProbeJson",
-            '{"declared":true,"result":"absent","checkedAt":"2026-01-01T00:00:00Z"}',
-            "-LegacyRoot",
-            str(home / ".agent-machines"),
-            "-DurableHome",
-            str(durable_home or tmp_path / "durable"),
-        ],
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=True,
+    installation_context.compare_and_swap_activation(
+        context=context, expected_marketplace_id=install["marketplaceId"],
+        expected_plugin_id="agent-machines",
+        expected_namespace_generation=namespace["generation"],
+        expected_install_generation=install["generation"], expected_activation_generation=0,
+        activation_mode="namespaced", activation_state="active", legacy_disposition="absent",
+        legacy_probe={"declared": True, "result": "absent", "checkedAt": "2026-01-01T00:00:00Z"},
+        legacy_root=home / ".agent-machines",
+        durable_home=durable_home or tmp_path / "durable",
+        environment=environment,
     )
-    json.loads(result.stdout)
     return context.parent
 
 
@@ -1419,13 +1376,7 @@ def test_agent_machines_required_context_preserves_absent_policy_legacy_use(
             "HOME": str(home),
             "USERPROFILE": str(home),
             "COPILOT_PLUGIN_ROOT": str(payload),
-            "PYTHONPATH": os.pathsep.join(
-                [
-                    str(payload / "src"),
-                    str(payload / "libs" / "plugin-resolve" / "src"),
-                    str(_agent_procutil_src(payload)),
-                ]
-            ),
+            "PYTHONPATH": os.pathsep.join(_agent_machines_import_sources(payload)),
             "TEST_PYTHON": sys.executable,
         }
     )
@@ -1459,7 +1410,7 @@ def test_agent_machines_requested_context_never_falls_back_to_legacy(
     pwsh = shutil.which("pwsh")
     assert pwsh
     payload = _copied_agent_machines_payload(tmp_path)
-    context = _stamp_agent_machines_context(tmp_path, payload, pwsh)
+    context = _stamp_agent_machines_context(tmp_path, payload)
     home = tmp_path / "home"
     home.mkdir()
     environment = os.environ.copy()
@@ -1499,10 +1450,10 @@ def test_agent_machines_active_context_selects_only_its_cell_root(
     pwsh = shutil.which("pwsh")
     assert pwsh
     payload = _copied_agent_machines_payload(tmp_path)
-    context = _stamp_agent_machines_context(tmp_path, payload, pwsh)
+    context = _stamp_agent_machines_context(tmp_path, payload)
     home = tmp_path / "home"
     home.mkdir()
-    plugin_root = _activate_agent_machines_context(tmp_path, home, context, pwsh)
+    plugin_root = _activate_agent_machines_context(tmp_path, home, context)
     root_record = tmp_path / "selected-root.txt"
     (payload / "scripts" / "resolve-runtime.ps1").write_text(
         "[IO.File]::WriteAllText($env:TEST_ROOT_RECORD, $env:AGENT_RT_ROOT)\n"
@@ -1516,13 +1467,7 @@ def test_agent_machines_active_context_selects_only_its_cell_root(
             "USERPROFILE": str(home),
             "COPILOT_PLUGIN_ROOT": str(payload),
             "COPILOT_EXTENSIONS_CONTEXT": str(context),
-            "PYTHONPATH": os.pathsep.join(
-                [
-                    str(payload / "src"),
-                    str(payload / "libs" / "plugin-resolve" / "src"),
-                    str(_agent_procutil_src(payload)),
-                ]
-            ),
+            "PYTHONPATH": os.pathsep.join(_agent_machines_import_sources(payload)),
             "TEST_PYTHON": sys.executable,
             "TEST_ROOT_RECORD": str(root_record),
         }
@@ -1551,16 +1496,19 @@ def test_agent_machines_active_context_selects_only_its_cell_root(
     os.name != "nt" or shutil.which("pwsh") is None,
     reason="canonical Windows profile semantics require native Windows",
 )
+@pytest.mark.parametrize("blocked_state", [
+    "malformed policy", "maintenance", "foreign activation", "orphaned transfer",
+])
 def test_agent_machines_blocked_context_states_never_run_legacy(
-    tmp_path: Path,
+    tmp_path: Path, blocked_state: str,
 ) -> None:
     pwsh = shutil.which("pwsh")
     assert pwsh
     payload = _copied_agent_machines_payload(tmp_path)
-    context = _stamp_agent_machines_context(tmp_path, payload, pwsh)
+    context = _stamp_agent_machines_context(tmp_path, payload)
     home = tmp_path / "home"
     home.mkdir()
-    plugin_root = _activate_agent_machines_context(tmp_path, home, context, pwsh)
+    plugin_root = _activate_agent_machines_context(tmp_path, home, context)
     root_record = tmp_path / "selected-root.txt"
     (payload / "scripts" / "resolve-runtime.ps1").write_text(
         "[IO.File]::WriteAllText($env:TEST_ROOT_RECORD, $env:AGENT_RT_ROOT)\n"
@@ -1574,77 +1522,55 @@ def test_agent_machines_blocked_context_states_never_run_legacy(
             "USERPROFILE": str(home),
             "COPILOT_PLUGIN_ROOT": str(payload),
             "COPILOT_EXTENSIONS_CONTEXT": str(context),
-            "PYTHONPATH": os.pathsep.join(
-                [
-                    str(payload / "src"),
-                    str(payload / "libs" / "plugin-resolve" / "src"),
-                    str(_agent_procutil_src(payload)),
-                ]
-            ),
+            "PYTHONPATH": os.pathsep.join(_agent_machines_import_sources(payload)),
             "TEST_PYTHON": sys.executable,
             "TEST_ROOT_RECORD": str(root_record),
         }
     )
 
-    def invoke_blocked(label: str) -> None:
-        root_record.unlink(missing_ok=True)
-        result = subprocess.run(
-            [
-                pwsh,
-                "-NoProfile",
-                "-File",
-                str(payload / "bin" / "agent-machines.ps1"),
-                "--version",
-            ],
-            env=environment,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert result.returncode == 126, f"{label}: {result.stderr}"
-        assert "blocks invocation" in result.stderr
-        assert not root_record.exists(), label
-
-    policy = home / ".copilot-extensions" / "installation-mode.json"
-    original_policy = policy.read_bytes()
-    policy.write_text("{\n", encoding="utf-8")
-    invoke_blocked("malformed policy")
-    policy.write_bytes(original_policy)
-
-    maintenance = plugin_root / "maintenance"
-    maintenance.write_text("maintenance\n", encoding="utf-8")
-    invoke_blocked("maintenance")
-    maintenance.unlink()
-
     activation = plugin_root / "installation-activation.json"
     original_activation = json.loads(activation.read_text(encoding="utf-8"))
-    foreign_activation = dict(original_activation)
-    foreign_activation["environment"] = dict(original_activation["environment"])
-    foreign_activation["environment"]["platform"] = "posix"
-    activation.write_text(json.dumps(foreign_activation), encoding="utf-8")
-    invoke_blocked("foreign activation")
-    activation.unlink()
-
-    legacy = home / ".agent-machines"
-    legacy.mkdir()
-    (legacy / ".installation-ownership.json").write_text(
-        json.dumps(
-            {
-                "schema": "copilot-extensions.legacy-installation-ownership",
-                "version": 1,
-                "marketplaceId": original_activation["marketplaceId"],
-                "pluginId": "agent-machines",
-                "activation": {
-                    "path": str(plugin_root / "missing-activation.json"),
-                    "generation": 1,
+    if blocked_state == "malformed policy":
+        policy = home / ".copilot-extensions" / "installation-mode.json"
+        policy.write_text("{\n", encoding="utf-8")
+    elif blocked_state == "maintenance":
+        (plugin_root / "maintenance").write_text("maintenance\n", encoding="utf-8")
+    elif blocked_state == "foreign activation":
+        foreign_activation = dict(original_activation)
+        foreign_activation["environment"] = dict(original_activation["environment"])
+        foreign_activation["environment"]["platform"] = "posix"
+        activation.write_text(json.dumps(foreign_activation), encoding="utf-8")
+    else:
+        activation.unlink()
+        legacy = home / ".agent-machines"
+        legacy.mkdir()
+        (legacy / ".installation-ownership.json").write_text(
+            json.dumps(
+                {
+                    "schema": "copilot-extensions.legacy-installation-ownership",
+                    "version": 1,
+                    "marketplaceId": original_activation["marketplaceId"],
+                    "pluginId": "agent-machines",
+                    "activation": {
+                        "path": str(plugin_root / "missing-activation.json"),
+                        "generation": 1,
+                    },
+                    "environment": original_activation["environment"],
+                    "transferredAt": "2026-01-01T00:00:00Z",
                 },
-                "environment": original_activation["environment"],
-                "transferredAt": "2026-01-01T00:00:00Z",
-            }
-        ),
-        encoding="utf-8",
+            ),
+            encoding="utf-8",
+        )
+    result = subprocess.run(
+        [
+            pwsh, "-NoProfile", "-File",
+            str(payload / "bin" / "agent-machines.ps1"), "--version",
+        ],
+        env=environment, capture_output=True, text=True, check=False,
     )
-    invoke_blocked("orphaned transfer")
+    assert result.returncode == 126, f"{blocked_state}: {result.stderr}"
+    assert "blocks invocation" in result.stderr
+    assert not root_record.exists(), blocked_state
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
@@ -1660,7 +1586,6 @@ def test_agent_machines_removed_policy_keeps_active_cell_authoritative(
     context = _stamp_agent_machines_context(
         tmp_path,
         payload,
-        pwsh,
         explicit_source=False,
         durable_home=durable_home,
     )
@@ -1668,7 +1593,6 @@ def test_agent_machines_removed_policy_keeps_active_cell_authoritative(
         tmp_path,
         home,
         context,
-        pwsh,
         durable_home=durable_home,
     )
     (home / ".copilot-extensions" / "installation-mode.json").unlink()
@@ -1684,13 +1608,7 @@ def test_agent_machines_removed_policy_keeps_active_cell_authoritative(
             "HOME": str(home),
             "USERPROFILE": str(home),
             "COPILOT_PLUGIN_ROOT": str(payload),
-            "PYTHONPATH": os.pathsep.join(
-                [
-                    str(payload / "src"),
-                    str(payload / "libs" / "plugin-resolve" / "src"),
-                    str(_agent_procutil_src(payload)),
-                ]
-            ),
+            "PYTHONPATH": os.pathsep.join(_agent_machines_import_sources(payload)),
             "TEST_PYTHON": sys.executable,
             "TEST_ROOT_RECORD": str(root_record),
         }

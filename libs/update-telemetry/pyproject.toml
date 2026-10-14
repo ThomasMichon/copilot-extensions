@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Distribution name is namespaced (agent-update-telemetry) to prevent
+# dependency-confusion; the import module is ``update_telemetry``.
+# Mirrors agent-remote-login-shell / agent-procutil.
+name = "agent-update-telemetry"
+version = "0.1.0-dev1"
+description = "Shared update-run telemetry (JSONL events, folded status file, exit codes) across Copilot CLI plugins"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Michon" }
+]
+# Pure stdlib; no runtime dependencies. Its contract tests run in the
+# agent-worktrees suite (plugins/agent-worktrees/tests/test_update_telemetry_lib.py)
+# against the schemas/ and fixtures/ kept here.
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]

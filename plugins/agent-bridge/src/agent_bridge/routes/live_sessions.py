@@ -253,6 +253,7 @@ async def register_live_session(
         driven_by=body.driven_by,
         venue=body.venue.model_dump_json() if body.venue is not None else None,
         process_started_at=body.process_started_at,
+        clear_targeting_metadata=body.clear_targeting_metadata,
         now=now,
     )
     if status != "live":
@@ -371,7 +372,7 @@ async def list_live_sessions(
 
 
 @router.get("/resolve", response_model=LiveSessionInfo)
-async def resolve_live_session(handle: str, request: Request) -> LiveSessionInfo:
+async def resolve_live_session(handle: str, request: Request, qualified_peer: bool = False) -> LiveSessionInfo:
     """Resolve a handle (session id OR **worktree handle**) -> its live session.
 
     This is D3's addressing endpoint: an agent is a series of sessions in one
@@ -384,7 +385,10 @@ async def resolve_live_session(handle: str, request: Request) -> LiveSessionInfo
     the path-param route.
     """
     db = _db(request)
-    row = db.resolve_live_session(handle, now=time.time())
+    try:
+        row = db.resolve_live_session(handle, now=time.time(), qualified_peer=qualified_peer)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if row is None:
         raise HTTPException(
             status_code=404, detail="no live session for handle"

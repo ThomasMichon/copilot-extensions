@@ -689,6 +689,10 @@ def validate_registration(kind: str, spec: dict) -> None:
             )
         try:
             reviewer_loop_lifecycle_config(spec)
+            if eval_spec is not None and "scripts" in eval_spec:
+                from .producers.evaluator import ScriptEvaluatorRegistry
+
+                ScriptEvaluatorRegistry.from_spec(eval_spec)
         except EvaluatorError as exc:
             raise RegistrationError(str(exc)) from exc
         _validate_disposable_cli_labels(spec)

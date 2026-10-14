@@ -35,9 +35,12 @@ and ``self._now()`` from that class and is not usable standalone.
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 import sqlite3
 from collections.abc import Callable
 
+from .queue_allocation_revisions import revision_disposed
 from .queue_records import ExclusiveKeyBusyError, SpawnReservation, SpawnState, Status, TaskError
 
 log = logging.getLogger("agent-dispatch.queue")
@@ -46,6 +49,10 @@ log = logging.getLogger("agent-dispatch.queue")
 def spawn_key(task_id: str, attempt: int) -> str:
     """The canonical reservation key for a (task, attempt) spawn."""
     return f"dispatch-task:{task_id}:{attempt}"
+
+
+
+
 
 
 def _validate_conclusion_claim(
@@ -101,6 +108,8 @@ class SpawnReservationMixin:
     def reserve_spawn(
         self, task_id: str, *, reserved_by: str | None = None, now: float | None = None,
         allow_suspended_reembodiment: bool = False,
+        driver: str | None = None,
+        allocation_revision: int | None = None,
     ) -> tuple[SpawnReservation, bool]:
         """Atomically reserve the right to spawn an embody worker for ``task_id``.
 
@@ -139,6 +148,10 @@ class SpawnReservationMixin:
         carry-forward) is unchanged.
         """
         ts = self._now(now)
+        if allocation_revision is not None and (
+            type(allocation_revision) is not int or not 1 <= allocation_revision <= 2**63 - 1
+        ):
+            raise TaskError("allocation revision must be a positive integer")
         from .ci_repair_spawn import authority_snapshot, reservation_authorized
         admission = None
         with self._connect() as probe:
@@ -160,6 +173,38 @@ class SpawnReservationMixin:
                 "SELECT * FROM spawn_reservations WHERE task_id = ? ORDER BY attempt ASC",
                 (task_id,),
             ).fetchall()
+            identity = conn.execute(
+                "SELECT identity FROM workspace_queue_identity WHERE singleton = 1",
+            ).fetchone()["identity"]
+            logical_identity = json.dumps(
+                [identity, task.repo, "dedup" if task.dedup_key is not None else "task",
+                 task.dedup_key if task.dedup_key is not None else task.id],
+                separators=(",", ":"),
+            )
+            creation_prefix = "dispatch-workspace:" + hashlib.sha256(logical_identity.encode()).hexdigest() + ":"
+            allocation_rows = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE creation_key LIKE ? "
+                "ORDER BY allocation_revision DESC, reserved_at DESC, attempt DESC",
+                (creation_prefix + "%",),
+            ).fetchall()
+            latest_allocation = allocation_rows[0] if allocation_rows else (rows[-1] if rows else None)
+            previous_revision = latest_allocation["allocation_revision"] if latest_allocation else 1
+            revision = previous_revision if allocation_revision is None else allocation_revision
+            if revision < previous_revision or (latest_allocation is None and revision != 1):
+                raise TaskError("allocation revision must retain the current revision or advance it explicitly")
+            new_allocation = revision != previous_revision
+            if (
+                latest_allocation is not None and latest_allocation["creation_key"] is None
+                and latest_allocation["worktree"] is None
+                and latest_allocation["state"] not in SpawnState.ACTIVE and not new_allocation
+            ):
+                raise TaskError("legacy allocation intent is unknown; preserve it for reconciliation")
+            if new_allocation and not revision_disposed([
+                row for row in (allocation_rows or rows)
+                if row["allocation_revision"] == previous_revision
+            ]):
+                raise TaskError("new allocation revision requires proven disposal of the previous workspace")
+            creation_key = creation_prefix + str(revision)
             if task.exclusive_key is not None:
                 active = conn.execute(
                     "SELECT * FROM spawn_reservations "
@@ -172,11 +217,15 @@ class SpawnReservationMixin:
                     ),
                 ).fetchone()
                 if active is not None:
+                    if active["task_id"] == task_id and active["allocation_revision"] != revision:
+                        raise TaskError("active reservation conflicts with requested allocation revision")
                     conn.execute("COMMIT")
                     return SpawnReservation._from_row(active), False
             else:
                 for row in rows:
                     if row["state"] in SpawnState.ACTIVE:
+                        if row["allocation_revision"] != revision:
+                            raise TaskError("active reservation conflicts with requested allocation revision")
                         conn.execute("COMMIT")
                         return SpawnReservation._from_row(row), False
             eligible = task.status == Status.QUEUED and task.owner is None
@@ -190,9 +239,18 @@ class SpawnReservationMixin:
                 )
             attempt = (max(r["attempt"] for r in rows) + 1) if rows else 1
             key = spawn_key(task_id, attempt)
+            allocation_reservation_key = (
+                latest_allocation["allocation_reservation_key"] or latest_allocation["key"]
+                if latest_allocation is not None and not new_allocation else key
+            )
             carried_worktree = task.affinity.get("worktree")
+            if new_allocation and carried_worktree:
+                raise TaskError("explicit target conflicts with a replacement allocation revision")
             worktree_ownership = "targeted" if carried_worktree else None
             carried_session = None
+            carried_project = carried_path = carried_host = carried_driver = None
+            if latest_allocation is not None and not new_allocation:
+                carried_project = latest_allocation["allocation_project"]
             conversation_retired = False
             if (
                 carried_worktree is None
@@ -208,27 +266,39 @@ class SpawnReservationMixin:
                 # brand-new worktree, discarding the task's actual context.
                 carried_worktree = task.owner.split("/", 1)[1]
                 worktree_ownership = "reused"
-            if task.exclusive_key is not None:
+            if not new_allocation and (task.exclusive_key is not None or rows or allocation_rows):
+                if latest_allocation is not None:
+                    lineage_column = "creation_key" if latest_allocation["creation_key"] else "task_id"
+                    lineage_value = creation_key if latest_allocation["creation_key"] else task_id
+                else:
+                    lineage_column = "exclusive_key" if task.exclusive_key is not None else "task_id"
+                    lineage_value = task.exclusive_key if task.exclusive_key is not None else task_id
+                revision_filter = "AND allocation_revision = ? " if latest_allocation is not None else ""
                 prior = conn.execute(
-                    "SELECT session_handle, worktree, conversation_retired "
+                    "SELECT * "
                     "FROM spawn_reservations "
-                    "WHERE exclusive_key = ? AND worktree IS NOT NULL "
+                    f"WHERE {lineage_column} = ? AND worktree IS NOT NULL "
+                    f"{revision_filter}"
                     "ORDER BY reserved_at DESC LIMIT 1",
-                    (task.exclusive_key,),
+                    (lineage_value, revision) if latest_allocation is not None else (lineage_value,),
                 ).fetchone()
                 if prior is not None:
+                    if carried_worktree and carried_worktree != prior["worktree"]:
+                        raise TaskError("explicit target conflicts with retained workspace identity")
                     carried_worktree = prior["worktree"]
                     carried_session = prior["session_handle"]
+                    carried_project, carried_path = prior["allocation_project"], prior["worktree_path"]
+                    carried_host, carried_driver = prior["creating_host"], prior["driver"]
                     if carried_session is not None:
                         # rearmed counts as retired too (copilot-extensions#4978):
                         # an operator rearm starts the task over, so its carried
                         # session must never be resumed again.
                         retired = conn.execute(
                             "SELECT 1 FROM spawn_reservations "
-                            "WHERE exclusive_key = ? AND session_handle = ? "
+                            f"WHERE {lineage_column} = ? AND session_handle = ? "
                             "AND release_requested = 1 AND state IN (?, ?, ?) LIMIT 1",
                             (
-                                task.exclusive_key,
+                                lineage_value,
                                 carried_session,
                                 SpawnState.SETTLED,
                                 SpawnState.FAILED,
@@ -277,7 +347,7 @@ class SpawnReservationMixin:
                     worktree_ownership = "reused"
             if carried_worktree is not None:
                 cleanup_claims = conn.execute(
-                    "SELECT key FROM spawn_reservations "
+                    "SELECT key, task_id, creation_key FROM spawn_reservations "
                     "WHERE worktree = ? AND state IN (?, ?) "
                     "AND conclusion_state = ?",
                     (
@@ -288,17 +358,42 @@ class SpawnReservationMixin:
                     ),
                 ).fetchall()
                 for cleanup_claim in cleanup_claims:
-                    carried_worktree = None
-                    carried_session = None
+                    previous_task = self._fetch(conn, cleanup_claim["task_id"])
+                    if (
+                        cleanup_claim["task_id"] == task_id or cleanup_claim["creation_key"] == creation_key
+                        or task.dedup_key is not None and previous_task is not None
+                        and previous_task.repo == task.repo and previous_task.dedup_key == task.dedup_key
+                    ):
+                        raise TaskError(
+                            f"worktree {carried_worktree!r} has in-flight cleanup {cleanup_claim['key']}; "
+                            "allocation identity is retained"
+                        )
+                    # An independent logical request may reserve its own key,
+                    # but cannot inherit a predecessor's cleaning allocation.
+                    carried_worktree = carried_session = None
+                    carried_path = carried_host = carried_driver = None
+                    carried_project = latest_allocation["allocation_project"] if latest_allocation else None
                     worktree_ownership = None
                     conversation_retired = False
                     break
+            agent_info = None
+            if latest_allocation is not None and latest_allocation["driver"] == "ordinary-bridge" and driver != "ordinary-bridge":
+                carried_worktree = carried_session = None
+                carried_path = carried_host = carried_driver = None
+                worktree_ownership = None
+            if driver == "ordinary-bridge" and not new_allocation:
+                from .ordinary_bridge import carry_agent
+                carried_worktree, carried_session, worktree_ownership, agent_info = carry_agent(
+                    conn, task, carried_worktree, carried_session, worktree_ownership,
+                    conversation_retired, creation_key=creation_key)
             conn.execute(
                 "INSERT INTO spawn_reservations "
                 "(key, task_id, exclusive_key, attempt, state, reserved_by, "
                 "session_handle, worktree, inherited_worktree, "
-                "worktree_ownership, conversation_retired, reserved_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "worktree_ownership, conversation_retired, allocation_project, worktree_path, "
+                "creating_host, driver, reserved_at, updated_at, allocation_revision, "
+                "creation_key, allocation_reservation_key, agent_info) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     key,
                     task_id,
@@ -311,8 +406,16 @@ class SpawnReservationMixin:
                     carried_worktree,
                     worktree_ownership,
                     int(conversation_retired),
+                    carried_project,
+                    carried_path,
+                    carried_host,
+                    driver if latest_allocation is not None and latest_allocation["driver"] == "ordinary-bridge" else driver or carried_driver,
                     ts,
                     ts,
+                    revision,
+                    creation_key,
+                    allocation_reservation_key,
+                    agent_info,
                 ),
             )
             row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (key,)).fetchone()
@@ -383,6 +486,8 @@ class SpawnReservationMixin:
                         conn.execute("COMMIT")
                         raise TaskError(f"worktree carried by newer reservation {newer['key']}")
             if worktree is not None:
+                if (row["allocation_project"] or row["worktree_path"]) and worktree != row["worktree"]:
+                    raise TaskError("recorded workspace identity cannot change")
                 cleanup_claims = conn.execute(
                     "SELECT key FROM spawn_reservations "
                     "WHERE key <> ? AND worktree = ? AND state IN (?, ?) "
@@ -493,6 +598,8 @@ class SpawnReservationMixin:
         ownership: str = "unknown",
         creating_host: str | None = None,
         driver: str | None = None,
+        allocation_project: str | None = None,
+        worktree_path: str | None = None,
         now: float | None = None,
     ) -> SpawnReservation:
         """Record a reusable worktree while the reservation is still reserving.
@@ -506,13 +613,11 @@ class SpawnReservationMixin:
             raise TaskError("spawn worktree must be non-empty")
         if ownership not in {"created", "targeted", "reused", "unknown"}:
             raise TaskError(f"invalid spawn worktree ownership: {ownership!r}")
-        if ownership != "created":
-            creating_host = None
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT state, worktree, worktree_ownership, inherited_worktree "
+                "SELECT * "
                 "FROM spawn_reservations WHERE key = ?",
                 (key,),
             ).fetchone()
@@ -524,6 +629,13 @@ class SpawnReservationMixin:
                 raise TaskError(
                     f"reservation {key} is {row['state']!r}, not {SpawnState.RESERVING!r}"
                 )
+            if row["allocation_project"] or row["worktree_path"]:
+                if (
+                    row["worktree"] is not None and row["worktree"] != worktree
+                    or row["allocation_project"] is not None and row["allocation_project"] != allocation_project
+                    or row["worktree_path"] is not None and row["worktree_path"] != worktree_path
+                ):
+                    raise TaskError("recorded workspace identity cannot change")
             cleanup_claims = conn.execute(
                 "SELECT key FROM spawn_reservations "
                 "WHERE key <> ? AND worktree = ? AND state IN (?, ?) "
@@ -551,13 +663,15 @@ class SpawnReservationMixin:
                 "WHEN worktree_ownership = 'reused' THEN worktree "
                 "ELSE inherited_worktree END, "
                 "worktree = ?, worktree_ownership = ?, creating_host = ?, "
-                "driver = ?, updated_at = ? WHERE key = ?",
+                "driver = ?, allocation_project = ?, worktree_path = ?, updated_at = ? WHERE key = ?",
                 (
                     worktree,
                     worktree,
                     ownership,
-                    creating_host,
+                    creating_host if ownership == "created" else row["creating_host"],
                     driver,
+                    allocation_project,
+                    worktree_path,
                     ts,
                     key,
                 ),
@@ -566,6 +680,27 @@ class SpawnReservationMixin:
                 "SELECT * FROM spawn_reservations WHERE key = ?",
                 (key,),
             ).fetchone()
+            conn.execute("COMMIT")
+        return SpawnReservation._from_row(updated)
+
+    def record_spawn_allocation(self, key: str, project: str) -> SpawnReservation:
+        """Bind execution routing before the first non-transactional allocation."""
+        if not isinstance(project, str) or not project.strip():
+            raise TaskError("allocation project must be non-empty")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
+            if row is None:
+                raise TaskError(f"no such reservation: {key}")
+            if row["state"] != SpawnState.RESERVING:
+                raise TaskError("allocation binding requires a reserving attempt")
+            if row["allocation_project"] is not None and row["allocation_project"] != project:
+                raise TaskError("recorded allocation project cannot change")
+            conn.execute(
+                "UPDATE spawn_reservations SET allocation_project=?, updated_at=? WHERE key=?",
+                (project, self._now(None), key),
+            )
+            updated = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
             conn.execute("COMMIT")
         return SpawnReservation._from_row(updated)
 

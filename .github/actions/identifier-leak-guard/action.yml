@@ -1,0 +1,132 @@
+name: Trusted identifier leak guard
+description: Scan a PR commit as inert Git data with trusted tooling and publish the existing check.
+inputs:
+  pr-number:
+    description: Pull request number from the trusted event.
+    required: true
+  head-sha:
+    description: Pull request head pinned by the triggering event.
+    required: true
+  facility-identifiers:
+    description: Trusted facility denylist.
+    required: false
+  work-identifiers:
+    description: Trusted work denylist.
+    required: false
+runs:
+  using: composite
+  steps:
+    - id: setup-python
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+      continue-on-error: true
+      with:
+        python-version: "3.12"
+
+    - id: pr
+      name: Resolve PR metadata and fence stale events
+      continue-on-error: true
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+      env:
+        PR_NUMBER: ${{ inputs.pr-number }}
+        EVENT_HEAD_SHA: ${{ inputs.head-sha }}
+      with:
+        script: |
+          const { data: pr } = await github.rest.pulls.get({
+            ...context.repo, pull_number: Number(process.env.PR_NUMBER),
+          });
+          const stale = pr.head.sha !== process.env.EVENT_HEAD_SHA;
+          core.setOutput("stale", String(stale));
+          if (stale) core.notice("PR head moved on; skipping stale identifier reporting.");
+
+    - id: fetch-pr-data
+      name: Fetch PR head as inert data only
+      continue-on-error: true
+      if: steps.pr.outcome == 'success' && steps.pr.outputs.stale != 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        HEAD_SHA: ${{ inputs.head-sha }}
+      run: |
+        gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" \
+          --jq '.[] | select(.status != "removed") | .filename | @json' \
+          > identifier-guard-paths.jsonl
+        git -c core.hooksPath= -c core.fsmonitor=false fetch --no-tags --no-recurse-submodules --depth=1 origin \
+          "$HEAD_SHA:refs/remotes/origin/pr-head/$PR_NUMBER"
+
+    - id: init-files
+      name: Initialize report files
+      continue-on-error: true
+      if: steps.pr.outcome == 'success' && steps.pr.outputs.stale != 'true'
+      shell: bash
+      run: |
+        printf '[]\n' > identifier-guard-findings.json
+        printf '[]\n' > identifier-guard-details.json
+
+    - id: denylist
+      name: Load trusted denylist
+      continue-on-error: true
+      if: steps.pr.outcome == 'success' && steps.pr.outputs.stale != 'true'
+      shell: bash
+      env:
+        RAW_FACILITY: ${{ inputs.facility-identifiers }}
+        RAW_WORK: ${{ inputs.work-identifiers }}
+      run: |
+        joined=""
+        if [ -n "$RAW_FACILITY" ]; then
+          joined="$RAW_FACILITY"
+        fi
+        if [ -n "$RAW_WORK" ]; then
+          if [ -n "$joined" ]; then
+            joined="${joined}"$'\n'
+          fi
+          joined="${joined}${RAW_WORK}"
+        fi
+        {
+          echo "COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI<<__CI_IDS__"
+          printf '%s\n' "$joined"
+          echo "__CI_IDS__"
+        } >> "$GITHUB_ENV"
+        if [ -n "$joined" ]; then
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - id: scan
+      name: Run trusted scanner
+      continue-on-error: true
+      if: steps.pr.outcome == 'success' && steps.pr.outputs.stale != 'true'
+      shell: bash
+      env:
+        PR_NUMBER: ${{ inputs.pr-number }}
+      run: >-
+        python tools/check-no-internal-identifiers.py
+        --ci
+        --paths-jsonl identifier-guard-paths.jsonl
+        --git-ref "refs/remotes/origin/pr-head/$PR_NUMBER"
+        --json-out identifier-guard-findings.json
+        --trusted-details-json-out identifier-guard-details.json
+
+    - name: Publish Check Run and PR feedback
+      if: always()
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        PR_HEAD_SHA: ${{ inputs.head-sha }}
+        FINDINGS_PATH: identifier-guard-findings.json
+        DETAILS_PATH: identifier-guard-details.json
+        PATHS_PATH: identifier-guard-paths.jsonl
+        STALE: ${{ steps.pr.outputs.stale }}
+        DENYLIST_CONFIGURED: ${{ steps.denylist.outputs.configured }}
+        SETUP_PYTHON_OUTCOME: ${{ steps.setup-python.outcome }}
+        PR_OUTCOME: ${{ steps.pr.outcome }}
+        INIT_FILES_OUTCOME: ${{ steps.init-files.outcome }}
+        FETCH_PR_DATA_OUTCOME: ${{ steps.fetch-pr-data.outcome }}
+        DENYLIST_OUTCOME: ${{ steps.denylist.outcome }}
+        SCAN_OUTCOME: ${{ steps.scan.outcome }}
+      with:
+        script: |
+          await require(`${process.env.ACTION_PATH}/report.cjs`)({github, context, core});

@@ -3,7 +3,7 @@
 - **Subject:** agent-logger's portable corpus, digest, accounting, and aggregation backend
 - **Scope:** leaf
 - **Status:** Draft
-- **Last revised:** 2026-10-09
+- **Last revised:** 2026-10-12
 - **Reality docs:** [agent-logger architecture](../../../../plugins/agent-logger/docs/architecture.md)
 
 ## Purpose & Intent
@@ -35,6 +35,16 @@ summarize the same corpus without recreating the backend.
 Session state and the process logs needed for accounting are preserved and
 synchronized to configured storage. Scheduled cold compaction bounds waste
 without making evidence unreadable or losing subsequent writes.
+Per-session accounting evidence also survives loss or rebuild of the shared CLI
+accounting database; preserving one global database is not the only durable ledger.
+
+### evidence-calibrated-historical-estimates
+Sessions without measured token accounting can receive explicitly estimated
+historical quantities when relationships calibrated against measured sessions
+support them. The estimate's basis, uncertainty, applicability and coverage are
+visible; insufficient evidence remains unknown. Transcript estimates never
+impersonate provider meters, reconstruct unseen context as fact or invent
+billing ownership.
 
 ### all-session-digests-and-statistics
 Every admitted session yields a machine-ingestible digest and accounting

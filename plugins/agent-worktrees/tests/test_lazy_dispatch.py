@@ -48,7 +48,7 @@ _ADD_PARSERS_MODULES = [
     "resolve_cli", "finalize_cli", "attribution_prepare_cli", "pr_state_cli", "status_cli", "status_bar_cli",
     "status_updater_cli", "status_monitor_cli", "status_monitor_runtime", "status_monitor_reap_stale",
     "pane_lifecycle", "handoff_cli", "handoff_successor_repair_cli", "handoff_cancel_cli", "list_cli", "claims_cli", "follow_ups_cli",
-    "session_metadata_cli", "cleanup_gc_cli", "reap_cli", "reclaim_cli",
+    "session_metadata_cli", "cleanup_gc_cli", "reap_cli", "reclaim_cli", "resource_producer_cli",
     "worktree_ops_cli", "picker_profiles_cli", "maintenance_cli",
     "installation_cli", "update_cli", "context_cli", "services_cli",
     "repos_cli", "related_cli", "git_cli", "pr_cli", "session_binding_cli",

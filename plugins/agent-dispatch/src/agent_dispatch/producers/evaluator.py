@@ -35,6 +35,8 @@ from typing import Any
 
 from agent_procutil import no_window_kwargs
 
+from ..registrar import RegistrarError
+from ..repository_resources import resolve_execution_resources, validate_resource_arguments
 from . import UNTRUSTED_EXTERNAL_CONTENT_NOTE
 
 # Lifecycle event types the coordinator publishes (see coordinator._emit).
@@ -338,24 +340,32 @@ class ScriptEvaluator:
         argv: Sequence[str],
         *,
         timeout_seconds: float = 30.0,
+        cwd: str | None = None,
         runner: Callable[..., Any] = subprocess.run,
     ):
         self.name = name
         self.argv = [str(part) for part in argv]
         self.timeout_seconds = float(timeout_seconds)
+        self.cwd = cwd
         self._runner = runner
 
     def evaluate(self, event: dict) -> list[Decision]:
         payload = json.dumps(event, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
         try:
+            argv, cwd = resolve_execution_resources(self.argv, self.cwd)
+        except RegistrarError as exc:
+            log.warning("script evaluator %s resource resolution failed: %s", self.name, exc)
+            raise EvaluatorRuntimeError(f"script evaluator resource resolution failed: {exc}") from exc
+        try:
             completed = self._runner(
-                self.argv,
+                argv,
                 input=payload,
                 capture_output=True,
                 text=True,
                 timeout=self.timeout_seconds,
                 check=False,
                 shell=False,
+                **({"cwd": cwd} if cwd is not None else {}),
                 **no_window_kwargs(),
             )
         except subprocess.TimeoutExpired:
@@ -386,7 +396,10 @@ class ScriptEvaluator:
 class ScriptEvaluatorRegistry:
     """Trusted selector -> fixed argv mapping for script evaluators."""
 
-    def __init__(self, scripts: dict[str, Sequence[str]], *, timeout_seconds: float = 30.0):
+    def __init__(
+        self, scripts: dict[str, Sequence[str]], *, timeout_seconds: float = 30.0,
+        cwd: str | None = None,
+    ):
         if not scripts:
             raise EvaluatorError("script evaluator registry requires a non-empty 'scripts' object")
         normalized: dict[str, tuple[str, ...]] = {}
@@ -401,15 +414,26 @@ class ScriptEvaluatorRegistry:
                 raise EvaluatorError(
                     f"script evaluator {name!r} must map to a non-empty argv list"
                 )
+            try:
+                validate_resource_arguments(argv)
+            except ValueError as exc:
+                raise EvaluatorError(str(exc)) from exc
             normalized[name] = tuple(argv)
         self.scripts = normalized
         self.timeout_seconds = float(timeout_seconds)
+        if cwd is not None and (not isinstance(cwd, str) or not cwd):
+            raise EvaluatorError("script evaluator 'cwd' must be a non-empty string")
+        try:
+            validate_resource_arguments([cwd])
+        except ValueError as exc:
+            raise EvaluatorError(str(exc)) from exc
+        self.cwd = cwd
 
     @classmethod
     def from_spec(cls, spec: dict[str, Any]) -> ScriptEvaluatorRegistry:
         if "rules" in spec:
             raise EvaluatorError("script evaluator registry cannot also define declarative 'rules'")
-        extra = sorted(set(spec) - {"scripts", "timeout_seconds"})
+        extra = sorted(set(spec) - {"scripts", "timeout_seconds", "cwd"})
         if extra:
             raise EvaluatorError(f"unknown script evaluator key(s): {extra}")
         timeout = spec.get("timeout_seconds", 30.0)
@@ -426,7 +450,7 @@ class ScriptEvaluatorRegistry:
         scripts = spec.get("scripts")
         if not isinstance(scripts, dict):
             raise EvaluatorError("script evaluator registry requires a 'scripts' object")
-        return cls(scripts, timeout_seconds=timeout_seconds)
+        return cls(scripts, timeout_seconds=timeout_seconds, cwd=spec.get("cwd"))
 
     def evaluator_for(
         self,
@@ -441,6 +465,7 @@ class ScriptEvaluatorRegistry:
             selector,
             argv,
             timeout_seconds=self.timeout_seconds,
+            cwd=self.cwd,
             runner=runner,
         )
 

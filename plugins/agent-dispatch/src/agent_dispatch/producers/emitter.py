@@ -23,14 +23,17 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from ..client import DispatchClient
+from ..repository_resources import (
+    resolve_execution_resources, resolve_resource_argument, validate_resource_arguments,
+)
 
 
 class EmitterError(ValueError):
     """A malformed command-emitter spec."""
 
 
-def validate_spec(spec: dict[str, Any]) -> None:
-    """Validate a periodic command-emitter spec."""
+def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False) -> None:
+    """Validate shape before admission; only held work resolves resources."""
     if not isinstance(spec, dict):
         raise EmitterError("emitter spec must be a JSON object")
     if not isinstance(spec.get("id"), str) or not spec["id"]:
@@ -62,6 +65,10 @@ def validate_spec(spec: dict[str, Any]) -> None:
         value = spec.get(key)
         if value is not None and (not isinstance(value, str) or not value):
             raise EmitterError(f"'{key}' must be a non-empty string")
+    try:
+        validate_resource_arguments([*(command or []), spec.get("cwd")])
+    except ValueError as exc:
+        raise EmitterError(str(exc)) from exc
     if builtin is not None:
         if command is not None or effort_builtin is not None:
             raise EmitterError(
@@ -73,7 +80,7 @@ def validate_spec(spec: dict[str, Any]) -> None:
         from ..repository_issue_loops import validate_config
 
         try:
-            validate_config(builtin, cwd=spec.get("cwd"))
+            validate_config(builtin, cwd=spec.get("cwd"), resolve_resources=resolve_resources)
         except ValueError as exc:
             raise EmitterError(str(exc)) from exc
     if effort_builtin is not None:
@@ -87,7 +94,7 @@ def validate_spec(spec: dict[str, Any]) -> None:
         from ..effort_driver_loops import validate_config
 
         try:
-            validate_config(effort_builtin, cwd=spec.get("cwd"))
+            validate_config(effort_builtin, cwd=spec.get("cwd"), resolve_resources=resolve_resources)
         except ValueError as exc:
             raise EmitterError(str(exc)) from exc
     try:
@@ -143,12 +150,16 @@ def validate_spec(spec: dict[str, Any]) -> None:
             raise EmitterError(
                 "'side_load.command' must include a {change_ref} placeholder"
             )
+        try:
+            validate_resource_arguments(command)
+        except ValueError as exc:
+            raise EmitterError(str(exc)) from exc
 
 
 def load_spec(path: str | Path) -> dict[str, Any]:
     """Load and validate a command-emitter JSON spec."""
     data = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
-    validate_spec(data)
+    validate_spec(data, resolve_resources=False)
     return data
 
 
@@ -427,9 +438,12 @@ def run_side_load(
     side_load = spec.get("side_load")
     if not side_load:
         raise EmitterError(f"emitter {spec['id']!r} does not declare side_load")
+    command, cwd = resolve_execution_resources(
+        _render_command(side_load["command"], change_ref=change_ref), spec.get("cwd"),
+    )
     completed = runner(
-        _render_command(side_load["command"], change_ref=change_ref),
-        cwd=spec.get("cwd"),
+        command,
+        cwd=cwd,
         env={
             **os.environ,
             **(spec.get("env") or {}),
@@ -465,7 +479,8 @@ def run_tick(
     clock: Callable[[], float] = time.time,
 ) -> dict[str, Any]:
     """Acquire/renew the emitter lease and invoke one command tick when held."""
-    validate_spec(spec)
+    validate_spec(spec, resolve_resources=False)
+    cwd = spec.get("cwd")
     scope = lease_scope(spec)
     lease = client.acquire_schedule_lease(
         scope,
@@ -492,10 +507,11 @@ def run_tick(
             from .ci_repair import AdmissionRefused, run_tick as run_ci_tick
 
             try:
+                cwd = resolve_resource_argument(cwd, execution=True, directory=True) if cwd else None
                 ci_config = dict(spec["ci_repair"])
                 for key in ("source_command", "admission_command"):
                     ci_config[key] = _render_command(ci_config[key])
-                result = run_ci_tick(client, ci_config, runner=runner, cwd=spec.get("cwd"))
+                result = run_ci_tick(client, ci_config, runner=runner, cwd=cwd)
             except AdmissionRefused as exc:
                 return {
                     "held": True, "lease": lease.get("lease"), "scope": scope,
@@ -516,7 +532,7 @@ def run_tick(
                 client,
                 spec["repository_issue_loop"],
                 clock=clock,
-                cwd=spec.get("cwd"),
+                cwd=cwd,
             )
             return {
                 "held": True,
@@ -535,7 +551,7 @@ def run_tick(
                 client,
                 spec["effort_driver_loop"],
                 clock=clock,
-                cwd=spec.get("cwd"),
+                cwd=cwd,
             )
             return {
                 "held": True,
@@ -548,9 +564,12 @@ def run_tick(
                 "duration_seconds": max(0.0, clock() - started_at),
             }
         task_output_json = spec.get("task_output") == "json"
+        command, command_cwd = resolve_execution_resources(
+            _render_command(spec["command"]), spec.get("cwd"),
+        )
         completed = runner(
-            _render_command(spec["command"]),
-            cwd=spec.get("cwd"),
+            command,
+            cwd=command_cwd,
             env=env,
             timeout=spec.get("timeout_seconds"),
             check=False,

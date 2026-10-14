@@ -12,6 +12,8 @@ from typing import Any
 
 import httpx
 from .client_completion_review import CompletionReviewMixin
+from .client_categories import CategoryClientMixin
+from .client_errors import DispatchError, DispatchUpgradeRequired  # noqa: F401 -- public re-exports
 from .client_events import EventStreamClientMixin
 from .client_exclude import ClearExcludeClientMixin
 from .client_registrations import RegistrationClientMixin
@@ -23,33 +25,7 @@ from .client_suspend import SuspendClientMixin
 from .client_transport import ConnectRetryClient
 from .client_verification import VerificationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
-class DispatchError(RuntimeError):
-    """A non-2xx response from the coordinator (carries status + detail)."""
-
-    def __init__(self, status_code: int, detail: object):
-        rendered = json.dumps(detail, sort_keys=True) if isinstance(detail, dict) else str(detail)
-        super().__init__(f"HTTP {status_code}: {rendered}")
-        self.status_code = status_code
-        self.detail = detail
-
-    def as_dict(self) -> dict[str, object]:
-        if isinstance(self.detail, dict):
-            return self.detail
-        return {
-            "code": "dispatch_http_error",
-            "message": str(self.detail),
-            "status": self.status_code,
-        }
-
-
-class DispatchUpgradeRequired(DispatchError):
-    """The coordinator accepted a request but lacks the required protocol."""
-
-    def __init__(self, detail: str):
-        super().__init__(426, detail)
-
-
-class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
+class DispatchClient(CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(
@@ -163,27 +139,7 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
     def result(self, task_id: str) -> dict:
         return self._unwrap(self._http.get(f"/tasks/{task_id}/result"))
 
-    def list(self, **params: Any) -> list[dict]:
-        clean = {k: v for k, v in params.items() if v is not None}
-        return self._unwrap(self._http.get("/tasks", params=clean))
-
-    def find(self, query: str, *, repo: str | None = None, limit: int = 50) -> list[dict]:
-        params: dict[str, Any] = {"q": query, "limit": limit}
-        if repo is not None:
-            params["repo"] = repo
-        return self._unwrap(self._http.get("/tasks", params=params))
-
-    def sweep(self, *, repo: str | None = None, limit: int = 500) -> list[dict]:
-        """The dedup corpus: every non-abandoned task in the lane, newest first."""
-        params: dict[str, Any] = {"sweep": True, "limit": limit}
-        if repo is not None:
-            params["repo"] = repo
-        return self._unwrap(self._http.get("/tasks", params=params))
-
     # -- producers / transitions --------------------------------------------
-
-    def create(self, title: str, **kwargs: Any) -> dict:
-        return self._unwrap(self._http.post("/tasks", json={"title": title, **kwargs}))
 
     def propose(self, title: str, **kwargs: Any) -> dict:
         return self.create(title, proposed=True, **kwargs)
@@ -622,6 +578,8 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
         self, task_id: str, *, reserved_by: str | None = None,
         allow_suspended_reembodiment: bool = False,
         coordinator_launch: bool = False,
+        driver: str | None = None,
+        allocation_revision: int | None = None,
     ) -> dict:
         """Atomically reserve the right to spawn an embody worker for a task.
 
@@ -637,11 +595,13 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
         """
         return self._unwrap(
             self._http.post(
-                "/spawn-reservations",
+                "/spawn-reservations/revisions" if allocation_revision is not None else "/spawn-reservations",
                 json={
                     "task_id": task_id,
                     "reserved_by": reserved_by,
                     "allow_suspended_reembodiment": allow_suspended_reembodiment,
+                    **({"driver": driver} if driver is not None else {}),
+                    **({"allocation_revision": allocation_revision} if allocation_revision is not None else {}),
                 },
                 **({"timeout": 180.0} if coordinator_launch else {}),
             )
@@ -653,11 +613,13 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
         *,
         session_handle: str | None = None,
         worktree: str | None = None,
+        session_info: dict | None = None,
     ) -> dict:
         return self._unwrap(
             self._http.post(
                 f"/spawn-reservations/{key}/spawned",
-                json={"session_handle": session_handle, "worktree": worktree},
+                json={"session_handle": session_handle, "worktree": worktree,
+                      **({"session_info": session_info} if session_info is not None else {})},
             )
         )
 
@@ -743,6 +705,8 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
         ownership: str = "unknown",
         creating_host: str | None = None,
         driver: str | None = None,
+        allocation_project: str | None = None,
+        worktree_path: str | None = None,
     ) -> dict:
         """Record the reserved worktree before launching the worker session."""
         return self._unwrap(
@@ -753,6 +717,8 @@ class DispatchClient(ScheduleClientMixin, RegistrationClientMixin, WorktreeStatu
                     "ownership": ownership,
                     "creating_host": creating_host,
                     "driver": driver,
+                    "allocation_project": allocation_project,
+                    "worktree_path": worktree_path,
                 },
             )
         )

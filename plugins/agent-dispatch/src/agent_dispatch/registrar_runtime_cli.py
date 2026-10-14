@@ -174,6 +174,7 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
             kwargs: dict[str, Any] = {
                 "kind": args.kind,
                 "aliases": getattr(args, "aliases", None),
+                "repository": getattr(args, "repository", None),
             }
             if args.owner is not None:
                 kwargs["owner"] = args.owner

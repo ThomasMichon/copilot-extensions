@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import platform
 import subprocess
 import threading
 import time
@@ -19,6 +20,7 @@ from work_coalescing_singleton import CoalescingServer
 from work_coalescing_singleton import client as wcs_client
 
 from worktree_manager import mux_daemon
+from worktree_manager import mux_daemon_process
 from worktree_manager import mux_mapping_registry
 
 
@@ -909,6 +911,9 @@ def test_daemon_observes_attachments_without_status_monitor(tmp_path, monkeypatc
     registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
     registry.register(_entry(attached_clients=0))
     monkeypatch.setattr(mux_daemon, "_status_monitor_lock_path", lambda: tmp_path / "absent.lock")
+    # Prime platform's cache first: on Windows its first call shells out via
+    # subprocess.run, which the fake below would otherwise answer.
+    platform.system()
     monkeypatch.setattr(
         subprocess, "run", _fake_run_factory(list_clients_lines=["client-one"])
     )
@@ -1474,13 +1479,34 @@ def test_ensure_daemon_running_propagates_root_to_spawned_child(tmp_path, monkey
     this helper reports failure despite successfully spawning a daemon."""
     captured: dict = {}
 
-    def _fake_spawn(argv):
+    def _fake_spawn(argv, **kwargs):
         captured["argv"] = argv
+        captured["cwd"] = kwargs.get("cwd")
         return False  # spawn "succeeds" at the OS level is irrelevant here
 
     monkeypatch.setattr(mux_daemon, "_spawn_detached", _fake_spawn)
     mux_daemon.ensure_daemon_running(tmp_path, boot_wait_s=0.05)
     assert any(arg == f"--root={tmp_path}" for arg in captured["argv"])
+    assert captured["cwd"] == tmp_path
+
+
+def test_ensure_daemon_running_passes_an_absolute_root_for_a_relative_one(tmp_path, monkeypatch):
+    """The child runs from the root, so a relative root must be made absolute
+    first or the child would resolve it against its new cwd."""
+    captured: dict = {}
+
+    def _fake_spawn(argv, **kwargs):
+        captured["argv"] = argv
+        captured["cwd"] = kwargs.get("cwd")
+        return False
+
+    monkeypatch.setattr(mux_daemon, "_spawn_detached", _fake_spawn)
+    (tmp_path / "rel").mkdir()
+    monkeypatch.chdir(tmp_path)
+    mux_daemon.ensure_daemon_running(Path("rel"), boot_wait_s=0.05)
+    assert f"--root={tmp_path / 'rel'}" in captured["argv"]
+    assert captured["cwd"] == tmp_path / "rel"
+    assert captured["cwd"].is_absolute()
 
 
 def test_manager_daemon_restart_republishes_live_mapping_without_relaunch(tmp_path, monkeypatch):
@@ -1903,6 +1929,24 @@ def test_spawn_detached_scrubs_auth_env(monkeypatch):
     assert "AGENT_WORKTREES_AHP_AUTH_TOKEN" not in captured["env"]
 
 
+@pytest.mark.parametrize("given", ["root", "missing", None])
+def test_spawn_detached_never_inherits_caller_cwd(monkeypatch, tmp_path, given):
+    captured = {}
+
+    def _fake_popen(argv, **kwargs):
+        captured["cwd"] = kwargs.get("cwd")
+        return object()
+
+    monkeypatch.setattr(subprocess, "Popen", _fake_popen)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(mux_daemon_process.os.path, "expanduser", lambda _p: str(home))
+    cwd = {"root": tmp_path, "missing": tmp_path / "absent", None: None}[given]
+
+    assert mux_daemon_process.spawn_detached(["python", "-m", "worktree_manager"], cwd=cwd)
+    assert captured["cwd"] == str(tmp_path if given == "root" else home)
+
+
 def test_spawn_detached_windows_kwargs_avoid_console_flash(monkeypatch):
     """Regression test (2026-09-26 flashing-console bug): the daemon's own
     subsequent per-tick ``subprocess.run([mux_bin, ...])`` calls (in
@@ -1922,7 +1966,12 @@ def test_spawn_detached_windows_kwargs_avoid_console_flash(monkeypatch):
         return _Proc()
 
     monkeypatch.setattr(subprocess, "Popen", _fake_popen)
-    monkeypatch.setattr(os, "name", "nt")
+    import agent_procutil
+
+    monkeypatch.setattr(agent_procutil, "_is_windows", lambda: True)
+    monkeypatch.setattr(
+        mux_daemon.mux_daemon_process, "direct_daemon_python", lambda executable: (executable, {}),
+    )
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
 
     assert mux_daemon._spawn_detached(["python", "-m", "worktree_manager"]) is True
@@ -2073,7 +2122,7 @@ def test_ensure_daemon_running_serializes_concurrent_first_callers(tmp_path, mon
     spawn_calls: list[list[str]] = []
     spawn_lock = threading.Lock()
 
-    def _fake_spawn(argv):
+    def _fake_spawn(argv, **kwargs):
         with spawn_lock:
             spawn_calls.append(argv)
         # Simulate the spawned daemon actually starting shortly after.

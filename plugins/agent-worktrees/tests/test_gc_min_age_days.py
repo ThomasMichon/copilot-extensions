@@ -146,6 +146,10 @@ Write-Output "DERIVED=$derived"
 @pytest.mark.guard
 def test_install_ps1_gc_call_has_min_age_days_floor():
     text = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
+    text = text[
+        text.index("function Invoke-VersionedActivateInner {"):
+        text.index("\nfunction Invoke-VersionedActivate {")
+    ]
     assert "'gc', '--protect-pids', '--min-age-days', '0.05'" in text
     assert "LastWriteTime = Get-Date" in text
     # $prev must be derived from the canonical resolver, not a hand-rolled
@@ -167,13 +171,17 @@ def test_install_ps1_gc_call_has_min_age_days_floor():
     # newest-slot scan pick the brand-new slot itself instead of the real
     # previously-pinned older slot.
     resolve_idx = text.index(". $resolverSrc")
-    mark_complete_idx = text.index("\n    Invoke-VersionedMarkComplete\n")
+    mark_complete_idx = text.index("if (-not (Invoke-VersionedMarkComplete)) { return $false }")
     assert resolve_idx < mark_complete_idx
 
 
 @pytest.mark.guard
 def test_install_sh_gc_call_has_min_age_days_floor():
     text = (SCRIPTS / "install.sh").read_text(encoding="utf-8")
+    text = text[
+        text.index("_versioned_activate_inner() {"):
+        text.index("\n_versioned_activate() {")
+    ]
     assert "gc --protect-pids \"${gc_keep_args[@]}\" --min-age-days 0.05" in text
     assert 'touch "$INSTALL_DIR/versions/$prev"' in text
     # $prev must be derived from the canonical resolver.
@@ -192,7 +200,7 @@ def test_install_sh_gc_call_has_min_age_days_floor():
     assert touch_idx < activate_idx
     # Ordering guard (review round 6): same reasoning as the ps1 test.
     resolve_idx = text.index('. "$_resolver_src"')
-    mark_complete_idx = text.index("\n    _versioned_mark_complete\n")
+    mark_complete_idx = text.index("_versioned_mark_complete || return $?")
     assert resolve_idx < mark_complete_idx
 
 

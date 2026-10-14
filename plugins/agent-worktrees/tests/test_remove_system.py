@@ -18,9 +18,26 @@ from agent_worktrees import tracking
 @pytest.fixture(autouse=True)
 def receiving_project_authority(monkeypatch, tmp_path):
     config = _config(tmp_path / "receiving")
-    monkeypatch.setattr(cli.cfg, "load_config", lambda: config)
-    monkeypatch.setattr(cli.cfg, "load_project_config", lambda project: cli.cfg.load_config())
-    monkeypatch.setattr(cli.cfg, "load_machines_yaml", lambda anchor: {})
+
+    def load_project_config(project, *, include_control_plane_related_pr=True):
+        return cli.cfg.load_config()
+
+    monkeypatch.setattr(
+        cli.cfg, "load_config",
+        lambda *, include_control_plane_related_pr=True: config,
+    )
+    monkeypatch.setattr(cli.cfg, "load_project_config", load_project_config)
+    monkeypatch.setattr(cli.cfg, "load_machines_yaml", lambda anchor, **_kwargs: {})
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("include_control_plane_related_pr", [False, True])
+def test_receiving_project_authority_accepts_overlay_scope(
+    include_control_plane_related_pr,
+):
+    assert cli.cfg.load_project_config(
+        "demo", include_control_plane_related_pr=include_control_plane_related_pr,
+    ) is cli.cfg.load_config()
 
 
 def _record(tmp_path: Path) -> tuple[tracking.WorktreeRecord, Path]:

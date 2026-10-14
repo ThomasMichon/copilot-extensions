@@ -158,11 +158,6 @@ def _launch_env(
                 "the container's Copilot CLI would start signed out"
             )
         env["GH_TOKEN"] = github_token
-    from .resolver import resolve_copilot_cli_token_or_raise
-
-    copilot_token = resolve_copilot_cli_token_or_raise(config, target.fleet, args.name)
-    if copilot_token:
-        env["COPILOT_GITHUB_TOKEN"] = copilot_token
     for key in _DISPATCH_ENV_KEYS:
         value = os.environ.get(key, "").strip()
         if value:
@@ -210,7 +205,12 @@ def _prepare_remote_env(
 
     launch_env = container_environment(args.name, target.user)
     launch_env.update(values)
-    return write_remote_env(args.name, target.user, launch_env)
+    from .copilot_process_auth import stage_env
+
+    return stage_env(
+        args.name, target.user, launch_env, write_remote_env,
+        config=target.config, fleet=target.fleet,
+    )
 
 
 def _resolve_target(args: argparse.Namespace) -> Any:
@@ -236,6 +236,7 @@ class _ContainerAdapter:
         remote_env: str | None,
         relay_port: int | None,
         host_relay_port: int | None,
+        target: Any = None,
     ) -> None:
         self.name = name
         self.ssh_config = ssh_config
@@ -243,6 +244,8 @@ class _ContainerAdapter:
         self.remote_env = remote_env
         self.relay_port = relay_port
         self.host_relay_port = host_relay_port
+        self.target = target
+        self.inputs_safe_to_cleanup = True
         self._hold_updated_at: float | None = None
 
     def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
@@ -253,17 +256,50 @@ class _ContainerAdapter:
 
     def launch(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         from .ssh_transport import build_remote_command, build_ssh_command
-
-        remote_command = build_remote_command(command, self.remote_env)
-        proc = subprocess.run(
-            build_ssh_command(self.ssh_config, remote_command, pty=False),
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            creationflags=no_window_flags(),
+        from .copilot_process_auth import (
+            created_child, prepare_launch, wait_for_consumption,
+            without_inference_token, wrap_command,
         )
-        return proc.returncode, proc.stdout or "", proc.stderr or ""
+        from .ssh_transport import cleanup_remote_env
+
+        auth_env = None
+        try:
+            if self.target is not None:
+                auth_env = prepare_launch(
+                    self.target.config, self.target.fleet, self.name, self.target.user,
+                )
+            command = wrap_command(command, auth_env, manager=True)
+            remote_command = build_remote_command(command, self.remote_env)
+            ssh_command = build_ssh_command(self.ssh_config, remote_command, pty=False)
+            self.inputs_safe_to_cleanup = auth_env is None
+            proc = subprocess.run(
+                ssh_command,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                creationflags=no_window_flags(),
+                env=without_inference_token(dict(os.environ)),
+            )
+            if self.target is not None and auth_env:
+                try:
+                    result = json.loads(proc.stdout)
+                except (ValueError, TypeError) as exc:
+                    if proc.returncode == 0:
+                        raise RuntimeError("Copilot embodiment returned an invalid launch receipt") from exc
+                else:
+                    if created_child(result):
+                        wait_for_consumption(self.name, self.target.user, auth_env, timeout=timeout)
+                    self.inputs_safe_to_cleanup = True
+            return proc.returncode, proc.stdout or "", proc.stderr or ""
+        finally:
+            if self.target is not None and self.inputs_safe_to_cleanup:
+                cleanup_remote_env(self.name, self.target.user, auth_env)
+            elif auth_env:
+                print(
+                    "[WARN] Retaining unconfirmed Copilot launch inputs for bounded abandoned-input cleanup.",
+                    file=sys.stderr,
+                )
 
     def ensure_keeper(self, *, venue_port: int, mux: str) -> dict[str, Any]:
         from . import forward_keeper
@@ -343,6 +379,7 @@ def cmd_detach(
         return busy_exit
 
     remote_env: str | None = None
+    adapter: _ContainerAdapter | None = None
     try:
         try:
             launch_env, relay_port, host_relay_port = _launch_env(
@@ -362,6 +399,7 @@ def cmd_detach(
             remote_env=remote_env,
             relay_port=relay_port,
             host_relay_port=host_relay_port,
+            target=target,
         )
         _progress("prepare", "registration credentials on the container")
         rc, payload = launch_detached(
@@ -377,7 +415,7 @@ def cmd_detach(
         )
         return _emit(rc, payload)
     finally:
-        if remote_env:
+        if remote_env and (adapter is None or adapter.inputs_safe_to_cleanup):
             try:
                 cleanup_remote_env(args.name, target.user, remote_env)
             except RuntimeError:

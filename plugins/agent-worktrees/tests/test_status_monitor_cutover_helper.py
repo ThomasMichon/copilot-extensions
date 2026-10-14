@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import threading
 import time
+import subprocess
+from types import SimpleNamespace
 
-from zdd import routing
+import pytest
+
+from zdd import breadcrumb, routing
 
 from agent_worktrees import status_monitor_cutover as smc
 
@@ -20,6 +24,86 @@ class _Handle:
 
     def poll(self) -> int | None:
         return None if self.daemon.alive else 0
+
+
+def test_failed_monitor_census_is_not_an_empty_inventory(monkeypatch):
+    monkeypatch.setattr(smc, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(
+        smc.subprocess, "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 1, stdout="", stderr="fixture census failure",
+        ),
+    )
+    with pytest.raises(OSError, match="native monitor process census failed"):
+        smc._iter_status_monitor_pids()
+
+
+@pytest.mark.parametrize("phase", ["recovery", "passive_reap"])
+def test_activation_preserves_refusal_before_starting_cutover(tmp_path, monkeypatch, phase):
+    events = []
+    refusal = {"refused": True, "reason": "fixture native custody refusal"}
+    record = breadcrumb.write_breadcrumb(tmp_path, state="started", new_pid=202)
+    monkeypatch.setattr(smc, "routing_dir", lambda: tmp_path)
+    monkeypatch.setattr("agent_worktrees.status_monitor_runtime._status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_control_url_from_route", lambda: "http://127.0.0.1:1234")
+    monkeypatch.setattr(
+        smc, "_acquire_cutover_lock",
+        lambda _: SimpleNamespace(release=lambda: events.append("release")),
+    )
+
+    def recover(*args, **kwargs):
+        events.append("recovery")
+        if phase == "recovery":
+            return refusal
+        breadcrumb.write_breadcrumb(tmp_path, state="rolled_back", new_pid=202)
+        return {"recovered": True}
+
+    def reap(original):
+        assert original == record and phase == "passive_reap"
+        events.append("passive_reap")
+        return refusal
+
+    monkeypatch.setattr(breadcrumb, "recover_stale_cutover", recover)
+    monkeypatch.setattr(smc, "_reap_abandoned_passive", reap)
+    monkeypatch.setattr(
+        smc, "CutoverOrchestrator",
+        lambda *args, **kwargs: pytest.fail("cutover started after native refusal"),
+    )
+    monkeypatch.setattr(
+        "agent_worktrees.status_monitor_reap_stale.schedule_delayed_daemon_health_reap",
+        lambda: events.append("backstop"),
+    )
+    result = smc.activate_after_update(runtime_python="python")
+    assert result["action"] == "refused"
+    assert result["result"] == {"ok": False, "error": refusal["reason"]}
+    assert events == (
+        ["recovery", "release", "backstop"] if phase == "recovery"
+        else ["recovery", "passive_reap", "release", "backstop"]
+    )
+    assert breadcrumb.read_breadcrumb(tmp_path)["new_pid"] == 202
+
+
+@pytest.mark.parametrize("live", [False, True])
+@pytest.mark.parametrize("content", ["{", "{}", '{"state":"unknown"}',
+                                     '{"state":"conditional-started"}'])
+def test_activation_refuses_unverifiable_custody_before_restart(
+    tmp_path, monkeypatch, live, content,
+):
+    path = breadcrumb.breadcrumb_path(tmp_path)
+    path.write_text(content)
+    monkeypatch.setattr(smc, "routing_dir", lambda: tmp_path)
+    monkeypatch.setattr("agent_worktrees.status_monitor_runtime._status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: live)
+    monkeypatch.setattr(smc, "_monitor_control_url_from_route", lambda: None)
+    monkeypatch.setattr(
+        "agent_worktrees.status_monitor_runtime._restart_status_monitor",
+        lambda: pytest.fail("restart reached before custody refusal"),
+    )
+    result = smc.activate_after_update(runtime_python="python", monitor_was_live=True)
+    assert result["action"] == "refused" and result["result"]["ok"] is False
+    assert "owner-led recovery" in result["reason"]
+    assert path.read_text() == content
 
 
 class _FakeDaemon:

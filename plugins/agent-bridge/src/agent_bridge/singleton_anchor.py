@@ -5,13 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent_procutil import no_window_flags
-
 from .agent_registry import _agent_worktrees_bin, _normalize_repo_basename
+from .provider_process import run_captured
 
 log = logging.getLogger("agent-bridge.singleton-anchor")
 
@@ -94,13 +92,9 @@ def list_singleton_repos() -> list[SingletonRepo]:
         k: v for k, v in os.environ.items() if k not in _SCRUBBED_ENV_KEYS
     }
     try:
-        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
+        proc = run_captured(
             [exe, "repos", "list", "--class", "singleton", "--json"],
-            capture_output=True,
-            text=True,
             timeout=_QUERY_TIMEOUT_S,
-            check=False,
-            creationflags=no_window_flags(),
             env=child_env,
         )
     except Exception as exc:

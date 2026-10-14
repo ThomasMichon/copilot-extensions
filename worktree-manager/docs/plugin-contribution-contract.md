@@ -69,6 +69,10 @@ Version-1 compatibility also covers the existing declarative fields:
   return a JSON array of non-blank strings; missing/failed/invalid/empty results
   stop this form with an explicit error, never an arbitrary free-text fallback.
   Unlike create forms, configuration forms do not force `allow_other: true`.
+  When explicitly allowed, custom choice defaults restore the Other control.
+  Configuration multichoice Other values use one custom value per line, so
+  multiple saved custom members restore and remain independently editable.
+  Ordinary create and steering forms retain their existing Other semantics.
   All nested commands receive the same attributable target resolution and
   validation as other contribution commands. The provider owns revalidation,
   local persistence and the meaning of removing an override; the Manager does
@@ -122,6 +126,50 @@ Version-1 compatibility also covers the existing declarative fields:
 The command arrays are process-boundary contracts. The Manager invokes the
 contributing plugin's canonical CLI; it never imports the plugin runtime or
 reads the plugin's private state.
+
+## Configuration backstage contributions
+
+A list contribution may declare `"placement": "config"` (the default is
+`"left"`). It becomes a full-content section of Configuration, alongside
+Profiles, using the same `list`, `items_field`, `entry`, `columns`, `summary`,
+`actions`, and `view_actions` vocabulary as an operational pivot. Configuration
+uses horizontal section navigation instead of the Machines band. Section
+navigation and loading content mount before any provider command completes;
+failed reads remain visible and retryable. Machine-local sections declare
+`"scope": "global"` and resolve their local target in their own CLI, never from
+the previously selected operational machine.
+Configuration placement requires explicit `"scope": "account"` or `"global"`;
+omitted/default machine scope is rejected because there is no Machines band.
+Its row-action `{machine}` context is empty rather than inheriting a hidden
+operational target. Legacy `config_sections` receive the local identity in
+their compatibility context; they never inherit a previously selected peer.
+
+Configuration row forms use the existing `kind: "form"`, `fields_from`,
+`title_from`, `body_from`, `{field.<name>}` and `{fields}` contract. The selected
+row supplies fields, initial values, and effects prose through those paths.
+The host renders an editor in the Configuration workspace, not a task-steering
+dialog: Cancel performs no write or draft save. `confirm: true` shows the
+collected values and provider effects before submission, with Cancel selected
+initially. Providers must revalidate values and target identity on submission;
+displaying a preview is not authorization to skip validation.
+
+Workers owns its catalog, local-instance lifecycle, and activation receipts.
+Catalog rows distinguish configured instances from templates and separately
+expose provenance, prerequisites, desired enablement, observed activity, and
+statistics. Source-owned rows are read-only apart from supported local controls.
+Template instantiation writes a new, stable user-local identity; Edit updates
+that identity against an explicit revision baseline. Save-only never activates
+or creates agentic work. Save and Activate requires explicit effects consent:
+it may make an existing supervisor reconcile the declaration and subsequently
+create tasks or launch agents. A receipt distinguishes persistence success from
+activation pending, acknowledged, or failed, and never equates enabled with
+running. Providers own collision refusal, stale-edit refusal, and retry-safe
+submission; the Manager does not create another registrar or supervisor.
+
+Legacy `config_sections` remain supported. Their destination/loading content
+opens immediately; status and strict option reads fill that workspace
+asynchronously. A one-shot command remains explicitly action-triggered rather
+than becoming a mutation performed merely by browsing Configuration.
 
 ## Compatibility
 

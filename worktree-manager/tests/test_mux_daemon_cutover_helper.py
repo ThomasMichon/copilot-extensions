@@ -8,7 +8,9 @@ import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 from work_coalescing_singleton import CoalescingServer
 from zdd import breadcrumb, routing
 
@@ -264,6 +266,48 @@ def test_activate_after_update_bootstraps_a_legacy_lock_only_daemon(tmp_path, mo
 
     for daemon in daemons.values():
         daemon.force_terminate()
+
+
+@pytest.mark.parametrize("route_mode", ["same-version", "legacy-live", "legacy-dead"])
+@pytest.mark.parametrize("content", [
+    "{", "{}", '{"state":"unknown"}', '{"state":"conditional-started"}',
+    '{"state":"publication-uncertain"}',
+])
+def test_activation_refuses_unverifiable_custody_before_fast_or_legacy_paths(
+    tmp_path, monkeypatch, route_mode, content,
+):
+    route_dir = mdc.routing_dir(tmp_path)
+    route_dir.mkdir(parents=True)
+    path = breadcrumb.breadcrumb_path(route_dir)
+    path.write_text(content)
+    events = []
+    endpoint = routing.Endpoint(bind="127.0.0.1", port=1234, pid=101, version="1.2.3")
+    monkeypatch.setattr(
+        mdc, "routed_endpoint",
+        lambda _: endpoint if route_mode == "same-version" else None,
+    )
+    monkeypatch.setattr(mdc, "_health_check", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        mux_daemon, "read_lock_data", lambda _: {"pid": 101},
+    )
+    monkeypatch.setattr(mdc, "_lock_data_is_live", lambda _: route_mode == "legacy-live")
+
+    def acquire(_root):
+        events.append("acquire")
+        return SimpleNamespace(release=lambda: events.append("release"))
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("mutation or legacy activation reached before custody refusal")
+
+    monkeypatch.setattr(mdc, "_acquire_cutover_lock", acquire)
+    monkeypatch.setattr(mdc, "load_or_create_control_token", unexpected)
+    monkeypatch.setattr(mdc, "_legacy_lock_cutover", unexpected)
+    monkeypatch.setattr(mdc, "spawn_passive", unexpected)
+    result = mdc.activate_after_update(root=tmp_path, slot=tmp_path / "slot", version="1.2.3")
+    assert result["action"] == "refused" and result["result"]["ok"] is False
+    assert "owner-led recovery" in result["reason"]
+    assert events == ["acquire", "release"]
+    assert path.read_text() == content
 
 
 def test_activate_after_update_is_noop_when_already_at_target_version(tmp_path, monkeypatch):
@@ -528,6 +572,16 @@ def test_terminate_mux_daemon_pid_accepts_a_matched_real_process():
     the exact root being operated on -- not merely report success against a
     stubbed-out terminator (the identity-bound safety net
     docs/patterns/graceful-daemon-cutover.md requires a direct test for)."""
+    import os
+    import pytest
+
+    if os.name != "nt":
+        import signal
+
+        if not callable(getattr(os, "pidfd_open", None)) or not callable(
+            getattr(signal, "pidfd_send_signal", None)
+        ):
+            pytest.skip("Interpreter lacks identity-bound POSIX PID termination primitives")
     root = Path.home() / ".worktree-manager-test-identity-match"
     proc = _spawn_fake_mux_daemon_process(root)
     try:

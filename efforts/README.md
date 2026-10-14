@@ -10,15 +10,18 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Workspace Acquisition Continuity](active/workspace-acquisition-continuity/README.md) | Draft; one execution workspace and replay-safe creation proposal | #6440 |
-| [Configuration Backstage and Worker Instances](active/configuration-backstage-and-worker-instances/README.md) | Draft; horizontal sections, list-first resources, explicit activation outcomes | #6379 |
+| [Continuous Worktree Reclamation](active/continuous-worktree-reclamation/README.md) | Draft; vision and implementation/performance plan only, execution separately authorized | #6620; preserves #1488/#1918/#3114, #6060 and #6471 |
+| [Seasoned Dependencies and Transactional Installs](active/seasoned-dependencies-and-transactional-installs/README.md) | Draft; seven-day declarations/resolution and failed-build cleanup | #6476 |
+| [Dispatch Fleet Reliability and Recovery](active/dispatch-fleet-reliability-recovery/README.md) | Active; maintenance categories, bounded supervision and registry-rooted recovery | #6466, #6467, #6470, #6471; existing #6407/#6421 repair owner retained |
+| [Runtime Operational Contracts](active/review-pipeline-operational-contracts/README.md) | Draft; proposal review before implementation | #6274; existing Windows regression #6266 |
+| [Configuration Backstage and Worker Instances](active/configuration-backstage-and-worker-instances/README.md) | Active; proposal reviewed, section and instance contracts | #6379 |
 | [Main-Owned Workflow Control](active/main-owned-workflow-control/README.md) | Active; first wave live, validation consolidation open | #6237; run/check consolidation primary, ownership enabling |
-| [Fleet Control V2](active/fleet-control-v2/README.md) | Active; artifact preflight landed, both-method release trust plan next | #6236, #6240, #6241; existing #5789/#6030/#6424 owners retained |
+| [Fleet Control V2](active/fleet-control-v2/README.md) | Active; pinned-key verifier landed, role lifecycle next; GitHub proof deferred | #6236, #6240, #6241, #6443; existing #5789/#6030/#6424 owners retained |
 | [Lean Runtime Dependencies](active/lean-runtime-dependencies/README.md) | Active; proposal reviewed, dependency reduction | #6234 |
 | [Process Slot Ownership](active/process-slot-ownership/README.md) | Active; reader-lifetime continuation | #3963; registry presentation separately #5559 |
 | [Process Spawn Reduction](active/process-spawn-reduction/README.md) | Active | #6086 |
 | [Private PR Source Attribution](active/private-pr-source-attribution/README.md) | Active; originating identity slice | #6068 |
-| [Remote Picker Seed Parity](active/remote-picker-seed-parity/README.md) | Draft; operator-requested parity | #6057 |
+| [Remote Picker Seed Parity](active/remote-picker-seed-parity/README.md) | Active | #6057 |
 | [Worktree Conclusion Tidier](active/worktree-conclusion-tidier/README.md) | Draft; audit capability released/installed, live pilot gated | #6060 |
 | [Native Context Handoff Compatibility](active/native-context-handoff-compatibility/README.md) | Active; capability-contract investigation | #6028 |
 | [Linux Role Fleet](active/linux-role-fleet/README.md) | Active; reviewed Komodo-first plan and isolated adoption proof | #6030, #5861 |
@@ -49,7 +52,7 @@ that pattern to this repository.
 | [Worktree/Effort Railroad Binding](active/worktree-effort-railroad-binding/README.md) | Draft | #3581 |
 | [Worktree Head-Succession Hardening](active/worktree-head-succession-hardening/README.md) | Draft | #3584 |
 | [Picker Creature Comforts](active/picker-creature-comforts/README.md) | Draft | #3586 |
-| [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Active (Phase 7) | #3336 |
+| [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Active (Phases 7 and 8) | #3336 |
 | [Promotion-Failure Reactive Fix Agent](active/promotion-failure-reactive-fix-agent/README.md) | Active | _TBD_ |
 | [Agent-Process Self-Report Registry](active/agent-process-self-report-registry/README.md) | Draft | #5559 |
 | [Full-Harness Startup Reliability](active/full-harness-startup-reliability/README.md) | Active | #3303 |
@@ -87,7 +90,7 @@ that pattern to this repository.
 | [Windows Launch Hardening](active/windows-launch-hardening/README.md) | Active | #786 |
 | [Worktree Manager Control Plane](active/worktree-manager-control-plane/README.md) | Active | #352 |
 | [agent-index Engine Daemon](active/agent-index-engine-daemon/README.md) | Active | See effort |
-| [Vendored Installer Engine](active/vendored-installer-engine/README.md) | Draft | See effort |
+| [Vendored Installer Engine](active/vendored-installer-engine/README.md) | Active | See effort |
 | [Module Componentization Discipline](active/module-componentization-discipline/README.md) | Active | #2805 |
 | [Componentization Campaign Auto-Worker](active/componentization-campaign-auto-worker/README.md) | Draft | #3372 |
 | [Authoritative Write-Through Daemon](active/agent-worktrees-authoritative-daemon/README.md) | Active | #3761 |
@@ -103,6 +106,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Workspace Acquisition Continuity](2026/10/13%20workspace-acquisition-continuity/README.md) | Done; runtime merged to dev, main publication unconfirmed, no host rollout | #6440; automatic promotion remains #3336 |
 | [agent-bridge Attention Waits](2026/09/03%20agent-bridge-attention-waits/README.md) | Done; archived | #1450 |
 | [Plugin Process Hygiene](2026/09/13%20plugin-process-hygiene/README.md) | Done; archived | #736 |
 | [agent-dispatch Workers Configuration Section](2026/10/12%20agent-dispatch-workers-config-section/README.md) | Done; local controls and native override proof landed | #6282; remote UI/validation transferred to #6283 |

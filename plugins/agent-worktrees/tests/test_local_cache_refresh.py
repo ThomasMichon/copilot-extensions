@@ -4,9 +4,9 @@ resume, and ``sessionStart`` (see ``test_hook_ipc.py`` for the sessionStart
 coverage). See ``docs/patterns/worktree-scoped-dynamic-guidance.md`` and
 ``efforts/2026/10/02 ambient-guidance-navigability`` Phase 7.
 
-This module invokes customizing-copilot's own declared, versioned
+This module invokes agent-worktrees' packaged
 ``render-local-cache`` CLI (``manage-instruction-projections.py``) across a
-process boundary -- never importing that plugin's Python package -- per
+process boundary -- never discovering a sibling plugin's payload -- per
 ``docs/patterns/a-la-carte-independence.md``'s "no cross-plugin
 reach-around" rule.
 """
@@ -17,8 +17,8 @@ import json
 import os
 import sys
 import subprocess
-import shutil
 import time
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -43,42 +43,21 @@ def _renderer_json(*, changed=None, unchanged=None, warnings=0, blocking=0):
     })
 
 
-def test_renderer_identity_lookup_does_not_resolve_unrelated_plugins(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from plugin_activation import resolver
-    home = tmp_path / "home"
-    root = home / ".copilot" / "installed-plugins" / "test-market" / "customizing-copilot"
-    root.mkdir(parents=True)
-    (root / "plugin.json").write_text('{"name":"customizing-copilot","version":"1.0.0"}')
-    settings = home / ".copilot" / "settings.json"
-    settings.write_text(json.dumps({"enabledPlugins": {
-        "customizing-copilot@test-market": True, "unrelated@test-market": True,
-    }}))
-    real_installed = resolver._installed_root
-    visited: list[str] = []
-
-    def installed(copilot_home, source):
-        visited.append(source)
-        assert source != "unrelated@test-market"
-        return real_installed(copilot_home, source)
-
-    monkeypatch.setattr(resolver, "_installed_root", installed)
-    assert lcr._select_global_root(home) == root
-    assert visited == ["customizing-copilot@test-market"]
 
 
+@pytest.mark.guard
 def test_identity_lookup_shares_overall_budget_without_two_second_cutoff(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from agent_worktrees import push_timeout
     clock = iter([100.0, 100.0, 103.0])
-    monkeypatch.setattr(lcr.time, "monotonic", lambda: next(clock))
+    real_monotonic = time.monotonic
+    monkeypatch.setattr(lcr, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    assert time.monotonic is real_monotonic
     lookup_timeouts: list[float] = []
     render_timeouts: list[float] = []
 
-    def resolve(_home, *, timeout, outcomes, repo_root):
-        assert repo_root == tmp_path
+    def resolve(_home, *, timeout, outcomes):
         lookup_timeouts.append(timeout)
         return tmp_path / "renderer.py"
 
@@ -94,66 +73,23 @@ def test_identity_lookup_shares_overall_budget_without_two_second_cutoff(
     assert render_timeouts == [7]
 
 
-@pytest.mark.parametrize("trusted", [True, False])
-def test_current_directory_renderer_requires_repository_trust(tmp_path, trusted):
-    home = tmp_path / "home"
-    repo = tmp_path / "repo"
-    market = repo / ".ai"
-    plugin = market / "customizing-copilot"
-    plugin.mkdir(parents=True)
-    (plugin / "plugin.json").write_text('{"name":"customizing-copilot","version":"1.0.0"}')
-    manifest = market / ".claude-plugin" / "marketplace.json"
-    manifest.parent.mkdir()
-    manifest.write_text(json.dumps({
-        "name": "local", "plugins": [{"name": "customizing-copilot", "source": "./customizing-copilot"}],
-    }))
-    settings = repo / ".github" / "copilot" / "settings.json"
-    settings.parent.mkdir(parents=True)
-    settings.write_text(json.dumps({
-        "enabledPlugins": {"customizing-copilot@local": True},
-        "extraKnownMarketplaces": {"local": {"source": {"source": "directory", "path": "./.ai"}}},
-    }))
-    copilot = home / ".copilot"
-    copilot.mkdir(parents=True)
-    (copilot / "config.json").write_text(json.dumps({
-        "trustedFolders": [str(repo)] if trusted else [],
-    }))
-    assert lcr._select_global_root(home, repo) == (plugin.resolve() if trusted else None)
+@pytest.mark.skipif(os.name == "nt", reason="POSIX launch process-group ownership")
+@pytest.mark.parametrize("timeout,inherited", [(None, True), (10, False)])
+def test_only_foreground_render_inherits_manager_process_group(monkeypatch, tmp_path, timeout, inherited):
+    from agent_worktrees import push_timeout
 
+    observed = []
+    monkeypatch.setenv("WORKTREE_MANAGER_ENGINE_OWNS_PROCESS_GROUP", "1")
+    monkeypatch.setattr(lcr, "_resolve_cli_script", lambda *_args, **_kwargs: tmp_path / "engine.py")
+    monkeypatch.setattr(lcr, "_resolve_own_agent_worktrees_command", lambda: None)
 
-def test_renderer_identity_ambiguity_is_checked_across_project_and_global_scopes(tmp_path, monkeypatch):
-    project = SimpleNamespace(
-        name="customizing-copilot",
-        root_for_scope=lambda scope: tmp_path / "project" if scope == "project:current" else None,
-    )
-    global_plugin = SimpleNamespace(
-        name="customizing-copilot",
-        root_for_scope=lambda scope: tmp_path / "global" if scope == "global" else None,
-    )
-    monkeypatch.setattr(
-        "plugin_activation.resolve_active_plugins",
-        lambda **_kwargs: SimpleNamespace(active={
-            "customizing-copilot@project-market": project,
-            "customizing-copilot@global-market": global_plugin,
-        }),
-    )
-    assert lcr._select_global_root(tmp_path / "home", tmp_path / "repo") is None
+    def run(argv, **kwargs):
+        observed.append(kwargs.get("inherit_process_group", False))
+        return subprocess.CompletedProcess(argv, 0, _renderer_json(), "")
 
-
-def test_current_repository_disable_prevents_global_renderer_fallback(tmp_path):
-    home = tmp_path / "home"
-    repo = tmp_path / "repo"
-    plugin = home / ".copilot" / "installed-plugins" / "market" / "customizing-copilot"
-    plugin.mkdir(parents=True)
-    (plugin / "plugin.json").write_text('{"name":"customizing-copilot","version":"1.0.0"}')
-    (home / ".copilot" / "settings.json").write_text(json.dumps({
-        "enabledPlugins": {"customizing-copilot@market": True},
-    }))
-    settings = repo / ".github" / "copilot" / "settings.json"
-    settings.parent.mkdir(parents=True)
-    settings.write_text(json.dumps({"enabledPlugins": {"customizing-copilot@market": False}}))
-    assert lcr._select_global_root(home) == plugin.resolve()
-    assert lcr._select_global_root(home, repo) is None
+    monkeypatch.setattr(push_timeout, "run_bounded", run)
+    assert lcr.refresh_local_cache(tmp_path, timeout=timeout).status == "ready"
+    assert observed == [inherited]
 
 
 @pytest.mark.parametrize(
@@ -197,6 +133,31 @@ def test_dry_run_launch_never_refreshes(tmp_path, monkeypatch):
     assert lcr.prepare_for_launch(tmp_path, dry_run=True).status == "skipped"
 
 
+def test_foreground_projection_waits_and_reports_each_stage(tmp_path, monkeypatch, capsys):
+    from agent_worktrees import push_timeout
+    timeouts = []
+
+    def resolve(_home, *, timeout, outcomes):
+        timeouts.append(timeout)
+        return tmp_path / "renderer.py"
+
+    def render(argv, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        return subprocess.CompletedProcess(argv, 0, _renderer_json(changed=["local"]), "")
+
+    monkeypatch.setattr(lcr, "_resolve_cli_script", resolve)
+    monkeypatch.setattr(lcr, "_resolve_own_agent_worktrees_command", lambda: None)
+    monkeypatch.setattr(push_timeout, "run_bounded", render)
+    assert lcr.prepare_for_launch(tmp_path).status == "ready"
+    assert timeouts == [None, None]
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    for label in ("Preparing instruction projections", "Resolving projection renderer", "Rendering instruction projections"):
+        assert f"{label}: starting" in captured.err
+        assert f"{label}: finished" in captured.err
+    assert "1 installed" in captured.err
+
+
 def test_launch_refresh_repairs_nested_worktree_guidance(tmp_path, monkeypatch):
     from agent_worktrees import push_timeout
 
@@ -226,30 +187,25 @@ def test_launch_refresh_repairs_nested_worktree_guidance(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("trusted", [True, False], ids=["trusted", "untrusted"])
 @pytest.mark.parametrize("delivery", ["launch", "backup"])
-@pytest.mark.parametrize("renderer_scope", ["global", "project"])
+@pytest.mark.parametrize("renderer_scope", ["global", "project", "disabled"])
 @pytest.mark.timeout(2 * lcr.DEFAULT_TIMEOUT_S + 15)
-def test_real_global_discovery_and_renderer_fit_launch_budget(
+def test_packaged_renderer_fits_launch_and_backup_budget(
     tmp_path, monkeypatch, trusted, delivery, renderer_scope,
 ):
-    """Exercise both production subprocesses and source discovery, not stubs."""
-    scripts = (
-        _REPO_ROOT / "plugins" / "customizing-copilot" / "skills"
-        / "reviewing-customizations" / "scripts"
-    )
-    if not scripts.is_dir():
-        pytest.skip("customizing-copilot sibling plugin not checked out here")
+    """Exercise the standalone packaged engine and source discovery, not stubs."""
+    from test_projection_runtime_assets import materialized_payload
+    from agent_worktrees import installer
+
+    payload = materialized_payload(tmp_path, monkeypatch)
+    monkeypatch.setattr(installer, "_payload_root", lambda: payload)
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(payload))
     home = tmp_path / "home"
     installed = home / ".copilot" / "installed-plugins" / "test-market"
-    renderer = installed / "customizing-copilot"
-    shutil.copytree(scripts, renderer / "skills" / "reviewing-customizations" / "scripts")
-    (renderer / "plugin.json").write_text(
-        json.dumps({"name": "customizing-copilot", "version": "1.0.0"}), encoding="utf-8"
-    )
+    installed.mkdir(parents=True)
     (home / ".copilot" / "settings.json").write_text(
-        json.dumps({"enabledPlugins": (
-            {"customizing-copilot@test-market": True} if renderer_scope == "global" else {}
-        )}),
-        encoding="utf-8",
+        json.dumps({"enabledPlugins": {
+            "customizing-copilot@test-market": renderer_scope == "global",
+        }}), encoding="utf-8",
     )
     repo = tmp_path / "repo"
     repo.mkdir(parents=True)
@@ -373,16 +329,25 @@ def test_json_base_launch_prepares_guidance_before_command(tmp_path, monkeypatch
     assert json.loads(capfd.readouterr().out)["action"] == "exec"
 
 
-def test_json_worktree_launch_prepares_selected_root(tmp_path, monkeypatch):
+def test_json_worktree_launch_prepares_selected_root(tmp_path, monkeypatch, sample_record):
     import argparse
     from agent_worktrees import resolve_cli
 
     record_path = tmp_path / "example.yaml"
     record_path.write_text("fixture", encoding="utf-8")
     root = tmp_path / "selected"
-    record = SimpleNamespace(worktree_path=str(root))
+    config = m.cfg.Config(
+        srcroot=str(tmp_path), machine="test", platform="linux", repo_name="demo",
+        repos={"demo": m.cfg.RepoConfig(
+            anchor=str(tmp_path), worktree_root=str(tmp_path / "worktrees"),
+        )},
+    )
+    record = replace(
+        sample_record, worktree_id="example", worktree_path=str(root),
+        repo=config.repo_name, machine=config.machine, platform=config.platform,
+    )
     state = SimpleNamespace(
-        load_config=lambda: SimpleNamespace(), requested_machine=None, use_base=False,
+        load_config=lambda: config, requested_machine=None, use_base=False,
         use_new=False, worktree_id="example", args=argparse.Namespace(dry_run=False),
     )
     monkeypatch.setattr(resolve_cli, "_validate_profile_assignment_config", lambda config: None)
@@ -424,186 +389,8 @@ def test_json_new_dry_run_cannot_create_or_render(tmp_path, monkeypatch, capfd, 
     assert "no worktree or guidance was created" in capfd.readouterr().out
 
 
-class TestSelectGlobalRoot:
-    """Direct, in-process tests of the pure resolution/filtering logic
-    ``_resolve_cli_script``'s subprocess entry point calls. See
-    ``TestResolveCliScript`` for the subprocess-wiring coverage."""
-
-    def test_returns_none_when_not_installed(self, tmp_path: Path) -> None:
-        assert lcr._select_global_root(tmp_path) is None
-
-    def _fake_plugin(self, name: str, *, global_root: Path | None = None) -> SimpleNamespace:
-        def _root_for_scope(scope: str) -> Path | None:
-            return global_root if scope == "global" and global_root is not None else None
-
-        return SimpleNamespace(name=name, root_for_scope=_root_for_scope)
-
-    def test_finds_the_global_scope_root(self, tmp_path: Path, monkeypatch) -> None:
-        plugin_root = tmp_path / "customizing-copilot"
-        fake_plugin = self._fake_plugin("customizing-copilot", global_root=plugin_root)
-        fake_report = SimpleNamespace(active={"customizing-copilot@local": fake_plugin})
-        monkeypatch.setattr(
-            "plugin_activation.resolve_active_plugins", lambda **k: fake_report
-        )
-
-        assert lcr._select_global_root(tmp_path) == plugin_root
-
-    def test_ignores_an_active_plugin_with_a_different_name(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        fake_plugin = self._fake_plugin("some-other-plugin", global_root=tmp_path)
-        fake_report = SimpleNamespace(active={"some-other-plugin@local": fake_plugin})
-        monkeypatch.setattr(
-            "plugin_activation.resolve_active_plugins", lambda **k: fake_report
-        )
-
-        assert lcr._select_global_root(tmp_path) is None
-
-    def test_ignores_a_project_scoped_override_never_trusting_non_global_roots(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        """A matching-named plugin whose live roots are ONLY project-
-        scoped (an agent-worktrees-registered project's local dev
-        override of customizing-copilot, never this machine's own global
-        install) must never be trusted -- a session in an unrelated repo
-        must never execute that project's own local content."""
-        fake_plugin = SimpleNamespace(
-            name="customizing-copilot", root_for_scope=lambda scope: None,
-        )
-        fake_report = SimpleNamespace(active={"customizing-copilot@local": fake_plugin})
-        monkeypatch.setattr(
-            "plugin_activation.resolve_active_plugins", lambda **k: fake_report
-        )
-
-        assert lcr._select_global_root(tmp_path) is None
-
-    def test_fails_closed_when_multiple_active_plugins_share_the_name(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        """Two distinct active-plugin entries both claiming the expected
-        name (different marketplace identities) must never be resolved by
-        arbitrary iteration order -- an ambiguous identity is refused."""
-        root_a = tmp_path / "a"
-        root_b = tmp_path / "b"
-        fake_report = SimpleNamespace(
-            active={
-                "customizing-copilot@marketplace-a": self._fake_plugin(
-                    "customizing-copilot", global_root=root_a
-                ),
-                "customizing-copilot@marketplace-b": self._fake_plugin(
-                    "customizing-copilot", global_root=root_b
-                ),
-            }
-        )
-        monkeypatch.setattr(
-            "plugin_activation.resolve_active_plugins", lambda **k: fake_report
-        )
-
-        assert lcr._select_global_root(tmp_path) is None
-
-    def test_never_raises_when_resolution_itself_fails(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        def _boom(**k):
-            raise RuntimeError("boom")
-
-        monkeypatch.setattr("plugin_activation.resolve_active_plugins", _boom)
-
-        assert lcr._select_global_root(tmp_path) is None
 
 
-class TestResolveCliScript:
-    """Subprocess-wiring tests for ``_resolve_cli_script``: it runs
-    ``_select_global_root`` out-of-process (see the module docstring for
-    why), so these tests mock ``push_timeout.run_bounded`` rather than
-    ``plugin_activation.resolve_active_plugins`` directly -- that logic
-    has its own direct coverage in ``TestSelectGlobalRoot``."""
-
-    def test_finds_the_script_when_the_subprocess_reports_a_root(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        plugin_root = tmp_path / "customizing-copilot"
-        scripts_dir = (
-            plugin_root / "skills" / "reviewing-customizations" / "scripts"
-        )
-        scripts_dir.mkdir(parents=True)
-        script = scripts_dir / "manage-instruction-projections.py"
-        script.write_text("", encoding="utf-8")
-
-        from agent_worktrees import push_timeout
-
-        monkeypatch.setattr(
-            push_timeout, "run_bounded",
-            lambda *a, **k: SimpleNamespace(stdout=f"{plugin_root}\n"),
-        )
-
-        assert lcr._resolve_cli_script(tmp_path, timeout=5.0) == script
-
-    def test_fails_closed_when_the_subprocess_reports_nothing(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        from agent_worktrees import push_timeout
-
-        monkeypatch.setattr(
-            push_timeout, "run_bounded", lambda *a, **k: SimpleNamespace(stdout="\n"),
-        )
-
-        assert lcr._resolve_cli_script(tmp_path, timeout=5.0) is None
-
-    def test_fails_closed_when_the_reported_root_has_no_script(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        """A reported root that doesn't actually contain the expected
-        script (a stale or mismatched report) must never fall back to
-        trusting anything else -- fail closed."""
-        from agent_worktrees import push_timeout
-
-        monkeypatch.setattr(
-            push_timeout, "run_bounded",
-            lambda *a, **k: SimpleNamespace(stdout=f"{tmp_path}\n"),
-        )
-
-        assert lcr._resolve_cli_script(tmp_path, timeout=5.0) is None
-
-    def test_never_raises_when_the_subprocess_call_fails(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        from agent_worktrees import push_timeout
-
-        def _boom(*a, **k):
-            raise RuntimeError("boom")
-
-        monkeypatch.setattr(push_timeout, "run_bounded", _boom)
-
-        assert lcr._resolve_cli_script(tmp_path, timeout=5.0) is None
-
-    def test_fails_closed_on_a_resolution_timeout(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        """A resolution subprocess that exceeds its own bound must fail
-        closed -- ``push_timeout.run_bounded`` already kills the whole
-        process tree on a stall, so this only needs to prove the raised
-        ``TimeoutExpired`` is absorbed, never surfaced."""
-        import subprocess
-
-        from agent_worktrees import push_timeout
-
-        def _timeout(*a, **k):
-            raise subprocess.TimeoutExpired(cmd="x", timeout=1)
-
-        monkeypatch.setattr(push_timeout, "run_bounded", _timeout)
-
-        assert lcr._resolve_cli_script(tmp_path, timeout=0.1) is None
-
-    def test_real_subprocess_round_trip_against_an_empty_home(
-        self, tmp_path: Path
-    ) -> None:
-        """Real, non-mocked round trip through ``push_timeout.run_
-        bounded`` and the actual ``python -m agent_worktrees.local_cache_
-        refresh`` subprocess entry point, proving the module is genuinely
-        importable and runnable that way (not just as a library) -- an
-        empty home with nothing installed resolves to nothing."""
-        assert lcr._resolve_cli_script(tmp_path, timeout=30.0) is None
 
 
 
@@ -675,7 +462,7 @@ class TestRefreshLocalCache:
         from agent_worktrees import push_timeout
 
         clock = [100.0]
-        monkeypatch.setattr(lcr.time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(lcr, "time", SimpleNamespace(monotonic=lambda: clock[0]))
         script = tmp_path / "renderer.py"
 
         def resolve(home, **kwargs):
@@ -700,7 +487,7 @@ class TestRefreshLocalCache:
         from agent_worktrees import push_timeout
 
         clock = [100.0]
-        monkeypatch.setattr(lcr.time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(lcr, "time", SimpleNamespace(monotonic=lambda: clock[0]))
 
         def resolve(home, **kwargs):
             clock[0] += kwargs["timeout"]
@@ -720,7 +507,7 @@ class TestRefreshLocalCache:
         from agent_worktrees import push_timeout
 
         clock = [100.0]
-        monkeypatch.setattr(lcr.time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(lcr, "time", SimpleNamespace(monotonic=lambda: clock[0]))
         monkeypatch.setattr(lcr, "_resolve_cli_script", lambda *a, **k: tmp_path / "renderer.py")
 
         def command():
@@ -735,31 +522,19 @@ class TestRefreshLocalCache:
         monkeypatch.setattr(push_timeout, "run_bounded", render)
         assert lcr.refresh_local_cache(tmp_path, timeout=10.0).status == "ready"
 
-    def test_real_slow_discovery_still_publishes_guidance(
+    def test_real_slow_owned_render_still_publishes_guidance(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        from agent_worktrees import push_timeout
-
-        root = tmp_path / "customizing-copilot"
-        script = root / lcr._SIBLING_RELATIVE_SCRIPT
+        script = tmp_path / "owned-engine" / "manage-instruction-projections.py"
         script.parent.mkdir(parents=True)
         script.write_text(
-            "import pathlib, sys\n"
+            "import pathlib, sys, time\n"
+            "time.sleep(2.1)\n"
             "pathlib.Path(sys.argv[2], 'guidance').write_text('delivered')\n"
             f"print({_renderer_json(changed=['guidance'])!r})\n",
             encoding="utf-8",
         )
-        run_bounded = push_timeout.run_bounded
-
-        def run(argv, **kwargs):
-            if argv[1:3] == ["-m", "agent_worktrees.local_cache_refresh"]:
-                argv = [
-                    sys.executable, "-c",
-                    "import sys,time; time.sleep(2.1); print(sys.argv[1])", str(root),
-                ]
-            return run_bounded(argv, **kwargs)
-
-        monkeypatch.setattr(push_timeout, "run_bounded", run)
+        monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home, **kwargs: script)
         monkeypatch.setattr(lcr, "_resolve_own_agent_worktrees_command", lambda: None)
         result = lcr.refresh_local_cache(tmp_path, home=tmp_path, timeout=10.0)
         assert result.status == "ready", result.diagnostic
@@ -1281,20 +1056,24 @@ class TestResumeWiring:
             },
         )
 
-    def _patched_resume(self, tmp_path: Path, monkeypatch, *, dry_run: bool):
+    def _patched_resume(self, tmp_path: Path, monkeypatch, sample_record, *, dry_run: bool):
         import argparse
 
         config = self._config(tmp_path)
         worktree_path = tmp_path / "worktrees" / "wt-1"
         worktree_path.mkdir(parents=True)
-        record = SimpleNamespace(
+        record = replace(
+            sample_record,
             worktree_id="wt-1",
+            repo=config.repo_name,
+            machine=config.machine,
+            platform=config.platform,
             worktree_path=str(worktree_path),
             branch="worktree/wt-1",
             sessions=[],
-            yaml_path=tmp_path / "tracking" / "wt-1.yaml",
             resume_count=0,
             last_resumed_at=None,
+            codename="test-record",
         )
 
         class _NullLock:
@@ -1332,10 +1111,10 @@ class TestResumeWiring:
         return record, config, args, worktree_path
 
     def test_resume_refreshes_the_local_cache(
-        self, tmp_path: Path, monkeypatch
+        self, tmp_path: Path, monkeypatch, sample_record
     ) -> None:
         record, config, args, worktree_path = self._patched_resume(
-            tmp_path, monkeypatch, dry_run=False
+            tmp_path, monkeypatch, sample_record, dry_run=False
         )
         calls = []
         monkeypatch.setattr(
@@ -1347,10 +1126,10 @@ class TestResumeWiring:
         assert calls == [str(worktree_path)]
 
     def test_dry_run_resume_never_refreshes(
-        self, tmp_path: Path, monkeypatch
+        self, tmp_path: Path, monkeypatch, sample_record
     ) -> None:
         record, config, args, _worktree_path = self._patched_resume(
-            tmp_path, monkeypatch, dry_run=True
+            tmp_path, monkeypatch, sample_record, dry_run=True
         )
         calls = []
         monkeypatch.setattr(

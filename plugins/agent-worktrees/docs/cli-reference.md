@@ -4,6 +4,14 @@
 agent-worktrees <subcommand> [options]
 ```
 
+## Disposable producer ownership
+
+`resource-producer <capabilities|reserve|begin|complete|bind|inspect|close> --json
+[--owner-ref REF]` exposes version-1 provider-neutral disposable ownership.
+Except for capabilities, operations read exactly one JSON object from stdin.
+See [the exact ABI and callback contract](resource-producer.md). These claims
+cannot be settled through generic release, at-rest, sweep or abandon commands.
+
 ## CLI mode (no project binstub)
 
 The generic `agent-worktrees` command works without a project binstub. If
@@ -181,7 +189,7 @@ continue to work unchanged.
 | `status-updater` | Background loop that keeps a session's `@aw_ctx`/`@aw_seg` status vars fresh **off the paint path** (no per-render binstub spawn) |
 | `list` | List worktrees from tracking records. `--codename <name>` restricts to the worktree with that assigned codename, as an alternative to `--worktree-id` |
 | `handoff-cutover` | Internal live-handoff primitive: spawn a seeded successor window, safely refocus an already-live successor with `--retry`, or retire an old pane |
-| `embody` | Agent-facing primitive to create/resume a detached mux+Copilot session in a worktree. `--codename <name>` selects the target by its assigned codename (effort `pr-attribution-codenames`), same local-then-cross-machine resolution as `resolve`; a match on a different machine fails closed (reports the machine, does not attempt a remote launch) |
+| `embody` | Agent-facing primitive to create/resume a detached mux+Copilot session in a worktree. `--codename <name>` selects the target by its assigned codename (effort `pr-attribution-codenames`), same local-then-cross-machine resolution as `resolve`; a match on a different machine fails closed (reports the machine, does not attempt a remote launch). Optional `--copilot-process-launcher <absolute-executable>` binds a one-launch native wrapper without putting inference credentials in the manager/mux environment. It supports direct `copilot` templates or normalized setup; incompatible templates, missing executables and configured `copilot_path` overrides refuse. The attended `copilot` counterpart can also write a nonsecret create-or-resume receipt with `--launch-result-file <launcher-directory>/result.json` before attaching. Rejoining a running session does not use a new launcher or refresh its authentication. |
 
 ### Terminal identity
 
@@ -321,6 +329,32 @@ base disposition (`direct` | `pr-human-merge` | `pr-agent-merge` |
 profile when `pr.roles` or live merge authority can change which verbs apply.
 
 
+
+### Observed check failure diagnostics
+
+GitHub `pr-watch` results (including timeouts and `checks_failed` events) and
+the `pr-status --json` live block include `check_failures`: the failing check's
+`name`, `state` (provider conclusion), `source` (`check-run` or `commit-status`),
+`url` and available `description`. Human output prints the same names and links.
+The data comes from the existing REST status/check-run reads, so it can include
+an optional automated-review check omitted by `gh pr checks`.
+
+`checks_scope: "observed"` is intentional: this rollup includes optional checks,
+not just required CI. A reviewer runner failure does not mean the required CI
+aggregate failed. Required-check completeness is separately verified at the
+admin merge boundary; these diagnostics neither weaken nor replace that gate.
+`checks_complete` reports whether both observed sources were readable/complete,
+or is null for providers that do not supply diagnostic coverage. An empty
+failure list from an unsupported provider is not proof that no failure exists.
+Known decoded failures survive missing or malformed later pages and a failed
+paginated command, with `checks_complete: false`; incomplete evidence cannot
+produce a success/none rollup.
+
+Diagnostics retain at most 64 failures per snapshot and 2,048 characters per
+text field. `check_failures_omitted` reports any additional failures; shortened
+text is marked `[truncated]`. Only HTTP(S) diagnostic links without embedded
+credentials are emitted. Raw annotations and job logs are not fetched on each
+watch poll; the diagnostic link is the drill-down path when a summary is absent.
 
 ## Status bar segment (tmux / psmux)
 
@@ -592,11 +626,42 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 | `register` | Register a new project (create config + binstub without full reinstall) |
 | `unregister` | Deregister a project's own adoption lifecycle (projects.yaml + repos.yaml entry + its binstub) -- never the shared runtime or another project's registration; see below |
 | `uninstall` | Remove worktree manager (`--remove-config` ALSO deletes the SHARED `~/.agent-worktrees` registry root -- shared by every adopted project, not just `--project`'s; requires `--yes`) |
-| `update` | Re-deploy runtime from repo source + refresh every active registered plugin payload/runtime, purge inactive installed identities absent from an authoritatively refreshed marketplace catalog, and opportunistically refresh the remaining installed-but-inactive payload inventory; then update sibling modules, fast-forward the managed repo anchor(s), and auto-prune legitimately stale Picker pivot manifests. Active or activation-unknown identities are never purged. An inactive inventory refresh/uninstall failure is advisory; an active plugin refresh failure fails the update. Version-gated: skips a runtime whose deployed version already matches its payload (`--force` re-deploys all active runtimes; `--no-anchor-sync` skips the anchor sync; `--no-prune-pivots` skips the pivot prune -- see `doctor`'s `--prune-pivots` for the same safe subset run on demand) |
+| `update` | Re-deploy runtime from repo source + refresh every active registered plugin payload/runtime, purge inactive installed identities absent from an authoritatively refreshed marketplace catalog, and opportunistically refresh the remaining installed-but-inactive payload inventory; then update sibling modules, fast-forward the managed repo anchor(s), and auto-prune legitimately stale Picker pivot manifests. Active or activation-unknown identities are never purged. An inactive inventory refresh/uninstall failure is advisory; an active plugin refresh failure fails the update. Version-gated: skips a runtime whose deployed version already matches its payload (`--force` re-deploys all active runtimes; `--force-runtime NAME`, repeatable, re-deploys only the named runtime(s); `--no-anchor-sync` skips the anchor sync; `--no-prune-pivots` skips the pivot prune -- see `doctor`'s `--prune-pivots` for the same safe subset run on demand). Exit codes and the run's status file: see below |
 | `install-status` | Show installation and deployment status |
 | `deploy-instructions` | Retire migrated managed instruction files (machine identity now via the `session-machine` sessionStart hook) |
 | `machine-context` | sessionStart producer for the exact-session guidance writer (cwd-gated) |
 | `get` | Query config values (e.g., `agent-worktrees get repo-dir`) |
+
+### `update` results: exit codes, events, and status
+
+`update` (and `worktree-manager update`, which drives it) records each run
+through the shared [`update-telemetry`](../../../libs/update-telemetry/README.md)
+library: phase and per-plugin events go to
+`~/.copilot-extensions/update/runs/<run_id>/events.jsonl` and the folded result
+to `~/.copilot-extensions/update/update-status.json` (override the directory
+with `COPILOT_EXTENSIONS_UPDATE_HOME`). Each step is its own timed phase
+(`payload_refresh`, `engine_runtime`, `binstubs`, `module_update`,
+`runtime_reconcile`, `anchor_sync`, `prune`). The exit code is 0 on success and
+non-zero for every failure:
+
+| Exit | Meaning |
+|---|---|
+| 0 | Everything required is current (a restart may still be flagged in the status file) |
+| 1 | A step failed (`command_failed`), including a failed Manager cutover |
+| 2 | Usage error. Standalone `agent-worktrees update` rejects bad arguments before a run starts, so nothing is recorded. `worktree-manager update` creates the run (and self-updates) before the engine parses the forwarded arguments, so an engine usage error is recorded as the run's failure (`command_failed`, error code `usage`) and still exits 2 |
+| 3 | A configuration problem must be fixed first (for example a missing PowerShell, installer or engine, an invalid installer deadline, or an invalid installation context) |
+| 4 | Authentication is required |
+| 5 | Blocked by contention: a lock that timed out, a file another process holds open (Windows sharing/lock violation), or an installer exit of 75 (the cutover did not complete and the previous generation is still serving). Plain permission or I/O errors are exit 1 (`permission_denied` / `io_error`) |
+| 6 | An update step timed out: the agent-worktrees or a registered plugin's payload refresh, or a runtime or module installer. A timeout is always reported as a timeout, never as success |
+| 130 | Interrupted |
+
+`--force-runtime NAME` re-deploys just that runtime (repeatable); it is
+forwarded through `worktree-manager update`, and a name this update would not
+deploy (unknown, inactive, skipped, payload-only or not allowed on this machine)
+is a configuration error (exit 3). Inactive inventory failures are
+advisories and never fail the run. Telemetry
+is best-effort: if events or status cannot be written, `update` warns once,
+stops writing telemetry for the rest of that run, and its result is unchanged.
 
 ### Deregistering a project (`unregister`) vs. tearing down the runtime (`uninstall --remove-config`)
 
@@ -653,12 +718,42 @@ to the effort after release.
 | Subcommand | Description |
 |------------|-------------|
 | `services` | Service discovery, staleness checks, passthrough to installers |
-| `repos` | Repos registry -- list, find, add, clone, srcroot, `account`/`account-for` (owner→gh-login map), `allow-edits` (break-glass edit grants) |
+| `repos` | Repos registry -- list, find, add, clone, srcroot, `sync`, `account`/`account-for` (owner→gh-login map), `allow-edits` (break-glass edit grants) |
 | `accounts` | gh account identity catalog (`accounts.yaml`) -- list/show/set/remove logins, scopes, login flows |
 | `validate` | Validate core infrastructure files |
 | `pre-launch` | Check bootstrap staleness (JSON output, for launch wrappers) |
 | `reconcile-plugins` | Reconcile repo-adopted plugin payloads + gated runtimes (JSON output, for launch wrappers) |
 | `uninstall-plugins` | Sweep every deployed core plugin runtime via each plugin's own uninstall action (JSON; dry-run by default) |
+
+### Bare-anchor sync (`repos sync`)
+
+`repos sync` fast-forwards a bare anchor (`core.bare=true`) by moving its
+default-branch ref with a compare-and-swap `update-ref`. When the anchor also
+keeps an index and checked-out files beside its git dir (a converted ordinary
+clone), those files move with the ref: before the ref moves, the sync checks
+that no other git process holds the anchor's index lock, that the index
+matches the old commit, that the files have no local edits, and that no
+untracked or ignored path is in the way of a newly tracked one. If a
+check fails, the ref is left unmoved. After the ref moves, it runs the same
+two-tree `read-tree -m -u` a checkout would (so `core.autocrlf` applies). Linked
+worktrees are never touched. A result that reaches the file-state checks ends
+with `; files=<status>`. Earlier exits (a detached HEAD, a branch mismatch, a
+missing ref, a fetch failure, divergence, or a failed `update-ref`) leave the
+files untouched and carry no `files=` token:
+
+| Status | Meaning |
+|--------|---------|
+| `refreshed` | Ref and files advanced together |
+| `current` | Already up to date; the index matches the ref |
+| `none` | A bare repo with no index or checked-out files; nothing to refresh |
+| `stale-index` | The index does not match the ref (for example, an earlier ref-only sync); ref left unmoved |
+| `dirty` | The checked-out files have local edits; ref left unmoved |
+| `collision` | An untracked or ignored local path is in the way of a newly tracked one; ref left unmoved |
+| `index-locked` | Another git process holds the anchor's `index.lock`; ref left unmoved |
+| `refresh-failed:<detail>` | The ref advanced (the result names the commit it advanced from) but the files could not be refreshed, for example because another git process took `index.lock` after the checks; fix the cause, then run `git --git-dir <anchor>/.git -c core.bare=false --work-tree <anchor> read-tree -m -u <from> <branch>` (works from any directory; an anchor with checked-out files keeps its git dir at `<anchor>/.git`) |
+
+Any status other than `refreshed`, `current`, or `none` is printed as a
+warning.
 
 ### Repo-adopted plugin reconciliation (`reconcile-plugins`)
 

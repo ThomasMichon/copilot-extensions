@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-11
+- **Last revised:** 2026-10-12
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -224,7 +224,12 @@ contracts, and configuration across plugins **align**, offering to reconcile
 drift or a half-upgraded set. It **complements** each plugin's own
 self-provisioning/self-reconciliation rather than replacing it: a plugin still
 keeps *itself* healthy alone; the configurator is the place a human can see and
-true-up the *whole set* at once.
+true-up the *whole set* at once. On a host that adopts the integrated
+coordination product, the app is a client of that product's release authority
+and installer. It shows what is selected, ready, and serving, and it can
+request an update. It does not keep its own record of which release the host
+runs, and it is never a second updater. See
+[plugin-services *one-authority-per-lifecycle-decision*](../plugin-services/README.md#one-authority-per-lifecycle-decision).
 
 ### self-updating
 The app **keeps itself current on its own** — fetched by the one-line bootstrap
@@ -366,6 +371,10 @@ the app to keep *itself* current.
   [`docs/architecture.md`](../../docs/architecture.md)
 
 ## Provenance
+
+- **2026-10-12** — Clarified that, on hosts that adopt the integrated
+  coordination product, plugin updating and alignment is a client of that
+  product's release authority and installer, not a second updater.
 
 - **2026-09-25** — Renamed *terminal-app profile selection and fragment
   mirroring* to **Terminal Fragment handling** and added an explicit

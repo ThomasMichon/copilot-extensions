@@ -64,6 +64,33 @@ rather than as a successful refresh. The existing `auto_fast_forward` policy
 disables opportunistic anchor movement during creation without preventing
 remote-ref-based worktree creation.
 
+### Replay-safe programmatic creation
+
+`create --creation-key <opaque-key> --json` binds one logical request to its
+allocation facts and generated worktree identity. It creates space only:
+the keyed result contains `worktree` plus versioned `creation` metadata,
+not an executable session launch plan. Existing unkeyed creation is unchanged.
+The key is not a worktree ID. Callers choose a different logical revision
+only for a deliberate replacement, never for a transport retry or dispatch
+attempt.
+
+The per-project, installation-qualified owner journal records intent before
+allocation effects and completion before returning. An exact completed replay
+returns the original result after checking the owner record, path, branch, and
+creation nonce. Changed allocation facts conflict; removed or retired results
+refuse rather than allocating again. Concurrent or interrupted creation returns
+an explicit pending/recovery error (exit 3), including the reserved identity
+when known. It never treats a missing response as permission to repeat create.
+Pending effects require reconciliation; no automatic replacement is authorized
+by an absent local receipt.
+Profile, readiness, pairing and codename validation (including the under-lock
+recheck) precede reservation of the allocation identity. Source/root preparation
+may already have occurred, but no checkout, tracking record or reciprocal child
+claim exists yet. A positively refused validation before that workspace-effects
+boundary preserves the bound facts and permits same-key retry after repair.
+Once an identity is reserved, even a later failed call stays pending and cannot
+reset the key or authorize another allocation.
+
 ## Worktree states
 
 The tracking state (seen in `list` / the picker) and its status-bar block:
@@ -308,8 +335,12 @@ live. Never hand-run `git merge`/`push`/`worktree remove`.
 ### Pausing a worktree instead of finalizing (a runbook, not a subcommand)
 
 `finalize` is all-or-nothing on its resource-obligation-settlement gate: any
-unsettled outbound claim either blocks it outright, or `--abandon
+unsettled outbound legacy claim either blocks it outright, or `--abandon
 --handoff-to <recipient>` re-homes the *entire* unsettled set elsewhere.
+Disposable-owned producer claims are stricter: verified close or an explicitly
+accepted bound-claim handoff is required, and abandon, sweep, disconnect, generic
+release and gate-mode overrides cannot discharge them. Pending/allocating/unknown producer
+claims always block. See [the producer ABI](resource-producer.md).
 Neither fits "sync and tidy everything that's actually done, but leave this
 one claim open on purpose" — e.g. a deliberate pending `context-handoff` task
 meant to resume in this exact worktree, or any other genuinely-still-open

@@ -78,9 +78,10 @@ _resolve_venue_copilot() { _resolve_vendored_lib venue-copilot; }
 _resolve_zdd() { _resolve_vendored_lib zdd; }
 _resolve_remote_login_shell() { _resolve_vendored_lib remote-login-shell; }
 _resolve_fleet_contracts() { _resolve_vendored_lib fleet-contracts; }
+_resolve_machine_transport() { _resolve_vendored_lib machine-transport; }
 
 _install_agent_ssh_package() {
-    local agent_procutil_dir ssh_manager_dir venue_copilot_dir zdd_dir remote_login_shell_dir fleet_contracts_dir
+    local agent_procutil_dir ssh_manager_dir venue_copilot_dir zdd_dir remote_login_shell_dir fleet_contracts_dir machine_transport_dir
     agent_procutil_dir="$(_resolve_agent_procutil)" || {
         _fail 'Cannot locate agent-procutil library'
         return 1
@@ -105,9 +106,14 @@ _install_agent_ssh_package() {
         _fail 'Cannot locate fleet-contracts library'
         return 1
     }
+    machine_transport_dir="$(_resolve_machine_transport)" || {
+        _fail 'Cannot locate machine-transport library'
+        return 1
+    }
     if [[ -n "${UV_CMD:-}" ]]; then
-        local install_target lib_out pkg_out uv_ok=1
-        for install_target in \
+        local lib_out pkg_out
+        if lib_out=$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" \
+            --reinstall-package agent-venue-copilot --quiet \
             "pyyaml>=6.0.3" \
             "$agent_procutil_dir" \
             "$PLUGIN_DIR/libs/dropin-registry" \
@@ -115,29 +121,15 @@ _install_agent_ssh_package() {
             "$venue_copilot_dir" \
             "$zdd_dir" \
             "$remote_login_shell_dir" \
-            "$fleet_contracts_dir"
-        do
-            if [[ "$install_target" == "$venue_copilot_dir" ]]; then
-                lib_out="$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" --reinstall-package agent-venue-copilot "$install_target" --quiet)" || {
-                    [[ -n "$lib_out" ]] && printf '%s\n' "$lib_out" >&2
-                    _step 'uv package install failed -- falling back to python -m pip'
-                    uv_ok=0
-                    break
-                }
-                continue
-            fi
-            if ! lib_out=$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" "$install_target" --quiet); then
-                [[ -n "$lib_out" ]] && printf '%s\n' "$lib_out" >&2
-                _step 'uv package install failed -- falling back to python -m pip'
-                uv_ok=0
-                break
-            fi
-        done
-        if [[ "$uv_ok" -eq 1 ]]; then
+            "$fleet_contracts_dir" \
+            "$machine_transport_dir"); then
             if pkg_out=$(INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="$PLUGIN_DIR" invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" --no-deps "$PLUGIN_DIR" --quiet); then
                 return 0
             fi
             [[ -n "$pkg_out" ]] && printf '%s\n' "$pkg_out" >&2
+            _step 'uv package install failed -- falling back to python -m pip'
+        else
+            [[ -n "$lib_out" ]] && printf '%s\n' "$lib_out" >&2
             _step 'uv package install failed -- falling back to python -m pip'
         fi
     fi
@@ -149,6 +141,7 @@ _install_agent_ssh_package() {
         "$zdd_dir" \
         "$remote_login_shell_dir" \
         "$fleet_contracts_dir" \
+        "$machine_transport_dir" \
         "$PLUGIN_DIR" 2>/dev/null
 }
 
@@ -529,7 +522,7 @@ _materialize_snapshot_vendored_libs() {
     local snapshot_dir="$1"
     mkdir -p "$snapshot_dir/libs"
     local lib source destination
-    for lib in agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts; do
+    for lib in agent-procutil ssh-manager venue-copilot zdd remote-login-shell fleet-contracts machine-transport; do
         source="$(_resolve_vendored_lib "$lib")" || {
             _fail "Cannot locate required snapshot library: $lib"
             return 1
@@ -692,7 +685,8 @@ _snapshot_is_reusable() {
         "libs/venue-copilot/pyproject.toml" \
         "libs/zdd/pyproject.toml" \
         "libs/remote-login-shell/pyproject.toml" \
-        "libs/fleet-contracts/pyproject.toml"
+        "libs/fleet-contracts/pyproject.toml" \
+        "libs/machine-transport/pyproject.toml"
     do
         [[ -f "$current_snapshot/$rel" ]] || return 1
     done
@@ -715,6 +709,116 @@ _deploy_binstub() {
         "$SCRIPT_DIR/resolve-runtime.sh"
 }
 
+# === install-transaction lock (fail-closed) ===
+# Serializes every mutating action of this runtime (stamp/install/update/
+# provision): an exclusive lock on $INSTALL_DIR/.install.lock (flock on fd 7,
+# since fd 8 is the stamp-publication lock, or a pid-symlink fallback where flock is unavailable) held for the whole build +
+# publish transaction. A concurrent run waits up to the timeout
+# (COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC, default 300s) and then FAILS -- it
+# never proceeds unlocked. The OS drops the flock if this process dies; a dead
+# owner's pid symlink is reaped.
+__install_lock_link=""
+__install_lock_fd=""
+
+_install_lock_timeout() {
+    local __t="${COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC:-}"
+    case "$__t" in
+        ''|*[!0-9]*) __t=300 ;;
+    esac
+    [[ "$__t" -gt 0 ]] 2>/dev/null || __t=300
+    printf '%s' "$__t"
+}
+
+_exit_install_lock() {
+    if [[ -n "$__install_lock_link" ]]; then
+        local __owner
+        __owner="$(readlink "$__install_lock_link" 2>/dev/null || true)"
+        [[ "$__owner" == "$$" ]] && rm -f "$__install_lock_link"
+        __install_lock_link=""
+    elif [[ -n "$__install_lock_fd" ]]; then
+        flock -u "$__install_lock_fd" 2>/dev/null || true
+        eval "exec $__install_lock_fd>&-"
+        __install_lock_fd=""
+    fi
+}
+
+_enter_install_lock() {
+    local __timeout="${1:-$(_install_lock_timeout)}"
+    mkdir -p "$INSTALL_DIR" 2>/dev/null || return 1
+    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
+        { exec 7>"$INSTALL_DIR/.install.lock"; } 2>/dev/null || return 1
+        if ! flock -w "$__timeout" 7; then
+            exec 7>&-
+            return 1
+        fi
+        __install_lock_fd=7
+        return 0
+    fi
+    local __link="$INSTALL_DIR/.install.lock.pid" __deadline __owner __live __now
+    __deadline=$(( $(date +%s) + __timeout ))
+    until ln -s "$$" "$__link" 2>/dev/null; do
+        if [[ "$(date +%s)" -ge "$__deadline" ]]; then
+            return 1
+        fi
+        __owner="$(readlink "$__link" 2>/dev/null || true)"
+        if [[ -z "$__owner" ]]; then
+            # The link vanished after the failed `ln -s` (its holder released
+            # it or a reaper removed it), or the path is not a symlink this
+            # lock can attribute. Never unlink here: lock creators are not
+            # serialized by the reap mutex, so an unlink could delete a live
+            # lock taken meanwhile. Retry; an unattributable path fails
+            # closed at the deadline.
+            sleep 0.1
+            continue
+        fi
+        case "$__owner" in
+            *[!0-9]*) __live=0 ;;
+            *) if kill -0 "$__owner" 2>/dev/null; then __live=1; else __live=0; fi ;;
+        esac
+        if [[ "$__live" == 1 ]]; then
+            sleep 1
+        elif ln -s "$$" "$__link.reap" 2>/dev/null; then
+            # Serialize stale-owner recovery: without this PID-bearing reap
+            # mutex, two contenders could both see the same stale owner, and
+            # one's `rm -f` could delete the live lock the other just took.
+            # Unlink only if the link still holds the owner judged stale above
+            # and that owner is still not live: a dead owner cannot release its
+            # own link and only serialized reapers remove a stale one, so that
+            # value is stable under this mutex. An absent link, or one naming a
+            # different (possibly just-released) holder, is never removed.
+            __now="$(readlink "$__link" 2>/dev/null || true)"
+            if [[ -n "$__now" && "$__now" == "$__owner" ]]; then
+                case "$__now" in
+                    *[!0-9]*) rm -f "$__link" ;;
+                    *) kill -0 "$__now" 2>/dev/null || rm -f "$__link" ;;
+                esac
+            fi
+            rm -f "$__link.reap"
+        else
+            # Another contender is reaping. A reap mutex whose owner died
+            # mid-reap is deliberately never reclaimed automatically (that
+            # would reintroduce the check-then-unlink race); the run fails
+            # closed at its deadline until the stale .reap link is removed.
+            sleep 0.1
+        fi
+    done
+    __install_lock_link="$__link"
+    return 0
+}
+# === end install-transaction lock ===
+
+case "$ACTION" in
+    install|update|stamp|provision)
+        if ! _enter_install_lock; then
+            _fail "Could not acquire the install transaction lock ($INSTALL_DIR/.install.lock) within $(_install_lock_timeout)s -- another install is still running; refusing to proceed unlocked"
+            exit 1
+        fi
+        trap '_exit_install_lock' EXIT
+        trap '_exit_install_lock; exit 130' INT
+        trap '_exit_install_lock; exit 143' TERM
+        ;;
+esac
+
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 if [[ "$ACTION" == "stamp" ]]; then
@@ -722,7 +826,7 @@ if [[ "$ACTION" == "stamp" ]]; then
     SOURCE_PATH="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
     SOURCE_KIND="$(_source_kind "$SOURCE_PATH")"
     _acquire_stamp_publication_lock || exit 1
-    trap '_release_stamp_publication_lock' EXIT
+    trap '_release_stamp_publication_lock; _exit_install_lock' EXIT
     CURRENT_SNAPSHOT="$(_current_snapshot)"
     if _published_snapshot_is_newer "$CURRENT_SNAPSHOT" "$SOURCE_PATH" "$SRC_VERSION"; then
         _skip "Published snapshot $CURRENT_SNAPSHOT is newer than $SRC_VERSION; leaving payload-dir unchanged"

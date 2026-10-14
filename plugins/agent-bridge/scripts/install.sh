@@ -25,6 +25,8 @@
 #              (`test-chamber services agent-bridge update`), NOT a raw
 #              checkout installer -- the guard exists to stop a stale checkout
 #              silently downgrading (and de-featuring) the running daemon.
+#              It never overrides the completed-slot refusal (#5472): a
+#              published versions/<v> slot is not rebuilt in place.
 # =============================================================================
 
 set -euo pipefail
@@ -293,6 +295,12 @@ fi
 VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 # === end install-contract:v3 versioned-venv ===
 
+# The transaction's payload fingerprint, fixed once before admission by
+# _guard_published_slot and carried to the completion marker and deploy
+# manifest (see _payload_hash). Never inherited from the environment.
+PAYLOAD_HASH=""
+PAYLOAD_HASH_FIXED=0
+
 # Ensure ~/.local/bin is on PATH
 if [[ ":$PATH:" != *":$LOCAL_BIN:"* ]]; then
     export PATH="$LOCAL_BIN:$PATH"
@@ -428,7 +436,7 @@ _write_update_marker() {
 _clear_update_marker() {
     [[ "$_UPDATE_MARKER_HELD" == true ]] || return 0
     _UPDATE_MARKER_HELD=false
-    exec 9>"${UPDATE_MARKER_REFCOUNT_LOCK}" 2>/dev/null || return 0
+    { exec 9>"${UPDATE_MARKER_REFCOUNT_LOCK}"; } 2>/dev/null || return 0
     flock -w 10 9 || true
     local count tmp
     count="$(cat "${UPDATE_MARKER_REFCOUNT}" 2>/dev/null || echo 0)"
@@ -594,43 +602,177 @@ _bootstrap_python() {
     return 1
 }
 
-_payload_hash() {
-    # Content fingerprint of the RUNTIME PAYLOAD (#935/#776/ce#811): sha256 over
-    # the sorted "<per-file sha256>  <relpath>" list for pyproject.toml plus every
-    # file under src/ and libs/ (excluding caches/build artifacts). A src/-only
-    # edit without a version bump changes this value, so the completion marker +
-    # content guards detect real content drift, not just a pyproject change.
-    # Re-baselined by the accompanying version bump (self-healing). Empty on error.
+_uv_source_paths() {
+    # The [tool.uv.sources] `path = "..."` dependencies one pyproject.toml ($1)
+    # declares, resolved relative to that project's own directory (as uv
+    # resolves them when installing it). Prints one directory per line; only
+    # directories holding a pyproject.toml.
+    local pp="$1" base rel resolved
+    base="$(cd "$(dirname "$pp")" 2>/dev/null && pwd)" || return 0
+    while IFS= read -r rel; do
+        resolved="$(cd "$base" 2>/dev/null && cd "$rel" 2>/dev/null && pwd)" || continue
+        [[ -f "$resolved/pyproject.toml" ]] && printf '%s\n' "$resolved"
+    done < <(
+        sed -n '/^\[tool\.uv\.sources\]/,/^\[/p' "$pp" 2>/dev/null |
+        grep -o 'path[[:space:]]*=[[:space:]]*"[^"]*"' |
+        sed -n 's/.*"\([^"]*\)".*/\1/p'
+    )
+    return 0
+}
+
+_payload_lib_roots() {
+    # Every shared-library directory OUTSIDE $PLUGIN_DIR that this installer
+    # installs into the runtime slot: the libraries it installs explicitly
+    # (resolved through _resolve_vendored_lib, exactly as the build does) plus
+    # the transitive closure of [tool.uv.sources] path dependencies of the
+    # plugin and of those libraries (resolved live by `uv pip install`, e.g.
+    # "../../libs/<lib>" in a checkout). Directories under $PLUGIN_DIR (a
+    # materialized/vendored libs/ copy) are covered by the plugin scan in
+    # _compute_payload_hash and are not repeated. One directory per line.
+    local plugin_real lib dir pp key real i=0
+    plugin_real="$(cd "$PLUGIN_DIR" 2>/dev/null && pwd)" || return 0
+    local candidates=() pending=("$plugin_real/pyproject.toml")
+    for lib in ssh-manager credential-relay zdd single-instance-lease config-migrate; do
+        if dir="$(_resolve_vendored_lib "$lib")" && [[ -n "$dir" ]]; then
+            candidates+=("$dir")
+            pending+=("$dir/pyproject.toml")
+        fi
+    done
+    for pp in "$plugin_real"/libs/*/pyproject.toml; do
+        [[ -f "$pp" ]] && pending+=("$pp")
+    done
+    local visited=$'\n'
+    while (( i < ${#pending[@]} )); do
+        pp="${pending[$i]}"
+        i=$((i + 1))
+        [[ -f "$pp" ]] || continue
+        key="$(cd "$(dirname "$pp")" 2>/dev/null && pwd)" || continue
+        case "$visited" in *$'\n'"$key"$'\n'*) continue ;; esac
+        visited+="$key"$'\n'
+        while IFS= read -r dir; do
+            candidates+=("$dir")
+            pending+=("$dir/pyproject.toml")
+        done < <(_uv_source_paths "$pp")
+    done
+    local seen=$'\n'
+    for dir in "${candidates[@]+"${candidates[@]}"}"; do
+        real="$(cd "$dir" 2>/dev/null && pwd)" || continue
+        [[ "$real" == "$plugin_real" || "$real" == "$plugin_real"/* ]] && continue
+        case "$seen" in *$'\n'"$real"$'\n'*) continue ;; esac
+        seen+="$real"$'\n'
+        printf '%s\n' "$real"
+    done
+    return 0
+}
+
+_payload_tree_digests() {
+    # "<sha256>  <label>/<relpath>" for every installable file under $1,
+    # labeled with prefix $2. Caches and build artifacts (which the build itself
+    # writes into these trees) are excluded; $3 names a never-installed tests/
+    # tree to skip: `top` (<dir>/tests) or `lib` (<dir>/<lib>/tests).
+    local dir="$1" label="$2" tests="${3:-}"
+    [[ -d "$dir" ]] || return 0
+    local prune=()
+    case "$tests" in
+        top) prune=(-path ./tests -prune -o) ;;
+        lib) prune=(-path './*/tests' -prune -o) ;;
+    esac
+    (
+        cd "$dir" || exit 1
+        find . ${prune[@]+"${prune[@]}"} -type f \
+            ! -path '*/__pycache__/*' ! -path '*/.venv/*' ! -path '*/venv/*' \
+            ! -path '*/.pytest_cache/*' ! -path '*/.mypy_cache/*' ! -path '*/.ruff_cache/*' \
+            ! -path '*/.git/*' ! -path '*/node_modules/*' \
+            ! -path '*/build/*' ! -path '*/dist/*' ! -path '*.egg-info/*' \
+            ! -name '*.pyc' -print0 2>/dev/null \
+          | LC_ALL=C sort -z \
+          | xargs -0 -r sha256sum 2>/dev/null
+    ) | sed "s#^\\([0-9a-f]*\\) [ *]\\./#\\1  $label/#"
+}
+
+_compute_payload_hash() {
+    # Content fingerprint of EVERY source this installer installs into the
+    # runtime slot (#935/#776/ce#811, #5472): sha256 over the sorted
+    # "<per-file sha256>  <label>" list for pyproject.toml, src/, the
+    # plugin-local libs/, and each shared library resolved outside $PLUGIN_DIR
+    # (_payload_lib_roots), whose files are labeled "libs/<lib>/<relpath>" so
+    # the value does not depend on where the checkout lives. Caches, build
+    # artifacts and each library's own top-level tests/ (never installed) are
+    # excluded, so building or testing never changes the value. Empty on error.
+    # LC_ALL=C: identical-content files (e.g. empty __init__.py) tie on the
+    # digest and are ordered by path, which must not depend on the caller's
+    # locale (an interactive shell vs a service manager).
     (
         cd "$PLUGIN_DIR" 2>/dev/null || exit 0
         {
             [[ -f pyproject.toml ]] && sha256sum pyproject.toml 2>/dev/null
-            for __sub in src libs; do
-                [[ -d "$__sub" ]] || continue
-                find "$__sub" -type f \
-                    ! -path '*/__pycache__/*' ! -path '*/.venv/*' ! -path '*/venv/*' \
-                    ! -path '*/.pytest_cache/*' ! -path '*/.mypy_cache/*' \
-                    ! -path '*/build/*' ! -path '*/dist/*' ! -path '*.egg-info/*' \
-                    ! -name '*.pyc' -print0 2>/dev/null \
-                  | sort -z \
-                  | xargs -0 -r sha256sum 2>/dev/null
-            done
-        } | sort | sha256sum 2>/dev/null | awk '{print $1}'
+            # The declared project `readme`, embedded in installed metadata.
+            [[ -f README.md ]] && sha256sum README.md 2>/dev/null
+            _payload_tree_digests "$PLUGIN_DIR/src" src
+            _payload_tree_digests "$PLUGIN_DIR/libs" libs lib
+            local __lib
+            while IFS= read -r __lib; do
+                _payload_tree_digests "$__lib" "libs/$(basename "$__lib")" top
+            done < <(_payload_lib_roots)
+        } | LC_ALL=C sort | sha256sum 2>/dev/null | awk '{print $1}'
     ) || true
+}
+
+_payload_hash() {
+    # The payload fingerprint admission, the completion marker and the deploy
+    # manifest (installer-engine's write_deploy_manifest) all read. A completed
+    # slot is reused only when this matches its marker, so _guard_published_slot
+    # fixes it ONCE per transaction, before admission, and every later reader
+    # gets that same value. After a build it is recomputed only to VERIFY the
+    # sources did not change mid-build (_payload_unchanged_since_admission); a
+    # mismatch fails the install instead of publishing either value.
+    # Before it is fixed (no transaction yet), it is computed on demand.
+    if [[ "${PAYLOAD_HASH_FIXED:-0}" == 1 ]]; then
+        printf '%s' "${PAYLOAD_HASH:-}"
+    else
+        _compute_payload_hash
+    fi
+}
+
+_payload_unchanged_since_admission() {
+    # Post-build check that the slot holds the bytes admission hashed: the
+    # build reads the sources AFTER PAYLOAD_HASH was fixed, so an edit landing
+    # in between would put new bytes in the slot under a marker (and deploy
+    # manifest) naming the old hash, and a later install of the old sources
+    # would wrongly reuse it. Recomputes the hash directly (bypassing the
+    # fixed _payload_hash value) and returns non-zero, after reporting it,
+    # when it differs; the caller must then fail without publishing the
+    # marker or manifest, or activating. Nothing to verify when no slot was
+    # built (reuse) or no hash was admitted.
+    [[ "${SLOT_ADMISSION:-}" != reuse ]] || return 0
+    [[ "${PAYLOAD_HASH_FIXED:-0}" == 1 && -n "${PAYLOAD_HASH:-}" ]] || return 0
+    local fresh
+    fresh="$(_compute_payload_hash)"
+    [[ "$fresh" != "$PAYLOAD_HASH" ]] || return 0
+    _fail "Install sources changed during the build (payload hash $PAYLOAD_HASH at admission, ${fresh:-unavailable} now); refusing to publish runtime slot versions/$SRC_VERSION -- re-run the install"
+    return 1
 }
 
 _versioned_slot_clean() {
     # #935: ensure the target slot exists, tossing it first if a prior build left
     # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
     # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
-    # legacy mode.
+    # derived from LINK_DIR so the current-slot guard works per plugin). Returns
+    # non-zero when the primitive REFUSES (e.g. the incomplete slot is selected
+    # or still in use): building over it would mutate a live/selected slot in
+    # place, so the caller must not proceed (#5472). No-op in legacy mode.
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py
     py="$(_bootstrap_python)" || return 0
     [[ -n "$py" ]] || return 0
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
+    local out rc=0
+    out="$("$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1)" || rc=$?
+    if [[ -n "$out" ]]; then printf '%s\n' "$out" | sed 's/^/  ...    /'; fi
+    if [[ "$rc" -ne 0 ]]; then
+        _fail "Runtime slot versions/$SRC_VERSION could not be safely prepared (exit $rc); refusing to build over it in place"
+        return 1
+    fi
 }
 
 _versioned_mark_complete() {
@@ -638,18 +780,113 @@ _versioned_mark_complete() {
     # passed, so "marker present" == "healthy, complete build". A crashed /
     # watchdog-killed install never reaches here, leaving its slot markerless and
     # thus tossable + retryable. No-op in legacy mode. Runs the stdlib-only
-    # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
-    # this helper is portable byte-identically across plugins).
+    # versioned_runtime.py via the slot's own python (or any bootstrap python).
+    # A refused publication fails the caller (#5472).
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
+    local py=""
+    if [[ -x "$VENV_DIR/bin/python" ]]; then
+        py="$VENV_DIR/bin/python"
+    else
+        py="$(_bootstrap_python)" || py=""
+    fi
+    if [[ -z "$py" ]]; then
+        _fail "No python available to publish the completion marker for runtime slot versions/$SRC_VERSION"
+        return 1
+    fi
+    # The transaction's payload fingerprint fixed before admission (see
+    # _payload_hash) -- never recomputed here; callers that built the slot
+    # first confirm the sources still hash to it
+    # (_payload_unchanged_since_admission).
     local ph
     ph="$(_payload_hash)"
     local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
     if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /' || true
+    # A refused publication (e.g. conflicting completion evidence for this
+    # numbered version) must fail the install, never be swallowed (#5472).
+    local out rc=0
+    out="$("$py" "${args[@]}" 2>&1)" || rc=$?
+    if [[ -n "$out" ]]; then printf '%s\n' "$out" | sed 's/^/  ...    /'; fi
+    if [[ "$rc" -ne 0 ]]; then
+        _fail "Failed to publish the completion marker for runtime slot versions/$SRC_VERSION (exit $rc)"
+        return 1
+    fi
+}
+
+_slot_admission() {
+    # Classify the target numbered slot (versions/$SRC_VERSION) through the
+    # shared versioned_runtime `check-admission` primitive, BEFORE anything
+    # drains the daemon or touches the slot (#5472). Prints one of:
+    #   construct              -- absent, or no completion marker: build as before
+    #   reuse                  -- published with exactly this payload
+    #   content-conflict       -- published with DIFFERENT payload content
+    #   health-repair-required -- published evidence is malformed
+    #   unverified             -- a completion marker exists but the payload
+    #                             hash / admission could not be computed
+    # Only construct/reuse may proceed: a published slot is immutable, so new
+    # content needs a new version, never an in-place rebuild. A helper failure
+    # with no completion marker on disk stays `construct`, so an incomplete
+    # slot is still rebuilt exactly as before.
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || { echo construct; return 0; }
+    local fallback=construct
+    if [[ -e "$VENV_DIR/.install-complete.json" || -L "$VENV_DIR/.install-complete.json" ]]; then
+        fallback=unverified
+    fi
+    local vr="$SCRIPT_DIR/versioned_runtime.py"
+    local ph
+    ph="$(_payload_hash)"
+    if [[ -z "$ph" || ! -f "$vr" ]]; then echo "$fallback"; return 0; fi
+    local candidates=() py decision
+    [[ -x "$VENV_DIR/bin/python" ]] && candidates+=("$VENV_DIR/bin/python")
+    if py="$(_bootstrap_python)"; then candidates+=("$py"); fi
+    for py in "${candidates[@]+"${candidates[@]}"}"; do
+        if decision="$("$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" check-admission "$SRC_VERSION" --payload-hash "$ph" 2>/dev/null)" \
+                && [[ -n "$decision" ]]; then
+            echo "$decision"
+            return 0
+        fi
+    done
+    echo "$fallback"
+}
+
+_slot_admission_refusal() {
+    # The actionable refusal for a published same-version slot (#5472). There is
+    # no override (--force included, matching the other runtime installers):
+    # repair or new content always requires a distinct, newly versioned slot.
+    local admission="$1"
+    if [[ "$admission" == content-conflict ]]; then
+        _fail "Runtime slot versions/$SRC_VERSION is already complete for different payload content; bump the plugin version instead of rebuilding an immutable slot in place"
+    else
+        _fail "Runtime slot versions/$SRC_VERSION carries completion evidence that could not be verified ($admission); bump the plugin version instead of rebuilding an immutable slot in place (repair requires a distinct generation)"
+    fi
+    _fail "Refused before draining, stopping, or rebuilding anything; the running agent-bridge service was left untouched."
+}
+
+_guard_published_slot() {
+    # Returns 0 when the target slot is published with this exact payload AND
+    # already active (the caller no-ops: no drain, no stop, no rebuild); returns
+    # 1 when the caller should proceed (absent/incomplete slot, or a matching
+    # but inactive one); EXITS 1 when the slot is published with different or
+    # unverifiable content (#5472).
+    local admission
+    # Fix the transaction's payload fingerprint ONCE, before admission; the
+    # completion marker and deploy manifest carry this same value (#5472).
+    PAYLOAD_HASH="$(_compute_payload_hash)"
+    PAYLOAD_HASH_FIXED=1
+    admission="$(_slot_admission)"
+    SLOT_ADMISSION="$admission"
+    case "$admission" in
+        construct) return 1 ;;
+        reuse)
+            if [[ "$(_versioned_current)" == "$SRC_VERSION" ]]; then
+                _ok "agent-bridge $SRC_VERSION already installed and healthy (content match) -- no-op (no stop, no rebuild)."
+                return 0
+            fi
+            return 1 ;;
+        *)
+            _slot_admission_refusal "$admission"
+            exit 1 ;;
+    esac
 }
 # === end install-contract:v3 versioned-venv helpers ===
 
@@ -1022,15 +1259,20 @@ _install_sibling_plugins() {
 
 # Prune any stale venue-provider package from EVERY agent-bridge venv and fail if
 # one is still importable afterward (the #1643 guard). Two venvs can carry a stale
-# copy: the ACTIVE versioned runtime slot ($VENV_DIR) and the retired legacy
-# top-level ~/.agent-bridge/venv (the install-contract-v3 leftover that
-# agent-codespaces' old installer vendored into). We prune both: uv-uninstall
-# first (clean dist-info removal), then belt-and-suspenders remove any raw-copied
-# dirs, then probe importability from each venv's OWN interpreter.
+# copy: the runtime slot being built ($VENV_DIR, still unpublished) and the
+# retired legacy top-level ~/.agent-bridge/venv (the install-contract-v3
+# leftover that agent-codespaces' old installer vendored into). We prune both:
+# uv-uninstall first (clean dist-info removal), then belt-and-suspenders remove
+# any raw-copied dirs, then probe importability from each venv's OWN interpreter.
+# A `venv` SYMLINK is not a legacy venv: it targets an already-published slot,
+# which is create-once (#5472) and must never be rewritten; activation removes
+# the stale link instead.
 _remove_vendored_providers() {
     local pys=() py pkg mod purelib leak
     [[ -x "$VENV_DIR/bin/python" ]] && pys+=("$VENV_DIR/bin/python")
-    [[ -x "$INSTALL_DIR/venv/bin/python" ]] && pys+=("$INSTALL_DIR/venv/bin/python")  # runtime-resolution: allow legacy-venv cleanup (prune, not launch)
+    if [[ ! -L "$INSTALL_DIR/venv" && -x "$INSTALL_DIR/venv/bin/python" ]]; then  # runtime-resolution: allow legacy-venv cleanup (prune, not launch)
+        pys+=("$INSTALL_DIR/venv/bin/python")  # runtime-resolution: allow legacy-venv cleanup (prune, not launch)
+    fi
     if [[ ${#pys[@]} -eq 0 ]]; then
         _step "No bridge venv yet -- nothing to prune (#1643)"
         return 0
@@ -1307,43 +1549,20 @@ do_stamp() {
 # holds the lock; systemd-launched and python-cutover (close_fds) daemons don't.
 _enter_install_lock() {
     mkdir -p "$INSTALL_DIR" 2>/dev/null || true
-    exec 8>"$INSTALL_DIR/.install.lock" 2>/dev/null || return 0   # can't open -> lock-free
+    { exec 8>"$INSTALL_DIR/.install.lock"; } 2>/dev/null || return 0   # can't open -> lock-free
     command -v flock >/dev/null 2>&1 || return 0                  # no flock -> lock-free
     flock -w 150 8 || return 1                                    # held whole window -> defer
     return 0
 }
 
-do_install() {
-    echo ""
-    echo "=== agent-bridge install ==="
-    echo ""
-
-    # Prerequisite: uv (self-acquired if absent) + governed-feed index
-    _ensure_uv || exit 1
-    _ensure_uv_index
-
-    _migration_check
-
-    # Guard against a stale checkout downgrading an existing healthy install
-    # (#1790). No-op on first install (no installed version to compare).
-    _downgrade_guard
-
-    # Serialize concurrent installers (ce#776/#777 follow-up): wait for any
-    # in-flight install; on timeout defer -- it lands the version.
-    if ! _enter_install_lock; then
-        _warn "Another agent-bridge install is in progress -- deferring this run. No-op."
-        return 0
-    fi
-
-    mkdir -p "$INSTALL_DIR"
-    if $PUBLISH_GLOBAL_BINSTUBS; then
-        mkdir -p "$LOCAL_BIN"
-    fi
-
+_install_slot_build() {
+    # Build the target slot from scratch for do_install: venv, vendored libs,
+    # the agent-bridge package. Only for an absent or incomplete slot -- a
+    # completed slot is never rebuilt in place (#5472).
     # #935: toss an INCOMPLETE prior slot first so we never `uv venv
     # --allow-existing` over a half-built corpse (the current/active slot is
     # never tossed). No-op in legacy mode.
-    _versioned_slot_clean
+    _versioned_slot_clean || exit 1
 
     # Create venv via uv
     if ! _venv_healthy "$VENV_DIR"; then
@@ -1465,6 +1684,64 @@ do_install() {
     fi
     _ok "Package installed"
 
+    # Prune any stale vendored provider copy + guard (#1643) while the slot is
+    # still unpublished: a completed slot is create-once (#5472), so nothing
+    # may rewrite it after its marker is published or it is activated.
+    _install_sibling_plugins || exit 1
+}
+
+do_install() {
+    echo ""
+    echo "=== agent-bridge install ==="
+    echo ""
+
+    # Prerequisite: uv (self-acquired if absent) + governed-feed index
+    _ensure_uv || exit 1
+    _ensure_uv_index
+
+    _migration_check
+
+    # Guard against a stale checkout downgrading an existing healthy install
+    # (#1790). No-op on first install (no installed version to compare).
+    _downgrade_guard
+
+    # Serialize concurrent installers (ce#776/#777 follow-up): wait for any
+    # in-flight install; on timeout defer -- it lands the version.
+    if ! _enter_install_lock; then
+        _warn "Another agent-bridge install is in progress -- deferring this run. No-op."
+        return 0
+    fi
+
+    # Immutable-slot admission (#5472, ce#776/#777): a published same-version
+    # slot whose content matches and is already active is a no-op; one whose
+    # content differs (or whose evidence cannot be verified) is refused --
+    # non-zero, no --force override -- before anything is touched. An absent or
+    # incomplete slot builds exactly as before.
+    if _guard_published_slot; then
+        _write_deploy_manifest
+        return 0
+    fi
+
+    mkdir -p "$INSTALL_DIR"
+    if $PUBLISH_GLOBAL_BINSTUBS; then
+        mkdir -p "$LOCAL_BIN"
+    fi
+
+    # A completed slot that already holds exactly this payload (just not the
+    # active one) is activated as-is: never recreate its venv, reinstall into
+    # it, or prune it (#5472). Only an absent/incomplete slot is built.
+    if [[ "${SLOT_ADMISSION:-}" == reuse ]]; then
+        _skip "Runtime slot versions/$SRC_VERSION is already complete for this payload -- activating it without rebuilding"
+    else
+        _install_slot_build
+    fi
+
+    # The build read the sources after PAYLOAD_HASH was fixed: publish nothing
+    # (marker, manifest) and activate nothing unless they still hash to it.
+    # Like a refused marker publication, the slot stays incomplete and the
+    # next build's --clean-incomplete tosses it.
+    _payload_unchanged_since_admission || exit 1
+
     # Versioned layout (#581): health-gate the freshly-built slot in isolation,
     # then swap the stable `venv` symlink onto it. Everything below resolves
     # through `venv` (the link). No-op in legacy mode.
@@ -1473,7 +1750,7 @@ do_install() {
             _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
             exit 1
         fi
-        _versioned_mark_complete
+        _versioned_mark_complete || exit 1
         _versioned_activate || exit 1
     fi
 
@@ -1484,10 +1761,6 @@ do_install() {
     else
         _step "Config migration skipped"
     fi
-
-    # Prune any stale vendored provider copy from the bridge venv(s) + guard
-    # (#1643): pure providers.d, no in-venv provider packages.
-    _install_sibling_plugins
 
     # Create binstub
     deploy_binstub
@@ -1905,6 +2178,20 @@ _remove_venv_backup() {
 # on any failure WITHOUT exiting, so the caller can roll back. The service must
 # already be stopped before this runs.
 _update_core() {
+    # A completed slot that already holds exactly this payload (just not the
+    # active one) is activated as-is: never recreate its venv or reinstall
+    # into it (#5472). Verify it still imports, then hand back to activation.
+    if [[ "${SLOT_ADMISSION:-}" == reuse ]]; then
+        _skip "Runtime slot versions/$SRC_VERSION is already complete for this payload -- activating it without rebuilding"
+        if ! _runtime_healthy; then
+            _fail "Completed runtime slot versions/$SRC_VERSION failed its health check -- not activating"
+            return 1
+        fi
+        if ! PYTHONUTF8=1 "$VENV_DIR/bin/python" -m agent_bridge config migrate 2>/dev/null; then
+            _step "Config migration skipped"
+        fi
+        return 0
+    fi
     # Build/repair the venv. Versioned layout: $VENV_DIR is a FRESH per-version
     # slot (never the running daemon's), so an absent slot is normal -- always
     # build it. Legacy layout: repair the single venv in place if python is gone.
@@ -1915,7 +2202,7 @@ _update_core() {
         fi
         if ! _venv_healthy "$VENV_DIR"; then
             _step "Building runtime slot versions/$SRC_VERSION..."
-            _versioned_slot_clean
+            _versioned_slot_clean || return 1
             if ! _uv_venv_resilient "$VENV_DIR" --python 3.10 --allow-existing; then
                 _uv_venv_resilient "$VENV_DIR" --allow-existing || { _fail "Venv build failed (versions/$SRC_VERSION)"; return 1; }
             fi
@@ -2026,6 +2313,11 @@ _update_core() {
         return 1
     fi
 
+    # Prune any stale vendored provider copy + guard (#1643) before the final
+    # verification, publication and activation: the slot is create-once
+    # (#5472), and a failure here still rolls back to the previous runtime.
+    _install_sibling_plugins reinstall || return 1
+
     # Verify the freshly-installed runtime imports before declaring success --
     # catches a half-installed venv (e.g. a wheel/dependency gap) while we can
     # still roll back, rather than starting a broken service.
@@ -2060,6 +2352,14 @@ do_update() {
     # over an in-flight install/update. Defer on timeout.
     if ! _enter_install_lock; then
         _warn "Another agent-bridge install/update is in progress -- deferring. No-op."
+        return 0
+    fi
+
+    # Immutable-slot admission (#5472) -- BEFORE the update marker, the drain,
+    # or any stop, so a no-op or a refused update never disturbs the live
+    # daemon. See do_install.
+    if _guard_published_slot; then
+        _write_deploy_manifest
         return 0
     fi
 
@@ -2152,8 +2452,11 @@ do_update() {
         fi
     fi
 
-    # Run the protected update; on any failure, roll back to the snapshot.
-    if ! _update_core; then
+    # Run the protected update; on any failure, roll back to the snapshot. A
+    # build whose sources changed after PAYLOAD_HASH was fixed is a failure
+    # too: the never-published slot is discarded before marker, manifest or
+    # activation.
+    if ! _update_core || ! _payload_unchanged_since_admission; then
         _fail "Update failed"
         if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
             # The `venv` link was never swapped (activate runs only after a healthy
@@ -2189,15 +2492,12 @@ do_update() {
     # stable `venv` symlink onto it. In cutover mode the old daemon keeps serving
     # from its own immutable slot until drained. No-op in legacy mode.
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-        _versioned_mark_complete
+        _versioned_mark_complete || { _fail "Versioned completion publication failed"; exit 1; }
         _versioned_activate || { _fail "Versioned activate failed"; exit 1; }
     fi
 
     # Success: discard the rollback snapshot.
     _remove_venv_backup
-
-    # Update sibling plugins (e.g. agent-codespaces for codespace: namespace)
-    _install_sibling_plugins reinstall
 
     # Update binstub
     deploy_binstub

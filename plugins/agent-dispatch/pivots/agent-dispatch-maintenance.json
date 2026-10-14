@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "label": "Maintenance tasks",
+  "after": "Worktrees",
+  "list": ["agent-dispatch-board", "--machine", "{machine}", "--category", "maintenance"],
+  "stream": true,
+  "subscribe": true,
+  "entry": {
+    "id": "id", "title": "title", "worktree": "target_worktree",
+    "subtitle": "subtitle", "group": "group", "badges": ["activity", "labels"]
+  },
+  "columns": [
+    {"key": "id", "header": "ID", "width": 9, "priority": 1},
+    {"key": "group", "header": "PHASE", "width": 10, "palette": "task_phase", "priority": 2},
+    {"key": "target_worktree", "header": "WT", "width": 5, "priority": 3, "style": "bold cyan"},
+    {"key": "wt_live", "header": "LIVE", "width": 13, "priority": 4},
+    {"key": "length_display", "header": "LENGTH", "width": 9, "align": "r", "priority": 5},
+    {"key": "artifacts_summary", "header": "ARTIFACTS", "width": 18}
+  ],
+  "group_field": "group",
+  "empty_hint": "No active or recently-finished maintenance tasks for this machine.",
+  "actions": [
+    {
+      "key": "inspect-evidence",
+      "label": "Inspect evidence — results, progress, statistics and attachments",
+      "run": ["agent-dispatch", "inspect-task", "{task_id}", "--machine", "{machine}"],
+      "description": "Read the full task, result/log references, events, progress, statistics and durable attachment lineage on the owning machine."
+    },
+    {
+      "key": "charter", "label": "View charter", "kind": "card",
+      "title_from": "charter.title", "status_from": "charter.status",
+      "link_from": "charter.link", "body_from": "charter.body",
+      "when": {"has_charter": "true"}
+    },
+    {
+      "key": "worktree-status", "label": "Worktree status — session, claims, commits",
+      "kind": "card", "title_from": "worktree_status.title",
+      "status_from": "worktree_status.status", "link_from": "worktree_status.link",
+      "body_from": "worktree_status.body", "when": {"has_worktree": "true"}
+    },
+    {
+      "key": "steer", "label": "Steer — read the card & answer", "kind": "form",
+      "fields_from": "card.request_input", "title_from": "card.title", "body_from": "card.body",
+      "run": ["agent-dispatch", "steer", "submit", "{task_id}", "{fields}", "--expected-status", "{status}"],
+      "when": {"group": "Blocked"}
+    },
+    {
+      "key": "pause", "label": "Pause the agent", "confirm": true,
+      "run": ["agent-dispatch", "pause", "{task_id}", "--reason", "paused from picker", "--expected-status", "{status}"],
+      "when": {"embodied": "true", "held": "false"}
+    },
+    {
+      "key": "unpause", "label": "Unpause the agent", "confirm": true,
+      "run": ["agent-dispatch", "unpause", "{task_id}", "--expected-status", "{status}"],
+      "when": {"held": "true"}
+    }
+  ]
+}

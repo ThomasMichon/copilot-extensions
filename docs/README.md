@@ -16,6 +16,9 @@ Read only the path your task needs; component references remain authoritative.
 | 6 | How does the running system compose? | [Architecture](architecture.md) |
 | 7 | How do I assemble or audit an opinionated harness? | [Harness runbook](harness-runbook.md) |
 
+For interactive configuration, follow the illustrated
+[Configuration workbench walkthrough](configuration-workbench.md).
+
 For a specific plugin, go directly to the [reference index](reference-index.md)
 or the [marketplace roster](../.github/plugin/marketplace.json). Installation
 does not imply adoption; a successful local workflow does not prove a remote

@@ -66,7 +66,7 @@ Its key cannot contain whitespace, path separators or reference delimiters;
 keys must be unique without regard to case.
 
 Declare native Windows and WSL as separate entries, for example
-`workstation-windows` and `workstation-wsl`. Consumers select the current
+`workstation` and `workstation-wsl`. Consumers select the current
 registered key explicitly. Distinct entries do not become local merely because
 their OS hostname matches. Physical-host metadata cannot resolve an explicit
 space; ambiguous legacy names are rejected rather than bound to the first entry.
@@ -77,6 +77,52 @@ remain readable; this does not rewrite or migrate their identities.
 Registries without an explicit execution-space declaration retain their legacy
 lifecycle behavior. Opted-in consumers reject invalid selection rather than
 guessing from shared hostname metadata.
+
+### Logical-machine owner projection
+
+`normalize_machine_entries(entries: Mapping[str, MachineEntry]) -> dict[str, MachineEntry]`
+is the shared, read-only owner projection. Apply it after parsing and merging
+the resolved topology. A legacy Windows/WSL entry keyed `desktop` expands to
+`desktop` (`execution_platform="windows"`) and `desktop-wsl`
+(`execution_platform="wsl"`), both associated through `physical_host="desktop"`.
+The native key stays canonical; each logical entry retains only its own exact
+SSH profile. Explicit independent entries retain their configured keys and
+physical association, even when they do not use the conventional suffix.
+No arbitrary suffix is stripped or inferred. The projection is idempotent
+and does not write topology or change persisted registrations.
+Generated entries retain the original registry key in read-only `legacy_key`
+metadata. Owners use that provenance to distinguish platform-aware legacy
+projection from an operator's explicit execution-space selection; the latter's
+configuration/platform safety gates remain unchanged.
+Projecting a remote Windows/WSL host does not opt an unrelated legacy native
+owner into operator-declared execution-space policy. Consumers still fence
+operations targeting a projected space, and explicit declarations retain
+their existing registry-wide source-selection requirement.
+
+`machine_identity_names(entry)` exposes keys, aliases, explicit
+`compatibility_aliases`, and profile aliases. Hostname and display name are
+selection identities only for unscoped legacy entries. Logical-machine
+physical metadata is for grouping, not an alternate canonical source/target.
+Duplicate logical keys, profile aliases crossing entries, repeated same-platform
+profiles, and legacy WSL mixed with a non-Windows native platform fail closed.
+Collisions with an explicitly declared generated key require repository-owned
+topology repair, not an automatic merge.
+
+`find_machine_entry(entries, name, *, reject_ambiguous=False,
+execution_platform=None)` resolves independent profile aliases as well as keys.
+An owner that knows its local platform may supply `execution_platform` to resolve
+a physical hostname/association or select a sibling of another platform.
+Multiple eligible same-platform siblings remain ambiguous; an exact logical
+key/profile of the requested platform stays independently selectable.
+Without that context a physical hostname alone never selects a logical entry.
+`local_execution_platform()` detects Windows, WSL, or Linux without launching
+subprocesses. Downstream address syntax remains a logical machine name, not a
+machine/environment pair.
+
+The parser's compatibility defaults are unchanged: normalization is an explicit
+owner step. `agent-machines.resolve_machine` uses this projection and exposes
+`execution_platform` and `physical_host`; UI consumers can group by association
+without collapsing the independently addressable entries.
 
 ```python
 from machine_transport import get_machine_transport

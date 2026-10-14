@@ -32,8 +32,16 @@ working directory, and a marketplace display name are not durable provenance.
 
 ## Standard approach
 
-**Treat one globally distinguishing marketplace source as an installation cell,
-then qualify every plugin-owned machine-local resource by that cell.**
+**For explicit marketplace-cell installations, treat one globally distinguishing
+marketplace source as an installation cell, then qualify every plugin-owned
+machine-local resource by that cell.**
+
+Non-cell hosts retain their supported legacy/default runtime layout and
+user-global plugin commands. Cell activation remains explicit and default-off;
+this pattern does not require a single-install host to activate a cell or
+retire its supported commands. Exact, attributable command selection applies
+in both modes and does not permit one marketplace to overwrite another's
+ownership.
 
 The durable user-level home is source-neutral:
 
@@ -157,10 +165,14 @@ Long-lived runtime callers use an installation-local canonical launcher after
 validating the same context. Session-start hooks emit a command catalog when an
 agent-facing surface cannot interpolate its payload root directly.
 
-Machine-global command space is reserved for attributable project entry points.
-A generated project command records and pins its owning cell. Another cell must
-choose a distinct entry point or perform an explicit ownership transfer; it may
-not replace the wrapper last-writer-wins.
+On hosts with activated marketplace cells, machine-global command space is
+reserved for attributable project entry points; generic plugin commands remain
+payload- or cell-local. Non-cell hosts retain their supported user-global
+plugin commands, but consumers still use the selected installation's exact
+callable command, not ambient name precedence. A generated project command
+records and pins its owning installation. Another installation must choose a
+distinct entry point or perform an explicit ownership transfer; it may not
+replace the wrapper last-writer-wins.
 
 Same-cell sibling composition uses explicit provider and consumer identities.
 Cross-cell composition is a separate opt-in contract and always names the target
@@ -253,14 +265,22 @@ retains rollout rationale and acceptance only.
 
 This pattern is normative before the rollout is complete. Existing
 `~/.agent-*`, `~/.local/bin/agent-*`, and unqualified service artifacts remain
-legacy reality until their owning phase migrates them. New installation
-plumbing must accept installation context now; it must not add another
-unqualified root or singleton that later phases need to discover and unwind.
+supported legacy/default reality on non-cell hosts, not artifacts that must
+retire there. Their migration or retirement is conditional on explicit cell
+activation and proven ownership. New installation plumbing must accept
+installation context now; a cell must not add another unqualified
+root or singleton that later phases need to discover and unwind.
 
 `tools/check-marketplace-isolation.py` inventories those transitional surfaces.
 It is report-only while producers migrate; `--verbose` and `--json` expose
-categorized file/line findings, and `--strict` becomes the enforcement gate only
-after the baseline reaches zero. A compatibility exception must carry an inline
+categorized file/line findings. Blocking enforcement remains deferred until
+behavioral acceptance is complete and every remaining finding is fixed or has
+an explicit, narrow disposition. The enforcement mechanism is the guard's
+`--strict` mode in CI; Phase 6 enables that blocking invocation only after the
+Phase 8 acceptance gate is met. This document does not enable it.
+Supported own-payload placement on non-cell
+hosts is not a retirement requirement or a reason to use a blanket installer
+allowance. A compatibility exception must carry an inline
 `marketplace-isolation: allow <reason>` marker so the reason remains auditable.
 
 ## See Also

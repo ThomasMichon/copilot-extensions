@@ -38,6 +38,10 @@ def _record(
     tdir.mkdir(parents=True, exist_ok=True)
     wdir = tmp_path / "trees" / project / worktree_id
     wdir.mkdir(parents=True, exist_ok=True)
+    (wdir / ".agent-worktrees").mkdir(exist_ok=True)
+    (wdir / ".agent-worktrees" / "machines.yaml").write_text(
+        "machines: {}\n", encoding="utf-8",
+    )
     (tmp_path / project / "config.yaml").write_text(json.dumps({
         "repo_name": project, "machine": machine,
         "repos": {project: {"anchor": str(wdir)}},
@@ -60,6 +64,7 @@ def _record(
 @pytest.fixture
 def handoff_world(tmp_path, monkeypatch):
     runtime = tmp_path / "runtime"
+    monkeypatch.setattr(claim_handoffs.cfg, "_load_inrepo_config", lambda anchor: {})
     monkeypatch.setattr(claim_handoffs.cfg, "install_dir", lambda: runtime)
     monkeypatch.setattr(
         claim_handoffs.cfg, "project_dir", lambda name=None: tmp_path / str(name)
@@ -67,7 +72,7 @@ def handoff_world(tmp_path, monkeypatch):
     load_config = claim_handoffs.cfg.load_config
     monkeypatch.setattr(
         claim_handoffs.cfg, "load_project_config",
-        lambda name: load_config(tmp_path / name / "config.yaml", project=name),
+        lambda name, **kwargs: load_config(tmp_path / name / "config.yaml", project=name, **kwargs),
     )
     return {"tmp_path": tmp_path}
 

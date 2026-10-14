@@ -44,6 +44,7 @@ ENGINE_ARGV_ENV = "WORKTREE_MANAGER_ENGINE_ARGV"
 #: A generous ceiling: a cold engine self-provisions on first use, and a classify
 #: pass can enumerate many worktrees. Kept bounded so the Manager never hangs.
 _DEFAULT_TIMEOUT = 120
+_REMOTE_ADMISSION_TIMEOUT = 240
 _PYTHON_PARENT_ENV = {
     "PYTHONHOME",
     "PYTHONPATH",
@@ -210,10 +211,11 @@ def _run(
     project: str | None,
     args: list[str],
     *,
-    timeout: int = _DEFAULT_TIMEOUT,
+    timeout: int | None = _DEFAULT_TIMEOUT,
     allow_nonzero: bool = False,
     runner=None,
     cwd: str | None = None,
+    stream_progress: bool = False,
 ) -> str:
     """Run ``agent-worktrees [--project <p>] <args>`` and return stdout.
 
@@ -241,7 +243,19 @@ def _run(
             }
             if os.name == "nt":
                 kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            proc = subprocess.run(cmd, **kwargs)
+            if stream_progress:
+                from .engine_process import run as run_preparation
+                from .engine_progress import streamed_stderr
+
+                with streamed_stderr() as (stderr_fd, stderr_path):
+                    kwargs.pop("capture_output")
+                    kwargs.update(stdout=subprocess.PIPE, stderr=stderr_fd)
+                    proc = run_preparation(cmd, **kwargs)
+                    detail = Path(stderr_path).read_text(encoding="utf-8", errors="replace")
+                    if detail:
+                        proc.stderr = detail
+            else:
+                proc = subprocess.run(cmd, **kwargs)
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e
     except OSError as e:
@@ -274,9 +288,10 @@ def _error_from_envelope(stdout: str) -> str | None:
 
 
 def run_json(project: str | None, args: list[str], *,
-             timeout: int = _DEFAULT_TIMEOUT,
+             timeout: int | None = _DEFAULT_TIMEOUT,
              allow_nonzero: bool = False,
-             runner=None) -> dict:
+             runner=None,
+             stream_progress: bool = False) -> dict:
     """Run a ``--json`` verb and parse its stdout envelope into a dict."""
     raw = _run(
         project,
@@ -284,6 +299,7 @@ def run_json(project: str | None, args: list[str], *,
         timeout=timeout,
         allow_nonzero=allow_nonzero,
         runner=runner,
+        stream_progress=stream_progress,
     )
     try:
         obj = json.loads(raw)
@@ -567,7 +583,7 @@ def resolve_launch_plan(
     target_no_mux: bool = False,
     seed: str | None = None,
     defer_new_seed: bool | None = None,
-    timeout: int = _DEFAULT_TIMEOUT,
+    timeout: int | None = None,
 ) -> LaunchPlan:
     """Fetch a launch plan via ``agent-worktrees resolve --json`` (process boundary).
 
@@ -581,17 +597,24 @@ def resolve_launch_plan(
     full ``--interactive`` only at backend handoff, not at plan construction.
     Meaningful with either ``new=True`` or a plain resume
     (``worktree_id`` set, ``bare_resume=False``); the engine's own CLI already
-    rejects it with ``base=True``, ``bare_resume=True``, or alongside
-    ``target_machine``, so this is intentionally NOT re-validated here.
+    rejects it with ``base=True`` or ``bare_resume=True``. With a target machine,
+    the engine admits intent through that target's daemon before returning an
+    identity-only SSH launch plan.
 
     Prompted New/Resume requests require typed retry staging. An older engine
     must refuse the capability flag before mutation, rather than silently
     dropping preservation. Ordinary seedless launches retain version-skew
     compatibility.
+    Explicitly bounded remote prompted requests allow at least 240 seconds:
+    the outer engine must outlive its 180-second SSH admission and startup.
 
     Version-skew tolerant: an older engine that does not know ``--bare-resume`` is
     retried as a plain resume (degrade the feature, don't fail) -- the same contract
     property :func:`list_worktrees` applies to ``--classify``.
+
+    Foreground preparation waits for completion by default and streams stderr
+    progress. Individual engine operations retain their own failure bounds;
+    an explicit timeout remains available to bounded automation.
     """
     selectors = sum(bool(value) for value in (worktree_id, new, base))
     if selectors != 1:
@@ -621,7 +644,14 @@ def resolve_launch_plan(
         args += ["--seed", seed]
 
     try:
-        obj = run_json(project, args, timeout=timeout)
+        obj = run_json(
+            project, args,
+            timeout=(
+                max(timeout, _REMOTE_ADMISSION_TIMEOUT)
+                if target_machine and seed and timeout is not None else timeout
+            ),
+            stream_progress=True,
+        )
     except EngineError as e:
         detail = _engine_error_detail(e)
         if require_staging and "unrecognized arguments" in detail and "--stage-launch-seed" in detail:
@@ -656,6 +686,7 @@ def resolve_launch_plan(
                 project,
                 ["resolve", "--base", "--no-mux"],
                 timeout=timeout,
+                stream_progress=True,
             )
         else:
             raise

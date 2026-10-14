@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from .engine_action_confirm import confirm_then
-from .engine_dialogs import CfgMenuScreen, ScopeDlgScreen, TaskMenuScreen
+from .engine_dialogs import ScopeDlgScreen, TaskMenuScreen
 from .create_action_screen import CreateActionScreen
 from .background import run_background
 from .inbox import ensure_inbox
@@ -25,52 +25,30 @@ class PickerScreenPivotActionsMixin:
             {"kind": "pivot", "idx": i, "label": self.htabs[i]}
             for i in self._config_pivots()
         ]
-        for cs in getattr(self, "config_sections", []) or []:
-            items.append({"kind": "section", "section": cs, "label": cs.label})
         return items
     def _open_cfgmenu(self):
-        """Open the Configuration menu: the pivots placed under ⚙ Configuration
-        (Profiles) plus any contributed Configuration sections. Selecting a
-        pivot switches to it and focuses its body; selecting a section runs its
-        command. User-local config only -- never repo-managed settings.
-
-        Migrated to a native Textual ``ModalScreen`` (#88 F4): ``push_screen``s a
-        ``CfgMenuScreen`` that owns the stack, focus, and key routing and returns
-        the chosen item index via ``dismiss(int|None)``; the callback acts on the
-        selection (``None`` cancels)."""
-        items = self._cfgmenu_items()
-        if not items:
+        """Enter Configuration before scheduling any provider read."""
+        indices = self._config_pivots()
+        if not indices:
             return
-        # If the current pivot is already config-hosted, pre-select it.
-        cur = next(
-            (n for n, it in enumerate(items)
-             if it["kind"] == "pivot" and it["idx"] == self.htab),
-            0,
+        if not self._in_configuration():
+            self._config_return = (self.htab, self.sel, self.top, self.btn_idx)
+            self._config_return_key = self._pivot_descriptor_key()
+        target = next(
+            (index for index in indices if self._pivot_descriptor_key(index)
+             == getattr(self, "_last_config_key", None)), indices[0],
         )
-
-        def _after(choice):
-            if choice is None:
-                return
-            target = items[choice]
-            if target["kind"] == "section":
-                # A cross-plugin contributed Configuration section (#B slice 2):
-                # run it and rescan (it may have changed config/session state).
-                # ``confirm: true`` gates the run behind an explicit are-you-sure.
-                section = target["section"]
-                confirm_then(self.app, section,
-                             lambda section=section: self._run_config_section(section))
-                return
-            self.htab = target["idx"]
-            self.btn_idx = 0
-            self.top = 0
-            self.sel = self.default_sel()      # focus the hosted pivot's body
-        self.app.push_screen(CfgMenuScreen(items, cur), _after)
+        self.htab = target if target in indices else indices[0]
+        self.sel = ("M", 0)
+        self.btn_idx = self.top = 0
+        self.refresh()
+        self.call_after_refresh(self._load_current_config_section)
     def _config_section_ctx(self) -> dict:
         """Placeholder context for a contributed config section's argv template:
-        the current machine identity and the picker's repo (config sections are
+        the local machine identity and the picker's repo (config sections are
         global -- there is no per-worktree context)."""
         return {
-            "machine": self._pivot_machine_id() or "",
+            "machine": self._source_local[0] or "",
             "repo": getattr(self.src, "REPO", "") or "",
         }
     def _run_config_section(self, section) -> None:
@@ -126,12 +104,9 @@ class PickerScreenPivotActionsMixin:
             self._run_config_action(section, ctx, values)
 
         summary = "\n\n".join(part for part in (section.description, status) if part)
-        self.app.push_screen(
-            CreateActionScreen(
-                action.label, fields, confirm=action.confirm, submit_label="Apply",
-                summary=summary, confirm_values=True,
-            ),
-            _after,
+        self._open_configuration_editor(
+            action.label, fields, confirm=action.confirm,
+            summary=summary, submitted=_after, submit_label="Apply",
         )
     def _run_config_action(self, section, ctx, values):
         from . import tasks
@@ -139,16 +114,13 @@ class PickerScreenPivotActionsMixin:
         def _work():
             return tasks.run_config_section(section.configure_action, ctx, fields=values)
 
-        def _done(result):
-            ok, msg = result
-            self.debug = (f"{section.label}: {msg or 'applied'}" if ok
-                          else f"{section.label} failed: {msg}")
-            if not ok:
-                self.app.push_screen(SubmitErrorScreen(section.label, msg, None))
-            self._start_setup_reload_worker()
-            self.sel = self.default_sel()
+        def _reload():
+            key = (section.source, section.key)
+            self._config_section_states.pop(key, None)
+            if self._kind() == "config_section" and self._config_section_key() == key:
+                self._load_current_config_section(force=True)
 
-        self._run_bg(section.configure_action.label, _work, _done)
+        self._run_configuration_command(section.label, _work, _reload)
     def _open_task_menu(self):
         """Open the Enter action sub-menu for the focused task, built from the
         registered pivot's declared ``actions``.
@@ -180,6 +152,9 @@ class PickerScreenPivotActionsMixin:
             if choice is None:
                 return
             action = actions[choice]
+            if reg.placement == "config" and action.form is not None:
+                self._run_task_action(reg, action, rec)
+                return
             # ``confirm: true`` gates the run behind an explicit are-you-sure.
             confirm_then(self.app, action,
                          lambda action=action: self._run_task_action(reg, action, rec))
@@ -193,7 +168,7 @@ class PickerScreenPivotActionsMixin:
         ctx["title"] = rec.get(reg.title_field)
         wt = rec.get(reg.worktree_field) if reg.worktree_field else None
         ctx["worktree"] = wt or ""
-        ctx["machine"] = self._pivot_machine_id() or ""
+        ctx["machine"] = "" if reg.placement == "config" else self._pivot_machine_id() or ""
         # picker-venue-pivots Phase 3: the pivot's own `list` argv[0] is the
         # provider binstub name (e.g. "agent-codespaces"/"agent-containers"),
         # reused verbatim by the "open-venue" internal action so it never
@@ -272,6 +247,9 @@ class PickerScreenPivotActionsMixin:
             # the action's `run` are substituted and the command is run (the steer
             # transport). Cache invalidation happens after the submitted run.
             self._open_pivot_form(reg, action, rec, ctx, title)
+            return
+        if reg.placement == "config":
+            self._submit_configuration_form(reg, action, ctx, {})
             return
         if getattr(action, "progress", False):
             self._run_task_action_progress(reg, action, ctx, title)
@@ -366,6 +344,10 @@ class PickerScreenPivotActionsMixin:
             "body": _pivots.resolve_path(rec, spec.get("body_from")),
         }
         row_title = rec.get(reg.title_field) or rec.get(reg.id_field) or ""
+        if reg.placement == "config":
+            from .configuration_form import ConfigurationDetailScreen
+            self.app.push_screen(ConfigurationDetailScreen(str(row_title), card))
+            return
         self.app.push_screen(PivotCardScreen(str(row_title), card))
     def _open_pivot_form(self, reg, action, rec, ctx, title):
         """Open the docked card + tabbed-elicitation modal for a ``kind:"form"``
@@ -384,6 +366,29 @@ class PickerScreenPivotActionsMixin:
         spec = action.form or {}
         raw_fields = _pivots.resolve_path(rec, spec.get("fields_from"))
         fields = _normalize_form_fields(raw_fields)
+        if reg.placement == "config":
+            from .pivot_create_action import _parse_create_fields
+            try:
+                fields = list(_parse_create_fields(
+                    raw_fields, where="configuration fields", dynamic_other=False,
+                ))
+            except ValueError as error:
+                self.app.push_screen(SubmitErrorScreen(action.label, str(error), None))
+                return
+            summary = str(
+                _pivots.resolve_path(rec, spec.get("body_from"))
+                or _pivots.resolve_path(rec, "card.body") or action.description
+            )
+
+            def after(values):
+                if values is not None:
+                    self._submit_configuration_form(reg, action, ctx, values)
+
+            self._open_configuration_editor(
+                action.label, fields, confirm=action.confirm,
+                summary=summary, submitted=after,
+            )
+            return
         card = {
             "title": _pivots.resolve_path(rec, spec.get("title_from")) or title,
             "status": _pivots.resolve_path(rec, "card.status"),

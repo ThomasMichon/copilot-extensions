@@ -16,7 +16,15 @@ import pytest
 LIB = Path(__file__).resolve().parents[1]
 PYTHON_SCRIPT = LIB / "installation_context.py"
 POSIX_SCRIPT = LIB / "installation-context.sh"
-POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
+_REQUESTED_POWERSHELL = os.environ.get("INSTALLATION_CONTEXT_POWERSHELL")
+if _REQUESTED_POWERSHELL:
+    POWERSHELL = shutil.which(_REQUESTED_POWERSHELL)
+    if POWERSHELL is None:
+        raise RuntimeError(
+            f"Requested installation-context PowerShell runner is unavailable: {_REQUESTED_POWERSHELL}"
+        )
+else:
+    POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 SOURCE_FIXTURES = LIB / "fixtures" / "source-identities.json"
 GOVERNANCE_FIXTURES = LIB / "fixtures" / "installation-mode-governance.json"
 PLUGIN_ID = "agent-example"
@@ -75,6 +83,18 @@ def _load_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.mark.installation_context_smoke
+def test_explicit_powershell_unavailable_fails_instead_of_skipping() -> None:
+    environment = {**os.environ}
+    environment["INSTALLATION_CONTEXT_POWERSHELL"] = "installation-context-shell-does-not-exist"
+    result = subprocess.run(
+        [sys.executable, "-c", "import runpy,sys; runpy.run_path(sys.argv[1])", __file__],
+        env=environment, capture_output=True, text=True, check=False, timeout=20,
+    )
+    assert result.returncode != 0
+    assert "Requested installation-context PowerShell runner is unavailable" in result.stderr
 
 
 def _source_vector(index: int = 0) -> dict[str, object]:
@@ -2422,8 +2442,10 @@ def test_remote_maintenance_probe_fails_closed_on_unreachable_or_ambiguous_outpu
     "runner",
     ALL_RUNNERS,
 )
+@pytest.mark.parametrize("pointer_exists", [False, True])
+@pytest.mark.installation_context_smoke
 def test_status_and_probe_cli_parity_and_read_only(
-    tmp_path: Path, runner: str
+    tmp_path: Path, runner: str, pointer_exists: bool
 ) -> None:
     layout = _cell_layout(tmp_path)
     legacy = tmp_path / "legacy"
@@ -2431,7 +2453,14 @@ def test_status_and_probe_cli_parity_and_read_only(
     policy = tmp_path / "policy.json"
     _write_json(policy, _policy(True, str(layout["marketplace_id"])))
     probe = {"declared": True, "result": "absent", "checkedAt": None}
-    before = _snapshot(tmp_path)
+    if pointer_exists:
+        pointer = Path(layout["durable"]) / PLUGIN_ID / "runtime-root"
+        pointer.parent.mkdir()
+        pointer.write_text("retained-foreign-pointer\n", encoding="utf-8")
+    before = {
+        name: (value, (tmp_path / name).stat().st_mtime_ns)
+        for name, value in _snapshot(tmp_path).items()
+    }
     status = _run(
         runner,
         _cli_arguments(
@@ -2457,18 +2486,10 @@ def test_status_and_probe_cli_parity_and_read_only(
     assert value["desiredMode"] == "legacy"
     assert set(value["maintenance"]) == {"state", "scope", "marker", "sidecar"}
 
-    # `status` is not fully read-only: a "ready" resolution with a non-null
-    # runtimeRoot publishes the durable, advisory runtime-root pointer (see
-    # install-contract.md "Durable runtime-root pointer"). Assert the delta
-    # is exactly that one intentional side effect, nothing else.
-    after_status = _snapshot(tmp_path)
-    pointer_relative = f"durable/{value['pluginId']}/runtime-root"
-    assert set(after_status) - set(before) == {
-        f"durable/{value['pluginId']}",
-        pointer_relative,
-    }
-    pointer_path = tmp_path / pointer_relative
-    assert pointer_path.read_text(encoding="utf-8") == value["runtimeRoot"] + "\n"
+    assert {
+        name: (entry, (tmp_path / name).stat().st_mtime_ns)
+        for name, entry in _snapshot(tmp_path).items()
+    } == before
 
     allowed = _run(
         runner,
@@ -2478,7 +2499,48 @@ def test_status_and_probe_cli_parity_and_read_only(
     decision = json.loads(allowed.stdout)
     assert decision["allowMutation"] is True
     assert decision["probeReason"] == "legacy-active"
-    assert _snapshot(tmp_path) == after_status
+    assert {
+        name: (entry, (tmp_path / name).stat().st_mtime_ns)
+        for name, entry in _snapshot(tmp_path).items()
+    } == before
+
+
+@pytest.mark.parametrize("namespaced", [False, True])
+@pytest.mark.installation_context_smoke
+def test_diagnostic_api_never_enters_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, namespaced: bool
+) -> None:
+    module = _load_module()
+    layout = _cell_layout(tmp_path)
+    profile = tmp_path / "profile"
+    legacy = tmp_path / "legacy"
+    profile.mkdir()
+    legacy.mkdir()
+    environment = _profile_environment(profile)
+    if namespaced:
+        _activation(layout, environment=environment)
+    arguments = _api_arguments(
+        layout, profile, legacy,
+        platform=environment["platform"], wsl_distro=environment["wslDistro"],
+    )
+    before = _snapshot(tmp_path)
+
+    def refuse_mutation(*args, **kwargs):
+        raise AssertionError("diagnostic entered installation mutation")
+
+    for name in (
+        "_atomic_write_json",
+        "_atomic_write_text",
+        "stamp_context",
+        "compare_and_swap_activation",
+        "_DirectoryLock",
+    ):
+        monkeypatch.setattr(module, name, refuse_mutation)
+    result = module.resolve_installation_mode(**arguments)
+    decision = module.probe_legacy_entrypoint(**arguments)
+    assert result["actualMode"] == ("namespaced" if namespaced else "legacy"), result
+    assert decision["allowMutation"] is (not namespaced)
+    assert _snapshot(tmp_path) == before
 
 
 @pytest.mark.parametrize(
@@ -2589,8 +2651,9 @@ def test_policy_precedence_evidence_matches_across_runners(
 
 @pytest.mark.parametrize(
     "runner",
-    REFERENCE_RUNNERS,
+    ALL_RUNNERS,
 )
+@pytest.mark.installation_context_smoke
 def test_active_namespaced_cli_is_visible_and_probe_refuses(
     tmp_path: Path, runner: str
 ) -> None:
@@ -2599,6 +2662,7 @@ def test_active_namespaced_cli_is_visible_and_probe_refuses(
     legacy.mkdir()
     activation = _activation(layout)
     injected_policy = tmp_path / "missing-policy.json"
+    before = _snapshot(tmp_path)
     status = _run(
         runner,
         _cli_arguments(
@@ -2630,6 +2694,7 @@ def test_active_namespaced_cli_is_visible_and_probe_refuses(
     decision = json.loads(refused.stdout)
     assert decision["allowMutation"] is False
     assert decision["probeReason"] == "namespaced-active"
+    assert _snapshot(tmp_path) == before
 
 
 @pytest.mark.parametrize(

@@ -30,6 +30,14 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
     :func:`apply_status_value_migrations` below.
     """
     conn.execute("CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY)")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS workspace_queue_identity "
+        "(singleton INTEGER PRIMARY KEY CHECK(singleton = 1), identity TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO workspace_queue_identity VALUES (1, ?)",
+        (secrets.token_hex(16),),
+    )
     existing = {r["name"] for r in conn.execute("PRAGMA table_info(tasks)")}
     for name, decl in _COLUMNS.items():
         if name == "id" or name in existing:
@@ -77,6 +85,7 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
             raise
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_repo ON tasks(repo)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_category_created ON tasks(category, created_at)")
     # Sentinel-backfill rows created before ``repo`` became required so a
     # legacy task never leaks into a real repo's default-scoped views.
     # Idempotent: after the first run there are no NULL-repo rows (create
@@ -365,6 +374,8 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
         "  worktree_ownership TEXT,"
         "  creating_host TEXT,"
         "  driver TEXT,"
+        "  allocation_project TEXT,"
+        "  worktree_path TEXT,"
         "  conversation_retired INTEGER NOT NULL DEFAULT 0,"
         "  release_requested INTEGER NOT NULL DEFAULT 0,"
         "  release_disposition TEXT,"
@@ -437,7 +448,7 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
         row["name"]
         for row in conn.execute("PRAGMA table_info(spawn_reservations)").fetchall()
     }
-    for column in ("worktree_ownership", "creating_host", "driver"):
+    for column in ("worktree_ownership", "creating_host", "driver", "agent_info"):
         if column not in reservation_columns:
             try:
                 conn.execute(f"ALTER TABLE spawn_reservations ADD COLUMN {column} TEXT")
@@ -494,6 +505,24 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
         except sqlite3.OperationalError as exc:
             if "duplicate column name" not in str(exc).lower():
                 raise
+    for column in ("allocation_project", "worktree_path"):
+        if column not in reservation_columns:
+            try:
+                conn.execute(f"ALTER TABLE spawn_reservations ADD COLUMN {column} TEXT")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+    for column, declaration in (
+        ("allocation_revision", "INTEGER NOT NULL DEFAULT 1"),
+        ("creation_key", "TEXT"),
+        ("allocation_reservation_key", "TEXT"),
+    ):
+        if column not in reservation_columns:
+            try:
+                conn.execute(f"ALTER TABLE spawn_reservations ADD COLUMN {column} {declaration}")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
     if "inherited_worktree" not in reservation_columns:
         try:
             conn.execute(
@@ -696,3 +725,5 @@ def run_queue_schema_migrations(conn: sqlite3.Connection, *, now_fn) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_registrations_kind ON registrations(kind)"
     )
+    from .acquisition_receipts import ensure
+    ensure(conn)

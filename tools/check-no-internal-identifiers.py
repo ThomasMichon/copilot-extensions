@@ -65,9 +65,11 @@ identifier in an *untouched* file from blocking every unrelated push, while
 still catching anything a push introduces. Pass ``--all`` to audit the whole
 tracked tree instead (useful for a one-off full sweep). If the base ref can't
 be resolved (no ``origin/main`` in a fresh clone), the guard falls back to a
-full-tree scan. Trusted CI may instead pass ``--paths-file`` plus ``--git-ref``
+full-tree scan. Trusted CI may instead pass ``--paths-jsonl`` plus ``--git-ref``
 to scan repo-relative paths from a fetched PR-head tree-ish as inert git data
-without checking out or executing that revision.
+without checking out or executing that revision. JSON-string records preserve
+newlines and other valid Git filename characters; ``--paths-file`` retains its
+legacy one-path-per-line interface.
 
 Run manually:  python tools/check-no-internal-identifiers.py          # push diff
                python tools/check-no-internal-identifiers.py --all    # whole tree
@@ -385,6 +387,13 @@ def _load_paths_file(path: Path) -> list[str]:
     return [line for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
+def _load_paths_jsonl(path: Path) -> list[str]:
+    paths = [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line]
+    if any(not isinstance(value, str) or not value or "\0" in value for value in paths):
+        raise ValueError("JSONL paths must be nonempty Git filename strings")
+    return paths
+
+
 DEFAULT_BASE = os.environ.get("COPILOT_EXTENSIONS_GUARD_BASE", "origin/main")
 
 
@@ -610,6 +619,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Read repo-relative paths to scan from PATH (one per line).",
     )
     parser.add_argument(
+        "--paths-jsonl",
+        metavar="PATH",
+        help="Read lossless repo-relative Git paths from PATH (one JSON string per line).",
+    )
+    parser.add_argument(
         "--git-ref",
         metavar="REF",
         help="Read file contents from git tree-ish REF instead of the working tree.",
@@ -630,8 +644,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Suppress per-finding stdout and print only a count summary.",
     )
     args = parser.parse_args(argv)
-    if args.all and args.paths_file:
-        parser.error("--all and --paths-file are mutually exclusive")
+    if sum(bool(value) for value in (args.all, args.paths_file, args.paths_jsonl)) > 1:
+        parser.error("--all, --paths-file and --paths-jsonl are mutually exclusive")
 
     identifiers, reasons, live_sweep_error = _load_identifier_data()
     if live_sweep_error:
@@ -656,7 +670,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     files_to_scan = (
-        _load_paths_file(Path(args.paths_file))
+        _load_paths_jsonl(Path(args.paths_jsonl))
+        if args.paths_jsonl
+        else _load_paths_file(Path(args.paths_file))
         if args.paths_file
         else _files_to_scan(args.all, args.base, emit_status=not args.ci)
     )

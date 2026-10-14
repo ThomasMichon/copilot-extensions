@@ -56,6 +56,17 @@ for client, Gateway and node roles; runtime-backed Copilot adapters depend on
 that explicitly adopted product instead of self-installing another runtime.
 Static guidance remains independently useful.
 
+The product ships as a **coordinated release**: one locked, mutually
+compatible set of the suite's installable services, CLIs, and daemons. The
+set is a shared core plus optional heavy environments, each with its own
+dependency closure. A release is a unit of compatibility, not an instruction
+to install or start everything in it. Each host gets only the closures of the
+roles and optional capabilities selected for it. Every capability in the
+release has four separate states: **installed code**, **available command**,
+**configured role**, and **authorized resident execution**. Being in the
+release never makes a capability present, callable, configured, or running by
+itself.
+
 Integrated control roles may share canonical coordination state after verified
 authority migration, while accepted execution, credentials and heavy workers
 retain appropriate failure boundaries. Every integrated role uses the same
@@ -161,6 +172,12 @@ resource fencing, or existing standalone-service defaults.
   host without contending for runtime, state, lifecycle, adoption, discovery, or
   invocation resources. See the
   [Marketplace Installation Cells](installation-cells/README.md) child vision.
+- **Runtime assembly & artifact admission** — how a host acquires, verifies,
+  and assembles immutable runtime generations from an approved artifact
+  source. It reuses the release pipeline's existing artifact identity and has
+  one admission path for every entry point. See the
+  [Runtime Assembly & Artifact Admission](runtime-assembly/README.md) child
+  vision.
 - **Per-plugin visions** — concrete leaves under `visions/plugins/<name>/` refine
   this model for a specific service. Linked from here as they are authored.
 
@@ -174,6 +191,19 @@ Lightweight callers remain light; expensive optional stacks have explicit
 installation ownership. Dependency cost is measured across fresh installation,
 downloads, resident processes and retained immutable generations, rather than
 judged by package names or direct wheel size alone.
+
+### seasoned-external-dependencies
+
+Every declared external dependency version and every dependency selected for
+installation has been released for at least seven days. This applies to build,
+runtime, development, transitive and selected optional dependencies. A
+repository-owned source dependency is attributable first-party input, not an
+external release; its external dependency closure still observes the same floor.
+Unknown release evidence never grants eligibility. Installation respects the
+adopter's configured feed and its artifact eligibility rather than bypassing it
+or treating availability on a different registry as proof. A stricter release
+age remains stricter; convenience, fallback and dependency-update automation
+never weaken the minimum.
 
 ### compatible-helper-runtime-reuse
 
@@ -213,8 +243,15 @@ impossible by construction, and rollback a swap rather than a rebuild. The
 immutable, versioned, junction-selected install is the service's **executable
 logic**; its **durable state** (databases, indexes, queues, anything the service
 must not lose) lives in a **separate location that a version swap never touches**,
-so cutting over or rolling back the runtime is safe by construction. Replacing a
+so a version swap never destroys state. Rollback still re-selects a generation
+only when it is compatible with that state (*state-aware-rollback*). Replacing a
 running version is governed by *zero-downtime-cutover* below.
+
+A failed selected-dependency installation never publishes a completed runtime,
+active selection or service cutover. Construction cleans up only its owned,
+incomplete candidate and preserves the previous healthy runtime, completed
+slots and concurrent owners. An interrupted or unreclaimed candidate remains
+nonselectable, with a visible failure rather than a success-shaped fallback.
 
 ### discoverable-local-endpoint
 A client reaches a service by **resolving the service's current endpoint from
@@ -236,7 +273,10 @@ For standalone host installation this supervision is the plugin's **own** — a
 plugin brings up and keeps alive **its own daemon** with **no
 installer/configurator control-plane in the loop**. An optional control-plane
 may observe and true-up daemons across the set, but a daemon's standalone
-existence and liveness never depend on it running.
+existence and liveness never depend on it running. Windows, Linux, and macOS
+are each first-class. On each, the integrated profile's per-user supervision
+uses that platform's native facility. No platform gets a weaker lifecycle,
+update, or rollback guarantee.
 
 ### least-privilege-lifecycle-tier
 Every service uses the **lowest lifecycle tier that satisfies its availability
@@ -283,6 +323,16 @@ and true-up alignment**, but a plugin **provisions and reconciles itself — and
 supervises its own daemon (see *platform-native-lifecycle*) — with that app
 entirely absent**.
 
+This is the contract of a **standalone addon**, where the plugin's own
+installer is the installer. On a host that adopts the integrated profile, the
+same layered entry points (first-use binstub, session stamp, skill readiness
+check) remain the triggers, but they **delegate** to that product's installer
+and per-user supervisor (see *installer-owned-lifecycle-plugin-owned-knowledge*
+and *one-authority-per-lifecycle-decision*): they request convergence to the
+selected release lock rather than reconciling to their own payload version,
+and they never install, activate, or supervise a runtime themselves. Either
+way there is exactly one installer and one supervisor per runtime on a host.
+
 **Narrow, operator-invoked exception (bootstrap-killswitch):** an explicit,
 resettable, host-local switch lets an operator or agent pause this automatic
 reconcile for the **default (non-namespaced) installation only**, for the
@@ -316,6 +366,11 @@ cannot install it as a fallback. The plugin's remaining lightweight surfaces
 continue to work independently where meaningful. A normal runtime plugin or
 service still follows `self-provisioning-runtime`; delegation is an explicit
 capability boundary, not a way to centralize routine plugin installation.
+On a host that adopts the integrated coordination profile, an optional heavy
+environment is instead a selectable closure of the coordinated release. That
+host's installer assembles it through the shared admission path like any
+other closure, so the release lock stays the only source of which versions
+run.
 
 ### graceful-composition
 When multiple services are present they discover and use one another's optional
@@ -408,6 +463,66 @@ synchronization or explicit integration alongside deployment. Those operations
 remain separately attributable and governed by their repository authority and
 contribution contract. Their presence never expands the installer phase's write
 scope or makes ambient repository discovery an integration request.
+
+### selective-activation-within-one-release
+Adopting a coordinated release never means installing or starting all of it.
+A host's selected roles and optional capabilities decide which closures it
+installs. A thin client stays thin, and a heavy optional environment exists
+only where it was selected. Installed, available, configured, and
+authorized-to-run can each be observed separately, and each changes only
+through its own explicit decision. A disabled or unselected choice is desired
+state. Update, repair, rollback, and migration to a newer release all keep
+it, and never re-enable a capability, role, or resident service as a side
+effect. Holding one service at a last-known-good generation is a recorded,
+attributable exception inside the selected release, within that release's
+compatibility rules. It is not a second release.
+
+### release-channels
+Adopters follow a named release channel, such as a soaked, stable channel,
+that is decoupled from how often contributions are promoted. The release
+authority applies the channel. Each update run resolves one named release
+when it starts and converges to that release. A newer release published
+during the run is picked up by a later run, never partway through this one.
+
+### adoptive-migration-to-integrated-profile
+Moving an existing installation onto the integrated profile adopts its
+durable state, configuration, and registrations one service at a time. It
+never reinstalls over them or resets them. A setup that already works keeps
+working at every step. Old registrations are retired only after their
+replacement is verified as serving. There is an explicit, reversible way
+back. Ambiguous ownership is preserved and surfaced, as in installation
+cells' *provenance-safe-transition*.
+
+### installer-owned-lifecycle-plugin-owned-knowledge
+Acquiring, assembling, activating, and recovering a runtime is installer
+work. For a standalone addon that is the addon's own installer. For a host
+that adopts the integrated profile it is that product's installer. The
+first-use, session-stamp, and readiness entry points of
+*self-provisioning-runtime* are triggers for that one installer, not a second
+installer. A Copilot
+plugin supplies knowledge (skills and guidance), connection surfaces (hooks,
+extension entry points, typed invocation), and bounded, attributable
+declarations of what it needs from a runtime. Plugin content never assembles
+runtime code itself and never becomes the supervisor of a resident process.
+Installed services, CLIs, and daemons work on a native host and in an OCI
+container with no Copilot installation, marketplace, or plugin registry
+present. They are configured through installation-owned configuration and
+state, not through plugin directories.
+
+### compatibility-enforced-at-the-consumer
+A plugin declares the runtime capabilities and compatible range it needs. The
+declaration is enforced where the plugin's command actually runs, not only at
+publication or in a session hook. That includes hosts without hook support,
+hook-less background and scheduled paths, and delegated venues whose runtime
+is older or newer than the coordinator's plugin. If the reachable runtime
+cannot support a command, the consumer returns one precise update or
+readiness outcome naming what is required before it issues that command.
+Features the runtime does support keep working. Capability is resolved
+against the target venue's own runtime and its effective plugin selection.
+One host's installation evidence never certifies another venue, and staging
+plugin knowledge into a venue does not provision its runtime. Status and
+session hooks observe and report compatibility. They never run a synchronous
+installation or repair.
 
 ### entity-relationship-diagnosability
 Every entity the suite tracks (worktree, session, task, machine, repo,
@@ -530,6 +645,73 @@ An unfinished transition is not automatically abandoned: recovery establishes
 that its owner is gone or has yielded before changing the serving generation,
 releasing its drain, or retiring its candidate.
 
+### one-authority-per-lifecycle-decision
+Every lifecycle decision has exactly one owner. Composing the suite never
+creates a second owner for the same decision.
+
+- **Release selection and rollout outcomes.** Which release, role closures,
+  and optional capabilities a host should run, and whether each target
+  accepted, deferred, failed, or completed it. For hosts that adopt the
+  integrated profile this belongs to the product's release authority (see
+  [machine-fleet](../machine-fleet/README.md#unified-coordination-product)).
+  For a standalone install it is the adopter's explicit choice. No installer,
+  supervisor, plugin, or status surface picks a release on its own.
+- **Acquisition, assembly, activation, and recovery.** These belong to the
+  host's installer. It realizes the selected release through the shared
+  admission path ([Runtime Assembly & Artifact Admission](runtime-assembly/README.md))
+  and reports an attributable outcome to the release authority.
+- **Keeping authorized resident services running.** Start, restart,
+  drain-for-cutover, and stop belong to one lifecycle supervisor per service
+  on the host. On a host that adopts the integrated profile, that is a single
+  per-user supervisor for all of the product's resident services. A
+  standalone addon uses the platform-native supervision its own installer
+  registered. Either way, supervision uses the service's lifecycle tier, runs
+  only what the installer activated and configuration authorizes, and never
+  installs or selects code.
+- **Registered work.** Schedules, loops, and task workers belong to the
+  agent-dispatch supervisor, which is itself a supervised resident service.
+  Any companion runtime it materializes goes through the same release lock
+  and admission path.
+
+Front ends such as the Worktree Manager, a canvas, an in-session update cue,
+or a scheduled maintenance job are clients of these owners. They may request
+an update or show status. They never hold their own record of which release a
+host runs.
+
+### serving-state-reconciled-not-assumed
+"Installed" and "serving" are different facts. Every install, including one
+that changes nothing because the build already matches, reconciles what each
+authorized resident service is actually serving. It repairs a service that is
+missing, still running an older generation, or unhealthy. A matching build is
+never treated as proof of convergence. Convergence is reported only from
+attributable evidence of what is serving.
+
+### state-aware-rollback
+Rollback re-selects a prior runtime generation only when that generation is
+compatible with the service's current durable state and in-flight work. If a
+newer generation migrated or extended durable state, rollback either takes a
+compatible path the owning service defines or stops with an explicit outcome.
+It never runs an older generation against state it cannot safely read.
+Restoring durable state by hand stays an explicit, attributable operator
+action.
+
+### update-cost-proportional-to-change
+How much an update costs depends on what changed, not on how big the suite
+is. Converging an already-current host is close to free: a cheap check of the
+release identity, with no rebuilds, re-resolution, or source round-trips. A
+change rebuilds and restarts only what it affects.
+
+### one-run-converges
+One update run applies everything it fetches. An updater that replaces its
+own logic carries on under the new logic within the same run. A second run is
+never needed to apply what the first one fetched.
+
+### failure-contained-and-named
+A failing source, credential, artifact, or service blocks only what depends on
+it. The rest of the update proceeds. The previous healthy generation of
+anything not updated keeps serving. The run's outcome names exactly what was
+deferred or refused, and why.
+
 ### register-once-cutover-on-update
 A lifecycle supervisor is bound **once** to a stable launcher and remains
 unchanged across ordinary version updates. The launcher resolves the selected
@@ -565,8 +747,11 @@ retain the payload directory as its working directory or depend on mutable files
 there for steady-state service execution. Runtime processes operate from their
 installed generation and durable state locations, so refreshing or replacing
 the payload cannot be blocked by a process the previous payload launched.
-Copilot CLI's own session-scoped loading of skills, hooks, and extensions from
-the payload remains outside this service-runtime guarantee.
+Delivering a new plugin knowledge payload (skills, hooks, extensions) follows
+the same rule for sessions. It is published beside, never over, a payload that
+a running session or process may hold. A live session keeps the payload it
+loaded until it ends or deliberately reloads. Sessions started afterward see
+the new payload.
 
 ### single-instance-lease
 At most **one live daemon owns a given service within one marketplace
@@ -702,7 +887,13 @@ an incomplete change, the same way an undocumented behavior change is.
   per-host vision's authority.
 - **No mandatory central coordinator.** The suite does not require one always-on
   arbiter process that other plugins depend on; composition is peer-wise and
-  optional.
+  optional. The integrated profile's release authority and per-user supervisor
+  apply only to hosts that explicitly adopt that profile. A standalone addon
+  never requires them.
+- **No second release or lifecycle truth.** No front end, plugin, hook, or
+  convenience updater may keep its own record of which release a host runs or
+  its own rollout outcome alongside the owners named in
+  *one-authority-per-lifecycle-decision*.
 - **Not an endpoint-mechanism specification.** This vision fixes the *guarantees*
   of a local endpoint (discoverable, collision-free, local-first, standalone) but
   deliberately does **not** pin the mechanism — a Unix domain socket, a named
@@ -714,14 +905,31 @@ an incomplete change, the same way an undocumented behavior change is.
 
 - Parent vision: [visions index](../README.md)
 - Child visions:
-  [Marketplace Installation Cells](installation-cells/README.md) · per-plugin
-  service visions live under `visions/plugins/<name>/`
+  [Marketplace Installation Cells](installation-cells/README.md) ·
+  [Runtime Assembly & Artifact Admission](runtime-assembly/README.md) ·
+  per-plugin service visions live under `visions/plugins/<name>/`
 - Reality docs: [`docs/architecture.md`](../../docs/architecture.md) (install
   topology, the ports table, communication paths) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · per-plugin
   `docs/architecture.md`
 
 ## Provenance
+
+- **2026-10-12** — Made the coordinated release explicit within the integrated
+  profile: one locked release with selective, state-preserving activation; one
+  owner per lifecycle decision; installer-owned lifecycle with plugins limited
+  to knowledge, connection surfaces, and declarations; compatibility enforced
+  where commands run; reconciliation of serving state; and state-aware
+  rollback. Also added update properties: cost proportional to change,
+  convergence in a single run, release channels, failure containment,
+  adoptive and reversible migration, delivery of plugin payloads that does not
+  disturb running sessions, and three-platform parity. Moved artifact consumption into the new
+  [Runtime Assembly & Artifact Admission](runtime-assembly/README.md) child.
+  Stated at intent level so that the existing cutover, release-role, and
+  artifact-promotion work composes into one lifecycle rather than gaining
+  parallel authorities. Scoped *self-provisioning-runtime* to standalone
+  addons, with integrated-profile hosts delegating to one installer and
+  supervisor.
 
 - **2026-10-09** — Clarified the operator-confirmed installation boundary:
   source builds and cleanup remain outside the checkout, while an intentional

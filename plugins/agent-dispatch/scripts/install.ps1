@@ -1409,9 +1409,11 @@ function Deploy-SelfProvisioningBinstub {
     <# Deploy the agent-dispatch CLI binstubs into ~/.local/bin, SELF-PROVISIONING
        (#1393): fast-path the built versioned slot's python; if no slot is built
        yet (a `stamp` deferred the venv), provision on first use. The primary
-       first-use path fetches and runs the UPSTREAM installer
-       (agent-dispatch-service/bootstrap.ps1 on `main`, the same Copilot-
-       independent entrypoint the standalone package uses) rather than relying
+       first-use path fetches and runs the UPSTREAM installer via the STABLE
+       public-install-surface proxy (install/dispatch/bootstrap.ps1 on
+       `main`, which itself resolves to the current real
+       services/dispatch/bootstrap.ps1 -- see
+       docs/patterns/standalone-service-layout.md) rather than relying
        on the plugin's own already-staged payload -- this is the transition
        toward a single installer source of truth (agent-dispatch-standalone-
        container effort, Phase 4). The locally stamped snapshot's
@@ -1485,19 +1487,22 @@ if ($env:AGENT_DISPATCH_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-d
 $_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
 $_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
 # Primary path (agent-dispatch-standalone-container Phase 4): fetch and run the
-# UPSTREAM installer -- the same Copilot-independent bootstrap the standalone
-# agent-dispatch-service package uses -- rather than relying on this plugin's
-# own already-staged payload. This is a deliberate transition toward a single
-# installer source of truth; the locally stamped snapshot below remains only as
-# an offline/network-restricted fallback and is expected to be dropped once
-# this path is validated. AGENT_DISPATCH_PROVISION_OFFLINE=1 skips straight to
-# the fallback (e.g. an air-gapped host).
+# UPSTREAM installer via the STABLE public-install-surface proxy
+# (install/dispatch/bootstrap.ps1 -- see
+# docs/patterns/standalone-service-layout.md), which itself resolves to
+# whatever the real standalone bootstrap currently is, rather than relying
+# on this plugin's own already-staged payload. This is a deliberate
+# transition toward a single installer source of truth; the locally stamped
+# snapshot below remains only as an offline/network-restricted fallback and
+# is expected to be dropped once this path is validated.
+# AGENT_DISPATCH_PROVISION_OFFLINE=1 skips straight to the fallback (e.g. an
+# air-gapped host).
 $_provisioned = $false
 if (-not $env:AGENT_DISPATCH_PROVISION_OFFLINE) {
-    $_bootUrl = 'https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/agent-dispatch-service/bootstrap.ps1'
+    $_bootUrl = 'https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/install/dispatch/bootstrap.ps1'
     $_bootFile = Join-Path ([IO.Path]::GetTempPath()) "agent-dispatch-bootstrap-$PID.ps1"
     try {
-        [Console]::Error.WriteLine('[agent-dispatch] fetching upstream installer (agent-dispatch-service/bootstrap.ps1, main)...')
+        [Console]::Error.WriteLine('[agent-dispatch] fetching upstream installer (install/dispatch/bootstrap.ps1, main)...')
         Invoke-WebRequest -Uri $_bootUrl -UseBasicParsing -TimeoutSec 20 -OutFile $_bootFile
         & $_exe -NoProfile -ExecutionPolicy Bypass -File $_bootFile provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
         if ($LASTEXITCODE -eq 0) { $_provisioned = $true }
@@ -1990,12 +1995,8 @@ function Install-Runtime {
             }
             Deploy-SelfProvisioningBinstub
             Write-Manifest
-            # Register-PickerPivot ALSO writes shared, version-sensitive
-            # content (pivots/agent-dispatch.json, from THIS invocation's
-            # own $PluginDir) another invocation could race the exact same
-            # way as the binstub/manifest above -- keep it inside this same
-            # protected span rather than letting it run after the mutex is
-            # released.
+            # The Picker materializes templates only from its verified active
+            # payload roots; this installer does not publish shared pivot data.
             Register-PickerPivot
         } finally {
             [void]$publishMutex.ReleaseMutex()
@@ -2063,19 +2064,9 @@ function Write-Manifest {
 }
 
 function Register-PickerPivot {
-    $pivotSrc = Join-Path $PluginDir 'pivots\agent-dispatch.json'
-    $pivotDir = Join-Path $env:USERPROFILE '.agent-worktrees\pivots'
-    if (Test-Path $pivotSrc) {
-        try {
-            if (-not (Test-Path $pivotDir)) { New-Item -ItemType Directory -Force -Path $pivotDir | Out-Null }
-            Copy-Item -Force $pivotSrc (Join-Path $pivotDir 'agent-dispatch.json')
-            Write-Ok "Picker pivot registered: $pivotDir\agent-dispatch.json"
-        } catch {
-            Write-Skip 'Could not register picker pivot (agent-worktrees runtime root not writable)'
-        }
-    } else {
-        Write-Skip "Picker pivot manifest not found at $pivotSrc"
-    }
+    # The consumer verifies activation and root identity before publishing v3
+    # pointers for both templates. An optional Picker is not an installer dependency.
+    Write-Ok 'Picker owns attributed pivot discovery from active payload templates'
 }
 
 # -- Coordinator Scheduled Task (default-on on deploy machines) --------------

@@ -117,6 +117,7 @@ def _run_codespaces(args: list[tuple[str, bool]], *, timeout: float = 660.0):
         callback_args=tuple(token for token, _trusted in args),
         legacy_command=full_argv,
         timeout=timeout,
+        kind="reclaim",
     )
     if proc is None:
         log.debug("agent-codespaces %s failed to run", [t for t, _ in args][:2])

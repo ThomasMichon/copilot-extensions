@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from pathlib import Path
@@ -338,6 +339,81 @@ def test_route_register_list_get_deregister(client: TestClient) -> None:
     assert client.get("/api/v1/live-sessions/cli-1").status_code == 404
     # idempotent deregister
     assert client.delete("/api/v1/live-sessions/cli-1").status_code == 200
+
+
+def test_route_explicit_clear_removes_stale_lineage_until_metadata_recovers(
+    client: TestClient, tmp_db: Database,
+) -> None:
+    fixture_path = Path(__file__).resolve().parents[1] / "contract/fixtures/http/current/live-registration-generation-35.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    qualified = {
+        "session_id": "cli-clear", "machine": "host", "repo": "project",
+        "worktree_id": "wt-clear", "cwd": "/fixture", "branch": "main",
+        "pid": 4242, "process_started_at": time.time(),
+    }
+    assert client.post("/api/v1/live-sessions", json=qualified).status_code == 200
+    unresolved = {
+        "session_id": qualified["session_id"], "machine": None,
+        "repo": None, "worktree_id": None, "pid": qualified["pid"],
+        "process_started_at": qualified["process_started_at"],
+    }
+    # Nulls on ordinary heartbeats keep known metadata, as before.
+    retained = client.post("/api/v1/live-sessions", json=unresolved)
+    assert retained.status_code == 200
+    assert retained.json()["worktree_id"] == "wt-clear"
+    cleared = client.post(
+        fixture["request"]["path"],
+        json={**fixture["request"]["json"], "process_started_at": qualified["process_started_at"]},
+    )
+    assert cleared.status_code == fixture["response_projection"]["status_code"], cleared.text
+    row = cleared.json()
+    assert {key: row[key] for key in fixture["response_projection"]["json"]} == fixture["response_projection"]["json"]
+    assert all(row[key] is None for key in ("machine", "repo", "worktree_id"))
+    assert (row["cwd"], row["branch"], row["pid"]) == ("/fixture", "main", 4242)
+    now = time.time()
+    assert tmp_db.resolve_live_session("live:host:project:wt-clear", now=now) is None
+    assert tmp_db.resolve_live_session("wt-clear", now=now) is None
+    assert tmp_db.resolve_live_session("cli-clear", now=now)["session_id"] == "cli-clear"
+    recovered = client.post(
+        "/api/v1/live-sessions", json={**qualified, "machine": "host-wsl"},
+    )
+    assert recovered.status_code == 200
+    assert tmp_db.resolve_live_session(
+        "live:host-wsl:project:wt-clear", now=time.time(),
+    )["session_id"] == "cli-clear"
+    assert tmp_db.resolve_live_session("live:host:project:wt-clear", now=time.time()) is None
+
+
+@pytest.mark.parametrize("rejected", ["incarnation_mismatch", "taken-over", "reserved"])
+def test_explicit_clear_preserves_registration_admission_fences(
+    client: TestClient, tmp_db: Database, rejected: str,
+) -> None:
+    now = time.time()
+    initial = {
+        "session_id": "cli-fenced", "machine": "host", "repo": "project",
+        "worktree_id": "wt-fenced", "pid": 100, "process_started_at": now,
+    }
+    assert client.post("/api/v1/live-sessions", json=initial).status_code == 200
+    if rejected == "taken-over":
+        tmp_db.execute_write(
+            "UPDATE live_sessions SET status='taken-over' WHERE session_id=?", ("cli-fenced",),
+        )
+    elif rejected == "reserved":
+        tmp_db.create_session(
+            "owner", name="owner", agent_name=None, target_dir="/fixture",
+            target_type="local", status="running", now=now,
+        )
+        assert tmp_db.reserve_worktree_ownership("wt-fenced", "owner", now=now, reclaim=True)
+    request = {
+        "session_id": "cli-fenced", "clear_targeting_metadata": True,
+        "pid": 200 if rejected == "incarnation_mismatch" else 100,
+        "process_started_at": now,
+    }
+    response = client.post("/api/v1/live-sessions", json=request)
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["reason"] == rejected
+    row = tmp_db.get_live_session("cli-fenced")
+    assert (row["machine"], row["repo"], row["worktree_id"]) == ("host", "project", "wt-fenced")
 
 
 def test_route_register_carries_venue_for_remote_cli_mode(client: TestClient) -> None:

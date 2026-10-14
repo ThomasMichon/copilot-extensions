@@ -222,10 +222,18 @@ passes only the host path and never reads the file itself.
 The fleet image must carry Copilot CLI, the agent-bridge plugin, tmux, sshd,
 and the container's own worktree manager with the workspace already adopted
 as a project (the launch fails with "Could not resolve a project" otherwise).
-With `forward_gh_token` on (the default), the host `gh auth token` is staged
-as `GH_TOKEN` through the same stdin-only launch file as the relay values, so
-the container's Copilot starts signed in; the launch fails early if the host
-has no token rather than starting a signed-out session.
+The starter is schema 2 with `copilot_auth_mode: host-copilot`. Replace
+`copilot_cli_account: your-copilot-login` with the independently selected host
+Copilot account. Its credential is resolved afresh before each new Copilot
+process and staged for that process only; absent login fails explicitly.
+Existing schema-1 configurations migrate their prior posture to explicit
+`legacy` mode rather than silently changing authentication on update.
+
+With `forward_gh_token` on (the default), the host repository credential is
+staged as `GH_TOKEN` for normal gh/Git operations. It is not the inference
+credential in host-Copilot mode. Restricted fleets receive neither credential:
+their separately configured native-inference route keeps authentication on
+the host, and trusted direct-token forwarding is not a fallback.
 
 For a named restricted OpenSSH target:
 

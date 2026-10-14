@@ -1,0 +1,8 @@
+{
+  "name": "trusted-pr-metadata-checks",
+  "private": true,
+  "dependencies": {
+    "commonmark": "0.31.2",
+    "parse5": "7.2.1"
+  }
+}

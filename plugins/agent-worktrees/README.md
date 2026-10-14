@@ -11,6 +11,17 @@ sibling plugin to use local worktree isolation. Those sibling plugins compose
 gracefully when installed (extra picker pivots, cross-machine delegation,
 CodeSpace/container resolvers), but their absence only disables those features.
 
+Resolved machine topology treats native Windows and WSL as independent logical
+machines, conventionally `host` and `host-wsl`. The shared machine owner
+projects legacy combined entries without editing topology or historical
+records. Local configuration resolution uses the actual platform for those
+projected entries, so `get machine`, new ownership references, and bridge
+registration name the correct logical machine. Explicit execution-space
+configuration retains its existing canonical-key/platform mutation gates;
+physical association never authorizes access to a sibling's ledger.
+Identity probes refuse an invalid explicit registered source rather than
+advertising the physical host or another platform's key.
+
 ## How It Works
 
 On Windows, ordinary and passive status-monitor starts bypass the venv Python
@@ -31,6 +42,10 @@ without erasing completion evidence. The resolver no longer sees a ready
 marker, and subsequent installer admission still refuses rebuilding that slot.
 Repair of a broken completed slot requires a distinct, health-checked generation,
 not an in-place dependency reinstall into a running CLI/monitor's files.
+Both installer entrypoints require successful completion publication before
+activation. Missing bootstrap Python, an unavailable input fingerprint, or a
+publication refusal stops before selector, last-known-good, monitor, and GC
+changes. A successful health probe alone does not authorize activation.
 
 Agent Worktrees has three shipped pieces:
 
@@ -79,6 +94,16 @@ Companion presentation belongs to the separately installed Worktree Manager,
 reached over a process boundary. The small `packaging` dependency is explicit
 so reconciliation preserves version ordering and downgrade protection without
 relying on UI dependencies.
+
+## Authoritative Repository Roots
+
+Consumers requiring authoritative repository roots use
+`agent-worktrees repos find <name> --registered-only --json`. This read-only
+contract returns `registration: ready`, the registered name/class/remote and
+current platform's existing local root. Unlike ordinary `repos find`, it never
+uses a source-root discovery fallback. Invalid or duplicate registry mappings,
+missing registrations and unavailable checkouts are explicit errors. Acquisition
+and adoption remain separate owner operations; this read never clones a repo.
 
 ## Independent Execution Spaces
 

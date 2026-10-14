@@ -35,6 +35,42 @@ class _FakeManager:
         return SimpleNamespace(exit_code=0, stdout="", stderr="")
 
 
+@pytest.mark.guard
+@pytest.mark.asyncio
+async def test_process_auth_is_child_only_and_existing_cleanup_handle_is_used(monkeypatch):
+    from agent_bridge.container_preference_launch import container_child_argv
+    from agent_bridge.session_host import container_transport as transport
+
+    prepared = {
+        "name": "example-1", "user": "vscode", "execution_instance": "selected",
+        "remote_env": "/launch/general.env",
+        "acp_command": (
+            "unset COPILOT_GITHUB_TOKEN; "
+            'export PATH=/launch/general.env.d:"$PATH"; copilot --acp --stdio'
+        ),
+    }
+    target = {"name": "example-1", "provider_command": ["provider"],
+              "acp_command": "copilot --acp --stdio"}
+    argv = container_child_argv(target, prepared, ["/plugins/example"],
+                                copilot_args=["--no-ask-user"])
+    assert argv[:2] == ["bash", "-lc"]
+    assert "/launch/general.env.d" in argv[2]
+    assert ". /launch/general.env.d/auth.env;" not in argv[2]
+    assert "--plugin-dir=/plugins/example" in argv[2]
+    seen = []
+
+    async def run(command, *, timeout):
+        seen.append(command)
+        return 0, b"", b""
+
+    monkeypatch.setattr(transport, "_run_provider", run)
+    assert await transport.cleanup_container_session_host(target, prepared)
+    assert [cmd[cmd.index("--remote-env") + 1] for cmd in seen] == [
+        "/launch/general.env",
+    ]
+    assert all("--expected-instance" in cmd for cmd in seen)
+
+
 @pytest.mark.asyncio
 async def test_provider_runner_wraps_windows_batch_argv(monkeypatch):
     observed = {}

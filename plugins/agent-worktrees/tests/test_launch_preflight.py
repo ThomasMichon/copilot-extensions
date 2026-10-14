@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -324,12 +325,20 @@ def test_resolve_json_resume_preflight_failure_precedes_tracking_mutation(
     tmp_path,
     monkeypatch,
     capfd,
+    sample_record,
 ):
     config = _config(tmp_path)
     tracking_dir = tmp_path / "tracking"
     tracking_dir.mkdir()
     (tracking_dir / "wt-1.yaml").write_text("placeholder\n", encoding="utf-8")
-    record = SimpleNamespace(worktree_path=str(tmp_path / "worktrees" / "wt-1"))
+    record = replace(
+        sample_record,
+        worktree_id="wt-1",
+        repo=config.repo_name,
+        machine=config.machine,
+        platform=config.platform,
+        worktree_path=str(tmp_path / "worktrees" / "wt-1"),
+    )
     monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_dir)
     monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda _value: "wt-1")
@@ -361,12 +370,16 @@ def test_interactive_resume_preflight_failure_precedes_all_mutations(
     tmp_path,
     monkeypatch,
     capfd,
+    sample_record,
 ):
     config = _config(tmp_path)
-    record = SimpleNamespace(
+    record = replace(
+        sample_record,
         worktree_id="wt-1",
+        repo=config.repo_name,
+        machine=config.machine,
+        platform=config.platform,
         worktree_path=str(tmp_path / "worktrees" / "wt-1"),
-        yaml_path=tmp_path / "tracking" / "wt-1.yaml",
         branch="worktree/wt-1",
     )
     monkeypatch.setattr(m.state_root_mod, "resolve_config_root", _unsafe_root)

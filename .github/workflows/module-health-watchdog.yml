@@ -1,7 +1,7 @@
 # Detection only -- no agent dispatch, no live-registrar change. Files (or
 # leaves alone, if one is already open) a tracking issue for the single
-# worst module-size offender, mirroring module-size-baseline-widen.yml's own
-# proven scheduled/mechanical shape. See tools/module-health-watchdog.py's
+# worst module-size offender using a default-branch scheduled/mechanical
+# shape. See tools/module-health-watchdog.py's
 # module docstring for the full rationale.
 name: Module health watchdog
 
@@ -30,8 +30,7 @@ jobs:
     # `workflow_dispatch` can target any ref; without this guard, a manual
     # run against a PR branch could analyze unreviewed code and file a
     # public issue from it. `schedule` always runs against the default
-    # branch already; this is belt-and-suspenders for both triggers, the
-    # same pattern `module-size-baseline-widen.yml` already uses.
+    # branch already; this is belt-and-suspenders for both triggers.
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4

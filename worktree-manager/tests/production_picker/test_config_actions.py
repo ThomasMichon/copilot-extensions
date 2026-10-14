@@ -16,9 +16,10 @@ from textual.widgets import Input, Static
 
 from test_picker_tui import _fixture_source, _wait_for_initial_setup
 from worktree_manager.production_picker.picker_tui import pivots, tasks
-from worktree_manager.production_picker.picker_tui.create_action_screen import CreateActionScreen
+from worktree_manager.production_picker.picker_tui.configuration_form import (
+    ConfigurationFormScreen as CreateActionScreen, ConfigurationResultScreen,
+)
 from worktree_manager.production_picker.picker_tui.engine import PickerApp, PickerScreen
-from worktree_manager.production_picker.picker_tui.engine_dialogs import CfgMenuScreen
 from worktree_manager.production_picker.picker_tui.engine_focus import FocusGroup
 from worktree_manager.production_picker.picker_tui.pivot_actions import ManifestError
 from worktree_manager.production_picker.picker_tui.steering import SubmitErrorScreen
@@ -81,14 +82,24 @@ async def _wait(pilot, predicate):
 
 
 async def _open(scr, pilot):
+    if isinstance(scr.app.screen, ConfigurationResultScreen):
+        await _wait(pilot, lambda: not scr.app.screen.pending)
+        scr.app.screen.action_close()
+        await pilot.pause()
     scr._open_cfgmenu()
     await pilot.pause()
-    menu = scr.app.screen
-    assert isinstance(menu, CfgMenuScreen)
-    index = next(i for i, item in enumerate(menu._items) if item["kind"] == "section")
-    for _ in range(index):
-        await pilot.press("down")
-    await pilot.press("enter")
+    index = next(i for i, descriptor in enumerate(scr.pivots)
+                 if descriptor["kind"] == "config_section")
+    while scr.htab != index:
+        scr._rotate_machine(1)
+        await pilot.pause()
+    await _wait(pilot, lambda: scr._config_section_states.get(
+        scr._config_section_key(), {},
+    ).get("state") in ("ready", "error"))
+    state = scr._config_section_states[scr._config_section_key()]
+    if state["state"] == "error":
+        return scr
+    scr._activate_config_section()
     await _wait(
         pilot,
         lambda: isinstance(scr.app.screen, (CreateActionScreen, SubmitErrorScreen))
@@ -216,7 +227,8 @@ def test_config_form_cancel_and_apply_native_controls(tmp_path, monkeypatch):
             assert "Local machine only" in text
             assert not applied.exists()
             await _cancel_then_confirm(screen, pilot)
-            await _wait(pilot, applied.exists)
+            await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen)
+                        and not app.screen.pending)
             assert json.loads(applied.read_text()) == [
                 "fixture-pool", "disable", "literal {pool} [bold]",
             ]
@@ -248,10 +260,15 @@ def test_config_command_failure_is_visible_without_unconfirmed_mutation(
                 assert isinstance(screen, CreateActionScreen), scr.debug
                 await _fill_and_apply(screen, pilot)
                 await pilot.press("left", "enter")
-                await _wait(pilot, lambda: isinstance(app.screen, SubmitErrorScreen))
+                await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen)
+                            and not app.screen.pending)
             else:
-                assert isinstance(screen, SubmitErrorScreen)
-            assert "fixture failure" in scr.debug
+                assert screen is scr
+                assert "fixture failure" in scr._config_section_states[
+                    scr._config_section_key()
+                ]["status"]
+            if failure == "apply":
+                assert "fixture failure" in scr.debug
 
     asyncio.run(run())
 
@@ -263,7 +280,6 @@ def test_workers_picker_real_override_round_trip(tmp_path, monkeypatch):
         pytest.skip("set WORKERS_CONFIG_TEST_PYTHON for the cross-distribution acceptance lane")
     root = Path(__file__).resolve().parents[3]
     source = root / "plugins" / "agent-dispatch" / "src"
-    manifest = root / "plugins" / "agent-dispatch" / "pivots" / "agent-dispatch.json"
     assert source.is_dir() and Path(dispatch_python).is_file()
     declaration_dir = tmp_path / "declarations"
     declaration_dir.mkdir()
@@ -287,12 +303,16 @@ def test_workers_picker_real_override_round_trip(tmp_path, monkeypatch):
         f"import sys; sys.path.insert(0, {str(source)!r}); "
         "from agent_dispatch.__main__ import main; raise SystemExit(main())",
     ]
-    section = json.loads(manifest.read_text(encoding="utf-8"))["config_sections"][0]
-    section["run"] = prefix + section["run"][1:]
+    # Legacy callers keep their CLI contract after Workers moves to a list pivot.
+    section = _section()
+    section["run"] = prefix + ["workers", "config-section"]
     action = section["configure_action"]
-    action["run"] = prefix + action["run"][1:]
+    action["run"] = prefix + [
+        "workers", "config-section", "--toggle", "{field.action}",
+        "--reason={field.reason}", "--require-declared", "--", "{field.pool}",
+    ]
     pool = action["fields"][0]
-    pool["options_command"] = prefix + pool["options_command"][1:]
+    pool["options_command"] = prefix + ["workers", "pool-options"]
     _install_section(tmp_path, monkeypatch, section)
 
     async def run():
@@ -320,12 +340,13 @@ def test_workers_picker_real_override_round_trip(tmp_path, monkeypatch):
                 await _wait(pilot, lambda: group.is_mounted and group.has_focus)
                 await pilot.press("left", "enter")
                 await _wait(pilot, lambda: not isinstance(app.screen, CreateActionScreen))
-                await _wait(pilot, lambda: not getattr(scr, "_busy_label", ""))
+                await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen)
+                            and not app.screen.pending)
                 assert "failed" not in scr.debug
                 state = json.loads(overrides.read_text(encoding="utf-8"))
                 listed = subprocess.run(
                     prefix + ["supervise", "override", "list"],
-                    capture_output=True, text=True, timeout=10, check=True,
+                    capture_output=True, text=True, timeout=tasks.ACTION_TIMEOUT, check=True,
                     env=tasks._child_process_env(), creationflags=no_window_flags(),
                 )
                 effective = json.loads(listed.stdout)["overridden_off"]
@@ -350,7 +371,8 @@ def test_workers_picker_real_override_round_trip(tmp_path, monkeypatch):
                     (declaration_dir / "duplicate.json").write_bytes(original)
                 await _fill_and_apply(screen, pilot)
                 await pilot.press("left", "enter")
-                await _wait(pilot, lambda: isinstance(app.screen, SubmitErrorScreen))
+                await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen)
+                            and not app.screen.pending)
                 assert "failed" in scr.debug
                 assert overrides.read_bytes() == before
                 await pilot.press("escape")

@@ -228,7 +228,7 @@ def test_uv_only_clean_host_installs_without_precreating_slot(tmp_path: Path) ->
     assert (_slot(home) / ".install-complete.json").is_file()
 
 
-def test_uv_only_host_rebuilds_malformed_current_slot(tmp_path: Path) -> None:
+def test_uv_only_host_refuses_selected_malformed_slot(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     fake_bin = _write_fake_uv(tmp_path)
@@ -238,6 +238,10 @@ def test_uv_only_host_rebuilds_malformed_current_slot(tmp_path: Path) -> None:
     (slot / "partial.txt").write_text("discard", encoding="ascii")
     root = slot.parents[1]
     (root / "current-version").write_text(VERSION, encoding="ascii")
+    before = {
+        path: path.read_bytes()
+        for path in (slot / "Scripts" / "python.exe", slot / "partial.txt", root / "current-version")
+    }
 
     result = _run(
         INSTALL,
@@ -248,9 +252,10 @@ def test_uv_only_host_rebuilds_malformed_current_slot(tmp_path: Path) -> None:
         uv_only=True,
     )
 
-    assert result.returncode == 0, result.stdout
-    assert not (slot / "partial.txt").exists()
-    assert (slot / ".install-complete.json").is_file()
+    assert result.returncode != 0, result.stdout
+    assert "requires distinct-generation health repair" in result.stdout
+    assert all(path.read_bytes() == content for path, content in before.items())
+    assert not (slot / ".install-complete.json").exists()
 
 
 def _seed_healthy_slot(home: Path) -> Path:
@@ -291,7 +296,7 @@ def _seed_healthy_slot(home: Path) -> Path:
     return slot
 
 
-def test_install_rebuilds_slot_with_incomplete_metadata(tmp_path: Path) -> None:
+def test_install_refuses_selected_slot_with_incomplete_metadata(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     fake_bin = _write_fake_uv(tmp_path)
@@ -302,15 +307,21 @@ def test_install_rebuilds_slot_with_incomplete_metadata(tmp_path: Path) -> None:
     runtime = home / ".agent-codespaces"
     (runtime / "current-version").write_text(VERSION, encoding="ascii")
     (runtime / "last-known-good").write_text(VERSION, encoding="ascii")
+    before = {
+        path: path.read_bytes()
+        for path in (
+            slot / "Scripts" / "python.exe", slot / "partial.txt",
+            runtime / "current-version", runtime / "last-known-good",
+        )
+    }
 
     result = _run(INSTALL, "install", home=home, fake_bin=fake_bin, mode="success")
 
-    assert result.returncode == 0, result.stdout
-    assert not (slot / "partial.txt").exists()
-    assert (slot / "pyvenv.cfg").is_file()
-    marker = json.loads((slot / ".install-complete.json").read_text(encoding="utf-8"))
-    assert marker["version"] == VERSION
-    assert (runtime / "current-version").read_text(encoding="utf-8").strip() == VERSION
+    assert result.returncode != 0, result.stdout
+    assert "requires distinct-generation health repair" in result.stdout
+    assert all(path.read_bytes() == content for path, content in before.items())
+    assert not (slot / "pyvenv.cfg").exists()
+    assert not (slot / ".install-complete.json").exists()
 
 
 def test_install_rebuilds_slot_with_malformed_completion_state(tmp_path: Path) -> None:

@@ -190,6 +190,8 @@ def build_remote_create_argv(
         argv += ["--supersede-exclusive-key"]
     if getattr(args, "source", None):
         argv += ["--source", args.source]
+    if getattr(args, "category", None) == "maintenance":
+        argv += ["--category", args.category]
     if getattr(args, "origin_ref", None):
         argv += ["--origin-ref", args.origin_ref]
     if getattr(args, "dedup_key", None):
@@ -306,6 +308,8 @@ def build_remote_browse_argv(
       also guarantees no second hop.
     """
     argv = ["agent-dispatch", subcommand]
+    if getattr(args, "category", None):
+        argv += ["--category", args.category]
     if subcommand == "inbox" and getattr(args, "machine", None):
         argv += ["--machine", args.machine]
     board = subcommand == "inbox" and getattr(args, "board", False)

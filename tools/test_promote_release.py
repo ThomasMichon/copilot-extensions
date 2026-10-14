@@ -259,9 +259,14 @@ def test_promote_with_candidate_branch_never_touches_main_directly(tmp_path: Pat
         ["ls-remote", str(origin), "refs/heads/release/promote-test"], repo
     ).split()[0]
     assert remote_candidate == report["commit"]
-    # no tag pushed yet -- the caller tags the real post-merge commit.
+    # no tag pushed or named for the pre-merge candidate -- the caller tags
+    # the real post-merge commit as `<tag_stem>-<merge sha8>`.
+    assert report["tag"] is None
     remote_tags = _git(["ls-remote", "--tags", str(origin)], repo)
-    assert report["tag"] not in remote_tags
+    assert report["tag_stem"] not in remote_tags
+    state = json.loads(_git(["show", f"{report['commit']}:{pr.PIPELINE_STATE_PATH}"], repo))
+    assert state["last_promotion"]["tag"] == report["tag_stem"]
+    assert report["commit"][:8] not in report["tag_stem"]
 
 
 def test_promote_message_lists_bumps_and_changefiles():
@@ -285,8 +290,25 @@ def test_promote_writes_pipeline_state_into_generated_commit(repo: Path):
     state_json = _git(["show", f"{report['commit']}:{pr.PIPELINE_STATE_PATH}"], repo)
     state = json.loads(state_json)
     assert state["last_promotion"]["dev_head"] == dev_head
-    assert report["tag"].startswith(state["last_promotion"]["tag"])
+    # The state records the stem; the directly created tag is exactly
+    # `<stem>-<sha8>` of the commit that carries this state.
+    assert state["last_promotion"]["tag"] == report["tag_stem"]
+    assert report["tag"] == f"{report['tag_stem']}-{report['commit'][:8]}"
+    assert report["tag"] in _git(["tag", "--points-at", report["commit"]], repo).splitlines()
     assert state["paused"] is False
+
+
+def test_promote_tag_stem_is_utc(repo: Path, monkeypatch):
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
+    _commit(repo, "demo-plugin: a change")
+    _git(["checkout", "-q", "main"], repo)
+    fixed = pr.time.struct_time((2026, 1, 2, 3, 4, 5, 4, 2, 0))
+    monkeypatch.setattr(pr.time, "gmtime", lambda *_: fixed)
+
+    report = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+
+    assert report["tag_stem"] == "promote-20260102030405"
 
 
 def test_promote_checks_in_a_matching_coverage_baseline(tmp_path: Path, repo: Path):

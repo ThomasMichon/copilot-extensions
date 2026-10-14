@@ -2,13 +2,16 @@
 """Native Textual region widgets extracted from ``engine.py``."""
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING
 
 from rich.text import Text
 from textual.widget import Widget
+from textual.visual import Visual
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 
+from .deferred_row import DeferredRow
 from .engine_helpers import (
     _NO_FLEX_COLUMN,
     fit,
@@ -17,6 +20,13 @@ from .engine_helpers import (
 
 if TYPE_CHECKING:
     from .engine import PickerScreen
+
+
+def _worktree_fingerprint(rows):
+    fields = ("id", "title", "state", "age_secs", "sess",
+              "activity", "live_intent", "live_rest", "status_markers")
+    return tuple(tuple(row.get(field) for field in fields) for row in rows)
+
 
 class _PickerSegment(Widget):
     """One NF2 screen segment (or a row-slice of one) -- a leaf widget that
@@ -41,7 +51,7 @@ class _PickerSegment(Widget):
         self._rows = rows
 
     def render(self):
-        seg = self._screen._frame_segments()
+        seg = self._screen._frame_segments(include_body=False)
         lines = seg[self._seg_key]
         if self._rows is not None:
             lines = lines[self._rows]
@@ -114,7 +124,7 @@ class _PickerPivots(_FocusRegion):
 
     def render(self):
         scr = self._screen
-        seg = scr._frame_segments()
+        seg = scr._frame_segments(include_body=False)
         return scr._join_lines(seg["header"][1:2], seg["W"])
 
 class _PickerMachine(_FocusRegion):
@@ -222,7 +232,7 @@ class _PickerNativeData(OptionList):
         self._sections = []       # option index -> section label active there
         self._section_texts = {}  # section label -> its header Text (for sticky)
         self._kinds = []          # option index -> VRow kind ('section' etc.)
-        self._l_rows = {}         # worktree row key -> (option index, rec, li)
+        self._l_rows = {}         # worktree row key -> (option index, rec, li, alt)
         self._colhdr_index = None  # option index of the pivot's column header
         self._colhdr_text = None   # its Text (for sticky), or None (no colhdr)
         self._sig = None          # last data signature (rebuild only on change)
@@ -234,6 +244,7 @@ class _PickerNativeData(OptionList):
         scr = self._screen
         wt = tuple(sorted(scr.wt_sel.ids)) if hasattr(scr, "wt_sel") else ()
         kind = scr._kind()
+        worker_fp = ()
         # A cheap per-pivot data-size probe so the options rebuild when the
         # active pivot's rows change (tasks load, maintenance candidates), not
         # only when the worktrees list does. ``fp`` (review finding, #2228 P4)
@@ -257,9 +268,21 @@ class _PickerNativeData(OptionList):
             else:
                 rows = scr.list_records()
             nrows = len(rows)
-            fp = tuple((r.get("id"), r.get("title"), r.get("state"),
-                        r.get("age_secs"), r.get("sess"))
-                       for r in rows)
+            fp = _worktree_fingerprint(rows)
+            if kind == "worktrees":
+                worker_fp = tuple(
+                    (key, tuple((worker["pivot"], worker["id"], worker["label"],
+                                 worker["live"], worker["activity"]) for worker in workers))
+                    for key, workers in scr._worktree_supervised_workers_index(rows).items()
+                    if workers
+                )
+            if scr._in_configuration():
+                if kind == "registered":
+                    fp = tuple(repr(row) for row in rows)
+                elif kind == "config_section":
+                    fp = (repr(getattr(scr, "_config_section_states", {}).get(
+                        scr._config_section_key(), {},
+                    )),)
         except Exception:
             nrows, fp = -1, ()
         return (kind, scr.htab, scr.machine_idx, nrows, wt,
@@ -267,7 +290,7 @@ class _PickerNativeData(OptionList):
                 getattr(scr, "manager_update_state", None),
                 scr.size.width, getattr(scr, "cmd_mode", False),
                 getattr(scr.list_view, "query", ""),
-                getattr(scr.list_view, "sort_index", 0), fp)
+                getattr(scr.list_view, "sort_index", 0), fp, worker_fp)
 
     def _rebuild(self):
         scr = self._screen
@@ -295,7 +318,7 @@ class _PickerNativeData(OptionList):
             opts = []
             for vr in data:
                 stop = getattr(vr, "stop", None)
-                text = vr.text if isinstance(vr.text, Text) else Text(str(vr.text))
+                text = vr.text if isinstance(vr.text, (Text, Visual)) else Text(str(vr.text))
                 kind = getattr(vr, "kind", None)
                 ps = getattr(vr, "pin_section", None)
                 cur_label = ps[0] if ps else cur_label
@@ -316,7 +339,7 @@ class _PickerNativeData(OptionList):
                 if stop is not None and stop[0] == "L" and rec is not None:
                     rid = scr._row_key(rec)
                     if rid is not None:
-                        self._l_rows[rid] = (idx, rec, stop[1])
+                        self._l_rows[rid] = (idx, rec, stop[1], getattr(vr, "alt", False))
             if opts:
                 self.add_options(opts)
             if preserve_scroll and old_scroll_y:
@@ -506,8 +529,7 @@ class _PickerNativeData(OptionList):
         # exactly before trusting positional indices into it. A mismatch here
         # (data mutated between the two calls) falls back to a full rebuild
         # rather than risk patching the wrong row's text into the wrong slot.
-        refetched_fp = tuple((r.get("id"), r.get("title"), r.get("state"),
-                              r.get("age_secs"), r.get("sess")) for r in rows)
+        refetched_fp = _worktree_fingerprint(rows)
         if refetched_fp != new_fp:
             return False
         view = scr.worktrees_view
@@ -520,31 +542,31 @@ class _PickerNativeData(OptionList):
             row = self._l_rows.get(rid)
             if row is None:
                 return False   # unknown row -> safe fallback to a full rebuild
-            idx, _old_rec, li = row
+            idx, _old_rec, li, alt = row
             if not (0 <= idx < count):
                 return False
-            text = view._row_text(rec, li, self._SENTINEL_SEL, W, lcols,
-                                  None, None)
-            self.replace_option_prompt_at_index(idx, text)
+            self.replace_option_prompt_at_index(idx, DeferredRow(partial(
+                view._row_text, rec, li, self._SENTINEL_SEL, W, lcols,
+                None, None, alt=alt)))
+            self.replace_option_prompt_at_index(idx + 1, DeferredRow(partial(
+                view._detail_line, rec, W, alt=alt)))
             # Keep _l_rows current so a LATER pulse/selection fast path (or
             # another content repaint) diffs against this row's fresh data,
             # not the stale record this patch just replaced on screen.
-            self._l_rows[rid] = (idx, rec, li)
+            self._l_rows[rid] = (idx, rec, li, alt)
         return True
 
     def _try_selection_repaint(self, new_sig) -> bool:
-        """Repaint only the worktree rows whose checkbox glyph changed, in place
-        (#171). Returns True if it fully handled the update; False to fall back
-        to :meth:`_rebuild`.
+        """Invalidate painted checkbox strips without replacing row prompts.
+        Returns True if handled; False to fall back to :meth:`_rebuild`.
 
         Applies only when the signature delta is *selection-only*: the pivot is
         Worktrees and ``new_sig`` differs from the last signature in nothing but
         the ``wt`` (selection ids) field -- i.e. plain/shift arrow navigation,
         where single-select tracks focus. The native list is built with a
         sentinel sel (focus is the native amber cursor, not baked into row text),
-        so the only per-row change is the box glyph on the rows entering/leaving
-        the selection; re-rendering just those via the SAME per-row renderer as
-        the full rebuild keeps the output byte-identical."""
+        so only checkbox glyphs change. Deferred factories read current
+        selection on paint, including when an off-screen row later scrolls in."""
         old = self._sig
         if old is None or len(old) != len(new_sig):
             return False
@@ -553,34 +575,15 @@ class _PickerNativeData(OptionList):
         # Differ ONLY in the wt (selection) field -- index 4 of _signature().
         if any(old[i] != new_sig[i] for i in range(len(old)) if i != 4):
             return False
-        changed = set(old[4]) ^ set(new_sig[4])
-        if not changed:
+        if old[4] == new_sig[4]:
             return False
-        scr = self._screen
-        W = scr.size.width or 100
-        try:
-            cols, _sections = scr.current_list()
-            lcols = fit(cols, W - 2, _NO_FLEX_COLUMN, 0)
-        except Exception:
-            return False
-        view = scr.worktrees_view
-        count = self.option_count
-        for rid in changed:
-            row = self._l_rows.get(rid)
-            if row is None:
-                return False   # unknown row -> safe fallback to a full rebuild
-            idx, rec, li = row
-            if not (0 <= idx < count):
-                return False
-            text = view._row_text(rec, li, self._SENTINEL_SEL, W, lcols,
-                                  None, None)
-            self.replace_option_prompt_at_index(idx, text)
+        # Deferred row factories read the current selection when painted.
+        self._clear_caches()
         return True
 
     def _try_pulse_repaint(self, new_sig) -> bool:
-        """Repaint only the worktree rows whose LIVE glyph actually pulses, in
-        place (render-perf follow-up, #3307 2026-09-30). Returns True if it
-        fully handled the update; False to fall back to :meth:`_rebuild`.
+        """Invalidate live-glyph strips once, retaining deferred row prompts.
+        Returns True if handled; False to fall back to :meth:`_rebuild`.
 
         Applies only when the signature delta is *pulse-only*: the pivot is
         Worktrees and ``new_sig`` differs from the last signature in nothing
@@ -588,8 +591,8 @@ class _PickerNativeData(OptionList):
         ~10fps idle tick's cosmetic frame flip, with no real reload/nav/scope
         change alongside it. Most rows never call ``row_sess_pulses`` true (a
         finalized/unattached/non-live worktree's glyph never changes color),
-        so this is typically a no-op scan rather than a full O(rows)
-        clear+rebuild -- the exact over-painting the operator flagged."""
+        so a view without live rows needs no invalidation. Visible factories
+        read the new pulse; off-screen rows are not reformatted or replaced."""
         old = self._sig
         if old is None or len(old) != len(new_sig):
             return False
@@ -600,23 +603,10 @@ class _PickerNativeData(OptionList):
             return False
         if old[5] == new_sig[5]:
             return False
-        scr = self._screen
-        W = scr.size.width or 100
-        try:
-            cols, _sections = scr.current_list()
-            lcols = fit(cols, W - 2, _NO_FLEX_COLUMN, 0)
-        except Exception:
-            return False
-        view = scr.worktrees_view
-        count = self.option_count
-        for idx, rec, li in self._l_rows.values():
-            if not row_sess_pulses(rec.get("sess", "")):
-                continue
-            if not (0 <= idx < count):
-                return False
-            text = view._row_text(rec, li, self._SENTINEL_SEL, W, lcols,
-                                  None, None)
-            self.replace_option_prompt_at_index(idx, text)
+        if any(row_sess_pulses(rec.get("sess", ""))
+               for _idx, rec, _li, _alt in self._l_rows.values()):
+            # Clear old strips, not off-screen prompts; factories read current pulse.
+            self._clear_caches()
         return True
 
     def on_mount(self) -> None:

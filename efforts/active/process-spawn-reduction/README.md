@@ -111,7 +111,7 @@ a scaling aspiration, not a fixed spawn-rate budget with an approved interval.
 - [x] _(Agent-recommended bounded first slice)_ Batch per-pass fallback object
   comparisons before adding cross-cycle immutable-fact reuse; preserve fresh
   mutable Git observations and prove the one-/many-path process budgets.
-- [ ] Share fresh enrichment across compatible resident list-warm shapes within
+- [x] Share fresh enrichment across compatible resident list-warm shapes within
   one pass, preserving exact-selection/output separation and next-pass reads.
 
 ### Phase 4 - Unit boundaries and release proof
@@ -166,6 +166,107 @@ after equivalence and error semantics are established. Keep native integration
 small and explicit while unit policy tests remain in-process.
 
 ## Journal
+
+### 2026-10-13 - Real listing workload and request-budget boundary
+
+- #6498 merged after exact-head Copilot approval with zero open findings and
+  successful required CI. #6459 also merged. Normal generated `main` still
+  excludes both source slices; neither the collection claim nor the parent
+  campaign is complete. No deployment was inferred from those merges.
+- Measured source `34301ec39c4c1983c3797576b47a34643b65bd72` through a contained
+  native listing fixture: real YAML records/config, production session scan
+  and renderer, four non-mux-detail shapes, warm loop, classify IPC and Git.
+  Classifier fallback was explicitly refused; clocks and request budgets were
+  not changed. Fixture setup and Git commits are outside the pass counts.
+- One divergent record used 9 Git starts and one read-only `psmux` start in
+  each of two unchanged passes (1.068/1.102 seconds). Four records used 33 Git
+  starts and one `psmux` start (3.565/3.669 seconds). After a dirty edit, the
+  next pass rendered Dirty and used 6/30 Git starts for one/four records,
+  respectively. These are direct Popen-boundary counts, not sampled estimates.
+- The earlier eight-Git fixture modeled its config/render/session surfaces.
+  This real consumer includes one committed-config `symbolic-ref` probe per
+  pass in addition to eight Git starts per clean divergent record. It also
+  includes the production active-path `list-sessions` query even without
+  `--mux-details`: that is a real read of the host mux, not an isolated mux
+  fixture or a modeled zero-child result. No host mux/session mutation ran.
+- At eight divergent records, the first request did not complete without the
+  ordinary classifier fallback. The strict diagnostic failed after 6.291
+  seconds, with 65 Git starts and one `psmux` start observed by that boundary.
+  This is excluded from successful native-consumer proof. It identifies a
+  workload-size/request-budget constraint for the next coalescing slice, not
+  authority to enlarge deadlines or discard correctness fallback.
+- Measurements exclude the full monitor lifecycle/sweep, installed-runtime
+  execution, peak descendants and stationary host-wide improvement. No
+  broad workload or lifecycle checklist item is marked complete from them.
+- The normal promotion gates changed while this work resumed: index and
+  full plugin validation passed in run 38502638232, but publication then
+  refused `manifest payload hash differs from candidate`, already tracked
+  in #6535. No forced release, integrity bypass, competing repair PR or
+  workflow retry was attempted.
+
+### 2026-10-13 - Explicit native shell admission
+
+- Claimed #6087 after checking for an existing owner and competing PR.
+  Three test modules probed real Bash during collection, including unrelated
+  `-k` selections. Moved their native behavior tests behind explicit T3
+  session fixtures, retaining the real installer and background-prune bodies.
+- Shared test-only admission rejects WindowsApps/System32 WSL launchers before
+  a probe, prefers native Git Bash on Windows, and bounds headless exit-code,
+  pipefail and cygpath probes. Direct pytest fails closed without explicit
+  tier admission. PowerShell command-resolution execution is explicit too;
+  the pipefail source drift guard stays in the ordinary selection.
+- Fresh-import and admission policy tests mock all subprocess boundaries.
+  The contained default selection passed 27 tests and skipped 11 native cases;
+  the explicit lane passed all 38, including real Git Bash and PowerShell
+  consumers, at unchanged runner limits.
+- Temporary subprocess instrumentation rejected every real process attempt
+  during full collection: 8,890 tests collected, zero attempted children.
+  A separate unrelated one-test selection also collected the complete suite
+  with zero attempted children. Instrumentation was removed afterward.
+- These are fresh temporary consumer fixtures, not a first-install change.
+  No external venue is required for this test-only Windows/native-shell
+  boundary; no production installer or runtime behavior changed. Review,
+  merge and normal promotion remain outstanding. The broader campaign stays
+  Active and this slice does not settle its workload/lifecycle obligations.
+- Review found that an earlier WSL launcher on PATH could hide a portable
+  Git Bash when the usual installation path is absent. Filtered known launcher
+  directories before fallback lookup and retained post-resolution refusal.
+  Added the ordered-PATH policy regression; all 39 focused tests, including
+  the retained native consumers, passed at unchanged limits.
+
+### 2026-10-13 - Released list-warm coalescing and real-clock validation
+
+- #6431 passed its current-head review and CI gates, merged, and was included
+  in promotion #6453. The qualifying agent-worktrees release is 1.24.57-dev1,
+  not the earlier 1.24.56-dev1 snapshot that excluded this slice.
+- A normal Copilot payload refresh with debug logging succeeded within the
+  unchanged 120-second limit. The standard unified updater then activated
+  the runtime. Subsequent normal deployment advanced the current payload,
+  runtime marker and attributable resident to 1.24.58-dev1. The resident
+  answered an actual authenticated hook request after updater cleanup in
+  0.24 seconds within the normal 0.5-second request budget.
+- Installed-consumer proofs for both releases imported their actual installed
+  runtime modules and executed the real warm loop, classify IPC and Git.
+  Four fixture demands retained eight direct Git starts in each of two
+  passes and observed a subsequent dirty edit. Transcript, mux and reclaim
+  enrichment remained modeled; this is not a real-host four-shape workload
+  or a stationary host-wide spawn-rate comparison.
+- Found that the original cache-age fixture mutated shared stdlib time.time,
+  also freezing transport deadlines. #6459 isolates that clock and retains
+  the unmocked clock APIs. The corrected source selection passed 16 tests
+  including native IPC, without increasing deadlines; the installed proofs
+  also used the isolated fixture. Earlier direct counts remain counts, not
+  unfrozen request-budget evidence. A separate failed paired benchmark is
+  excluded from successful timing claims.
+- The unified updater exited nonzero because the configured governed feed
+  omitted FastAPI 0.143.0, required by the newer Dispatch runtime. That release
+  is available and not yanked on public PyPI. No feed override, downgrade or
+  shared-cache purge was attempted. Earlier Copilot payload timeouts remain
+  unclassified; a later successful refresh is not a root-cause explanation.
+- The parent remains Active. Real representative daemon workloads,
+  immutable/event-driven cross-cycle reuse, unit collection boundaries,
+  selected-cell/Bash work and independent lifecycle observations remain
+  unresolved; this bounded slice does not satisfy those obligations.
 
 ### 2026-10-12 - Deployment proof and selection-scoped list warming
 

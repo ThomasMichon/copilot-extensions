@@ -37,6 +37,7 @@ import subprocess
 import threading
 
 from agent_procutil import no_window_flags
+from machine_transport import local_execution_platform
 
 from .. import project_config as cfg
 from . import data_local, derive, provider_sources, roster, source_identity
@@ -74,9 +75,9 @@ _LOG = logging.getLogger(__name__)
 class Source:
     """One machine/environment the picker loads worktrees from.
 
-    ``machine``/``env`` are the display labels (``machines.yaml`` display name +
-    short env label) and must match this module's ``machines()`` descriptors so
-    the engine's per-tab filtering and "this host" detection line up. Existing
+    ``machine``/``env`` are the logical roster key and short env label, matching
+    this module's ``machines()`` identities for filtering and local detection.
+    ``display_machine`` is cosmetic physical-host grouping only. Existing
     local and remote machine sources share the ``machine-ssh`` kind; ``local``
     records whether enumeration runs in-process rather than over SSH.
     """
@@ -86,8 +87,9 @@ class Source:
                  source_kind=SOURCE_KIND_MACHINE_SSH, source_id=None,
                  source_label=None, provider="", target_id="", instance_id="",
                  venue=None, capabilities=None, resolve_argv=None,
-                 connect_argv=None):
-        self.machine = machine        # display_name from machines.yaml
+                 connect_argv=None, display_machine=None):
+        self.machine = machine        # canonical logical key from machines.yaml
+        self.display_machine = display_machine or machine
         self.env = env                # Win | WSL | Linux
         self.argv = argv              # subprocess argv (None for the local src)
         self.local = local
@@ -100,7 +102,7 @@ class Source:
         self.source_id = source_identity.resolve_id(
             source_kind, source_id, machine=machine, env=env
         )
-        self.source_label = source_label or f"{machine} / {env}"
+        self.source_label = source_label or f"{self.display_machine} / {env}"
         self.provider = provider
         self.target_id = target_id
         self.instance_id = instance_id
@@ -135,7 +137,7 @@ def _unique_sources(sources):
 
 def _local_identity() -> tuple[str, str]:
     """(hostname-key, platform-name) for the machine this picker runs on."""
-    return socket.gethostname().split(".")[0].lower(), cfg.detect_platform()
+    return socket.gethostname().split(".")[0].lower(), local_execution_platform()
 
 
 def _project() -> str:
@@ -326,24 +328,23 @@ def _build_sources():
     repo = config.default_repo
     try:
         entries = cfg.load_machines_yaml(repo.anchor)
-    except (FileNotFoundError, ValueError):
+    except ValueError:
+        raise
+    except FileNotFoundError:
         entries = {}
 
     project = _project()
     local_key, local_plat = _local_identity()
     local_elabel = _ENV_LABEL.get(local_plat, local_plat.title() or "?")
     config_machine = (config.machine or "").lower()
+    local_machine = roster.local_entry(entries, config_machine, local_key, local_plat)
 
     out: list[Source] = []
-    for key, m in entries.items():
+    for m in entries.values():
         if not m.copilot:
             continue
-        is_local_machine = (
-            key.lower() == local_key
-            or (getattr(m, "hostname", "") or "").lower() == local_key
-            or key.lower() == config_machine
-            or (m.alias and m.alias.lower() == config_machine)
-        )
+        is_local_machine = m is local_machine
+        first_source = len(out)
         local_env_added = False
         for ssh_env in m.ssh_environments:
             ename = (ssh_env.name or "").lower()
@@ -375,6 +376,10 @@ def _build_sources():
         if is_local_machine and not local_env_added:
             out.append(Source(m.key, local_elabel, None, local=True,
                               ready=True))
+        elif m.execution_platform and not m.ssh_environments:
+            elabel = _ENV_LABEL.get(m.execution_platform, m.execution_platform.title())
+            out.append(Source(m.key, elabel, None, ready=False))
+        roster.apply_display_machine(out[first_source:], m)
 
     # Defensive fail-safe: guarantee a local source even when this machine is
     # entirely absent from machines.yaml (a freshly-provisioned box whose
@@ -811,7 +816,7 @@ def machines(sources=None):
     tab and is never contacted.
     """
     return [
-        (f"{s.machine} {s.env}", s.machine, s.env, s.ready)
+        (f"{s.display_machine} {s.env}", s.machine, s.env, s.ready)
         for s in (sources if sources is not None else _build_sources())
         if s.source_kind == SOURCE_KIND_MACHINE_SSH
     ]
@@ -822,7 +827,7 @@ def source_tabs(sources=None):
     return [
         {
             "label": (
-                f"{source.machine} {source.env}"
+                f"{source.display_machine} {source.env}"
                 if source.source_kind == SOURCE_KIND_MACHINE_SSH
                 else source.source_label
             ),

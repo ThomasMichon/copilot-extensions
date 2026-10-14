@@ -21,10 +21,23 @@ import pytest
 from agent_dispatch import bridge, tracking
 from agent_dispatch import supervisor as supervisor_module
 from agent_dispatch.client import DispatchError
-from agent_dispatch.queue import SpawnState, Status
+from agent_dispatch.queue import SpawnState, Status, TaskError
 from agent_dispatch.supervisor import Supervisor
 from tests._helpers import TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
+
+
+class OwnerResultQueue(TaskQueue):
+    """Fixture allocations carry synthetic owner facts unless explicitly unknown."""
+
+    def record_spawn_worktree(self, key, worktree, **kwargs):
+        from agent_dispatch import embody
+
+        reservation = self.get_reservation(key)
+        task = self.get(reservation.task_id)
+        kwargs.setdefault("allocation_project", embody.project_for_task(asdict(task)))
+        kwargs.setdefault("worktree_path", f"/fixture/{worktree}")
+        return super().record_spawn_worktree(key, worktree, **kwargs)
 
 
 class QueueBackedClient:
@@ -84,10 +97,12 @@ class QueueBackedClient:
         )
         return [asdict(r) for r in rows]
 
-    def reserve_spawn(self, task_id, *, reserved_by=None, allow_suspended_reembodiment=False):
+    def reserve_spawn(self, task_id, *, reserved_by=None, allow_suspended_reembodiment=False, allocation_revision=None, driver=None):
         res, ok = self._q.reserve_spawn(
             task_id, reserved_by=reserved_by,
             allow_suspended_reembodiment=allow_suspended_reembodiment,
+            allocation_revision=allocation_revision,
+            driver=driver,
         )
         return {"reserved": ok, "reservation": asdict(res)}
 
@@ -98,6 +113,9 @@ class QueueBackedClient:
         return asdict(
             self._q.record_spawn_worktree(key, worktree, **kwargs)
         )
+
+    def record_spawn_allocation(self, key, project):
+        return asdict(self._q.record_spawn_allocation(key, project))
 
     def fail_spawn(
         self,
@@ -399,7 +417,7 @@ def test_default_liveness_uses_ssh_for_peer_machine(monkeypatch):
 
 @pytest.fixture
 def q(tmp_path):
-    return TaskQueue(tmp_path / "tasks.db")
+    return OwnerResultQueue(tmp_path / "tasks.db")
 
 
 @pytest.fixture
@@ -528,6 +546,7 @@ def test_poll_records_failed_headless_session_before_releasing_worktree(
         lambda *_args, **_kwargs: {
             "worktree": "wt-created",
             "path": "/tmp/wt-created",
+            "project": "worker-harness",
             "created": True,
             "replaced": False,
             "ownership": "created",
@@ -565,6 +584,7 @@ def test_poll_threads_allocation_no_pair_into_worktree_preparation(
         return {
             "worktree": "wt-created",
             "path": "/tmp/wt-created",
+            "project": kwargs["project"],
             "created": True,
             "replaced": False,
             "ownership": "created",
@@ -572,7 +592,7 @@ def test_poll_threads_allocation_no_pair_into_worktree_preparation(
 
     monkeypatch.setattr(embody, "prepare_reusable_worktree", fake_prepare)
 
-    spawn = _ok_spawn()
+    spawn = _ok_spawn({"session": "sess-1", "worktree": "wt-created"})
     spawn.requires_reusable_worktree = True
     spawn.allocation_no_pair = True
     sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, machine="host-a")
@@ -1014,7 +1034,7 @@ def test_cold_steer_resumes_existing_acp_session(q, client):
     assert reservation.key not in sup._cooled_reservations
 
 
-def test_cold_resume_missing_worktree_releases_same_task_for_fresh_embodiment(
+def test_cold_resume_missing_worktree_preserves_identity_until_cleanup(
     q, client, tmp_path
 ):
     missing_worktree = tmp_path / "removed-review-worktree"
@@ -1077,11 +1097,11 @@ def test_cold_resume_missing_worktree_releases_same_task_for_fresh_embodiment(
     assert held.release_requested is True
     assert held.conclusion_state == "complete"
 
-    assert sup.poll_once(now=1001) == [blocked.id]
-    assert spawn.calls == [blocked.id]
-    reservations = q.list_reservations(task_id=blocked.id)
-    assert len(reservations) == 2
-    assert sum(r.state == SpawnState.SPAWNED for r in reservations) == 1
+    sup.release_requested_bodies(now=1001)
+    with pytest.raises(TaskError, match="in-flight cleanup"):
+        q.reserve_spawn(blocked.id)
+    assert spawn.calls == []
+    assert len(q.list_reservations(task_id=blocked.id)) == 1
 
 
 @pytest.mark.parametrize("target_kind", ["unknown", "present", "relative"])
@@ -3861,9 +3881,7 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
     """The headless backend embodies via agent-bridge, delivering the SAME
     autopilot seed the CLI backend uses (parity: identical driving, different
     body) -- and records no worktree handle (a headless body is not a worktree)."""
-    import subprocess
-
-    from agent_dispatch import session_acquisition, embody
+    from agent_dispatch import ordinary_bridge, embody
     from agent_dispatch.supervisor import make_headless_spawn
 
     calls: dict = {}
@@ -3874,9 +3892,10 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
         calls.update(
             task_id=task["id"], agent=agent, prompt=prompt,
         )
-        return subprocess.CompletedProcess(args=[], returncode=0, stdout='{"mode":"acp","session_id":"bridge-1","native_session_id":"native-1","worktree_id":"wt-1"}', stderr="")
+        return {"mode": "acp", "session": "local-body:bridge-1",
+                "native_session_id": "native-1", "worktree": "wt-1"}
 
-    monkeypatch.setattr(session_acquisition, "acquire", fake_spawn_worker)
+    monkeypatch.setattr(ordinary_bridge, "start", fake_spawn_worker)
     monkeypatch.setattr(
         embody, "autopilot_worker_prompt",
         lambda task_id, *, worker_id, route="", repo=None, all_repos=False,
@@ -4064,24 +4083,21 @@ def test_make_headless_spawn_charter_overrides_allocation_agent():
     ],
 )
 def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch, stderr):
-    import subprocess
-
-    from agent_dispatch import session_acquisition, embody
+    from agent_dispatch import ordinary_bridge, embody
     from agent_dispatch.supervisor import make_headless_spawn
 
     monkeypatch.setattr(embody, "autopilot_worker_prompt", lambda *a, **k: "seed")
-    monkeypatch.setattr(
-        session_acquisition, "acquire",
-        lambda *a, **k: subprocess.CompletedProcess([], 1, "", stderr),
-    )
+    def fail(*args, **kwargs):
+        raise ordinary_bridge.CreatedAgentUnrecorded(stderr)
+    monkeypatch.setattr(ordinary_bridge, "start", fail)
     ok, handle = make_headless_spawn()({"id": "t"})
     assert ok is False
     assert "failed-123" in handle["error"]
-    assert handle["session"] == "local-body:failed-123"
+    assert handle["retained"] is True
 
 
 def test_make_headless_spawn_reuses_carried_session(monkeypatch):
-    from agent_dispatch import bridge, embody, session_acquisition
+    from agent_dispatch import bridge, embody, ordinary_bridge
     from agent_dispatch.supervisor import make_headless_spawn
 
     resumed = []
@@ -4097,11 +4113,11 @@ def test_make_headless_spawn_reuses_carried_session(monkeypatch):
         "spawn_worker",
         lambda *args, **kwargs: created.append((args, kwargs)),
     )
-    import subprocess
     def acquire(task, **kwargs):
         resumed.append((task["spawn_session_handle"].removeprefix("local-body:"), kwargs["prompt"]))
-        return subprocess.CompletedProcess([], 0, '{"mode":"acp","session_id":"session-old","native_session_id":"native-old","worktree_id":"wt-review"}', "")
-    monkeypatch.setattr(session_acquisition, "acquire", acquire)
+        return {"mode": "acp", "session": "local-body:session-old",
+                "native_session_id": "native-old", "worktree": "wt-review"}
+    monkeypatch.setattr(ordinary_bridge, "start", acquire)
 
     ok, handle = make_headless_spawn()(
         {
@@ -4123,7 +4139,7 @@ def test_make_headless_spawn_reuses_carried_session(monkeypatch):
 
 
 def test_make_headless_spawn_does_not_replace_live_busy_session(monkeypatch):
-    from agent_dispatch import bridge, embody, session_acquisition
+    from agent_dispatch import bridge, embody, ordinary_bridge
     from agent_dispatch.supervisor import make_headless_spawn
 
     created = []
@@ -4136,7 +4152,7 @@ def test_make_headless_spawn_does_not_replace_live_busy_session(monkeypatch):
     )
     def acquire(*args, **kwargs):
         raise bridge.BridgeCarriedSessionBusy("carried session remains live")
-    monkeypatch.setattr(session_acquisition, "acquire", acquire)
+    monkeypatch.setattr(ordinary_bridge, "start", acquire)
 
     ok, handle = make_headless_spawn()(
         {
@@ -4156,7 +4172,7 @@ def test_make_headless_spawn_does_not_replace_live_busy_session(monkeypatch):
 def test_make_headless_spawn_does_not_replace_confirmed_gone_session(monkeypatch):
     import subprocess
 
-    from agent_dispatch import bridge, embody, session_acquisition
+    from agent_dispatch import bridge, embody, ordinary_bridge
     from agent_dispatch.supervisor import make_headless_spawn
 
     created = []
@@ -4175,7 +4191,7 @@ def test_make_headless_spawn_does_not_replace_confirmed_gone_session(monkeypatch
     monkeypatch.setattr(bridge, "spawn_worker", create)
     def acquire(*args, **kwargs):
         raise bridge.BridgeUnavailable("strict native resume refused")
-    monkeypatch.setattr(session_acquisition, "acquire", acquire)
+    monkeypatch.setattr(ordinary_bridge, "start", acquire)
 
     ok, handle = make_headless_spawn()(
         {
@@ -4192,7 +4208,7 @@ def test_make_headless_spawn_does_not_replace_confirmed_gone_session(monkeypatch
 
 
 def test_make_headless_spawn_holds_on_unknown_carried_session(monkeypatch):
-    from agent_dispatch import bridge, embody, session_acquisition
+    from agent_dispatch import bridge, embody, ordinary_bridge
     from agent_dispatch.supervisor import make_headless_spawn
 
     created = []
@@ -4204,7 +4220,7 @@ def test_make_headless_spawn_holds_on_unknown_carried_session(monkeypatch):
     )
     def acquire(*args, **kwargs):
         raise bridge.BridgeCarriedSessionBusy("could not determine native liveness")
-    monkeypatch.setattr(session_acquisition, "acquire", acquire)
+    monkeypatch.setattr(ordinary_bridge, "start", acquire)
 
     ok, handle = make_headless_spawn()(
         {
@@ -4221,7 +4237,7 @@ def test_make_headless_spawn_holds_on_unknown_carried_session(monkeypatch):
 
 
 def test_make_headless_spawn_degrades_when_bridge_absent(monkeypatch):
-    from agent_dispatch import bridge, embody
+    from agent_dispatch import bridge, embody, ordinary_bridge
     from agent_dispatch.supervisor import make_headless_spawn
 
     monkeypatch.setattr(embody, "autopilot_worker_prompt", lambda *a, **k: "seed")
@@ -4229,7 +4245,7 @@ def test_make_headless_spawn_degrades_when_bridge_absent(monkeypatch):
     def _boom(*a, **k):
         raise bridge.BridgeUnavailable("no agent-bridge on PATH")
 
-    monkeypatch.setattr(bridge, "spawn_worker", _boom)
+    monkeypatch.setattr(ordinary_bridge, "start", _boom)
     ok, handle = make_headless_spawn()({"id": "t"})
     assert ok is False
     assert "agent-bridge" in handle["error"]
@@ -4339,6 +4355,7 @@ def test_ordinary_headless_task_records_created_worktree_before_launch(
         return {
             "worktree": "wt-created",
             "path": "/tmp/wt-created",
+            "project": kwargs["project"],
             "created": True,
             "replaced": False,
             "ownership": "created",
@@ -4389,6 +4406,7 @@ def test_exclusive_spawn_records_precreated_worktree_before_launch(
         lambda _task, _reservation, **_kwargs: {
             "worktree": "wt-precreated",
             "path": "/tmp/wt-precreated",
+            "project": _kwargs["project"],
             "created": True,
             "replaced": False,
             "ownership": "created",
@@ -4935,7 +4953,7 @@ def test_yielded_created_worktree_is_concluded_before_respawn(q, client):
     )
     q.yield_task(task.id, "host-a/wt-created")
     conclusions = []
-    spawn = _ok_spawn()
+    spawn = _ok_spawn({"session": "sess-1", "worktree": "wt-created"})
     sup = Supervisor(
         client,
         spawn_fn=spawn,
@@ -5001,9 +5019,8 @@ def test_failed_attempt_cleanup_retries_after_body_release(q, client):
     assert pending.state == SpawnState.FAILED
     assert pending.conclusion_state == "pending"
     assert spawn.calls == []
-    replacement, acquired = q.reserve_spawn(task.id)
-    assert acquired is True
-    assert replacement.attempt == 2
+    with pytest.raises(TaskError, match="in-flight cleanup"):
+        q.reserve_spawn(task.id)
 
     second = Supervisor(
         client,
@@ -5031,7 +5048,10 @@ def test_failed_attempt_cleanup_retries_after_body_release(q, client):
     ) == 0
     assert q.get_reservation(reservation.key).state == SpawnState.FAILED
     assert q.get_reservation(reservation.key).conclusion_state == "complete"
-    assert replacement.worktree is None
+    replacement, acquired = q.reserve_spawn(task.id)
+    assert acquired is True
+    assert replacement.attempt == 2
+    assert replacement.worktree == "wt-created"
 
 
 # -- unleased worktree-only retirement: no captured owner_session_id --------
@@ -5104,6 +5124,7 @@ def test_probes_the_spawn_fns_own_allocation_project_when_overridden(q, client):
         ownership="created",
         creating_host="host-a",
         driver="agent-dispatch",
+        allocation_project="routed-project",
     )
     q.request_spawn_release(
         reservation.key,
@@ -5133,13 +5154,8 @@ def test_probes_the_spawn_fns_own_allocation_project_when_overridden(q, client):
     assert probe_calls == [("wt-routed", "routed-project")]
 
 
-def test_allocation_project_resolution_failure_degrades_to_unknown(q, client):
-    # `_spawn_attribute` can invoke an I/O-backed `allocation_project_for`
-    # selector (the default headless one calls a strict registry lookup)
-    # that may raise when a backing registry is unavailable. That failure
-    # must degrade this reservation to unknown for this cycle -- never
-    # propagate out of release_requested_bodies and abort the whole polling
-    # pass over every other reservation.
+def test_missing_allocation_project_degrades_only_that_reservation(q, client):
+    # Missing provenance is unknown, even if current routing offers a project.
     task = q.create("work")
     reservation, _ = q.reserve_spawn(task.id)
     other_task = q.create("other-work")
@@ -5150,6 +5166,7 @@ def test_allocation_project_resolution_failure_degrades_to_unknown(q, client):
         ownership="created",
         creating_host="host-a",
         driver="agent-dispatch",
+        allocation_project=None,
     )
     q.record_spawn_worktree(
         other_reservation.key,
@@ -6921,7 +6938,7 @@ def test_reconcile_reserving_worktree_replaced_between_probe_and_release_is_fenc
     assert sup.reconcile_reserving() == 0
     unchanged = q.get_reservation(reservation.key)
     assert unchanged.state == SpawnState.RESERVING
-    assert unchanged.worktree == "wt-replaced"
+    assert unchanged.worktree == "wt-original"
 
 
 @pytest.mark.parametrize(

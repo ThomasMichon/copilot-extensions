@@ -21,7 +21,7 @@ from zdd import breadcrumb
 from zdd import routing
 from zdd.cutover import CutoverOrchestrator
 
-from . import locks, procs
+from . import locks
 from .status_monitor_python import direct_monitor_python
 
 _BIND = "127.0.0.1"
@@ -349,6 +349,8 @@ def _iter_status_monitor_pids() -> set[int]:
         }
     argv = ["ps", "-eo", "pid=,args="]
     out = subprocess.run(argv, capture_output=True, text=True, timeout=5, check=False)  # noqa: S603
+    if out.returncode != 0:
+        raise OSError(f"native monitor process census failed (exit {out.returncode})")
     hits: set[int] = set()
     for line in (out.stdout or "").splitlines():
         parts = line.strip().split(None, 1)
@@ -373,8 +375,13 @@ def _reap_abandoned_passive(record: dict | None) -> dict:
         return pid in _iter_status_monitor_pids()
 
     def _terminate(pid: int) -> bool:
-        return bool(
-            procs.terminate_pid_if_identity(pid, locks.process_start_time(pid)).get("killed")
+        from zdd.diagnostics import terminate_pid_if_identity
+
+        result = terminate_pid_if_identity(
+            pid, (record or {}).get("new_process_start_time"), exit_timeout=5.0,
+        )
+        return all(
+            result.get(key) is True for key in ("killed", "identity_verified", "exit_confirmed")
         )
 
     return breadcrumb.reap_abandoned_passive(
@@ -404,6 +411,12 @@ def activate_after_update(
     }
     if not summary["enabled"]:
         summary["reason"] = "disabled"
+        return summary
+    refusal = breadcrumb.recovery_refusal(
+        routing_dir(), breadcrumb.read_breadcrumb(routing_dir()),
+    )
+    if refusal is not None:
+        summary.update(action="refused", reason=refusal, result={"ok": False, "error": refusal})
         return summary
     monitor_was_live = _monitor_lock_is_live() if monitor_was_live is None else bool(monitor_was_live)
     if not _monitor_lock_is_live():
@@ -437,7 +450,15 @@ def activate_after_update(
             _make_client,
             health_check=_health_check,
         )
+        if summary["recovery"].get("refused"):
+            reason = breadcrumb.refusal_reason(summary["recovery"])
+            summary.update(action="refused", reason=reason, result={"ok": False, "error": reason})
+            return summary
         summary["passive_reap"] = _reap_abandoned_passive(pre_recovery)
+        if summary["passive_reap"].get("refused"):
+            reason = breadcrumb.refusal_reason(summary["passive_reap"])
+            summary.update(action="refused", reason=reason, result={"ok": False, "error": reason})
+            return summary
         orch = CutoverOrchestrator(
             routing_dir(),
             bind=_BIND,

@@ -270,21 +270,60 @@ class ResourceClaim:
     state: str = "active"
     note: str = ""
     handoff_bundle: str = ""
+    producer: object = None
+    producer_present: bool = False
+
+    def to_dict(self) -> dict:
+        """Full wire shape, with producer metadata absent for legacy claims."""
+        result: dict[str, object] = {
+            "kind": self.kind, "ref": self.ref, "created_at": self.created_at,
+            "state": self.state, "note": self.note, "handoff_bundle": self.handoff_bundle,
+        }
+        if self.has_producer:
+            from .resource_producer import wire_metadata
+            result["producer"] = wire_metadata(self.producer)
+        return result
+
+    def to_public_dict(self) -> dict[str, object]:
+        """Stable compact ledger projection used by status and claims views."""
+        result: dict[str, object] = {
+            "kind": self.kind, "ref": self.ref,
+            "created_at": self.created_at, "state": self.state,
+        }
+        if self.note:
+            result["note"] = self.note
+        if self.has_producer:
+            from .resource_producer import wire_metadata
+            result["producer"] = wire_metadata(self.producer)
+        return result
+
+    @property
+    def has_producer(self) -> bool:
+        return self.producer_present or self.producer is not None
 
     @property
     def is_live(self) -> bool:
+        if self.has_producer:
+            return self.is_unsettled
         return self.state in _CLAIM_LIVE_STATES
 
     @property
     def is_unsettled(self) -> bool:
+        if self.has_producer:
+            from .resource_producer import unsettled
+            return unsettled(self)
         return obligations.blocks_finalize(self.state)
 
     @property
     def is_at_rest(self) -> bool:
+        if self.has_producer:
+            return False
         return obligations.is_at_rest(self.state)
 
     @property
     def is_abandoned(self) -> bool:
+        if self.has_producer:
+            return False
         return obligations.is_abandoned(self.state)
 
 
@@ -459,6 +498,8 @@ def add_resource_claim(
     save: bool = True,
 ) -> ResourceClaim:
     tracking = _tracking()
+    if claim.has_producer:
+        raise ValueError("producer claims require resource-producer reserve")
     if (
         record.status in {"finalizing", "orphaned"}
         or (
@@ -474,6 +515,8 @@ def add_resource_claim(
     for existing in record.resources:
         if existing.ref != claim.ref:
             continue
+        if existing.has_producer:
+            raise ValueError("cannot overwrite a producer claim through generic claims add")
         reservation = claim_handoff_reservation(record, existing)
         if reservation:
             equivalent = (
@@ -517,6 +560,8 @@ def settle_resource_claim(
     match = next((claim for claim in record.resources if claim.ref == ref), None)
     if match is None or claim_handoff_reservation(record, match):
         return None
+    if match.has_producer:
+        raise ValueError("producer claims require verified close or accepted handoff")
     match.state = obligations.normalize(disposition)
     if save:
         tracking.save_record(record, path)
@@ -534,6 +579,8 @@ def release_resource_claim(
     match = next((claim for claim in record.resources if claim.ref == ref), None)
     if match is None or claim_handoff_reservation(record, match):
         return None
+    if match.has_producer:
+        raise ValueError("producer claims require verified close or accepted handoff")
     match.state = obligations.RELEASED
     if save:
         tracking.save_record(record, path)
@@ -642,6 +689,8 @@ def sweep_abandoned_obligations(
     tracking = _tracking()
     reclaimed: list[ResourceClaim] = []
     for claim in record.resources:
+        if claim.has_producer:
+            continue
         if not claim.is_unsettled or claim_handoff_reservation(record, claim):
             continue
         try:
@@ -692,7 +741,10 @@ def release_all_resources(
     ``finalize.py``'s own call site.
     """
     tracking = _tracking()
-    released = [claim for claim in record.resources if claim.is_live and claim.kind != "session"]
+    released = [
+        claim for claim in record.resources
+        if claim.is_live and claim.kind != "session" and not claim.has_producer
+    ]
     for claim in released:
         claim.state = "released"
     # worktree-finality-and-obligations Phase 2: snapshot exactly what THIS
@@ -732,7 +784,7 @@ def release_at_rest_resources(
     tracking = _tracking()
     released = [
         claim for claim in record.resources
-        if claim.is_at_rest and claim.kind != "session"
+        if claim.is_at_rest and claim.kind != "session" and not claim.has_producer
     ]
     for claim in released:
         claim.state = "released"
@@ -780,6 +832,9 @@ def rehome_abandoned_obligations(
     project: str | None = None,
 ) -> list[dict]:
     tracking = _tracking()
+    claims = list(claims)
+    if any(claim.has_producer for claim in claims):
+        raise ValueError("producer obligations require verified close or accepted handoff, not orphan rehoming")
     try:
         path = tracking.orphanage_path(project)
         with tracking._RecordLock(path, require_sidecar=True):

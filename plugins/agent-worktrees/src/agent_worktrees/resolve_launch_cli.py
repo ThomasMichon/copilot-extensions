@@ -512,7 +512,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         # *.local.instructions.md sibling now -- a fast-forward just above
         # may have changed the installed payload this worktree sees.
         # Degradation is reported without blocking an otherwise usable launch.
-        local_cache_refresh.refresh_local_cache(record.worktree_path)
+        local_cache_refresh.prepare_for_launch(record.worktree_path)
 
     resume_target = None
     if not getattr(args, "no_resume", False):

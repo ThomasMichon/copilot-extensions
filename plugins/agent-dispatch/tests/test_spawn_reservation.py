@@ -1873,7 +1873,9 @@ class _QueueBackedClient:
 
 
 def _mock_created_worktree(monkeypatch):
-    from agent_dispatch import embody
+    from agent_dispatch import bridge, embody
+
+    monkeypatch.setattr(bridge, "registered_agent_project", lambda *_a, **_kw: "execution-repo")
 
     monkeypatch.setattr(
         embody,
@@ -1884,6 +1886,7 @@ def _mock_created_worktree(monkeypatch):
             "created": True,
             "replaced": False,
             "ownership": "created",
+            "project": "execution-repo",
         },
     )
 
@@ -1898,11 +1901,11 @@ def test_create_spawn_never_double_spawns(monkeypatch, q):
 
     def fake_do_spawn(_args, task, *, route=""):
         spawns.append(task["id"])
-        return (types.SimpleNamespace(returncode=0), "fake", {"session": "s", "worktree": "w"})
+        return (types.SimpleNamespace(returncode=0), "fake", {"session": "s", "worktree": task["spawn_worktree"]})
 
     monkeypatch.setattr(m, "_do_spawn", fake_do_spawn)
 
-    args = types.SimpleNamespace(url=None, token=None)
+    args = types.SimpleNamespace(url=None, token=None, spawn_backend="embody")
     m._spawn_worker_for(args, {"id": t.id})
     m._spawn_worker_for(args, {"id": t.id})  # dedup collision / re-run
 
@@ -1933,7 +1936,7 @@ def test_create_spawn_failure_without_absence_proof_remains_fenced(
         return (types.SimpleNamespace(returncode=1), "fake", {"session": None, "worktree": None})
 
     monkeypatch.setattr(m, "_do_spawn", failing_do_spawn)
-    args = types.SimpleNamespace(url=None, token=None)
+    args = types.SimpleNamespace(url=None, token=None, spawn_backend="embody")
 
     m._spawn_worker_for(args, {"id": t.id})
     first = q.latest_reservation(t.id)
@@ -1972,7 +1975,7 @@ def test_create_spawn_failure_stays_fenced_when_cleanup_is_pending(
         )
 
     monkeypatch.setattr(m, "_do_spawn", failing_do_spawn)
-    args = types.SimpleNamespace(url=None, token=None)
+    args = types.SimpleNamespace(url=None, token=None, spawn_backend="embody")
 
     m._spawn_worker_for(args, {"id": t.id})
     first = q.latest_reservation(t.id)
@@ -2011,7 +2014,7 @@ def test_create_spawn_failure_without_handle_stays_fenced_when_cleanup_is_held(
         )
 
     monkeypatch.setattr(m, "_do_spawn", failing_do_spawn)
-    args = types.SimpleNamespace(url=None, token=None)
+    args = types.SimpleNamespace(url=None, token=None, spawn_backend="embody")
 
     m._spawn_worker_for(args, {"id": t.id})
     first = q.latest_reservation(t.id)
@@ -2054,7 +2057,7 @@ def test_create_spawn_failure_without_handle_stays_fenced_when_pending(
         )
 
     monkeypatch.setattr(m, "_do_spawn", failing_do_spawn)
-    args = types.SimpleNamespace(url=None, token=None)
+    args = types.SimpleNamespace(url=None, token=None, spawn_backend="embody")
 
     m._spawn_worker_for(args, {"id": task.id})
     fenced = q.latest_reservation(task.id)
@@ -2094,7 +2097,7 @@ def test_create_spawn_failure_without_handle_stays_fenced_when_cleanup_complete(
             },
         ),
     )
-    args = types.SimpleNamespace(url=None, token=None)
+    args = types.SimpleNamespace(url=None, token=None, spawn_backend="embody")
 
     m._spawn_worker_for(args, {"id": task.id})
 
@@ -2103,7 +2106,7 @@ def test_create_spawn_failure_without_handle_stays_fenced_when_cleanup_complete(
     assert fenced.conclusion_state == "complete"
 
 
-def test_no_spawn_mechanism_can_retire_held_cleanup(monkeypatch, q):
+def test_no_spawn_mechanism_preserves_allocation(monkeypatch, q):
     task = q.create("work")
     monkeypatch.setattr(m, "_client", lambda _args: _QueueBackedClient(q))
     _mock_created_worktree(monkeypatch)
@@ -2118,16 +2121,17 @@ def test_no_spawn_mechanism_can_retire_held_cleanup(monkeypatch, q):
         },
     )
     monkeypatch.setattr(m, "_do_spawn", lambda *_args, **_kwargs: None)
-    args = types.SimpleNamespace(url=None, token=None)
+    args = types.SimpleNamespace(url=None, token=None, spawn_backend="embody")
 
     m._spawn_worker_for(args, {"id": task.id})
 
     retired = q.latest_reservation(task.id)
     assert retired.state == SpawnState.FAILED
-    assert retired.conclusion_state == "held"
+    assert retired.conclusion_state is None
+    assert retired.allocation_project == "execution-repo"
 
 
-def test_no_spawn_mechanism_retires_pending_cleanup_with_metadata(
+def test_no_spawn_mechanism_retry_keeps_workspace_without_cleanup(
     monkeypatch, q
 ):
     task = q.create("work")
@@ -2144,18 +2148,18 @@ def test_no_spawn_mechanism_retires_pending_cleanup_with_metadata(
         },
     )
     monkeypatch.setattr(m, "_do_spawn", lambda *_args, **_kwargs: None)
-    args = types.SimpleNamespace(url=None, token=None)
+    args = types.SimpleNamespace(url=None, token=None, spawn_backend="embody")
 
     m._spawn_worker_for(args, {"id": task.id})
 
     retired = q.latest_reservation(task.id)
     assert retired.state == SpawnState.FAILED
-    assert retired.conclusion_state == "pending"
-    assert "live-session" in (retired.conclusion_detail or "")
+    assert retired.conclusion_state is None
     replacement, acquired = q.reserve_spawn(task.id)
     assert acquired is True
     assert replacement.attempt == 2
-    assert replacement.worktree is None
+    assert replacement.worktree == retired.worktree
+    assert replacement.allocation_project == "execution-repo"
 
 
 @pytest.mark.parametrize(
@@ -2206,10 +2210,10 @@ def test_conclusion_exception_respects_independent_body_absence(
         "reason": "bounded cleanup failure",
     }
     if body_absent:
-        replacement, acquired = q.reserve_spawn(task.id)
-        assert acquired is True
-        assert replacement.attempt == 2
-        assert replacement.worktree is None
+        with pytest.raises(TaskError, match="allocation identity is retained"):
+            q.reserve_spawn(task.id)
+        assert q.latest_reservation(task.id).worktree == "wt-created"
+        assert len(q.list_reservations(task_id=task.id)) == 1
     else:
         blocked, acquired = q.reserve_spawn(task.id)
         assert acquired is False

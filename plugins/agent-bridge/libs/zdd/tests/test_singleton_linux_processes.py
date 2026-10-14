@@ -64,7 +64,8 @@ if remaining:
             break
         time.sleep(.01)
 else:
-    root.joinpath("final").write_text(str(os.getpid()))
+    root.joinpath("final.tmp").write_text(str(os.getpid()))
+    os.replace(root / "final.tmp", root / "final")
     end = time.monotonic() + 5
     while not root.joinpath("release").exists() and time.monotonic() < end:
         time.sleep(.01)

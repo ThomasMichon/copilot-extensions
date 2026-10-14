@@ -1,16 +1,8 @@
-"""picker-new-session-prompt-and-composer /
-resume-prompt-durable-seed-and-mux-fix: ``resolve --seed`` guard behavior.
+"""Local and structured SSH ``resolve --seed`` admission guards.
 
-``--seed`` is valid with either ``--new`` (persisted onto the new record) or
-``--worktree-id`` (appended directly to the resume launch's own argv -- see
-``resolve_launch_cli._resolve_resume_context``) -- but never with ``--base``
-(no worktree record, no launch argv builder for the seed to reach), and never
-combined with a remote ``--machine`` target in either mode: the non-JSON path
-checks ``use_new``/``worktree_id`` before ``requested_machine`` and would
-otherwise silently create/resume LOCALLY instead of honoring (or rejecting)
-``--machine``; the JSON path's remote dispatch additionally relays a naively
-space-joined command string with no shell quoting, unsafe for a value that
-can contain arbitrary text.
+New and cold Resume stage prompt intent on the target. Remote text requires
+non-preview JSON admission; interactive remote resolve and incompatible base,
+bare-resume and restore modes refuse before mutation.
 """
 from __future__ import annotations
 
@@ -44,8 +36,8 @@ def _config(tmp_path, machine):
     )
 
 
-def test_resolve_new_with_machine_and_seed_is_rejected_json(capfd):
-    rc = resolve_cli.cmd_resolve(_args(seed="do the thing"))
+def test_resolve_new_with_machine_and_seed_preview_is_rejected_json(capfd):
+    rc = resolve_cli.cmd_resolve(_args(seed="do the thing", dry_run=True))
 
     assert rc != 0
     out = json.loads(capfd.readouterr().out)
@@ -70,7 +62,7 @@ def test_resolve_new_with_machine_and_no_seed_is_unaffected(monkeypatch, capfd, 
     --seed) must still reach the existing remote-dispatch path untouched."""
     state = resolve_cli.ResolveCommandState.from_args(_args(seed=None))
     state.config = _config(tmp_path, "")
-    monkeypatch.setattr(resolve_cli.cfg, "load_machines_yaml", lambda _: {})
+    monkeypatch.setattr(resolve_cli.cfg, "load_machines_yaml", lambda _, **_kwargs: {})
     called = []
     monkeypatch.setattr(
         resolve_cli, "_emit_remote_plan_for_env",
@@ -165,7 +157,7 @@ def test_resolve_machine_differing_from_the_local_machine_still_dispatches_remot
     is specific to the self-match case, not a blanket skip."""
     state = resolve_cli.ResolveCommandState.from_args(_args(seed=None))
     state.config = _config(tmp_path, "a-different-machine")
-    monkeypatch.setattr(resolve_cli.cfg, "load_machines_yaml", lambda _: {})
+    monkeypatch.setattr(resolve_cli.cfg, "load_machines_yaml", lambda _, **_kwargs: {})
     called = []
     monkeypatch.setattr(
         resolve_cli, "_emit_remote_plan_for_env",
@@ -193,7 +185,7 @@ def test_json_launch_canonicalizes_self_target_before_selecting_transport(
     )
     state.config = config
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _: {entry.key: entry})
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _, **_kwargs: {entry.key: entry})
     calls = []
     monkeypatch.setattr(
         resolve_cli, "_emit_remote_plan_for_env",
@@ -236,7 +228,7 @@ def test_self_alias_rejects_unknown_environment(monkeypatch, tmp_path, capfd):
     state.config = _config(tmp_path, "example-host")
     monkeypatch.setattr(
         cfg, "load_machines_yaml",
-        lambda _: {"example-host": cfg.MachineEntry(
+        lambda _, **_kwargs: {"example-host": cfg.MachineEntry(
             key="example-host", alias="local-alias", display_name="Example Host",
         )},
     )
@@ -285,7 +277,7 @@ def test_ambiguous_self_alias_never_launches_locally(monkeypatch, tmp_path, capf
     ]
     if reverse:
         entries.reverse()
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _: {e.key: e for e in entries})
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda _, **_kwargs: {e.key: e for e in entries})
     state = resolve_cli.ResolveCommandState.from_args(
         _args(new_worktree=False, base=True, machine="shared", environment="Win")
     )
@@ -305,17 +297,35 @@ def test_interactive_environment_handoff_rejects_nested_ssh(monkeypatch, tmp_pat
     ) != 0
 
 
-def test_resolve_worktree_id_with_machine_and_seed_is_rejected_json(capfd):
+def test_resolve_worktree_id_with_machine_and_seed_preview_is_rejected_json(capfd):
     """The same remote-target rejection applies to a --worktree-id resume
     seed, not only --new."""
     rc = resolve_cli.cmd_resolve(
-        _args(new_worktree=False, worktree_id="some-wt", seed="do the thing")
+        _args(new_worktree=False, worktree_id="some-wt", seed="do the thing", dry_run=True)
     )
 
     assert rc != 0
     out = json.loads(capfd.readouterr().out)
     assert "seed" in out.get("error", "").lower()
     assert "machine" in out.get("error", "").lower()
+
+
+@pytest.mark.parametrize("new", [False, True])
+def test_remote_prompt_cli_routes_same_seed_selectors_and_no_mux(monkeypatch, tmp_path, new):
+    config = _config(tmp_path, "local")
+    monkeypatch.setattr(resolve_cli.cfg, "load_config", lambda *a, **k: config)
+    called = []
+    monkeypatch.setattr(
+        resolve_cli, "_emit_remote_plan_for_env",
+        lambda *a, **k: called.append((a, k)) or 0,
+    )
+    args = _args(new_worktree=new, worktree_id=None if new else "wt-a",
+                 seed="line one\nquotes ' $()", environment="WSL", target_no_mux=True)
+    assert resolve_cli.cmd_resolve(args) == 0
+    route, keywords = called[0]
+    assert route[:3] == (config, "example-host", "WSL")
+    assert route[3] == (["--new", "--no-mux"] if new else ["--worktree-id", "wt-a", "--no-mux"])
+    assert keywords == {"seed": args.seed}
 
 
 def test_resolve_worktree_id_with_seed_and_no_machine_is_accepted(capfd):

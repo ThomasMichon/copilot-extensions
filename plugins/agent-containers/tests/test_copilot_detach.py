@@ -39,7 +39,8 @@ def _args(**kw):
 
 
 def _target(profile: str = "trusted"):
-    config = ContainersConfig(forward_gh_token=False, relay_enabled=True, relay_port=9857)
+    config = ContainersConfig(forward_gh_token=False, relay_enabled=True, relay_port=9857,
+                              copilot_auth_mode="legacy")
     fleet = FleetConfig(
         repo="example/repo", workspace_folder="/workspaces/repo", exec_user="vscode"
     )
@@ -76,6 +77,7 @@ def seams(monkeypatch):
     monkeypatch.setattr(detach, "model_copilot_args", lambda existing: [])
     calls = types.SimpleNamespace(
         run=[],
+        environments={},
         reserve=[],
         release=[],
         keeper=[],
@@ -188,6 +190,7 @@ def seams(monkeypatch):
     def fake_run(argv, **kwargs):
         command = argv[-1]
         calls.run.append(command)
+        calls.environments[command] = kwargs.get("env")
         if "curl -fsS" in command:
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
         if "agent-worktrees embody" in command:
@@ -241,6 +244,37 @@ def test_detach_success_provisions_credentials_starts_keeper_and_reports_handle(
     assert seams.release == [("anchor-repo@repo-1", "r1")]
     assert _FakeLock.instances[0].released is True
     assert "GH_TOKEN" not in seams.remote_env[0]
+
+
+def test_detach_ssh_excludes_inference_token_but_preserves_repository_auth(seams, monkeypatch):
+    monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "fake-inference-token")
+    monkeypatch.setenv("GH_TOKEN", "fake-repository-token")
+
+    assert detach.cmd_detach(
+        _args(),
+        require_live_relay_port=lambda: 61234,
+        relay_healthy=lambda port: True,
+    ) == 0
+
+    launch = next(command for command in seams.run if "agent-worktrees embody" in command)
+    environment = seams.environments[launch]
+    assert "COPILOT_GITHUB_TOKEN" not in environment
+    assert environment["GH_TOKEN"] == "fake-repository-token"
+
+
+def test_detach_explicit_legacy_preserves_existing_container_login(seams, monkeypatch):
+    import agent_containers.ssh_transport as transport
+
+    monkeypatch.setattr(
+        transport, "container_environment",
+        lambda name, user: {"PATH": "/bin", "COPILOT_GITHUB_TOKEN": "fake-container-login"},
+    )
+    assert detach.cmd_detach(
+        _args(),
+        require_live_relay_port=lambda: 61234,
+        relay_healthy=lambda port: True,
+    ) == 0
+    assert seams.remote_env[0]["COPILOT_GITHUB_TOKEN"] == "fake-container-login"
 
 
 def test_detach_forwards_the_host_github_token_when_enabled(seams, monkeypatch, capsys):
@@ -313,7 +347,7 @@ def test_detach_without_relay_still_prepares_agent_worktrees_and_workspace(monke
     ]
 
 
-def test_launch_env_forwards_a_separate_copilot_cli_account_token(monkeypatch):
+def test_launch_env_does_not_stage_inference_auth(monkeypatch):
     import agent_containers.resolver as resolver_mod
 
     monkeypatch.setattr(
@@ -340,23 +374,24 @@ def test_launch_env_forwards_a_separate_copilot_cli_account_token(monkeypatch):
         relay_healthy=lambda p: (_ for _ in ()).throw(AssertionError("no relay")),
     )
 
-    assert env["COPILOT_GITHUB_TOKEN"] == "gho_inference_only"
+    assert "COPILOT_GITHUB_TOKEN" not in env
     assert "GH_TOKEN" not in env
 
 
-def test_launch_env_fails_closed_when_copilot_cli_account_has_no_host_login(monkeypatch):
+def test_actual_detached_launch_fails_closed_when_source_is_missing(monkeypatch):
     import agent_containers.resolver as resolver_mod
 
     monkeypatch.setattr(resolver_mod, "host_copilot_cli_token", lambda account: None)
     target = _target()
+    target.config.copilot_auth_mode = "host-copilot"
     target.fleet.copilot_cli_account = "inference-user"
 
     with pytest.raises(RuntimeError, match="copilot-login"):
-        detach._launch_env(
-            _args(no_relay=True),
-            target,
-            require_live_relay_port=lambda: (_ for _ in ()).throw(AssertionError("no relay")),
-            relay_healthy=lambda p: (_ for _ in ()).throw(AssertionError("no relay")),
+        detach._ContainerAdapter(
+            name="repo-1", ssh_config=None, hold_id="scope", remote_env=None,
+            relay_port=None, host_relay_port=None, target=target,
+        ).launch(
+            "agent-worktrees embody --detach", timeout=30,
         )
 
 

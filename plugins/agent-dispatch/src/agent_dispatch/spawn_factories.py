@@ -34,7 +34,10 @@ from .spawn_script_body import (  # noqa: F401 -- re-exported for existing call 
 
 
 class SpawnPreparationRetained(RuntimeError):
-    """A created worktree could not be recorded; retain the reservation fence."""
+    """Workspace provenance is unproven or incompatible; retain the reservation fence."""
+
+class SpawnPreparationPending(SpawnPreparationRetained):
+    """The ground owner requires replay of the same pending creation identity."""
 
 
 #: A spawn function: given a task snapshot, launch a worker and report
@@ -236,6 +239,7 @@ def _default_attempt_conclusion(
     session: str | None,
     reservation_key: str,
     driver: str,
+    *, project: str | None = None, worktree_path: str | None = None,
 ) -> dict:
     from . import embody
 
@@ -244,6 +248,7 @@ def _default_attempt_conclusion(
         session,
         reservation_key,
         owner=driver,
+        project=project, worktree_path=worktree_path,
     )
 
 
@@ -525,7 +530,7 @@ def make_embody_spawn(
 
     The supervisor runs CWD-neutral (a service whose working directory is its own
     runtime dir, not any repo), so the spawn **names the target project
-    explicitly** -- derived from the task's lane -- via embody's ``--project``
+    explicitly** -- retained from allocation owner facts -- via acquisition's project
     global, rather than relying on git-like CWD discovery (which would fail with
     "Could not resolve a project for 'embody'"). See the
     ``project-scoped-invocation`` pattern.
@@ -548,16 +553,16 @@ def make_embody_spawn(
                     repo=None if all_repos else task.get("repo"), all_repos=all_repos,
                 ),
                 driver=driver,
-                project=embody.project_for_task(task),
+                project=task.get("spawn_allocation_project") or embody.project_for_task(task),
                 charter=charter,
                 verify_timeout=verify_timeout,
             )
         except bridge.BridgeCarriedSessionBusy as exc:
             return False, {"error": str(exc), "deferred": True}
         except bridge.BridgeUnavailable as exc:
-            return False, {"error": str(exc)}
+            return False, {"error": str(exc), "preserve_workspace": True}
         if result.returncode != 0:
-            return False, {"error": (result.stderr or "").strip()[:200] or "nonzero exit"}
+            return False, {"error": (result.stderr or "").strip()[:200] or "nonzero exit", "preserve_workspace": True}
         handle = session_acquisition.handle(result)
         if not handle.get("session"):
             # A zero exit with no recognizable session id is not a usable
@@ -633,9 +638,9 @@ def make_headless_spawn(
     cleanly: if the ``agent-bridge`` CLI is absent, the spawn reports failure (the
     supervisor fails the reservation, leaving the task queued).
 
-    The supervisor pre-creates and records the headless body's worktree before
-    launch, then passes that exact target to agent-bridge. It also records a
-    ``local-body:<bridge-session-id>`` recovery handle, so a
+    Bridge creates the worktree and agent without a prompt. The coordinator
+    records readiness and the ``local-body:<bridge-session-id>`` handle before
+    ordinary send delivers the assigned task. A
     body that ends before completing (crash, or an explicit ``agent-bridge end``
     after a run cancel) is **liveness-recovered**: the supervisor probes the
     session locally and, on a confirmed-gone verdict, settles the orphaned
@@ -647,48 +652,41 @@ def make_headless_spawn(
     ``agent-dispatch`` commands (``""`` for local discovery, ``" --shared"`` for
     the shared moniker); never a raw ``--url`` (the caller rejects that).
     """
-    from . import bridge, embody, session_acquisition
+    from . import bridge, embody, ordinary_bridge
 
     def spawn(task: dict) -> tuple[bool, dict]:
-        worker_id = f"acquired-{task.get('spawn_reservation_key')}"
+        worker_id = f"dispatch-{task.get('spawn_reservation_key')}"
         seed = embody.autopilot_worker_prompt(
             task["id"],
             worker_id=worker_id,
             route=route,
             repo=None if all_repos else task.get("repo"),
             all_repos=all_repos,
-            explicit_worker_identity=True,
+            explicit_worker_identity=False,
         )
         try:
-            result = session_acquisition.acquire(
-                task, mode="acp",
+            if no_pair:
+                raise bridge.BridgeUnavailable("ordinary Bridge create cannot express the no-pair allocation override")
+            handle = ordinary_bridge.start(
+                task, client=task.get("_spawn_client"),
                 agent=agent,
                 charter=charter,
                 prompt=seed,
-                project=embody.project_for_task(task),
+                project=task.get("spawn_allocation_project") or embody.project_for_task(task),
             )
+        except ordinary_bridge.CreatedAgentUnrecorded as exc:
+            return False, {"error": str(exc), "retained": True}
         except bridge.BridgeCarriedSessionBusy as exc:
             return False, {"error": str(exc), "deferred": True}
         except bridge.BridgeUnavailable as exc:
             return False, {"error": str(exc)}
-        if result.returncode != 0:
-            handle = {
-                "error": (result.stderr or "").strip()[:200] or "nonzero exit"
-            }
-            if failed_session := _failed_bridge_session(result):
-                handle["session"] = f"{_LOCAL_BODY_PREFIX}{failed_session}"
-            return False, handle
-        # Capture the created local agent-bridge session id and encode it as a
-        # `local-body:<sid>` recovery handle so a *gone* body (ended/cancelled)
-        # is liveness-recovered by the supervisor -- freeing its spawn slot.
-        # Falls back to the opaque worker id when uncapturable (degrade safe).
-        return True, session_acquisition.handle(result)
+        return True, handle
 
-    spawn.requires_reusable_worktree = True
+    spawn.requires_reusable_worktree = False
+    setattr(spawn, "ordinary_bridge_for", lambda _task: True)
     spawn.allocation_driver = "agent-dispatch"
     spawn.allocation_interface = "acp"
-    # Caveat: --agent binds a *registered* spawn profile, not any .agent.md
-    # charter; falls back to venue on this legacy worktree-bound path only.
+    # Allocation attributes remain available for callers inspecting backend metadata.
     spawn.allocation_agent = charter or agent
     spawn.allocation_no_pair = no_pair
     spawn.allocation_project_for = lambda _task: (
@@ -757,4 +755,5 @@ def make_label_routed_spawn(default: SpawnFn, *, overrides: Mapping[str, SpawnFn
     spawn.allocation_no_pair_for = lambda task: selected_bool_attribute(
         task, "allocation_no_pair", False
     )
+    setattr(spawn, "ordinary_bridge_for", lambda task: selected_bool_attribute(task, "ordinary_bridge", False))
     return spawn

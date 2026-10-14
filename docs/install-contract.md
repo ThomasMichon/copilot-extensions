@@ -26,6 +26,14 @@ writable runtime or lifecycle artifact. The normative model is defined by
 the requirements below bind installers before the staged runtime migration is
 complete.
 
+Namespaced resource qualification applies to explicit cell installations and
+their lifecycle, including preparation before activation.
+Non-cell hosts retain their supported legacy/default layout and user-global
+plugin commands; they are not required to activate a cell or retire those
+commands. Both modes preserve attributable installation ownership and exact
+command selection. The mode does not authorize last-writer-wins replacement
+of another installation.
+
 1. An installer resolves a validated installation context before writing
    machine-local state. Payload-originated installs inherit attributable
    marketplace provenance; reconciliation, repair, bootstrap, and other
@@ -46,9 +54,11 @@ complete.
    repository roots. Launchers replace conflicting legacy root variables rather
    than inheriting them.
 6. Generic plugin shims live in their owning payload and dispatch directly to
-   that cell's runtime. Machine-global commands are limited to attributable
-   project entry points with ownership receipts; installers never compete for a
-   global generic plugin command last-writer-wins.
+   the selected runtime. On activated-cell hosts, machine-global commands are
+   limited to attributable project entry points with ownership receipts.
+   Non-cell hosts retain supported user-global plugin commands, but consumers
+   still invoke the selected installation's exact command. Installers never
+   compete for a global generic plugin command last-writer-wins.
 7. Missing, ambiguous, or mismatched provenance fails closed. Same-cell sibling
    discovery is explicit, and a same-named peer from another cell is never
    selected through `PATH`, a wildcard installed-plugin scan, or a shared
@@ -921,46 +931,30 @@ Implementations may add a more specific stable invalid-evidence reason, such as
 
 #### Durable runtime-root pointer (resolver-free consumers)
 
-**Added 2026-09-27** (`marketplace-scoped-installations` effort, Phase 2
-consumer-resolution correction). Some callers must run before a full
-resolver invocation is safely possible — a session-start hook on a
-"tools-half box" (before the plugin's own runtime is provisioned), or any
-caller for which even `bash` 4.4/`awk`/Python cannot be assumed. These
-callers cannot invoke the resolver directly, yet still need a best-effort
-answer to "is there a currently active runtime for plugin X, and where."
+The September 2026 advisory `runtime-root` file is retired as a discovery
+mechanism. It was keyed only by plugin name, could be overwritten by another
+marketplace, and described a runtime/state directory rather than a callable
+command. Neither diagnostic action publishes, modifies, or deletes that file.
+Existing files remain untouched; cleanup is a separate explicit operation.
 
-Every `status` resolution (`resolve_installation_mode` / `installation-context.sh
-status` / `installation-context.ps1 status`) that reaches `status: "ready"`
-with a non-null `runtimeRoot` publishes that value, as a side effect, to a
-durable, plain-text, well-known location:
+`status`, `probe-legacy`, and the importable `resolve_installation_mode` API
+are non-mutating diagnostics on every supported platform. Their result schema,
+ownership checks, and refusal semantics remain unchanged. Diagnostic success
+does not authorize publication, provisioning, activation, or service startup.
 
-```text
-<durable-home>/<plugin-id>/runtime-root
-```
+Resolver-free onboarding checks its own payload command and installer, using
+the same readiness criteria as that payload's session command catalog; it
+never executes a shim to test availability or trusts an arbitrary existing
+runtime directory. If its owning payload command is unavailable, onboarding
+stays silent even when a legacy global command exists; it never directs a user
+to an unavailable catalog entry. This does not remove or disable supported
+legacy commands.
 
-(`<durable-home>` is the same canonical `.copilot-extensions` root used by
-`installation-mode.json`.) The file contains exactly one line: the absolute
-`runtimeRoot` path, UTF-8, LF-terminated, written with the same atomic
-same-directory-replacement discipline as every other durable-home write. It
-is not a secret (a path, not a credential); each runtime follows its own
-existing atomic-write primitive's default permissions rather than adding new
-platform-specific permission-hardening code for this one file. Publication is
-skipped — the existing pointer, if any, is left
-untouched — whenever `status` is not `"ready"` or `runtimeRoot` is null;
-a transient bad resolution must never overwrite a last-known-good pointer,
-and a failed write must never fail or block the resolver's real result.
-
-**This pointer is advisory-only and never authoritative.** It exists purely
-to let a resolver-free reader make a best-effort existence/path check
-(`test -x "$(cat .../runtime-root 2>/dev/null)/bin/<command>"`, or equivalent)
-with a plain `cat`/`head -n1` — no JSON parsing, no `awk`, no bash-4.4
-features required to read it. Any caller that can afford the real resolver
-must call it directly instead of trusting this file; the pointer may be
-stale (a plugin update, migration, or rollback since the last `status` call)
-and a resolver-free reader that finds it missing or stale must fail open
-exactly as it already does today for "no answer" — it must never treat the
-pointer's absence as proof nothing is installed, and never use it to gate a
-mutating decision.
+Session callers consume the owning plugin's exact catalog `argv`. Durable
+out-of-session callers use explicitly ownership-bound stable launchers.
+Neither uses a plugin-name-only pointer as an invocation contract. Publication
+belongs to the corresponding explicit lifecycle or session-start boundary,
+not a status query.
 
 #### Effective-mode and status table
 
@@ -1084,9 +1078,10 @@ globally distinguishing marketplace provenance; the variable's presence does
 not replace installation identity, and not every plugin surface receives it.
 
 > **Transition note.** Concrete `~/.agent-*` and `~/.local/bin/agent-*` examples
-> later in this document describe the currently deployed legacy layout. They
-> remain valid only for unchanged legacy installers during the phased migration.
-> New or migrated installer surfaces follow the cell contract above.
+> later in this document describe the supported legacy/default layout on
+> non-cell hosts. Those hosts need not retire that layout. Cell activation,
+> migration, and cell-owned installer surfaces follow the cell contract above;
+> supported default operation is not itself namespaced activation.
 > Until an explicit installer or management caller wires activation and runtime
 > selection, missing user policy means the legacy layout remains authoritative.
 > Context receipts may be stamped without selecting the cell runtime, and the
@@ -1227,9 +1222,16 @@ A plugin declares whether — and where — its runtime should be reconciled via
 
 | `runtimeScope` | Meaning |
 |----------------|---------|
-| `none` | The reconciler never touches the runtime. Use for skills/agents/hooks-only plugins, **plugin-contributed extensions** whose payload *is* the runtime (e.g. `context-handoff`), **and** plugins whose runtime is managed out-of-band (per-machine, by hand). |
-| `universal` | Reconcile the runtime on **every** machine (a non-Python runtime that every machine needs and that deploys outside the plugin payload). |
+| `none` | The reconciler never touches the runtime. Use for skills/agents/hooks-only plugins **and** plugin-contributed extensions whose payload *is* the runtime (e.g. `context-handoff`). A plugin that ships a runtime installer (`scripts/install.*` or `scripts/init.*`) must not declare `none` -- `tools/check-install-contract.py` rejects it, because neither the launch-time reconcile nor `update` would ever rebuild that runtime. |
+| `universal` | Reconcile the runtime on **every** machine that enables the plugin (e.g. `agent-worktrees`, `agent-ssh`). |
 | `machine-gated` | Reconcile the runtime only on machines in the plugin's allowed set (e.g. `agent-bridge`, `agent-codespaces`, `agent-containers`, `agent-mcp`). |
+
+The same scope governs the unified `update` flow: `update` rebuilds a
+`machine-gated` runtime only where the machine gate described below permits it
+(the same `runtime_allowed` decision), resolving the gate from the repository
+that enables the plugin, and
+reports any other machine as `SKIPPED (not allowed on this machine)` -- even
+under `--force`, which re-deploys only runtimes this machine may run.
 
 The reusable installer/readiness contract for `machine-gated` plugins is defined
 by [`patterns/installer-readiness-modules.md`](patterns/installer-readiness-modules.md)
@@ -1703,6 +1705,41 @@ and the markerless corpse is tossed + rebuilt on the next run (automatic retry).
 > hazard (there, a Windows `PermissionError` from
 > `shutil.rmtree`/`shutil.copytree` hitting a slot still held open by
 > another process) for this one standalone installer.
+
+### Install-transaction lock — mutating runs never interleave, never run unlocked
+
+Several callers can start the same plugin's installer at once: the launch-time
+reconcile, `update`, a session-start bootstrap, and a binstub's first-use
+`provision`. An adopting installer (`agent-pull-requests`, `agent-logger`,
+`agent-vault`, `agent-mcp`, `agent-containers`, `agent-ssh`) therefore holds one exclusive
+lock on `<install-dir>/.install.lock` for every mutating action
+(`stamp`/`install`/`update`/`provision`) across its whole
+build + publish transaction (Windows: a `FileShare.None` handle; POSIX: `flock` on
+fd 8 (fd 7 for `agent-ssh`), or an atomic pid symlink
+`<install-dir>/.install.lock.pid` where `flock` is unavailable, whose dead owner is
+reaped under a pid-bearing `.install.lock.pid.reap` mutex so two contenders can
+never both reap and then delete each other's live lock. The reaper re-derives
+staleness from the link's current value while holding that mutex, and a link that
+reads empty -- absent (just released or reaped) or not a symlink -- is never
+unlinked: lock creators are not serialized by the mutex, so such an unlink could
+delete a live lock taken in the meantime; an unattributable lock path fails
+closed at the deadline. A `.reap` link left by a
+reaper that died mid-reap is deliberately never reclaimed automatically (that
+would reintroduce the same race); runs fail closed at their deadline until it is
+removed by hand). It is
+acquired **after** the self-stage
+re-exec (the staging parent never holds it) and released in `finally` / an `EXIT`
+trap; the OS releases it if the process dies.
+
+The lock is **fail-closed**: a run that cannot acquire it within its timeout
+(300s; overridable for `agent-vault`, `agent-mcp`, `agent-containers`, and `agent-ssh` via
+`COPILOT_PLUGIN_INSTALL_LOCK_TIMEOUT_SEC`) reports that it could not acquire the
+install transaction lock and exits non-zero — it never proceeds unlocked.
+Read-only actions (`status`), service controls, and `uninstall` do not take it.
+`agent-logger` differs only in also locking `uninstall` (everything except
+`status`).
+It is distinct from the binstub's `.provision.lock`, which only single-flights
+first-use provisioning around the installer call.
 
 ### Update-in-progress marker — installer self-reports a live transition (#5066)
 
@@ -2316,6 +2353,9 @@ runtime entrypoint (`install.*` if present, else `init.*`):
   new runtime plugins must comply, not be added to that set.
 - every plugin PowerShell script routes persistent User/Machine environment
   access through the shared contained-test adapter; direct access is rejected.
+- every plugin's declared `runtimeScope` is one the reconciler accepts, and a
+  plugin that ships a runtime installer declares `universal` or `machine-gated`
+  (see [Automatic reconciliation at launch](#automatic-reconciliation-at-launch-runtimescope)).
 
 Wire it as a `pre-push` hook (see `tools/hooks/pre-push`, which also runs
 `tools/check-no-internal-identifiers.py` — a repo-wide guard that fails the push

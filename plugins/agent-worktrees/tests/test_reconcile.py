@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import subprocess
@@ -26,6 +27,93 @@ INSTALLATION_CONTEXT_PS1 = (
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("pointer_exists", [False, True])
+def test_runtime_resolution_real_helper_read_only(env, monkeypatch, pointer_exists):
+    payload = env.install_payload("agent-worktrees", "2.0.0", scope="universal")
+    helper = reconcile._installation_context_helper("agent-worktrees", payload)
+    assert helper is not None
+    monkeypatch.setenv("HOME", str(env.home))
+    monkeypatch.setenv("USERPROFILE", str(env.home))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: env.home))
+    assert Path.home() == env.home
+    if os.name == "nt":
+        # Isolate PowerShell's own JIT/telemetry startup writes, not helper
+        # effects; keep the entire fixture home in the byte/mtime snapshot.
+        (env.home / "AppData" / "Local" / "Microsoft" / "PowerShell").mkdir(
+            parents=True,
+        )
+        monkeypatch.setenv("DOTNET_MultiCoreJitNoProfileGather", "1")
+        monkeypatch.setenv("COMPlus_MultiCoreJitNoProfileGather", "1")
+        monkeypatch.setenv("POWERSHELL_TELEMETRY_OPTOUT", "1")
+    legacy = env.home / ".agent-worktrees"
+    legacy.mkdir()
+    (legacy / "retained-state.json").write_text('{"retained":true}\n', encoding="utf-8")
+    if pointer_exists:
+        pointer = env.home / ".copilot-extensions" / "agent-worktrees" / "runtime-root"
+        pointer.parent.mkdir(parents=True)
+        pointer.write_text("retained-foreign-pointer\n", encoding="utf-8")
+
+    calls = []
+    real_run = subprocess.run
+
+    def run_fixture_helper(command, **kwargs):
+        helper_index = command.index(str(helper))
+        assert command[helper_index + 1] == "probe-legacy"
+        calls.append(command)
+        if os.name == "nt":
+            return real_run(command, **kwargs)
+        # HOME cannot redirect the POSIX account profile. Pin only that OS
+        # lookup in the child, then execute the unchanged owned helper CLI.
+        bootstrap = (
+            "import pwd,runpy,sys\n"
+            "home=sys.argv[1]\n"
+            "original=pwd.getpwuid\n"
+            "def getpwuid(uid):\n"
+            "    record=original(uid)\n"
+            "    return pwd.struct_passwd((*record[:5],home,record.pw_shell))\n"
+            "pwd.getpwuid=getpwuid\n"
+            "sys.argv=sys.argv[2:]\n"
+            "runpy.run_path(sys.argv[0],run_name='__main__')\n"
+        )
+        return real_run(
+            [command[0], "-c", bootstrap, str(env.home), *command[1:]],
+            **kwargs,
+        )
+
+    monkeypatch.setattr(reconcile.subprocess, "run", run_fixture_helper)
+
+    def snapshot():
+        return {
+            path.relative_to(env.home).as_posix(): (
+                path.is_dir(), path.stat().st_mtime_ns,
+                hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None,
+            )
+            for path in env.home.rglob("*")
+        }
+
+    before = snapshot()
+    result = reconcile._run_installation_mode_helper(
+        "agent-worktrees", payload, helper, legacy, context=None,
+    )
+    assert result["schema"] == "copilot-extensions.installation-resolution"
+    assert result["actualMode"] == "legacy"
+    assert result["runtimeRoot"] == str(legacy)
+    assert result["context"] is None
+    assert result["policy"]["path"] == str(
+        env.home / ".copilot-extensions" / "installation-mode.json"
+    )
+    assert result["policy"]["authoritative"] is True
+    assert result["policy"]["state"] == "missing"
+    selected = reconcile.resolve_runtime_installation(
+        "agent-worktrees", payload, home=env.home,
+    )
+    assert selected.actual_mode == "legacy"
+    assert selected.runtime_root == legacy
+    assert selected.context is None
+    assert len(calls) == 2
+    assert snapshot() == before
+
 
 @pytest.fixture
 def env(tmp_path: Path, monkeypatch):

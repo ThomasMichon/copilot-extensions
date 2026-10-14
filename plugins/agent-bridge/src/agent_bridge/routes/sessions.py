@@ -9,7 +9,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from .. import elevated
@@ -28,16 +28,12 @@ from ..models import (
     CursorAckRequest,
     CursorInfo,
     DelegatedResultSnapshot,
-    PendingPrompt,
-    PendingQueueResponse,
     ResyncSessionResponse,
     SessionInfo,
     SessionListResponse,
     SessionStatus,
     StartSessionRequest,
     StartSessionResponse,
-    SubmitPromptRequest,
-    SubmitPromptResponse,
 )
 from ..result_snapshot import (
     DEFAULT_MAX_ITEMS,
@@ -56,9 +52,18 @@ from ..session_manager import (
     SessionConflictError,
 )
 from ..transport import SpawnTarget
+from ..session_start_selection import find_reusable_caller_session as _find_reusable_session
 from ..worktree_head import resolve_head
 from ..preference_requests import apply_request_preferences, reused_preference_source
 from .event_pages import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, events_before_page, rows_to_events as _rows_to_events
+from .prompts import (  # noqa: F401 -- preserved public route imports
+    clear_pending_queue,
+    get_pending_queue,
+    remove_pending_prompt,
+    router as prompt_router,
+    submit_native_bound_prompt,
+    submit_prompt,
+)
 
 if TYPE_CHECKING:
     from ..session_manager import Session, SessionManager
@@ -66,6 +71,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/sessions", tags=["sessions"])
+router.include_router(prompt_router)
 
 # Sentinel cursor key for callers with no caller_id -- keeps delivery_cursors'
 # primary key non-null while giving anonymous callers a shared resume point.
@@ -472,30 +478,6 @@ def _persisted_session_info(
 
 # Session states considered "alive"/reusable for caller affinity. Terminal
 # states are excluded -- reusing one would hand back a no-process session.
-_REUSABLE_STATES = frozenset({
-    SessionStatus.CREATED,
-    SessionStatus.STARTING,
-    SessionStatus.RUNNING,
-    SessionStatus.IDLE,
-})
-
-
-def _find_reusable_session(mgr, agent_name, caller_id):
-    """Return an alive session matching (agent_name, caller_id), or None.
-
-    Picks the most recently updated match so a reload reattaches to the
-    freshest session for that caller.
-    """
-    for session in mgr.list_sessions():  # already sorted newest-first
-        if (
-            session.caller_id == caller_id
-            and session.agent_name == agent_name
-            and session.status in _REUSABLE_STATES
-        ):
-            return session
-    return None
-
-
 def _enforce_worktree_head_guard(worktree_id: str, mgr=None) -> None:
     """Refuse a create into a worktree with an active head or pending handoff.
 
@@ -586,6 +568,13 @@ def _enforce_worktree_head_guard(worktree_id: str, mgr=None) -> None:
     )
 
 
+@router.post("/workspace-creations", response_model=StartSessionResponse)
+async def create_workspace(req: StartSessionRequest, request: Request):
+    if req.creation_key is None:
+        raise HTTPException(status_code=422, detail="workspace-creations requires creation_key")
+    return await start_session(req, request)
+
+
 @router.post("", response_model=StartSessionResponse, status_code=201)
 async def start_session(req: StartSessionRequest, request: Request):
     mgr: SessionManager = request.app.state.session_manager
@@ -649,7 +638,7 @@ async def start_session(req: StartSessionRequest, request: Request):
     # that (agent, caller_id) pair, return it instead of spawning a new
     # one -- makes create idempotent for HTTP consumers. Pass force_new
     # to opt out.
-    if req.caller_id and not req.force_new:
+    if req.caller_id and not req.force_new and req.creation_key is None:
         existing = _find_reusable_session(mgr, agent_name, req.caller_id)
         if existing is not None:
             existing_source = reused_preference_source(req, existing)
@@ -669,7 +658,7 @@ async def start_session(req: StartSessionRequest, request: Request):
     # agent-bridge-cold-resume Phase 3). Head is *derived* from
     # agent-worktrees; fails open if unreadable. Sibling of
     # `resume_worktree`'s `live_cli_holds_worktree` liveness guard.
-    if req.worktree_id:
+    if req.worktree_id and req.creation_key is None:
         _enforce_worktree_head_guard(req.worktree_id, mgr)
 
     if agent_name:
@@ -733,6 +722,11 @@ async def start_session(req: StartSessionRequest, request: Request):
     # Per-session env overrides (e.g. BYOK provider selection) merge onto the
     # agent's declared env, per-session winning (applied by the transport).
     request_env, source = apply_request_preferences(req, request.app.state, target)
+
+    from ..workspace_creation import start_request
+    creation = await start_request(req, mgr, target, agent_name=agent_name, env=request_env, source=source)
+    if creation is not None:
+        return creation
 
     try:
         session = await mgr.start_session(
@@ -1079,95 +1073,6 @@ async def wait_for_attention(
         await session.event_log.wait_for_events(
             after, timeout=min(remaining, 30.0)
         )
-
-
-@router.post("/{session_id}/turns", response_model=SubmitPromptResponse)
-async def submit_prompt(
-    session_id: str,
-    req: SubmitPromptRequest,
-    request: Request,
-    response: Response,
-):
-    """Submit a prompt to a session.
-
-    Default (``queue=false``) preserves the legacy contract: run now, or
-    409 if the session is busy. With ``queue=true`` the prompt is durably
-    queued when busy (persisted to ``pending_prompts``, delivered FIFO on
-    settle, surviving remount/crash/restart); response is 202 with
-    ``queued=true`` and the queue position.
-    """
-    mgr: SessionManager = request.app.state.session_manager
-    try:
-        if req.queue:
-            result = await mgr.submit_or_queue_prompt(
-                session_id, req.prompt, caller_id=req.caller_id, no_resume=req.no_resume
-            )
-        else:
-            turn_index = await mgr.submit_prompt(session_id, req.prompt)
-            result = {"queued": False, "turn_index": turn_index}
-    except DaemonDrainingError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
-    except ProviderTargetRefreshError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=ProviderTargetRefreshError.public_message,
-        ) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    effective = result.get("session_id") or session_id  # a successor, after a prompt-triggered handoff
-    session = mgr.get_session(effective)
-    status = session.status if session else SessionStatus.IDLE
-    if result.get("queued"):
-        response.status_code = 202
-        return SubmitPromptResponse(
-            status=status, session_id=effective, queued=True,
-            queue_id=result.get("queue_id"), position=result.get("position"),
-        )
-    return SubmitPromptResponse(turn_index=result.get("turn_index"), status=status, session_id=effective)
-
-
-@router.get("/{session_id}/queue", response_model=PendingQueueResponse)
-async def get_pending_queue(session_id: str, request: Request):
-    """Snapshot a session's durable pending-prompt queue (FIFO order)."""
-    mgr: SessionManager = request.app.state.session_manager
-    try:
-        rows = mgr.list_pending_queue(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    return PendingQueueResponse(
-        session_id=session_id,
-        pending=[PendingPrompt(**r) for r in rows],
-    )
-
-
-@router.delete("/{session_id}/queue/{queue_id}", status_code=204)
-async def remove_pending_prompt(session_id: str, queue_id: int, request: Request):
-    """Drop one queued follow-up by id (operator removes a chip)."""
-    mgr: SessionManager = request.app.state.session_manager
-    try:
-        hit = mgr.remove_pending_prompt(session_id, queue_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    if not hit:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Queued prompt {queue_id} not found for session {session_id}",
-        )
-
-
-@router.delete("/{session_id}/queue", status_code=204)
-async def clear_pending_queue(session_id: str, request: Request):
-    """Clear a session's whole durable pending-prompt queue."""
-    mgr: SessionManager = request.app.state.session_manager
-    try:
-        mgr.clear_pending_queue(session_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
 
 @router.post("/{session_id}/resync", response_model=ResyncSessionResponse)

@@ -1493,7 +1493,20 @@ def _cmd_update(rest: list[str]) -> int:
     Two steps: (1) self-update the Manager (best-effort; effective next run);
     (2) orchestrate via the engine (``agent-worktrees update --no-manager``,
     the seam bypass) -- refreshing plugin payloads/runtimes, syncing anchors.
+    The run is recorded through ``update_events``; the exit code follows the
+    shared update table (0 success, non-zero failure classes).
     """
+    from .update_events import UpdateRun
+
+    run = UpdateRun()
+    try:
+        return run.finish(_cmd_update_steps(rest, run))
+    except BaseException as exc:
+        run.abort(exc)
+        raise
+
+
+def _cmd_update_steps(rest: list[str], run) -> int:
     from . import engine_client as ec
     from .self_install import self_update
 
@@ -1503,27 +1516,31 @@ def _cmd_update(rest: list[str]) -> int:
 
     # 1. Self-update the Manager (best-effort; the new slot takes effect next run).
     print("  Self-updating the Worktree Manager …")
-    su = self_update(dry_run=False)
-    cutover = su.cutover if isinstance(su.cutover, dict) else None
-    cutover_failed = bool(
-        cutover
-        and (
-            cutover.get("action") == "error"
-            or (
-                isinstance(cutover.get("result"), dict)
-                and cutover["result"].get("ok") is False
+    with run.self_update_phase():
+        su = self_update(dry_run=False)
+        cutover = su.cutover if isinstance(su.cutover, dict) else None
+        cutover_failed = bool(
+            cutover
+            and (
+                cutover.get("action") == "error"
+                or (
+                    isinstance(cutover.get("result"), dict)
+                    and cutover["result"].get("ok") is False
+                )
             )
         )
-    )
-    if su.action == "updated":
-        print(f"    ✓ updated {su.previous or '(none)'} → {su.version} "
-              "(active on next run)")
-    elif su.action == "already-current":
-        print(f"    ✓ already current ({su.version})")
-    else:
-        print(f"    ○ self-update {su.action}: {su.reason} — continuing")
-    if cutover_failed:
-        print(f"    ✗ mux-daemon cutover failed: {cutover}")
+        if su.action == "updated":
+            print(f"    ✓ updated {su.previous or '(none)'} → {su.version} "
+                  "(active on next run)")
+        elif su.action == "already-current":
+            print(f"    ✓ already current ({su.version})")
+        else:
+            print(f"    ○ self-update {su.action}: {su.reason} — continuing")
+        if cutover_failed:
+            print(f"    ✗ mux-daemon cutover failed: {cutover}")
+        # Inside the phase, so a failed cutover is the phase's own outcome.
+        run.record_self_update(su.action, cutover_failed,
+                               str(cutover) if cutover_failed else su.reason)
     # The manager_update_check cache is stale after a version change -- drop
     # it so the next poll re-checks for real instead of serving the
     # pre-update verdict (#4424).
@@ -1543,6 +1560,8 @@ def _cmd_update(rest: list[str]) -> int:
         rc = ec.run_engine_passthrough(project, ["update", "--no-manager", *forwarded])
     except ec.EngineError as e:
         print(f"  ✗ {e}")
+        run.record_engine_error(str(e), missing=bool(getattr(e, "install_hint", False)),
+                                cause=e.__cause__)
         if getattr(e, "install_hint", False):
             print("    Run `worktree-manager setup --apply` to install the engine first.")
         return 1

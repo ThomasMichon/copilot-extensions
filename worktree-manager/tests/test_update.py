@@ -10,8 +10,11 @@ best-effort behavior — all without a real engine or network.
 from __future__ import annotations
 
 import io
+import json
+import os
 import subprocess
 from contextlib import redirect_stdout
+from pathlib import Path
 
 import pytest
 
@@ -109,7 +112,8 @@ def test_update_engine_absent_hints_setup(monkeypatch):
     buf = io.StringIO()
     with redirect_stdout(buf):
         rc = wm._cmd_update([])
-    assert rc == 1
+    # An absent engine is a configuration problem (exit 3 in the update table).
+    assert rc == 3
     assert "worktree-manager setup" in buf.getvalue()
 
 
@@ -152,6 +156,70 @@ def test_extract_project_none_when_absent():
     project, rest = wm._extract_project(["--force", "--skip-modules"])
     assert project is None
     assert rest == ["--force", "--skip-modules"]
+
+
+# ── update-run telemetry ──────────────────────────────────────────────────────
+
+def _telemetry_status(home) -> dict:
+    return json.loads((home / "update-status.json").read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+def update_home(tmp_path, monkeypatch):
+    import update_telemetry as ut
+    for key in (ut.ENV_RUN_ID, ut.ENV_EVENTS, ut.ENV_OWNER):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv(ut.ENV_HOME, str(tmp_path / "update-home"))
+    return tmp_path / "update-home"
+
+
+def test_cutover_failure_command_failed(monkeypatch, update_home):
+    rc, _calls, _out = _run_update(
+        [],
+        monkeypatch,
+        su_action="updated",
+        su_kwargs={"cutover": {"action": "error", "error": "boom"}},
+    )
+    assert rc == 1
+    status = _telemetry_status(update_home)
+    assert status["run"]["outcome"] == "command_failed"
+    assert status["last_failure"]["summary"].startswith("manager: command_failed")
+    phases = [(p["phase"], p["outcome"]) for p in status["run"]["phases"]]
+    assert phases == [("manager_self_update", "command_failed")]
+
+
+@pytest.mark.parametrize(("engine_rc", "expected"), [(0, 0), (2, 2), (6, 6), (5, 5), (75, 1)])
+def test_engine_exit_code_maps_through_table(monkeypatch, update_home, engine_rc, expected):
+    from worktree_manager.self_install import SelfUpdateResult
+    monkeypatch.setattr(self_install, "self_update",
+                        lambda **kw: SelfUpdateResult(action="already-current", version="1"))
+    monkeypatch.setattr(ec, "run_engine_passthrough", lambda project, args, **kw: engine_rc)
+    with redirect_stdout(io.StringIO()):
+        assert wm._cmd_update([]) == expected
+
+
+def test_run_env_reaches_engine(monkeypatch, update_home):
+    import update_telemetry as ut
+    from worktree_manager.self_install import SelfUpdateResult
+    monkeypatch.setattr(self_install, "self_update",
+                        lambda **kw: SelfUpdateResult(action="already-current", version="1"))
+    monkeypatch.setattr(ec, "engine_base_command", lambda: ["/fake/agent-worktrees"])
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["env"] = kw["env"]
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(ec.subprocess, "run", fake_run)
+    with redirect_stdout(io.StringIO()):
+        assert wm._cmd_update([]) == 0
+    env = seen["env"]
+    assert env[ut.ENV_OWNER] == f"manager:{os.getpid()}"
+    assert Path(env[ut.ENV_EVENTS]).is_absolute()
+    status = _telemetry_status(update_home)
+    assert env[ut.ENV_RUN_ID] == status["run"]["id"]
+    assert status["run"]["exit_code"] == 0
+    assert ut.ENV_RUN_ID not in os.environ, "the owner restores its environment"
 
 
 # ── run_engine_passthrough ────────────────────────────────────────────────────
@@ -754,3 +822,53 @@ def test_safe_extract_never_uses_the_filter_kwarg(tmp_path):
             self_install._safe_extract(tf, dest)
 
     assert (dest / "stuff" / "a.txt").read_text() == "hello\n"
+
+
+@pytest.mark.parametrize(("install_hint", "expected", "outcome"), [
+    (True, 3, "configuration_limitation"),
+    (False, 1, "command_failed"),
+])
+def test_engine_error_is_recorded(monkeypatch, update_home, install_hint, expected, outcome):
+    from worktree_manager.self_install import SelfUpdateResult
+    monkeypatch.setattr(self_install, "self_update",
+                        lambda **kw: SelfUpdateResult(action="already-current", version="1"))
+
+    def boom(project, args, **kw):
+        raise ec.EngineError("engine unavailable", install_hint=install_hint)
+
+    monkeypatch.setattr(ec, "run_engine_passthrough", boom)
+    with redirect_stdout(io.StringIO()):
+        assert wm._cmd_update([]) == expected
+    status = _telemetry_status(update_home)
+    assert status["run"]["outcome"] == outcome
+    assert status["last_failure"]["summary"].startswith(f"engine: {outcome}")
+
+
+def _sharing_violation() -> OSError:
+    exc = OSError(13, "The process cannot access the file")
+    exc.winerror = 32
+    return exc
+
+
+@pytest.mark.parametrize(("cause", "expected", "outcome", "code"), [
+    (_sharing_violation(), 5, "blocked_by_lock", "sharing_violation"),
+    (PermissionError(13, "Access is denied"), 1, "command_failed", "permission_denied"),
+    (OSError(5, "Input/output error"), 1, "command_failed", "io_error"),
+])
+def test_engine_launch_error_is_classified_by_its_cause(
+        monkeypatch, update_home, cause, expected, outcome, code):
+    from worktree_manager.self_install import SelfUpdateResult
+    monkeypatch.setattr(self_install, "self_update",
+                        lambda **kw: SelfUpdateResult(action="already-current", version="1"))
+
+    def boom(project, args, **kw):
+        raise ec.EngineError("could not start the engine") from cause
+
+    monkeypatch.setattr(ec, "run_engine_passthrough", boom)
+    with redirect_stdout(io.StringIO()):
+        assert wm._cmd_update([]) == expected
+    status = _telemetry_status(update_home)
+    assert status["run"]["outcome"] == outcome
+    events = Path(status["run"]["events_path"]).read_text(encoding="utf-8").splitlines()
+    engine = [json.loads(e) for e in events if '"component":"engine"' in e.replace(" ", "")]
+    assert [e["error"]["code"] for e in engine] == [code]

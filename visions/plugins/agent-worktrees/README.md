@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** branch (worktree-lifetime authority; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-12
+- **Last revised:** 2026-10-13
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -242,15 +242,24 @@ still live, resumable, or a member of the ordinary active set. It is the
 natural terminus of the lifecycle — reap discards the checkout, never the
 record of what the checkout was.
 
+### Continuous worktree reclamation
+
+The [continuous reclamation](continuous-reclamation/README.md) child governs
+ongoing, host-wide collection of safely disposable workspaces, with bounded
+resident maintenance, preserved responsibility and observable performance.
+
 ### Derived status
 
 Overall status is a reduction over independently owned facts: source-control
 state, claims and obligations, asserted disposition, effort focus, relationships,
 and fresh provider observations. No observer writes the aggregate verdict.
 Stale or absent execution observations reduce fidelity without erasing durable
-responsibility. Computing this reduction is always available **on demand** —
-direct, in-process computation is a correct degrade path, never a failure — but
-it is not the steady-state target: whenever a resident accelerator is
+responsibility. Owning producers materialize this reduction into an independently
+readable, schema-bounded current-state projection. An ordinary status read
+consumes that projection; it does not reconstruct the facts from journals,
+ledgers, lists, or a growing worktree record. Explicit refresh and workflow
+repair remain available, but a cold or missing projection is reported honestly
+rather than silently turning the read into reconstruction. Whenever a resident accelerator is
 reachable, a reader is a **thin, ref-counted subscriber** of it rather than an
 independent computer of the same facts. A reader that finds none running boots
 one on demand, waits for it to publish its reachable address, subscribes, reads
@@ -288,13 +297,11 @@ confirmed is marked as such in the rendered result — never silently reported
 as certain, and never given a separate, whole state of its own standing in
 for "unverified."
 
-**This describes the accelerator's first-landed shape**
-(`agent-worktrees-external-status-accelerator`, 2026-09-20): read-only warmth
-over facts the durable YAML record (and direct git/session/claims
-computation) already own, never a second writer, never authoritative over a
-fresher direct read. *The resident daemon as the authoritative live-state
-database* below asserts the deliberate long-term inversion of that stance —
-read this section as Phase 1 of that trajectory, not as the ceiling.
+The schema-bounded current-state projection is the read surface for derived
+status, not a competing owner of the underlying observations. *The
+resident daemon as the authoritative live-state database* below owns coherent
+current state and its publication. Projection freshness never grants a reader
+authority to reconstruct or overwrite it.
 
 ### The resident daemon as the authoritative live-state database
 
@@ -309,13 +316,13 @@ sync of its in-memory state, never independently opened, parsed, or
 hand-written by a CLI command, a script, or a sibling plugin as a side door
 around it.
 
-This is a deliberate reversal, not an extension: today, a CLI invocation that
-finds no daemon reachable degrades to direct file computation as a
-**correct, coequal** path (*Derived status* above). Under this direction, a
-read degrade to direct file access remains available for resilience — the
+Under this direction, a read degrade to direct access to the same bounded
+current-state projection remains available for resilience — the
 daemon being unreachable must never wedge worktree state shut — but it stops
 being coequal: it is a **degraded, advisory-only** path, clearly marked as
-such to whatever surfaced it. A *write* degrades differently, deliberately:
+such to whatever surfaced it. Absence or unreadiness of that projection does
+not authorize journal replay, ledger traversal, or a fleet scan inside the
+read. A *write* degrades differently, deliberately:
 when no daemon is reachable, a mutation runs the **exact same underlying
 write logic the daemon itself would have called** — imported and invoked
 in-process, never a second, forked implementation that could quietly drift
@@ -478,22 +485,16 @@ engine or persisting a second copy of its state.
 
 ### external-status-consumer-contract
 
-*(Phase 1 shape — see* daemon-mediated-write-authority *and* single-write-
-path-across-plugins *below for the asserted long-term inversion this is
-expected to grow into.)*
-
 Any other capability that needs a worktree's current status — a Tasks-board
 status card, a dashboard, a notification — is the same kind of reader
 *Derived status* above already describes: it boots the resident accelerator
 on demand if none is reachable, subscribes, and reads the answer from its
 fast, coalesced cache, rather than independently recomputing git state,
 session lineage, liveness, or the claims graph, or spawning its own
-subprocess on a hot per-render or per-click path. Per the suite-wide
-work-coalescing-singleton pattern, this is **warmth, not truth**: the
-accelerator owns no fact a consumer couldn't otherwise obtain, it only saves
-everyone from separately paying to recompute the same shareable answer, and
-a stale or unreachable accelerator is never treated as authoritative over a
-fresher direct answer. The projection itself carries the same per-fact
+subprocess on a hot per-render or per-click path. The read is O(state-schema),
+independent of growing records, histories, ledgers, lists and graphs.
+The authority owns materialization; a stale or unreachable service does not
+license a reader to compute a competing answer. The projection carries the same per-fact
 freshness/unconfirmed markers *Derived status* already requires (never a
 flattened, all-or-nothing "current" verdict); a consumer renders those
 markers as given rather than presenting a successfully-fetched but stale or
@@ -502,17 +503,15 @@ excluded from this cache (see *Not a transcript or event warehouse* below) —
 a consumer that wants recent messages pulls them on demand from the owning
 session host instead.
 
-A consumer able to compute these facts itself (an in-process agent-worktrees
-caller) retains *Derived status*'s existing direct-computation fallback when
-no accelerator is reachable. A consumer that cannot — a separate plugin
-operating under its own documented subprocess-free contract (a Tasks-board
-render loop or card click forbidden from spawning work, for instance) — has
-no such fallback available to it: this is the narrow, named exception
-`docs/patterns/work-coalescing-singleton.md` records for exactly this
-shape. Its boot-on-demand subscribe attempt either succeeds within its own
-bounded wait, or it reports the requested facts as stale/unknown and moves
-on, never blocking its own render or click path and never silently
-recomputing or guessing at the answer.
+Every ordinary reader, including an in-process agent-worktrees caller,
+retains the same bound when no accelerator is reachable. Where its own
+access contract permits it, it may read the independently addressable bounded
+durable projection as explicitly advisory; it never loads a growing record or
+recomputes the facts instead. A separate plugin with a subprocess-free render
+contract does not bypass that contract to recover missing state. Its bounded
+subscribe attempt either succeeds or it presents last-good advisory facts or
+explicit stale/unknown/unavailable state, never blocking its render or click
+path and never silently reconstructing or guessing the answer.
 
 ### daemon-mediated-write-authority
 
@@ -551,6 +550,34 @@ The status a worktree renders is a reduction over a fixed, small set of
 independently named facts — activity since the last checkpoint,
 upstream-containment, local dirtiness, open claims, and pending handoff —
 never a hand-authored combined enum that grows a new case per situation.
+
+### schema-bounded-status-read
+
+Reading one worktree's daemon-cached status costs **O(state-schema)**: the
+fixed schema and its bounded field sizes, not the cardinality or byte size of
+any journal, ledger, list, handoff sequence, claims graph, or registered fleet.
+The current-state projection is independently addressable; loading a growing
+record and returning only a small part of it does not satisfy this guarantee.
+Cold, warm, restart, and advisory-degrade reads retain the same boundary.
+
+### pushed-claims-state
+
+The owning write authority computes claims relationships and their derived
+status, then pushes the relevant graph state into each affected worktree's
+current-state projection. Ordinary readers never traverse the graph to obtain
+it. Growing graph and ledger views remain separately, explicitly inspectable;
+they are not unbounded collections hidden inside the bounded status schema.
+
+### direct-current-handoff-head
+
+Each worktree exposes its current handoff head through a directly readable
+current-state slot. Ordinary status and monitoring read that head, not the
+sequence that led to it. Historical succession and handoff reconstruction are
+explicit workflow-repair operations, never prerequisites for reporting current
+status. Advancing that head does not strand older unresolved predecessor
+retirements: their owner preserves automatic retry through bounded current
+work selection, separate from head reporting, while explicit repair can
+inspect every outstanding duty.
 
 ### continuously-revalidated-freshness
 
@@ -640,6 +667,25 @@ current — a periodic background sweep plus operation-triggered
 recomputation — so an ordinary reader benefits from freshness without
 personally requesting it.
 
+### active-claims-closure-monitoring
+
+Recurring monitoring follows authoritative active worktree and anchor roots
+and the transitive claims closure of their unsettled responsibilities. An
+inactive child in that closure remains accountable; an unrelated inactive
+worktree does not acquire recurring monitoring merely because its durable
+record exists or a historical listing once displayed it. Membership is pushed
+with the owning lifecycle and claims state, not rediscovered by every reader.
+Unavailable observations are marked as unknown without silently abandoning
+custody or expanding ordinary monitoring into an unbounded historical sweep.
+
+### history-is-repair-not-status
+
+Journals, ledgers, and historical lists remain available to explicit
+inspection, repair, migration, and archival workflows. They never supply an
+ordinary current-status read, including a cache miss or degraded response.
+Necessary producer-side derivation is distinct from serving the materialized
+answer, and its cost is never hidden in that read.
+
 ### force-refresh-is-opt-in-not-implicit
 
 A caller may force the resident accelerator to recompute a specific fact
@@ -700,11 +746,12 @@ speed.
 
 ### direct-read-is-a-degrade-not-a-peer
 
-Direct file/computation access remains available for resilience — the
+Direct access to bounded current-state projections remains available for resilience — the
 daemon being unreachable must never wedge worktree state shut — but it is
 strictly a **degraded, read-only** path, not a coequal one: it never writes,
 and whatever surfaced it marks the answer as degraded rather than presenting
-it with the same confidence as a daemon-mediated read.
+it with the same confidence as a daemon-mediated read. A missing projection
+returns explicit unavailable or unready state, not a hidden replay or scan.
 
 ### contribution-posture-degrades-honestly
 
@@ -819,6 +866,7 @@ manager, or session-host implementation.
 
 - Child vision: [Pull requests](pull-requests/README.md) - provider-neutral publication and review capability.
 - Child vision: [Status-monitor singleton](status-monitor-singleton/README.md) - lifecycle exclusivity and bounded serving coverage.
+- Child vision: [Continuous reclamation](continuous-reclamation/README.md) - safe cross-repository collection without accumulating manual recovery work.
 - Parent vision: [agent-fabric](../../agent-fabric/README.md)
 - Cross-cutting sibling:
   [session-hosting](../../session-hosting/README.md) — pluggable ownership of

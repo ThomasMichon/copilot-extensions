@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { hostname, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 
-import { resolveMetadataAsync, runCliAsync } from "../extensions/agent-bridge/metadata.mjs";
+import { registrationMetadata, resolveMetadataAsync, runCliAsync } from "../extensions/agent-bridge/metadata.mjs";
 
 // A disposable directory with a fake "agent-worktrees" and "git" binstub so
 // these tests exercise real child-process spawning (the actual regression
@@ -45,41 +45,41 @@ test("runCliAsync resolves trimmed stdout on success", async () => {
 // SUM of all four durations, up to their combined ~29s timeout budget, which
 // was confirmed live as the cause of a ready-timeout crash-loop under session
 // contention. They must run concurrently instead, bounded by the single
-// slowest call. This proves it with real (slow, disposable) child processes,
-// not a timer mock -- the previous shape would fail this test by taking
-// ~4x as long.
+// slowest call. A real-process barrier proves overlap without a wall-time
+// threshold that also measures host load and shell startup.
 test("resolveMetadataAsync runs its four spawns concurrently, not sequentially", async (t) => {
-  const { dir, write } = makeFakeBinDir();
-  // Deliberately generous: on Windows each stub spawns a real powershell.exe
-  // to sleep, which itself has a fixed ~250-400ms startup cost on top of the
-  // sleep duration -- that fixed cost applies once if concurrent, ~4x if
-  // sequential. SLEEP_MS is large enough, and the pass threshold wide enough,
-  // that this stays a clean, non-flaky discriminator between the two shapes
-  // even under machine load: concurrent lands around one spawn's total cost
-  // (~800-1000ms here); sequential would land around 4x that (~3200ms+).
-  const SLEEP_MS = 700;
-  write("git", SLEEP_MS, "main");
-  write("agent-worktrees", SLEEP_MS, "some-worktree");
-
-  // resolveMetadataAsync hardcodes the binary names "git"/"agent-worktrees";
-  // point PATH at our fake bin dir so those resolve to the slow stubs above,
-  // without needing either real tool installed.
+  const { dir } = makeFakeBinDir();
+  const gate = join(dir, "gate.cjs");
+  writeFileSync(gate, `
+const { writeFileSync, readdirSync } = require("node:fs");
+const { join } = require("node:path");
+const dir = ${JSON.stringify(dir)};
+writeFileSync(join(dir, process.pid + ".started"), "");
+const deadline = Date.now() + 5000;
+function poll() {
+  if (readdirSync(dir).filter(name => name.endsWith(".started")).length === 4) {
+    console.log(process.argv[2]);
+  } else if (Date.now() >= deadline) {
+    process.exitCode = 1;
+  } else {
+    setTimeout(poll, 10);
+  }
+}
+poll();
+`);
+  for (const [name, value] of [["git", "main"], ["agent-worktrees", "some-worktree"]]) {
+    const isWin = process.platform === "win32";
+    const script = join(dir, isWin ? `${name}.cmd` : name);
+    writeFileSync(script, isWin
+      ? `@echo off\r\n"${process.execPath}" "${gate}" "${value}"\r\nexit /b %errorlevel%\r\n`
+      : `#!/bin/sh\nexec "${process.execPath}" "${gate}" "${value}"\n`);
+    if (!isWin) chmodSync(script, 0o755);
+  }
   const originalPath = process.env.PATH;
   process.env.PATH = `${dir}${process.platform === "win32" ? ";" : ":"}${originalPath}`;
   t.after(() => { process.env.PATH = originalPath; });
 
-  const start = Date.now();
   const meta = await resolveMetadataAsync({ cwd: dir, env: {} });
-  const elapsedMs = Date.now() - start;
-
-  // Concurrent: ~1 spawn's total cost. Sequential (the regression this test
-  // guards against): ~4 spawns' total cost. SLEEP_MS * 2 sits comfortably
-  // between the two on this machine's measured per-spawn overhead, with
-  // sequential landing at roughly SLEEP_MS * 4+ -- not a knife's-edge margin.
-  assert.ok(
-    elapsedMs < SLEEP_MS * 2,
-    `expected concurrent execution (~${SLEEP_MS}ms + one spawn's overhead), took ${elapsedMs}ms -- looks sequential`,
-  );
   assert.equal(meta.branch, "main");
   assert.equal(meta.worktree_id, "some-worktree");
   assert.equal(meta.machine, "some-worktree"); // stub returns the same fixed string for every `get` call
@@ -157,11 +157,7 @@ test("fake bin harness sanity: the stub script really does sleep", () => {
   assert.equal(out, "ok");
 });
 
-// A failed `agent-worktrees get machine` (timeout, crash) must not leave the
-// session without a machine: a resume could then never be folded into its
-// placeholder, stranding messages sent to the launch handle. It falls back to
-// the hostname, as agent-worktrees' own machine detection does.
-test("resolveMetadataAsync falls back to the hostname when the machine lookup fails", async (t) => {
+test("resolveMetadataAsync does not invent a logical machine from a physical hostname", async (t) => {
   const { dir, write } = makeFakeBinDir();
   write("git", 0, "main");
   const isWin = process.platform === "win32";
@@ -175,7 +171,7 @@ test("resolveMetadataAsync falls back to the hostname when the machine lookup fa
 
   const meta = await resolveMetadataAsync({ cwd: dir, env: {} });
 
-  assert.equal(meta.machine, hostname().toLowerCase());
+  assert.equal(meta.machine, null);
 });
 
 // An extension reload in the same process is a new module instance: it must
@@ -213,10 +209,47 @@ test("metadataRefresher fills in a worktree the load-time lookup missed, with ba
 
 test("metadataRefresher never replaces a known identity", async () => {
   const { metadataRefresher } = await import("../extensions/agent-bridge/metadata.mjs");
-  const state = { meta: { worktree_id: "pinned@cs", repo: "proj" } };
+  const state = { meta: { machine: "m1", worktree_id: "pinned@cs", repo: "proj" } };
   let calls = 0;
   const refresh = metadataRefresher(state, async () => { calls += 1; return { worktree_id: "other" }; }, () => 0);
   assert.equal(await refresh(), false);
   assert.equal(calls, 0);
   assert.equal(state.meta.worktree_id, "pinned@cs");
+});
+
+test("metadataRefresher recovers the logical machine even when worktree and project are known", async () => {
+  const { metadataRefresher } = await import("../extensions/agent-bridge/metadata.mjs");
+  const state = { meta: { machine: null, worktree_id: "wt-1", repo: "proj" } };
+  let calls = 0;
+  const refresh = metadataRefresher(state, async () => {
+    calls += 1;
+    return { machine: "host-wsl", worktree_id: "other", repo: "other" };
+  }, () => 0);
+  assert.equal(await refresh(), true);
+  assert.deepEqual(state.meta, { machine: "host-wsl", worktree_id: "wt-1", repo: "proj" });
+  assert.equal(await refresh(), false);
+  assert.equal(calls, 1);
+});
+
+test("an unresolved machine cannot register an unqualified worktree lineage", () => {
+  const meta = { machine: null, worktree_id: "shared-name", repo: "proj", cwd: "/fixture" };
+  assert.deepEqual(registrationMetadata(meta), {
+    machine: null, worktree_id: null, repo: null, cwd: "/fixture",
+    clear_targeting_metadata: true,
+  });
+  assert.equal(meta.worktree_id, "shared-name");
+  assert.deepEqual(registrationMetadata(null), {
+    machine: null, worktree_id: null, repo: null, clear_targeting_metadata: true,
+  });
+  const resolved = { ...meta, machine: "host-wsl" };
+  assert.equal(registrationMetadata(resolved), resolved);
+});
+
+test("incomplete project or worktree metadata also clears the old lineage", () => {
+  for (const key of ["repo", "worktree_id"]) {
+    const meta = { machine: "host-wsl", repo: "proj", worktree_id: "wt", [key]: null };
+    assert.deepEqual(registrationMetadata(meta), {
+      machine: null, repo: null, worktree_id: null, clear_targeting_metadata: true,
+    });
+  }
 });

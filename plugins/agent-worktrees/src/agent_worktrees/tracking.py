@@ -1465,34 +1465,14 @@ def _pr_to_yaml_dict(pr: PRRecord) -> dict[str, object]:
 
 def _parse_claim_mapping(raw: dict) -> ResourceClaim:
     """Parse one ResourceClaim mapping from a ``resources:`` list item."""
-    kind = str(raw.get("kind", "worktree")) or "worktree"
-    state_raw = raw.get("state")
-    state = state_raw if state_raw in (
-        "active", "at-rest", "released", "abandoned") else "active"
-    return ResourceClaim(
-        kind=kind,
-        ref=str(raw.get("ref", "")),
-        created_at=str(raw.get("created_at", "")),
-        state=state,
-        note=str(raw.get("note", "")),
-        handoff_bundle=str(raw.get("handoff_bundle", "")),
-    )
+    from .claim_codec import parse_mapping
+    return parse_mapping(raw, claim_factory=ResourceClaim)
 
 
 def _claim_to_yaml_dict(claim: ResourceClaim) -> dict[str, object]:
     """Serialize a ResourceClaim to a YAML-friendly mapping (omit empties)."""
-    d: dict[str, object] = {"kind": claim.kind, "ref": claim.ref}
-    if claim.created_at:
-        d["created_at"] = claim.created_at
-    # Emit state only when it deviates from the default ("active") to keep the
-    # common-case entry lean.
-    if claim.state and claim.state != "active":
-        d["state"] = claim.state
-    if claim.note:
-        d["note"] = claim.note
-    if claim.handoff_bundle:
-        d["handoff_bundle"] = claim.handoff_bundle
-    return d
+    from .claim_codec import yaml_mapping
+    return yaml_mapping(claim)
 
 
 def derive_execution_leg(record: WorktreeRecord) -> ExecutionLegBinding | None:
@@ -1896,7 +1876,7 @@ def _load_record_uncached(path: Path) -> WorktreeRecord:
     raw_resources = data.get("resources")
     if isinstance(raw_resources, list):
         for raw in raw_resources:
-            if isinstance(raw, dict) and raw.get("ref"):
+            if isinstance(raw, dict) and (raw.get("ref") or "producer" in raw):
                 resources_list.append(_parse_claim_mapping(raw))
 
     # worktree-finality-and-obligations Phase 2: the most recent finalize
@@ -1905,7 +1885,7 @@ def _load_record_uncached(path: Path) -> WorktreeRecord:
     raw_last_finalize_released = data.get("last_finalize_released")
     if isinstance(raw_last_finalize_released, list):
         for raw in raw_last_finalize_released:
-            if isinstance(raw, dict) and raw.get("ref"):
+            if isinstance(raw, dict) and (raw.get("ref") or "producer" in raw):
                 last_finalize_released_list.append(_parse_claim_mapping(raw))
 
     # worktree-finality-and-obligations Phase 3: itemized follow-up ledger.
@@ -2556,6 +2536,8 @@ def _save_record_unlocked(
     if current is not None:
         _merge_pr_attribution_state(record, current)
         pr_publication_state.advance_authority_revisions(record, current)
+    from .resource_producer import preserve_claims
+    preserve_claims(record, current, path)
 
     for session in record.sessions or ():
         if len(session.activations) > _MAX_SESSION_ACTIVATIONS:
@@ -2887,7 +2869,7 @@ def _save_record_unlocked(
     # agent-bridge-worktree-native-agents: the bound charter. Emitted only
     # when set, so an unbound worktree's YAML stays byte-identical.
     if record.bound_agent:
-        content += f"bound_agent: {_yaml_scalar(record.bound_agent)}\n"
+        content += yaml.safe_dump({"bound_agent": record.bound_agent}, sort_keys=False)
     if record.pending_seed:
         # yaml.safe_dump (not the hand-rolled _yaml_scalar, which only
         # quotes a leading reserved-indicator char) so arbitrary, possibly

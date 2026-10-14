@@ -5,8 +5,8 @@ a subprocess seam (`<binstub> namespace-list/-resolve/-target-repo/-ensure-ready
 instead of importing its resolver in the bridge venv, falling back to an
 in-process resolver on any *subprocess* failure while mapping a provider's
 legitimate not-found (exit 3) / bad-state (exit 4) back to KeyError / ValueError.
-These tests mock ``shutil.which`` + ``subprocess.run`` (the shim uses the
-module-level names in ``agent_registry``).
+List tests mock the owned command adapter; other methods retain their
+``subprocess.run`` seam.
 """
 
 from __future__ import annotations
@@ -25,6 +25,8 @@ from agent_bridge.agent_registry import (
 )
 from agent_bridge.agent_registry_namespace import NamespaceListIncomplete
 from agent_bridge.transport import SpawnTarget
+
+_LIST_RUN = "agent_bridge.reader_command.OwnedReaderCommand.run"
 
 
 class _Fallback(NamespaceResolver):
@@ -69,25 +71,20 @@ async def test_list_uses_cli():
     payload = json.dumps([
         {"name": "cs-a", "display_name": "A", "state": "available"},
     ])
-    with patch("shutil.which", _which), patch("subprocess.run", return_value=_cp(0, payload)):
+    with patch("shutil.which", _which), patch(_LIST_RUN, return_value=_cp(0, payload)):
         agents = await CliNamespaceResolver("codespace", "agent-codespaces", fb).list()
     assert [a.name for a in agents] == ["cs-a"]
     assert "list" not in fb.calls  # CLI path, no fallback
 
 
 @pytest.mark.asyncio
-async def test_list_threads_timeout_into_subprocess_run():
-    # Reliability: AgentResolver.list_agents_async's per-resolver bound must
-    # actually kill a wedged provider process, not merely abandon the await
-    # (asyncio.wait_for alone cannot stop a subprocess.run already running in
-    # a worker thread via asyncio.to_thread -- see agent_registry.py's
-    # _NAMESPACE_LIST_RESOLVER_TIMEOUT_ENV docstring). Confirm the ``timeout``
-    # kwarg to ``list()`` reaches ``subprocess.run`` verbatim, so its own
-    # timeout enforcement (which kills the child process) is what bounds it.
+async def test_list_threads_timeout_into_owned_command():
+    # The first caller's execution bound reaches the owned native adapter,
+    # rather than merely cancelling the thread's awaiter.
     fb = _Fallback()
     payload = json.dumps([{"name": "cs-a", "state": "available"}])
     with patch("shutil.which", _which), patch(
-        "subprocess.run", return_value=_cp(0, payload)
+        _LIST_RUN, return_value=_cp(0, payload)
     ) as mock_run:
         await CliNamespaceResolver("codespace", "agent-codespaces", fb).list(
             timeout=3.5
@@ -97,12 +94,10 @@ async def test_list_threads_timeout_into_subprocess_run():
 
 @pytest.mark.asyncio
 async def test_list_timeout_expired_degrades_like_other_subprocess_failures():
-    # subprocess.run(timeout=...) raises TimeoutExpired after already killing
-    # the child process (stdlib guarantee) -- CliNamespaceResolver must treat
-    # that exactly like any other subprocess failure (fall back, not raise).
+    # The adapter retains stdlib direct-child execution deadline semantics.
     fb = _Fallback()
     with patch("shutil.which", _which), patch(
-        "subprocess.run",
+        _LIST_RUN,
         side_effect=subprocess.TimeoutExpired(cmd=["agent-codespaces"], timeout=3.5),
     ):
         agents = await CliNamespaceResolver(
@@ -115,7 +110,7 @@ async def test_list_timeout_expired_degrades_like_other_subprocess_failures():
 @pytest.mark.asyncio
 async def test_list_falls_back_on_unparseable():
     fb = _Fallback()
-    with patch("shutil.which", _which), patch("subprocess.run", return_value=_cp(0, "not json")):
+    with patch("shutil.which", _which), patch(_LIST_RUN, return_value=_cp(0, "not json")):
         agents = await CliNamespaceResolver("codespace", "agent-codespaces", fb).list()
     assert [a.name for a in agents] == ["fallback-cs"]
     assert fb.calls == ["list"]
@@ -580,7 +575,7 @@ async def test_no_fallback_resolve_still_raises_when_cli_absent():
 async def test_no_fallback_list_raises_incomplete_on_timeout():
     r = CliNamespaceResolver("codespace", "agent-codespaces", fallback=None)
     with patch("shutil.which", _which), patch(
-        "subprocess.run",
+        _LIST_RUN,
         side_effect=subprocess.TimeoutExpired(cmd=["agent-codespaces"], timeout=3.5),
     ):
         with pytest.raises(NamespaceListIncomplete):
@@ -591,7 +586,7 @@ async def test_no_fallback_list_raises_incomplete_on_timeout():
 async def test_no_fallback_list_raises_incomplete_on_nonzero_exit():
     r = CliNamespaceResolver("codespace", "agent-codespaces", fallback=None)
     with patch("shutil.which", _which), patch(
-        "subprocess.run", return_value=_cp(1, "", "boom")
+        _LIST_RUN, return_value=_cp(1, "", "boom")
     ):
         with pytest.raises(NamespaceListIncomplete):
             await r.list()
@@ -601,7 +596,7 @@ async def test_no_fallback_list_raises_incomplete_on_nonzero_exit():
 async def test_no_fallback_list_raises_incomplete_on_unparseable_output():
     r = CliNamespaceResolver("codespace", "agent-codespaces", fallback=None)
     with patch("shutil.which", _which), patch(
-        "subprocess.run", return_value=_cp(0, "not json")
+        _LIST_RUN, return_value=_cp(0, "not json")
     ):
         with pytest.raises(NamespaceListIncomplete):
             await r.list()
@@ -614,7 +609,7 @@ async def test_with_fallback_list_still_falls_back_on_genuine_failure():
     fb = _Fallback()
     r = CliNamespaceResolver("codespace", "agent-codespaces", fallback=fb)
     with patch("shutil.which", _which), patch(
-        "subprocess.run", return_value=_cp(1, "", "boom")
+        _LIST_RUN, return_value=_cp(1, "", "boom")
     ):
         agents = await r.list()
     assert [a.name for a in agents] == ["fallback-cs"]
@@ -701,7 +696,7 @@ async def test_list_is_cached_within_ttl():
         return _cp(0, payload)
 
     resolver = CliNamespaceResolver("codespace", "agent-codespaces", fb)
-    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+    with patch("shutil.which", _which), patch(_LIST_RUN, side_effect=_run):
         first = await resolver.list()
         second = await resolver.list()
     assert [a.name for a in first] == ["cs-a"]
@@ -722,7 +717,7 @@ async def test_list_cache_disabled_via_env(monkeypatch):
         return _cp(0, payload)
 
     resolver = CliNamespaceResolver("codespace", "agent-codespaces", fb)
-    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+    with patch("shutil.which", _which), patch(_LIST_RUN, side_effect=_run):
         await resolver.list()
         await resolver.list()
     assert calls == 2  # TTL=0 (off) re-queries every call
@@ -744,7 +739,7 @@ async def test_list_cache_expires_after_ttl(monkeypatch):
     resolver = CliNamespaceResolver("codespace", "agent-codespaces", fb)
     with (
         patch("shutil.which", _which),
-        patch("subprocess.run", side_effect=_run),
+        patch(_LIST_RUN, side_effect=_run),
         patch("time.monotonic", side_effect=lambda: fake_now[0]),
     ):
         await resolver.list()
@@ -765,7 +760,7 @@ async def test_invalidate_list_cache_forces_requery():
         return _cp(0, payload)
 
     resolver = CliNamespaceResolver("codespace", "agent-codespaces", fb)
-    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+    with patch("shutil.which", _which), patch(_LIST_RUN, side_effect=_run):
         await resolver.list()
         resolver.invalidate_list_cache()
         await resolver.list()
@@ -786,7 +781,10 @@ async def test_successful_resolve_invalidates_list_cache():
         return _cp(0, resolve_payload)
 
     resolver = CliNamespaceResolver("codespace", "agent-codespaces", fb)
-    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+    with (
+        patch("shutil.which", _which), patch("subprocess.run", side_effect=_run),
+        patch(_LIST_RUN, side_effect=_run),
+    ):
         await resolver.list()
         assert resolver._list_cache is not None
         await resolver.resolve("cs-a")
@@ -804,7 +802,10 @@ async def test_successful_ensure_ready_invalidates_list_cache():
         return _cp(0)
 
     resolver = CliNamespaceResolver("codespace", "agent-codespaces", fb)
-    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+    with (
+        patch("shutil.which", _which), patch("subprocess.run", side_effect=_run),
+        patch(_LIST_RUN, side_effect=_run),
+    ):
         await resolver.list()
         assert resolver._list_cache is not None
         await resolver.ensure_ready("cs-a")

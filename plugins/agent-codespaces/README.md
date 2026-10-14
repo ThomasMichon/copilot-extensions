@@ -57,6 +57,21 @@ for the existing Codespace SSH session path, preserving provisioning, credential
 relay, forwarding, claim ownership and disconnect settlement. It is not an
 independent machine resolver and does not need a `machine-transport` dependency.
 
+## Runtime health and activation
+
+Both installers verify `python -I -m agent_codespaces --help` before publishing
+completion or activating a numbered or claimed development slot. Isolated
+module execution checks the actual CLI entrypoint and its imports; a successful
+package import alone can accept a partial namespace package. Checkout files,
+`PYTHONPATH`, and user-site packages cannot mask missing runtime files.
+
+If an existing numbered slot has completion evidence but fails that launch
+check, ordinary installation refuses before rebuilding its venv or packages,
+including under `--force`/`-Force`. Its completion evidence and selectors are
+left intact. Use a distinct repair generation or a new released version;
+this health refusal does not itself implement generation repair or complete
+the broader admission/coalescing rollout.
+
 ## Configuration
 
 **Most repos need no config at all.** agent-codespaces works out of the box on

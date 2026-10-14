@@ -22,6 +22,8 @@ def task(**changes):
         "spawn_reservation_key": "reservation-a", "spawn_worktree": "worktree-a",
         "spawn_worktree_ownership": "reused", "spawn_conversation_retired": False,
         "spawn_session_handle": "local-body:bridge-a", **changes,
+        "spawn_allocation_project": changes.get("spawn_allocation_project", "example"),
+        "spawn_worktree_path": changes.get("spawn_worktree_path", "workspace-path"),
     }
 
 
@@ -62,7 +64,7 @@ def test_actual_request_carries_owner_facts_and_keeps_distinct_identities(transp
     assert not any("embody" in args or "create" in args or "send" in args for args, _ in transport)
 
 
-@pytest.mark.parametrize("mode", ["cli", "acp"])
+@pytest.mark.parametrize("mode", ["cli"])
 def test_factories_use_bridge_acquisition_and_stable_delivery(transport, mode):
     factory = spawn_factories.make_embody_spawn if mode == "cli" else spawn_factories.make_headless_spawn
     sample = task(spawn_session_handle=None)
@@ -94,7 +96,7 @@ def test_retired_carried_handle_is_not_revived(transport):
     assert transport[0][1]["conversation_retired"] is True
 
 
-@pytest.mark.parametrize("backend,mode", [("embody", "cli"), ("bridge", "acp")])
+@pytest.mark.parametrize("backend,mode", [("embody", "cli")])
 def test_one_shot_uses_the_same_constructed_boundary(transport, backend, mode):
     args = argparse.Namespace(
         spawn_backend=backend, spawn_agent="task-worker", run_async=True, verify_timeout=7,
@@ -121,14 +123,14 @@ def test_observation_failure_preserves_successful_acquisition_and_cleanup_handle
             raise OSError("wait transport unavailable")
         return subprocess.CompletedProcess(argv, 1, "", "wait unavailable")
     monkeypatch.setattr(session_acquisition.subprocess, "run", run)
-    args = argparse.Namespace(spawn_backend="bridge", spawn_agent="task-worker", run_async=False)
-    result, via, handle = _do_spawn(args, task())
-    assert result.returncode == 0 and via == "agent-bridge"
+    result = session_acquisition.acquire(task(), mode="acp", prompt="work", wait=True)
+    handle = session_acquisition.handle(result)
+    assert result.returncode == 0
     assert handle["session"] == "local-body:bridge-a"
     assert handle["worktree"] == "worktree-a"
     assert handle["native_session_id"] == "native-acp"
     assert handle["observation_error"]
-    assert "observation failed" in capsys.readouterr().err
+    assert "observation failed" in result.stderr
     assert len(transport) == 1
 
 
@@ -185,6 +187,21 @@ def test_cli_factory_unsupported_options_fail_without_deferred_retry(monkeypatch
     assert len(calls) == 1
 
 
+def test_one_shot_cli_charter_is_not_silently_discarded(monkeypatch):
+    captured = {}
+
+    def acquire(task, **options):
+        captured.update(options)
+        return subprocess.CompletedProcess([], 1, "", "CLI charter capability unavailable")
+
+    monkeypatch.setattr(session_acquisition, "acquire", acquire)
+    args = argparse.Namespace(spawn_backend="embody", spawn_agent="local",
+                              spawn_charter="reviewer", run_async=True)
+    result, _, handle = _do_spawn(args, task())
+    assert captured["charter"] == "reviewer"
+    assert result.returncode == 1 and handle["not_started"]
+
+
 def test_old_bridge_cli_argparse_refusal_is_proven_pre_effect(monkeypatch):
     monkeypatch.setattr(session_acquisition, "agent_bridge_launch_prefix", lambda: ["bridge"])
     parser = argparse.ArgumentParser(prog="agent-bridge")
@@ -225,7 +242,7 @@ def test_postlaunch_dispatch_fence_refusal_defers_instead_of_authorizing_cleanup
         subprocess.CompletedProcess(argv, 1, json.dumps({
             "detail": {"code": "dispatch_fence_changed", "message": "task changed"},
         }), "task changed"))
-    args = argparse.Namespace(spawn_backend="bridge", spawn_agent="worker", run_async=True)
+    args = argparse.Namespace(spawn_backend="embody", spawn_agent="worker", run_async=True)
     result, _, handle = _do_spawn(args, task(spawn_worktree_ownership="created"))
     assert result.returncode == 1
     assert handle["deferred"] is True

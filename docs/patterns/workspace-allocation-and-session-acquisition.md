@@ -7,7 +7,7 @@ the bridge vision's
 and dispatch's
 [execution workspace continuity](../../visions/plugins/agent-dispatch/README.md#execution-workspace-continuity).
 The implementation campaign is
-[workspace-acquisition-continuity](../../efforts/active/workspace-acquisition-continuity/README.md).
+[workspace-acquisition-continuity](../../efforts/2026/10/13%20workspace-acquisition-continuity/README.md).
 
 ## One workspace, distinct owners
 
@@ -61,10 +61,13 @@ task claim generation must not silently become a new allocation revision.
 Per-attempt acquisition/delivery IDs remain separate: they fence prompt
 admission without redefining the workspace or permitting a duplicate turn.
 
-Keyed creation is a reviewed target contract, not a claim that every current
-CLI already accepts a creation-key option. The effort owns additive API,
-negotiation, persistence, recovery, and compatibility implementation. Existing
-unkeyed standalone creation keeps its deliberate fresh-create behavior.
+Ground creation accepts optional `--creation-key`; local worktree-backed
+bridge creation accepts the same option through protocol 34's distinct
+workspace-creation endpoint. Explicit dispatch allocation revisions likewise
+use a non-fallback revision endpoint. Older or unsupported owners refuse
+instead of ignoring a safety-affecting option. Existing unkeyed standalone
+creation keeps its deliberate fresh-create behavior; remote/fleet keyed
+embodiment remains explicitly unsupported.
 
 ## Refusal and unknown outcome are different
 

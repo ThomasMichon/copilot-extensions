@@ -2,7 +2,7 @@
   "schema_version": 1,
   "label": "Tasks",
   "after": "Worktrees",
-  "list": ["agent-dispatch-board", "--machine", "{machine}"],
+  "list": ["agent-dispatch-board", "--machine", "{machine}", "--category", "work"],
   "stream": true,
   "subscribe": true,
   "entry": {
@@ -42,6 +42,12 @@
     ]
   },
   "actions": [
+    {
+      "key": "inspect-evidence",
+      "label": "Inspect evidence — results, progress, statistics and attachments",
+      "run": ["agent-dispatch", "inspect-task", "{task_id}", "--machine", "{machine}"],
+      "description": "Read the full task, result/log references, events, progress, statistics and durable attachment lineage on the owning machine."
+    },
     {
       "key": "steer",
       "label": "Steer — read the card & answer",
@@ -140,36 +146,6 @@
       "when": {"group": "Submitted", "require_verification": "True"},
       "confirm": true,
       "description": "Manual override for a submitted verification-gated task: accept its completion claim and close it as completed."
-    }
-  ],
-  "config_sections": [
-    {
-      "key": "workers",
-      "label": "Workers",
-      "run": ["agent-dispatch", "workers", "config-section"],
-      "description": "Local machine only. Disable masks a declared worker pool with a user-local override. Enable removes that override; it does not guarantee the declaration or running pool is active. Repository declarations are not edited.",
-      "configure_action": {
-        "label": "Workers",
-        "fields": [
-          {
-            "name": "pool",
-            "type": "choice",
-            "options_command": ["agent-dispatch", "workers", "pool-options"]
-          },
-          {"name": "action", "type": "choice", "options": ["disable", "enable"]},
-          {
-            "name": "reason",
-            "type": "text",
-            "show_when": {"field": "action", "equals": "disable"}
-          }
-        ],
-        "confirm": true,
-        "run": [
-          "agent-dispatch", "workers", "config-section",
-          "--toggle", "{field.action}", "--reason={field.reason}",
-          "--require-declared", "--", "{field.pool}"
-        ]
-      }
     }
   ]
 }

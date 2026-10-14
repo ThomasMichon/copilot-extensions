@@ -42,7 +42,8 @@ Then, end-to-end (needs a Python env with `textual` / `rich` / `pyyaml`):
 
 ```bash
 python render.py home.png                 # picker home screen
-python render.py cfg.png --modal cfg      # with the Configuration modal open
+python render.py cfg.png --modal cfg      # Configuration backstage
+python render.py guide --configuration-guide --zoom 1  # all Configuration steps
 python render.py steer.png --modal steer  # Markdown card + recommended defaults
 python render.py verdict.png --modal steer-verdict  # recommended verdict selected
 python render.py reject.png --modal steer-reject  # rejected-feedback follow-up
@@ -64,9 +65,21 @@ through the worktree implementation. It applies only to `--modal steer`;
 Never commit a recovered-card raster to this public repository; committed demos
 must use the identifier-neutral synthetic fixture.
 
+`--configuration-guide` renders Profiles, its Apply confirmation, Workers
+loading/catalog/actions/details, instantiation/declaration/editing, effect
+confirmation, pending receipt, discovery error, and an 80x24 catalog. It needs
+the agent-dispatch Python dependencies as well as the Manager's; it reuses
+provider-owned scaffolds and effects. Discovery and submission are patched to
+identifier-neutral fixtures, so no operator state is read or changed and no
+worker is activated. The current Workers manifest and production Textual
+compositor are used, including full-content `Screen` editors and receipts.
+The [illustrated guide](../../../docs/configuration-workbench.md) records source
+revisions and the single regeneration command for its committed PNG assets.
+
 ## Files
 
 - `render.py` — end-to-end: capture a demo state → SVG → PNG.
+- `configuration.py` — Configuration guide scenarios (UI-only fixtures).
 - `svg2png.mjs` — the SVG→PNG rasterizer (Fira Code, 3×). Reusable for any
   Rich/Textual capture SVG.
 - `package.json` — the `@resvg/resvg-js` dependency.

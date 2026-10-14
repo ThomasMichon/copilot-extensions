@@ -1,11 +1,24 @@
 # Local worker session acquisition
 
-One-shot `create --spawn`, local supervisor `make_headless_spawn`/
-`make_embody_spawn`, and interactive embodiment acquire and deliver through
-`agent-bridge acquire --request-file -`, current-client HTTP protocol 31. Existing
+One-shot `create --spawn` and local supervisor `make_headless_spawn` use ordinary
+bridge create/store/send: create without a prompt, durably store the exact ready
+bridge/native identity, then send under its native-conversation fence. Dispatch
+binds the execution project and stable creation key before calling
+`agent-bridge create --creation-key`; bridge owns both allocation and embodiment.
+A lost create response replays that key rather than allocating again, and a
+routing change cannot replace the recorded execution project. The created-agent
+receipt retains the owner repository/worktree/path for retries and cleanup.
+Older coordinators lacking keyed-allocation recording fail closed.
+
+Explicit `make_embody_spawn` and interactive CLI embodiment use
+`agent-bridge acquire --request-file -`, current-client HTTP protocol 34. Existing
 `spawn_backend=bridge` selects ACP; explicit `embody` selects CLI. No missing-
 capability fallback changes mode or invokes worktree session launch directly.
 Standalone task/script dispatch still works without bridge.
+
+The acquisition-specific proof and receipt rules below govern the CLI and
+legacy acquisition path, not ordinary ACP create/store/send. No legacy
+acquisition marker implicitly grants ordinary-send authority.
 
 Allocation, reservation recording, task claim/adoption, evaluation, pending
 steers and terminal cleanup keep their original owners. Dispatch conveys
@@ -27,6 +40,58 @@ Only an active task (`queued`, `claimed`, `started`, or `suspended`) with a
 reservation as its namespace worktree fallback. Historical reservations remain
 visible as evidence but cannot redirect a completed task away from its durable
 session.
+
+Local allocation persists the ground owner's repository, worktree ID, and path
+as `allocation_project`, `worktree`, and `worktree_path` before acquisition.
+Request version 2 carries that same project/path; bridge checks both the
+reservation and exact owner record. ACP selects its registered worker project;
+the default CLI worker needs no ACP registration. The queue lane still owns
+claim authority and does not qualify the execution workspace.
+
+Retries retain the recorded allocation even without an exclusive key, including
+its native handle and retirement marker. Routing changes do not change that
+allocation or destructive absence probes. An older coordinator lacking the
+recording fields refuses before create; a recording response that ignores them
+holds the reservation. Legacy carried allocations missing project/path,
+incompatible owner results, reassigned or missing carried worktrees preserve
+the binding for repair rather than allocate a replacement.
+
+Before the first create, the coordinator also binds the selected execution
+project through the reservation's `/allocation` operation. Even a lost ground
+response therefore cannot restore mutable routing as target authority.
+`creation_key` is derived from the durable queue identity, canonical queue lane,
+typed deduplication identity (task ID when absent), and persisted
+`allocation_revision`. Attempts, task generation and transport retries do not
+advance that revision. The owner receives `create --creation-key` and the
+original allocation task ID and `allocation_reservation_key`/attempt provenance
+on every replay. A re-emitted task with the same typed deduplication identity
+retains that ground provenance, even before its original response was recorded;
+the current task/reservation still owns admission and prompt delivery.
+
+`create --spawn --allocation-revision <positive-integer>` is the explicit
+replacement input; the reserve API/client expose the same optional field.
+Explicit revision requests use `/spawn-reservations/revisions`, so an older
+coordinator cannot silently ignore the field through the legacy reservation
+endpoint. A missing capability refuses before reservation or launch.
+Omitting it retains the previous revision (initially 1). Advancing it requires
+positive `removed`/`already-removed` disposal evidence for the prior allocation
+and no active attempt. Primed, held, pending and unknown outcomes are not
+disposal. Pending cleanup preserves the same logical identity and refuses its
+next reservation rather than clearing the workspace. A different logical
+request may reserve its own key, but cannot inherit or rebind that cleaning
+allocation. Terminal key replay cannot allocate again.
+The original allocation reservation qualifies destructive ground cleanup;
+the current spawn reservation still owns admission and prompt delivery.
+
+An exact deterministic `refused/prepared` receipt may attest `not_started` for
+the current request and spend the bounded failure budget. Unavailable-owner,
+busy, pending, prior native identity and historical launch outcomes retain
+reconciliation. A local acquisition failure preserves its allocation rather
+than concluding and recreating it as a retry strategy.
+The ground owner's typed exit-3 `creation.status=pending` outcome is deferred
+under the same creation key, including one-shot and supervised CLI preparation.
+It does not spend the failed-spawn budget. Conflict, terminal and malformed
+responses are not silently reclassified as pending.
 
 Prompt/delivery identity is stable per reservation, not a random worker ID on
 each retry. Bridge—not dispatch—selects reuse/resume/create. A task generation
@@ -93,7 +158,7 @@ The cross-layer
 distinguishes queue lane, selected execution project, and code target. The
 workspace owner-returned execution identity must be preserved across
 preparation, bridge acquisition, recovery, and cleanup. The
-[workspace continuity effort](../../../efforts/active/workspace-acquisition-continuity/README.md)
+[workspace continuity effort](../../../efforts/2026/10/13%20workspace-acquisition-continuity/README.md)
 tracks correction of independent project derivation and adds stable creation
 identity across attempts. This is not authorization to weaken the historical
 first-conversation or fresh-recovery checks below.
@@ -130,5 +195,5 @@ An active reservation must finish its normal defer/conclusion before this verb;
 never force-clear it or directly edit the database. Deploy the promoted
 bridge and dispatch fixes through normal immutable-runtime activation first.
 The promoted bridge payload/client must be deployed too: current acquisition
-clients require daemon protocol 31 and refuse a protocol-30 daemon before
+clients require daemon protocol 34 and refuse an older daemon before
 sending a request, rather than assume it implements recovery revalidation.

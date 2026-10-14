@@ -532,6 +532,18 @@ gates, `per-machine` overlays, nested module/resource gates, and machine
 directory selection. Ambiguous cross-entry matches fail before reconciliation.
 Without usable topology, the raw host name remains the standalone fallback.
 
+Machine identity uses the shared `machine_transport` owner model. Its read-only
+logical projection expands legacy Windows/WSL topology into `<base>` and
+`<base>-wsl`, preserving profile aliases and exposing `execution_platform` and
+`physical_host` on `MachineIdentity` for display grouping. Explicit independent
+entries retain their keys. Automatic local resolution knows its platform;
+explicit physical-host selection requires
+`resolve_machine(..., execution_platform="windows"|"wsl"|"linux")` and refuses
+multiple eligible siblings. WSL gates accept its own logical key/profile aliases,
+not the native key or shared physical hostname. No package, persisted registration,
+or repository topology is rewritten; move any WSL-specific package gates to the
+logical WSL key through normal repository maintenance.
+
 The canonical root is `.copilot-extensions/agent-machines/`. Legacy
 `.agent-machines/` and `.github/machine-state/` remain bounded fallbacks only
 when the canonical root is absent. An explicit marketplace-specific overlay may

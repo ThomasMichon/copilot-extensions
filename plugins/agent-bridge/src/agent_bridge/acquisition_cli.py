@@ -11,9 +11,9 @@ from typing import Any
 from .acquisition_contract import AcquisitionRequest, AcquisitionResult
 from .client import BridgeClientError
 
-from .protocol import ACQUISITION_RETIREMENT_RECOVERY_PROTOCOL_VERSION
+from .protocol import ACQUISITION_WORKSPACE_PROTOCOL_VERSION
 
-ACQUISITION_PROTOCOL_VERSION = ACQUISITION_RETIREMENT_RECOVERY_PROTOCOL_VERSION
+ACQUISITION_PROTOCOL_VERSION = ACQUISITION_WORKSPACE_PROTOCOL_VERSION
 
 
 def acquire(client: Any, request: AcquisitionRequest) -> AcquisitionResult:

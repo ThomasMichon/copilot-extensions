@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 import types
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -55,10 +56,14 @@ def no_unit_processes(request, monkeypatch):
 
 @pytest.fixture
 def warm_model(tmp_path, monkeypatch):
+    real_time = time.time
     monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path)
     monkeypatch.setattr(cfg, "project_name", lambda: "example")
     monkeypatch.setattr(cfg, "_load_config_uncached", lambda: types.SimpleNamespace())
-    monkeypatch.setattr(list_cache.time, "time", lambda: 1001.0)
+    cache_clock = types.ModuleType(time.__name__)
+    cache_clock.__dict__.update(vars(time))
+    cache_clock.time = lambda: 1001.0
+    monkeypatch.setattr(list_cache, "time", cache_clock)
     calls = Counter()
     production_classify = core._classify_records
     production_render = core._worktree_to_dict
@@ -132,7 +137,17 @@ def warm_model(tmp_path, monkeypatch):
         calls=calls, record=record, state=state, shapes=shapes, demand=demand,
         production_classify=production_classify,
         production_render=production_render,
+        real_time=real_time,
     )
+
+
+@pytest.mark.portfolio_tier("T0")
+def test_cache_clock_does_not_freeze_classify_transport_deadlines(warm_model):
+    assert list_cache.time is not time
+    assert time.time is warm_model.real_time
+    assert list_cache.time.monotonic is time.monotonic
+    assert list_cache.time.time() == 1001.0
+    assert time.time is not list_cache.time.time
 
 
 @pytest.mark.portfolio_tier("T0")

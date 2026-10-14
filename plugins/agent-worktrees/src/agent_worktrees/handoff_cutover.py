@@ -731,8 +731,8 @@ def _maybe_emit_stage_13(
 def _dispatch_handoff_repair(verb: str, verb_args: dict):
     """Dispatch confirmed-retire repair to a compatible daemon or local code.
 
-    Claim settlement and session conclusion require execution-space-aware verb
-    version 2; an older handler is never dialed. An ambiguous sent request raises
+    Claim settlement requires execution-space-aware verb version 3; session
+    conclusion requires version 2. Older handlers are never dialed. Ambiguous requests raise
     ``tracking_write.AmbiguousWriteOutcome`` and must not be auto-retried.
     """
     from . import status_monitor_runtime as _smr
@@ -743,7 +743,7 @@ def _dispatch_handoff_repair(verb: str, verb_args: dict):
         verb_args,
         read_lock_data=lambda: locks.read_lock(_smr._monitor_lock_path()),
         ensure_monitor=_smr._ensure_status_monitor if _smr._status_monitor_enabled() else None,
-        min_version=2 if verb in ("claim_settle", "session_conclude") else 1,
+        min_version=3 if verb == "claim_settle" else 2 if verb == "session_conclude" else 1,
     )
 
 

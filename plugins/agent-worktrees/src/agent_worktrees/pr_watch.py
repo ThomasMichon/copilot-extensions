@@ -25,6 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 from . import pr_contract as pc
+from .pr_checks import checks_payload
 from .pr_consent import consent_argv, consent_command, consent_update_key
 from .pr_occupancy import occupancy_from_readiness
 from .providers import ProviderError, account_token_for_slug, get_provider
@@ -83,7 +84,10 @@ def decorate_events(
         "pr_state": snap.pr_state,
         "merged": snap.merged,
         "mergeable": snap.mergeable,
-        "checks_state": snap.checks_state,
+        **checks_payload(
+            snap.checks_state, snap.check_failures,
+            complete=snap.checks_complete, omitted=snap.check_failures_omitted,
+        ),
         "head_sha": snap.head_sha,
         "base_ref": snap.base_ref,
         "cursor": pc.Baseline.from_snapshot(snap).to_cursor(),

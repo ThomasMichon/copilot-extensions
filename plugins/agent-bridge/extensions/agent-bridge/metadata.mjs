@@ -21,7 +21,6 @@
 // readiness. The four calls also run in parallel (`Promise.all`), bounded by
 // the single slowest one instead of their sum.
 import { exec, execFile } from "node:child_process";
-import { hostname } from "node:os";
 
 // Epoch seconds this process started (wall clock minus uptime), fixed once
 // per *process*: pinned on the process object, so an extension reload in the
@@ -77,10 +76,9 @@ export async function resolveMetadataAsync({ cwd = process.cwd(), env = process.
     getAsync("project"),
   ]);
   return {
-    // A failed lookup falls back to the hostname, agent-worktrees' own last
-    // resort (``detect_machine``): with no known machine, a resume could never
-    // be folded into its placeholder and messages to it would be stranded.
-    machine: machine || hostname().toLowerCase(),
+    // A physical hostname cannot identify the logical Windows/WSL owner.
+    // Leave failed lookup pending for the bounded identity refresher.
+    machine: machine || null,
     cwd,
     // A venue launcher may pin a venue-qualified identity (e.g.
     // `anchor-<repo>@<codespace>`) via AGENT_BRIDGE_SCOPE_ID so several
@@ -107,9 +105,17 @@ export async function resolveMetadataAsync({ cwd = process.cwd(), env = process.
 // place the session in its worktree: when the load-time lookup misses them (a
 // slow or failed `agent-worktrees get` under load, as right after a reboot),
 // the session would otherwise stay registered without them for its whole life.
-const IDENTITY_FIELDS = ["worktree_id", "repo"];
+const IDENTITY_FIELDS = ["machine", "worktree_id", "repo"];
 export const METADATA_RETRY_MIN_MS = 30_000;
 export const METADATA_RETRY_MAX_MS = 10 * 60_000;
+
+export function registrationMetadata(meta) {
+  if (IDENTITY_FIELDS.every((key) => meta?.[key])) return meta;
+  return {
+    ...meta, machine: null, worktree_id: null, repo: null,
+    clear_targeting_metadata: true,
+  };
+}
 
 // ``refresh()`` re-resolves the metadata while a field above is still missing,
 // at most once per backoff (30 s doubling to 10 min), and fills in only what was

@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "copilot-extensions.update-status",
+  "title": "update-status.json: the folded result of the latest update run",
+  "type": "object",
+  "required": ["schema", "version", "updated_at", "run"],
+  "properties": {
+    "schema": {"const": "copilot-extensions.update-status"},
+    "version": {"const": 1},
+    "updated_at": {"type": "string"},
+    "run": {
+      "type": "object",
+      "required": ["id", "owner", "outcome"],
+      "properties": {
+        "id": {"type": "string"},
+        "owner": {"type": "string"},
+        "trigger": {"enum": ["harness", "manual", "schedule", "session", "setup"]},
+        "started_at": {"type": ["string", "null"]},
+        "ended_at": {"type": ["string", "null"]},
+        "duration_ms": {"type": ["integer", "null"]},
+        "outcome": {
+          "enum": [
+            "verified_current", "requires_restart", "in_progress",
+            "configuration_limitation", "blocked_by_lock", "auth_required", "timeout",
+            "command_failed"
+          ]
+        },
+        "exit_code": {"type": ["integer", "null"]},
+        "host": {"type": "string"},
+        "platform": {"type": "string"},
+        "events_path": {"type": "string"},
+        "event_parse_errors": {"type": "integer"},
+        "phases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["phase", "outcome"],
+            "properties": {
+              "phase": {"type": "string"},
+              "started_at": {"type": ["string", "null"]},
+              "duration_ms": {"type": ["integer", "null"]},
+              "outcome": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    "last_success": {
+      "type": ["object", "null"],
+      "properties": {
+        "run_id": {"type": "string"},
+        "ended_at": {"type": ["string", "null"]},
+        "duration_ms": {"type": ["integer", "null"]}
+      }
+    },
+    "last_failure": {
+      "type": ["object", "null"],
+      "properties": {
+        "run_id": {"type": "string"},
+        "ended_at": {"type": ["string", "null"]},
+        "outcome": {"type": "string"},
+        "summary": {"type": "string"},
+        "fix": {"type": "string"}
+      }
+    },
+    "restart_required": {"type": "boolean"},
+    "restart_reasons": {"type": "array", "items": {"type": "string"}},
+    "auth": {"type": ["object", "null"]},
+    "pins": {"type": "array"},
+    "advisories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["component", "outcome"],
+        "properties": {
+          "component": {"type": "string"},
+          "outcome": {"type": "string"},
+          "summary": {"type": "string"}
+        }
+      }
+    },
+    "plugins": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["outcome"],
+        "properties": {
+          "required": {"type": "boolean"},
+          "outcome": {"type": "string"},
+          "changed": {"type": "boolean"},
+          "detail": {"type": "string", "maxLength": 300},
+          "error_code": {"type": "string"},
+          "payload": {"type": ["object", "null"]},
+          "runtime": {"type": ["object", "null"]},
+          "live_generation": {"type": ["object", "null"]},
+          "cutover": {"type": ["object", "null"]},
+          "durations_ms": {"type": "object"},
+          "notes": {"type": "array", "items": {"type": "string"}},
+          "advisory_outcome": {"type": "string"},
+          "advisory_detail": {"type": "string"}
+        }
+      }
+    }
+  }
+}

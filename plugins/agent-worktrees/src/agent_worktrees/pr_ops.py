@@ -1787,7 +1787,7 @@ def _live_pr_state(
     provider_name = active.provider or prcfg.provider
     target_repo = active.repo or ((record.repo if record else "") or "")
     try:
-        from . import pr_contract as pc, providers
+        from . import pr_contract as pc, pr_checks, providers
         from .pr_occupancy import occupancy_from_state
 
         provider = providers.get_provider(provider_name)
@@ -1832,6 +1832,7 @@ def _live_pr_state(
             api_base=getattr(prcfg, "api_base", "") or "", token=token,
         )
     live: dict = {
+        **pr_checks.checks_payload(snap.checks_state, snap.check_failures, complete=snap.checks_complete, omitted=snap.check_failures_omitted),
         "verdict": st.verdict,
         "approval_stale": st.approval_stale,
         "approval_stale_authorized": st.approval_stale_authorized,

@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_worktrees import launch_seed_exec as new_seed_launch, launch_seed_state, resolve_cli, tracking
+from agent_worktrees import launch_seed_exec as new_seed_launch, launch_seed_state, push_timeout, resolve_cli, tracking
 from agent_worktrees import config as cfg
 from agent_worktrees.sessions import LiveVerdict
 from test_resolve_seed_delivery import _args, _stub_launch_plumbing
@@ -38,14 +38,40 @@ def registered_demo_project(tmp_path):
     }), encoding="utf-8")
 
 
-def test_resolve_parser_defaults_to_deferred_new_ownership():
+@pytest.mark.guard
+@pytest.mark.parametrize("explicit", [False, True])
+def test_resolve_parser_preserves_deferred_option_presence(explicit):
     parser = argparse.ArgumentParser()
     resolve_cli.add_parsers(parser.add_subparsers())
-    args = parser.parse_args(["resolve", "--json", "--worktree-id", "wt-a"])
-    assert args.defer_new_seed is True
+    argv = ["resolve", "--json", "--worktree-id", "wt-a"]
+    if explicit:
+        argv.append("--defer-new-seed")
+    args = parser.parse_args(argv)
+    assert args.defer_new_seed is (True if explicit else None)
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("explicit", [False, True])
+def test_ordinary_resolve_defaults_to_deferred_new_ownership(monkeypatch, explicit):
+    parser = argparse.ArgumentParser()
+    resolve_cli.add_parsers(parser.add_subparsers())
+    argv = ["resolve", "--json", "--worktree-id", "wt-a"]
+    if explicit:
+        argv.append("--defer-new-seed")
+    args = parser.parse_args(argv)
+    observed = []
+
+    def capture_state(parsed):
+        observed.append(parsed.defer_new_seed)
+        raise resolve_cli._ResolveEarlyExit(0)
+
+    monkeypatch.setattr(resolve_cli.ResolveCommandState, "from_args", capture_state)
+    assert resolve_cli.cmd_resolve(args) == 0
+    assert observed == [True]
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell unavailable")
+@pytest.mark.timeout(90 if os.name == "nt" else 30)
 @pytest.mark.parametrize("case", ["live", "unknown"])
 def test_new_two_hop_guard_rejection_and_retry(tmp_path, monkeypatch, capfd, case):
     import agent_worktrees.__main__ as core
@@ -152,10 +178,9 @@ def test_new_two_hop_guard_rejection_and_retry(tmp_path, monkeypatch, capfd, cas
     retry = second_resolve()
     # Execute the actual deferred CLI and the real PowerShell argv consumer.
     def execute():
-        return subprocess.run(
-            retry["cmd"], capture_output=True, text=True, timeout=20,
+        return push_timeout.run_bounded(
+            retry["cmd"], cwd=None, timeout=20,
             env={**os.environ, "AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED": "1"},
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
 
     delivered = execute()
@@ -203,6 +228,7 @@ def test_uninstrumented_setup_rejects_without_claim_or_execution(tmp_path, monke
 
 @pytest.mark.parametrize("shell", ["powershell", "bash"])
 @pytest.mark.parametrize("kind", ["new", "resume"])
+@pytest.mark.timeout(90 if os.name == "nt" else 30)
 def test_real_setup_child_rejects_before_copilot_and_keeps_seed_for_retry(tmp_path, kind, shell):
     if shell == "powershell" and shutil.which("pwsh") is None:
         pytest.skip("PowerShell unavailable")
@@ -226,23 +252,24 @@ def test_real_setup_child_rejects_before_copilot_and_keeps_seed_for_retry(tmp_pa
             "import json,sys\nprint(json.dumps(sys.argv[1:]))\n", encoding="utf-8",
         )
     def execute(backend):
+        env = {**os.environ, "AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED": "1"}
         if shell == "powershell":
             command = [
                 shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(setup),
                 "-RuntimePython", sys.executable, "-CopilotPath", str(backend),
             ]
         else:
+            env["PATH"] = os.pathsep.join([str(Path(BASH).parent), env.get("PATH", "")])
             command = [
                 BASH, setup.as_posix(), "--runtime-python", Path(sys.executable).as_posix(),
                 "--copilot-path", Path(backend).as_posix(),
             ]
             if Path(backend) == Path(sys.executable):
                 command.append(capture.as_posix())
-        return subprocess.run(
+        return push_timeout.run_bounded(
             new_seed_launch.deferred_command(command, record.yaml_path, seed_id=saved.seed_id),
-            capture_output=True, text=True, timeout=25,
-            env={**os.environ, "AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED": "1"},
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            cwd=None, timeout=45,
+            env=env,
         )
     rejected = execute(tmp_path / "nonexistent-copilot.exe")
     assert rejected.returncode != 0

@@ -91,18 +91,19 @@ new AsyncFunction("github", "core", "context", input.script)(github, core, conte
 
 def test_one_trusted_entry_point_preserves_both_checks(workflow):
     triggers = workflow.get("on", workflow.get(True))
-    assert set(triggers) == {"pull_request_target"}
+    assert set(triggers) == {"pull_request_target", "push", "workflow_dispatch"}
     assert workflow["name"] == "Workflow lockdown guard"
     assert triggers["pull_request_target"]["branches"] == ["dev"]
     assert set(triggers["pull_request_target"]["types"]) == {
-        "opened", "reopened", "synchronize", "edited", "ready_for_review",
+        "opened", "reopened", "synchronize", "edited", "ready_for_review", "labeled", "unlabeled",
     }
     assert not (WORKFLOW.parent / "copilot-review-gate.yml").exists()
     assert "concurrency" not in workflow
     assert workflow["permissions"] == {"contents": "read", "pull-requests": "read"}
     guard = workflow["jobs"]["workflow-lockdown-guard"]
     assert guard["name"] == "workflow-lockdown-guard"
-    assert "needs" not in guard and "if" not in guard
+    assert "needs" not in guard
+    assert guard["if"] == "github.event_name == 'pull_request_target'"
     assert all("uses" not in step or "checkout" not in step["uses"] for step in guard["steps"])
     review = workflow["jobs"]["request-review"]
     assert review["name"] == "request-review-if-maintainer"

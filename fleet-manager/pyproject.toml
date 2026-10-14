@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fleet-manager"
-version = "0.1.7-dev1"
+version = "0.1.8-dev1"
 description = "Standalone, preservation-safe fleet configuration and capacity planner."
 readme = "README.md"
 license = "MIT"
@@ -12,7 +12,8 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest", "setuptools>=83.0.0", "wheel"]
+release-verification = ["cryptography>=46,<47"]
+dev = ["pytest", "setuptools>=83.0.0", "wheel", "cryptography>=46,<47"]
 
 [project.scripts]
 fleet-manager = "fleet_manager.__main__:main"

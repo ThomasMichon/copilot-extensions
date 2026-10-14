@@ -17,6 +17,41 @@ import materialize_main as mm
 import uv_editable_ref as uer
 
 
+def test_packaged_projection_assets_expand_into_own_payload(tmp_path):
+    root = tmp_path / "repo"
+    consumer = root / "plugins" / "agent-worktrees"
+    consumer.mkdir(parents=True)
+    source = _canonical_file(
+        root, "plugins/customizing-copilot/scripts/render.py", content="print('owned engine')\n",
+    )
+    (consumer / "packaged-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 1,
+        "canonicalDir": "plugins/customizing-copilot/scripts",
+        "payloadDir": "scripts/instruction-projections", "files": ["render.py"],
+    }), encoding="utf-8")
+    dest = tmp_path / "release" / "plugins" / "agent-worktrees"
+    dest.mkdir(parents=True)
+    report = mm.materialize_launch_wrapper_assets_into(
+        source_consumer_dir=consumer, dest_consumer_dir=dest,
+        canonical_root=root, dest_root=tmp_path / "release",
+    )
+    assert len(report) == 1 and report[0].startswith("OK")
+    assert (dest / "scripts" / "instruction-projections" / "render.py").read_bytes() == source.read_bytes()
+    assert not (dest.parent / "customizing-copilot").exists()
+
+
+@pytest.mark.parametrize("directory", ["../outside", "..\\outside", "C:\\outside"])
+def test_packaged_assets_refuse_escaping_payload_directory(tmp_path, directory):
+    consumer = tmp_path / "plugins" / "agent-worktrees"
+    consumer.mkdir(parents=True)
+    (consumer / "packaged-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 1,
+        "canonicalDir": "canonical", "payloadDir": directory, "files": ["render.py"],
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="payloadDir"):
+        lwar.load_manifest(consumer, manifest_name=lwar.PACKAGED_MANIFEST_NAME)
+
+
 def _canonical_lib(root: Path, lib: str, *, version: str, content: str) -> Path:
     pkg = lib.replace("-", "_")
     d = root / "libs" / lib
@@ -667,7 +702,7 @@ def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
             expected_lib = expected_consumer_dir / "libs" / lib
             if not expected_lib.exists():
                 source = repo / "libs" / lib
-                if consumer == "agent-dispatch-service" and name == lib == "agent-dispatch":
+                if consumer == "services/dispatch" and name == lib == "agent-dispatch":
                     source = repo / "plugins" / lib
                 shutil.copytree(source, expected_lib, ignore=mm._ignore)
                 _build_expected_vendored_tree(expected_lib, canonical_root=repo)

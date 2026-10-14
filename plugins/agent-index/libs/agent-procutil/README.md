@@ -86,6 +86,69 @@ Conflicting breakaway creation flags are rejected. The default
 `allow_breakaway=True` remains compatible with existing callers that deliberately
 launch survivable daemons.
 
+## Optional owned-process CPU observations
+
+`agent-procutil[metrics]` adds psutil-backed, read-only observations. The default
+installation and ordinary helper imports remain stdlib-only. Even importing
+`agent_procutil.metrics` does not load psutil until a sample is requested.
+
+```python
+from agent_procutil.metrics import OwnedProcessCpuSampler, ProcessIdentity
+
+sampler = OwnedProcessCpuSampler(
+    ProcessIdentity(pid=owned_pid, created_at=creation_time_from_owned_spawn),
+)
+observation = await sampler.sample()
+```
+
+Supply the root PID and creation time captured at the caller's own spawn seam,
+not an arbitrary PID inferred later. The sampler does not establish ownership
+authority. It verifies identities before and after reads, retains observed
+descendants across reparenting, and never adopts a reused PID.
+
+`observed_cpu_seconds` is the sum of observed per-identity CPU maxima, or `None`
+when no trustworthy counter is available. It is always a lower bound:
+polling can miss short-lived children or their final CPU interval. `issues`
+explicitly report missing/denied/reused identities, unavailable metrics and
+counter regressions; `truncated` reports exhausted discovery/retention capacity.
+Neither field is a cleanup verdict or permission to kill a process.
+
+At most 128 identities are retained for the sampler's lifetime, and each sample
+performs at most 128 child-discovery attempts. Completed samples are reused for
+one second; concurrent callers
+join one shielded native future. Cancelling a caller leaves
+`pending_sample_future` tracked until its sampling operation actually completes;
+that running future cannot be cancelled by an asyncio wrapper or loop shutdown.
+The caller can boundedly await `asyncio.wrap_future(holder)` at shutdown without
+claiming native completion from a cancelled coroutine. The sampling thread is
+daemon-scoped to its owning process and cannot outlive that process.
+psutil may inspect system process tables internally; the identity cap alone
+does not prove host-independent constant sampling cost.
+
+Each actual attempt has immutable `SampleAccounting`: a random 32-character
+sampler instance, a bounded sequence, `pending`/`succeeded`/`failed` state,
+monotonic start/completion, elapsed sampling `wall_seconds`, worker
+`thread_cpu_seconds`, and bounded timing `issues`. `observation.sample` carries
+the completed successful attempt. Cached reuse returns the same observation,
+provenance and cost; deduplicate by `(instance, sequence)` rather than adding
+the cost again. Recreating a sampler or exhausting its 63-bit sequence creates
+a new instance.
+
+`current_sample` exposes only the current/last attempt.
+`sample_accounting_future` pins its native completion accounting, including
+backend failures that still raise to ordinary sample awaiters. Cancellation,
+loop shutdown and join timeout never finalize this uncancellable accounting
+future. A worker-start failure is explicitly failed with unknown timing.
+Timing failures preserve a valid process observation and mark unavailable,
+invalid or regressed clocks as unknown, never invented zero. Both duration
+clocks are read in the sampling thread; native CPU counters may be quantized
+independently of wall time. Collector CPU is not the observed process-tree
+CPU lower bound, and must never be added to it.
+
+CPU enforcement, consumer role aggregation and process-tree reclamation are
+not provided by this API. Run its focused and native tests with the library's
+`dev` and `metrics` extras under the adopting repository's bounded test runner.
+
 ## Vendoring
 
 **In dev**, most consumers' `pyproject.toml` reference this library through

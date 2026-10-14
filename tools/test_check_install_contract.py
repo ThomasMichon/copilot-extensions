@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
+import json
 from pathlib import Path
 import pytest
 
@@ -102,3 +104,119 @@ def test_retention_contract_rejects_unprotected_incomplete_slot(monkeypatch) -> 
     )
     with pytest.raises(AssertionError, match="incomplete cleanup"):
         checker._check_runtime_retention(runtime)
+
+
+def _plugin(root: Path, name: str, manifest: object, *, installer: str | None = None) -> None:
+    plugin = root / name
+    plugin.mkdir(parents=True)
+    text = manifest if isinstance(manifest, str) else json.dumps(manifest)
+    (plugin / "plugin.json").write_text(text, encoding="utf-8")
+    if installer:
+        (plugin / "scripts").mkdir()
+        (plugin / "scripts" / installer).write_text("# installer\n", encoding="utf-8")
+
+
+def test_runtime_scope_accepts_reconciled_runtime_and_payload_only(tmp_path) -> None:
+    _plugin(tmp_path, "gated", {"runtimeScope": "machine-gated"}, installer="install.ps1")
+    _plugin(tmp_path, "everywhere", {"runtimeScope": "universal"}, installer="init.sh")
+    _plugin(tmp_path, "skills-only", {"runtimeScope": "none"})
+    _plugin(tmp_path, "undeclared-payload", {"name": "undeclared-payload"})
+
+    assert checker._runtime_scope_violations(tmp_path) == []
+
+
+@pytest.mark.parametrize("installer", ["install.ps1", "install.sh", "init.ps1", "init.sh"])
+def test_runtime_installer_must_not_declare_none(tmp_path, installer) -> None:
+    _plugin(tmp_path, "agent-example", {"runtimeScope": "none"}, installer=installer)
+
+    violations = checker._runtime_scope_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert violations[0].startswith("agent-example: ships a runtime installer")
+    assert "'none'" in violations[0]
+
+
+def test_runtime_installer_must_declare_a_scope(tmp_path) -> None:
+    _plugin(tmp_path, "agent-example", {"name": "agent-example"}, installer="install.sh")
+
+    violations = checker._runtime_scope_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert "undeclared" in violations[0]
+
+
+@pytest.mark.parametrize("scope", ["machine_gated", "Universal", "", 3, None])
+def test_declared_scope_must_be_valid(tmp_path, scope) -> None:
+    _plugin(tmp_path, "skills-only", {"runtimeScope": scope})
+
+    violations = checker._runtime_scope_violations(tmp_path)
+
+    assert len(violations) == 1
+    assert violations[0].startswith("skills-only: runtimeScope ")
+
+
+def test_unreadable_manifest_is_reported(tmp_path) -> None:
+    _plugin(tmp_path, "broken", "{not json")
+    _plugin(tmp_path, "array", "[]")
+
+    violations = checker._runtime_scope_violations(tmp_path)
+
+    assert [v.split(":", 1)[0] for v in violations] == ["array", "broken"]
+
+
+def test_repository_plugins_declare_valid_runtime_scopes() -> None:
+    assert checker._runtime_scope_violations(REPO / "plugins") == []
+
+
+def test_valid_scopes_match_the_reconciler() -> None:
+    source = (
+        REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees" / "reconcile.py"
+    ).read_text(encoding="utf-8")
+    for node in ast.parse(source).body:
+        if (
+            isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "VALID_SCOPES" for t in node.targets)
+        ):
+            assert set(ast.literal_eval(node.value)) == set(checker.VALID_RUNTIME_SCOPES)
+            return
+    raise AssertionError("reconcile.VALID_SCOPES not found")
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        '    exec 8>"$INSTALL_DIR/.install.lock" 2>/dev/null || return 1',
+        "            exec 8>&- 2>/dev/null || true",
+        '    exec 9>"${LOCK}" 2> /dev/null || return 0',
+        '    exec 8> "$INSTALL_DIR/.install.lock" 2>/dev/null || return 1',
+        '    exec 7< "$f" 2>/dev/null',
+    ],
+)
+def test_exec_redirect_that_swallows_stderr_is_rejected(tmp_path, line) -> None:
+    scripts = tmp_path / "plugins" / "demo" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "install.sh").write_text(f"#!/usr/bin/env bash\n{line}\n", encoding="utf-8")
+    violations = checker._exec_stderr_swallow_violations(tmp_path / "plugins")
+    assert len(violations) == 1
+    assert "demo/scripts/install.sh:2" in violations[0]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        '    { exec 8>"$INSTALL_DIR/.install.lock"; } 2>/dev/null || return 1',
+        "            { exec 8>&-; } 2>/dev/null || true",
+        '        if { exec 8>"$lease_path"; } 2>/dev/null; then',
+        '    # exec 8>"$f" 2>/dev/null would swallow stderr',
+        '    exec "$PY" -m tool 2>/dev/null',
+    ],
+)
+def test_grouped_exec_redirect_is_accepted(tmp_path, line) -> None:
+    scripts = tmp_path / "plugins" / "demo" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "install.sh").write_text(f"#!/usr/bin/env bash\n{line}\n", encoding="utf-8")
+    assert checker._exec_stderr_swallow_violations(tmp_path / "plugins") == []
+
+
+def test_repo_installers_do_not_swallow_stderr_with_exec() -> None:
+    assert checker._exec_stderr_swallow_violations(REPO / "plugins") == []

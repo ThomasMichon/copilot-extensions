@@ -21,6 +21,80 @@ its destination.
 
 ## Contribution flow (PR-required)
 
+### Required source attribution on dev PRs
+
+Every PR targeting `dev`, including manually opened and automated PRs, must
+carry one source-attribution comment in its description. Opening with the
+managed `create-pr` flow supplies this automatically; bypassing that flow does
+not waive the metadata requirement.
+
+For a managed source, the minimal format is:
+
+```html
+<!-- agent-worktrees:source codename=<assigned-public-handle> -->
+```
+
+Use the worktree's actual assigned public codename, not a fabricated label.
+Optional `root` is another assigned public handle; optional `enc` is the
+base64 AWI1 envelope produced by the shared-key attribution tools. Handles are
+lowercase alphanumeric segments joined by hyphens, at most 64 characters.
+Encryption is optional; never publish raw machine, worktree or session fields.
+Place the comment on its own line outside code fences or quoted examples.
+Indented code, blockquotes, escaped comments and list-contained fenced examples
+are not source metadata; the trusted check parses Markdown containers rather
+than counting example text.
+
+Repository automation instead supplies its public workflow origin:
+
+```html
+<!-- agent-worktrees:source workflow=purge-consumed-changefiles run=123456789 -->
+```
+
+Workflow slugs use lowercase alphanumeric segments joined by hyphens or
+underscores (64 characters maximum). `run` is optional and, when present,
+contains 1-20 decimal digits. Codename and workflow forms cannot be mixed;
+unknown fields, duplicates and multiple source comments are refused.
+This is structural origin metadata, not cryptographic proof of authorship.
+
+gh-aw workflows already append their compiler-controlled origin after body
+sanitization. When no managed source comment is present, their native form is
+also accepted:
+
+```html
+<!-- gh-aw-workflow-id: ci-failure-fix-attempt -->
+```
+
+This reuses the existing automation publisher rather than relying on an agent
+to add a second marker or rewriting its safe-output artifacts.
+
+**Manual repair:** retain the authored description in a UTF-8 file. From the
+managed source worktree, use the exact agent-worktrees command in the session
+catalog:
+
+```text
+<agent-worktrees catalog argv[0]> attribution-prepare --body-file authored-pr.md
+<agent-worktrees catalog argv[0]> repos gh <owner/repo> -- pr edit <number> --body-file prepared-pr.md
+```
+
+Save the first command's prepared output as UTF-8 `prepared-pr.md` before
+running the second. If preparation is not installed yet, append the minimal
+comment manually using the actual codename from managed worktree creation or
+listing. Do not overwrite authored prose, guess a source, weaken privacy
+settings, or silently switch accounts. If no publishable source exists, stop
+and ask the operator. **Agents must repair metadata, not apply or remove
+operator-only policy labels to bypass CI.**
+
+The trusted `source-attribution` check reads current PR metadata and reevaluates
+description/base edits and metadata changes, so a body-only repair needs no
+dummy commit. Its required-context rollout occurs only after the trusted
+workflow has reached `main` and is verified; old green checks from earlier
+workflow versions do not substitute for this distinct requirement.
+GitHub attaches check results to commits, not individual PRs. Multiple open
+`dev` PRs sharing one head commit therefore fail this check, even when each
+description is valid. Publish a distinct head commit for each PR before retrying.
+When a peer moves, closes, or retargets away from `dev`, its departure refreshes
+the remaining PRs on the old head; they need no unrelated description edit.
+
 **PRs target `dev`, not `main`.** `main` is regenerated wholesale by a CI
 promotion pipeline (`.github/workflows/validate-and-promote.yml`,
 dev-branch-release-pipeline effort, ThomasMichon/copilot-extensions#3336) —
@@ -874,12 +948,18 @@ binstub in `~/.local/bin/`.
   baselined ceiling in the ordinary case is a **manual, reviewed edit** to
   the JSON, never something a plain refresh does silently — bare
   `--refresh-baseline` only lowers or removes entries, it never raises one.
-  The one exception is the opt-in `--refresh-baseline --allow-widen` flag,
-  restricted by convention to a scheduled/post-merge run against `main`
-  (`.github/workflows/module-size-baseline-widen.yml`), which additionally
+  Automated maintenance uses `--refresh-baseline --widen-only`,
+  restricted to a trusted post-merge CI-completion run against committed `dev`
+  (`.github/workflows/promote-trigger.yml`), which additionally
   ratchets a grown file's ceiling up to its current size and opens its own
-  small, reviewable PR — never something a PR branch's own CI run applies to
-  its own diff. A separate `--changed-since REF` flag scopes the ordinary
+  small, reviewable PR targeting `dev` — never something a PR branch's own CI run applies to
+  its own diff. Automation never lowers or removes an existing ceiling,
+  including graduated entries, so a stale tightening cannot block later
+  growth. A stale higher ceiling is an accepted reviewed proposal, not a
+  reason to require exact-baseline equality or global strict-base CI.
+  Manual `--refresh-baseline` retains tightening; adding `--allow-widen`
+  also permits widening during that deliberate refresh.
+  A separate `--changed-since REF` flag scopes the ordinary
   (non-widening) check to files this branch's own commits actually touch
   (used by CI on `pull_request` events) — this repo's high concurrent-PR
   volume otherwise let one already-merged PR's growth in a shared,

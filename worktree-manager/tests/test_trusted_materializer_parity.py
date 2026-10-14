@@ -123,10 +123,10 @@ def _run_uv_editable_scenario(tmp_path: Path, canonical_mod, *, name: str, build
 
 @pytest.mark.parametrize("implementation", ["canonical", "trusted"])
 @pytest.mark.parametrize("consumer_name,dependency,path,allowed", [
-    ("agent-dispatch-service", "agent-dispatch", "../plugins/agent-dispatch", True),
+    ("services/dispatch", "agent-dispatch", "../../plugins/agent-dispatch", True),
     ("unrelated-service", "agent-dispatch", "../plugins/agent-dispatch", False),
-    ("agent-dispatch-service", "alias", "../plugins/agent-dispatch", False),
-    ("agent-dispatch-service", "agent-dispatch", "../plugins/other-plugin", False),
+    ("services/dispatch", "alias", "../../plugins/agent-dispatch", False),
+    ("services/dispatch", "agent-dispatch", "../plugins/other-plugin", False),
 ])
 def test_standalone_dispatch_package_reference_is_explicit(
     tmp_path, canonical, implementation, consumer_name, dependency, path, allowed,
@@ -142,7 +142,7 @@ def test_standalone_dispatch_package_reference_is_explicit(
     )
     _canonical_lib(root, "zdd", version="0.1.0", content="VALUE = 2\n")
     consumer = root / consumer_name
-    consumer.mkdir()
+    consumer.mkdir(parents=True)
     (consumer / "pyproject.toml").write_text(
         '[project]\nname = "standalone"\nversion = "0.1.0"\n'
         f'[tool.uv.sources]\n{dependency} = {{ path = "{path}", editable = true }}\n'
@@ -176,11 +176,11 @@ def test_standalone_dispatch_reference_refuses_symlinked_ancestors(tmp_path, can
     (plugin / "src/agent_dispatch").mkdir(parents=True)
     (plugin / "src/agent_dispatch/__init__.py").write_text("VALUE = 1\n")
     (plugin / "pyproject.toml").write_text('[project]\nname = "agent-dispatch"\nversion = "0.1.0"\n')
-    consumer = root / "agent-dispatch-service"
-    consumer.mkdir()
+    consumer = root / "services" / "dispatch"
+    consumer.mkdir(parents=True)
     (consumer / "pyproject.toml").write_text(
         '[project]\nname = "standalone"\nversion = "0.1.0"\n'
-        '[tool.uv.sources]\nagent-dispatch = { path = "../plugins/agent-dispatch", editable = true }\n'
+        '[tool.uv.sources]\nagent-dispatch = { path = "../../plugins/agent-dispatch", editable = true }\n'
     )
     dest = tmp_path / "slot"
     shutil.copytree(consumer, dest)

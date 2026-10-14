@@ -29,6 +29,11 @@ under `worktree-manager/bin/`; promotion copies the files listed in
 `plugins/agent-worktrees/bin/` so a shipped payload never depends on a sibling
 `worktree-manager/` checkout being present.
 
+The same packaged-asset machinery expands `packaged-assets.json` declarations.
+Agent-worktrees uses this for the projection engine shared with customizing-
+copilot: one canonical dev source becomes a complete, byte-identical engine
+inside its own released payload, with no sibling-plugin discovery at runtime.
+
 Usage::
 
     python tools/materialize_main.py --dest /path/to/main-snapshot
@@ -219,9 +224,9 @@ def materialize_uv_editable_ref_into(
         # own possibly `..`-laden text.
         canonical_relative = Path("libs") / lib
         # Only the reviewed standalone wrapper may embed its own runtime package.
-        if (source_consumer_dir.absolute() == canonical_root_r / "agent-dispatch-service"
+        if (source_consumer_dir.absolute() == canonical_root_r / "services" / "dispatch"
                 and name == lib == "agent-dispatch"
-                and raw_path == "../plugins/agent-dispatch"):
+                and raw_path == "../../plugins/agent-dispatch"):
             bad_source = _find_symlinked_ancestor(source_consumer_dir, canonical_root_r)
             if bad_source is not None:
                 log.append(f"SKIP {dest_consumer_dir}: {bad_source} is a symlink -- refusing")

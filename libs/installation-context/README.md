@@ -22,7 +22,22 @@ and marketplace ids, resolve payload provenance, compute the approved durable
 layout, strictly validate receipts, and expose the same bounded `stamp` and
 `activation-cas` mutations. They also expose immutable `snapshot-stamp` and
 read-only `snapshot-validate` provenance actions plus read-only `status` and
-`probe-legacy` actions for installation-mode governance. `stamp` creates or
+`probe-legacy` actions for installation-mode governance. These diagnostics
+never publish a `runtime-root` file; existing advisory files are left untouched.
+Command discovery uses attributable catalogs or explicit lifecycle launchers,
+not a status-query side effect. The Python `resolve_payload_source(...)` API
+reuses installed-declaration and directory-catalog provenance resolution without
+reading installation policy, activation, receipts, or the cell tree. It returns
+normalized source, fingerprint, marketplace identity, plugin identity, payload
+root, and locator only; it does not prove runtime ownership, readiness, or select
+an installation. An ambient installation-context pointer is deliberately outside
+this source-only API's scope. Missing, conflicting, or unsupported provenance
+raises `InstallationContextError`, never a guessed source. Explicit management
+callers may supply a source descriptor. `resolve_context(...)` composes the same
+source resolver with its existing receipt and cell-ownership checks; those checks
+remain mandatory when selecting or managing a cell. Catalog integration is a
+separate consumer change, not implied by this API's presence.
+`stamp` creates or
 updates only `namespace.json` and `install.json`. `activation-cas` explicitly
 publishes only `installation-activation.json` after pinning the caller-observed
 namespace, install, and activation generations. The cross-runner actions do not

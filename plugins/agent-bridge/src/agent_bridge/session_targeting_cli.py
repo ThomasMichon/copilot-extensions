@@ -201,7 +201,18 @@ def _send(args: argparse.Namespace) -> None:
     target = args.target
     prompt = _resolve_prompt(args, required=True)
 
+    if getattr(args, "expected_native_session_id", None) is not None:
+        if any(getattr(args, option, False) for option in ("force", "queue", "new")):
+            raise SendRefused(
+                "refused_unavailable", reason="invalid_native_fence_options", retryable=False,
+                target=target, error="native-bound send cannot force, queue, or create a session",
+            )
+        core._submit_and_stream(client, args, target, prompt, caller_id=core._caller_id_for(args))
+        return
+
+    from .live_peer_address import peer_target_after_lookup
     live = client.resolve_live_session(target)
+    address = peer_target_after_lookup(target, prompt, live=bool(live))
     if live:
         expected_session_id = getattr(args, "expected_session_id", None)
         # The delivery carries expected_session_id, which an alias-aware daemon checks
@@ -229,6 +240,9 @@ def _send(args: argparse.Namespace) -> None:
             sys.exit(2)
         _deliver_to_live_session(client, args, live["session_id"], prompt)
         return
+    if address is not None:
+        _deliver_to_live_session(client, args, target, prompt, remote_address=address)
+        return
     if getattr(args, "expected_session_id", None):
         raise SendRefused(
             "refused_unavailable", reason="not_found", retryable=False, target=target,
@@ -250,13 +264,8 @@ def _caller_worktree_handle() -> str | None:
 
 
 def _live_reply_to(args: argparse.Namespace) -> str | None:
-    explicit = getattr(args, "reply_to", None)
-    if explicit:
-        return explicit
-    handle = _caller_worktree_handle()
-    if handle:
-        return handle
-    return os.environ.get("AGENT_BRIDGE_SESSION_ID") or os.environ.get("SESSION_ID")
+    from .live_peer_address import caller_reply_address
+    return caller_reply_address(args, lambda: _core()._get_client(), _caller_worktree_handle)
 
 
 def _live_sender_label(args: argparse.Namespace) -> str:
@@ -299,7 +308,8 @@ def _live_message_delivery(args: argparse.Namespace) -> str:
     return getattr(args, "delivery", None) or "steer"
 
 
-def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, prompt: str) -> None:
+def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, prompt: str,
+                             *, remote_address=None) -> None:
     from .client import BridgeClientError
     from .send_outcome import emit, live_outcome, refusal_from_live_error
 
@@ -318,17 +328,24 @@ def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, 
     if expected_session_id:
         delivery_options["expected_session_id"] = expected_session_id
     try:
-        result = client.send_live_message(
-            session_id,
-            sender=sender,
-            body=prompt,
-            reply_to=reply_to,
-            kind=kind,
-            delivery=delivery,
-            wait=wait,
-            wait_timeout=wait_timeout,
-            **delivery_options,
-        )
+        if remote_address is not None:
+            from .live_peer_address import send_remote_peer
+            result = send_remote_peer(
+                client, args, remote_address, sender=sender, reply_to=reply_to,
+                kind=kind, delivery=delivery, prompt=prompt,
+            )
+        else:
+            result = client.send_live_message(
+                session_id,
+                sender=sender,
+                body=prompt,
+                reply_to=reply_to,
+                kind=kind,
+                delivery=delivery,
+                wait=wait,
+                wait_timeout=wait_timeout,
+                **delivery_options,
+            )
     except BridgeClientError as exc:
         refused = refusal_from_live_error(exc, session_id)
         if refused is None:
@@ -390,6 +407,7 @@ def _submit_and_stream(
     prompt: str,
     *,
     caller_id: str | None,
+    submitted_result: dict | None = None,
 ) -> None:
     core = _core()
     from .send_outcome import emit, prompt_outcome
@@ -398,13 +416,23 @@ def _submit_and_stream(
     from .client import BridgeClientError
 
     try:
-        result = client.submit_prompt(
-            session_id,
-            prompt,
-            queue=queue,
-            caller_id=caller_id,
-            request_timeout=core._startup_request_timeout(resume=True, fresh_fallback=True),
-        )
+        expected_native = getattr(args, "expected_native_session_id", None)
+        if submitted_result is not None:
+            result = submitted_result
+        elif expected_native is not None:
+            from .native_bound_prompt import submit_native_bound_prompt
+            result = submit_native_bound_prompt(
+                client, session_id, prompt, caller_id=caller_id,
+                expected_native_session_id=expected_native,
+            )
+        else:
+            result = client.submit_prompt(
+                session_id,
+                prompt,
+                queue=queue,
+                caller_id=caller_id,
+                request_timeout=core._startup_request_timeout(resume=True, fresh_fallback=True),
+            )
     except BridgeClientError as exc:
         if exc.status == 404:
             # The session vanished between resolving it and this submit.
@@ -762,6 +790,9 @@ def _cmd_create_cli(
 
 
 def _cmd_create(args: argparse.Namespace) -> None:
+    if getattr(args, "creation_key", None) is not None and getattr(args, "cli", False):
+        print("[FAIL] --creation-key is not supported by CLI-mode venue creation.", file=sys.stderr)
+        sys.exit(2)
     if getattr(args, "detach", False) and not getattr(args, "cli", False):
         print("[FAIL] --detach requires --cli", file=sys.stderr)
         sys.exit(2)
@@ -786,6 +817,12 @@ def _cmd_create(args: argparse.Namespace) -> None:
     caller_id = core._caller_id_for(args)
 
     from .client import BridgeClientError
+
+    creation_key = getattr(args, "creation_key", None)
+    if creation_key is not None:
+        from .workspace_creation_cli import create
+        create(args, client, caller_id=caller_id)
+        return
 
     try:
         existing = client.get_session(target)
@@ -845,7 +882,13 @@ def _cmd_create(args: argparse.Namespace) -> None:
     if not prompt:
         ident = core._connection_identity(client, session_id)
         if args.json:
-            core._json_out({"session_id": session_id, "connection": ident})
+            session = client.get_session(session_id)
+            ident["native_session_id"] = session.get("acp_session_id")
+            ident["target_dir"] = session.get("target_dir")
+            ready = session.get("status") == "idle" and session.get("turn_count") == 0
+            core._json_out({"session_id": session_id, "connection": ident,
+                            "ready": ready,
+                            "status": "awaiting_first_prompt" if ready else session.get("status")})
         else:
             core._print_connection_identity(ident)
             print(f"[OK] Session {session_id} created -- send work with: agent-bridge send {session_id} \"<prompt>\"")
@@ -917,7 +960,7 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     send_p.add_argument("prompt", nargs="?", default=None, help="Prompt text to send (omit and use --prompt-file for multi-line prompts that shouldn't transit the shell's argv)")
     send_p.add_argument("--prompt-file", dest="prompt_file", default=None, metavar="PATH", help="Read the prompt from PATH (or '-' for stdin) instead of the positional argument. Use this for multi-line prompts to avoid shell argv mangling (e.g. PowerShell word-splitting a prompt at the first embedded double-quote). Mutually exclusive with the positional prompt.")
     send_p.add_argument("--sender", "--from", dest="sender", default=None, help="Attribution label when the target is a live interactive session (default: this caller's worktree/user). Legibility only, not routing.")
-    send_p.add_argument("--reply-to", dest="reply_to", default=None, help="Routable handle a reply should target when delivering to a live session -- a worktree handle (survives handoff) or a session id (default: this caller's own worktree handle, else its session id from the environment). Rendered as the envelope's reply-to.")
+    send_p.add_argument("--reply-to", dest="reply_to", default=None, help="Routable peer reply address: live:<machine>:<project>:<worktree>, a legacy local worktree handle, or an exact session id. Defaults to the caller's registered qualified worktree address. Rendered as the envelope's reply-to.")
     send_p.add_argument("--kind", choices=["prompt", "notify", "status-check"], default="prompt", help="Typed intent when delivering to a live session: 'prompt' (a work directive, default) vs 'notify'/'status-check' (asks only for a terse out-of-band ack, never treated as new work).")
     send_p.add_argument("--notify", action="store_true", help="Shorthand for --kind notify (informational; no work expected).")
     send_p.add_argument("--status-check", dest="status_check", action="store_true", help="Shorthand for --kind status-check (asks for a terse status ack).")
@@ -934,6 +977,7 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     send_p.add_argument("--idempotency-key", help="stable producer key; retries return the original live-message id instead of enqueuing a duplicate")
     send_p.add_argument("--expected-session-id", help="deliver only if the target still resolves to this exact live session id (checked again atomically when enqueuing)")
     send_p.add_argument("--min-daemon-protocol", type=int, default=None, metavar="N", help="send nothing (exit 3) unless the running daemon advertises HTTP protocol N or newer")
+    send_p.add_argument("--expected-native-session-id", default=None, metavar="UUID", help="Admit an immediate prompt only to this exact running native conversation; never resume, recreate, queue, or hand off")
     core._add_stream_args(send_p)
     send_p.set_defaults(func=_cmd_send)
 
@@ -948,6 +992,7 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     create_p.add_argument("--charter", dest="charter", default=None, metavar="AGENT", help="Optional .github/agents/<charter>.agent.md behavior overlay -- passed as Copilot's own --agent flag on the launched session, independent of TARGET (the venue this session spawns onto).")
     create_p.add_argument("--target-dir", dest="target_dir", default=None, metavar="PATH", help="Run this agent session in an existing checkout directory.")
     create_p.add_argument("--worktree-id", dest="worktree_id", default=None, metavar="ID", help="Bind the created session to an existing agent-worktrees worktree id.")
+    create_p.add_argument("--creation-key", help="opaque logical creation identity; exact local workspace/session retries retain the original result")
     create_p.add_argument("--cli", action="store_true", help="Deliver a live, human-attachable CLI-mode Copilot session on the venue TARGET names (codespace:<name>, container:<name>, or ssh:<name>) instead of an ordinary headless ACP session -- hands off entirely to that provider's own `copilot` verb, optionally seeded with the positional prompt as its first turn (agent-bridge-cli-mode-sessions Phase 4). Defaults to anchor mode on the venue (no worktree required). Refused for a bare/unprefixed TARGET -- use `agent-worktrees copilot` directly for a local session.")
     create_p.add_argument("--driver", default=None, metavar="LABEL", help="With --cli: forwarded to the remote `agent-worktrees copilot --driver` (stamps the 'driven by' banner).")
     create_p.add_argument("--detach", action="store_true", help="With --cli on a codespace:<name>, container:<name>, or ssh:<name> target: start the CLI-mode session in the background (seeded with the prompt) and print a JSON handle (session id plus attach/observe/nudge/stop commands) instead of taking over this terminal -- for an orchestrating agent that must not hand its TTY away.")

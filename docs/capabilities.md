@@ -49,7 +49,7 @@ Neither classification alone establishes platform or venue support.
   every plugin supports that provider's API.
 - Optional standalone products—[Worktree Manager](../worktree-manager/README.md),
   [fleet-manager](../fleet-manager/README.md), and
-  [agent-dispatch-service](../agent-dispatch-service/README.md)—are outside the
+  [agent-dispatch-service](../services/dispatch/README.md)—are outside the
   marketplace-plugin roster. Their own pages define current scope.
 
 No fleet/controller bootstrap, new provider backend, or future Configurator

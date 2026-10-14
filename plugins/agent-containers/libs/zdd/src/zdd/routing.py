@@ -41,6 +41,7 @@ propagating; a failed replacement leaves the previous route intact.
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
@@ -54,6 +55,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import publication_history, routing_persistence
+
 log = logging.getLogger("zdd")
 
 _TABLE_FILENAME = "active.json"
@@ -66,6 +69,10 @@ _PROBE_TIMEOUT_S = 0.25
 
 class ActivePublicationRefused(RuntimeError):
     """Raised when a guarded route publication refuses the current active row."""
+
+
+class RoutingLockTimeout(TimeoutError):
+    """The routing mutation lock could not be acquired before the deadline."""
 
 
 def format_authority(host: str, port: int) -> str:
@@ -135,20 +142,28 @@ def routing_table_path(config_dir: str | os.PathLike[str]) -> Path:
 
 
 @contextmanager
-def _file_routing_lock(config_dir: str | os.PathLike[str]):
+def _file_routing_lock(
+    config_dir: str | os.PathLike[str], *, deadline: float | None = None,
+):
     path = Path(config_dir) / _LOCK_FILENAME
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as handle:
         if sys.platform == "win32":
             import msvcrt
 
-            handle.seek(0)
-            if not handle.read(1):
+            # Reading byte zero can itself hit another holder's mandatory lock.
+            if os.fstat(handle.fileno()).st_size == 0:
                 handle.seek(0)
                 handle.write(b"\0")
                 handle.flush()
             handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            if deadline is None:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                _wait_for_lock(
+                    lambda: msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1),
+                    deadline,
+                )
             try:
                 yield
             finally:
@@ -157,19 +172,59 @@ def _file_routing_lock(config_dir: str | os.PathLike[str]):
         else:
             import fcntl
 
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            if deadline is None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            else:
+                _wait_for_lock(
+                    lambda: fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB),
+                    deadline,
+                )
             try:
                 yield
             finally:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def _wait_for_lock(acquire: Callable[[], object], deadline: float) -> None:
+    while True:
+        try:
+            acquire()
+            return
+        except OSError as exc:
+            if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                raise
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RoutingLockTimeout("routing lock acquisition deadline expired") from exc
+            time.sleep(min(0.05, remaining))
+
+
 @contextmanager
-def _routing_lock(config_dir: str | os.PathLike[str]):
+def _routing_lock(
+    config_dir: str | os.PathLike[str], *, deadline: float | None = None,
+):
     """Serialize routing mutations across threads and processes."""
-    with _PROCESS_ROUTING_LOCK:
-        with _file_routing_lock(config_dir):
+    acquired = (
+        _PROCESS_ROUTING_LOCK.acquire()
+        if deadline is None
+        else _PROCESS_ROUTING_LOCK.acquire(timeout=max(0.0, deadline - time.monotonic()))
+    )
+    if not acquired:
+        raise RoutingLockTimeout("routing thread lock acquisition deadline expired")
+    try:
+        with _file_routing_lock(config_dir, deadline=deadline):
             yield
+    finally:
+        _PROCESS_ROUTING_LOCK.release()
+
+
+@contextmanager
+def routing_lock(
+    config_dir: str | os.PathLike[str], *, deadline: float,
+):
+    """Hold native routing authority within an explicit acquisition deadline."""
+    with _routing_lock(config_dir, deadline=deadline):
+        yield
 
 
 def read_table(config_dir: str | os.PathLike[str], *, strict: bool = False) -> dict | None:
@@ -282,18 +337,40 @@ def read_active_endpoint(
 
 def _atomic_write(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=False), encoding="utf-8")
-    for attempt in range(20):
-        try:
-            os.replace(tmp, path)
-            return
-        except OSError as exc:
-            # Windows readers and scanners can temporarily deny replacement.
-            # Never retry unrelated errors or suppress a permanent failure.
-            if getattr(exc, "winerror", None) not in (5, 32, 33) or attempt == 19:
-                raise
-            time.sleep(0.05)
+    previous = _read_mutation_table(path.parent)
+    if publication_history.KEY in previous and publication_history.read(previous) is None:
+        log.error("Publication history unavailable; prior negative proofs invalidated")
+    history = publication_history.updated(previous, data)
+    following = {**data, publication_history.KEY: history}
+    # Persist conservative custody before making the new route visible. A
+    # daemon can admit work as soon as another process sees the renamed route.
+    protected = {**previous, publication_history.KEY: history}
+    routing_persistence.write(path, protected)
+    routing_persistence.write(path, following)
+
+
+def _read_mutation_table(config_dir: str | os.PathLike[str]) -> dict:
+    try:
+        return read_table(config_dir, strict=True) or {}
+    except (OSError, ValueError) as exc:
+        reason = f"routing state unverifiable ({type(exc).__name__}); owner-led recovery required"
+        log.error(reason)
+        raise ActivePublicationRefused(reason) from None
+
+
+def publication_witness(
+    config_dir: str | os.PathLike[str], *, deadline: float,
+) -> str:
+    """Capture routing-owned evidence before a passive candidate is born."""
+    with _routing_lock(config_dir, deadline=deadline):
+        table = _read_mutation_table(config_dir)
+        history = publication_history.read(table)
+        if history is None:
+            _atomic_write(routing_table_path(config_dir), table)
+            history = publication_history.read(_read_mutation_table(config_dir))
+        if history is None:
+            raise ActivePublicationRefused("publication history cannot establish candidate custody")
+        return history["epoch"]
 
 
 def _next_generation(data: dict | None) -> int:
@@ -340,7 +417,7 @@ def _publish_active_unlocked(
                 "identity-bound supervision must reject this route", pid,
             )
     path = routing_table_path(config_dir)
-    current = read_table(config_dir) or {}
+    current = _read_mutation_table(config_dir)
     gen = generation if generation is not None else _next_generation(current)
 
     new_active = Endpoint(
@@ -479,6 +556,7 @@ def publish_active_with_previous_guarded(
     refuse_current: Callable[[dict | None], str | None] | None = None,
     require_expected_active: bool = True,
     process_start_time: str | None = None,
+    lock_deadline: float | None = None,
 ) -> tuple[Endpoint, Endpoint | None]:
     """Publish active while validating the current active row under the lock.
 
@@ -487,7 +565,7 @@ def publish_active_with_previous_guarded(
     Re-read and validate that row under the same routing lock that writes the
     replacement, so a caller never flips over a newly-published route.
     """
-    with _routing_lock(config_dir):
+    with _routing_lock(config_dir, deadline=lock_deadline):
         current = read_table(config_dir) or {}
         current_raw = current.get("active") if isinstance(current, dict) else None
         if not isinstance(current_raw, dict):
@@ -510,6 +588,27 @@ def publish_active_with_previous_guarded(
             demote_existing=demote_existing,
             process_start_time=process_start_time,
         )
+
+
+def validate_active(
+    config_dir: str | os.PathLike[str],
+    expected: Endpoint,
+    *,
+    refuse_current: Callable[[dict | None], str | None] | None = None,
+    lock_deadline: float | None = None,
+) -> None:
+    """Validate an exact raw owner under the native routing lock, without writing."""
+    with _routing_lock(config_dir, deadline=lock_deadline):
+        table = read_table(config_dir, strict=True) or {}
+        raw = table.get("active")
+        refusal = _refuse_or_changed(
+            raw if isinstance(raw, dict) else None,
+            expected_active=expected,
+            refuse_current=refuse_current,
+            require_expected_active=True,
+        )
+        if refusal:
+            raise ActivePublicationRefused(refusal)
 
 
 def restore_previous_if_owner(
@@ -562,6 +661,13 @@ def clear_if_owner(config_dir: str | os.PathLike[str], pid: int) -> bool:
     entry to ``previous`` so an in-flight client mid-resolve still has a fallback
     if the successor is not yet listening.
     """
+    observed = read_table(config_dir)
+    if observed is not None:
+        raw = observed.get("active")
+        endpoint = Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+        if raw is None or (endpoint is not None and endpoint.pid != pid):
+            # An unpublished passive must not wait on its terminator's fence.
+            return False
     with _routing_lock(config_dir):
         data = read_table(config_dir)
         if not data:

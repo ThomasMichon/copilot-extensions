@@ -26,6 +26,15 @@ _project_config_lock = threading.Lock()
 
 def detect_legacy_machine(entries: dict[str, MachineEntry], hostname: str) -> str:
     if any(entry.execution_platform for entry in entries.values()):
+        from .config import detect_platform
+
+        entry = find_machine_entry(
+            entries, hostname, reject_ambiguous=True, execution_platform=detect_platform(),
+        )
+        if entry is not None and entry.legacy_key:
+            return entry.key
+        if not any(item.execution_platform and not item.legacy_key for item in entries.values()):
+            return machine_name(entry) if entry is not None else hostname
         raise ExecutionSpaceError(
             "registered execution spaces require explicit machine configuration; "
             "hostname does not select a local registry"
@@ -40,6 +49,23 @@ def detect_legacy_machine(entries: dict[str, MachineEntry], hostname: str) -> st
         if entry.alias and hostname == entry.alias.lower():
             return machine_name(entry)
     return hostname
+
+
+def canonicalize_legacy_config(config: Any) -> Any:
+    from . import config as cfg
+
+    repo = config.repos.get(config.repo_name)
+    if repo is None or not repo.anchor:
+        return config
+    try:
+        entries = cfg.load_machines_yaml(repo.anchor, config=config)
+    except FileNotFoundError:
+        return config
+    selected = find_machine_entry(
+        entries, config.machine, reject_ambiguous=True,
+        execution_platform=cfg.detect_platform(),
+    )
+    return replace(config, machine=selected.key) if selected and selected.legacy_key else config
 
 
 def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None, str, str | None]:
@@ -58,7 +84,7 @@ def resolve_owner_record_path(owner_ref: str, config: Any) -> tuple[Path | None,
     if not local:
         error = (
             "cross-space owner ledger mutation is unsupported"
-            if any(entry.execution_platform for entry in registry_for_config(config).values())
+            if _requires_scoped_identity(registry_for_config(config), config.machine, parsed.machine)
             else None
         )
         return None, parsed.worktree_id, error
@@ -107,11 +133,24 @@ def registry_for_config(config: Any) -> dict[str, MachineEntry]:
     except (AttributeError, KeyError):
         return {}
     try:
-        return cfg.load_machines_yaml(anchor)
+        return cfg.load_machines_yaml(anchor, config=config)
     except FileNotFoundError:
         return {}
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise ExecutionSpaceError(f"execution-space registry is invalid: {exc}") from exc
+
+
+def _requires_scoped_identity(entries: dict[str, MachineEntry], *names: str) -> bool:
+    if any(entry.execution_platform and not entry.legacy_key for entry in entries.values()):
+        return True
+    try:
+        for name in names:
+            entry = find_machine_entry(entries, name, reject_ambiguous=True)
+            if entry is not None and entry.execution_platform:
+                return True
+        return False
+    except ValueError as exc:
+        raise ExecutionSpaceError(str(exc)) from exc
 
 
 def require_owner_identity(owner: str, config: Any, *, canonical_ref: bool = True) -> bool:
@@ -122,7 +161,7 @@ def require_owner_identity(owner: str, config: Any, *, canonical_ref: bool = Tru
         target = find_machine_entry(entries, owner)
     except ValueError as exc:
         raise ExecutionSpaceError(str(exc)) from exc
-    explicit = any(entry.execution_platform for entry in entries.values())
+    explicit = _requires_scoped_identity(entries, config.machine, owner)
     if explicit:
         if current is None or not current.execution_platform or config.machine != current.key:
             raise ExecutionSpaceError(
@@ -147,7 +186,7 @@ def require_owner_identity(owner: str, config: Any, *, canonical_ref: bool = Tru
 
 
 def require_current_execution_space(config: Any) -> None:
-    if any(entry.execution_platform for entry in registry_for_config(config).values()):
+    if _requires_scoped_identity(registry_for_config(config), config.machine):
         require_owner_identity(config.machine, config)
 
 
@@ -156,7 +195,7 @@ def require_record_mutation(record: Any, config: Any) -> None:
 
     if record is None:
         return
-    if not any(entry.execution_platform for entry in registry_for_config(config).values()):
+    if not _requires_scoped_identity(registry_for_config(config), config.machine, record.machine):
         return
     if not require_owner_identity(record.machine, config):
         raise ExecutionSpaceError(
@@ -176,13 +215,15 @@ def require_record_mutation(record: Any, config: Any) -> None:
             )
 
 
-def require_project_record_mutation(record: Any) -> None:
-    """Resolve receiving-side project authority, never caller-supplied identity."""
+def project_record_config(record: Any) -> Any:
+    """Resolve registered receiving-side configuration under the shared fence."""
     from . import config as cfg
 
     try:
         with _project_config_lock:
-            config = cfg.load_project_config(record.repo)
+            config = cfg.load_project_config(
+                record.repo, include_control_plane_related_pr=False,
+            )
         if record.repo not in config.repos:
             raise ValueError("requested project is not registered in receiving-side configuration")
         config = replace(config, repo_name=record.repo)
@@ -190,7 +231,12 @@ def require_project_record_mutation(record: Any) -> None:
         raise ExecutionSpaceError(
             f"cannot establish receiving-side authority for project {record.repo!r}: {exc}"
         ) from exc
-    require_record_mutation(record, config)
+    return config
+
+
+def require_project_record_mutation(record: Any) -> None:
+    """Resolve receiving-side project authority, never caller-supplied identity."""
+    require_record_mutation(record, project_record_config(record))
 
 
 def require_cleanup_identity(record: Any, anchor: str | Path) -> None:

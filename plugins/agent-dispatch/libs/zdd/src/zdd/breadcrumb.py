@@ -62,7 +62,12 @@ _BREADCRUMB_FILENAME = "cutover.json"
 
 # States from which the orchestrator would still advance if it were alive; a
 # breadcrumb left in one of these is an aborted cutover.
-_NON_TERMINAL = frozenset({"started", "flipped", "draining"})
+_NON_TERMINAL = frozenset({
+    "started", "flipped", "draining",
+    "publication-uncertain",
+    "conditional-started", "conditional-flipped", "conditional-draining",
+    "conditional-publication-uncertain",
+})
 _TERMINAL = frozenset({"committed", "rolled_back", "failed"})
 
 
@@ -97,6 +102,21 @@ def read_breadcrumb(config_dir: str | os.PathLike[str]) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def recovery_refusal(config_dir: str | os.PathLike[str], record: dict | None) -> str | None:
+    """Shared refusal for existing custody that legacy paths cannot interpret."""
+    if requires_conditional_recovery(record):
+        return "conditional cutover requires owner-led recovery"
+    if record is not None and record.get("state") == "publication-uncertain":
+        return "publication commit uncertain; owner-led recovery required"
+    if (
+        record is None and breadcrumb_path(config_dir).exists()
+    ) or (
+        record is not None and record.get("state") not in _NON_TERMINAL | _TERMINAL
+    ):
+        return "recovery state cannot be verified; owner-led recovery required"
+    return None
+
+
 def write_breadcrumb(
     config_dir: str | os.PathLike[str],
     *,
@@ -107,6 +127,8 @@ def write_breadcrumb(
     pid: int | None = None,
     error: str | None = None,
     started_at: str | None = None,
+    publication_witness: str | None = None,
+    new_process_start_time: str | None = None,
 ) -> dict:
     """Write/update the cutover breadcrumb atomically. Returns the record.
 
@@ -130,6 +152,8 @@ def write_breadcrumb(
         "new_port": new_port,
         "new_pid": new_pid,
         "error": error,
+        "publication_witness": publication_witness,
+        "new_process_start_time": new_process_start_time,
     }
     _atomic_write(breadcrumb_path(config_dir), record)
     return record
@@ -154,7 +178,46 @@ def is_stale(record: dict | None) -> bool:
     return str(record.get("state")) in _NON_TERMINAL
 
 
+def requires_conditional_recovery(record: dict | None) -> bool:
+    """Conditional attempts cannot be resolved by legacy undrain/reap."""
+    return bool(record and str(record.get("state", "")).startswith("conditional-"))
+
+
+def refusal_reason(outcome: dict) -> str:
+    """Report malformed refusal evidence explicitly rather than crashing a CLI."""
+    reason = outcome.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        return reason
+    message = "native recovery refused without a valid reason; outcome contract invalid"
+    log.error(message)
+    return message
+
+
 def recover_stale_cutover(
+    config_dir: str | os.PathLike[str],
+    make_client: Callable[[str], Any],
+    *,
+    health_check: Callable[[str, int], bool] | None = None,
+) -> dict:
+    """Recover only while holding native transition authority, without waiting."""
+    from .cutover_lock import CutoverLock, CutoverLockedError
+
+    try:
+        with CutoverLock(config_dir):
+            return _recover_stale_cutover_locked(
+                config_dir, make_client, health_check=health_check
+            )
+    except CutoverLockedError:
+        log.error("Legacy recovery refused while native cutover authority is held")
+        return {"recovered": False, "refused": True,
+                "reason": "native cutover in progress; recovery refused"}
+    except OSError as exc:
+        reason = f"native recovery authority unavailable ({type(exc).__name__})"
+        log.error(reason)
+        return {"recovered": False, "refused": True, "reason": reason}
+
+
+def _recover_stale_cutover_locked(
     config_dir: str | os.PathLike[str],
     make_client: Callable[[str], Any],
     *,
@@ -182,6 +245,11 @@ def recover_stale_cutover(
     gate would see nothing to do.
     """
     record = read_breadcrumb(config_dir)
+    refusal = recovery_refusal(config_dir, record)
+    if refusal is not None:
+        log.error("Legacy recovery refused: %s", refusal)
+        return {"recovered": False, "refused": True,
+                "reason": refusal}
     if not is_stale(record):
         return {"recovered": False, "reason": "no stale cutover breadcrumb"}
 
@@ -190,8 +258,11 @@ def recover_stale_cutover(
         # Nothing to undrain (drain gate was never opened before the abort).
         write_breadcrumb(
             config_dir, state="rolled_back",
+            pid=record.get("pid"),
             old=None, new_port=record.get("new_port"),
             new_pid=record.get("new_pid"),
+            publication_witness=record.get("publication_witness"),
+            new_process_start_time=record.get("new_process_start_time"),
             error=record.get("error") or "aborted before drain",
             started_at=record.get("started_at"),
         )
@@ -214,8 +285,11 @@ def recover_stale_cutover(
         # do not keep retrying a dead endpoint.
         write_breadcrumb(
             config_dir, state="rolled_back", old=old,
+            pid=record.get("pid"),
             new_port=record.get("new_port"),
             new_pid=record.get("new_pid"),
+            publication_witness=record.get("publication_witness"),
+            new_process_start_time=record.get("new_process_start_time"),
             error=(record.get("error") or "aborted") + "; survivor unreachable",
             started_at=record.get("started_at"),
         )
@@ -242,8 +316,11 @@ def recover_stale_cutover(
 
     write_breadcrumb(
         config_dir, state="rolled_back", old=old,
+        pid=record.get("pid"),
         new_port=record.get("new_port"),
         new_pid=record.get("new_pid"),
+        publication_witness=record.get("publication_witness"),
+        new_process_start_time=record.get("new_process_start_time"),
         error=record.get("error") or "aborted cutover recovered",
         started_at=record.get("started_at"),
     )
@@ -292,6 +369,76 @@ def reap_abandoned_passive(
     record: dict | None = None,
     now: datetime | None = None,
 ) -> dict:
+    """Reap only under native transition authority with a fresh breadcrumb."""
+    import time
+
+    from . import routing
+    from .cutover_lock import CutoverLock, CutoverLockedError
+
+    try:
+        with CutoverLock(config_dir):
+            current = read_breadcrumb(config_dir)
+            refusal = recovery_refusal(config_dir, current)
+            if refusal is not None:
+                log.error("Passive reap refused: %s", refusal)
+                return {"reaped": False, "refused": True, "reason": refusal, "pid": None}
+            if record is not None and (
+                current is None or any(
+                    current.get(key) != record.get(key)
+                    for key in (
+                        "pid", "started_at", "old", "new_pid", "new_port",
+                        "publication_witness", "new_process_start_time",
+                    )
+                )
+            ):
+                reason = "cutover identity changed; stale passive-reap evidence refused"
+                log.error(reason)
+                return {"reaped": False, "refused": True, "reason": reason, "pid": None}
+            with routing.routing_lock(config_dir, deadline=time.monotonic()):
+                table = routing.read_table(config_dir, strict=True) or {}
+                candidate = (record or current or {}).get("new_pid")
+                candidate_port = (record or current or {}).get("new_port")
+                for key in ("active", "previous"):
+                    raw = table.get(key)
+                    if raw is not None and not isinstance(raw, dict):
+                        raise ValueError("routing entry is not an object")
+                    endpoint = routing.Endpoint.from_dict(raw) if raw else None
+                    if raw and endpoint is None:
+                        raise ValueError("routing entry identity is invalid")
+                    if endpoint is not None and (
+                        (candidate is not None and endpoint.pid == candidate)
+                        or endpoint.port == candidate_port
+                    ):
+                        return {
+                            "reaped": False,
+                            "reason": "recorded passive pid is published -- it was promoted",
+                            "pid": candidate,
+                        }
+                return _reap_abandoned_passive_locked(
+                    config_dir, pid_alive=pid_alive, terminate=terminate,
+                    active_pid=active_pid, grace_seconds=grace_seconds,
+                    record=record, now=now,
+                )
+    except CutoverLockedError:
+        log.error("Passive reap refused while native cutover authority is held")
+        return {"reaped": False, "refused": True,
+                "reason": "native cutover in progress; reap refused", "pid": None}
+    except (OSError, ValueError) as exc:
+        reason = f"native routing authority unavailable; reap refused ({type(exc).__name__})"
+        log.error(reason)
+        return {"reaped": False, "refused": True, "reason": reason, "pid": None}
+
+
+def _reap_abandoned_passive_locked(
+    config_dir: str | os.PathLike[str],
+    *,
+    pid_alive: Callable[[int], bool],
+    terminate: Callable[[int], bool],
+    active_pid: int | None = None,
+    grace_seconds: float = DEFAULT_ABANDONED_PASSIVE_GRACE_S,
+    record: dict | None = None,
+    now: datetime | None = None,
+) -> dict:
     """Terminate a passive daemon spawned by an abandoned cutover (the downstream tracker).
 
     ``spawn_passive`` stands the new daemon up *before* the breadcrumb can
@@ -319,11 +466,9 @@ def reap_abandoned_passive(
       abandoned and must never be touched,
     - ``pid_alive(new_pid)`` is falsy (already gone -- nothing to do).
 
-    ``pid_alive`` and ``terminate`` are injected so this stays pure/stdlib:
-    a real caller should compose a positive identity check into ``pid_alive``
-    (e.g. re-verify the pid is still a coordinator process by cmdline, not
-    just "some process with this number") to guard against pid reuse, mirroring
-    the identity-check discipline in ``single_instance_lease``'s reaper.
+    The birth-time process token and pre-spawn publication witness must both
+    remain verifiable. ``terminate`` must additionally bind the final mutation
+    to that exact process using a native handle; preflight alone is not a fence.
 
     Callers must pass the **same breadcrumb record** they read before calling
     :func:`recover_stale_cutover` (via ``record=``) rather than letting this
@@ -334,6 +479,10 @@ def reap_abandoned_passive(
     Returns a summary dict: ``{"reaped": bool, "reason": str, "pid": int | None}``.
     """
     rec = record if record is not None else read_breadcrumb(config_dir)
+    if requires_conditional_recovery(rec):
+        log.error("Conditional cutover requires owner-led recovery; passive reap refused")
+        return {"reaped": False, "refused": True,
+                "reason": "conditional cutover requires owner-led recovery", "pid": None}
     if not is_stale(rec):
         return {"reaped": False, "reason": "no stale cutover breadcrumb", "pid": None}
     new_pid = rec.get("new_pid")
@@ -358,10 +507,30 @@ def reap_abandoned_passive(
         }
     if not pid_alive(new_pid):
         return {"reaped": False, "reason": "recorded passive pid is not alive", "pid": new_pid}
+    from . import diagnostics, publication_history, routing
+
+    table = routing.read_table(config_dir, strict=True) or {}
+    start = rec.get("new_process_start_time")
+    if (
+        not isinstance(start, str) or not start
+        or diagnostics.process_start_time(new_pid) != start
+        or not publication_history.never_published(
+            table, rec.get("publication_witness"), pid=new_pid, port=rec.get("new_port"),
+        )
+    ):
+        reason = "candidate promoted or publication history unverified; owner-led recovery required"
+        log.error(reason)
+        return {"reaped": False, "refused": True, "reason": reason, "pid": new_pid}
     try:
-        ok = bool(terminate(new_pid))
+        ok = terminate(new_pid)
+        if type(ok) is not bool:
+            reason = "candidate termination returned invalid exit evidence; reap refused"
+            log.error(reason)
+            return {"reaped": False, "refused": True, "reason": reason, "pid": new_pid}
     except Exception as exc:  # noqa: BLE001 -- reap is best-effort, never raised
-        return {"reaped": False, "reason": f"terminate failed: {exc}", "pid": new_pid}
+        reason = f"identity-bound candidate termination failed ({type(exc).__name__})"
+        log.error(reason)
+        return {"reaped": False, "refused": True, "reason": reason, "pid": new_pid}
     if ok:
         log.warning(
             "Reaped abandoned passive pid=%d from a cutover started %s (age=%.0fs, "
@@ -369,6 +538,7 @@ def reap_abandoned_passive(
         )
     return {
         "reaped": ok,
+        **({"refused": True} if not ok else {}),
         "reason": "terminated" if ok else "terminate reported failure",
         "pid": new_pid,
     }

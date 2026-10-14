@@ -547,6 +547,8 @@ def test_build_stale_relay_renders_unknown_worktree_status(monkeypatch):
 
 
 def test_main_reads_local_coordinator(monkeypatch, tmp_path, capsys):
+    from agent_dispatch import client_categories
+    monkeypatch.setattr(client_categories, "require_endpoint_categories", lambda endpoint: None)
     (tmp_path / "active.json").write_text(
         json.dumps({"active": {"bind": "127.0.0.1", "port": 1234}}),
         encoding="utf-8",
@@ -803,6 +805,8 @@ def test_fetch_rows_direct_delegates_to_build(monkeypatch):
     """``_fetch_rows`` (the --stream/--subscribe fetch path) resolves to the
     direct-coordinator path on this machine, running the raw task list
     through the same `_build` the one-shot path uses."""
+    from agent_dispatch import client_categories
+    monkeypatch.setattr(client_categories, "require_endpoint_categories", lambda endpoint: None)
     monkeypatch.setattr(board_cli, "_local_machine", lambda: "m1")
     monkeypatch.setattr(board_cli, "_endpoint", lambda: "http://x:1")
 

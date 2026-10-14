@@ -113,6 +113,26 @@ def test_find_supervised_workers_uses_the_machine_scope_for_machine_pivots():
     assert pivots.find_supervised_workers([{"pivot": reg}], runtimes, "other", _WID) == []
 
 
+def test_supervised_worker_index_visits_each_ready_scope_once():
+    scans = []
+
+    class Rows(list):
+        def __iter__(self):
+            scans.append(True)
+            return super().__iter__()
+
+    reg = _worker_pivot()
+    rows = Rows(
+        {"display": f"worker-{i}", "worktree_id": f"worktree-{i}"}
+        for i in range(1100)
+    )
+    index = pivots.supervised_workers_by_worktree(
+        [{"pivot": reg}], {reg.name: _Runtime({"": rows})}, "host")
+    assert len(index) == 1100
+    assert scans == [True]
+    assert index["worktree-1099"][0]["label"] == "worker-1099"
+
+
 def test_find_supervised_workers_is_empty_until_the_pivot_has_loaded():
     reg = _worker_pivot()
     rows = [{"display": "cs-one", "worktree_id": _WID}]
@@ -120,6 +140,60 @@ def test_find_supervised_workers_is_empty_until_the_pivot_has_loaded():
     assert pivots.find_supervised_workers([{"pivot": reg}], runtimes, "host", _WID) == []
     assert pivots.find_supervised_workers([{"pivot": reg}], {}, "host", _WID) == []
     assert pivots.find_supervised_workers([{"pivot": reg}], runtimes, "host", "") == []
+
+
+def test_screen_worker_index_reuses_effective_scopes_across_machines():
+    from worktree_manager.production_picker.picker_tui.engine_model import (
+        PickerScreenModelMixin,
+    )
+
+    scans = []
+
+    class Rows(list):
+        def __init__(self, scope, rows):
+            super().__init__(rows)
+            self.scope = scope
+
+        def __iter__(self):
+            scans.append(self.scope)
+            return super().__iter__()
+
+    account = _worker_pivot()
+    local = _worker_pivot("agent-containers", account_scoped=False)
+    records = [
+        {"id": f"worktree-{i}", "machine": display}
+        for display in ("First", "Second")
+        for i in range(3)
+    ]
+    account_runtime = _Runtime({"": Rows("account", [
+        {"display": f"account-{i}", "worktree_id": f"worktree-{i}"}
+        for i in range(3)
+    ])})
+    local_runtime = _Runtime({
+        machine: Rows(machine, [
+            {"display": f"{machine}-{i}", "worktree_id": f"worktree-{i}"}
+            for i in range(3)
+        ])
+        for machine in ("first", "second")
+    })
+    screen = types.SimpleNamespace(
+        pivots=[{"pivot": account}, {"pivot": local}],
+        _pivot_runtimes={account.name: account_runtime, local.name: local_runtime},
+        _machine_key_map=lambda: {"First": "first", "Second": "second"},
+        _row_key=lambda rec: (rec["machine"], rec["id"]),
+    )
+
+    index = PickerScreenModelMixin._worktree_supervised_workers_index(screen, records)
+
+    assert scans == ["account", "first", "second"]
+    for rec in records:
+        machine = rec["machine"].lower()
+        suffix = rec["id"].removeprefix("worktree-")
+        assert [worker["label"] for worker in index[screen._row_key(rec)]] == [
+            f"account-{suffix}", f"{machine}-{suffix}",
+        ]
+    assert account_runtime.ensured == account_runtime.repolled == []
+    assert local_runtime.ensured == local_runtime.repolled == []
 
 
 def test_worker_pivots_never_supply_a_claiming_task_phase_badge():

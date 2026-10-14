@@ -12,7 +12,12 @@ from __future__ import annotations
 import datetime as _dt
 import socket
 
-from machine_transport import is_local_machine
+from machine_transport import (
+    AmbiguousMachineError,
+    find_machine_entry,
+    is_local_machine,
+    local_execution_platform,
+)
 
 from worktree_manager import engine_client
 
@@ -44,7 +49,7 @@ _GROUP_C_MUX_FIELDS = ("mux_session", "mux_clients", "mux_attached")
 
 def _local_identity() -> tuple[str, str]:
     host = socket.gethostname().split(".")[0]
-    plat = cfg.detect_platform()
+    plat = local_execution_platform()
     return host, _ENV_LABEL.get(plat, plat.title())
 
 
@@ -67,25 +72,41 @@ def is_local(machine: str, env: str) -> bool:
     registry for exactly this reason; this is the equivalent check for a
     single ``(machine, env)`` pair rather than the whole roster.
 
-    The ``env``-gate (and the ``LOCAL``-tuple fast path) stay local to this
-    picker-specific wrapper; the machine-identity canonicalization itself
-    delegates to the shared ``machine_transport.is_local_machine`` (vendored,
-    not duplicated -- see its own module docstring for the full algorithm,
-    including the direct-``config_machine``-before-registry-load ordering
-    and the non-empty-gated comparisons this wrapper relies on).
+    The ``env``-gate and hostname tuple fast path stay Picker-specific.
+    Logical entries use the shared platform-aware lookup through ``roster``;
+    legacy native entries and registry outages retain the shared
+    ``is_local_machine`` compatibility behavior.
     """
-    if (machine, env) == LOCAL:
-        return True
+    matches_raw_local = (machine, env) == LOCAL
     if not machine or env != LOCAL[1]:
         return False
     try:
         config = cfg.load_config()
     except Exception:
+        return matches_raw_local
+    try:
+        entries = cfg.load_machines_yaml(config.default_repo.anchor)
+    except AmbiguousMachineError:
         return False
+    except (FileNotFoundError, ValueError, KeyError):
+        entries = {}
+    if any(m.execution_platform for m in entries.values()):
+        try:
+            target = find_machine_entry(entries, machine, reject_ambiguous=True)
+            local = roster.local_entry(
+                entries, config.machine, LOCAL[0], local_execution_platform(),
+            )
+        except ValueError:
+            return False
+        if target is None and local is None:
+            return matches_raw_local
+        return target is not None and target is local
+    if matches_raw_local:
+        return True
     return is_local_machine(
         machine,
         config_machine=config.machine,
-        load_entries=lambda: cfg.load_machines_yaml(config.default_repo.anchor),
+        load_entries=lambda: entries,
         # Explicitly the SAME short (domain-suffix-stripped) hostname
         # ``LOCAL`` itself uses -- the shared helper's own default
         # (``socket.gethostname()``, unstripped) would otherwise disagree

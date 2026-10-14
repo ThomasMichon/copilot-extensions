@@ -61,6 +61,9 @@ sys.dont_write_bytecode = True
 #: dev to know or carry it.
 PIPELINE_STATE_PATH = ".github/release-pipeline-state.json"
 PIPELINE_STATE_SCHEMA = "copilot-extensions.release-pipeline-state"
+# Every promotion tag is `<PROMOTION_TAG_PREFIX>-<UTC ts>-<sha8>`; rollback and
+# CI find promotions by this prefix.
+PROMOTION_TAG_PREFIX = "promote"
 
 
 class PromotionError(RuntimeError):
@@ -349,13 +352,22 @@ def consume_pending_changes(
         else:
             sys.modules.pop("changefile", None)
 
-    return {
+    from promotion_control import ControlPreservationError, preserve_control
+
+    try:
+        control = preserve_control(scratch, main_head=main_head, repo=repo)
+    except ControlPreservationError as exc:
+        raise PromotionError(f"control preservation refused: {exc}") from exc
+    summary = {
         "bumps": {p: computed[p] for p in applied},
         "changefiles_consumed": changefile_names,
         "changefiles_newly_applied": newly_applied_names,
         "projections_synced": projections_synced,
         "materialize_log": materialize_log,
     }
+    if control is not None:
+        summary["control_preserved"] = control
+    return summary
 
 
 def _read_pipeline_state(main_head: str, *, repo: Path) -> dict:
@@ -547,9 +559,13 @@ def _remove_pycache(root: Path) -> None:
             _shutil.rmtree(cache_dir, ignore_errors=True)
 
 
-def build_promotion_tree(scratch: Path) -> str:
+def build_promotion_tree(scratch: Path, *, control: dict | None = None) -> str:
     _remove_pycache(scratch)
     _git(["add", "-A"], cwd=scratch)
+    if control is not None:
+        # Stage pinned blobs after checkout filters and core.filemode handling.
+        for path, blob in control["files"].items():
+            _git(["update-index", "--add", "--cacheinfo", f"100644,{blob},{path}"], cwd=scratch)
     return _git(["write-tree"], cwd=scratch)
 
 
@@ -619,7 +635,7 @@ def promote(
     main_ref: str = "origin/main",
     push: bool = False,
     force: bool = False,
-    tag_prefix: str = "promote",
+    tag_prefix: str = PROMOTION_TAG_PREFIX,
     candidate_branch: str | None = None,
     coverage_baselines_dir: Path | None = None,
     build_python_artifacts_dir: Path | None = None,
@@ -733,44 +749,49 @@ def promote(
             repo=repo,
             trusted_source=REPO,
         )
-        content_tree = build_promotion_tree(scratch)
+        content_tree = build_promotion_tree(scratch, control=summary.get("control_preserved"))
         main_content_tree = _tree_excluding_state(main_tree, repo=repo)
 
         if content_tree == main_content_tree:
             return {"promoted": False, "reason": "no content change vs. main", **summary}
 
         from promotion_python_artifacts import (
-            PromotionArtifactError, candidate_projects, export_artifacts, validate_artifacts,
+            PromotionArtifactError, export_artifacts, validate_composed_artifacts,
         )
 
         if python_artifacts_dir is not None:
             try:
-                validate_artifacts(
-                    python_artifacts_dir, content_tree=content_tree,
+                validate_composed_artifacts(
+                    python_artifacts_dir, scratch=scratch, content_tree=content_tree,
                     dev_head=dev_head, main_before=main_head,
-                    projects=candidate_projects(scratch),
-                    candidate_root=scratch,
                 )
             except PromotionArtifactError as exc:
                 raise PromotionError(str(exc)) from exc
 
         base = _git(["merge-base", main_head, dev_head], cwd=repo, check=False) or main_head
         message = format_promotion_message(dev_range=(base, dev_head), summary=summary)
-        tag_name = f"{tag_prefix}-{time.strftime('%Y%m%d%H%M%S')}"
+        # The state file records only the tag *stem*: the landed commit's sha
+        # is not known until it exists (and, on the PR path, until the
+        # squash-merge produces it). Every pushed tag is `<stem>-<sha8>` of
+        # the commit it points at, so the tag and the state it releases
+        # always agree.
+        tag_stem = f"{tag_prefix}-{time.strftime('%Y%m%d%H%M%S', time.gmtime())}"
 
         new_state = dict(state)
         new_state["last_promotion"] = {
             "dev_head": dev_head,
             "main_before": main_head,
-            "tag": tag_name,
+            "tag": tag_stem,
             "promoted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
+        if "control_preserved" in summary:
+            new_state["last_promotion"]["control_preserved"] = summary["control_preserved"]
         _write_pipeline_state_into_scratch(scratch, new_state)
         _seed_coverage_baselines_from_main(scratch, main_head, repo=repo)
         baselines_written = _write_coverage_baselines_into_scratch(
             scratch, coverage_baselines_dir, dev_head=dev_head
         )
-        new_tree = build_promotion_tree(scratch)
+        new_tree = build_promotion_tree(scratch, control=summary.get("control_preserved"))
 
         commit = _git(
             ["commit-tree", new_tree, "-p", main_head, "-m", message], cwd=scratch
@@ -785,16 +806,22 @@ def promote(
                 )
             except PromotionArtifactError as exc:
                 raise PromotionError(str(exc)) from exc
-        tag_name = f"{tag_name}-{commit[:8]}"
+        tag_name: str | None = f"{tag_stem}-{commit[:8]}"
 
         if push and candidate_branch:
             # Land via a real PR, not a direct push (see promote()'s
-            # docstring) -- the tag is created by the caller against the
-            # actual post-merge commit, not this pre-merge candidate.
+            # docstring) -- the caller tags the actual post-merge commit as
+            # `<tag_stem>-<merge sha8>`; this pre-merge candidate's sha is
+            # replaced by the squash-merge, so no tag name is reported for it.
+            tag_name = None
             _git(["push", "origin", f"{commit}:refs/heads/{candidate_branch}"], cwd=scratch)
         else:
             if build_python_artifacts_dir is None:
                 _git(["tag", "-a", tag_name, "-m", message, commit], cwd=scratch)
+            else:
+                # Artifact preparation never tags (and never pushes; see the
+                # guard at the top), so there is no tag name to report.
+                tag_name = None
             if push:
                 _git(["push", "origin", f"{commit}:refs/heads/main"], cwd=scratch)
                 _git(["push", "origin", tag_name], cwd=scratch)
@@ -803,6 +830,7 @@ def promote(
             "promoted": True,
             "commit": commit,
             "tag": tag_name,
+            "tag_stem": tag_stem,
             "main_before": main_head,
             "dev_head": dev_head,
             "pushed": push,
@@ -886,7 +914,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"promote-release: {report['reason']}; nothing to do.")
         return 0
 
-    print(f"promote-release: generated commit {report['commit']} (tag {report['tag']})")
+    if report["tag"]:
+        print(f"promote-release: generated commit {report['commit']} (tag {report['tag']})")
+    elif report.get("python_artifacts_exported"):
+        print(
+            f"promote-release: prepared commit {report['commit']} for artifact export "
+            f"(not tagged; tag stem {report['tag_stem']})"
+        )
+    else:
+        print(
+            f"promote-release: generated commit {report['commit']} "
+            f"(tag stem {report['tag_stem']}; the merged commit is tagged "
+            f"{report['tag_stem']}-<merge sha8>)"
+        )
     print(f"  main before: {report['main_before']}")
     print(f"  dev head:    {report['dev_head']}")
     for plugin, (old, new) in sorted(report["bumps"].items()):

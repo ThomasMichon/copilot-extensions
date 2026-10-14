@@ -217,24 +217,24 @@ def test_compute_and_apply_bumps_a_standalone_consumer(isolated: Path):
 
 
 def test_index_service_bumps_without_marketplace_plugin(isolated: Path):
-    _standalone(isolated, "agent-index-service", "0.1.0-dev1")
-    package = isolated / "agent-index-service" / "src" / "agent_index_service"
+    _standalone(isolated, "services/index", "0.1.0-dev1")
+    package = isolated / "services/index" / "src" / "agent_index_service"
     package.mkdir(parents=True)
     (package / "__init__.py").write_text(
         '__version__ = "0.1.0-dev1"\n', encoding="utf-8"
     )
     changefile.write_changefile(
-        [{"plugin": "agent-index-service", "type": "patch"}], "standalone controller"
+        [{"plugin": "services/index", "type": "patch"}], "standalone controller"
     )
 
     result = acc.compute(acc.pending_bumps())
-    assert result == {"agent-index-service": ("0.1.0-dev1", "0.1.1-dev1")}
-    assert acc.apply(result) == ["agent-index-service"]
+    assert result == {"services/index": ("0.1.0-dev1", "0.1.1-dev1")}
+    assert acc.apply(result) == ["services/index"]
     assert 'version = "0.1.1-dev1"' in (
-        isolated / "agent-index-service" / "pyproject.toml"
+        isolated / "services/index" / "pyproject.toml"
     ).read_text()
     assert '__version__ = "0.1.1-dev1"' in (package / "__init__.py").read_text()
-    assert not (isolated / "plugins" / "agent-index-service").exists()
+    assert not (isolated / "plugins" / "services/index").exists()
 
 
 def test_standalone_write_only_touches_project_table_version(isolated: Path):

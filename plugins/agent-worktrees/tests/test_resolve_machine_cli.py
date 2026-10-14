@@ -311,7 +311,7 @@ import sys
 from types import SimpleNamespace
 from machine_transport import parse_machines_yaml_file
 from agent_worktrees import config as cfg, resolve_machine_cli as rmc
-cfg.load_machines_yaml = lambda _anchor: parse_machines_yaml_file(sys.argv[1])
+cfg.load_machines_yaml = lambda _anchor, **_kwargs: parse_machines_yaml_file(sys.argv[1])
 cfg.project_name = lambda: "example-project"
 config = SimpleNamespace(default_repo=SimpleNamespace(anchor="fixture"))
 raise SystemExit(rmc._emit_remote_plan_for_env(config, "FRIENDLY", "Linux", ["list", "--json"]))
@@ -345,7 +345,7 @@ import sys
 from types import SimpleNamespace
 from machine_transport import parse_machines_yaml_file
 from agent_worktrees import config as cfg, output, resolve_machine_cli as rmc
-cfg.load_machines_yaml = lambda _anchor: parse_machines_yaml_file(sys.argv[1])
+cfg.load_machines_yaml = lambda _anchor, **_kwargs: parse_machines_yaml_file(sys.argv[1])
 config = SimpleNamespace(default_repo=SimpleNamespace(anchor="fixture"))
 with output.stdout_to_stderr():
     result = rmc._emit_remote_plan_for_env(config, "SHARED", "Linux")

@@ -17,7 +17,11 @@ import subprocess as _subprocess
 import sys
 import time
 import urllib.request as _urllib
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from zdd.conditional import ConditionalCutover
 
 from . import __version__
 from . import config as _config
@@ -334,10 +338,34 @@ def _add_cutover_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--json", action="store_true", help="emit JSON.")
 
 
-def _cmd_cutover(args: argparse.Namespace) -> int:
+def _cmd_cutover(
+    args: argparse.Namespace, *, conditional: ConditionalCutover | None = None,
+    routing_dir: Path | None = None,
+) -> int:
     """Zero-downtime graceful cutover -- shared by ``deploy`` and ``_cutover``."""
     from zdd import breadcrumb
     from zdd.cutover import CutoverOrchestrator
+
+    if conditional is not None:
+        from zdd.conditional import run_conditional_cutover
+
+        if routing_dir is None:
+            raise ValueError("conditional deployment requires the observed routing directory")
+        if getattr(args, "force", False) or getattr(args, "recover", False):
+            raise ValueError("conditional deployment cannot force retirement or run legacy recovery")
+        result = run_conditional_cutover(
+            routing_dir, version=__version__, request=conditional,
+            health_timeout=args.health_timeout, drain_timeout=args.drain_timeout,
+            lock_timeout=getattr(args, "lock_timeout", None),
+        )
+        if getattr(args, "json", False):
+            _emit(result.to_dict())
+        else:
+            for step in result.steps:
+                print(f"  - {step}", file=sys.stderr)
+            if not result.ok:
+                print(f"[FAIL] Conditional cutover refused or failed: {result.error}", file=sys.stderr)
+        return 0 if result.ok else 1
 
     cli = _resolve_cli_module()
     core_time = getattr(cli, "time", time)
@@ -351,7 +379,8 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     from .install_paths import apply_service_env_overlay
     from .install_paths import install_dir as runtime_install_dir
 
-    apply_service_env_overlay(os.environ, runtime_install_dir())
+    runtime_root = runtime_install_dir()
+    apply_service_env_overlay(os.environ, runtime_root)
     cfg = _config.load_config()
     token = _client_token_value()
     wildcard_v4 = ".".join(("0", "0", "0", "0"))
@@ -414,6 +443,10 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
             "stdin": _subprocess.DEVNULL,
             "stdout": _subprocess.DEVNULL,
             "stderr": _subprocess.DEVNULL,
+            # Same as the primary detached launch: run from the runtime root,
+            # never the caller's cwd (a worktree or payload directory), which a
+            # long-lived process would otherwise hold open on Windows.
+            "cwd": str(runtime_root),
         }
         # NOT windowless_python()/detached_kwargs(): this coordinator is a
         # daemon with RECURRING console-subsystem descendants (it repeatedly
@@ -490,11 +523,25 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
         )
         return 2
     try:
+        _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(_config.routing_dir())
         recovery = breadcrumb.recover_stale_cutover(
             _config.routing_dir(), make_client, health_check=liveness_check
         )
-        _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(_config.routing_dir())
+        if recovery.get("refused"):
+            reason = breadcrumb.refusal_reason(recovery)
+            if getattr(args, "json", False):
+                _emit({"ok": False, "error": reason, "recovery": recovery})
+            else:
+                print(f"[FAIL] {reason}", file=sys.stderr)
+            return 1
         passive_reap = reap_abandoned(_pre_recovery_breadcrumb)
+        if passive_reap.get("refused"):
+            reason = breadcrumb.refusal_reason(passive_reap)
+            if getattr(args, "json", False):
+                _emit({"ok": False, "error": reason, "passive_reap": passive_reap})
+            else:
+                print(f"[FAIL] {reason}", file=sys.stderr)
+            return 1
         if getattr(args, "recover", False):
             recovery["passive_reap"] = passive_reap
             _emit(recovery)

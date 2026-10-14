@@ -1,6 +1,7 @@
 """Guard for init.ps1's non-uv (bare-pip) preinstall loop covering the
 uv-editable canonical-reference libs (vendor-pointer-generalization effort):
-dropin-registry, plugin-resolve, agent-procutil, plugin-activation.
+dropin-registry, plugin-resolve, agent-procutil, remote-login-shell,
+machine-transport, plugin-activation.
 Exercises the loop via real pwsh execution for both the uv path and the
 bare-pip fallback path,
 confirming plugin-local/repo-root-canonical resolution and the required
@@ -61,7 +62,10 @@ $haveUv = ${str(have_uv).lower()}
 
 
 def _make_libs(root: Path) -> None:
-    for lib in ("dropin-registry", "plugin-resolve", "agent-procutil", "plugin-activation"):
+    for lib in (
+        "dropin-registry", "plugin-resolve", "agent-procutil",
+        "remote-login-shell", "machine-transport", "plugin-activation",
+    ):
         lib_dir = root / lib
         lib_dir.mkdir(parents=True)
         (lib_dir / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
@@ -85,10 +89,11 @@ def test_preinstall_loop_resolves_plugin_local_copy_and_orders_correctly(
     installs = [
         seg.split(":", 1)[1] for seg in proc.stdout.split("|") if seg.startswith(marker)
     ]
-    assert len(installs) == 4
+    assert len(installs) == 6
     order = [Path(p).name for p in installs]
     assert order.index("plugin-activation") > order.index("dropin-registry")
     assert order.index("plugin-activation") > order.index("plugin-resolve")
+    assert order.index("machine-transport") > order.index("remote-login-shell")
 
 
 @pytest.mark.parametrize("have_uv", [True, False])
@@ -111,6 +116,6 @@ def test_preinstall_loop_falls_back_to_repo_root_canonical_when_absent(
     installs = [
         seg.split(":", 1)[1] for seg in proc.stdout.split("|") if seg.startswith(marker)
     ]
-    assert len(installs) == 4
+    assert len(installs) == 6
     for resolved in installs:
         assert os.path.realpath(resolved).startswith(os.path.realpath(str(canonical)))

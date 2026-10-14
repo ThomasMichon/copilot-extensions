@@ -3,7 +3,7 @@
 - **Subject:** A driver-based fleet of machines and services coordinated through an optional central Gateway controller.
 - **Scope:** leaf (cross-cutting child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-11
+- **Last revised:** 2026-10-13
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md), [`docs/configuration.md`](../../docs/configuration.md)
 
 ## Purpose & Intent
@@ -46,6 +46,22 @@ references. Private inventories, accounts, and deployment policy remain with the
 adopter, not the portable controller. Effective configuration and its provenance
 are inspectable; installing connection tooling alone does not enroll a machine
 or enable background services.
+
+### Logical machines and physical association
+
+Windows and WSL on one physical host are separately addressable logical
+machines, conventionally `<base>` and `<base>-wsl`. Machine and SSH owners
+resolve their independent identities and exact connection profiles; downstream
+worktree, bridge and dispatch clients consume that authority rather than adding
+an environment dimension to machine addresses or selecting a first SSH profile.
+An explicitly declared logical key remains canonical regardless of naming
+convention.
+
+Physical association supports host grouping and Win/WSL presentation in
+Worktree Manager, without collapsing source/target identities, registrations,
+settings, sessions or ownership. Existing identity evidence stays intact;
+ambiguous legacy ownership is not permission to migrate or write a sibling's
+state.
 
 ### Substrate drivers
 
@@ -149,6 +165,20 @@ its selected Gateway is unavailable.
 Copilot adapters provide guidance and typed invocation, not installation,
 updates or persistent supervision. Independently useful guidance and existing
 standalone service adoption remain available outside this profile.
+
+The product's release authority is the single owner of release selection and
+rollout outcomes for the hosts that adopt it. It decides which coordinated
+release each role runs, which optional heavy environments a role includes,
+and when a per-service last-known-good hold applies. It records each target's
+own outcome from attributable installer evidence. Role closures are the unit
+of installation. A client gets only its thin closure. A Gateway or node adds
+only the control, execution, and optional environments that its role and
+configuration select. A host's installer realizes the selection, its
+supervisor keeps authorized residents running, and neither one selects a
+release (plugin-services
+[*one-authority-per-lifecycle-decision*](../plugin-services/README.md#one-authority-per-lifecycle-decision)).
+A delegated venue's runtime is observed and reported in its own right. A
+central host's evidence never stands in for it.
 
 Accepted work survives controller/connection replacement. Authority is fenced at
 the resource/effect owner; stale observations, grant expiry or healthy replacement
@@ -294,7 +324,9 @@ side effects. Offline recipients remain visibly unresolved.
 ### explicit-availability-roles
 
 Auto, on-demand, client-only, service-host, and credential-provider roles are
-explicit configuration choices, not consequences of tool installation.
+explicit configuration choices, not consequences of tool installation or of a
+role's code being present in the selected release. Updates, rollbacks, and
+release changes keep a disabled or retired role disabled.
 An operator client may maintain one logical Gateway connection without becoming
 a feeder or per-target keepalive owner. Required attended credential-provider
 dependencies are reported honestly rather than implying unattended availability.
@@ -356,7 +388,8 @@ replacement.
 - Parent: [agent-fabric](../agent-fabric/README.md)
 - Related: [host-resource-providers](../host-resource-providers/README.md),
   [venue-parity](../venue-parity/README.md), [session-hosting](../session-hosting/README.md)
-- Lifecycle: [plugin-services](../plugin-services/README.md), [installer](../installer/README.md)
+- Lifecycle: [plugin-services](../plugin-services/README.md), [installer](../installer/README.md),
+  [runtime assembly & artifact admission](../plugin-services/runtime-assembly/README.md)
 - Cutover: [graceful daemon cutover](../../docs/patterns/graceful-daemon-cutover.md)
 - Auth-relay reality: [credential-relay](../../libs/credential-relay/README.md)
 - Reality: [architecture](../../docs/architecture.md), [configuration](../../docs/configuration.md)

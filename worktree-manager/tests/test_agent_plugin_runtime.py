@@ -186,6 +186,50 @@ def test_namespaced_root_used_when_policy_enabled_and_context_matches(
     ]
 
 
+@pytest.mark.parametrize("pointer_exists", [False, True])
+def test_runtime_inspection_uses_real_read_only_primitive(
+    monkeypatch, tmp_path: Path, pointer_exists: bool
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    install, python = namespaced_fixture(home, windows=apr.os.name == "nt")
+    _write_policy(home, enabled=True)
+    patch_profile(monkeypatch, apr, home)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path / "no-legacy"))
+    if pointer_exists:
+        pointer = home / ".copilot-extensions" / "agent-worktrees" / "runtime-root"
+        pointer.parent.mkdir()
+        pointer.write_text("retained-foreign-pointer\n", encoding="utf-8")
+    primitive = apr._load_installation_context()
+    assert primitive is not None
+
+    def fail_mutation(*args, **kwargs):
+        raise AssertionError("runtime inspection entered lifecycle mutation")
+
+    for name in (
+        "_atomic_write_json", "_atomic_write_text", "stamp_context",
+        "compare_and_swap_activation", "_DirectoryLock",
+    ):
+        monkeypatch.setattr(primitive, name, fail_mutation)
+
+    def snapshot():
+        return {
+            path.relative_to(tmp_path).as_posix(): (
+                path.is_dir(), path.stat().st_mtime_ns,
+                path.read_bytes() if path.is_file() else None,
+            )
+            for path in tmp_path.rglob("*")
+        }
+
+    before = snapshot()
+    assert apr.marketplace_cells_enabled(os_profile=home)
+    assert apr.resolve_installed_plugin_command("agent-worktrees") == [
+        str(python), "-m", "agent_worktrees"
+    ]
+    assert snapshot() == before
+
+
 def test_namespaced_root_ignored_when_policy_disabled(monkeypatch, tmp_path):
     """The core 'same config' guarantee: an explicit context alone is never
     enough. Absent (or explicitly false) policy always falls back to legacy,
@@ -328,7 +372,9 @@ def test_canonical_os_profile_never_substitutes_home_on_posix(monkeypatch):
 
 
 def test_canonical_os_profile_uses_userprofile_on_windows(monkeypatch):
-    monkeypatch.setattr(apr.os, "name", "nt")
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(apr, "os", SimpleNamespace(**{**vars(apr.os), "name": "nt"}))
     assert apr._canonical_os_profile({"USERPROFILE": "C:\\Users\\someone"}) == Path(
         "C:\\Users\\someone"
     )

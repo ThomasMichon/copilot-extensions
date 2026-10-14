@@ -423,6 +423,120 @@ win grows with build complexity.
 
 ## Journal
 
+### 2026-10-13 - Phase 2 integration released; native signing proof pending
+
+- Slice 5 merged as #6332 (`2cbd4035bd55110ebcaaa237f7a77702263798a7`)
+  after required CI passed and the current-head review reported no open
+  findings. Its source worktree was finalized.
+- Promotion run `38354692556` passed its full validation and merged release
+  PR #6480, producing main commit
+  `c7fa37e39a7d851390d71cb57afd29a25af2569a`. The workflow and publisher
+  blobs at that commit match the final integration implementation.
+- That run executed an older default-branch workflow, so its successful
+  promotion does **not** prove the newly released native artifact lane.
+  Dispatched real promotion run `38365819933` from the new trusted main
+  commit. The workflow's single-pending concurrency queue cancelled it
+  before any job ran when automatic run `38366908719`, using the same
+  trusted workflow commit, replaced it. Follow that genuine promotion
+  candidate rather than repeatedly dispatching competing runs. Native
+  identity/digest/immutable-retry evidence remains open until the new lane
+  produces and verifies its actual outputs.
+- Run `38366908719` failed before artifact execution: both standalone index
+  jobs rejected the old `agent-index-service` CLI name after the dev service
+  move, and two Worktrees handoff test doubles lacked the newly required
+  configuration keyword. The latter are already repaired by #6494.
+  The index compatibility repair subsequently merged as #6522; #6508 repaired
+  the separate packaged resolver diagnostic fixtures. Build/sign/publication
+  jobs were skipped, so this run supplies no native artifact evidence.
+- After #6522 superseded its index repair, the operator selected an additive
+  remainder for #6506: preserve the merged parser/index behavior, add only the
+  dispatch alias and retain native layered-dependency execution coverage.
+  That narrowed PR merged normally as
+  `562c0a8ffd35873b5735e2655ffafa3e535cc43d`, following exact-head approval
+  with zero findings and green required CI. Hosted Windows and Linux runner
+  contracts both passed. The native fixture explicitly proves an isolated
+  parent loads pytest outside its interpreter scheme and executes both real
+  aliases in canonical contained environments without installing packages.
+- Promotion run `38450328906` passed both standalone index lanes, demonstrating
+  recovery of the original alias blocker. Its full Worktrees lane failed
+  before artifact execution; diagnosis of that current failure remains
+  necessary before the native signing/publication gate can complete.
+- The Worktrees failures (#6556/#6557) trace to
+  `execution_spaces.registry_for_config` dropping its already resolved
+  receiving configuration when loading registry overlays. The bounded repair
+  forwards that object through the existing loader keyword without weakening
+  scalar-load counts or identity fences. Pre-publication deduplication found
+  the independently opened #6563 implementing the same repair; coordination
+  now preserves that single canonical PR rather than publishing a competitor.
+  Its owner completed exact-head approval and required CI, then merged it as
+  `f19bcf09d589438c5297ddda3a664ba4e42232a8`; provider confirmation records
+  `2026-10-13T20:56:45Z`. Its source worktree is finalized.
+- Supplemental local evidence proves actual overlay parsing, malformed-registry
+  refusal and a fresh-process machine getter that loads configuration once.
+  Packaged wrapper previews retain the real manifest and canonical assets in
+  a bounded fixture, checking every packaged wrapper's exact bytes; both
+  platform cases pass without longer deadlines. Separating native explain
+  and finalize cases preserves both real Git contracts within their item
+  budgets. The rebased test-only follow-up is #6570, with no production repair
+  or duplicate mock/fallback change. Its contained batch passed 18 tests,
+  including the dedicated warning-adapter tests; the landing fixture isolates
+  that unrelated installed adapter rather than invoking it from a synthetic
+  worktree. Exact-head Copilot approval `5510141064` reported zero findings,
+  there were no unresolved threads, and required CI `38469248189` succeeded.
+  The follow-up merged as `13fa71a4c4262f1ae28e23fda8adb91bb6e023cb` at
+  `2026-10-13T21:27:31Z`; its source worktree is finalized and its parent
+  obligation is at rest.
+  The full Windows portfolio remains **incomplete**: its first
+  three groups passed, but a later attempt timed out in
+  `test_a_commit_after_a_sync_still_counts`, now explicitly tracked as #6568.
+  This is not a green portfolio
+  claim, and no production authority check, release gate or deadline was
+  relaxed. Merge sequencing is coordinated with #6563's owner; the original
+  repair claims and separate native timeout remain owned.
+- The next genuine automatic promotion is `38468423676`. Its completed
+  Worktrees job `115541174026` exposes a different six-case fixture signature:
+  launch preflight, project-scoping and local-cache fixtures lack the
+  receiving configuration's `machine` field required by the execution-space
+  fence. The literal job result is six failures, 588 passes and 11 skips;
+  build/sign/publication proof is still blocked. The release owner received
+  the exact nodes and traceback before any parallel repair was started.
+- The six new signatures are #6571 through #6576. A final posting-race check
+  found an earlier active consolidated claim on #6576
+  (`6155707847`), published after the initial empty-thread reads. The later
+  reservations were explicitly released on all six threads before any source
+  edit; the duplicate local task was retired and the untouched source worktree
+  finalized. The existing claimant retains this fix-forward slice. No second
+  repair PR or relaxed release gate was created. Owner coordination and the
+  native artifact proof remain open.
+- Independent fixture repair #6578 subsequently merged as
+  `ea1a1ccd6be92a6335fb544ec40d245875a48ecd` at
+  `2026-10-13T21:48:17Z`. The earlier claimant's supported publication flow
+  detected that substantive overlap and did not publish a competitor.
+  Automatic promotion run `38474138013`, started at
+  `2026-10-13T21:55:19Z`, is the next native-evidence candidate; it runs the
+  trusted workflow at `9c4d6acade6468e8220692194a62009e1b5ef4e4`.
+  Its initial gate and full-tree guards passed, but the completed Worktrees
+  job `115562509623` failed at `2026-10-13T22:06:06Z`: four
+  `test_obligation_settlement.py` fixtures omit `record.machine` before the
+  execution-space mutation fence. That group reports four failures, 422
+  passes and five skips. The earlier six-case group is no longer the reported
+  blocker; these separate parent-settlement fixtures now block native
+  signing/publication proof. Deduplication and ownership coordination precede
+  any test-only fix-forward, with the production fence unchanged.
+- Consumer entry-point review confirms that the shared installer engine
+  currently supplies resilient uv/venv and deployment helpers, not a
+  dependency-admission path. Existing governed-feed trust discovery and
+  protected named-index configuration are reusable, but an online
+  single-index resolution is insufficient evidence: transitive wheel metadata
+  can still introduce a direct URL before a post-resolution check runs.
+  First-party promotion metadata already rejects direct runtime references;
+  the consumer's third-party closure needs an acquisition-time boundary,
+  rather than claiming a post-compile URL check prevents those downloads.
+  No new installer path or dependency policy was enabled by this review.
+- This is released source, not a claim of local runtime rollout or installer
+  artifact consumption. Governed-feed closure/admission, shared-installer
+  consumption, platform/clean-room evidence and retention remain open.
+
 ### 2026-10-12 - Phase 2 slice 5: composed promotion artifact integration
 
 - Slice 4 merged as #6318 (`1703cc42bf8c23182f6a9793d14bd4d56b6d4228`).

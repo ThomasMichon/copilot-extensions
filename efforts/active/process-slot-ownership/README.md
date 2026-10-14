@@ -144,9 +144,20 @@ verified by this effort's Validation Plan.
 
 ### Continuation C - Reader budgets and circuit-first admission (Phase 6)
 
-- [ ] Implement the operator-approved bounded
+- [x] Implement the operator-approved bounded
       [CLI wall-admission circuit](reader-admission.md), preserving fallback
       and native holder ownership; CPU and process-tree gates stay separate.
+- [x] Implement the operator-approved
+      [owned CPU observation boundary](reader-cpu-observation.md) through
+      optional shared procutil metrics; reader wiring and enforcement remain
+      separate gates.
+- [x] Wire the [CLI reader observation lifecycle](reader-cpu-wiring.md)
+      and existing telemetry seam without CPU enforcement or new termination.
+- [x] Add [sample provenance and collector cost](reader-sample-accounting.md)
+      for measurement-only role-cost calibration before numeric enforcement.
+- [x] Reduce [collector role totals and provenance](reader-role-accounting.md)
+      under bounded provider epochs, without numeric enforcement
+      _(agent-recommended measurement refinement)_.
 - [ ] Define role keys, expected wall/CPU cost, fan-out limits, and provenance.
 - [ ] Open admission circuits on repeated budget overruns without reclaiming
       live progressing holders; successful bounded probes close them.
@@ -309,3 +320,247 @@ no-fallback requests now re-check executable presence and retain legitimate
 empty absence without launching work or treating it as native recovery.
 Both binstub and explicit-command absence regressions pass; the combined
 selection now passes 117 tests, one skipped.
+
+### 2026-10-12 - Wall admission landed
+
+Merged #6446 as `e28aaab8f` after exact-head approval and green checks.
+The provider absence compatibility edge is covered and clarified in the
+pattern. The CLI wall-admission slice and its focused validation are complete;
+the parent role CPU/wall accounting, wider caller admission, identity-safe
+native tree cleanup and cross-platform release/adoption gates remain open.
+
+### 2026-10-13 - Owned CPU observation boundary selected
+
+The operator selected psutil-backed observation of only reader-owned PIDs
+and descendants through shared procutil. The next reviewed slice preserves
+stdlib-only default consumers via optional metrics and explicitly represents
+partial coverage and unavailable samples. Numeric CPU budgets and any
+process termination policy have not been approved by this selection.
+
+### 2026-10-13 - Optional CPU observation implementation prepared
+
+The observation contract landed in #6481. Shared procutil now offers an
+optional psutil-backed, read-only sampler without importing that dependency
+through default helpers. Root and descendant identities are revalidated with
+fresh process objects; observed cumulative CPU maxima are lower bounds, not
+exhaustive tree totals. Discovery attempts and retained identities are capped,
+sampling is single-flight and cached for one second, and denied/missing/reused
+identities and counter regressions remain explicit.
+
+The complete procutil suite passed 78 tests on Windows, including a native
+root/child CPU fixture and graceful completion. Shared pytest-root cleanup
+initially encountered an unrelated access-denied path; a fresh task-local
+base directory avoided touching that shared path and validation passed.
+Full library lint, install-contract and exact source mirror checks passed.
+Linux proof, reader lifecycle wiring, cumulative role export, enforced CPU
+budgets and process-tree reclamation remain open; this library slice does not
+claim those outcomes. All 13 physical/pointer consumers carry release entries.
+
+Sampling uses a running native future rather than treating a cancelled
+asyncio task as proof that the observation thread ended. A loop-shutdown
+regression proves a later loop joins the original holder without another
+native sample. No new resident process or termination surface is introduced.
+
+The initial shared-library CI setup did not install optional metrics. Native
+CPU validation explicitly requires that extra; ordinary imports and the
+stdlib-only test lane remain runnable without it. The fixture passes its
+checkout source path to child interpreters, so bare pytest and editable-package
+validation exercise the same source. Cold default validation passed 77 tests
+with one explicitly skipped native-metrics fixture; metrics-enabled validation
+passed all 78. This does not substitute for the outstanding Linux native proof.
+
+The shared-library CI setup now explicitly installs the metrics backend so
+its native fixture executes rather than skips in the canonical Linux lane.
+Stdlib-only collection still reports the optional test as skipped when that
+backend is absent; production default consumers do not gain a runtime dependency.
+Linux execution evidence will be recorded only after the current CI run passes.
+
+### 2026-10-13 - CPU observation library landed; reader wiring next
+
+Merged #6496 as `3f5e9e550` after exact-head approval with zero findings and
+green checks. Canonical Linux CI installed psutil and passed 72 procutil tests
+with only the six existing Windows-native exclusions; Windows passed all 78.
+The optional shared-library observation boundary is complete, not the wider
+CPU budget or process-tree contract. The next slice connects owned CLI spawn
+receipts and the existing telemetry seam while keeping sampling holders
+accounted for independently from command completion.
+
+### 2026-10-13 - CLI reader CPU lifecycle prepared
+
+The reviewed wiring contract landed in #6514. Agent Bridge now opts into the
+metrics extra and observes only native namespace enumeration. The owned
+command adapter captures identity before communicate/reap, preserving direct
+child execution deadlines and output/fallback semantics. Native Windows
+FILETIME receipts match the metrics backend exactly, including a virtual
+environment launcher's distinct interpreter descendant.
+
+Sampling is provider-local, one-second completion-based cadence with 100ms
+joins. Native sampling futures remain owned across command completion,
+cancelled scan awaiters and provider replacement; bounded cache shutdown
+observes them without cancellation. A stuck sample suppresses later sampling
+instead of multiplying threads. Existing telemetry exports bounded lower-bound
+CPU observations and explicit uncertainty without arguments, output or paths.
+
+The focused Windows selection passed 133 tests, including native CPU export
+and two console-child cycles from a windowless parent with zero new visible
+windows or foreground transitions. The initial native fixture incorrectly
+equated a virtual environment launcher with its interpreter; the corrected
+fixture pins the owned root independently and verifies the observed descendant.
+A cadence regression also showed that starting the next bridge interval at
+sample admission could hit procutil's completion-based cache; cadence now
+starts at sample completion. Linux native proof remains pending the PR's
+canonical CI run. Numeric CPU limits, cumulative role accounting, sampler
+overhead and process-tree reclamation remain separate open items.
+
+The implementation PR's guard caught the roster cache crossing the module
+cap. Native command/sample ownership is now a focused helper rather than
+another cache responsibility. Validation also caught a sample that exceeded
+its 100ms join but completed during command execution: the observer now
+retains its shielded delivery waiter and consumes the completed observation
+at the bounded final join, without confusing waiter lifetime with the
+separately retained raw future. A deterministic delayed-sample regression
+and the complete focused Windows selection pass (134 tests).
+
+Review identified Python 3.10's distinct asyncio timeout class and unrelated
+desktop activity in the native launch regression. Observation and shutdown
+now classify both timeout classes consistently; a distinct-class regression
+proves ordinary join exhaustion remains pending rather than sampling failure.
+Windows visibility/focus counters are scoped to the owned parent/descendant
+PID set, not other applications. The focused selection passes 135 tests.
+
+Further review identified a late native completion after its join deadline
+and detached asyncio tasks whose eventual exceptions were not consumed.
+The provider now records sample completion through a native-future callback,
+with a conservative delivery-task fallback when the native future has already
+finished. A completion receipt blocks new sampling until its timestamp is
+known, then enforces the full one-second interval even across a later reader.
+Command and sampling task callbacks consume and explicitly log late failures
+without arguments or captured output; normal awaiters still receive errors.
+Late-completion cadence and cancelled-observer failure regressions pass, as
+does the complete focused selection (137 tests).
+
+Wall telemetry now uses the command worker's own completion-written duration,
+not the asyncio task's done state. A cancelled command task can leave its
+thread alive, so that case reports unknown duration rather than invented zero.
+The dedicated thread-backed cancellation regression and the complete focused
+selection pass (138 tests).
+
+The approved implementation's canonical CI then reached an integration
+fixture that still mocked the old subprocess seam. Both registry list-only
+fixtures now use the owned adapter, so deadline forwarding and non-zero
+failure exercise the intended boundary rather than accidental launch failure.
+The expanded namespace/provider selection passes 346 tests. The complete
+bounded Windows Agent Bridge portfolio passes all nine sub-suites: 4,239
+passed, 94 skipped. The non-blocking documentation observation was corrected
+as well: uncertainty retains an earlier valid CPU lower bound; `null` applies
+only when none was observed. Current-head review and Linux CI must pass again
+before landing this correction.
+
+### 2026-10-13 - Reader CPU wiring landed; calibration next
+
+Merged #6524 as `76eca4833` after exact-head approval with zero open findings
+and actual CI success on `5f32439f9`. The apparent earlier checks-success
+state contained only review workflows while code CI was still queued; merge
+waited for the complete code workflow and its required aggregate gate.
+
+Canonical Linux CI installed psutil 7.2.2 and passed all nine Agent Bridge
+sub-suites (4,287 passed, 46 skipped), including native CPU export. Windows
+passed all nine sub-suites (4,239 passed, 94 skipped). The reader wiring
+contract is complete, not numeric CPU enforcement or release/adoption.
+
+The next agent-recommended increment measures collector cost and gives each
+native sample bounded completion provenance so cached reuse and repeated
+observations cannot inflate accounting. It remains measurement-only;
+cumulative role reduction, expected cost/fan-out policy, enforced budgets and
+identity-safe process-tree reclamation are separate open gates.
+
+### 2026-10-13 - Sample accounting plan landed; implementation prepared
+
+Merged #6534 as `0fdda518f` after exact-head approval with zero findings and
+actual CI success. The reviewed measurement-only contract now has an
+implementation: bounded per-sampler/sequence provenance, current/last native
+accounting, separate collector wall/thread CPU, and explicit clock uncertainty.
+Cache reuse carries the same cost; backend exceptions still reach awaiters.
+Bridge exports late accounting through the existing content-free sink, including
+failed or cancelled waits, without losing native holder ownership.
+
+The physical procutil mirror and all 13 consumer changefile entries are
+synchronized; default helper consumers neither import psutil nor sample.
+Windows library validation passed 99 tests, including a direct native-thread
+counter witness. All nine Agent Bridge sub-suites passed (4,245 passed, 94
+skipped), including native accounting export. Linux CI and exact-head review
+remain required before merge. Numeric policy, role reduction, reclamation and
+authorized adoption remain unresolved parent gates; this implementation does
+not close them.
+
+### 2026-10-13 - Worker-start cache failure semantics corrected
+
+Review identified the same cache-invalidation omission in the canonical sampler
+and its physical mirror. A worker-start failure after an unavailable or regressed
+cache clock must invalidate `_last_at`, as a backend failure already does, so
+later clock recovery cannot resurrect an older successful observation.
+Both paths now do so; four recovery regressions cover both clock conditions
+and RuntimeError/OSError start failures while preserving the original exception.
+
+The full Windows procutil suite passed 103 tests after this correction, and the
+focused reader/admission/telemetry/vendoring selection passed 42. The previous
+full nine-sub-suite Windows and Linux runs are baseline evidence only; fresh
+exact-head review and code CI remain required before landing the correction.
+
+The existing consumer native fixture now also verifies the actual sampling-thread
+counter delta in exported telemetry, ensuring canonical Linux CI exercises that
+direct witness without another subprocess fixture. Its focused Windows
+reader/admission/telemetry/vendoring selection passed 42 tests.
+
+### 2026-10-13 - Sample accounting landed; bounded role reduction next
+
+Merged #6540 as `ae86df24c` after approval with zero open findings on
+`e10a4d14f` and actual code CI success. Both worker-start cache-invalidation
+findings were fixed and explicitly resolved. Final Windows validation passed
+103 procutil tests and all nine Agent Bridge sub-suites (4,287 passed, 97
+skipped). Canonical Linux CI installed psutil 7.2.2 and passed all nine
+sub-suites (4,335 passed, 49 skipped), including direct native collector CPU
+counter export. The sample-accounting contract is complete.
+
+The next agent-recommended increment reduces those sample costs into bounded,
+provider-epoch-scoped collector totals through existing telemetry. It introduces
+neither a membership registry nor numeric budgets; source epochs do not prove
+logical ownership or permit reclamation. Expected-cost/fan-out policy, broader
+reader coverage, global ownership validation and authorized adoption remain open.
+
+### 2026-10-13 - Collector role plan landed; reduction prepared
+
+Merged #6544 as `f7a29214b` after exact-head approval with zero findings and
+actual code CI success. The reviewed increment now has a provider-local,
+measurement-only implementation: anonymous epochs, immutable coherent totals,
+per-sampler completed-attempt cursors, separate known/unknown collector costs,
+and explicit continuity/overflow uncertainty. No unbounded sampler history,
+new observer or competing process registry is introduced.
+
+Late completion after command cancellation, provider replacement or loop
+shutdown stays pinned to the original epoch and retains existing native-holder
+ownership. Focused Windows validation passed 52 tests, including aggregate
+export compared directly with native sampling-thread CPU counter deltas.
+All nine bounded Windows consumer sub-suites passed (4,297 passed, 97 skipped),
+with cleanup verified. Fresh Linux code CI remains open for this slice.
+Expected-cost/fan-out policy, wider reader coverage, global logical ownership,
+numeric enforcement, reclamation and authorized adoption remain parent gates.
+
+### 2026-10-13 - Bounded collector role accounting landed
+
+Merged #6547 as `8c04c5c64` after approval with zero findings on
+`033adc3f25` and actual code CI success. All nine Windows Agent Bridge
+sub-suites passed (4,297 passed, 97 skipped); canonical Linux CI installed
+psutil 7.2.2 and passed all nine sub-suites (4,345 passed, 49 skipped).
+Both native consumer fixtures compare exported collector totals directly
+against actual sampling-thread counter deltas. The collector role reduction
+contract and its focused validation are complete; #3963 remains open.
+
+The next policy gate is expected wall/CPU cost and fan-out limits.
+Native fixture values prove accounting, not representative workload budgets;
+no numeric CPU or new fan-out threshold has been approved.
+Representative cost calibration before selecting limits is
+_(agent-recommended)_; extending measurement to the remaining reader inventory
+can proceed without inventing enforcement policy. Global logical ownership,
+admission enforcement, exact-identity/no-progress reclamation, release and
+authorized running-state adoption remain separate parent obligations.

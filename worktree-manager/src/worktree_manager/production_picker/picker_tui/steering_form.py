@@ -217,52 +217,6 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
         except Exception:
             pass
 
-    def _restore(self, values: dict) -> None:
-        for rec in self._q:
-            name, ftype = rec["name"], rec["type"]
-            options, allow_other = rec["options"], rec["allow_other"]
-            prim, other = rec["primary"], rec["other"]
-            if name not in values:
-                continue
-            v = values[name]
-            if ftype == "text":
-                prim.value = str(v)
-            elif ftype == "textarea":
-                prim.text = str(v)
-                prim.autosize()
-            elif ftype == "choice":
-                btns = list(prim.query(RadioButton))
-                if str(v) in options:
-                    target = options.index(str(v))
-                elif allow_other and other is not None:
-                    target = len(options)  # "Other…"
-                    other.text = str(v)
-                    other.display = True
-                    other.autosize()
-                else:
-                    target = -1
-                for j, b in enumerate(btns):
-                    b.value = (j == target)
-            elif ftype == "multichoice":
-                members = v if isinstance(v, list) else [v]
-                extras = []
-                for m in members:
-                    if str(m) in options:
-                        try:
-                            prim.select(prim.get_option_at_index(options.index(str(m))))
-                        except Exception:
-                            pass
-                    else:
-                        extras.append(str(m))
-                if allow_other and other is not None and extras:
-                    other.text = ", ".join(extras)
-                    other.display = True
-                    other.autosize()
-                    try:
-                        prim.select(prim.get_option_at_index(len(options)))
-                    except Exception:
-                        pass
-
     def _write_draft(self) -> None:
         path = _steer_draft_path(self._task_id)
         if not path:
@@ -370,5 +324,4 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
         # submitting.
         self._write_draft()
         self.dismiss({"action": "save", "values": self._collect()})
-
 

@@ -10,13 +10,15 @@ mechanism.
 
 from __future__ import annotations
 
-from .identity import is_local_machine
+from .identity import is_local_machine, local_execution_platform
 from .registry import (
     AmbiguousMachineError,
     MachineEntry,
     SSHEnvironment,
     find_machine_entry,
     machine_name,
+    machine_identity_names,
+    normalize_machine_entries,
     merge_machines_yaml,
     parse_machines_yaml,
     parse_machines_yaml_file,
@@ -38,7 +40,10 @@ __all__ = [
     "find_machine_entry",
     "get_machine_transport",
     "is_local_machine",
+    "local_execution_platform",
     "machine_name",
+    "machine_identity_names",
+    "normalize_machine_entries",
     "merge_machines_yaml",
     "parse_machines_yaml",
     "parse_machines_yaml_file",

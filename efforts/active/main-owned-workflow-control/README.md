@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees; ordinary changes target `dev`
 - **Created:** 2026-10-12
-- **Status:** Active; first wave live, candidate/validation consolidation open
+- **Status:** Active; first wave live, baseline correction dev-landed, composed validation open
 - **Vision:** `visions/main-owned-workflow-control/README.md`
 - **Umbrella issue:** #6237
 - **Related campaigns:** #3336; `promotion-failure-reactive-fix-agent`; #6142
@@ -105,6 +105,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
 - [ ] Remove redundant release-shaped PR and main-push validation only where
   existing trusted gates and exact-SHA release evidence cover the removed work;
   first prove no generated-output coverage or required context is lost.
+- [ ] Consolidate main-PR admission into its existing trusted reminder
+  invocation: release and prove admission and generated-content identifier
+  scanning first, then remove legacy CI allocation while retaining full
+  main-push validation.
 - [x] Coalesce or prevent redundant event-triggered runs, not merely mark all
   jobs skipped; preserve timely contributor feedback and review delivery.
   #6308/#6314 reduce trusted invocations; released #6359 prevents irrelevant
@@ -116,12 +120,13 @@ authorizes critical main-path acceptance or a bounded administrative change.
 
 ### Phase 2 - Inert preservation support where needed
 
-- [ ] Extend the existing composer with strict, exact-path preservation from
-  pinned main; absent manifest retains existing behavior.
-- [ ] Reject unsafe/missing files, collisions and conflicting ownership; record
-  control provenance and test intentional deletion.
-- [ ] Land implementation, tests and related documentation via dev, then promote
-  while no preservation manifest is active.
+- [x] Extend the existing composer with strict, exact-path preservation from
+  pinned main; absent manifest retains existing behavior (#6521).
+- [x] Reject unsafe/missing files, collisions and conflicting ownership; record
+  control provenance and test intentional deletion (#6521).
+- [x] Land implementation, tests and related documentation via dev (#6521).
+- [ ] Verify a covering promotion releases inert support while no preservation
+  manifest is active; release is separate from source merge.
 
 ### Phase 3 - Trusted admission and composed validation
 
@@ -145,6 +150,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
 
 ### Phase 5 - Finish validation and automation consolidation
 
+- [x] Land the dev implementation of reviewed, widen-only module-size baseline
+  maintenance and remove its obsolete main exception from source (#6438).
+- [ ] Verify a covering promotion activates the dev-owned baseline producer on
+  default main; record authorized runtime adoption separately.
 - [ ] Record ownership completion separately; it is not the prerequisite for
   Phase 1 reductions proven safe under existing protection.
 - [ ] Establish one exact-input validation contract and compact generated
@@ -435,3 +444,413 @@ credential changes, broad policy weakening or unreviewed releases.
 - A tightly coupled preflight follow-up rejects missing/non-string/empty rule
   discriminators rather than treating malformed policy as a non-status rule.
   Legitimate unrelated rule types remain unchanged.
+
+### 2026-10-13 - Dev-owned baseline correction and release queue recovery
+
+- #6426 merged as `fd73fdcff233` after current-head approval `5498079093`,
+  zero findings, both explicit requirements and the actual read-only preflight
+  passed. Malformed-policy behavior is dev-landed, not claimed deployed.
+- Generated promotion #6408 was conflicted despite green checks: main's only
+  intervening commit was automated baseline update #6071 (`53be0fa787d3`).
+  The operator identified main-targeted baseline maintenance as a bug and chose
+  a versioned baseline updated on dev, not a release-artifact redesign.
+- The operator explicitly authorized closing #6408. Only its recorded head
+  `c2e9bf25a7fe` was retired; branch and validation evidence were preserved.
+  Run `38324591183` ended with the expected closed-candidate failure, releasing
+  the queue. Replacement `38334102000` started; no new candidate is yet claimed
+  merged, and no CI or branch-policy bypass was used.
+- #6430 moves baseline maintenance into the existing trusted CI-completion
+  invocation. Pinned trusted tooling reads committed dev as data with isolated
+  Python and credential-free checkouts; publication is baseline-only to dev,
+  under ordinary CI/review. The release PAT is confined to publication.
+- The obsolete main-writing and manual-verification workflows are removed;
+  main admission no longer permits their baseline branch. Hard caps, existing
+  ceiling refresh and unrelated contribution scoping remain unchanged.
+  Sixty-one targeted tests passed, including poisoned candidate tooling/imports,
+  new-offender rejection, real stale-input/diff fencing and main rejection.
+- Activation/default-main proof remains pending review, CI and release. The
+  independent #6332 writer/attestation owner retains its files and open findings;
+  main validation is not pruned on the strength of this correction.
+
+### 2026-10-13 - Replacement release and baseline review follow-through
+
+- Replacement #6441 merged at `03:25:21Z` as `9539eda8f9b3`; promotion
+  `38334102000` completed successfully, including its exact-candidate waiter
+  and post-merge tag `promote-20261013032543-9539eda8`. The recorded validated dev input
+  `a27d57dc2ddc83fc1a8e92a0a026e5f64b5cb7b2` covers #6402 and #6414 by
+  Git ancestry, but not later #6426 or the still-open #6438. Runtime adoption
+  and the later covering release remain separate obligations.
+- Current-head review of #6438 found a real stale-baseline gap after the
+  pre-publication SHA fence: a subsequent dev shrink could leave an excessive
+  ceiling that the ordinary upper-bound check accepted.
+- The existing required PR guards now run read-only automatic-baseline
+  canonicality on the automation branch's merged dev tree. Recomputing the
+  refresh must produce the same baseline; a stale result fails without
+  rewriting the PR. Ordinary reviewed manual ceilings remain unchanged.
+  This validates the tree CI exercises, not a claim of atomic merge-time CAS.
+- Fifty-three focused tests passed, including an actual Git merge after dev
+  shrinks beyond the publication fence, refusal without file mutation,
+  successful regenerated policy, new-offender rejection and required-job
+  wiring. Focused lint and documentation consistency passed.
+  No new workflow, required check or credential was introduced.
+
+### 2026-10-13 - Operator-selected widen-only maintenance
+
+- The operator explicitly prioritizes avoiding an excessively low ceiling
+  that blocks code over avoiding a stale, unnecessarily high ceiling.
+  Confirmed automated maintenance must widen only; tightening remains a
+  deliberate componentization/manual refresh, not a subsequent automatic pass.
+- Automation now invokes `--refresh-baseline --widen-only`. It raises an
+  existing entry when necessary but never lowers, removes or creates an
+  entry. Manual refresh and `--allow-widen` retain their existing behavior;
+  the hard cap for new offenders remains enforced.
+- Removed the earlier experimental exact-baseline canonicality gate:
+  it rejected the stale-high proposals the operator accepts, and it could
+  not establish atomic base freshness under the non-strict status policy.
+  Ordinary PR ceiling checks and both required contexts remain intact.
+  No global strict-base policy, merge queue or additional CI run was introduced.
+- Sixty-two focused cases passed, including real Git races: a stale high
+  proposal remains admissible after a shrink, while widen-only maintenance
+  cannot publish a tightening that blocks subsequent growth within the
+  existing ceiling. Shrunk/graduated entries are preserved, new offenders
+  still fail, and deliberate manual tightening is unchanged.
+- Updated the reviewer contract and remaining live references to the retired
+  workflows. Historical incident references remain historical; the independent
+  attestation/control implementation is not changed.
+
+### 2026-10-13 - Widen-only correction merged; next composed-validation stretch
+
+- #6438 merged at `09:52:15Z` as `87c5f5ddcca1`. The final reviewed head was
+  `00d9cad9b9a6`, with Copilot approval `5501468799` and zero open findings.
+  CI `38373310592` and lockdown `38373311117` passed; the real read-only
+  source preflight verified every required context, complete policy pages,
+  integration identity and unchanged exact head before the managed merge.
+- Review hardening bounded the target-root probe, disabled diff helpers and
+  inherited system/global Git configuration at the publication fence, and made
+  workflow assertions select named steps while preserving required ordering.
+  Sixty-seven focused cases and Python lint passed. Widen-only maintenance,
+  deliberate manual tightening and ordinary new-offender checks are unchanged.
+- This is merged to dev, not yet claimed activated on default main. A covering
+  promotion must include #6426 and #6438 before release proof is recorded;
+  authorized runtime adoption remains separately outstanding.
+- The next stretch establishes the exact-input/final-composed-tree validation
+  contract using #6332's existing attestation producer, then proves a required
+  compact candidate gate before pruning promotion-PR or main-push validation.
+  No competing signer/receipt framework, main source exception, new credential
+  or premature removal of existing gates is authorized.
+- The campaign remains Active. First-wave measurement, independent-control
+  preservation/admission, platform coverage and the two-release-cycle
+  validation plan still require their own completion evidence.
+
+### 2026-10-13 - Inert preservation prerequisite prepared
+
+- #6332's signer transitively depends on the full validation jobs through its
+  builder. Its signed package index already binds dev/main/content, but does
+  not expose an authoritative suite/recipe evidence contract. It is not enough
+  by itself to remove candidate validation; the existing gates remain intact.
+- Prepared strict pinned-main preservation in the existing composer, shared
+  by trusted artifact recomposition. No manifest is active. Version 1 admits
+  only exact top-level workflow files and automatically preserves its own
+  declaration; dev cannot introduce or redefine that declaration.
+- Real-Git cases prove pinned rather than moving-main authority, exact blobs
+  despite candidate text/filemode policy, provenance, intentional retirement
+  and equivalent artifact recomposition. Negative cases cover unsafe Git
+  types, paths, aliases, missing targets and ambiguous declarations.
+- The contracts join existing path-gated Linux/Windows artifact jobs, not a
+  new workflow or required context. Source review and covering release remain
+  outstanding; atomic freshness, trusted admission, helper compatibility and
+  control-preserving rollback are still prerequisites to later activation.
+- This realizes the explicit-preservation vision item without changing its
+  intent. The repo's fail-loud, smallest-surface and cross-platform patterns
+  apply; no runtime, dependency, credential or branch-policy change is needed.
+- Native PR CI exposed #6322's previously unexplained Windows exit mismatch:
+  captured diagnostics show cold PowerShell compilation exceeding the fixture's
+  ten-second child timeout. Two such children also had only a twenty-second
+  enclosing budget. Repaired the ordinary fixture's nested deadline hierarchy,
+  without weakening any console, stream or exit assertion; the real five-second
+  timeout/tree-reap contract is unchanged. Both native local cases passed.
+  Current-head hosted Windows proof is still required, not waived as a flake.
+
+### 2026-10-13 - Inert preservation source merged; admission decision next
+
+- #6521 merged at `11:59:40Z` as `5f4ce4d8926f`. Final head `d3aae9957781`
+  received Copilot approval `5503062211` with zero open threads. Current-head CI
+  `38391167703` and lockdown `38391414726` passed, and the real source preflight
+  verified every configured requirement, applicable integration binding and
+  unchanged head before the managed merge. No bypass of CI was used.
+- Hosted Linux exercised 598 artifact/composer cases. The dedicated Windows
+  artifact job explicitly executed `test_promotion_control.py` with the shared
+  artifact suites: 259 passed. The separate Windows runner's 85-case native
+  containment selection also passed, proving #6322's diagnosed fixture recovery.
+  That issue is closed; no assertion or five-second tree-timeout was suppressed.
+- Preservation is dev-landed, not activated or claimed released. No manifest
+  exists. The full Plan/Validation Plan remains open for admission, atomic
+  freshness, compatibility, rollback, covering release and observed cycles.
+- A read-only live policy snapshot found `main source gate` required by ruleset
+  `18553911`, with strict=false and an Admin always-bypass actor on that combined
+  rule. Native GraphQL schema confirms merge accepts an expected head OID but no
+  expected base OID. A last-minute main read cannot supply atomic freshness.
+- The next cutover needs a separately accepted provider freshness mechanism and
+  explicit trust boundary. Dev's loose policy remains unchanged; no new App,
+  token, service, merge queue or policy mutation is authorized by this journal.
+
+### 2026-10-13 - Operator keeps current process; consolidation resumes
+
+- The operator reaffirmed that the current release process works and the task
+  is consolidation/deduplication, not making new ownership/freshness machinery
+  a prerequisite. Accepted the existing trusted-collaborator boundary.
+  No strict-base policy or new infrastructure was authorized.
+- Independent main-control activation remains dormant. Its hypothetical base
+  race is not a blocker for reductions covered by today's existing process.
+- The next staged reduction reuses the existing main-PR reminder invocation
+  for the unchanged `main source gate`. The temporary legacy CI producer stays
+  until trusted default-main deployment is proven; removing it earlier would
+  deadlock the promotion that deploys its replacement.
+- Main-push validation, contribution review/CI, fork approval and platform/deep
+  lanes remain intact. The final cutover removes a redundant main-PR workflow
+  invocation and its optional duplicate guards, not distinct coverage.
+- Coverage tracing found that main-PR identifier scanning follows the CI
+  completion and does not run on main pushes. Preserve and prove that caller
+  too before disabling main-PR CI; admission staging alone is not cutover.
+- Native Git/Bash tests exercise admitted/rejected shapes, actual rollback
+  trees and read-only head-object fetching without switching the trusted
+  working tree. Gate permissions are contents-read only; PR code never runs.
+- Prior resolver repair #6508 and standalone alias repair #6506 are merged.
+  New artifact-validation recovery stays with its existing #6535/#4876 owner;
+  no competing signer or publication fix is introduced here.
+- Later recovery run `38457217400` failed two project-scalar config-reuse
+  assertions in the full worktrees suite. Existing #6556/#6557 owners are
+  already validating a receiving-config reuse fix and coupled fixture repairs.
+  Preserve that ownership rather than loosen assertions or fork the repair.
+
+### 2026-10-13 - Trusted main admission staging merged
+
+- #6566 merged at `21:08:28Z` as `1f57609f76f6`. Final head `db2e7e1fd99a`
+  received native Copilot approval `5509925281` with zero open threads.
+  CI `38466307933` and lockdown `38466308104` passed; the real source preflight
+  verified all configured requirements and the unchanged head before merge.
+- The new producer remains staging until a covering promotion. The legacy CI
+  gate and scanner remain, so no pipeline reduction is claimed live yet.
+- The next code slice shares the existing trusted identifier scan/report
+  implementation across its current completion caller and the main-PR host.
+  Preserve explicit failure reporting, stale-head handling and denied/removed
+  path behavior. Uninvited main PRs must not gain a secret-denylist scan oracle.
+  Only after both new producers are released and proven may main-PR CI stop.
+
+### 2026-10-13 - Shared identifier scan staged without coverage removal
+
+- The post-CI scanner and the main-PR host now share one owner-protected
+  composite action and reporter under `.github/actions/identifier-leak-guard/`.
+  The trusted scanner still reads paginated non-removed changed paths from the
+  pinned PR commit as Git data; no PR checkout or PR executable code is involved.
+- Main-host scanning requires both successful unchanged main admission and
+  owner authorship. Rejected and non-owner PRs gain no secret-backed scan oracle.
+  The existing post-CI caller and all CI event/coverage lanes remain in place.
+- Stale events and heads advancing during a scan publish nothing. Both callers
+  retain thin always-failure reporting that works without a loaded local action.
+  An unconfigured but operational feature remains neutral; infrastructure
+  failures and missing/malformed reports cannot masquerade as that feature gate.
+- Local contracts exercise the real reporter, API delivery ordering and
+  authenticated comment markers, bounded full finding detail, every prerequisite
+  failure, stale heads, caller fallback without local files, and the actual
+  Bash/Python scanner against generated Git blobs distinct from the working tree.
+  The legacy scanner/policy regression selection remains green.
+- This realizes the consolidation vision without changing ownership or branch
+  policy. Smallest-surface and fail-loud patterns apply; no plugin payload,
+  runtime, dependency, credential or installer changes require a changefile or
+  fresh-machine install lane. Fresh temporary fixtures exercise first action use.
+- Review/current-head hosted checks and a covering promotion remain outstanding.
+  Default-main producer proof precedes removal of main-PR CI; source staging
+  is not live cutover. The full worktrees release failure retains its existing
+  repair owner rather than being bypassed or repaired by a competing PR.
+
+### 2026-10-13 - Scanner staging native CI blocker repaired
+
+- #6577 received current-head approval with no findings, but required CI
+  exposed #6532's real-helper read-only fixture on Windows: the first hosted
+  helper call exceeded its unchanged fifteen-second boundary.
+- The contained native reproduction independently found host-generated
+  `PowerShell/telemetry.uuid` in both full-home snapshots. #6581 owns this
+  bounded fixture repair: opt out of PowerShell telemetry only in the test
+  environment, retaining the real helper calls, production deadline and
+  byte/mtime assertions. Both native cases now pass locally.
+- No production resolver behavior changed. Hosted current-head validation
+  remains mandatory; local telemetry proof alone is not claimed to explain
+  or clear every hosted timeout. Review and required CI must run again after
+  this correction. No gate is bypassed and no competing installation work
+  is taken over.
+
+### 2026-10-13 - Review closes filename-transport bypass
+
+- Current-head review of #6577 identified a real inherited line-delimited
+  filename bypass: a valid newline-containing Git path became two nonexistent
+  paths and its contents were skipped. Merge stayed blocked despite green CI.
+- The shared action now emits one JSON-string filename per record; scanner and
+  reporter consume that lossless representation. The old `--paths-file` API
+  remains compatible, while `--paths-jsonl` rejects malformed/non-string/NUL
+  records and cannot be combined with the other explicit scope selectors.
+- Actual passive Git trees cover newline, carriage return, Unicode line
+  separators, whitespace and backslash filenames even on Windows, where some
+  cannot be checked out. Binary tree creation and a NUL-delimited byte assertion
+  prove exact fixture filenames before the real scanner command runs.
+- The telemetry-corrected head's required hosted Windows runner and launch
+  selections passed. Its subsequent low-severity documentation advisory exposed
+  a CLI stdin-body transport failure; the full PR description was restored from
+  an explicit file and read back, including Documentation impact and attribution.
+  Review must evaluate that complete description and the filename fix together.
+
+### 2026-10-13 - Shared scanner staging merged; release proof next
+
+- #6577 merged at `22:43:02Z` as `5d229af2eca8`. Final head `1ad14bfff2aa`
+  received native review `5510850988`: a clean owner-authored Comment with zero
+  open findings under the repository's documented contract. The real filename
+  finding was fixed and resolved; the generic recommendation for human security
+  review did not identify another defect or introduce a new merge requirement.
+- Current-head CI `38477671946` and lockdown passed. Before the managed merge,
+  the actual source preflight verified all configured requirements, complete
+  policy/evidence pages, bound integration identities and the unchanged head.
+  No CI or required-check bypass was used.
+- The final local workflow/scanner/policy selection passed 124 cases, including
+  the real Git filename boundary. Current-head native Windows and Linux lanes
+  passed; #6581's telemetry fixture repair is merged and that issue is closed.
+- Admission and scanner migration are source-landed, not yet proven on default
+  main. Keep the legacy gate and completion caller until a covering promotion
+  exercises both replacement producers; then remove main-PR CI allocation while
+  retaining full main-push, contributor and deep/platform coverage.
+- Release run `38479483177` is queued behind failed full-suite attempts. Existing
+  artifact/configuration repair owners retain their blockers. The campaign
+  remains Active; this source merge closes neither cutover nor observation.
+
+### 2026-10-13 - Full suites green; coverage evidence still blocks release
+
+- Containing run `38479483177` passed all nine full plugin suites, including
+  Agent Worktrees and Agent Bridge. The canonical #6587/#6588 fixture repair is
+  merged; do not reopen or replace that completed source correction.
+- Promotion job `115586929142` then refused because enrolled Agent Bridge
+  coverage had not been collected/transferred into that run. This is a distinct
+  evidence blocker, not another unit-test failure. The explicit evidence gate
+  remains intact.
+- Relayed the exact run/job/signature to the existing #6535/#4876 release-repair
+  owner in #6535 comment `6157132946`, without a competing implementation or
+  manual rerun. Run `38480618519` was already pending; its result alone cannot
+  be predicted from the prior source merges.
+- Default main still records validated dev `ca7b3e563067` from `07:32:25Z`, not
+  the new admission/scanner source. The next consolidation step remains blocked
+  on normal covering release and live producer proof. Legacy CI stays enabled.
+
+### 2026-10-13 - Review lifecycle measurement and canonical collector repair
+
+- Extended the existing complete three-hour event windows with review-workflow
+timing, using all Actions API pages rather than the latest-run sample.
+The earlier window contains 45 successful Copilot review runs; the later
+contains 79. Median recorded lifecycle increased from 227 to 262 seconds,
+and p90 from 389 to 446 seconds. These are `updated_at - run_started_at`
+workflow metadata durations, not measured inference or review-engine latency.
+- Every review run in both windows reports `run_started_at == created_at`.
+That field therefore provides no independent queue-delay observation here;
+zero recorded delay is not proof of an unqueued service. No causal latency,
+throughput or quota improvement follows from the invocation reduction.
+- The missing Bridge evidence is now traced by the existing release-repair
+drivers to repository-root collection of `test_workspace_creation.py`:
+`tests.test_acquisition_runtime` cannot be imported. #6597 owns the bounded
+test-import correction and retains the full evidence requirement. Another
+driver's proposed transfer was withdrawn after that ownership was confirmed.
+- Run `38481804293` independently reproduces the collection failure in Bridge
+job `115587540155`; an apparently successful optional baseline step alone
+does not prove an artifact was produced. Await the canonical repair's normal
+covering promotion. No competing patch, extra rerun or CI removal is made.
+
+### 2026-10-13 - Canonical repair merged; containing validation pinned
+
+- #6597 merged at `23:27:55Z` as `41615b8c601f`. Normal validation run
+`38484939290` selects that exact source: completed full-suite job
+`115596669721` records both checkout ref and actual HEAD as the merge SHA.
+A dispatch's triggering commit or run-level default-main SHA is not the
+selected validation input; authoritative job evidence resolves it.
+- Older run `38481804293` failed the unchanged evidence gate in promotion job
+`115596045700`. The containing run is still executing; complete baseline
+collection, artifact validation and actual main publication remain gates.
+- Shared the pinned run/job/SHA with the existing release owners in #6535
+comment `6157573705`, including explicit pending stages. Main still records
+the older `ca7b3e563067` release. The legacy CI producer remains untouched.
+
+### 2026-10-14 - Collector proof clears; residual artifact mismatch blocks release
+
+- Containing run `38484939290` completed all nine full plugin suites and
+produced all nine enrolled baseline artifacts, including Bridge artifact
+`11858944868`. Promotion's explicit collected-baseline requirement passed.
+This is the hosted proof of #6597's collector repair, not merely local
+validation or an optional step's reported success.
+- Unsigned Python artifact build `115605421711` and validation/attestation
+`115605705366` both passed. Promotion job `115605893690` then refused with
+`promote-release: manifest payload hash differs from candidate` while
+composing against exact dev `41615b8c601f`, with both baseline and signed
+Python artifact directories supplied. No candidate merge or publication
+occurred; successful attestation alone does not prove final composition.
+- Relayed the residual contract mismatch and the now-passing collection gate
+to the existing #6535/#4876 artifact owners in comment `6157878020`.
+Normal run `38487345996` was already active; no extra dispatch, parallel
+artifact implementation or evidence bypass was introduced.
+- Default-main admission/scanner proof and CI cutover remain outstanding.
+Keep every legacy producer until a genuine covering release clears them.
+
+### 2026-10-14 - Repeated composition refusal; original publisher reached
+
+- Normal run `38487345996`, on exact dev `d97acffbeab7`, passed its other
+jobs but promotion `115613853426` repeated the payload-hash refusal at
+`00:29:43Z`. There is still no covering release or replacement-producer proof.
+- Resolved the original #6332 publisher's actual source-attribution root and
+verified its live session before sending the exact two-run evidence directly.
+The existing Fleet Control V2 consumer's #6596 released-only rollout blocker
+was included. Delivery succeeded; repair acceptance or a canonical fix is
+not yet confirmed. The newer bootstrap-repair root had no live session, so
+no replacement session or service restart was attempted.
+- A peer's LF/CRLF scratch-canonicalization trace is a candidate diagnosis,
+not reproduced proof or permission to waive source/hash/wheel binding.
+Await the retained artifact owner's acknowledgement and normal repair.
+- The exact final-consumer repair is now reserved on #6535 as
+`battered-toolbox-promotion-candidate` (comment `6158147260`). Relayed that
+reservation to the original publisher and the Fleet Control V2 consumer
+to prevent overlap; broader #4876 custody remains unchanged.
+- A third normal run, `38492036670` on dev `f790097ec762`, repeated only the
+same promotion refusal in job `115627083122` at `01:14:31Z`. Requested the
+reserved worker's concrete reproduction/PR/next gate in comment `6158761173`;
+quiet time does not expire the reservation or authorize another repair.
+- Refreshed the eventual cutover's live required-context inventory: main has
+no classic required-status-check protection, and its complete effective
+rules include only `main source gate` as a required context, with strict
+freshness false. No required-workflow rule was present. The existing trusted
+host preserves that context name; no policy mutation or orphaned main PR
+aggregate is needed for this slice. Release and live producer proof still
+precede any removal of the old CI invocation.
+
+### 2026-10-14 - Source repair confirmed; independent clock fixture repaired
+
+- Provider evidence confirms #6604 merged at `00:54:06Z` as `1097e7f401de`.
+An open-PR-only progress lookup missed that completed publication; the earlier
+"no repair PR yet" status is corrected. The shared canonical artifact reader
+is source-landed, not released. #6611 separately prepares its dev workflow
+mirror; neither change authorizes this campaign to perform the distinct
+trusted-main bootstrap. Main still carries the older #6558 workflow.
+- Later validation `38495860924` instead fails the full worktrees suite at
+`test_identity_lookup_shares_overall_budget_without_two_second_cutoff`.
+Existing issue #6610 had no exact repair reservation or PR; reserved only
+this fixture family as `spry-cog-local-cache-clock`.
+- The actual contained native test reproduced the hosted StopIteration
+failure. Its three-value clock was patched onto the shared standard-library
+time module, so real launch-stage instrumentation exhausted those values.
+Bind the fake clock only to the module under test, including the three
+neighboring deadline fixtures of the same class. The regression explicitly
+verifies the standard-library monotonic clock is unchanged.
+- The complete local-cache/launch-progress selection now passes 71 tests,
+with two explicit platform skips. Exact ten-second overall, ten-second
+lookup and seven-second remaining-render assertions are retained; no
+production deadline, renderer, authority or fallback code changes.
+- The existing finite-clock regression joins the cheap deterministic guard
+selection, so required PR CI executes it rather than only collecting it.
+No new test case, matrix, workflow or subprocess is introduced.
+- This is a test-only, below-altitude release repair with the required
+agent-worktrees patch changefile. The real refresh and launch instrumentation
+supply the simple integration contract. Fresh-install/runtime rollout lanes
+do not apply because no install or runtime behavior changes. Current-head
+hosted checks, review and a containing full validation remain required.

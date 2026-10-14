@@ -216,7 +216,7 @@ async def test_drop_unfinished_inflight_bumps_generation_so_late_result_is_disca
 
 
 @pytest.mark.asyncio
-async def test_force_fail_bumps_generation_so_an_abandoned_scans_late_result_is_discarded():
+async def test_force_fail_bumps_generation_so_an_abandoned_scans_late_result_is_discarded(monkeypatch):
     """Same bug, the other call site: an abandoned (cancellation-resistant)
     scan `force_fail_uninitialized_namespaces()` gives up on must have its
     generation invalidated immediately, not left for a future scan to bump
@@ -230,6 +230,8 @@ async def test_force_fail_bumps_generation_so_an_abandoned_scans_late_result_is_
     a plain `Event.wait()` propagates `CancelledError` immediately, which
     only exercises `force_fail`'s unconditional FAILED tail, never the
     generation-bump branch under test."""
+    # This fixture owns cancellation; an optional provider deadline adds a different task.
+    monkeypatch.setenv("AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT", "0")
     resolver, ns = _make_resolver_with_namespace()
     cache = AgentRosterCache(resolver, refresh_interval=60.0)
     cache._CANCELLATION_GRACE = 0.05
@@ -291,7 +293,8 @@ async def test_provider_swap_before_task_start_does_not_scan_replacement_twice()
 
 
 @pytest.mark.asyncio
-async def test_provider_replacement_keeps_cancel_resistant_scan_owned_until_shutdown() -> None:
+async def test_provider_replacement_keeps_cancel_resistant_scan_owned_until_shutdown(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT", "0")
     resolver, original = _make_resolver_with_namespace()
     cache = AgentRosterCache(resolver, refresh_interval=60.0)
     release = asyncio.Event()
@@ -331,7 +334,8 @@ async def test_provider_replacement_keeps_cancel_resistant_scan_owned_until_shut
 
 
 @pytest.mark.asyncio
-async def test_stop_fences_result_of_retained_cancellation_resistant_holder() -> None:
+async def test_stop_fences_result_of_retained_cancellation_resistant_holder(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT", "0")
     resolver, provider = _make_resolver_with_namespace()
     cache = AgentRosterCache(resolver, refresh_interval=60)
     cache._CANCELLATION_GRACE = 0.01
@@ -1441,8 +1445,9 @@ async def test_stop_does_not_hang_on_a_stuck_discovery_scan():
 
 
 @pytest.mark.asyncio
-async def test_watchdog_recovers_even_when_namespace_scan_resists_cancellation():
+async def test_watchdog_recovers_even_when_namespace_scan_resists_cancellation(monkeypatch):
     """Restarting supervision retains the live scan until it finishes."""
+    monkeypatch.setenv("AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT", "0")
     resolver, ns = _make_resolver_with_namespace()
     started = asyncio.Event()
     release = asyncio.Event()

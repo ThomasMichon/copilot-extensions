@@ -443,6 +443,45 @@ downstream agent.
 | `status` | Show service status |
 | `uninstall` | Remove service (`--remove-config` for config too; `-DryRun`/`--dry-run` previews without changing anything) |
 
+Completed numbered runtime slots are immutable for both `install` and `update`.
+Before anything drains, stops, or rebuilds, the installer asks the shared
+`versioned_runtime.py check-admission` primitive about `versions/<v>/`: an
+already-active slot with the same payload is a no-op, and a completed but
+inactive slot with the same payload is activated as-is (no venv recreation,
+package reinstall, or provider pruning); a completed slot whose
+recorded payload differs (or whose completion evidence cannot be verified) is
+refused with a non-zero exit and a "bump the plugin version" message, leaving the
+running daemon untouched (there is no `--force` override). An absent or
+incomplete slot is built as before, unless the shared primitive refuses to prepare
+it (for example, it is the selected runtime or still in use), in which case the
+install fails instead of building over it. A refused completion-marker
+publication fails the install rather than being ignored. Every mutation of a
+newly built slot, including provider pruning, happens before its final health
+check, payload verification, completion-marker publication and activation, so
+a failure there publishes nothing and (for `update`) rolls back; nothing
+rewrites a slot once it is published.
+
+The payload hash compared by admission fingerprints everything the installer
+installs into the slot: the plugin's `pyproject.toml` and its declared `README.md`
+(embedded in the installed distribution metadata), `src/` and any plugin-local
+`libs/`, plus every shared library it installs from outside the plugin directory
+(the libraries it installs explicitly, resolved exactly as the build resolves
+them, and the transitive `[tool.uv.sources]` path dependencies, e.g.
+`../../libs/<lib>` in a checkout). Caches, build artifacts and each library's
+own `tests/` are excluded, so building or testing never changes it. The hash is
+computed once per transaction, under the install lock and before admission,
+and that same value is published in the completion marker and the deploy
+manifest. Because the build reads the sources after that point, a build is
+followed by a recomputation that only verifies them: if they no longer hash to
+the admitted value (an edit landed mid-install), the install fails with a
+"sources changed during the build; re-run the install" error and publishes no
+completion marker or deploy manifest and activates nothing. `install` leaves
+the unpublished slot incomplete for the next build to clean; `update` treats it
+as a failed update and rolls back. Because a shared-library edit now counts as a
+content change, a completed slot built before this fingerprint covered shared
+libraries is refused as different content until the plugin version changes;
+the next version bump builds a fresh slot with the current fingerprint.
+
 ### Scheduled task: write-once bootstrap (decoupled from the runtime version)
 
 On Windows the auto-start scheduled task is **write-once bootstrap

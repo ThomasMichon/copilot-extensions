@@ -233,6 +233,12 @@ class SpawnReservation:
     worktree_ownership: str | None = None
     creating_host: str | None = None
     driver: str | None = None
+    agent_info: dict | None = None
+    allocation_project: str | None = None
+    worktree_path: str | None = None
+    allocation_revision: int = 1
+    creation_key: str | None = None
+    allocation_reservation_key: str | None = None
     conversation_retired: bool = False
     release_requested: bool = False
     release_disposition: str | None = None
@@ -260,6 +266,13 @@ class SpawnReservation:
             worktree_ownership=row["worktree_ownership"],
             creating_host=row["creating_host"],
             driver=row["driver"],
+            agent_info=json.loads(row["agent_info"]) if "agent_info" in row.keys() and row["agent_info"] else None,
+            allocation_project=row["allocation_project"] if "allocation_project" in row.keys() else None,
+            worktree_path=row["worktree_path"] if "worktree_path" in row.keys() else None,
+            allocation_revision=row["allocation_revision"] if "allocation_revision" in row.keys() else 1,
+            creation_key=row["creation_key"] if "creation_key" in row.keys() else None,
+            allocation_reservation_key=row["allocation_reservation_key"]
+            if "allocation_reservation_key" in row.keys() else None,
             conversation_retired=bool(row["conversation_retired"])
             if "conversation_retired" in row.keys() else False,
             release_requested=bool(row["release_requested"]),

@@ -17,6 +17,25 @@ from .client_worktree_restart import _Base
 class CliModeClientMixin(_Base):
     """Mixin supplying ``BridgeClient``'s CLI-mode reservation and deregister calls."""
 
+    def resolve_live_session(self, handle: str, *, qualified_peer: bool = False) -> dict[str, Any]:
+        """Resolve an exact session, legacy local worktree, or qualified peer address."""
+        from .client import BridgeClientError
+        from .protocol import QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
+
+        if qualified_peer and not self.daemon_supports(QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
+            raise BridgeClientError(426, f"qualified peer addressing requires HTTP protocol {QUALIFIED_LIVE_PEER_PROTOCOL_VERSION}")
+        try:
+            return self._request(
+                "GET", "/api/v1/live-sessions/resolve",
+                params={"handle": handle, **({"qualified_peer": True} if qualified_peer else {})},
+            ) or {}
+        except BridgeClientError as exc:
+            if exc.status == 404:
+                if handle.startswith("live:") and not self.daemon_supports(QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
+                    raise BridgeClientError(426, f"qualified peer addressing requires HTTP protocol {QUALIFIED_LIVE_PEER_PROTOCOL_VERSION}") from exc
+                return {}
+            raise
+
     def create_cli_mode_reservation(
         self, worktree_id: str, *, ttl_seconds: float = 300.0,
         venue: dict[str, Any] | None = None,
@@ -31,6 +50,21 @@ class CliModeClientMixin(_Base):
         body = {"worktree_id": worktree_id, "ttl_seconds": ttl_seconds, "venue": venue}
         return self._request(
             "POST", f"/api/v1/live-sessions/cli-mode-reservations/{worktree_id}", body,
+        ) or {}
+
+    def resolve_remote_live_session(
+        self, host: str, target: str, *, qualified_peer: bool = False,
+    ) -> dict[str, Any]:
+        """Resolve an exact session or an explicitly qualified peer on its host."""
+        from .client import BridgeClientError
+        from .protocol import QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
+
+        self._require_remote_operations()
+        if qualified_peer and not self.daemon_supports(QUALIFIED_LIVE_PEER_PROTOCOL_VERSION):
+            raise BridgeClientError(426, f"remote qualified peer resolution requires HTTP protocol {QUALIFIED_LIVE_PEER_PROTOCOL_VERSION}")
+        return self._request(
+            "GET", self._remote_path(host, "/live-sessions/" + urllib.parse.quote(target, safe="")),
+            **({"params": {"qualified_peer": True}} if qualified_peer else {}),
         ) or {}
 
     def get_cli_mode_reservation(self, worktree_id: str) -> dict[str, Any]:

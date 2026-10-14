@@ -16,8 +16,9 @@ does **not** hold for the `bash` PATH-resolves-to on a bare Windows host: the
 App-Execution-Alias stub at ``%LOCALAPPDATA%\\Microsoft\\WindowsApps\\bash.EXE``
 launches the default WSL distro through a wrapper that neither propagates child
 exit codes (every command appears to exit 0) nor reads Windows temp paths, so
-the pipefail/errexit behaviour is unobservable. We probe the resolved bash once
-and skip the semantic tests when it is non-conformant rather than fail on it.
+the pipefail/errexit behaviour is unobservable. The explicit native tier probes
+Bash once per session through a lazy fixture
+and skips the semantic tests when it is non-conformant.
 The pure-text drift guard (:func:`test_install_sh_guards_value_greps`) needs no
 bash and runs everywhere. Input is piped in (not read from a temp file) so the
 tests carry no Windows-vs-POSIX path-translation assumptions either.
@@ -25,80 +26,18 @@ tests carry no Windows-vs-POSIX path-translation assumptions either.
 
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
+from native_shell_support import run_headless
 
 _INSTALL_SH = (
     Path(__file__).resolve().parents[1] / "scripts" / "install.sh"
 )
 
-# A bare shutil.which("bash") can resolve to a Windows App Execution Alias
-# stub or the classic `C:\Windows\System32\bash.exe` WSL launcher (both
-# invoke an actual WSL distro rather than running this script in the
-# environment under test). Prefer the real Git Bash location when present;
-# otherwise filter both known WSL-launcher locations out of PATH before
-# falling back to shutil.which, so this never silently selects one.
-_GIT_BASH = Path(r"C:\Program Files\Git\bin\bash.exe")
-def _resolve_bash() -> str | None:
-    if _GIT_BASH.is_file():
-        return str(_GIT_BASH)
-    path = os.environ.get("PATH")
-    if not path:
-        return None
-    filtered = os.pathsep.join(
-        part for part in path.split(os.pathsep)
-        if "windowsapps" not in part.lower()
-        and part.rstrip("\\").lower() != r"c:\windows\system32"
-    )
-    return shutil.which("bash", path=filtered)
-_BASH = _resolve_bash()
-
-
-def _bash_honors_pipefail() -> bool:
-    """True when the resolved ``bash`` aborts a command substitution whose
-    pipeline fails under ``set -euo pipefail``.
-
-    Mirrors the exact unguarded pattern install.sh used to carry: a no-match
-    ``grep`` inside a ``grep | head | sed`` pipeline. A conformant POSIX bash
-    aborts before the trailing ``echo`` (non-zero exit, no marker); the Windows
-    WSL app-exec stub instead reports success and prints the marker, which is
-    how we detect and skip it."""
-    if _BASH is None:
-        return False
-    probe = (
-        "set -euo pipefail\n"
-        "_x=$(printf 'a\\n' | grep 'zzz' | head -1 | sed 's/a/b/')\n"
-        "echo REACHED\n"
-    )
-    try:
-        r = subprocess.run([_BASH, "-c", probe], capture_output=True,
-                           text=True, timeout=30)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    bash_path = Path(_BASH)
-    if (
-        bash_path.name.lower() == "bash.exe"
-        and bash_path.parent.name.lower() == "system32"
-    ):
-        return False
-    return r.returncode != 0 and "REACHED" not in r.stdout
-
-
-_needs_conformant_bash = pytest.mark.skipif(
-    not _bash_honors_pipefail(),
-    reason="resolved bash does not honor `set -euo pipefail` "
-           "(no bash, or the Windows WindowsApps WSL app-exec stub); "
-           "install.sh's pipefail semantics are only observable under a real "
-           "POSIX bash (Linux / native WSL / macOS / Git Bash)",
-)
-
-
-@_needs_conformant_bash
-def test_value_grep_pattern_survives_missing_key():
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+def test_value_grep_pattern_survives_missing_key(native_bash: str):
     """The guarded extraction pattern must exit 0 (empty) when the key is
     absent, even under `set -euo pipefail`."""
     script = (
@@ -108,13 +47,14 @@ def test_value_grep_pattern_survives_missing_key():
         "| sed 's/.*default_branch:\\s*//' || true)\n"
         'echo "db=[$_db]"\n'
     )
-    r = subprocess.run([_BASH, "-c", script], capture_output=True, text=True)
+    r = run_headless([native_bash, "-c", script], capture_output=True, text=True)
     assert r.returncode == 0, f"pipeline aborted: {r.stderr}"
     assert "db=[]" in r.stdout
 
 
-@_needs_conformant_bash
-def test_unguarded_pattern_would_abort():
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+def test_unguarded_pattern_would_abort(native_bash: str):
     """Sanity check that the bug is real: the *unguarded* pattern aborts under
     pipefail when the key is absent (guards the regression's premise)."""
     script = (
@@ -124,7 +64,7 @@ def test_unguarded_pattern_would_abort():
         "| sed 's/.*default_branch:\\s*//')\n"
         'echo "reached=[$_db]"\n'
     )
-    r = subprocess.run([_BASH, "-c", script], capture_output=True, text=True)
+    r = run_headless([native_bash, "-c", script], capture_output=True, text=True)
     assert r.returncode != 0
     assert "reached=" not in r.stdout
 

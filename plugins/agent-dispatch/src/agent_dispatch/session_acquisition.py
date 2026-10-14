@@ -13,6 +13,8 @@ def spawn_snapshot(task: dict, reservation: dict, worktree: str, prepared: dict,
     return {
         **task, "spawn_worktree": worktree, "spawn_reservation_key": reservation["key"],
         "spawn_worktree_path": prepared["path"], "spawn_worktree_ownership": ownership,
+        "spawn_allocation_project": prepared.get("project"),
+        "spawn_allocation_reservation_key": reservation.get("allocation_reservation_key") or reservation["key"],
         "spawn_session_handle": None if replaced else reservation.get("session_handle"),
         "spawn_conversation_retired": reservation.get("conversation_retired"),
     }
@@ -36,6 +38,12 @@ def acquire(
     ownership = task.get("spawn_worktree_ownership")
     if not key or not worktree or ownership not in {"created", "reused", "targeted"}:
         raise BridgeUnavailable("acquisition requires recorded worktree/reservation owner facts")
+    execution_project = task.get("spawn_allocation_project")
+    worktree_path = task.get("spawn_worktree_path")
+    if not execution_project or not worktree_path:
+        raise BridgeCarriedSessionBusy("acquisition requires owner-qualified workspace provenance")
+    if project is not None and project != execution_project:
+        raise BridgeCarriedSessionBusy("acquisition project conflicts with recorded workspace")
     carried = task.get("spawn_session_handle")
     prior = carried.removeprefix("local-body:") if isinstance(carried, str) else None
     if prior and prior.startswith("fleet-body:"):
@@ -44,12 +52,13 @@ def acquire(
     if retired is True:
         prior = None
     payload = {
-        "version": 1, "target": agent, "mode": mode, "task_id": task["id"],
+        "version": 2, "target": agent, "mode": mode, "task_id": task["id"],
         "task_generation": task.get("generation"), "worktree_id": worktree,
         "allocation": ownership, "conversation_retired": retired,
         "intent": "automatic", "prior_session_id": prior,
         "delivery_id": f"{key}:acquire", "prompt": prompt, "charter": charter,
-        "project": project, "reservation_key": key, "driver": driver,
+        "project": execution_project, "worktree_path": worktree_path,
+        "reservation_key": key, "driver": driver,
         "verify_timeout": verify_timeout,
     }
     try:

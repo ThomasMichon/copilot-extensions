@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from machine_transport import normalize_machine_entries
 from machine_transport import parse_machines_yaml as parse_machine_entries
 
 log = logging.getLogger("agent-bridge")
@@ -77,6 +78,8 @@ class MachineConfig:
     alias: str = ""
     execution_platform: str = ""
     physical_host: str = ""
+    compatibility_aliases: tuple[str, ...] = ()
+    legacy_key: str = ""
 
     def get_ssh_env(self, env_name: str | None = None) -> SshEnvironment | None:
         """Get an SSH environment by name, or the first available one."""
@@ -121,25 +124,36 @@ class MachineConfig:
         )
 
 
-def parse_machines_yaml(data: dict[str, Any]) -> dict[str, MachineConfig]:
+def parse_machines_yaml(
+    data: dict[str, Any], *, normalize: bool = False,
+) -> dict[str, MachineConfig]:
     """Parse raw machines.yaml data into typed MachineConfig objects."""
     machines: dict[str, MachineConfig] = {}
     try:
         entries = parse_machine_entries(
-            data, default_ssh_alias_to_key=True, default_ssh_shell="bash",
+            data, default_ssh_alias_to_key=not normalize, default_ssh_shell="bash",
             keep_unnamed_environments=True, preserve_environment_values=True,
         )
+        if normalize:
+            entries = normalize_machine_entries(entries)
     except ValueError as exc:
         raise TopologyLoadError(str(exc)) from exc
     metadata = {str(key): value for key, value in data.get("machines", {}).items()}
     for entry in entries.values():
         key = entry.key
         # Shared identities are normalized; Bridge-only metadata stays at the edge.
-        mdata = metadata[key]
+        mdata = metadata[entry.legacy_key or key]
         ssh_block = mdata.get("ssh") or {}
+        missing_alias_names = [
+            env.get("name", "") for env in (ssh_block.get("environments") or [])
+            if isinstance(env, dict) and "alias" not in env
+        ]
         ssh_envs = [
-            SshEnvironment(name=env.name, alias=env.alias, port=env.port,
-                           user=env.user, shell=env.shell)
+            SshEnvironment(
+                name=env.name,
+                alias=key if normalize and env.name in missing_alias_names else env.alias,
+                port=env.port, user=env.user, shell=env.shell,
+            )
             for env in entry.ssh_environments
         ]
 
@@ -170,6 +184,8 @@ def parse_machines_yaml(data: dict[str, Any]) -> dict[str, MachineConfig]:
             auth_hooks=auth_hooks,
             execution_platform=entry.execution_platform,
             physical_host=entry.physical_host,
+            compatibility_aliases=entry.compatibility_aliases,
+            legacy_key=entry.legacy_key,
         )
 
     return machines
@@ -188,7 +204,7 @@ def load_machines_yaml(
         return {}
     try:
         data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-        machines = parse_machines_yaml(data)
+        machines = parse_machines_yaml(data, normalize=True)
         log.info("Loaded %d machines from %s", len(machines), p)
         return machines
     except (OSError, yaml.YAMLError, AttributeError, TypeError, ValueError) as exc:

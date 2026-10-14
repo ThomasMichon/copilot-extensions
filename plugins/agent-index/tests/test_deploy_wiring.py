@@ -13,7 +13,7 @@ from agent_index import __main__
 from agent_index import __version__
 
 
-def _capture_promoting_routing(monkeypatch, tmp_path, capsys):
+def _capture_promoting_routing(monkeypatch, tmp_path, capsys, *, refused=False, recover=False):
     captured = {}
 
     class Handle:
@@ -71,7 +71,10 @@ def _capture_promoting_routing(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(__main__, "_validate_cutover_governance", lambda _value: None)
     monkeypatch.setattr(
         "zdd.breadcrumb.recover_stale_cutover",
-        lambda *_args, **_kwargs: {"recovered": False},
+        lambda *_args, **_kwargs: (
+            {"recovered": False, "refused": True, "reason": "native recovery refused"}
+            if refused else {"recovered": False}
+        ),
     )
     monkeypatch.setattr("zdd.cutover.CutoverOrchestrator", FakeOrchestrator)
     monkeypatch.setattr(__main__, "_routing_endpoint", lambda: None)
@@ -83,13 +86,25 @@ def _capture_promoting_routing(monkeypatch, tmp_path, capsys):
             health_timeout=1.0,
             drain_timeout=1.0,
             force=False,
-            recover=False,
+            recover=recover,
         )
     )
 
     assert rc == 1
-    capsys.readouterr()
+    output = capsys.readouterr().out
+    if refused:
+        payload = json.loads(output)
+        assert payload["ok"] is False
+        assert "recovery refused" in payload["error"]
     return captured, handle, route_root
+
+
+@pytest.mark.parametrize("recover", [False, True])
+def test_deploy_propagates_native_recovery_refusal(monkeypatch, tmp_path, capsys, recover):
+    captured, _, _ = _capture_promoting_routing(
+        monkeypatch, tmp_path, capsys, refused=True, recover=recover
+    )
+    assert captured == {}
 
 
 def test_deploy_wires_cutover_orchestrator(monkeypatch, tmp_path, capsys) -> None:

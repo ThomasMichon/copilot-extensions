@@ -1,6 +1,7 @@
 # Temporary Docker resource obligations
 
-**Status:** Proposed; requires plan review before implementation.
+**Technical boundary:** Generic ownership ledger and allocation-fence source
+implementation validated; Docker producer integration and live validation pending.
 **Coordination:** #6109.
 **Canonical effort:** [Vendored Installer Engine](README.md).
 
@@ -76,10 +77,11 @@ agent-worktrees or finalize-time recursive Docker census is proposed.
   obtains its container ID afterward, and has separate teardown/orphan cleanup.
   Its host admission lease is not a creator obligation on a worktree.
 
-## Design decisions for review
+## Reviewed design decisions
 
-The following placements are **agent-recommended**, not approved implementation
-choices. This is a new cross-owner lifecycle contract, not a call-site-only fix.
+The following placements originated as **agent-recommended** choices and cleared
+the plan-review gate in PR #6116. They govern the pending implementation of this
+cross-owner lifecycle contract, not merely a call-site-only fix.
 
 1. **Ledger authority stays in agent-worktrees.** Add a versioned generic
    resource-producer transaction API for reserve, bind, confirmed close-out and
@@ -117,13 +119,23 @@ choices. This is a new cross-owner lifecycle contract, not a call-site-only fix.
    identity receipt outside the checkout. This receipt is diagnostic evidence,
    not another claim ledger or a promise that finalize is gated.
 
-Review must approve or revise these five choices before code starts. In
-particular, accept the shared-helper/provider placement, the temporary-only
-settlement restriction and explicit unowned standalone mode; do not infer those
-decisions from an existing installer-plan approval.
+The plan review explicitly covers these five choices, including the
+shared-helper/provider placement, temporary-only settlement restriction and
+explicit unowned standalone mode. A material change to that protocol requires
+an amendment through the normal review flow; implementation is not permission
+to bypass its invariants or the live cleanup confirmation gate.
 
 ## Transaction and failure requirements
 
+- **Review-directed amendment, agent-recommended and operator accepted
+  2026-10-12:** the generic allocation-in-progress transition must precede
+  external creation. The allocator completes or binds only its attempt-specific
+  fence; the retained monotonic epoch prevents stale absence through
+  pending/allocating/pending ABA. Unknown or interrupted allocation stays owned.
+  The exact ABI and authoritative quiescence-recovery contract are maintained
+  in [the producer reference](../../../plugins/agent-worktrees/docs/resource-producer.md).
+  This corrects the reviewed preallocation invariant; it does not authorize
+  live allocation, cleanup, provider bootstrap or a second ledger.
 - Reserve under the same ownership lock as finalize before the first Docker
   allocation. Persist endpoint/producer recovery evidence in the existing
   claim. Failure to reserve means no Docker allocation.
@@ -151,10 +163,19 @@ decisions from an existing installer-plan approval.
 
 ## Validation plan
 
-- [ ] Prove the real finalize entrypoint refuses an initially empty owner after
+- [x] Source ledger ABI: verify begin/close serialization, in-progress refusal, generation-fenced
+      completion/binding, stale absence through ABA, lost-fence quiescence
+      recovery and interruption retention in isolated regression fixtures.
+      Integrated producer enablement remains gated by the Docker/live items below.
+- [x] Source ledger ABI: verify accepted retry after source reaping, recipient/incoming token
+      uniqueness and preservation of already closed/transferred recipients in
+      isolated regression fixtures.
+- [x] Source ledger ABI: prove the real finalize entrypoint refuses an initially empty owner after
       reservation but before allocation; prove its final locked check rejects a
       concurrent producer or the producer refuses an already-finalizing owner.
-      Use isolated local tracking/Git fixtures, never an active parent worktree.
+      Proven by isolated local tracking/Git fixtures and a separate-process
+      sidecar-lock contender in `test_resource_producer_finalize.py`, never an
+      active parent worktree. Docker producer integration remains pending below.
 - [ ] Prove running and stopped-but-existing containers block; exact verified
       removal settles; cleanup failure, outage, daemon mismatch, malformed
       response and interrupted allocation remain active.
@@ -187,7 +208,20 @@ decisions from an existing installer-plan approval.
 - [ ] Report native PowerShell/Windows-container/macOS evidence separately;
       parser checks or simulated platform tests are not native lifecycle proof.
 
-Plan publication and review belong to the parent integrator. Implementation,
-live cleanup authority and native proofs remain pending. After implementation,
-update worktree obligation docs, clean-room architecture/operator docs and
+The generic ledger is source-validated. Docker identity callbacks, integrated
+allocation/cleanup paths and live/native Docker lifecycle proofs remain pending.
+Physical cleanup requires separate explicit authority. As those integrations
+land, update worktree obligation docs, clean-room architecture/operator docs and
 the test-flow docs to describe only the guarantees actually delivered.
+
+## Allocation-fence rationale
+
+An absence observation alone cannot prevent a creator from subsequently
+allocating and binding a resource. Mandatory allocation begin/completion fencing
+serializes allocation permission with claim close-out, preserving cleanup
+responsibility across interruption and stale absence observations.
+
+Close settles resource cleanup responsibility after verified removal or no
+allocation; handoff transfers that responsibility to an accepting worktree.
+Neither operation closes a Copilot session, a conversation or a service, and
+ledger transitions do not authorize physical cleanup.

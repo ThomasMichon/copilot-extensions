@@ -164,6 +164,9 @@ Implementation sequencing below is **agent-recommended**:
   Client artifact-contained lifecycle primitives and local resource diagnostics
   are the first prerequisite under #6424/#6240; managed lifecycle execution and
   controller/connector components remain open.
+  [Installation repair conductor](installation-repair-conductor.md) is the
+  agent-recommended #6464 setup prerequisite proposal; it does not implement
+  execution or require downstream plugins to create core installation cells.
 - [ ] Define controller-owned live configuration validation, atomic activation,
   last-valid-state recovery and explicit restart-required outcomes.
 - [ ] Implement explicit inspect/plan/apply behavior for the chosen adapter:
@@ -429,3 +432,22 @@ not to the vision. This effort does not acquire or migrate live capacity.
 - #6437's role-selected artifact preflight is merged and can be consumed by the
   subsequent managed-client slice. No lifecycle activation, release rollout or
   private migration gate is claimed complete here.
+
+### 2026-10-13 - Client prerequisite merged; next runtime obligations retained
+- #6432 merged at `2026-10-13T06:26:04Z`, commit
+  `ca7b3e5630673bf2dee2c7519c950575ad91b825`, after actual current-head approval,
+  resolved findings and every required check passed. The earlier independent
+  Windows console-root failure remains owned under #6266; a subsequent passing
+  native run is not a diagnosis or closure of that issue.
+- The artifact/resource prerequisite is delivered to `dev`, not yet evidence
+  of release promotion or an installed managed lifecycle. #6424 stays open for
+  explicit install/update/rollback and receipt-owned uninstall, consuming #6437
+  integrity preflight and #6240's separately reviewed release authentication.
+- The generic machine-setup installation repair conductor is claimed under
+  #6464, retaining #1886 uninstall and #6274/#6389 serving-convergence ownership.
+  Discovery remains read-only. A reviewed implementation plan must precede
+  executor implementation; no provider-specific composition is added upstream.
+- The fleet and routing campaign worktrees were safely pulled forward while
+  retaining recovery refs. Both efforts stay Active; controller/connector,
+  useful service roles, authorization, provider admission and adopter migration
+  completion gates remain unresolved.

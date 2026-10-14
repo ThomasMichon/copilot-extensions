@@ -67,6 +67,9 @@ class ScheduleRegistrationMixin:
             raise TaskError(f"schedule {sid!r} needs a 'title'")
         if not entry.get("repo"):
             raise TaskError(f"schedule {sid!r} needs a 'repo' (the task lane)")
+        if "category" in entry:
+            from .task_categories import category_value
+            category_value(entry["category"])
         try:
             due_occurrences(entry, now=self._now(now))
         except ScheduleError as exc:

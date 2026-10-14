@@ -32,13 +32,16 @@ def test_initial_stale_publication_dispatches_only_proven_recovery(monkeypatch, 
     monkeypatch.setattr(pr_publish, "push_identity", lambda *_a, **_k: "github.com/owner/repo")
     monkeypatch.setattr(pr_publish, "_tip", lambda *_: tip)
     monkeypatch.setattr(git_ops, "is_commit_ancestor", lambda *_a, **_k: ancestor)
-    def metadata(*args, **kwargs):
+    def git(*args, **kwargs):
         if args[:2] == ("remote", "get-url"):
-            return SimpleNamespace(returncode=0, stdout="https://github.com/owner/repo.git\n", stderr="")
-        if args[0] == "config":
+            return SimpleNamespace(
+                returncode=0, stdout="https://github.com/owner/repo.git\n", stderr=""
+            )
+        if args[:3] == ("config", "--null", "--get-all"):
             return SimpleNamespace(returncode=1, stdout="", stderr="")
-        pytest.fail(f"unexpected Git metadata probe: {args}")
-    monkeypatch.setattr(git_ops, "git", metadata)
+        pytest.fail(f"unexpected fixture Git command: {args!r}")
+
+    monkeypatch.setattr(git_ops, "git", git)
 
     def git(*args, **kwargs):
         if args[:2] == ("remote", "get-url"):

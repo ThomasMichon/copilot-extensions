@@ -8,9 +8,20 @@ detected to be bare.
 
 from __future__ import annotations
 
+import os
+import shlex
 import uuid
 
-from . import git_ops
+from . import bare_anchor_files, git_ops
+
+
+def _display_command(argv: list[str]) -> str:
+    """A copy-paste command for the operator's shell: PowerShell literal
+    quoting on Windows, POSIX quoting elsewhere, so ``$``, backticks and
+    quotes in a path or ref are never reinterpreted."""
+    if os.name == "nt":
+        return " ".join([argv[0], *("'" + a.replace("'", "''") + "'" for a in argv[1:])])
+    return shlex.join(argv)
 
 
 def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
@@ -40,10 +51,18 @@ def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
     compare-and-swap ``update-ref`` once confirmed to be a strict
     fast-forward, mirroring
     ``agent_machines.self_update._fast_forward_bare_repo``.
+
+    An anchor that still carries an index and checked-out files (a converted
+    ordinary clone) has those files advanced with the ref
+    (:mod:`bare_anchor_files`): a stale index, local edits, or an untracked or
+    ignored path in the way refuse BEFORE the ref moves. The detail always
+    ends with ``; files=<status>`` once the ref is known to be current.
     """
 
+    # Inherited GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE must never redirect the
+    # ref move or the fetch to another repository: always act on `path`.
     def _git(*args: str):
-        return git_ops.git(*args, cwd=path, check=False)
+        return git_ops.git(*args, cwd=path, check=False, isolated_repository=True)
 
     current = _git("branch", "--show-current").stdout.strip()
     if not current:
@@ -56,8 +75,10 @@ def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
         return (
             "skipped",
             f"HEAD is on '{current}', not declared default '{target}' "
-            "(bare anchor: switch it explicitly, e.g. `git symbolic-ref "
-            f"HEAD refs/heads/{target}`)",
+            "(bare anchor); switch it explicitly with: "
+            + _display_command(
+                ["git", "-C", str(path), "symbolic-ref", "HEAD", f"refs/heads/{target}"]
+            ),
         )
     old_sha = _git("rev-parse", "--verify", f"refs/heads/{target}").stdout.strip()
     if not old_sha:
@@ -86,7 +107,7 @@ def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
             *git_ops._auth_config_args("origin", cwd=path),
             "fetch", "--quiet", "--no-tags", "origin",
             f"+refs/heads/{target}:{scratch_ref}",
-            cwd=path, check=False, timeout=180,
+            cwd=path, check=False, timeout=180, isolated_repository=True,
         )
     finally:
         for refspec in saved_refspecs:
@@ -101,13 +122,28 @@ def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
         return ("skipped", f"origin/{target} not found after fetch")
     if new_sha == old_sha:
         _cleanup_scratch()
-        return ("synced", target)
+        return ("synced", f"{target}; files={bare_anchor_files.current_status(path, old_sha)}")
     ancestry = _git("merge-base", "--is-ancestor", old_sha, new_sha)
     if ancestry.returncode != 0:
         _cleanup_scratch()
         return ("skipped", "not fast-forwardable (diverged)")
+    refusal = bare_anchor_files.precheck(path, old_sha, new_sha)
+    if refusal:
+        _cleanup_scratch()
+        return (
+            "skipped",
+            f"{target} not fast-forwarded: anchor files cannot advance safely; files={refusal}",
+        )
     updated = _git("update-ref", f"refs/heads/{target}", new_sha, old_sha)
     _cleanup_scratch()
     if updated.returncode != 0:
         return ("error", updated.stderr.strip() or "git update-ref failed")
-    return ("synced", target)
+    files = bare_anchor_files.refresh(path, old_sha, new_sha)
+    if files.startswith(bare_anchor_files.REFRESH_FAILED):
+        # The ref already moved; the CLI reports the stale files as a warning.
+        return (
+            "synced",
+            f"{target} ref advanced from {old_sha[:12]} but anchor files were not refreshed; "
+            f"files={files}",
+        )
+    return ("synced", f"{target}; files={files}")

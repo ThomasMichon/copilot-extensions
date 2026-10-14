@@ -104,13 +104,29 @@ it does not cancel the native task or claim that its process has exited.
 
 CLI namespace enumeration has provider-local wall-overrun admission: two
 consecutive native execution timeouts open a 60-second cooldown. Suppressed
-requests use the existing in-process fallback or report namespace incomplete.
+requests use the existing in-process fallback. Without fallback, an installed
+provider reports namespace incomplete.
+An uninstalled provider remains legitimate empty absence: when no fallback
+exists and its executable is missing, suppression returns an empty list
+without launching work or claiming successful native recovery.
 After cooldown, one single-flight native probe may run; parsed native success
 closes admission, while a failed or fallback-only probe restarts the full
 cooldown. Native success or an intervening non-timeout failure resets the
 consecutive timeout streak. Caller join timeout/cancellation is not an overrun,
 and an already-running holder is joined before admission is considered.
 This is not CPU-budget measurement or process-tree reclamation authority.
+
+CLI enumeration separately observes its owned root and seen descendants through
+optional procutil metrics. Spawn receipts precede wait/poll/reap, using the
+owned Windows handle or the still-unreaped POSIX child. Provider-local cadence
+and a retained native sampling future prevent measurement amplification:
+command completion or cancellation of an observer is not sample completion.
+Cache lifecycle supervision captures both command and sampling holders, even
+when sampling starts after the outer scan has already ended. Bounded shutdown
+joins raw futures without cancelling them. Content-free telemetry reports CPU
+lower bounds and explicit uncertainty; observation failure cannot erase valid
+roster rows. This observation seam does not enforce a CPU budget or authorize
+reclamation.
 
 ## The wire protocol (generalizing `hook_ipc.py`)
 

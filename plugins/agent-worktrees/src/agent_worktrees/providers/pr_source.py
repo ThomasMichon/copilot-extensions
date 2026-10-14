@@ -62,8 +62,9 @@ def github_source(data: dict) -> dict[str, str]:
         host = url.netloc if url.hostname and not url.username and not url.password else ""
     except ValueError as exc:
         raise ProviderError("Malformed pull-request source URL.") from exc
+    # Enterprise Managed User logins contain an underscore enterprise shortcode.
     if name and (
-        not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9_.-]+", name)
+        not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9_-]*[A-Za-z0-9])?/[A-Za-z0-9_.-]+", name)
         or name.rsplit("/", 1)[-1] in {".", ".."}
     ):
         raise ProviderError("Malformed pull-request source repository name.")

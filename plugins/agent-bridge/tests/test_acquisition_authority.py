@@ -9,6 +9,24 @@ from agent_bridge.acquisition_contract import AcquisitionRefused, AcquisitionReq
 
 pytestmark = pytest.mark.contract("agent_bridge.acquisition.worktree_owner")
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["pending", "conflict", "terminal"])
+async def test_ground_keyed_creation_preserves_only_typed_pending(monkeypatch, status):
+    import json
+    from types import SimpleNamespace
+
+    process = SimpleNamespace(
+        returncode=3, communicate=AsyncMock(return_value=(
+            json.dumps({"creation": {"version": 1, "status": status}}).encode(), b"",
+        )),
+    )
+    monkeypatch.setattr(authority, "_agent_worktrees_launch_prefix", lambda: ["worktrees"])
+    monkeypatch.setattr(authority, "_agent_worktrees_environment", lambda: {})
+    monkeypatch.setattr(authority.asyncio, "create_subprocess_exec", AsyncMock(return_value=process))
+    with pytest.raises(AcquisitionRefused) as refused:
+        await authority.worktree_command(["create", "--creation-key", "logical-work", "--json"], "project-a")
+    assert refused.value.code == ("owner_operation_pending" if status == "pending" else "owner_refused")
+
 
 @pytest.fixture
 def acquisition_request():
@@ -66,3 +84,24 @@ async def test_cached_display_never_overrides_native_head(
     assert command.await_args_list[1].args == (
         ["head-session", "--worktree-id", "worktree-a", "--json"], "project-a",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("project,path", [
+    ("queue-repo", "workspace-path"), (None, "workspace-path"),
+    ("execution-repo", "other-path"), ("execution-repo", None),
+])
+async def test_workspace_owner_identity_must_match_request(
+    acquisition_request, monkeypatch, project, path,
+):
+    request = acquisition_request.model_copy(update={
+        "version": 2, "project": "execution-repo", "worktree_path": "workspace-path",
+    })
+    command = AsyncMock(return_value={"worktrees": [{
+        "id": "worktree-a", "repo": project, "path": path,
+    }]})
+    monkeypatch.setattr(authority, "worktree_command", command)
+    with pytest.raises(AcquisitionRefused) as error:
+        await authority.verify_worktree(request)
+    assert error.value.code in {"worktree_unknown", "workspace_identity_conflict"}
+    assert command.await_count == 1

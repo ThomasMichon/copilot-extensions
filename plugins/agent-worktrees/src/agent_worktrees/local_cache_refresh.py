@@ -1,47 +1,14 @@
-"""Wire customizing-copilot's ``render-local-cache`` CLI into the worktree
-lifecycle boundaries this pattern depends on: create, resume, and
-``sessionStart`` (a backup for drift accrued since).
+"""Prepare local instruction projections using this payload's own engine.
 
-See ``docs/patterns/worktree-scoped-dynamic-guidance.md`` and
-``efforts/2026/10/02 ambient-guidance-navigability`` Phase 7. This is the
-*consumer* side of a mechanism ``customizing-copilot`` owns entirely:
-``instruction_projections.render_local_cache()`` and the sibling-resolution/
-declaration schema it depends on all live in that plugin's own
-``skills/reviewing-customizations/scripts/``. Per
-``docs/patterns/a-la-carte-independence.md``'s "no cross-plugin
-reach-around" rule, this module never imports that plugin's Python package
-or assumes its internal layout beyond locating its own declared,
-versioned CLI entry point (``manage-instruction-projections.py``'s
-``render-local-cache`` operation) -- it invokes that payload-local script
-across a process boundary (a bounded-timeout subprocess).
+The canonical implementation is shared with customizing-copilot on dev;
+promotion vendors it into agent-worktrees, so a shipped standalone runtime
+never discovers or executes a sibling plugin. Source resolution inside the
+engine is scoped to the target repository's enabled instruction providers.
 
-Per ``docs/patterns/marketplace-installation-cells.md``'s "plugin name
-alone never selects a runtime" invariant, the sibling's root is resolved
-through ``plugin_activation.resolve_active_plugins()`` -- the same
-identity-verified active-plugin evidence ``claim_providers.py`` uses for
-its own sibling callbacks -- never by trusting a directory merely because
-it contains a ``plugin.json`` self-declaring the expected name. Only the
-plugin's **explicit current-checkout** activation scope is preferred, falling
-back to global activation. Unrelated registered-project scopes are never
-scanned and cannot supply another project's locally-overridden renderer.
-Repository-only enablement therefore works without user-global promotion.
-Missing or ambiguous provenance (zero, or more
-than one, matching active plugin) fails closed: no script is resolved,
-and the refresh reports unavailable for that round.
-
-That resolution call itself runs in its own bounded subprocess (``python
--m agent_worktrees.local_cache_refresh <home> [repo_root]``, this module's own
-entry point below) -- never in-process, and never on a bare Python
-thread -- because identity discovery performs filesystem I/O; only a real process-tree kill
-(``push_timeout.run_bounded``, the same mechanism the render step uses)
-can guarantee those descendants don't outlive a timeout. A thread's own
-``join(timeout)`` cannot cancel work already in flight inside it, so it
-can only abandon the wait, never the underlying Git children.
-
-Refreshes return attributable outcomes and log degradation without blocking
-session startup. Renderer budget warnings are successful delivery, not a
-reason to discard guidance. Explicit-checkout discovery avoids unrelated registered
-project scans; both process boundaries remain timeout-contained.
+Foreground create/resume waits for completion with progress. SessionStart
+queues a separate bounded backup worker rather than waiting inside the hook.
+Outcomes distinguish delivery, warnings and failure; no failed render is
+reported as successfully installed guidance.
 """
 
 from __future__ import annotations
@@ -55,6 +22,7 @@ import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
+from .launch_progress import step
 
 _LOG = logging.getLogger(__name__)
 RefreshStatus = Literal["ready", "partial", "unavailable", "failed", "timeout", "skipped", "queued"]
@@ -130,117 +98,25 @@ def prepare_for_launch(repo_root: str | Path, *, dry_run: bool = False) -> Refre
     """Install local guidance before instruction loading; dry runs never write."""
     if dry_run:
         return RefreshResult("skipped", detail="dry-run launch")
-    return refresh_local_cache(repo_root)
+    with step("Preparing instruction projections"):
+        return refresh_local_cache(repo_root, timeout=None)
 
-_SIBLING_PLUGIN_NAME = "customizing-copilot"
-_SIBLING_RELATIVE_SCRIPT = (
-    Path("skills")
-    / "reviewing-customizations"
-    / "scripts"
-    / "manage-instruction-projections.py"
-)
-
-# create/resume run as ordinary one-shot CLI commands, not inside the
-# long-lived resident status-monitor daemon -- a generous bound is fine.
+# The asynchronous backup remains bounded; foreground preparation waits.
 DEFAULT_TIMEOUT_S = 120.0
-# The scope name resolve_active_plugins() uses for a plugin's machine-wide
-# (non-project-specific) activation -- see ActivePlugin.root_for_scope().
-_GLOBAL_SCOPE = "global"
-
-
-def _select_global_root(home: Path, repo_root: Path | None = None) -> Path | None:
-    """Return the identity-verified current-project or global root for
-    ``_SIBLING_PLUGIN_NAME``, or ``None`` when zero or more than one
-    active plugin matches. Explicit checkout resolution preserves provenance
-    without inspecting unrelated registered-project scopes or overrides. This function
-    runs only inside the bounded resolution subprocess.
-    """
-    try:
-        from plugin_activation import resolve_active_plugins
-
-        report = resolve_active_plugins(
-            home=home, include_projects=False, plugin_names=(_SIBLING_PLUGIN_NAME,),
-            project_root=repo_root,
-        )
-    except Exception as exc:
-        _LOG.warning("Projection renderer discovery failed: %s", exc)
-        return None
-    scopes = ("project:current", _GLOBAL_SCOPE) if repo_root else (_GLOBAL_SCOPE,)
-    matching = [
-        plugin for plugin in report.active.values()
-        if plugin.name == _SIBLING_PLUGIN_NAME
-        and any(plugin.root_for_scope(scope) is not None for scope in scopes)
-    ]
-    if len(matching) != 1:
-        return None
-    plugin = matching[0]
-    for scope in scopes:
-        root = plugin.root_for_scope(scope)
-        if root is not None:
-            if scope == "project:current":
-                from plugin_activation import PluginStateError, inspect_plugin_state
-
-                if any(selected.root == root and selected.kind == "directory" for selected in plugin.live_roots):
-                    try:
-                        proof = inspect_plugin_state(plugin.source, home=home / ".copilot", repo=repo_root)
-                    except PluginStateError as exc:
-                        _LOG.warning("Current renderer trust lookup failed: %s", exc)
-                        return None
-                    if proof.get("repositoryTrusted") is not True:
-                        _LOG.warning("Current directory renderer requires explicit repository trust")
-                        return None
-            return root
-    return None
 
 
 def _resolve_cli_script(
-    home: Path, *, timeout: float, outcomes: list[RefreshResult] | None = None,
-    repo_root: Path | None = None,
+    home: Path, *, timeout: float | None, outcomes: list[RefreshResult] | None = None
 ) -> Path | None:
-    """Resolve customizing-copilot's ``render-local-cache`` CLI script
-    through identity-verified active-plugin evidence, never a bare
-    directory scan: a self-declared ``plugin.json`` name alone is not
-    installation identity (``docs/patterns/marketplace-installation-
-    cells.md``), so a stale or unrelated directory must never be trusted
-    to supply code this module goes on to execute.
-
-    Runs ``_select_global_root`` in its own bounded subprocess (see the
-    module docstring for why) rather than calling it in-process. Returns
-    ``None`` -- failing closed -- when customizing-copilot isn't resolved
-    at the current-checkout or global scope (or is ambiguous -- see ``_select_global_root``),
-    its script isn't present at the reported root, or resolution itself
-    doesn't complete within ``timeout``.
-    """
+    """Resolve the packaged engine from this installation's own payload."""
     try:
-        from . import push_timeout
+        from .projection_runtime_assets import projection_cli_script
 
-        result = push_timeout.run_bounded(
-            [
-                sys.executable, "-m", "agent_worktrees.local_cache_refresh", str(home),
-                *([str(repo_root)] if repo_root is not None else []),
-            ],
-            cwd=None, env=dict(os.environ), timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
+        return projection_cli_script()
+    except (OSError, ValueError) as exc:
         if outcomes is not None:
-            outcomes.append(RefreshResult("timeout", detail="renderer identity lookup timed out"))
+            outcomes.append(RefreshResult("failed", detail=f"packaged projection engine unavailable: {exc}"))
         return None
-    except Exception as exc:
-        if outcomes is not None:
-            outcomes.append(RefreshResult("failed", detail=f"renderer identity lookup failed: {exc}"))
-        return None
-    stderr = (getattr(result, "stderr", "") or "").strip()[:1000]
-    if getattr(result, "returncode", 0):
-        if outcomes is not None:
-            outcomes.append(RefreshResult("failed", detail=f"renderer identity lookup exited unsuccessfully: {stderr}"))
-        return None
-    output = (result.stdout or "").strip()
-    if not output:
-        if stderr and outcomes is not None:
-            outcomes.append(RefreshResult("failed", detail=f"renderer identity lookup: {stderr}"))
-        return None
-    script = Path(output) / _SIBLING_RELATIVE_SCRIPT
-    return script if script.is_file() else None
 
 
 def _resolve_own_agent_worktrees_command() -> str | None:
@@ -275,7 +151,7 @@ def refresh_local_cache(
     repo_root: str | Path,
     *,
     home: Path | None = None,
-    timeout: float = DEFAULT_TIMEOUT_S,
+    timeout: float | None = DEFAULT_TIMEOUT_S,
 ) -> RefreshResult:
     """Refresh enabled sources' gitignored, auto-discovered local instructions.
 
@@ -284,13 +160,15 @@ def refresh_local_cache(
     silently become success. ``timeout`` is the hard, enforced ceiling
     on this call's **own** cost (not counting ``push_timeout.run_
     bounded``'s own five-second cleanup grace),
-    shared between resolving the sibling's CLI and rendering with the actual
-    remaining time. Discovery has no shorter fixed cap: a healthy cold Python
-    startup must not discard guidance while the caller still has budget.
+    shared between locating the owned engine and rendering with the actual
+    remaining time; no separate lookup cutoff is imposed.
+    ``None`` waits for foreground preparation to finish, reporting renderer
+    discovery/render stages and elapsed-time heartbeats. Asynchronous backup
+    workers never select that mode.
     Both run via
     ``push_timeout.run_bounded`` rather than a plain ``subprocess.run(
-    timeout=...)``, which only terminates its direct child -- both the
-    resolver and the CLI can spawn descendants (Git child processes, an
+    timeout=...)``, which only terminates its direct child -- the
+    CLI can spawn descendants (Git child processes, an
     ``agent-worktrees`` lookup), which a bare ``timeout=`` would leave
     running past a stall. ``run_bounded`` kills each whole process tree
     instead. A timeout (or any other failure) at either step simply means
@@ -298,22 +176,27 @@ def refresh_local_cache(
     calling it at all.
     """
     home = home or Path.home()
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + timeout if timeout is not None else None
+
+    def report(result: RefreshResult) -> RefreshResult:
+        if timeout is None:
+            print(result.diagnostic, file=sys.stderr, flush=True)
+        return _report(result)
+
     try:
-        if timeout <= 0:
-            return _report(RefreshResult("timeout", detail="no refresh budget remains"))
+        if timeout is not None and timeout <= 0:
+            return report(RefreshResult("timeout", detail="no refresh budget remains"))
         repo_root = _checkout_root(repo_root)
-        resolution_timeout = deadline - time.monotonic()
-        if resolution_timeout <= 0:
-            return _report(RefreshResult("timeout", detail="no refresh budget remains"))
+        resolution_timeout = deadline - time.monotonic() if deadline is not None else None
+        if resolution_timeout is not None and resolution_timeout <= 0:
+            return report(RefreshResult("timeout", detail="no refresh budget remains"))
         outcomes: list[RefreshResult] = []
-        script = _resolve_cli_script(
-            home, timeout=resolution_timeout, outcomes=outcomes, repo_root=repo_root,
-        )
+        with step("Resolving projection renderer", enabled=timeout is None):
+            script = _resolve_cli_script(home, timeout=resolution_timeout, outcomes=outcomes)
         if script is None:
-            return _report(
+            return report(
                 outcomes[-1] if outcomes else RefreshResult(
-                    "unavailable", detail="project/global renderer missing or ambiguous; using checked-in fallback"
+                    "failed", detail="packaged projection engine unavailable; using checked-in fallback"
                 )
             )
         argv = [
@@ -328,14 +211,20 @@ def refresh_local_cache(
         agent_worktrees_command = _resolve_own_agent_worktrees_command()
         if agent_worktrees_command:
             argv += ["--agent-worktrees-path", agent_worktrees_command]
-        render_timeout = deadline - time.monotonic()
-        if render_timeout <= 0:
-            return _report(RefreshResult("timeout", detail="pre-render lookup exhausted refresh budget"))
+        render_timeout = deadline - time.monotonic() if deadline is not None else None
+        if render_timeout is not None and render_timeout <= 0:
+            return report(RefreshResult("timeout", detail="pre-render lookup exhausted refresh budget"))
         from . import push_timeout
 
-        result = push_timeout.run_bounded(
-            argv, cwd=None, env=dict(os.environ), timeout=render_timeout
-        )
+        with step("Rendering instruction projections", enabled=timeout is None):
+            inherited_group = (
+                timeout is None and os.name != "nt"
+                and os.environ.get("WORKTREE_MANAGER_ENGINE_OWNS_PROCESS_GROUP") == "1"
+            )
+            result = push_timeout.run_bounded(
+                argv, cwd=None, env=dict(os.environ), timeout=render_timeout,
+                **({"inherit_process_group": True} if inherited_group else {}),
+            )
         stderr = (getattr(result, "stderr", "") or "").strip()[:1000]
         try:
             parsed = _render_result(result.stdout or "", result.returncode)
@@ -343,11 +232,11 @@ def refresh_local_cache(
             raise ValueError(f"renderer exited {result.returncode}: {stderr}; {exc}") from exc
         if stderr:
             parsed = replace(parsed, detail=f"{parsed.detail}; stderr: {stderr}".strip("; ")[:2000])
-        return _report(parsed)
+        return report(parsed)
     except subprocess.TimeoutExpired:
-        return _report(RefreshResult("timeout", detail="local projection render timed out"))
+        return report(RefreshResult("timeout", detail="local projection render timed out"))
     except Exception as exc:
-        return _report(RefreshResult("failed", detail=f"local projection refresh failed: {exc}"))
+        return report(RefreshResult("failed", detail=f"local projection refresh failed: {exc}"))
 
 
 def _worker_directory(root: Path) -> Path:
@@ -386,18 +275,9 @@ def sessionstart_diagnostic(cwd: str, *, deadline: float | None) -> str:
         return _queue_refresh(cwd).diagnostic + "\n"
     except Exception as exc:
         return _report(RefreshResult("failed", detail=f"backup refresh failed: {exc}")).diagnostic + "\n"
-
-
 if __name__ == "__main__":
-    # Subprocess entry point for `_resolve_cli_script` (``python -m
-    # agent_worktrees.local_cache_refresh <home> [repo_root]``): print the resolved
-    # root, or an empty line when none (or ambiguously many) resolve.
-    # Deliberately minimal and crash-free -- a bare `print('')` on any
-    # unexpected argv shape, never a traceback a caller would need to
-    # parse out of stderr.
-    if len(sys.argv) == 3 and sys.argv[1] == "--refresh":
-        raise SystemExit(_run_refresh_worker(sys.argv[2]))
-    _home = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.home()
-    _repo_root = Path(sys.argv[2]) if len(sys.argv) > 2 else None
-    _root = _select_global_root(_home, _repo_root)
-    print(str(_root) if _root is not None else "")
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run the queued local instruction backup.")
+    parser.add_argument("--refresh", required=True)
+    raise SystemExit(_run_refresh_worker(parser.parse_args().refresh))

@@ -636,6 +636,85 @@ def _resolve_directory_evidence(
     return None
 
 
+def resolve_payload_source(
+    *,
+    payload_root: str | os.PathLike[str] | None = None,
+    plugin_id: str | None = None,
+    copilot_home: str | os.PathLike[str] | None = None,
+    project_root: str | os.PathLike[str] | None = None,
+    source_descriptor: Mapping[str, Any] | None = None,
+    marketplace_key: str | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Resolve payload provenance without reading or creating installation cells."""
+
+    environment = environment if environment is not None else os.environ
+    home = Path(environment.get("HOME") or Path.home())
+    copilot_value = Path(copilot_home or home / ".copilot")
+    if not _path_is_fully_qualified(copilot_value):
+        _fail("--copilot-home must be absolute.")
+    copilot = canonical_path(copilot_value)
+    project = (
+        canonical_path(project_root, must_exist=True)
+        if project_root is not None else None
+    )
+    payload_value = payload_root or environment.get("COPILOT_PLUGIN_ROOT")
+    if payload_value is None:
+        _fail("resolve requires --payload-root or COPILOT_PLUGIN_ROOT.")
+    payload_input = Path(payload_value)
+    if not _path_is_fully_qualified(payload_input):
+        _fail("The payload root must be absolute.")
+    payload = canonical_path(payload_input, must_exist=True)
+    if not payload.is_dir():
+        _fail(f"The payload root must be an existing directory: {payload}")
+    inherited_payload = environment.get("COPILOT_PLUGIN_ROOT")
+    if inherited_payload:
+        if not _path_is_fully_qualified(inherited_payload):
+            _fail("COPILOT_PLUGIN_ROOT must be absolute.")
+        if not paths_equal(payload, inherited_payload):
+            _fail("COPILOT_PLUGIN_ROOT conflicts with --payload-root.")
+
+    if source_descriptor is not None:
+        if not plugin_id:
+            _fail("Explicit source resolution requires --plugin-id.")
+        evidence = {
+            "source": normalize_source(source_descriptor),
+            "pluginId": plugin_id,
+            "readableName": marketplace_key or "marketplace",
+            "locator": None,
+        }
+    else:
+        evidence = _resolve_installed_evidence(payload, copilot, project)
+        if evidence is None:
+            evidence = _resolve_directory_evidence(payload, plugin_id)
+        if evidence is None:
+            _fail(
+                f"Cannot establish marketplace provenance for payload '{payload}'. "
+                "Supply an explicit source descriptor for management/development mode."
+            )
+        if plugin_id and plugin_id != evidence["pluginId"]:
+            _fail(
+                f"Expected plugin '{plugin_id}', payload evidence identifies "
+                f"'{evidence['pluginId']}'."
+            )
+    identity = source_identity(evidence["source"], evidence["readableName"])
+    resolved_plugin_id = str(evidence["pluginId"])
+    _assert_plugin_id(resolved_plugin_id)
+    return {
+        "source": {
+            "kind": identity["kind"],
+            "canonical": identity["canonical"],
+            "ref": identity["ref"],
+            "record": identity["record"],
+        },
+        "sourceFingerprint": identity["fingerprint"],
+        "marketplaceId": identity["marketplaceId"],
+        "pluginId": resolved_plugin_id,
+        "payloadRoot": str(payload),
+        "locator": evidence["locator"],
+    }
+
+
 def _locator_matches(locator: Mapping[str, Any], receipt: Mapping[str, Any]) -> bool:
     if _property(locator, "kind", "") != _property(receipt, "kind", ""):
         return False

@@ -9,11 +9,14 @@ probe. Existing execution timeouts remain unchanged.
 
 - Key admission by the provider instance and its namespace enumeration role.
   Join an existing exact holder before considering circuit state.
-- Count actual native execution timeout, not an outer caller wait timeout,
-  cancellation, missing executable, or a generic failure, as a wall overrun.
+- Only an actual native execution timeout counts as a wall overrun.
+  Caller wait timeout, caller cancellation, missing executable and generic
+  failure do not count as wall overruns.
 - Two consecutive native overruns open admission. While open, suppress new
   native launches; preserve the in-process fallback or report namespace
-  incomplete when none exists. Never synthesize authoritative empty data.
+  incomplete when none exists. A missing provider executable remains legitimate
+  empty absence, not native recovery. Never synthesize authoritative empty data
+  for an installed provider's suppressed or failed enumeration.
 - After 60 seconds, admit one probe through the existing provider-local
   single-flight holder. A successful native parse closes the circuit and
   resets consecutive overruns. Fallback success is not native recovery.
@@ -27,16 +30,20 @@ probe. Existing execution timeouts remain unchanged.
 
 ## Validation
 
-- [ ] Two native timeouts open the circuit; caller cancellation does not.
-- [ ] Suppressed callers never launch a subprocess and preserve fallback.
-- [ ] Missing fallback yields explicit namespace incompleteness.
-- [ ] One probe is admitted after cooldown; concurrent callers share it.
-- [ ] Native success closes the circuit; failed/fallback-only probe does not.
-- [ ] Intervening native success or a non-timeout failure resets the timeout
+- [x] Two native timeouts open the circuit; caller cancellation does not.
+- [x] Suppressed callers never launch a subprocess and preserve fallback.
+- [x] Missing fallback yields explicit namespace incompleteness for an
+      installed provider; a missing executable preserves empty absence.
+- [x] One probe is admitted after cooldown; concurrent callers share it.
+- [x] Native success closes the circuit; failed/fallback-only probe does not.
+- [x] Intervening native success or a non-timeout failure resets the timeout
       streak, so nonconsecutive overruns cannot open the circuit.
-- [ ] A failed or fallback-only probe restarts the full 60-second cooldown;
+- [x] A failed or fallback-only probe restarts the full 60-second cooldown;
       callers before that new deadline cannot admit another native probe.
-- [ ] Existing roster/native-holder ownership contracts remain green.
+- [x] Existing roster/native-holder ownership contracts remain green.
+
+Implementation and regression evidence: #6446, merged as `e28aaab8f`;
+117 targeted tests passed, one skipped.
 
 CPU measurement, cumulative role accounting, exact PID/start-time descendant
 cleanup and cross-platform release/adoption remain open in the parent plan.

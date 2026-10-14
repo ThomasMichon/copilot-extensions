@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from urllib.parse import quote
 
 from ..pr_contract import Comment, CommentThread, PRDiff, PRSnapshot, Review, ReviewNudgeResult, ThreadsResult
+from ..pr_checks import ChecksReport
 from .base import ProviderError, PRScope, PullResult, reject_copilot_mention, run_cli
 from .pr_source import github_source, pull_payload, source_text
 
@@ -327,6 +328,7 @@ class GitHubProvider:
             if isinstance(lbl, dict) and lbl.get("name")
         )
         head_sha = str((pr.get("head") or {}).get("sha", ""))
+        checks = self._checks_report(repo, head_sha, token, host=host)
         # REST ``state`` is only open|closed; ``merged`` is a separate bool (a
         # merged PR is closed+merged).
         return PRSnapshot(
@@ -338,7 +340,10 @@ class GitHubProvider:
             reviews=self._all_review_objs(repo, number, token, host=host),
             author=str((pr.get("user") or {}).get("login", "")),
             mergeable=mergeable_raw if isinstance(mergeable_raw, bool) else None,
-            checks_state=self._combined_checks_state(repo, head_sha, token, host=host),
+            checks_state=checks.state,
+            check_failures=checks.failures,
+            checks_complete=checks.complete,
+            check_failures_omitted=checks.omitted,
             labels=labels,
             title=str(pr.get("title", "")),
             draft=bool(pr.get("draft", False)),
@@ -401,80 +406,17 @@ class GitHubProvider:
         self, repo: str, sha: str, token: str | None, *,
         host: str = "github.com",
     ) -> str:
-        """Roll up statuses and check-runs; unreadable data stays unknown ("").
-        Failure dominates pending; success/none require both reads to succeed."""
-        if not sha:
-            return ""
-        any_signal = False
-        failure = False
-        pending = False
-        status_readable = runs_readable = False
+        """Compatibility state-only view of the observed diagnostic report."""
+        return self._checks_report(repo, sha, token, host=host).state
 
-        # 1. Legacy combined commit status.
-        proc = run_cli(
-            [
-                "gh", "api", "--hostname", host,
-                f"/repos/{repo}/commits/{sha}/status",
-            ],
-            env=self._env(token),
+    def _checks_report(
+        self, repo: str, sha: str, token: str | None, *, host: str = "github.com",
+    ) -> ChecksReport:
+        from .github_checks import read_checks
+        return read_checks(
+            repo, sha, host=host,
+            invoke=lambda argv: run_cli(argv, env=self._env(token)),
         )
-        if proc.returncode == 0:
-            try:
-                data = json.loads(proc.stdout or "{}")
-            except json.JSONDecodeError:
-                data = {}
-            if isinstance(data, dict):
-                statuses = data.get("statuses")
-                if isinstance(statuses, list):
-                    status_readable = True
-                if isinstance(statuses, list) and statuses:
-                    any_signal = True
-                    raw = str(data.get("state", "")).strip().lower()
-                    if raw in ("failure", "error"):
-                        failure = True
-                    elif raw == "pending":
-                        pending = True
-                    elif raw != "success":
-                        status_readable = False
-
-        # 2. Actions check-runs.
-        cproc = run_cli(
-            [
-                "gh", "api", "--paginate", "--hostname", host,
-                f"/repos/{repo}/commits/{sha}/check-runs",
-            ],
-            env=self._env(token),
-        )
-        if cproc.returncode == 0:
-            from .github_check_pages import check_runs_from_pages
-            runs = check_runs_from_pages(cproc.stdout or "")
-            if isinstance(runs, list):
-                runs_readable = True
-            if isinstance(runs, list) and runs:
-                any_signal = True
-                for run in runs:
-                    if not isinstance(run, dict):
-                        runs_readable = False
-                        continue
-                    status = str(run.get("status", "")).strip().lower()
-                    if status != "completed":
-                        pending = True
-                        continue
-                    conclusion = str(run.get("conclusion", "")).strip().lower()
-                    # neutral / success / skipped don't fail the gate; the rest do.
-                    if conclusion in (
-                        "failure", "timed_out", "action_required", "cancelled",
-                        "startup_failure", "stale",
-                    ):
-                        failure = True
-                    elif conclusion not in ("success", "neutral", "skipped"):
-                        runs_readable = False
-
-        if failure:
-            return "failure"
-        if pending:
-            return "pending"
-        return ("success" if any_signal else "none") if status_readable and runs_readable else ""
 
     def add_label(
         self, repo: str, number: int, label: str, *, api_base: str = "",

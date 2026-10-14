@@ -623,7 +623,9 @@ def _terminate_posix_if_identity(
         os.close(fd)
 
 
-def terminate_pid_if_identity(pid: int, expected_start_time: str | None) -> dict:
+def terminate_pid_if_identity(
+    pid: int, expected_start_time: str | None, *, exit_timeout: float | None = None,
+) -> dict:
     """Terminate only through an OS object bound to the verified process.
 
     Windows verifies creation time and calls ``TerminateProcess`` through the
@@ -631,6 +633,10 @@ def terminate_pid_if_identity(pid: int, expected_start_time: str | None) -> dict
     token, then signals through that pidfd. If either atomic identity mechanism
     is unavailable, this verified path fails closed.
     """
+    if exit_timeout is not None:
+        from zdd.diagnostics import terminate_pid_if_identity as terminate_native
+
+        return terminate_native(pid, expected_start_time, exit_timeout=exit_timeout)
     if pid <= 0 or not expected_start_time:
         return {
             "killed": False, "identity_verified": False,

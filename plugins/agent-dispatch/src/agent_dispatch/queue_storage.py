@@ -292,6 +292,7 @@ class QueueStorageMixin:
         *,
         repo: str | None = None,
         prompt: str = "",
+        category: str = "work",
         status: str = Status.QUEUED,
         requires: Sequence[str] | None = None,
         excludes: Sequence[str] | None = None,
@@ -352,6 +353,8 @@ class QueueStorageMixin:
         """
         if status not in (Status.QUEUED, Status.PROPOSED):
             raise TaskError(f"new task must be 'queued' or 'proposed', not {status!r}")
+        from .task_categories import category_value
+        category_value(category)
         if not isinstance(require_verification, bool):
             raise TaskError("require_verification must be true/false")
         if exclusive_key is not None:
@@ -430,6 +433,8 @@ class QueueStorageMixin:
                 "goal": goal,
                 "done_criteria": done_criteria,
             }
+            if category != "work":
+                request_fields["category"] = category
             request_hash = self._producer_request_hash(request_fields)
             compatible_request_hashes.add(request_hash)
             pre_exclusive_fields = dict(request_fields)
@@ -840,8 +845,8 @@ class QueueStorageMixin:
                         " source, origin_ref, evaluator_ref, exclusive_key, dedup_key,"
                         " goal, done_criteria, require_verification,"
                         " producer_fence, producer_request_hash,"
-                        " not_before, created_at, updated_at)"
-                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        " not_before, created_at, updated_at, category)"
+                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             task_id,
                             title,
@@ -870,6 +875,7 @@ class QueueStorageMixin:
                             not_before,
                             ts,
                             ts,
+                            category,
                         ),
                     )
                     self._audit(

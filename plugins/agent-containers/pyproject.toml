@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-containers"
-version = "0.2.43-dev1"
+version = "0.2.44-dev1"
 description = "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver"
 readme = "README.md"
 license = "MIT"
@@ -107,3 +107,4 @@ select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = ["guard: bounded launch and dependency contract smoke checks"]

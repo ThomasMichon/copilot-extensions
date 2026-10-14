@@ -158,12 +158,16 @@ def test_no_seed_at_all_leaves_launch_cmd_unchanged(tmp_path: Path, monkeypatch,
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell consumer unavailable")
 def test_cold_resume_plan_executes_with_exact_prompt_at_powershell_boundary(
-    tmp_path: Path, monkeypatch, capfd,
+    tmp_path: Path, monkeypatch,
 ):
+    from agent_worktrees import output
+
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
     config = _create_config(tmp_path)
+    work_dir = tmp_path / "wt-a"
+    work_dir.mkdir()
     tracking.create_new_record(
-        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "wt-a", "worktree/wt-a", str(work_dir), "demo-repo", "test",
         "windows", tmp_path,
     )
     _stub_launch_plumbing(monkeypatch, config)
@@ -179,10 +183,12 @@ def test_cold_resume_plan_executes_with_exact_prompt_at_powershell_boundary(
     )
     monkeypatch.setattr(m.sessions, "find_latest_session_id_fast", lambda *_a, **_k: "history-s1")
     seed = "quotes ' and \" ; $value\nsecond line"
-    assert resolve_cli.cmd_resolve(_args(seed=seed, no_mux=True)) == 0
-    plan = json.loads(capfd.readouterr().out)["launch"]
+    with output.capture_json_output() as captured:
+        assert resolve_cli.cmd_resolve(_args(seed=seed, no_mux=True)) == 0
+    plan = json.loads(captured.getvalue())["launch"]
     proc = subprocess.run(
         plan["cmd"], capture_output=True, text=True, check=True, timeout=20,
+        cwd=work_dir,
         env={**os.environ, "AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED": "1"},
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )

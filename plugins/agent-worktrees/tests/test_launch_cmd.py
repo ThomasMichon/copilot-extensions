@@ -50,6 +50,98 @@ def test_plain_launch_appends_allow_all():
     assert cmd[-2:] == ["--allow-all", "--experimental"]
 
 
+@pytest.mark.guard
+@pytest.mark.parametrize("normalized", [False, True])
+def test_process_launcher_binds_the_actual_native_command(tmp_path, monkeypatch, normalized):
+    launcher = tmp_path / "copilot"
+    launcher.write_text("#!/bin/sh\nexit 0\n")
+    launcher.chmod(0o700)
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    config = _config()
+    config.repos["ext"] = dataclasses.replace(
+        config.default_repo, anchor=str(tmp_path), launch={} if normalized else {"linux": ["copilot"]},
+    )
+    if normalized:
+        assert not (tmp_path / "tools" / "setup" / "setup.sh").exists()
+    args = _args([])
+    args.copilot_process_launcher = str(launcher)
+    inner = _inner_command(m._build_launch_cmd(config, args, str(tmp_path)))
+    if normalized:
+        assert "default-setup.sh" in inner[1]
+        assert inner[inner.index("--copilot-path") + 1] == str(launcher)
+    else:
+        assert inner[0] == str(launcher)
+    assert "COPILOT_GITHUB_TOKEN" not in str(inner)
+
+
+@pytest.mark.guard
+def test_process_launcher_refuses_unknown_template_missing_file_and_custom_path(tmp_path):
+    args = _args([])
+    args.copilot_process_launcher = str(tmp_path / "missing")
+    with pytest.raises(m.LaunchPreflightError, match="not executable"):
+        m._build_launch_cmd(_config(), args, str(tmp_path))
+    launcher = tmp_path / "copilot"
+    launcher.write_text("#!/bin/sh\nexit 0\n")
+    launcher.chmod(0o700)
+    args.copilot_process_launcher = str(launcher)
+    with pytest.raises(m.LaunchPreflightError, match="direct copilot"):
+        m._build_launch_cmd(_config({"linux": ["custom-agent"]}), args, str(tmp_path))
+    config = _config()
+    config.repos["ext"] = dataclasses.replace(
+        config.default_repo, launch={}, copilot_path={"linux": "/custom/copilot"},
+    )
+    with pytest.raises(m.LaunchPreflightError, match="configured copilot_path"):
+        m._build_launch_cmd(config, args, str(tmp_path))
+
+
+@pytest.mark.guard
+def test_normalized_setup_path_as_data_cannot_bypass_executable_validation(tmp_path):
+    from agent_worktrees import installer
+
+    launcher = tmp_path / "copilot"
+    launcher.write_text("#!/bin/sh\nexit 0\n")
+    launcher.chmod(0o700)
+    args = _args([])
+    args.copilot_process_launcher = str(launcher)
+    command = ["custom-agent", str(installer.install_dir() / "scripts" / "default-setup.sh")]
+    with pytest.raises(m.LaunchPreflightError, match="direct copilot"):
+        m._build_launch_cmd(_config({"linux": command}), args, str(tmp_path))
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("override", [
+    "--copilot-path=/custom/copilot", "-CopilotPath:/custom/copilot",
+    "-copilotpath:/custom/copilot",
+])
+def test_inline_copilot_path_override_is_refused(tmp_path, monkeypatch, override):
+    from agent_worktrees import installer
+    from agent_worktrees.process_launcher import apply_process_launcher
+
+    launcher = tmp_path / "copilot"
+    launcher.write_text("#!/bin/sh\nexit 0\n")
+    launcher.chmod(0o700)
+    args = _args([])
+    args.copilot_process_launcher = str(launcher)
+    command = ["bash", str(installer.install_dir() / "scripts" / "default-setup.sh"), override]
+    with pytest.raises(m.LaunchPreflightError, match="configured copilot_path"):
+        apply_process_launcher(command, args, m.LaunchPreflightError)
+
+
+@pytest.mark.guard
+@pytest.mark.parametrize("created", [True, False])
+def test_attached_launch_result_is_nonsecret_and_exclusive(tmp_path, created):
+    from agent_worktrees.process_launcher import write_launch_result
+
+    path = tmp_path / "result.json"
+    args = argparse.Namespace(
+        launch_result_file=str(path), copilot_process_launcher=str(tmp_path / "copilot"),
+    )
+    write_launch_result(args, {"created": created, "resumed": not created, "token": "not-copied"})
+    assert json.loads(path.read_text()) == {"version": 1, "created": created, "resumed": not created}
+    with pytest.raises(FileExistsError):
+        write_launch_result(args, {"created": created, "resumed": not created})
+
+
 def test_plain_launch_does_not_append_removed_no_sandbox_flag():
     # Copilot CLI 1.0.81-9 removed --no-sandbox. Auto-appending the retired flag
     # makes every new interactive worktree and handoff successor exit at launch.
@@ -596,6 +688,24 @@ def test_build_env_profile_overrides_session_env(monkeypatch):
     prof = cfg.CopilotProfile(name="p", label="p", env={"COPILOT_FEATURE_FLAGS": "override"})
     env = m._build_env(prof, {"COPILOT_FEATURE_FLAGS": "extensions"})
     assert env["COPILOT_FEATURE_FLAGS"] == "override"
+
+
+def test_build_env_reuses_launch_policy_for_hooks_and_ownership(monkeypatch):
+    config = cfg.Config(
+        srcroot="/s", machine="host", platform="linux", repo_name="target",
+        repos={"target": cfg.RepoConfig(anchor="/a", worktree_root="/w", pr=cfg.PRConfig(enabled=True))},
+    )
+    monkeypatch.setattr(m, "_worktree_id_from_git", lambda path: "wt-a")
+    monkeypatch.setattr(cfg, "project_name", lambda: "target")
+    monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
+
+    def forbidden():
+        raise AssertionError("launch environment repeated full configuration discovery")
+
+    monkeypatch.setattr(cfg, "load_config", forbidden)
+    env = m._build_env(None, work_dir="/w/wt-a", config=config)
+    assert env["AGENT_WORKTREES_HOOKS"] == "1"
+    assert env["AGENT_WORKTREES_OWNER_REF"] == "host/target/wt-a"
 
 
 def test_repo_session_env_templates_values(monkeypatch):

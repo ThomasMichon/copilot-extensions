@@ -117,7 +117,10 @@ name: Workflow lockdown guard
 on:
   pull_request_target:
     branches: [dev]
-    types: [opened, reopened, synchronize, edited, ready_for_review]
+    types: [opened, reopened, synchronize, edited, ready_for_review, labeled, unlabeled]
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -127,6 +130,9 @@ jobs:
   request-review:
     name: request-review-if-maintainer
     if: >-
+      github.event_name == 'pull_request_target' &&
+      github.event.action != 'labeled' &&
+      github.event.action != 'unlabeled' &&
       github.event.pull_request.draft == false &&
       (github.event.action != 'edited' || github.event.changes.base != null)
     permissions:
@@ -274,6 +280,9 @@ jobs:
 
   workflow-lockdown-guard:
     name: workflow-lockdown-guard
+    if: github.event_name == 'pull_request_target'
+    # A skipped required check can count as success; label/body edits must not
+    # replace a protected-path failure with a skipped job.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -353,3 +362,51 @@ jobs:
                 "account may modify workflows, actions, or CODEOWNERS -- ask them to " +
                 "make this change, or split it out of this PR.",
             );
+
+  source-attribution:
+    name: source-attribution
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Install locked metadata parser without lifecycle scripts
+        working-directory: .github/actions
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Require public-safe source metadata
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          retries: 0
+          script: |
+            await require("./.github/actions/required-pr-attribution.cjs").enforce({github, context, core});
+
+  refresh-source-attribution:
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: source-metadata-refresh-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Install locked metadata parser without lifecycle scripts
+        working-directory: .github/actions
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Refresh current dev source metadata checks
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          retries: 0
+          script: |
+            await require("./.github/actions/required-pr-attribution.cjs").backfill({github, context, core});

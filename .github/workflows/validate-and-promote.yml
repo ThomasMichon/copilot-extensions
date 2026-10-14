@@ -349,7 +349,7 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Test standalone controller with installed core and host containment
-        run: python tools/run-standalone-tests.py agent-index-service --prepare --admission-wait 60
+        run: python tools/run-standalone-tests.py services/index --prepare --admission-wait 60
 
   agent-index-service-windows:
     name: agent-index-service (windows-latest, standalone full)
@@ -367,7 +367,7 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Test standalone controller with installed core and host containment
-        run: python tools/run-standalone-tests.py agent-index-service --prepare --admission-wait 60
+        run: python tools/run-standalone-tests.py services/index --prepare --admission-wait 60
 
   guards-full-sweep:
     name: guards (full-tree, non-PR-scoped)
@@ -491,30 +491,21 @@ jobs:
         run: |
           git fetch origin main
           # Bootstrap the canonical checkout until the repaired trusted CLI is promoted.
-          mkdir -p "$RUNNER_TEMP/canonical-artifact-validator"
-          cat > "$RUNNER_TEMP/canonical-artifact-validator/promotion_python_artifacts.py" <<'PY'
-          import argparse
+          "$RUNNER_TEMP/artifact-validator/bin/python" - "$DEV_SHA" "$(git rev-parse origin/main)" "$ARTIFACT_DIR" <<'PY'
           import os
           import re
           import sys
           import tempfile
           from pathlib import Path
 
-          parser = argparse.ArgumentParser()
-          parser.add_argument("command", choices=["validate"])
-          parser.add_argument("--repo", required=True)
-          parser.add_argument("--out-dir", required=True)
-          parser.add_argument("--dev-head", required=True)
-          parser.add_argument("--main-before", required=True)
-          args = parser.parse_args()
-          repo = Path(args.repo).resolve()
-          sys.path.insert(0, str(repo / "tools"))
+          sys.path.insert(0, str(Path("tools").resolve()))
           import promote_release as promotion
           import promotion_python_artifacts as artifacts
 
-          dev, main = args.dev_head, args.main_before
+          dev, main, directory = sys.argv[1:]
           if not all(re.fullmatch(r"[0-9a-f]{40}", value) for value in (dev, main)):
               raise artifacts.PromotionArtifactError("invalid expected candidate commit identity")
+          repo = Path.cwd()
           scratch = promotion.add_scratch_worktree(dev, repo=repo)
           try:
               state = promotion._read_pipeline_state(main, repo=repo)
@@ -531,19 +522,13 @@ jobs:
                       ["checkout-index", "--all", f"--prefix={candidate}{os.sep}"], cwd=scratch,
                   )
                   artifacts.validate_artifacts(
-                      Path(args.out_dir), content_tree=tree, dev_head=dev, main_before=main,
+                      Path(directory), content_tree=tree, dev_head=dev, main_before=main,
                       projects=artifacts.candidate_projects(candidate), candidate_root=candidate,
                       source_policy="seasoned-public", min_age_days=7,
                   )
           finally:
               promotion.remove_scratch_worktree(scratch, repo=repo)
           PY
-          (
-            cd "$RUNNER_TEMP/canonical-artifact-validator"
-            "$RUNNER_TEMP/artifact-validator/bin/python" promotion_python_artifacts.py validate \
-              --repo "$GITHUB_WORKSPACE" --out-dir "$ARTIFACT_DIR" \
-              --dev-head "$DEV_SHA" --main-before "$(git -C "$GITHUB_WORKSPACE" rev-parse origin/main)"
-          )
       - name: Attest the validated index and every first-party bundle
         if: needs.build-python-artifacts.outputs.exported == 'true'
         uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3

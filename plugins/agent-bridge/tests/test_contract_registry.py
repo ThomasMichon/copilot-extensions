@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import os
 import subprocess
@@ -54,13 +55,71 @@ def _fixture(relative: str) -> dict:
 
 
 def test_http_declared_generation_matches_current_fixture() -> None:
-    fixture = _fixture("fixtures/http/current/acquisition-protocol.json")
+    fixture = _fixture("fixtures/http/current/peer-replies-generation-35.json")
     body = fixture["response"]
     assert body["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
     assert (
         body["min_protocol_version"]
         == bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED
     )
+
+def test_workspace_creation_fixture_matches_additive_models_and_capability_floors() -> None:
+    fixture = _fixture("fixtures/http/current/workspace-creation-generation-34.json")
+    request = StartSessionRequest.model_validate(fixture["request"]["json"])
+    assert request.creation_key == "logical-work"
+    assert request.creation_prompt is None
+    response = StartSessionResponse.model_validate(fixture["response"])
+    assert response.creation == fixture["response"]["creation"]
+    assert fixture["capability"]["workspace_creation"] == bridge_protocol.WORKSPACE_CREATION_PROTOCOL_VERSION
+    assert fixture["capability"]["owner_qualified_acquisition"] == bridge_protocol.ACQUISITION_WORKSPACE_PROTOCOL_VERSION
+    assert fixture["capability"]["native_bound_prompt"] == bridge_protocol.NATIVE_BOUND_PROMPT_PROTOCOL_VERSION
+
+
+def test_qualified_peer_contract_matches_current_fixture() -> None:
+    from agent_bridge.live_peer_address import LivePeerAddress
+    from agent_bridge.remote_operations import REMOTE_PEER_REPLY_MIN_VERSION
+    from agent_bridge.routes.remote import RemoteLiveMessageRequest
+
+    fixture = _fixture("fixtures/http/current/peer-replies-generation-35.json")
+    capability = fixture["capability"]
+    assert capability["required_protocol_version"] == bridge_protocol.QUALIFIED_LIVE_PEER_PROTOCOL_VERSION
+    assert capability["required_carrier_operation_version"] == REMOTE_PEER_REPLY_MIN_VERSION
+    assert str(LivePeerAddress.parse(capability["address"])) == capability["address"]
+    body = RemoteLiveMessageRequest.model_validate(fixture["request"]["json"])
+    assert body.reply_to == capability["address"]
+    assert body.wait and body.wait_timeout == 120
+    assert body.timeout >= body.wait_timeout + 15
+
+
+def test_live_registration_fixture_preserves_opt_in_wire_shape_and_default() -> None:
+    from agent_bridge.cli_mode_models import RegisterLiveSessionRequest
+
+    fixture = _fixture("fixtures/http/current/live-registration-generation-35.json")
+    payload = fixture["request"]["json"]
+    model = RegisterLiveSessionRequest.model_validate(payload)
+    assert model.model_dump(mode="json", exclude_unset=True) == payload
+    assert model.clear_targeting_metadata is True
+    ordinary = RegisterLiveSessionRequest(session_id=payload["session_id"])
+    assert ordinary.clear_targeting_metadata is fixture["compatibility"]["clear_targeting_metadata_default"]
+    assert fixture["compatibility"]["ordinary_null_heartbeat_retains_metadata"] is True
+
+
+@pytest.mark.parametrize("owner", ["prompt_models", "routes-prompts"])
+def test_native_bound_wire_is_preserved_at_the_new_peer_generation(owner) -> None:
+    from agent_bridge.prompt_models import SubmitPromptRequest, SubmitPromptResponse
+
+    previous = _fixture(f"fixtures/http/current/native-bound-extracted-{owner}-generation-33.json")
+    current = _fixture(f"fixtures/http/current/native-bound-extracted-{owner}-generation-35.json")
+    assert current["request"] == previous["request"]
+    assert current["response"] == previous["response"]
+    assert current["capability"] == previous["capability"]
+    assert current["health"]["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
+    assert SubmitPromptRequest.model_validate(current["request"]["json"]).model_dump(
+        mode="json", exclude_unset=True,
+    ) == current["request"]["json"]
+    assert SubmitPromptResponse.model_validate(current["response"]).model_dump(
+        mode="json",
+    ) == current["response"]
 
 
 def test_retirement_recovery_capability_matches_current_fixture() -> None:
@@ -205,7 +264,9 @@ def test_historical_health_fixture_preserves_complete_route_shape(
 def test_session_create_request_fixture_proves_unknown_field_tolerance() -> None:
     fixture = _fixture("fixtures/http/current/session-create-request.json")
     request = StartSessionRequest.model_validate(fixture["request"])
-    assert request.model_dump(mode="json") == fixture["accepted_model"]
+    assert request.model_dump(mode="json") == {
+        **fixture["accepted_model"], "creation_key": None, "creation_prompt": None,
+    }
     assert "future_option" not in request.model_fields_set
 
 
@@ -218,7 +279,7 @@ def test_session_create_response_fixture_matches_model() -> None:
         status=expected["status"],
         protocol_version=expected["protocol_version"],
     )
-    assert response.model_dump(mode="json") == expected
+    assert response.model_dump(mode="json") == {**expected, "creation": None}
 
 
 @pytest.mark.asyncio
@@ -251,6 +312,7 @@ async def test_agents_list_response_fixture_matches_route_serialization() -> Non
 def test_representative_error_fixture_matches_route() -> None:
     fixture = _fixture("fixtures/http/current/representative-error.json")
     request = SimpleNamespace(
+        url=SimpleNamespace(path="/api/v1/sessions"),
         app=SimpleNamespace(
             state=SimpleNamespace(
                 ready=False,
@@ -279,17 +341,59 @@ def _historical_protocol(commit: str):
     environment["GIT_NO_LAZY_FETCH"] = "1"
     environment["GIT_NO_REPLACE_OBJECTS"] = "1"
     result = subprocess.run(
-        ["git", "-C", str(REPO), "show", f"{commit}:{SESSION_HOST_PROTOCOL_PATH}"],
-        check=True,
+        ["git", "-c", f"safe.directory={REPO}", "-C", str(REPO),
+         "show", f"{commit}:{SESSION_HOST_PROTOCOL_PATH}"],
+        check=False,
         capture_output=True,
         text=True,
         env=environment,
     )
+    if result.returncode:
+        if not any(marker in result.stderr for marker in ("invalid object name", "bad object")):
+            result.check_returncode()
+        frozen = _fixture("fixtures/session-host/prior-runtime-dev150/protocol-source.json")
+        captured = frozen["captured_from"]
+        assert captured["commit"] == commit
+        assert captured["source_path"] == SESSION_HOST_PROTOCOL_PATH
+        historical_source = frozen["source_text"]
+        raw = historical_source.encode("utf-8")
+        assert hashlib.sha256(raw).hexdigest() == captured["source_sha256"]
+        assert hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest() == captured["source_git_blob"]
+    else:
+        historical_source = result.stdout
     module_name = f"_agent_bridge_protocol_{commit[:12]}"
     module = types.ModuleType(module_name)
     sys.modules[module_name] = module
-    exec(compile(result.stdout, f"{commit}:{SESSION_HOST_PROTOCOL_PATH}", "exec"), module.__dict__)
+    exec(compile(historical_source, f"{commit}:{SESSION_HOST_PROTOCOL_PATH}", "exec"), module.__dict__)
     return module
+
+
+def test_historical_protocol_without_commit_uses_hash_verified_source(monkeypatch) -> None:
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(
+        a[0], 128, "", "fatal: invalid object name",
+    ))
+    captured = _fixture("fixtures/session-host/prior-runtime-dev150/protocol-source.json")
+    protocol = _historical_protocol(captured["captured_from"]["commit"])
+    assert protocol.PROTOCOL_VERSION == 1
+
+
+def test_historical_protocol_rejects_corrupted_frozen_source(monkeypatch) -> None:
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(
+        a[0], 128, "", "fatal: invalid object name",
+    ))
+    captured = _fixture("fixtures/session-host/prior-runtime-dev150/protocol-source.json")
+    captured["source_text"] += "\n"
+    monkeypatch.setattr(sys.modules[__name__], "_fixture", lambda _: captured)
+    with pytest.raises(AssertionError):
+        _historical_protocol(captured["captured_from"]["commit"])
+
+
+def test_historical_protocol_preserves_unrelated_git_failures(monkeypatch) -> None:
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(
+        a[0], 128, "", "fatal: failed to read repository",
+    ))
+    with pytest.raises(subprocess.CalledProcessError):
+        _historical_protocol("4ed08dcdd0e72377b95a67d6bd22aec819bf7fec")
 
 
 def _message_frames(protocol) -> dict[str, dict[str, str]]:

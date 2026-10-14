@@ -91,23 +91,9 @@ def parse_handle(result: subprocess.CompletedProcess) -> dict[str, str | None]:
     Returns ``{"session": ..., "worktree": ...}`` (values may be ``None``). Used
     to record a spawn reservation's handle so a supervisor restart can reconcile.
     """
-    handle: dict[str, str | None] = {"session": None, "worktree": None}
-    try:
-        data = json.loads(result.stdout or "{}")
-    except (ValueError, TypeError):
-        return handle
-    if not isinstance(data, dict):
-        return handle
-    launch = data.get("launch") if isinstance(data.get("launch"), dict) else {}
-    worktree_obj = data.get("worktree") if isinstance(data.get("worktree"), dict) else {}
-    handle["worktree"] = (
-        data.get("worktree_id")
-        or worktree_obj.get("id")
-        or (data.get("worktree") if isinstance(data.get("worktree"), str) else None)
-        or launch.get("worktree_id")
-    )
-    handle["session"] = data.get("session_id") or data.get("session") or launch.get("session")
-    return handle
+    from .workspace_binding import parse_handle as parse
+
+    return parse(result)
 
 
 def create_worktree(
@@ -122,6 +108,7 @@ def create_worktree(
     timeout: float | None = None,
     agent: str | None = None,
     no_pair: bool = False,
+    creation_key: str | None = None,
 ) -> dict[str, str | None]:
     """Create a worktree without launching Copilot and return its id/path.
 
@@ -165,6 +152,8 @@ def create_worktree(
         cmd += ["--agent", agent]
     if no_pair:
         cmd.append("--no-pair")
+    if creation_key is not None:
+        cmd += ["--creation-key", creation_key]
     result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
         cmd,
         check=False,
@@ -174,21 +163,9 @@ def create_worktree(
         env=agent_worktrees_environment(),
         **no_window_kwargs(),
     )
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        raise EmbodyUnavailable(detail or f"agent-worktrees create exited {result.returncode}")
-    handle = parse_handle(result)
-    try:
-        data = json.loads(result.stdout or "{}")
-    except (ValueError, TypeError):
-        data = {}
-    worktree = data.get("worktree") if isinstance(data, dict) else {}
-    if isinstance(worktree, dict):
-        handle["worktree"] = handle.get("worktree") or worktree.get("id")
-        handle["path"] = worktree.get("path")
-    if not handle.get("worktree"):
-        raise EmbodyUnavailable("agent-worktrees create returned no worktree id")
-    return handle
+    from .workspace_binding import parse_created_workspace
+
+    return parse_created_workspace(result, creation_key=creation_key)
 
 
 def resolve_worktree(
@@ -231,7 +208,7 @@ def resolve_worktree(
                 raise WorktreeNotFound(f"worktree is terminal and cannot be reused: {worktree_id}")
             if task_id and (owner := worktree_attribution.foreign_task_id(row, task_id)):
                 raise WorktreeNotFound(f"worktree now owned by {owner!r}, not {task_id!r}")
-            return {"worktree": worktree_id, "path": row.get("path")}
+            return {"worktree": worktree_id, "path": row.get("path"), "project": row.get("repo")}
     raise WorktreeNotFound(f"worktree not found: {worktree_id}")
 
 
@@ -246,13 +223,13 @@ def prepare_reusable_worktree(
     timeout: float | None = None,
     agent: str | None = None,
     no_pair: bool = False,
+    allocation_client=None,
 ) -> dict[str, object]:
-    """Resolve or create the worktree carried by an exclusive reservation.
-    A successful lookup reuses the existing checkout. A positively missing
-    or reassigned-to-another-task carried id (see :func:`resolve_worktree`)
-    falls back to a fresh worktree. Any indeterminate failure propagates
-    without creating a replacement, so a possibly live binding is never overwritten."""
-    project = project or project_for_task(task)
+    """Resolve a carried owner-qualified workspace or allocate a new one."""
+    from .workspace_binding import allocation_project, allocation_provenance, hold
+
+    project = allocation_project(reservation, project or project_for_task(task))
+    allocation_task, allocation_key, allocation_attempt = allocation_provenance(str(task["id"]), reservation)
     carried = reservation.get("worktree")
     if isinstance(carried, str) and carried:
         try:
@@ -260,62 +237,48 @@ def prepare_reusable_worktree(
                 carried,
                 project=project,
                 timeout=timeout,
-                task_id=str(task["id"]),
+                task_id=allocation_task,
             )
         except WorktreeNotFound as exc:
-            created = create_worktree(
-                project=project,
-                interface=interface,
-                task_id=str(task["id"]),
-                reservation_key=str(reservation["key"]),
-                attempt=int(reservation["attempt"]),
-                driver=driver,
-                supervisor=supervisor,
-                timeout=timeout,
-                agent=agent,
-                no_pair=no_pair,
-            )
-            path = created.get("path")
-            if not isinstance(path, str) or not path:
-                raise EmbodyUnavailable(
-                    "agent-worktrees create returned no worktree path"
-                ) from exc
-            return {
-                "worktree": created["worktree"],
-                "path": path,
-                "created": True,
-                "replaced": True,
-                "ownership": "created",
-            }
+            hold(f"carried workspace {carried} unavailable; retained for repair: {exc}")
+        except EmbodyUnavailable as exc:
+            hold(f"carried workspace {carried} owner unresolved; retained for repair: {exc}")
         path = resolved.get("path")
         if not isinstance(path, str) or not path:
             raise EmbodyUnavailable(f"agent-worktrees resolved {carried!r} without a path")
         return {
             "worktree": carried,
             "path": path,
+            "project": resolved.get("project"),
+            "requested_project": project,
             "created": False,
             "replaced": False,
             "ownership": reservation.get("worktree_ownership") or "reused",
         }
 
+    if allocation_client is not None:
+        from .workspace_binding import bind_allocation
+
+        bind_allocation(allocation_client, reservation, project)
     created = create_worktree(
         project=project,
         interface=interface,
-        task_id=str(task["id"]),
-        reservation_key=str(reservation["key"]),
-        attempt=int(reservation["attempt"]),
+        task_id=allocation_task,
+        reservation_key=allocation_key,
+        attempt=allocation_attempt,
         driver=driver,
         supervisor=supervisor,
         timeout=timeout,
         agent=agent,
         no_pair=no_pair,
+        creation_key=reservation.get("creation_key"),
     )
     path = created.get("path")
-    if not isinstance(path, str) or not path:
-        raise EmbodyUnavailable("agent-worktrees create returned no worktree path")
     return {
         "worktree": created["worktree"],
         "path": path,
+        "project": created.get("project"),
+        "requested_project": project,
         "created": True,
         "replaced": False,
         "ownership": "created",
@@ -411,6 +374,8 @@ def conclude_dispatch_attempt(
     *,
     owner: str = DEFAULT_DRIVER,
     timeout: float = 30.0,
+    project: str | None = None,
+    worktree_path: str | None = None,
 ) -> dict:
     """Safely conclude one provenance-verified dispatch-created worktree."""
     args = [
@@ -431,8 +396,16 @@ def conclude_dispatch_attempt(
     prefix = _agent_worktrees_launch_prefix()
     if prefix is None:
         raise DisposableConclusionError("agent-worktrees CLI not found on this host")
+    if not project or not worktree_path:
+        raise DisposableConclusionError("allocation provenance unavailable; workspace preserved")
+    try:
+        actual = resolve_worktree(worktree, project=project, timeout=timeout)
+    except EmbodyUnavailable as exc:
+        raise DisposableConclusionError("allocation owner unavailable; workspace preserved") from exc
+    if actual.get("project") != project or actual.get("path") != worktree_path:
+        raise DisposableConclusionError("allocation identity changed; workspace preserved")
     result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
-        [*prefix, *args],
+        [*prefix, "--project", project, *args],
         check=False,
         capture_output=True,
         text=True,

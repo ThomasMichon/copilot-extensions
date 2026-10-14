@@ -71,7 +71,7 @@ def test_rollback_cannot_restore_newly_foreign_record(tmp_path, monkeypatch, cap
         key: MachineEntry(key=key, display_name=key, execution_platform="wsl")
         for key in ("m", "other-space")
     }
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: entries)
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: entries)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
     monkeypatch.setattr(
         tracking, "save_record",

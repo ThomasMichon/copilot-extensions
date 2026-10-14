@@ -145,7 +145,7 @@ _write_update_marker() {
 _clear_update_marker() {
     [[ "$_UPDATE_MARKER_HELD" == true ]] || return 0
     _UPDATE_MARKER_HELD=false
-    exec 9>"${UPDATE_MARKER_REFCOUNT_LOCK}" 2>/dev/null || return 0
+    { exec 9>"${UPDATE_MARKER_REFCOUNT_LOCK}"; } 2>/dev/null || return 0
     flock -w 10 9 || true
     local count tmp
     count="$(cat "${UPDATE_MARKER_REFCOUNT}" 2>/dev/null || echo 0)"
@@ -492,7 +492,7 @@ _versioned_activate() {
             [[ "$owner" != "$$" ]] || rm -f "$_activate_lock_link"
         else
             flock -u 8 2>/dev/null || true
-            exec 8>&- 2>/dev/null || true
+            { exec 8>&-; } 2>/dev/null || true
         fi
     }
     if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
@@ -500,9 +500,17 @@ _versioned_activate() {
         flock 8
     else
         _activate_lock_link="$INSTALL_DIR/.activate.lock.pid"
-        local owner
+        local owner owner_now
         until ln -s "$$" "$_activate_lock_link" 2>/dev/null; do
             owner="$(readlink "$_activate_lock_link" 2>/dev/null || true)"
+            if [[ -z "$owner" ]]; then
+                # The link vanished after the failed `ln -s` (or is not a
+                # symlink): never unlink then -- lock creators are not
+                # serialized by the reap mutex, so an unlink could delete a
+                # live lock taken meanwhile. Just retry.
+                sleep 0.1
+                continue
+            fi
             if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                 sleep 1
             elif ln -s "$$" "$_activate_lock_link.reap" 2>/dev/null; then
@@ -514,10 +522,18 @@ _versioned_activate() {
                 # self-healing (mirrors plugins/agent-machines/scripts/
                 # init.sh's stamp lock): only the process that wins this
                 # `ln -s .reap` may remove the main lock, and only after
-                # re-verifying it is still the SAME stale value observed
-                # above.
-                if [[ "$(readlink "$_activate_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
-                    rm -f "$_activate_lock_link"
+                # re-checking its current value (below).
+                # Unlink only if the link still holds the owner judged stale above
+                # and that owner is still not live: a dead owner cannot release its
+                # own link and only serialized reapers remove a stale one, so that
+                # value is stable under this mutex. An absent link, or one naming a
+                # different (possibly just-released) holder, is never removed.
+                owner_now="$(readlink "$_activate_lock_link" 2>/dev/null || true)"
+                if [[ -n "$owner_now" && "$owner_now" == "$owner" ]]; then
+                    case "$owner_now" in
+                        *[!0-9]*) rm -f "$_activate_lock_link" ;;
+                        *) kill -0 "$owner_now" 2>/dev/null || rm -f "$_activate_lock_link" ;;
+                    esac
                 fi
                 rm -f "$_activate_lock_link.reap"
             elif owner="$(readlink "$_activate_lock_link.reap" 2>/dev/null || true)" &&
@@ -865,15 +881,16 @@ _adopted_projects() {
 # venv's `python -m agent_dispatch`; otherwise it provisions on first use --
 # announcing (a human line + a machine-readable ::agent-provisioning:: signal so a
 # caller can extend its timeout), lock-serialized, fail-fast. The primary
-# first-use path fetches and runs the UPSTREAM installer
-# (agent-dispatch-service/bootstrap.sh on `main`, the same Copilot-independent
-# entrypoint the standalone package uses) rather than relying on this plugin's
-# own already-staged payload -- a deliberate transition toward a single
-# installer source of truth (agent-dispatch-standalone-container effort,
-# Phase 4). The locally stamped snapshot's scripts/install.sh remains only as
-# an offline/network-restricted fallback (AGENT_DISPATCH_PROVISION_OFFLINE=1
-# skips straight to it) and is expected to be dropped once the on-demand fetch
-# path is validated.
+# first-use path fetches and runs the UPSTREAM installer via the STABLE
+# public-install-surface proxy (install/dispatch/bootstrap.sh on `main`,
+# which itself resolves to the current real services/dispatch/bootstrap.sh
+# -- see docs/patterns/standalone-service-layout.md) rather than relying on
+# this plugin's own already-staged payload -- a deliberate transition toward
+# a single installer source of truth (agent-dispatch-standalone-container
+# effort, Phase 4). The locally stamped snapshot's scripts/install.sh
+# remains only as an offline/network-restricted fallback
+# (AGENT_DISPATCH_PROVISION_OFFLINE=1 skips straight to it) and is expected
+# to be dropped once the on-demand fetch path is validated.
 deploy_binstub() {
     mkdir -p "$LOCAL_BIN" "$INSTALL_DIR/bin"
     local machine="${AGENT_DISPATCH_SUPERVISE_MACHINE:-}"
@@ -936,18 +953,21 @@ _resolve
 [ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_dispatch "$@"
 printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
 # Primary path (agent-dispatch-standalone-container Phase 4): fetch and run the
-# UPSTREAM installer -- the same Copilot-independent bootstrap the standalone
-# agent-dispatch-service package uses -- rather than relying on this plugin's
-# own already-staged payload. This is a deliberate transition toward a single
-# installer source of truth; the locally stamped snapshot below remains only
-# as an offline/network-restricted fallback and is expected to be dropped once
-# this path is validated. AGENT_DISPATCH_PROVISION_OFFLINE=1 skips straight to
-# the fallback (e.g. an air-gapped host).
+# UPSTREAM installer via the STABLE public-install-surface proxy
+# (install/dispatch/bootstrap.sh -- see
+# docs/patterns/standalone-service-layout.md), which itself resolves to
+# whatever the real standalone bootstrap currently is, rather than relying
+# on this plugin's own already-staged payload. This is a deliberate
+# transition toward a single installer source of truth; the locally stamped
+# snapshot below remains only as an offline/network-restricted fallback and
+# is expected to be dropped once this path is validated.
+# AGENT_DISPATCH_PROVISION_OFFLINE=1 skips straight to the fallback (e.g. an
+# air-gapped host).
 _rc=1
-_boot_url="https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/agent-dispatch-service/bootstrap.sh"
+_boot_url="https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/main/install/dispatch/bootstrap.sh"
 if [ -z "${AGENT_DISPATCH_PROVISION_OFFLINE:-}" ]; then
     _boot_file="$(mktemp "${TMPDIR:-/tmp}/agent-dispatch-bootstrap.XXXXXX")"
-    printf '%s\n' "[$_name] fetching upstream installer (agent-dispatch-service/bootstrap.sh, main)..." >&2
+    printf '%s\n' "[$_name] fetching upstream installer (install/dispatch/bootstrap.sh, main)..." >&2
     if (command -v curl >/dev/null 2>&1 && curl -fsSL "$_boot_url" -o "$_boot_file") || \
        (command -v wget >/dev/null 2>&1 && wget -qO "$_boot_file" "$_boot_url"); then
         bash "$_boot_file" provision >&2
@@ -1216,7 +1236,7 @@ _ensure_runtime() {
                 [[ "$owner" != "$$" ]] || rm -f "$_publish_lock_link"
             else
                 flock -u 8 2>/dev/null || true
-                exec 8>&- 2>/dev/null || true
+                { exec 8>&-; } 2>/dev/null || true
             fi
         }
         if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
@@ -1224,14 +1244,31 @@ _ensure_runtime() {
             flock 8
         else
             _publish_lock_link="$INSTALL_DIR/.activate.lock.pid"
-            local owner
+            local owner owner_now
             until ln -s "$$" "$_publish_lock_link" 2>/dev/null; do
                 owner="$(readlink "$_publish_lock_link" 2>/dev/null || true)"
+                if [[ -z "$owner" ]]; then
+                    # The link vanished after the failed `ln -s` (or is not a
+                    # symlink): never unlink then -- lock creators are not
+                    # serialized by the reap mutex, so an unlink could delete a
+                    # live lock taken meanwhile. Just retry.
+                    sleep 0.1
+                    continue
+                fi
                 if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                     sleep 1
                 elif ln -s "$$" "$_publish_lock_link.reap" 2>/dev/null; then
-                    if [[ "$(readlink "$_publish_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
-                        rm -f "$_publish_lock_link"
+                    # Unlink only if the link still holds the owner judged stale above
+                    # and that owner is still not live: a dead owner cannot release its
+                    # own link and only serialized reapers remove a stale one, so that
+                    # value is stable under this mutex. An absent link, or one naming a
+                    # different (possibly just-released) holder, is never removed.
+                    owner_now="$(readlink "$_publish_lock_link" 2>/dev/null || true)"
+                    if [[ -n "$owner_now" && "$owner_now" == "$owner" ]]; then
+                        case "$owner_now" in
+                            *[!0-9]*) rm -f "$_publish_lock_link" ;;
+                            *) kill -0 "$owner_now" 2>/dev/null || rm -f "$_publish_lock_link" ;;
+                        esac
                     fi
                     rm -f "$_publish_lock_link.reap"
                 elif owner="$(readlink "$_publish_lock_link.reap" 2>/dev/null || true)" &&
@@ -1287,11 +1324,8 @@ _ensure_runtime() {
         fi
         deploy_binstub
         _write_manifest
-        # _register_pivot ALSO writes shared, version-sensitive content
-        # (pivots/agent-dispatch.json, from THIS invocation's own
-        # PLUGIN_DIR) another invocation could race the exact same way as
-        # the binstub/manifest above -- keep it inside this same protected
-        # span rather than letting it run after the lock is released.
+        # The Picker materializes templates only from its verified active
+        # payload roots; this installer does not publish shared pivot data.
         _register_pivot
         _unlock_publish
     else
@@ -1332,19 +1366,9 @@ _write_manifest() {
         "$PLUGIN_DIR" "$VENV_DIR" "" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$SRC_VERSION"
 }
 
-# Register the worktree-picker "Tasks" pivot (best-effort; never fatal).
+# The optional Picker owns activation-aware v3 pointer materialization.
 _register_pivot() {
-    local src="$PLUGIN_DIR/pivots/agent-dispatch.json"
-    local dir="$HOME/.agent-worktrees/pivots"
-    if [[ -f "$src" ]]; then
-        if mkdir -p "$dir" 2>/dev/null && cp -f "$src" "$dir/agent-dispatch.json" 2>/dev/null; then
-            _ok "Picker pivot registered: $dir/agent-dispatch.json"
-        else
-            _skip "Could not register picker pivot (agent-worktrees runtime root not writable)"
-        fi
-    else
-        _skip "Picker pivot manifest not found at $src"
-    fi
+    _ok "Picker owns attributed pivot discovery from active payload templates"
 }
 
 # -- Coordinator service (systemd user unit; default-on on deploy machines) --
@@ -2075,7 +2099,7 @@ do_stamp() {
             [[ "$owner" != "$$" ]] || rm -f "$_stamp_lock_link"
         else
             flock -u 8 2>/dev/null || true
-            exec 8>&- 2>/dev/null || true
+            { exec 8>&-; } 2>/dev/null || true
         fi
     }
     if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
@@ -2083,14 +2107,31 @@ do_stamp() {
         flock 8
     else
         _stamp_lock_link="$INSTALL_DIR/.activate.lock.pid"
-        local owner
+        local owner owner_now
         until ln -s "$$" "$_stamp_lock_link" 2>/dev/null; do
             owner="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
+            if [[ -z "$owner" ]]; then
+                # The link vanished after the failed `ln -s` (or is not a
+                # symlink): never unlink then -- lock creators are not
+                # serialized by the reap mutex, so an unlink could delete a
+                # live lock taken meanwhile. Just retry.
+                sleep 0.1
+                continue
+            fi
             if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                 sleep 1
             elif ln -s "$$" "$_stamp_lock_link.reap" 2>/dev/null; then
-                if [[ "$(readlink "$_stamp_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
-                    rm -f "$_stamp_lock_link"
+                # Unlink only if the link still holds the owner judged stale above
+                # and that owner is still not live: a dead owner cannot release its
+                # own link and only serialized reapers remove a stale one, so that
+                # value is stable under this mutex. An absent link, or one naming a
+                # different (possibly just-released) holder, is never removed.
+                owner_now="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
+                if [[ -n "$owner_now" && "$owner_now" == "$owner" ]]; then
+                    case "$owner_now" in
+                        *[!0-9]*) rm -f "$_stamp_lock_link" ;;
+                        *) kill -0 "$owner_now" 2>/dev/null || rm -f "$_stamp_lock_link" ;;
+                    esac
                 fi
                 rm -f "$_stamp_lock_link.reap"
             elif owner="$(readlink "$_stamp_lock_link.reap" 2>/dev/null || true)" &&
@@ -2231,7 +2272,7 @@ do_update() {
             [[ "$owner" != "$$" ]] || rm -f "$_cutover_lock_link"
         else
             flock -u 8 2>/dev/null || true
-            exec 8>&- 2>/dev/null || true
+            { exec 8>&-; } 2>/dev/null || true
         fi
     }
     if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
@@ -2239,14 +2280,31 @@ do_update() {
         flock 8
     else
         _cutover_lock_link="$INSTALL_DIR/.activate.lock.pid"
-        local owner
+        local owner owner_now
         until ln -s "$$" "$_cutover_lock_link" 2>/dev/null; do
             owner="$(readlink "$_cutover_lock_link" 2>/dev/null || true)"
+            if [[ -z "$owner" ]]; then
+                # The link vanished after the failed `ln -s` (or is not a
+                # symlink): never unlink then -- lock creators are not
+                # serialized by the reap mutex, so an unlink could delete a
+                # live lock taken meanwhile. Just retry.
+                sleep 0.1
+                continue
+            fi
             if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                 sleep 1
             elif ln -s "$$" "$_cutover_lock_link.reap" 2>/dev/null; then
-                if [[ "$(readlink "$_cutover_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
-                    rm -f "$_cutover_lock_link"
+                # Unlink only if the link still holds the owner judged stale above
+                # and that owner is still not live: a dead owner cannot release its
+                # own link and only serialized reapers remove a stale one, so that
+                # value is stable under this mutex. An absent link, or one naming a
+                # different (possibly just-released) holder, is never removed.
+                owner_now="$(readlink "$_cutover_lock_link" 2>/dev/null || true)"
+                if [[ -n "$owner_now" && "$owner_now" == "$owner" ]]; then
+                    case "$owner_now" in
+                        *[!0-9]*) rm -f "$_cutover_lock_link" ;;
+                        *) kill -0 "$owner_now" 2>/dev/null || rm -f "$_cutover_lock_link" ;;
+                    esac
                 fi
                 rm -f "$_cutover_lock_link.reap"
             elif owner="$(readlink "$_cutover_lock_link.reap" 2>/dev/null || true)" &&

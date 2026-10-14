@@ -13,6 +13,15 @@ control of an agent, or the decision to delegate a bounded subtask. Use
 agent-bridge for live cross-boundary conversation and steering, and
 `delegation-guidance:delegating-work` for runtime task decomposition.
 
+Internal coordinator deployment accepts optional `conditional`/`routing_dir`
+keyword arguments using the shared
+[conditional cutover contract](../../libs/zdd/README.md#conditional-owner-operation-partial-lifecycle-support).
+Only adopter-captured effective configuration and credentials may drive this
+operation; it does not overlay caller environment or infer compatibility from
+`service.env`. Production capture/attestation remains unwired, so a legacy
+coordinator correctly refuses conditional auto-retirement. Ordinary deployment
+is unchanged, and health attestation must honor configured coordinator auth.
+
 > **Status: installable runtime.** This ships the queue **engine**
 > (`agent_dispatch.queue`), the per-host **coordinator daemon**
 > (`agent-dispatch serve`), the **`agent-dispatch` CLI**, **local MCP tools**
@@ -28,6 +37,13 @@ agent-bridge for live cross-boundary conversation and steering, and
 > deploy machines the coordinator installs by default and auto-starts as a
 > service on both platforms: a **systemd user unit** (Linux) and a **Windows
 > Scheduled Task**.
+
+## Task categories
+
+Task purpose is an orthogonal [work/maintenance category](docs/task-categories.md):
+compatible creation defaults, before-limit selection, independent Tasks and
+Maintenance tasks pivots, full evidence inspection and preview-first historical
+classification. Category separation never prunes task history.
 
 ## Offline CI repair construction
 
@@ -123,7 +139,7 @@ while source, engine or library edits publish a new immutable identity.
 Delayed same-version local stamps reject a superseded snapshot candidate before
 publishing markers or launchers. POSIX
 retains its owning-payload pointer. First use primarily fetches and runs the
-**upstream installer** (`agent-dispatch-service/bootstrap.{sh,ps1}` on `main`
+**upstream installer** (`services/dispatch/bootstrap.{sh,ps1}` on `main`
 -- the same Copilot-independent entrypoint the standalone package uses)
 rather than relying on the plugin's own already-staged payload; the locally
 stamped snapshot is a fallback for offline/network-restricted hosts
@@ -188,23 +204,29 @@ at invocation time so a previously constructed prefix cannot bypass deactivation
 Without an explicit context, the historical home-root resolver and POSIX PATH
 fallback are unchanged, including their argv and environment behavior.
 
-### Worktree-picker "Tasks" pivot
+### Worktree-picker task-category pivots
 
-The installer drops a pivot manifest at
-`~/.agent-worktrees/pivots/agent-dispatch.json` so the agent-worktrees Textual
-picker grows a **Tasks** pivot (between Worktrees and Maintenance). It renders the
-status-grouped board through the stdlib-only `agent-dispatch-board` API client
+The Picker's existing activation-aware materializer publishes schema-v3 pointers
+at `~/.agent-worktrees/pivots/` from the enabled plugin's verified payload
+templates; the plugin installers do not copy raw manifests there. The Textual
+picker grows a **Tasks** pivot that explicitly requests ordinary work.
+The independent `agent-dispatch-maintenance.json` contribution adds
+**Maintenance tasks** after Tasks, without replacing the built-in worktree
+Maintenance view. Both render the status-grouped board through
+`agent-dispatch-board`, including a capability check before category reads
 (Blocked / Proposed / Started / Queued / Suspended / recently terminal). A separate **ACTIVE** badge appears only
 when embodiment tracking reports an assigned agent executing a turn; **STALLED**
 marks a running turn with no recent activity. That execution badge is independent
 from lifecycle phase -- `Started` alone never implies a live agent. The
 background supervisor publishes this observation into coordinator-owned task
-state; the board client is a sub-second coordinator API read and expires
+state; the board client reads the coordinator directly and expires
 observations older than 90 seconds, so the Picker never shells to
 agent-worktrees or agent-bridge. Enter
 opens a per-task action sub-menu. The seam is a filesystem manifest registry,
 not a Python import -- the plugins live in separate venvs -- so a stale or absent
-picker simply ignores it. Source: `pivots/agent-dispatch.json`.
+picker simply ignores it. Sources: `pivots/agent-dispatch.json` and
+`pivots/agent-dispatch-maintenance.json`; the [category reference](docs/task-categories.md)
+documents defaults, history and full evidence access.
 
 The manifest declares `"stream": true, "subscribe": true` (pivot-streaming-
 transport Phase 1): the Picker runs `agent-dispatch-board --stream` instead of
@@ -725,13 +747,28 @@ Naming this machine itself (or omitting `--machine`) is unaffected and edits
 the local store directly, no SSH involved. `supervise override list` has no
 `--machine` -- it always reports this machine's own store.
 
-### Worktree Manager Picker glue (`agent-dispatch workers config-section`)
+### Workers configuration and local instances
 
-A Worktree Manager Picker ⚙ **Configuration** menu entry named "Workers"
-(`plugins/agent-dispatch/pivots/agent-dispatch.json`'s own `config_sections`
-contribution) reports the status of every declared `supervised-lane` worker
-pool this machine discovers, without requiring the operator to know any
-`agent-dispatch` CLI invocation:
+The Manager's **Configuration → Workers** table
+(`pivots/workers-config.json`, `placement: config`, `scope: global`) lists
+configured user-local instances, read-only repository/plugin source declarations,
+and available templates. Descriptions, provenance, capacity, effective disable
+masks, and observed activity are separate facts; absent/stale supervisor receipts
+mean unknown activity, never active.
+
+Select an existing local instance to **Edit**, or a template to **Instantiate**
+a distinct local configuration. Both expose separate **Save only** and
+**Save and Activate** actions with explicit values/effects confirmation.
+Save-only drafts do not affect discovery or running workers. Activation publishes
+to the existing supervisor's registrar authority and can produce agentic work;
+the receipt distinguishes persistence from pending or failed activation.
+Cancel performs no provider mutation. This always targets the invoking CLI's
+local machine, independently of the Manager's operational machine selection.
+
+See [Workers catalog and instance lifecycle](docs/worker-instances.md) for inputs,
+prerequisites, effects, storage/revision semantics and CLI examples.
+
+The earlier status/override CLI remains compatible:
 
 ```bash
 agent-dispatch workers config-section            # summary: every declared pool
@@ -739,9 +776,7 @@ agent-dispatch workers config-section my-pool     # one named pool's status
 agent-dispatch workers config-section my-pool --toggle disable --reason "noisy"
 ```
 
-With no pool name (the Picker's own invocation, since a plugin-shipped
-manifest's `run` argv is static and cannot know which pool name a particular
-consuming repo chose), it prints one joined ≤200-char line across every
+With no pool name, it prints one joined ≤200-char line across every
 `kind: supervised-lane` declaration `registrar discover` finds -- e.g.
 `"my-pool: 2 lanes declared -- active; other-pool: 1 lane declared --
 overridden off (noisy)"` -- collapsing into a trailing `"+N more"` marker
@@ -752,15 +787,8 @@ the existing `supervise override` local kill-switch) that one pool only;
 `--json` emits full structured detail instead of the compact line, for either
 shape. See `workers_config_cli.py` for the full contract.
 
-**Local controls from the Picker.** After loading that status, Workers opens a
-pool/action form with an optional disable reason. **Apply** shows the selected
-pool and action in a confirmation that initially selects Cancel. Neither
-opening nor cancelling changes state. The controls always affect the invoking
-machine, even when another machine is selected in the Picker; remote controls
-are not part of this entry.
-
 `workers pool-options` is a read-only JSON list of declared local pool names.
-The form uses `workers config-section <name> --toggle enable|disable
+`workers config-section <name> --toggle enable|disable
 --require-declared`, which rechecks discovery and rejects absent or ambiguous
 declarations before changing the override store. Empty/error choices stop the
 form rather than permitting an arbitrary target. Existing terminal invocations
@@ -775,6 +803,93 @@ declaration, repository, or template is edited, and no daemon is started.
 `agent-dispatch emitter tick|serve SPEC --holder HOST` is the diagnostic/direct
 surface used by the supervised child. Normal deployments declare the emitter
 rather than wiring cron, a Scheduled Task, or another external timer.
+
+### Registered repository resources
+
+Repository-owned declarations can refer to `repo:<registered-name>:<relative-path>`
+for emitter/evaluator argv resources and execution `cwd`, script-forge
+`command`/`cwd`, effort-driver `state_root`, and recipe `extends:`. These
+references remain unchanged in declarations and generated emitter specs; the
+concrete root is derived at use time from the owning repository registry.
+Paths must remain within that root, including after symlink resolution.
+One validation or script invocation uses a transient root snapshot shared by
+execution context, argv, cwd and effort state. A recipe chain likewise shares
+its resolved roots for identity, document reads and nested references.
+Inherited relative emitter cwd values retain their named repository authority,
+including placeholders filled by a later hop. Discovery's field-provenance
+walk and recipe merge share that same snapshot. Repository class is checked
+per use: a reference checkout may supply read-only effort state or recipe
+content, but an execution use of the same cached root is refused.
+Registry lookups share a 15-second execution budget rather than receiving a
+new full budget per field. Finite probes own a non-breakaway Windows Job or
+POSIX process group. POSIX keeps the leader unreaped until group retirement,
+using kernel child custody rather than signaling a potentially reused PID;
+unknown custody is refused. Timeout teardown gets at most one additional second and
+unconfirmed teardown is an explicit error. These bounds are separate from
+the script execution timeout. A standby emitter does no resource lookup before
+acquiring its schedule lease. Expanding repository/effort loops, loading or
+registering a builtin emitter, and validating a standby tick check declaration
+shape only. Expanded specs preserve the declared worker identity and resource
+context; registry, worker-identity and filesystem resolution occur in the held tick.
+
+Shape-only validation still parses resource syntax in emitter argv, cwd and
+side-load argv, and inline evaluator argv/cwd. Malformed resources are refused
+at loading or registration; valid syntax does not require a locally available
+checkout before admission.
+Cross-repository inherited relative script-forge cwd values are also refused
+during shape validation, even when the command uses a named resource. Use a
+named cwd or declare the relative cwd in the leaf declaration so its authority
+is explicit.
+
+Windows Job custody has native Windows coverage; Linux unreaped-leader custody
+has native Linux coverage. macOS custody remains unverified: named-resource
+probes require Python's `waitid` and `WNOWAIT` support and refuse before spawning
+when those primitives are absent. There is no PID-only or uncustodied fallback.
+
+Repository and effort loops may set `execution_repo: tools` to bind their
+script/worker-identity context to a registered repository. This is independent
+of `repo`, which continues to identify the forge/task lane. For example:
+
+```yaml
+kind: evaluator
+name: verify-work
+spec:
+  repo: example/project
+  evaluator_ref: verify-work
+  evaluator_spec:
+    cwd: "repo:tools:."
+    scripts:
+      verify-work: ["python", "repo:tools:scripts/verify.py"]
+    timeout_seconds: 30
+```
+
+An identity-only discovery pointer uses the same registration:
+
+```bash
+agent-dispatch registrar add-pointer tools --kind repo --repository tools
+```
+
+The stored pointer contains `repository`, not a second checkout `location`.
+Explicitly migrating an existing repo pointer to the same registered root
+preserves its effective owner and lane aliases, materializing an implicit
+checkout-derived owner so registration identities do not change. A different target remains a retarget,
+not an inferred migration; an unavailable legacy target requires provenance
+verification before replacement. Legacy setup writers cannot downgrade a named
+pointer back to a checkout path; changing a named target requires an explicit
+registered repository name.
+
+Named resources require the optional agent-worktrees integration's
+`repos find <name> --registered-only --json` contract. Missing, malformed or
+duplicate registrations, absent local checkouts and older peers fail explicitly;
+no PATH/ancestor/srcroot discovery substitutes for registration. Acquire or
+adopt an absent checkout through its owner's standard `repos clone`/adoption
+flow before retrying. Read-only discovery never clones or registers it.
+Reference and knowledge registrations may supply read-only recipes and effort
+state, but cannot supply execution context. Active named registrar pointers must
+use worktree or singleton registrations: discovery refuses read-only classes
+before expanding declarations into executable units or implicit checkout paths.
+Existing standalone non-repository commands and legacy
+path declarations remain compatible; migration is explicit, not a startup rewrite.
 
 ### Repository reviewer loops (`agent-dispatch reviewer-loop`)
 
@@ -2115,6 +2230,7 @@ executes the task:
 ```bash
 agent-dispatch create "Summarize PR 42" --require review --spawn            # managed (waits)
 agent-dispatch create "Summarize PR 42" --spawn --spawn-agent task-worker --async  # fire-and-forget
+agent-dispatch create "Review a change" --spawn --spawn-agent example-harness --spawn-charter reviewer --async
 ```
 
 The worker is instructed to claim the specific task by id
@@ -2127,6 +2243,35 @@ taken from the coordinator before anything is launched: a dedup collision
 (`--spawn` on an existing `dedup_key`) or a racing second `--spawn` spawns the
 worker **exactly once**; the rest skip. See
 [`docs/spawn-supervisor.md`](docs/spawn-supervisor.md) for the reservation model.
+
+Local headless startup uses ordinary Bridge **create without a prompt → durable
+created-agent storage → send the assigned task → store returned session info**.
+The created-agent facts are visible in the task's `spawn_reservation.agent_info`;
+readiness is not execution. A storage failure sends nothing. Interrupted send
+retries retain the same handle: reuse an idle agent, or strictly resume a
+stopped one, never create a replacement. Both paths recheck the authenticated
+reservation/task admission fence immediately before delivery. That coordinator
+transaction is a pre-send admission point, not a cross-service transaction:
+later holds still gate claim/start. The ordinary send itself requires Bridge
+HTTP protocol 33 and the retained native UUID, refusing a dead or replaced
+conversation without auto-resume/recreation. Retained or ambiguous reservations
+consume supervisor capacity even when startup fails. Bridge-created worktrees remain Bridge-owned rather than being stamped
+as Dispatch-created allocations with Dispatch cleanup authority.
+The reservation's `ordinary-bridge` driver stays stable across this lifecycle;
+created provenance lives in `agent_info`. One-shot `create --spawn` exits
+nonzero when startup/publication fails, while preserving the task and any
+ambiguous created identity. Inspect that reservation instead of assuming the
+task was never created or allocating a replacement after an error.
+The first ordinary message includes the assigned task's prompt before the
+generic worker lifecycle seed, so task-specific identity/rubric bootstrap
+instructions arrive before claim/start. Local headless workers claim through
+their managed worktree's CWD identity, just like CLI-backed workers; they do
+not substitute a synthetic owner for a concrete worktree.
+Acquisition-marked tasks and retained allocations without ordinary metadata
+require an explicit authorized migration and are refused, not silently
+downgraded. CLI and fleet backends retain their existing transport; no mode is
+silently switched. The headless `--no-pair` allocation override is refused
+because ordinary Bridge create does not expose it.
 
 An optional **routing assignment** may be attached to a reservation before
 launch. Agent-dispatch is the single writer for this append-only provenance:

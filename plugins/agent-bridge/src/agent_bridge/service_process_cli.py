@@ -9,6 +9,11 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from zdd.conditional import ConditionalCutover
 
 from ._kill_pid_identity import _kill_pid  # noqa: F401 -- re-exported for __main__/callers
 
@@ -280,8 +285,14 @@ def _reap_abandoned_passive(config_dir_path, record: dict | None) -> dict:
         active_pid = active.get("pid") if isinstance(active, dict) else None
 
         def _terminate(pid: int) -> bool:
-            exited, _forced = core._ensure_retired_daemon_exited(pid)
-            return exited
+            from zdd.diagnostics import terminate_pid_if_identity
+
+            result = terminate_pid_if_identity(
+                pid, (record or {}).get("new_process_start_time"), exit_timeout=5.0,
+            )
+            return all(
+                result.get(key) is True for key in ("killed", "identity_verified", "exit_confirmed")
+            )
 
         return reap_abandoned_passive(
             config_dir_path,
@@ -291,7 +302,11 @@ def _reap_abandoned_passive(config_dir_path, record: dict | None) -> dict:
             record=record,
         )
     except Exception as exc:
-        return {"reaped": False, "reason": f"reap skipped: {exc}", "pid": None}
+        import logging
+
+        reason = f"native passive recovery unavailable ({type(exc).__name__}); reap refused"
+        logging.getLogger("zdd").error(reason)
+        return {"reaped": False, "refused": True, "reason": reason, "pid": None}
 
 
 def _pid_from_lock(port: int) -> int | None:
@@ -764,9 +779,14 @@ def _service_stop() -> None:
     print("[WARN] agent-bridge stop issued but still responding", file=sys.stderr)
 
 
-def _cmd_service(args: argparse.Namespace) -> None:
+def _cmd_service(
+    args: argparse.Namespace, *, conditional: ConditionalCutover | None = None,
+    routing_dir: Path | None = None,
+) -> None:
     core = _core()
     action = getattr(args, "service_action", None)
+    if conditional is not None and action != "restart":
+        raise ValueError("conditional service operation only supports restart")
     if action == "start":
         core._service_start()
     elif action == "stop":
@@ -779,7 +799,10 @@ def _cmd_service(args: argparse.Namespace) -> None:
         # efforts/active/agent-bridge-unified-zdd-cutover Phase 1.
         from . import venue_cli
 
-        venue_cli._cmd_deploy(args)
+        if conditional is None:
+            venue_cli._cmd_deploy(args)
+        else:
+            venue_cli._cmd_deploy(args, conditional=conditional, routing_dir=routing_dir)
     elif action == "status":
         core._cmd_status(args)
         pid = core._service_pid()

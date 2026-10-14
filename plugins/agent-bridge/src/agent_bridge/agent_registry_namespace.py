@@ -10,12 +10,15 @@ import shutil
 import subprocess
 import time
 from abc import ABC, abstractmethod
+from concurrent.futures import Future
 
 from agent_procutil import no_window_flags
+from agent_procutil.metrics import CpuObservation
 
 from .agent_registry_common import NamespaceAgentInfo
 from .transport import PluginRef, SpawnTarget
 from .reader_admission import ReaderAdmission
+from .reader_observation import ReaderCpuObservation
 
 log = logging.getLogger("agent-bridge")
 
@@ -80,6 +83,11 @@ class NamespaceResolver(ABC):
         """Actual enumeration holder, if it can outlive a cancelled caller."""
         return None
 
+    @property
+    def pending_cpu_sample_future(self) -> Future[CpuObservation] | None:
+        """Native sampling holder, independent of enumeration completion."""
+        return None
+
 
 class CliNamespaceResolver(NamespaceResolver):
     """Drive a namespace provider over a process boundary."""
@@ -101,6 +109,7 @@ class CliNamespaceResolver(NamespaceResolver):
         self._list_admission = ReaderAdmission()
         self._list_timed_out = False
         self._list_native_success = False
+        self._cpu_observation = ReaderCpuObservation(prefix)
 
     def invalidate_list_cache(self) -> None:
         """Drop the cached ``list()`` result so the next call re-queries live."""
@@ -109,6 +118,10 @@ class CliNamespaceResolver(NamespaceResolver):
     @property
     def pending_list_task(self) -> asyncio.Task[list[NamespaceAgentInfo]] | None:
         return self._list_task
+
+    @property
+    def pending_cpu_sample_future(self) -> Future[CpuObservation] | None:
+        return self._cpu_observation.pending_sample_future
 
     @property
     def prefix(self) -> str:
@@ -143,7 +156,10 @@ class CliNamespaceResolver(NamespaceResolver):
             )
 
         try:
-            result = await asyncio.to_thread(_call)
+            if argv == ["namespace-list"]:
+                result = await self._cpu_observation.run(cmd, timeout=timeout)
+            else:
+                result = await asyncio.to_thread(_call)
             return result.returncode, result.stdout, result.stderr
         except subprocess.TimeoutExpired:
             if argv == ["namespace-list"]:

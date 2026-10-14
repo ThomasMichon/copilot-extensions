@@ -30,7 +30,7 @@ def registered_project(tmp_tracking_dir, monkeypatch):
             anchor=str(tmp_tracking_dir), worktree_root=str(tmp_tracking_dir / "trees"),
         )},
     )
-    monkeypatch.setattr(cfg, "load_project_config", lambda name: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda name, **kwargs: config)
 
 
 def _terminal_bridge_record(tmp_tracking_dir: Path, *, worktree_path: str) -> WorktreeRecord:
@@ -125,7 +125,7 @@ def test_resolve_cli_reports_foreign_authority_without_success(
         key: MachineEntry(key=key, display_name=key, execution_platform="wsl")
         for key in ("test", "other-space")
     }
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: entries)
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: entries)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
     _wire_evidence(monkeypatch, cwd=rec.worktree_path)
     result = _run(

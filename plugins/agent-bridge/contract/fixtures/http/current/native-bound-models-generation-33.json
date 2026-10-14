@@ -1,0 +1,37 @@
+{
+  "captured_from": {
+    "commit": "dcbb776b4f8bee7f6f3ec0a5b6166ce382a81a87",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 33,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+    "source_git_blob": "56f3f36fbf60cadf6e1c16fc5491222dedf0eeb9",
+    "source_sha256": "0d5fe5e789c5dc2def908cbaf13eeec59a006a2a10dac23f9c30d3165de7d83e"
+  },
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/sessions/bridge-a/turns/native-bound",
+    "json": {
+      "prompt": "assigned task",
+      "queue": false,
+      "no_resume": true,
+      "expected_native_session_id": "native-a"
+    }
+  },
+  "response": {
+    "status": "running",
+    "session_id": "bridge-a",
+    "native_session_id": "native-a",
+    "turn_index": 0,
+    "queued": false,
+    "queue_id": null,
+    "position": null
+  },
+  "health": {
+    "protocol_version": 33,
+    "min_protocol_version": 1
+  },
+  "capability": {
+    "required_protocol_version": 33,
+    "older_route_status": 404
+  }
+}

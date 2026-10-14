@@ -10,7 +10,10 @@ and a synthetic HOME/root.
 from __future__ import annotations
 
 import os
+import subprocess
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from _conftest_sandbox import _apply_sandbox
@@ -112,7 +115,7 @@ def test_apply_reaps_stranded_cutover_passive_before_copying_payload(tmp_path, m
     slot -- otherwise a bare ``self-install --apply`` can hit a Windows
     ``PermissionError`` that only ``self_update()``'s own cutover path would
     have cleared (the gap this test guards against regressing)."""
-    from zdd import breadcrumb
+    from zdd import breadcrumb, diagnostics, routing
 
     import worktree_manager.mux_daemon_cutover as mdc
 
@@ -134,13 +137,26 @@ def test_apply_reaps_stranded_cutover_passive_before_copying_payload(tmp_path, m
     routing_dir = mdc.routing_dir(root)
     breadcrumb.write_breadcrumb(
         routing_dir, state="started", old=None, new_port=54321, new_pid=stranded_pid,
+        new_process_start_time="12345",
+        publication_witness=routing.publication_witness(
+            routing_dir, deadline=time.monotonic() + 1,
+        ),
     )
 
     reaped: list[int] = []
-    monkeypatch.setattr(mdc, "_iter_mux_daemon_pids", lambda: {stranded_pid})
+    live = {stranded_pid}
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda _: "12345")
+    monkeypatch.setattr(mdc, "_iter_mux_daemon_pids", lambda: set(live))
+
+    def terminate(pid, *, root, expected_start_time=None):
+        assert expected_start_time == "12345"
+        reaped.append(pid)
+        live.remove(pid)
+        return True
+
     monkeypatch.setattr(
         mdc, "_terminate_mux_daemon_pid",
-        lambda pid, *, root: (reaped.append(pid), True)[1],
+        terminate,
     )
 
     res = self_install(pd, root=root, dry_run=False)
@@ -159,6 +175,115 @@ def test_apply_reaps_stranded_cutover_passive_before_copying_payload(tmp_path, m
     assert record is not None
     assert record["new_pid"] == stranded_pid
     assert breadcrumb.is_stale(record)
+
+
+@pytest.mark.parametrize("refusal", ["missing-witness", "promoted", "unknown-state", "exception"])
+def test_apply_retains_slot_when_native_passive_custody_is_unavailable(tmp_path, monkeypatch, refusal):
+    from zdd import breadcrumb, diagnostics, routing
+    import worktree_manager.mux_daemon_cutover as mdc
+
+    pd = _fake_payload(tmp_path, "9.9.9")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+    slot = version_slot("9.9.9", root)
+    slot.mkdir(parents=True)
+    marker = slot / "retained-marker.txt"
+    marker.write_text("retained")
+    route = mdc.routing_dir(root)
+    witness = routing.publication_witness(route, deadline=time.monotonic() + 1)
+    breadcrumb.write_breadcrumb(
+        route, state="started", new_pid=999999, new_port=54321,
+        new_process_start_time="12345",
+        publication_witness=None if refusal == "missing-witness" else witness,
+    )
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda _: "12345")
+    monkeypatch.setattr(mdc, "_iter_mux_daemon_pids", lambda: {999999})
+    monkeypatch.setattr(mdc, "_terminate_mux_daemon_pid", lambda *_a, **_k: pytest.fail("unsafe kill"))
+    monkeypatch.setattr(si, "_copy_payload", lambda *_: pytest.fail("unsafe slot replacement"))
+    if refusal == "promoted":
+        for pid, port in ((999999, 54321), (999998, 54322), (999997, 54323)):
+            routing.publish_active(
+                route, bind="127.0.0.1", port=port, pid=pid, demote_existing=True,
+            )
+    elif refusal == "unknown-state":
+        breadcrumb.breadcrumb_path(route).write_text('{"state":"unknown"}')
+    elif refusal == "exception":
+        def unavailable(*_):
+            raise OSError("fixture error")
+        monkeypatch.setattr(mdc, "_reap_abandoned_passive", unavailable)
+    before = breadcrumb.breadcrumb_path(route).read_bytes()
+    result = self_install(pd, root=root, dry_run=False)
+    assert result.action == "error" and "version slot retained" in result.reason
+    assert marker.read_text() == "retained"
+    assert current_version(root) is None
+    assert breadcrumb.breadcrumb_path(route).read_bytes() == before
+
+
+@pytest.mark.parametrize("platform", ["posix", "nt"])
+@pytest.mark.parametrize("failure_phase", ["passive-reap", "follow-up"])
+def test_failed_native_census_retains_occupied_slot(
+    tmp_path, monkeypatch, platform, failure_phase,
+):
+    from zdd import breadcrumb, routing
+    import worktree_manager.mux_daemon_cutover as mdc
+
+    pd = _fake_payload(tmp_path, "9.9.9")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+    slot = version_slot("9.9.9", root)
+    slot.mkdir(parents=True)
+    marker = slot / "retained-marker.txt"
+    marker.write_text("retained")
+    route = mdc.routing_dir(root)
+    witness = routing.publication_witness(route, deadline=time.monotonic() + 1)
+    breadcrumb.write_breadcrumb(
+        route, state="started", new_pid=999999, new_port=54321,
+        new_process_start_time="12345", publication_witness=witness,
+    )
+    before = breadcrumb.breadcrumb_path(route).read_bytes()
+    monkeypatch.setattr(mdc, "os", SimpleNamespace(name=platform, environ=os.environ))
+    calls = []
+
+    def census(argv, **kwargs):
+        calls.append(argv)
+        if platform == "nt":
+            assert "-ErrorAction Stop" in argv[-1]
+        code = 0 if failure_phase == "follow-up" and len(calls) == 1 else 1
+        return subprocess.CompletedProcess(argv, code, stdout="", stderr="fixture census failure")
+
+    monkeypatch.setattr(mdc.subprocess, "run", census)
+    monkeypatch.setattr(si, "_copy_payload", lambda *_: pytest.fail("unsafe slot replacement"))
+    result = self_install(pd, root=root, dry_run=False)
+    assert result.action == "error" and "version slot retained" in result.reason
+    assert len(calls) == (1 if failure_phase == "passive-reap" else 2)
+    assert calls[0][0] == ("powershell" if platform == "nt" else "ps")
+    assert marker.read_text() == "retained" and current_version(root) is None
+    assert breadcrumb.breadcrumb_path(route).read_bytes() == before
+
+
+def test_apply_new_slot_does_not_retire_or_block_on_a_promoted_old_slot(tmp_path, monkeypatch):
+    from zdd import breadcrumb, routing
+    import worktree_manager.mux_daemon_cutover as mdc
+
+    pd = _fake_payload(tmp_path, "9.9.10")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+    old_slot = version_slot("9.9.9", root)
+    old_slot.mkdir(parents=True)
+    marker = old_slot / "retained-marker.txt"
+    marker.write_text("retained")
+    route = mdc.routing_dir(root)
+    routing.publish_active(route, bind="127.0.0.1", port=54321, pid=999999, version="9.9.9")
+    breadcrumb.write_breadcrumb(route, state="flipped", new_pid=999999, new_port=54321)
+    before = breadcrumb.breadcrumb_path(route).read_bytes()
+    monkeypatch.setattr(mdc, "_reap_abandoned_passive", lambda *_: pytest.fail("unrelated retirement"))
+    result = self_install(pd, root=root, dry_run=False)
+    assert result.action == "installed" and current_version(root) == "9.9.10"
+    assert marker.read_text() == "retained"
+    assert breadcrumb.breadcrumb_path(route).read_bytes() == before
 
 
 def test_apply_rechecks_install_need_after_acquiring_the_lease(tmp_path, monkeypatch):

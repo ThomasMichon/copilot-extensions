@@ -7,6 +7,52 @@ boundary is what keeps the coupling one-way and dependency-free (the Picker owns
 no worktree logic or state), and it is why the TUI framework (Textual) stays
 entirely out of the plugin engine.
 
+## SSH launch-prompt admission
+
+The Worktrees composer is host-rendered for local and machine-SSH sources.
+Prompted remote `resolve --json --machine <target>` invokes the target's own
+`resolve --json --launch-request-b64 <envelope>` first. The UTF-8 JSON envelope
+is bounded to 7168 bytes (7 KiB, including JSON metadata) and carries version 1, a 32-character hexadecimal
+`request_id`, `kind` (`new` or `resume`), `worktree_id` (null for New), `text`
+and Boolean `no_mux`. POSIX shell arguments are quoted; PowerShell commands
+are encoded. Prompt text never enters the interactive SSH launch string.
+Structured admission/status accepts only its protocol options and `--json`;
+ordinary resolve selectors, modifiers and positional Copilot arguments are
+rejected before reading or mutating target launch state. Exactly one nonempty
+protocol option is required; an empty value never enters ordinary resolve.
+
+The target's existing tracking-write daemon owns admission and seed staging.
+Admission retains a text-free fingerprint and allocated worktree/intent IDs
+under external tracking state. The returned receipt carries those identities,
+not prompt text. The host's subsequent remote plan launches the same worktree
+with `--stage-launch-seed --seed-id <id>`. The existing target setup and native
+backend boundary perform cold checks, reservation, failed-start release and
+successful handoff discard.
+
+`resolve --json --launch-request-status <request-id>` is read-only recovery.
+It returns `staged`, `handoff-unconfirmed`, `creation-incomplete`,
+`admission-incomplete` or
+`completed-or-superseded`, plus the allocated identities. A repeated admitted
+request cannot allocate another New worktree or restore a completed/replaced
+prompt. A matching durable seed is recoverable even if acceptance-receipt
+publication was interrupted, but an incomplete New creation is never ready.
+A machine/platform change that cannot honor the persisted New allocation
+refuses before creation rather than allocating a differently prefixed worktree.
+Every admission-file read validates its stored identity and field types;
+corrupt state returns a structured error without disconnecting the writer.
+Replay also checks the stored fingerprint and prompt kind against the request,
+and Resume must retain its requested worktree identity, including after the
+locked receipt reload.
+A target without the request capability rejects before mutation.
+## Fresh list snapshots
+
+Ordinary unscoped `list --json` requests consult their exact fresh result
+snapshot before enumerating tracking records or booting the monitor. A hit
+still records demand for resident refresh. `--fresh`, exact worktree/codename
+reads, refresh, streaming, glance and `--cache-only` retain their dedicated
+paths; this fast-hit contract does not imply those paths are database-backed.
+Missing or expired snapshots retain the existing live-scan behavior.
+
 ## Provider-backed source registry
 
 Venue providers may add project-scoped Picker sources by writing JSON registry
@@ -158,6 +204,44 @@ New and Resume prompts use one typed pending intent in
 existing `tracking_write` authority. The same-code logged fallback follows
 that authority's established no-request-sent/version-skew rules; ambiguous
 sent writes are never silently retried.
+
+Receiving-side mutation checks load the named project's execution-space
+configuration without control-plane PR grafts. Machine-registry overlay
+resolution likewise excludes PR discovery: neither authority path needs to
+verify unrelated repositories' plugin activation. PR commands still load their
+normal layered policy. This keeps prompt staging within the existing write
+deadline without weakening project, machine, platform, or ownership fences.
+
+Foreground New/Resume planning has no fixed aggregate deadline. The Manager
+streams engine stderr while retaining stdout as the JSON plan and preserving
+stderr error detail for version-skew handling. Configuration discovery,
+repository synchronization, prompt staging and projection preparation report
+start/end and elapsed-time heartbeats. Projection discovery/render waits for
+completion at this boundary; sessionStart queues its separate bounded backup.
+Individual Git, transport and mutation failure bounds remain in force, and
+bounded automation may explicitly set a plan timeout. Slow preparation is not
+a reason to abandon a successfully created checkout or skip projection work.
+
+Preparation stages also append `launch_preparation` events to the owning
+installation's rolling `logs/activity.jsonl`, without requiring a trace flag.
+Each stage has a unique `step_id`, `phase`, `state` (`started`, `waiting`,
+`finished`, or `failed`), monotonic `elapsed_ms`, process ID and, once selected,
+worktree ID. Failures record only their exception type, never prompt text,
+exception messages, environment values or command arguments. Seed transaction
+execution records its own start/end in the receiving daemon, so a client
+timeout can be distinguished from a transaction that later committed. Use
+`activity --worktree-id <id>` or filter the JSONL by process and step ID; an
+unmatched `started` event identifies the interrupted stage.
+
+New and exact JSON Resume reuse the selected launch configuration when building
+hook and owner environment values, rather than rediscovering plugin PR overlays
+twice. The selected PR policy, including foreign-repo overlays, remains intact;
+allocation-time locked policy revalidation is never cached or omitted.
+Single-worktree liveness uses only that worktree's registered session IDs,
+including bare sessions resumed from a different cwd, plus the mux probe.
+An empty registry is cheap and does not trigger historical session discovery;
+explicit recovery and the resident reconciliation cursor own registry repair.
+Thus unrelated session history cannot multiply the cost of a resume check.
 
 The Manager requests `resolve --stage-launch-seed` for prompted requests.
 `launch.seed_pending: true`, `launch.seed_id` and `launch.seed_kind` identify

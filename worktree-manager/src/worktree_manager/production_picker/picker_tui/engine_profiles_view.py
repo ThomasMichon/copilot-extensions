@@ -284,16 +284,13 @@ class ProfilesView:
                     self.applied[(ti, hi)] = self.grid.get((ti, hi), False)
 
     def build_chrome(self, add, width, sel):
-        # Profiles lives under Configuration with its own host-column axes -- no
-        # machine-scope row and no top button region, so its chrome is empty
-        # (the Apply/Reset buttons ride the bottom of the data). Uniform with the
-        # other views' build_chrome/build_data split (#88 NF3).
-        return
-
-    def build_data(self, add, width, sel):
-        self.build(add, width, sel)
+        add(self._eng.tab_bar(width, sel == ("M", 0)), stop=("M", 0))
 
     def build(self, add, width, sel):
+        self.build_chrome(add, width, sel)
+        self.build_data(add, width, sel)
+
+    def build_data(self, add, width, sel):
         """Emit the Profiles pivot body into ``add`` (the ``build_body`` VRow
         sink). Mirrors the former ``PickerScreen._build_profiles`` exactly."""
         if not self.host_cols:

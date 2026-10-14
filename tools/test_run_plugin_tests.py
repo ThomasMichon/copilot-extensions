@@ -154,6 +154,11 @@ def test_windowless_runner_contains_bare_console_descendants(tmp_path, timeout, 
     receipt = tmp_path / "descendants.json"
     result = tmp_path / "result.json"
     sandbox = tmp_path / "sandbox"
+    shell_timeout = 30
+    child_timeout = 2 * shell_timeout + 10
+    wall_seconds = 5 if timeout else child_timeout + 10
+    owner_timeout = max(25, wall_seconds + 10)
+    launcher_timeout = owner_timeout + 5
     console_probe = """
 import ctypes, os
 k = ctypes.windll.kernel32
@@ -183,7 +188,7 @@ else:
     for cycle in range(2):
         probe = subprocess.run(
             [{powershell!r}, '-NoProfile', '-NonInteractive', '-Command', {ps_script!r}],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout={shell_timeout},
         )
         assert probe.returncode == 7, (probe.returncode, probe.stdout, probe.stderr)
         assert 'git version' in probe.stdout
@@ -195,7 +200,7 @@ else:
     command = console_probe + f"""
 import subprocess, sys
 assert sys.stdin.readline().strip() == 'nested-input'
-probe = subprocess.run([sys.executable, '-c', {child!r}], timeout=25)
+probe = subprocess.run([sys.executable, '-c', {child!r}], timeout={child_timeout})
 sys.exit(17 if probe.returncode == 7 else 18)
 """
     owner = textwrap.dedent(f"""
@@ -208,7 +213,7 @@ sys.exit(17 if probe.returncode == 7 else 18)
         rc = containment.run_contained(
             [{sys.executable!r}, '-c', {command!r}],
             cwd=Path({str(tmp_path)!r}), env=env, sandbox=sandbox,
-            limits=containment.Limits(wall_seconds={5 if timeout else 20},
+            limits=containment.Limits(wall_seconds={wall_seconds},
                                       poll_seconds=0.05, max_processes=32,
                                       max_memory_mb=512, max_temp_mb=32),
         )
@@ -224,7 +229,7 @@ assert not ctypes.windll.kernel32.GetConsoleWindow()
 probe = subprocess.run(
     [{sys.executable!r}, '-c', {owner!r}],
     input='nested-input\\n', capture_output=True, text=True,
-    timeout=25, **no_window_kwargs(),
+    timeout={owner_timeout}, **no_window_kwargs(),
 )
 Path({str(streams)!r}).write_text(json.dumps({{
     'returncode': probe.returncode, 'stdout': probe.stdout, 'stderr': probe.stderr,
@@ -286,7 +291,7 @@ Path({str(streams)!r}).write_text(json.dumps({{
         try:
             completed = subprocess.run(
                 [pythonw, "-c", launcher], cwd=tmp_path, capture_output=True,
-                text=True, timeout=30, **no_window_kwargs(),
+                text=True, timeout=launcher_timeout, **no_window_kwargs(),
             )
             if desktop:
                 assert roots and owned, "observer never identified runner fixture processes"

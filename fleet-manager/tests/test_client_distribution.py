@@ -15,6 +15,9 @@ import tarfile
 import zipfile
 
 import pytest
+from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
+from packaging.utils import canonicalize_name
 
 PROJECT = Path(__file__).absolute().parents[1]
 LIBRARY = PROJECT.parent / "libs" / "versioned-runtime"
@@ -72,10 +75,20 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
         assert [row for row in rows if row[0] == member] == [[member, expected, str(len(data))]]
         metadata = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
         requirements = [
-            line for line in archive.read(metadata).decode().splitlines()
+            Requirement(line.removeprefix("Requires-Dist:").strip())
+            for line in archive.read(metadata).decode().splitlines()
             if line.startswith("Requires-Dist:")
         ]
-        assert all('extra == "dev"' in line for line in requirements)
+        assert all(requirement.marker is not None
+                   and not requirement.marker.evaluate({"extra": ""})
+                   and (requirement.marker.evaluate({"extra": "dev"})
+                        or requirement.marker.evaluate({"extra": "release-verification"}))
+                   for requirement in requirements)
+        verification = [requirement for requirement in requirements
+                        if requirement.marker.evaluate({"extra": "release-verification"})]
+        assert len(verification) == 1
+        assert canonicalize_name(verification[0].name) == "cryptography"
+        assert verification[0].specifier == SpecifierSet(">=46,<47")
         assert not any(name.endswith("/_standalone_runtime_build.py") for name in archive.namelist())
 
 

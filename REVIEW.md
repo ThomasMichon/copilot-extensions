@@ -34,13 +34,11 @@ specifically when reviewing a pull request, not a replacement for them.
   `main`, head branch matching `release/promote-<run id>`, authored via the
   `APERTURE_RELEASE_TOKEN` fine-grained PAT (a personal token minted under
   the maintainer's own account -- this repo has no separate bot identity --
-  so the PR's author is `ThomasMichon`, not a bot login). The other four
+  so the PR's author is `ThomasMichon`, not a bot login). The other three
   legitimate shapes are a workflow-file-ONLY bootstrap PR by the repo owner
   (workflow_run-triggered workflows resolve their own YAML from `main`, so a
   fix to `.github/workflows/*.yml` occasionally must land there directly),
-  `module-size-baseline-widen.yml`'s own automated PR (a fixed branch
-  name, authored under the same PAT, whose diff is never anything but the
-  one generated baseline JSON file), and `rollback_release.py`'s own
+  and `rollback_release.py`'s own
   pause/resume state-commit PR (branch name `release-pipeline/state-*`,
   same PAT, whose diff is never anything but the one pipeline-state JSON
   file) and its revert rollback PR (branch name
@@ -51,7 +49,7 @@ specifically when reviewing a pull request, not a replacement for them.
   the revert shape), not by admin bypass;
   see ThomasMichon/copilot-extensions#3622-erratum for the incident that
   prompted the hardening. Contributors always target `dev` — a PR whose
-  base is `main` and that matches none of these five shapes is not a
+  base is `main` and that matches none of these four shapes is not a
   legitimate use of
   this repo's PR flow (the repo's own CI has a hard guard checking exactly
   this, but that only fails the build; this comment is the visible signal
@@ -62,8 +60,7 @@ specifically when reviewing a pull request, not a replacement for them.
   > This PR targets `main` directly. `main` only ever moves via this
   > repo's own CI promotion pipeline (dev-branch-release-pipeline effort,
   > `.github/workflows/validate-and-promote.yml`) from a `release/promote-*`
-  > branch, a workflow-file-ONLY bootstrap PR,
-  > `module-size-baseline-widen.yml`'s own automated PR, or
+  > branch, a workflow-file-ONLY bootstrap PR, or
   > `rollback_release.py`'s own state-commit/revert PR. Please retarget
   > this PR's base branch to `dev` — see `docs/pipelines.md` § Release & Versioning.
 - **Scope to the diff.** Review the code the PR actually changes. The repo
@@ -108,6 +105,22 @@ specifically when reviewing a pull request, not a replacement for them.
   generated snapshot commit.
 - **Tests for runtime logic.** Flag PRs that change a runtime plugin's logic
   without adding or updating that plugin's `tests/`.
+- **Review reproducible test flows, not demands for public evidence.** When
+  validation coverage is missing, ask for a focused test or a reproducible
+  flow: safe prerequisites, commands or steps, and expected assertions for
+  the behavior being changed. Do not require submitters to post execution
+  receipts, logs, screenshots, recordings, environment inventories, or other
+  artifacts into PR descriptions, comments, or attachments. Their absence
+  alone is not a correctness finding or an additional approval gate.
+  Reviewers and maintainers own checking available CI and, where needed,
+  running the flow in an authorized isolated environment; do not shift that
+  responsibility into a demand for the author's private environment or data.
+  Keep reproduction inputs synthetic or safely redacted, and treat voluntary
+  artifacts as optional context, not a publication obligation. A test flow
+  defines how to verify behavior; it does not assert that execution passed.
+  Continue to flag concrete defects and missing or inadequate test coverage,
+  and honor actual required checks and documented validation obligations
+  without inventing a separate public-evidence requirement.
 - **Test portfolio growth.** Flag new exhaustive matrices, repeated process
   startup, or specialized suites added unconditionally to required PR CI.
   Require path gating, a focused smoke contract, and a scheduled/manual

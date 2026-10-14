@@ -241,6 +241,7 @@ class RegisteredPivot:
     #: ``None`` => this pivot offers no create action (today's default for
     #: every existing manifest).
     create_action: CreateAction | None = None
+    placement: str = "left"
 
     @property
     def account_scoped(self) -> bool:
@@ -562,6 +563,11 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
     scope = data.get("scope", "machine")
     if not isinstance(scope, str) or scope not in ("machine", "account", "global"):
         raise ManifestError("`scope` must be one of machine/account/global")
+    placement = data.get("placement", "left")
+    if placement not in ("left", "config"):
+        raise ManifestError("`placement` must be one of left/config")
+    if placement == "config" and scope == "machine":
+        raise ManifestError("Configuration `placement` requires `scope` account/global, not machine")
 
     stream = data.get("stream", False)
     if not isinstance(stream, bool):
@@ -613,6 +619,7 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
         columns=columns,
         summary_template=summary_template,
         scope=scope,
+        placement=placement,
         group_field=group_field,
         stream=stream,
         subscribe=subscribe,

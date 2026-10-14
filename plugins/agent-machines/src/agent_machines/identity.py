@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import platform
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable
 
 import yaml
+from machine_transport import (
+    MachineEntry,
+    find_machine_entry,
+    local_execution_platform,
+    machine_identity_names,
+    normalize_machine_entries,
+    parse_machines_yaml,
+)
 
 from .manifest import ManifestError
 
@@ -19,6 +27,8 @@ class MachineIdentity:
     accepted: tuple[str, ...]
     topology_path: Path | None = None
     warnings: tuple[str, ...] = ()
+    execution_platform: str = ""
+    physical_host: str = ""
 
 
 def _dedupe(values: Iterable[str]) -> tuple[str, ...]:
@@ -55,14 +65,21 @@ def resolve_machine(
     value: str | None = None,
     *,
     topology_repos: Iterable[Path] = (),
+    execution_platform: str | None = None,
 ) -> MachineIdentity:
-    """Resolve ``value`` through topology key/hostname/alias/display-name fields."""
+    """Resolve a logical key/profile; automatic local selection knows its platform.
+
+    An explicitly supplied value remains platform-neutral unless the caller
+    supplies execution_platform. Physical association never becomes a WSL gate alias.
+    """
     raw = (value or platform.node()).strip()
     if not raw:
         raise ManifestError("machine identity is empty")
-    folded_raw = raw.casefold()
-    entries: dict[str, tuple[str, list[str], Path]] = {}
-    identity_owners: dict[str, set[str]] = {}
+    context = execution_platform
+    if not value and context is None:
+        context = local_execution_platform()
+    entries: dict[str, MachineEntry] = {}
+    entry_paths: dict[str, Path] = {}
     warnings: list[str] = []
     for path in _topology_paths(topology_repos):
         try:
@@ -78,69 +95,52 @@ def resolve_machine(
             if machines is not None:
                 warnings.append(f"{path}: 'machines' must be a mapping")
             continue
-        for raw_key, raw_entry in machines.items():
-            key = str(raw_key).strip()
-            if not key:
-                warnings.append(f"{path}: machine key must be non-empty")
-                continue
-            if not isinstance(raw_entry, dict):
-                warnings.append(f"{path}: machine {key!r} must be a mapping")
-                continue
-            entry = raw_entry
-            identities = [
-                key,
-                *(
-                    str(entry.get(field)).strip()
-                    for field in ("hostname", "alias", "display_name")
-                    if isinstance(entry.get(field), str)
-                ),
-            ]
-            accepted = list(_dedupe(identities))
-            match_key = key.casefold()
-            if match_key in entries:
-                prior_key, prior_aliases, prior_path = entries[match_key]
-                entries[match_key] = (
-                    prior_key,
-                    list(_dedupe((*prior_aliases, *accepted))),
-                    prior_path,
-                )
-            else:
-                entries[match_key] = (key, accepted, path)
-            for identity in accepted:
-                identity_owners.setdefault(identity.casefold(), set()).add(match_key)
+        try:
+            parsed = normalize_machine_entries(parse_machines_yaml(document))
+            for key, entry in parsed.items():
+                prior_key = next((k for k in entries if k.casefold() == key.casefold()), None)
+                if prior_key is not None:
+                    prior = entries[prior_key]
+                    if (
+                        prior.execution_platform != entry.execution_platform
+                        or prior.physical_host != entry.physical_host
+                        or prior.ssh_environments != entry.ssh_environments
+                    ):
+                        raise ValueError(f"conflicting topology declarations for machine {key!r}")
+                    entries[prior_key] = replace(
+                        prior, compatibility_aliases=_dedupe((
+                            *prior.compatibility_aliases, *machine_identity_names(entry),
+                        )),
+                    )
+                else:
+                    entries[key] = entry
+                    entry_paths[key] = path
+        except ValueError as exc:
+            raise ManifestError(str(exc)) from exc
 
-    conflicts = {
-        identity: owners
-        for identity, owners in identity_owners.items()
-        if len(owners) > 1
-    }
-    if conflicts:
-        identity, owners = sorted(conflicts.items())[0]
-        keys = ", ".join(sorted(entries[owner][0] for owner in owners))
-        raise ManifestError(
-            f"topology identity {identity!r} is ambiguous across machine entries: {keys}"
+    try:
+        entries = normalize_machine_entries(entries)
+        entry = find_machine_entry(
+            entries, raw, reject_ambiguous=True, execution_platform=context,
         )
-
-    matches = {
-        key: entry
-        for key, entry in entries.items()
-        if folded_raw in {item.casefold() for item in entry[1]}
-    }
-    if not matches:
+    except ValueError as exc:
+        raise ManifestError(str(exc)) from exc
+    if entry is None:
         return MachineIdentity(
             raw=raw,
             canonical=raw,
             accepted=(raw,),
             warnings=tuple(warnings),
         )
-    if len(matches) > 1:
-        keys = ", ".join(sorted(match[0] for match in matches.values()))
-        raise ManifestError(f"machine identity {raw!r} is ambiguous across entries: {keys}")
-    canonical, accepted, path = next(iter(matches.values()))
+    accepted = machine_identity_names(entry)
+    if not entry.execution_platform:
+        accepted = (*accepted, raw)
     return MachineIdentity(
         raw=raw,
-        canonical=canonical,
-        accepted=_dedupe((*accepted, raw)),
-        topology_path=path,
+        canonical=entry.key,
+        accepted=_dedupe(accepted),
+        topology_path=entry_paths[entry.key],
         warnings=tuple(warnings),
+        execution_platform=entry.execution_platform,
+        physical_host=entry.physical_host,
     )

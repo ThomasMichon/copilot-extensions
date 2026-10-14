@@ -37,9 +37,21 @@ def _resolve_within(root: Path, source_rel: str) -> Path | None:
 def materialize_into(
     *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path,
     dest_root: Path | None = None,
+    manifest_name: str | None = None,
 ) -> list[str]:
+    if manifest_name is None:
+        return [
+            entry
+            for name in lwar.MANIFEST_NAMES
+            for entry in materialize_into(
+                source_consumer_dir=source_consumer_dir,
+                dest_consumer_dir=dest_consumer_dir,
+                canonical_root=canonical_root, dest_root=dest_root,
+                manifest_name=name,
+            )
+        ]
     try:
-        manifest = lwar.load_manifest(source_consumer_dir)
+        manifest = lwar.load_manifest(source_consumer_dir, manifest_name=manifest_name)
     except ValueError as exc:
         return [f"SKIP {source_consumer_dir}: {exc}"]
     if manifest is None:
@@ -72,6 +84,8 @@ def materialize_into(
         ]
 
     dest_bin = manifest.payload_dir(plugin_dir=dest_consumer_dir)
+    if uer.escapes_root(dest_bin.resolve(), dest_root_r):
+        return [f"SKIP {dest_bin}: resolves outside the destination root -- refusing"]
     if dest_bin.is_symlink():
         return [f"SKIP {dest_bin}: is a symlink -- refusing"]
     bad_ancestor = _find_symlinked_ancestor(dest_bin.parent, dest_root_r)
@@ -111,13 +125,15 @@ def materialize_all(dest: Path, *, canonical_root: Path) -> list[str]:
     source_plugins = canonical_root / "plugins"
     if not dest_plugins.is_dir() or not source_plugins.is_dir():
         return log
-    for manifest_path in sorted(source_plugins.glob(f"*/{lwar.MANIFEST_NAME}")):
-        plugin = manifest_path.parent.name
+    for source_consumer in sorted(source_plugins.iterdir()):
+        if not source_consumer.is_dir():
+            continue
+        plugin = source_consumer.name
         dest_consumer_dir = dest_plugins / plugin
         if not dest_consumer_dir.is_dir():
             continue
         log.extend(materialize_into(
-            source_consumer_dir=manifest_path.parent,
+            source_consumer_dir=source_consumer,
             dest_consumer_dir=dest_consumer_dir,
             canonical_root=canonical_root,
             dest_root=dest,

@@ -199,10 +199,12 @@ _VERB_MODULES: tuple[str, ...] = (
     "agent_worktrees.tracking_disposition_write",
     "agent_worktrees.tracking_followup_write",
     "agent_worktrees.tracking_claim_write",
+    "agent_worktrees.tracking_producer_write",
     "agent_worktrees.tracking_session_lifecycle_write",
     "agent_worktrees.tracking_session_registration_write",
     "agent_worktrees.tracking_session_deregistration_write",
     "agent_worktrees.launch_seed_state",
+    "agent_worktrees.launch_request",
 )
 
 _verb_modules_loaded = False
@@ -327,6 +329,14 @@ def compute(kind: str, payload: dict) -> dict:
     with _inflight_lock:
         _inflight_writes += 1
     try:
+        if verb.startswith("launch_seed_"):
+            from .launch_progress import step
+
+            with step(
+                f"Executing {verb}", enabled=False,
+                worktree_id=args.get("worktree_id"),
+            ):
+                return fn(args)
         return fn(args)
     finally:
         with _inflight_lock:

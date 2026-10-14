@@ -347,9 +347,12 @@ def _iter_mux_daemon_pids() -> set[int]:
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }",
+            "Get-CimInstance Win32_Process -ErrorAction Stop | "
+            "ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }",
         ]
         out = subprocess.run(argv, capture_output=True, text=True, timeout=10, check=False)  # noqa: S603
+        if out.returncode != 0:
+            raise OSError(f"native mux process census failed (exit {out.returncode})")
         hits: set[int] = set()
         for line in (out.stdout or "").splitlines():
             if "\t" not in line:
@@ -370,6 +373,8 @@ def _iter_mux_daemon_pids() -> set[int]:
         check=False,
         env=_ps_env_without_width_override(),
     )
+    if out.returncode != 0:
+        raise OSError(f"native mux process census failed (exit {out.returncode})")
     hits: set[int] = set()
     for line in (out.stdout or "").splitlines():
         parts = line.strip().split(None, 1)
@@ -408,7 +413,9 @@ def _ps_env_without_width_override() -> dict[str, str]:
     return env
 
 
-def _terminate_mux_daemon_pid(pid: int, *, root: Path) -> bool:
+def _terminate_mux_daemon_pid(
+    pid: int, *, root: Path, expected_start_time: str | None = None,
+) -> bool:
     """Terminate ``pid`` after verifying it is a mux-daemon bound to ``root``.
 
     This is the ONE legitimate PID-kill fallback this module uses: the
@@ -433,9 +440,16 @@ def _terminate_mux_daemon_pid(pid: int, *, root: Path) -> bool:
     if pid not in _iter_mux_daemon_pids() or not _pid_matches_root(pid, root=root):
         return False
     start_time = diagnostics.process_start_time(pid)
-    if start_time is None:
+    if start_time is None or (
+        expected_start_time is not None and start_time != expected_start_time
+    ):
         return False
-    return bool(diagnostics.terminate_pid_if_identity(pid, start_time).get("killed"))
+    if expected_start_time is None:
+        return bool(diagnostics.terminate_pid_if_identity(pid, start_time).get("killed"))
+    result = diagnostics.terminate_pid_if_identity(pid, expected_start_time, exit_timeout=5.0)
+    return all(
+        result.get(key) is True for key in ("killed", "identity_verified", "exit_confirmed")
+    )
 
 
 def _reap_abandoned_passive(root: Path, record: dict | None) -> dict:
@@ -445,7 +459,9 @@ def _reap_abandoned_passive(root: Path, record: dict | None) -> dict:
     return breadcrumb.reap_abandoned_passive(
         routing_dir(root),
         pid_alive=lambda pid: pid in _iter_mux_daemon_pids(),
-        terminate=lambda pid: _terminate_mux_daemon_pid(pid, root=root),
+        terminate=lambda pid: _terminate_mux_daemon_pid(
+            pid, root=root, expected_start_time=(record or {}).get("new_process_start_time"),
+        ),
         active_pid=int(active_pid) if active_pid else None,
         record=record,
         grace_seconds=0.0,
@@ -574,14 +590,18 @@ def _already_at_version(route: routing.Endpoint | None, version: str, *, root: P
 
 
 def _stale_cutover_in_progress(root: Path) -> bool:
-    """True if the durable breadcrumb marks an aborted prior cutover.
+    """True if recovery custody needs locked validation before any fast path.
 
     Only used to gate the *lock-free* pre-check below: it cannot safely run
     recovery itself (no lock held), so while a cutover looks aborted it must
     fall through to the locked path, where recovery always runs before any
     no-op decision is made.
     """
-    return breadcrumb.is_stale(breadcrumb.read_breadcrumb(routing_dir(root)))
+    record = breadcrumb.read_breadcrumb(routing_dir(root))
+    return (
+        breadcrumb.recovery_refusal(routing_dir(root), record) is not None
+        or breadcrumb.is_stale(record)
+    )
 
 
 def activate_after_update(
@@ -616,6 +636,13 @@ def activate_after_update(
 
     lease = _acquire_cutover_lock(resolved_root)
     try:
+        pre_recovery = breadcrumb.read_breadcrumb(routing_dir(resolved_root))
+        refusal = breadcrumb.recovery_refusal(routing_dir(resolved_root), pre_recovery)
+        if refusal is not None:
+            summary.update(
+                action="refused", reason=refusal, result={"ok": False, "error": refusal},
+            )
+            return summary
         load_or_create_control_token(resolved_root)
         lock_data = mux_daemon.read_lock_data(mux_daemon.lock_path(resolved_root))
         route = routed_endpoint(resolved_root)
@@ -635,13 +662,20 @@ def activate_after_update(
         # right below -- so a crashed prior cutover's stranded old daemon or
         # abandoned passive is never masked by an early "already active"
         # return.
-        pre_recovery = breadcrumb.read_breadcrumb(routing_dir(resolved_root))
         summary["recovery"] = breadcrumb.recover_stale_cutover(
             routing_dir(resolved_root),
             lambda base_url: _make_client(base_url, root=resolved_root),
             health_check=lambda host, port: _health_check(host, port, root=resolved_root),
         )
+        if summary["recovery"].get("refused"):
+            reason = breadcrumb.refusal_reason(summary["recovery"])
+            summary.update(action="refused", reason=reason, result={"ok": False, "error": reason})
+            return summary
         summary["passive_reap"] = _reap_abandoned_passive(resolved_root, pre_recovery)
+        if summary["passive_reap"].get("refused"):
+            reason = breadcrumb.refusal_reason(summary["passive_reap"])
+            summary.update(action="refused", reason=reason, result={"ok": False, "error": reason})
+            return summary
 
         # Re-check now, under the lock and after recovery/reap: another
         # caller may have already cut over to this exact version while we

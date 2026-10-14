@@ -2283,26 +2283,19 @@ def test_spawn_helper_degrades_gracefully(monkeypatch, capsys):
     assert "t1" in err
 
 
-def test_do_spawn_forwards_resume_worktree_for_reused_allocation(monkeypatch):
-    """The one-shot ``create --spawn`` path must apply the same reused/
-    retired-conversation decision as the supervisor's headless factory
-    (``spawn_factories.resume_worktree_eligible``) -- otherwise this entry
-    point still reuses the directory while calling plain ``create`` when
-    the carried handle is missing, the exact history-loss path strict
-    resume exists to close."""
+def test_do_spawn_forwards_retained_facts_to_ordinary_bridge(monkeypatch):
+    """One-shot startup shares the ordinary reservation-bound startup helper."""
     import argparse
 
-    from agent_dispatch import __main__, session_acquisition
+    from agent_dispatch import __main__, ordinary_bridge
 
     captured = {}
 
     def fake_spawn_or_resume_worker(task, **kwargs):
         captured.update(task)
-        import subprocess
+        return {"mode": "acp", "session": "local-body:sid", "native_session_id": "native", "worktree": "wt-1"}
 
-        return subprocess.CompletedProcess([], 0, stdout='{"mode":"acp","session_id":"sid","native_session_id":"native","worktree_id":"wt-1"}', stderr="")
-
-    monkeypatch.setattr(session_acquisition, "acquire", fake_spawn_or_resume_worker)
+    monkeypatch.setattr(ordinary_bridge, "start", fake_spawn_or_resume_worker)
     args = argparse.Namespace(
         spawn_agent="task-worker", run_async=False, url=None, spawn_backend="bridge",
     )
@@ -2318,25 +2311,19 @@ def test_do_spawn_forwards_resume_worktree_for_reused_allocation(monkeypatch):
     assert captured["spawn_conversation_retired"] is False
 
 
-def test_do_spawn_withholds_resume_worktree_for_retired_conversation(monkeypatch):
-    """The mirror case: a reused allocation whose carried conversation was
-    deliberately retired (an operator rearm) must NOT pass
-    ``resume_worktree=True`` -- that fallback would resurrect the retired
-    session via the worktree directory's own latest session, bypassing the
-    already-correctly-dropped ``spawn_session_handle``."""
+def test_do_spawn_conveys_retirement_to_ordinary_bridge(monkeypatch):
+    """Retirement facts remain available to the reservation-bound helper."""
     import argparse
 
-    from agent_dispatch import __main__, session_acquisition
+    from agent_dispatch import __main__, ordinary_bridge
 
     captured = {}
 
     def fake_spawn_or_resume_worker(task, **kwargs):
         captured.update(task)
-        import subprocess
+        return {"mode": "acp", "session": "local-body:sid", "native_session_id": "native", "worktree": "wt-1"}
 
-        return subprocess.CompletedProcess([], 0, stdout='{"mode":"acp","session_id":"sid","native_session_id":"native","worktree_id":"wt-1"}', stderr="")
-
-    monkeypatch.setattr(session_acquisition, "acquire", fake_spawn_or_resume_worker)
+    monkeypatch.setattr(ordinary_bridge, "start", fake_spawn_or_resume_worker)
     args = argparse.Namespace(
         spawn_agent="task-worker", run_async=False, url=None, spawn_backend="bridge",
     )
@@ -2832,7 +2819,8 @@ def test_inbox_scopes_cross_lane_to_this_machine(monkeypatch, capsys):
     assert rc == 0
 
     # Cross-lane query: repo is None (all lanes), status defaulted to proposed.
-    assert fake.calls == [{"repo": None, "status": "proposed", "label": None, "limit": 200}]
+    assert fake.calls == [{"repo": None, "status": "proposed", "label": None, "limit": 200,
+                           "category": "work"}]
 
     emitted = json.loads(capsys.readouterr().out)
     ids = {t["id"] for t in emitted}
@@ -2883,6 +2871,7 @@ def test_inbox_awaiting_steer_surfaces_proposed_plus_awaiting(monkeypatch, capsy
             "status": "proposed,claimed,started,suspended",
             "label": None,
             "limit": 200,
+            "category": "work",
         }
     ]
     emitted = json.loads(capsys.readouterr().out)
@@ -4950,7 +4939,7 @@ class TestInboxBoard:
             .read_text(encoding="utf-8")
         )
         assert manifest["list"] == [
-            "agent-dispatch-board", "--machine", "{machine}"
+            "agent-dispatch-board", "--machine", "{machine}", "--category", "work"
         ]
         assert manifest["entry"]["group"] == "group"
         assert manifest["entry"]["badges"] == ["activity", "labels"]

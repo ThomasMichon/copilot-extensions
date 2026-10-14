@@ -15,6 +15,84 @@ from machine_transport.registry import (
 from agent_worktrees import claims_cli, config as cfg, execution_spaces, tracking
 
 
+@pytest.mark.parametrize("platform,key", [("windows", "workstation"), ("wsl", "workstation-wsl")])
+def test_legacy_roster_projects_local_detection_and_live_registration_machine(
+    platform, key, tmp_path, monkeypatch, capsys,
+):
+    from agent_worktrees import context_cli, repos
+
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    (anchor / "machines.yaml").write_text(
+        "machines:\n  workstation:\n    hostname: real-host\n    ssh:\n"
+        "      environments:\n"
+        "        - {name: windows, alias: workstation-win, shell: pwsh}\n"
+        "        - {name: wsl, alias: workstation-ubuntu, shell: bash}\n",
+        encoding="utf-8",
+    )
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump({
+        "repo_name": "project", "machine": "workstation", "platform": platform,
+        "repos": {"project": {"anchor": str(anchor), "worktree_root": str(tmp_path / "trees")}},
+    }), encoding="utf-8")
+    monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "missing.yaml")
+    monkeypatch.setattr(repos, "read_registry", lambda: repos.ReposRegistry())
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    monkeypatch.setattr("socket.gethostname", lambda: "real-host")
+    config = cfg.load_config(path, project="project", include_control_plane_related_pr=False)
+    assert config.machine == key
+    assert cfg.detect_machine(anchor) == key
+    execution_spaces.require_current_execution_space(config)
+    entries = cfg.load_machines_yaml(anchor)
+    assert set(entries) == {"workstation", "workstation-wsl"}
+    assert entries["workstation-wsl"].physical_host == "workstation"
+    monkeypatch.setattr(cfg, "load_config", lambda **kwargs: config)
+    assert context_cli.cmd_get(SimpleNamespace(key="machine")) == 0
+    assert capsys.readouterr().out.strip() == key
+
+
+def test_local_wsl_identity_does_not_require_a_ready_ssh_alias(tmp_path, monkeypatch):
+    (tmp_path / "machines.yaml").write_text(
+        "machines:\n  desk:\n    ssh:\n      environments:\n"
+        "        - {name: windows, alias: desk-win}\n"
+        "        - {name: wsl}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr("socket.gethostname", lambda: "desk")
+    entries = cfg.load_machines_yaml(tmp_path)
+    assert entries["desk-wsl"].ssh_environments == []
+    assert entries["desk-wsl"].execution_platform == "wsl"
+    assert cfg.detect_machine(tmp_path) == "desk-wsl"
+
+
+def test_projecting_remote_wsl_does_not_reclassify_a_native_legacy_owner(tmp_path, monkeypatch):
+    (tmp_path / "machines.yaml").write_text(
+        "machines:\n  laptop:\n    hostname: local-host\n"
+        "    ssh:\n      environments: [{name: windows, alias: laptop-ssh}]\n"
+        "  desk:\n    ssh:\n      environments:\n"
+        "        - {name: windows, alias: desk-win}\n"
+        "        - {name: wsl, alias: desk-ubuntu}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    monkeypatch.setattr("socket.gethostname", lambda: "local-host")
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="laptop", platform="windows", repo_name="project",
+        repos={"project": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"))},
+    )
+    assert cfg.detect_machine(tmp_path) == "laptop"
+    execution_spaces.require_current_execution_space(config)
+    execution_spaces.require_record_mutation(
+        SimpleNamespace(machine="laptop", worktree_id="legacy", owner_ref=None), config,
+    )
+    with pytest.raises(execution_spaces.ExecutionSpaceError):
+        execution_spaces.require_record_mutation(
+            SimpleNamespace(machine="desk-wsl", worktree_id="remote", platform="wsl", owner_ref=None),
+            config,
+        )
+
+
 def test_distinct_registered_spaces_are_not_local_through_shared_hostname():
     entries = {
         "workstation-windows": MachineEntry(
@@ -36,6 +114,37 @@ def test_distinct_registered_spaces_are_not_local_through_shared_hostname():
     )
 
 
+def test_execution_space_registry_reuses_resolved_overlay_config(tmp_path, monkeypatch):
+    registry_path = tmp_path / "overlay-machines.yaml"
+    registry_path.write_text(
+        "machines:\n  workstation-windows:\n"
+        "    execution_platform: windows\n    physical_host: workstation\n",
+        encoding="utf-8",
+    )
+    config = cfg.Config(
+        machine="workstation-windows", platform="windows", repo_name="project",
+        srcroot=str(tmp_path), repos={"project": cfg.RepoConfig(
+            anchor=str(tmp_path / "anchor"), worktree_root=str(tmp_path / "children"),
+        )},
+    )
+    calls = []
+
+    def overlay_path(anchor, *, config=None):
+        calls.append((anchor, config))
+        return registry_path
+
+    def unexpected_config_reload(*_args, **_kwargs):
+        raise AssertionError("execution-space registry must reuse resolved configuration")
+
+    monkeypatch.setattr(cfg, "machines_yaml_path", overlay_path)
+    monkeypatch.setattr(cfg, "load_config", unexpected_config_reload)
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    execution_spaces.require_current_execution_space(config)
+    assert calls
+    assert all(anchor == config.default_repo.anchor and supplied is config
+               for anchor, supplied in calls)
+
+
 @pytest.fixture
 def scoped_config(tmp_path, monkeypatch):
     entries = {
@@ -47,7 +156,7 @@ def scoped_config(tmp_path, monkeypatch):
             ("workstation-windows", "windows"), ("workstation-wsl", "wsl"),
         )
     }
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: entries)
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: entries)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     config = cfg.Config(
         machine="workstation-windows", platform="windows", repo_name="project",
@@ -55,7 +164,7 @@ def scoped_config(tmp_path, monkeypatch):
             anchor=str(tmp_path), worktree_root=str(tmp_path / "children"),
         )},
     )
-    monkeypatch.setattr(cfg, "load_project_config", lambda project: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda project, **kwargs: config)
     return config
 
 
@@ -95,6 +204,21 @@ def test_true_same_registered_space_resolves_its_local_ledger(scoped_config, tmp
     assert path == tmp_path / "project" / "worktrees" / "wt-parent.yaml"
     assert worktree_id == "wt-parent"
     assert error is None
+
+
+@pytest.mark.parametrize("key", ["machine", "owner-ref"])
+@pytest.mark.parametrize("machine", ["workstation", "workstation-wsl"])
+def test_identity_probe_never_advertises_an_invalid_registered_source(
+    key, machine, scoped_config, monkeypatch, capsys,
+):
+    from agent_worktrees import context_cli
+
+    config = replace(scoped_config, machine=machine)
+    monkeypatch.setattr(cfg, "load_config", lambda **kwargs: config)
+    assert context_cli.cmd_get(SimpleNamespace(key=key)) == 1
+    error = capsys.readouterr().out.strip()
+    assert "execution" in error
+    assert error != machine
 
 
 @pytest.mark.parametrize("platform", ["windows", "wsl"])
@@ -225,7 +349,8 @@ def test_project_record_mutation_holds_a_lock_around_active_project_mutation(
 
     from agent_worktrees import config as _cfg
 
-    def fake_load_project_config(name, **_kwargs):
+    def fake_load_project_config(name, *, include_control_plane_related_pr):
+        assert include_control_plane_related_pr is False
         time.sleep(0.1)
         return _cfg.Config(
             machine="m", platform="wsl", repo_name=name,
@@ -292,7 +417,11 @@ def test_finalize_authority_fenced_write_catches_a_record_gone_foreign(
 def test_handoff_equal_physical_labels_do_not_bypass_space_selection(scoped_config, monkeypatch):
     from agent_worktrees import claim_handoff_accept_support
 
-    monkeypatch.setattr(cfg, "load_config", lambda: scoped_config)
+    def fake_load_config(*, include_control_plane_related_pr):
+        assert include_control_plane_related_pr is False
+        return scoped_config
+
+    monkeypatch.setattr(cfg, "load_config", fake_load_config)
     with pytest.raises(execution_spaces.ExecutionSpaceError):
         claim_handoff_accept_support.same_machine("workstation", "workstation")
     assert claim_handoff_accept_support.same_machine(
@@ -317,7 +446,7 @@ def test_legacy_multi_environment_registry_keeps_lifecycle_behavior(tmp_path, mo
             SSHEnvironment(name="wsl", alias="workstation-wsl"),
         ],
     )}
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: entries)
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: entries)
     config = SimpleNamespace(machine="workstation", default_repo=SimpleNamespace(anchor=tmp_path))
     record = SimpleNamespace(
         machine="workstation", worktree_id="legacy", owner_ref="workstation/project/parent",
@@ -479,7 +608,7 @@ def test_cleanup_malformed_registry_parser_is_structured_refusal(tmp_path, monke
         "    ssh:\n      environments: 42\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor: parse_machines_yaml_file(path))
+    monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: parse_machines_yaml_file(path))
     with pytest.raises(execution_spaces.ExecutionSpaceError, match="registry is invalid") as result:
         execution_spaces.require_cleanup_identity(SimpleNamespace(), tmp_path)
     assert isinstance(result.value.__cause__, TypeError)
@@ -532,7 +661,12 @@ def test_handoff_rejects_transport_alias_authority(scoped_config, monkeypatch):
     entries["workstation-windows"] = replace(
         entries["workstation-windows"], alias="windows-ssh",
     )
-    monkeypatch.setattr(cfg, "load_config", lambda: scoped_config)
+
+    def fake_load_config(*, include_control_plane_related_pr):
+        assert include_control_plane_related_pr is False
+        return scoped_config
+
+    monkeypatch.setattr(cfg, "load_config", fake_load_config)
     with pytest.raises(execution_spaces.ExecutionSpaceError, match="registered|explicit"):
         claim_handoff_accept_support.same_machine("windows-ssh", "windows-ssh")
 
@@ -656,7 +790,7 @@ def test_source_accept_rejects_foreign_record_before_registry_transition(
 
 
 def test_project_authority_failure_is_an_explicit_rejection(scoped_config, monkeypatch):
-    def unavailable(project):
+    def unavailable(project, **kwargs):
         raise ValueError("project is not registered")
 
     monkeypatch.setattr(cfg, "load_project_config", unavailable)
@@ -672,7 +806,7 @@ def test_project_authority_rejects_unrelated_sole_repo(scoped, tmp_path, monkeyp
         repo_name="missing", repos={"unrelated": unrelated},
     )
     assert config.default_repo is unrelated
-    monkeypatch.setattr(cfg, "load_project_config", lambda project: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda project, **kwargs: config)
     entries = {"workstation-windows": MachineEntry(
         key="workstation-windows", display_name="Windows",
         execution_platform="windows" if scoped else "",
@@ -699,10 +833,10 @@ def test_project_authority_uses_requested_repo_anchor(scoped_config, tmp_path, m
         anchor=unrelated_anchor, worktree_root=str(tmp_path / "other-children"),
     )
     scoped_config = replace(scoped_config, repo_name="unrelated")
-    monkeypatch.setattr(cfg, "load_project_config", lambda project: scoped_config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda project, **kwargs: scoped_config)
     anchors = []
 
-    def registry(anchor):
+    def registry(anchor, **_kwargs):
         anchors.append(anchor)
         return scoped_entries if anchor == requested_anchor else {}
 

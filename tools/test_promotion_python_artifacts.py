@@ -8,6 +8,7 @@ import io
 import inspect
 import json
 import os
+import runpy
 import shutil
 import stat
 import subprocess
@@ -654,13 +655,20 @@ def test_signer_requires_configured_policy_and_one_shared_lock(tmp_path, case):
             artifacts.validate_artifacts(directory, **kwargs)
 
 
-def _fake_builder(repo: Path, monkeypatch) -> None:
+def _fake_builder(repo: Path, monkeypatch, *, public: bool = False) -> None:
     project = repo / "plugins" / "demo-plugin" / "pyproject.toml"
     project.write_text(_STATIC_BUILD + '[project]\nname = "demo"\nversion = "0.1.0-dev1"\n', encoding="utf-8")
     package = project.parent / "src" / "demo"
     package.mkdir(parents=True, exist_ok=True)
     (package / "__init__.py").write_bytes(b"VALUE = 'first-party fixture'\n")
     template = _manifest(repo / "fixture-wheels")
+    if public:
+        packages = template["build_toolchain"]["packages"]
+        _complete_manifest(template, toolchain=builder.ToolchainLock(Path("."), packages, provenance={
+            "source_policy": "seasoned-public", "index": "https://pypi.org/simple",
+            "min_age_days": 7, "packages": packages,
+            "file_hashes": {name: ["a" * 64] for name in packages}, "python": "/python",
+        }))
     shutil.rmtree(repo / "fixture-wheels")
     (repo / "tools" / "build_python_artifacts.py").write_text(
         "TEMPLATE = " + repr(template) + "\n" + inspect.getsource(_wheel_bytes) + "\n"
@@ -763,6 +771,8 @@ def test_real_export_subprocess_uses_bumped_candidate_without_polluting_it(repo,
     assert [entry["plugin"] for entry in index["artifacts"]] == ["demo-plugin", "other-plugin"]
     assert "backend-residue.txt" not in _git(["ls-tree", "-r", "--name-only", prepared["commit"]], repo)
     assert _git(["tag", "--points-at", prepared["commit"]], repo) == ""
+    assert prepared["tag"] is None
+    assert prepared["tag_stem"].startswith(f"{promotion.PROMOTION_TAG_PREFIX}-")
     assert len(_git(["worktree", "list"], repo).splitlines()) == 1
     promoted = promotion.promote(
         repo=repo, dev_ref="dev", main_ref="main", python_artifacts_dir=directory,
@@ -770,6 +780,51 @@ def test_real_export_subprocess_uses_bumped_candidate_without_polluting_it(repo,
     assert promoted["promoted"]
     assert prepared["bumps"] == promoted["bumps"]
     assert promoted["tag"] in _git(["tag", "--points-at", promoted["commit"]], repo).splitlines()
+
+
+@pytest.mark.parametrize("suffix", ["ps1", "cmd"])
+@pytest.mark.parametrize("eol", ["crlf", "lf"])
+@pytest.mark.parametrize("entrypoint", ["cli", "workflow", "promote"])
+def test_candidate_artifact_validation_checks_out_composed_attributes(
+    repo, tmp_path, monkeypatch, suffix, eol, entrypoint,
+):
+    _git(["checkout", "-q", "dev"], repo)
+    _fake_builder(repo, monkeypatch, public=entrypoint == "workflow")
+    (repo / ".gitattributes").write_text(f"*.{suffix} text eol={eol}\n", encoding="utf-8")
+    relative = Path("plugins/demo-plugin") / f"generated.{suffix}"
+    payload = b"first line\nsecond line\n"
+    (repo / relative).write_bytes(payload)
+    dev = _commit(repo, "generated payload with checkout attributes")
+    main = _git(["rev-parse", "main"], repo)
+    consume = promotion.consume_pending_changes
+
+    def materialize(scratch, **kwargs):
+        summary = consume(scratch, **kwargs)
+        (scratch / relative).write_bytes(payload)
+        return summary
+
+    monkeypatch.setattr(promotion, "consume_pending_changes", materialize)
+    directory = tmp_path / "export"
+    promotion.promote(
+        repo=repo, dev_ref="dev", main_ref="main", build_python_artifacts_dir=directory,
+        toolchain_source="seasoned-public" if entrypoint == "workflow" else "governed",
+        toolchain_min_age_days=7 if entrypoint == "workflow" else None,
+    )
+    if entrypoint == "workflow":
+        _run_workflow_validator(repo, directory, dev, main, monkeypatch)
+        index = json.loads((directory / artifacts.INDEX_NAME).read_text())
+    elif entrypoint == "promote":
+        report = promotion.promote(
+            repo=repo, dev_ref="dev", main_ref="main", python_artifacts_dir=directory,
+        )
+        assert report["promoted"]
+        index = json.loads((directory / artifacts.INDEX_NAME).read_text())
+    else:
+        index = artifacts.validate_candidate_artifacts(
+            directory, repo=repo, dev_head=dev, main_before=main,
+        )
+    assert index["dev_head"] == dev
+    assert len(_git(["worktree", "list"], repo).splitlines()) == 1
 
 
 def test_missing_artifacts_fail_before_candidate_push(repo, tmp_path, monkeypatch):
@@ -791,6 +846,35 @@ def test_missing_artifacts_fail_before_candidate_push(repo, tmp_path, monkeypatc
             candidate_branch="release/test", python_artifacts_dir=tmp_path / "missing",
         )
     assert not pushes
+
+
+def test_promoter_script_reports_canonical_checkout_failure(repo, tmp_path, monkeypatch, capsys):
+    _git(["checkout", "-q", "dev"], repo)
+    _fake_builder(repo, monkeypatch)
+    _commit(repo, "candidate")
+    directory = tmp_path / "export"
+    promotion.promote(
+        repo=repo, dev_ref="dev", main_ref="main", build_python_artifacts_dir=directory,
+    )
+    run = subprocess.run
+
+    def fail_checkout(argv, *args, **kwargs):
+        if argv[0] == "git" and "checkout-index" in argv:
+            return subprocess.CompletedProcess(argv, 128, "", "forced canonical checkout failure")
+        return run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", fail_checkout)
+    monkeypatch.setattr(sys, "argv", [
+        str(promotion.__file__), "--repo", str(repo), "--dev-ref", "dev",
+        "--main-ref", "main", "--python-artifacts-dir", str(directory),
+    ])
+    with pytest.raises(SystemExit) as exited:
+        runpy.run_path(str(promotion.__file__), run_name="__main__")
+    assert exited.value.code == 1
+    captured = capsys.readouterr()
+    assert "forced canonical checkout failure" in captured.err
+    assert "Traceback" not in captured.out + captured.err
+    assert len(_git(["worktree", "list"], repo).splitlines()) == 1
 
 
 def test_noop_does_not_build_or_require_artifacts(repo, tmp_path):
@@ -1154,6 +1238,85 @@ def test_invalid_candidate_identity_fails_before_git_or_source_access(tmp_path):
         )
 
 
+def _run_workflow_validator(repo, directory, dev, main, monkeypatch):
+    root = Path(__file__).resolve().parent.parent
+    workflow = yaml.safe_load((root / ".github/workflows/validate-and-promote.yml").read_text())
+    validator = next(
+        step for step in workflow["jobs"]["python-artifacts"]["steps"]
+        if step.get("name") == "Validate untrusted bundles using only trusted default-branch code"
+    )
+    script = validator["run"].split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+    monkeypatch.setattr(sys, "argv", ["-", dev, main, str(directory)])
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.chdir(repo)
+    exec(compile(script, "<trusted-workflow-validator>", "exec"), {})
+
+
+def test_workflow_validator_rejects_invalid_identity_before_git(tmp_path, monkeypatch):
+    with pytest.raises(artifacts.PromotionArtifactError, match="candidate commit identity"):
+        _run_workflow_validator(tmp_path, tmp_path, "--untrusted-option", MAIN, monkeypatch)
+
+
+def test_workflow_validator_rejects_changed_bundle(repo, tmp_path, monkeypatch):
+    _git(["checkout", "-q", "dev"], repo)
+    _fake_builder(repo, monkeypatch, public=True)
+    dev = _commit(repo, "candidate")
+    main = _git(["rev-parse", "main"], repo)
+    directory = tmp_path / "export"
+    promotion.promote(
+        repo=repo, dev_ref="dev", main_ref="main", build_python_artifacts_dir=directory,
+        toolchain_source="seasoned-public", toolchain_min_age_days=7,
+    )
+    index = json.loads((directory / artifacts.INDEX_NAME).read_text())
+    (directory / index["artifacts"][0]["filename"]).write_bytes(b"changed")
+    with pytest.raises(artifacts.PromotionArtifactError, match="artifact digest mismatch"):
+        _run_workflow_validator(repo, directory, dev, main, monkeypatch)
+    assert len(_git(["worktree", "list"], repo).splitlines()) == 1
+
+
+@pytest.mark.parametrize("entrypoint", ["cli", "workflow", "promote"])
+def test_candidate_artifact_validation_resolves_temporary_root_aliases(
+    repo, tmp_path, monkeypatch, entrypoint,
+):
+    _git(["checkout", "-q", "dev"], repo)
+    _fake_builder(repo, monkeypatch, public=entrypoint == "workflow")
+    dev = _commit(repo, "candidate")
+    main = _git(["rev-parse", "main"], repo)
+    directory = tmp_path / "export"
+    promotion.promote(
+        repo=repo, dev_ref="dev", main_ref="main", build_python_artifacts_dir=directory,
+        toolchain_source="seasoned-public" if entrypoint == "workflow" else "governed",
+        toolchain_min_age_days=7 if entrypoint == "workflow" else None,
+    )
+    temporary_directory = artifacts.tempfile.TemporaryDirectory
+
+    class AliasedTemporaryDirectory:
+        def __init__(self, **kwargs):
+            self.directory = temporary_directory(**kwargs)
+
+        def __enter__(self):
+            root = Path(self.directory.__enter__())
+            (root / "alias-child").mkdir()
+            return str(root / "alias-child" / "..")
+
+        def __exit__(self, *args):
+            return self.directory.__exit__(*args)
+
+    monkeypatch.setattr(artifacts.tempfile, "TemporaryDirectory", AliasedTemporaryDirectory)
+    if entrypoint == "workflow":
+        _run_workflow_validator(repo, directory, dev, main, monkeypatch)
+    elif entrypoint == "promote":
+        report = promotion.promote(
+            repo=repo, dev_ref="dev", main_ref="main", python_artifacts_dir=directory,
+        )
+        assert report["promoted"]
+    else:
+        artifacts.validate_candidate_artifacts(
+            directory, repo=repo, dev_head=dev, main_before=main,
+        )
+    assert len(_git(["worktree", "list"], repo).splitlines()) == 1
+
+
 def test_workflow_separates_candidate_execution_signing_and_release_authority():
     root = Path(__file__).resolve().parent.parent
     workflow = yaml.safe_load((root / ".github" / "workflows" / "validate-and-promote.yml").read_text())
@@ -1174,8 +1337,13 @@ def test_workflow_separates_candidate_execution_signing_and_release_authority():
     checkout = next(step for step in steps if step.get("uses") == "actions/checkout@v4")
     assert checkout["with"]["ref"] == "${{ github.sha }}"
     assert checkout["with"]["persist-credentials"] is False
-    validator = next(step for step in steps if "promotion_python_artifacts.py validate" in step.get("run", ""))
-    assert "promotion_python_artifacts.py validate" in validator["run"]
+    validator = next(
+        step for step in steps
+        if step.get("name") == "Validate untrusted bundles using only trusted default-branch code"
+    )
+    assert "artifacts.validate_artifacts(" in validator["run"]
+    assert '"checkout-index", "--all"' in validator["run"]
+    assert 'source_policy="seasoned-public", min_age_days=7' in validator["run"]
     assert "promote_release.py" not in json.dumps(signer)
     assert "build_python_artifacts.py" not in json.dumps(signer)
     attestation = next(step for step in steps if "attest-build-provenance" in step.get("uses", ""))

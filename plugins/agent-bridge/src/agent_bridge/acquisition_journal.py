@@ -37,8 +37,11 @@ class AcquisitionClaim:
 
 
 def _digest(request: AcquisitionRequest) -> str:
+    facts = request.model_dump(mode="json")
+    if request.version == 1 and request.worktree_path is None:
+        facts.pop("worktree_path")
     payload = json.dumps(
-        request.model_dump(mode="json"), sort_keys=True, separators=(",", ":"),
+        facts, sort_keys=True, separators=(",", ":"),
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -153,3 +156,38 @@ class AcquisitionJournal:
         )
         if updated.rowcount != 1:
             raise AcquisitionRefused("fence_lost", "acquisition refusal did not own the fence")
+
+    def refused_before_effect(self, request: AcquisitionRequest) -> bool:
+        """Only an exact refused/prepared receipt proves this request never launched."""
+        if request.prior_session_id or request.prior_native_session_id:
+            return False
+        rows = self.db.execute_read(
+            "SELECT a.*, e.stage, e.data_json FROM acquisition_attempts a "
+            "JOIN acquisition_effects e USING(delivery_id) WHERE a.delivery_id=?",
+            (request.delivery_id,),
+        )
+        if not rows:
+            return False
+        row = rows[0]
+        if (
+            row["state"] != "refused" or row["stage"] != "prepared"
+            or row["request_digest"] != _digest(request) or row["result_json"]
+            or row["refusal_code"] not in {
+                "worktree_unknown", "workspace_identity_conflict", "worktree_terminal",
+                "cli_capability_missing", "cli_options_unsupported",
+                "target_unavailable", "venue_unsupported",
+            }
+        ):
+            return False
+        if self.db.execute_read(
+            "SELECT 1 FROM acquisition_attempts a LEFT JOIN acquisition_effects e USING(delivery_id) "
+            "WHERE a.worktree_id=? AND a.delivery_id<>? "
+            "AND (a.state<>'refused' OR COALESCE(e.stage, '')<>'prepared') LIMIT 1",
+            (request.worktree_id, request.delivery_id),
+        ):
+            return False
+        try:
+            recorded = AcquisitionRequest.model_validate(json.loads(row["data_json"])["_request"])
+        except (ValueError, TypeError, KeyError):
+            return False
+        return _digest(recorded) == _digest(request)

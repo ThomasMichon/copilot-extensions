@@ -22,9 +22,11 @@ MODEL = Path(str(resources.files("agent_bridge").joinpath("ui_static", "model.js
 
 
 def _run(tmp_path: Path, body: str) -> object:
+    model = tmp_path / "model.mjs"
+    model.write_bytes(MODEL.read_bytes())
     script = tmp_path / "t.mjs"
     script.write_text(
-        f"import * as m from {json.dumps(MODEL.resolve().as_uri())};\n"
+        f"import * as m from {json.dumps(model.resolve().as_uri())};\n"
         f"const out = await (async () => {{ {body} }})();\n"
         "console.log(JSON.stringify(out));\n",
         encoding="utf-8",

@@ -111,3 +111,13 @@ def test_degrades_when_mux_raises():
     assert v.source == "lock" and v.bare is True
     assert v.probes_ok is False  # the mux probe raised
     assert v.mux_probe_ok is False  # the mux probe itself is what raised here
+
+
+def test_verification_passes_only_the_authoritative_session_registry():
+    record = _rec()
+    record.sessions = [types.SimpleNamespace(session_id="registered-session")]
+    with patch("agent_worktrees.sessions.mux_status_many", return_value={}), \
+         patch("agent_worktrees.reclaim.resolve_bound_copilots", return_value=[]) as probe:
+        verdict = sessions.verify_worktree_active(record)
+    probe.assert_called_once_with(worktree_id="aaaa", session_ids=["registered-session"])
+    assert verdict.probes_ok

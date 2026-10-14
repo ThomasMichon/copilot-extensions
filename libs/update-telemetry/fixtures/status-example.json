@@ -1,0 +1,7 @@
+{"schema":"copilot-extensions.update-status","version":1,"updated_at":"2026-10-10T04:15:41Z",
+ "run":{"id":"20261010T041200Z-1234-abcd","owner":"harness:5678","outcome":"requires_restart","exit_code":0,"duration_ms":221400,
+  "phases":[{"phase":"runtime_reconcile","duration_ms":61000,"outcome":"verified_current"}]},
+ "restart_required":true,"last_failure":null,
+ "auth":{"report":[{"id":"github.com/<owner>","status":"ok","method":"as_configured"}],"fallback_used":[],"cleanup_offer":null},
+ "plugins":{"agent-bridge@copilot-extensions":{"required":true,"outcome":"verified_current","changed":true,
+  "runtime":{"active_version":"0.31.2-dev1","slot":{"version":"0.31.2-dev1","complete":true}},"live_generation":null,"cutover":null}}}

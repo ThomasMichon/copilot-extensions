@@ -1,9 +1,10 @@
 # fleet-manager
 
 Standalone fleet system home and thin CLI. **Current scope: offline configuration/
-capacity planning, explicit release-snapshot inspection and installed-client
-resource diagnostics.** No controller, provider invocation, credential
-lookup, managed install/update/uninstall, telemetry sink or resource mutation is delivered yet.
+capacity planning, explicit release-snapshot inspection, installed-client
+resource diagnostics and explicitly authenticated artifact staging.** No
+controller, provider invocation, credential lookup, managed install/update/uninstall,
+telemetry sink or managed-runtime/capacity mutation is delivered yet.
 Those remain the [canonical effort](../efforts/active/linux-role-fleet/README.md).
 
 ```text
@@ -75,8 +76,17 @@ enforced: plans allow 4 MiB, depth 15 and 513-object/collection items to
 accommodate preserved config plus joined recommendations and observations.
 Output hashing, saved-plan verification and CLI serialization use these output
 bounds and output-specific diagnostics, not the individual input limits.
-The package uses only the standard library and has no server,
-Docker, Copilot, marketplace or private-provider dependency.
+Default planning and inspection use only the standard library and have no
+server, Docker, Copilot, marketplace or private-provider dependency. The
+explicit `release-verification` extra adds maintained cryptographic support
+for the separate [pinned-key authentication API](docs/release-authentication.md);
+it does not select a trust policy, install a service or authorize activation.
+The [retained artifact-staging API](docs/artifact-staging.md) uses that explicit
+verification capability and the existing preflight to freeze selected bytes
+in a context-owned private spool. It does not execute artifacts or publish a
+runtime selector. Consumers obtain bounded immutable byte snapshots with current
+authentication, not reusable filesystem paths. Default planner/doctor commands
+do not stage anything.
 
 ## Thin client artifacts and local diagnostics
 
@@ -202,7 +212,10 @@ implement that authority or replace its acceptance gate.
 Vision reconciliation: closes the first contract portion of machine-fleet
 `unified-coordination-product` under [Fleet Control V2](../efforts/active/fleet-control-v2/README.md).
 Ordinary standalone client planning remains unchanged. Live lifecycle, signed
-release distribution and node/Gateway operation remain pending.
+release distribution and node/Gateway operation remain pending. The separate
+[release authentication API](docs/release-authentication.md) implements explicit
+pinned-key verification, not installation: default planning remains dependency-free,
+and GitHub-attestation selection explicitly refuses until its own verifier lands.
 
 ### Actual artifact integrity
 

@@ -11,7 +11,11 @@ import subprocess
 import sys
 import time
 import urllib.request
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from zdd.conditional import ConditionalCutover
 
 from .parity_harness import (
     CONTAINER_RECREATE_FAULT,
@@ -192,19 +196,44 @@ def _passive_daemon_stdio_kwargs() -> tuple[dict, list]:
     return kwargs, [log_out, log_err]
 
 
-def _cmd_deploy(args: argparse.Namespace) -> None:
+def _cmd_deploy(
+    args: argparse.Namespace, *, conditional: ConditionalCutover | None = None,
+    routing_dir: Path | None = None,
+) -> None:
+    from zdd import breadcrumb, routing
+    from zdd.cutover import CutoverOrchestrator
+
     from . import __version__
     from .client import BridgeClient
     from .config import config_dir, load_config, load_or_create_auth_token
     from .routing_state import active_route_is_forward
-    from zdd import breadcrumb, routing
-    from zdd.cutover import CutoverOrchestrator
 
     forwarded_skip = (
         "this machine reaches a host bridge through a forward (active.json); "
         "there is no local daemon to deploy"
     )
     core = _core()
+    if conditional is not None:
+        from zdd.conditional import run_conditional_cutover
+
+        if routing_dir is None:
+            raise ValueError("conditional deployment requires the observed routing directory")
+        if getattr(args, "force", False) or getattr(args, "recover", False):
+            raise ValueError("conditional deployment cannot force retirement or run legacy recovery")
+        result = run_conditional_cutover(
+            routing_dir, version=__version__, request=conditional,
+            health_timeout=args.health_timeout, drain_timeout=args.drain_timeout,
+            lock_timeout=getattr(args, "lock_timeout", None),
+            refuse_old=lambda active: forwarded_skip if active_route_is_forward(active) else None,
+        )
+        if getattr(args, "json", False):
+            core._json_out(result.to_dict())
+        else:
+            for step in result.steps:
+                print(f"  - {step}")
+            if not result.ok:
+                print(f"[FAIL] Conditional cutover refused or failed: {result.error}")
+        sys.exit(0 if result.ok else 1)
     if core._active_endpoint_is_forward() and not getattr(args, "recover", False):
         # The routed "old daemon" is the host's bridge, through the forward:
         # a cutover would take the route over, then drain and shut it down.
@@ -264,7 +293,21 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
 
     _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(config_dir())
     recovery = breadcrumb.recover_stale_cutover(config_dir(), make_client, health_check=health_check)
+    if recovery.get("refused"):
+        reason = breadcrumb.refusal_reason(recovery)
+        if getattr(args, "json", False):
+            core._json_out({"ok": False, "error": reason, "recovery": recovery})
+        else:
+            print(f"[FAIL] {reason}", file=sys.stderr)
+        sys.exit(1)
     passive_reap = core._reap_abandoned_passive(config_dir(), _pre_recovery_breadcrumb)
+    if passive_reap.get("refused"):
+        reason = breadcrumb.refusal_reason(passive_reap)
+        if getattr(args, "json", False):
+            core._json_out({"ok": False, "error": reason, "passive_reap": passive_reap})
+        else:
+            print(f"[FAIL] {reason}", file=sys.stderr)
+        sys.exit(1)
     if getattr(args, "recover", False):
         recovery["passive_reap"] = passive_reap
         if args.json:

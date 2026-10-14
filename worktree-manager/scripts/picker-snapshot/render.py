@@ -13,7 +13,8 @@ Also requires node + a Python env with textual/rich/pyyaml importable.
 
 Usage:
     python render.py out.png                 # picker home screen
-    python render.py out.png --modal cfg     # with the Configuration modal open
+    python render.py out.png --modal cfg     # Configuration backstage
+    python render.py docs --configuration-guide # complete illustrated walkthrough
     python render.py steer.png --modal steer # Markdown steering card
     python render.py verdict.png --modal steer-verdict
     python render.py reject.png --modal steer-reject
@@ -261,6 +262,9 @@ def main() -> int:
         help="open a native modal before capturing (composited app)")
     ap.add_argument("--zoom", default="3", help="rasterizer zoom (default 3)")
     ap.add_argument(
+        "--configuration-guide", action="store_true",
+        help="render all Configuration scenarios into the output directory")
+    ap.add_argument(
         "--card-json",
         help="card/task/task-list JSON to use with --modal steer")
     ap.add_argument(
@@ -269,9 +273,18 @@ def main() -> int:
     args = ap.parse_args()
 
     src = _demo_source()
+    if args.configuration_guide:
+        from configuration import SCENARIOS, capture_configuration
+        os.makedirs(args.out, exist_ok=True)
+        for scenario in SCENARIOS:
+            _rasterize(
+                capture_configuration(src, scenario),
+                os.path.join(args.out, f"{scenario}.png"), args.zoom,
+            )
+        return 0
     card = _load_card(args.card_json, args.task_id) if args.card_json else None
     if args.modal == "cfg":
-        svg = pcap.capture_modal(src, _open_cfg, title="Configuration menu")
+        svg = pcap.capture_modal(src, _open_cfg, title="Configuration backstage")
     elif args.modal == "clean":
         svg = pcap.capture_modal(src, _open_clean, title="Clean scope dialog")
     elif args.modal == "new":
@@ -299,19 +312,20 @@ def main() -> int:
     else:
         svg = pcap.capture(src, update_state="current")["svg"]
 
-    with tempfile.NamedTemporaryFile(
-            "w", suffix=".svg", delete=False, encoding="utf-8") as fh:
-        fh.write(svg)
-        svg_path = fh.name
-    try:
-        subprocess.run(
-            ["node", os.path.join(_HERE, "svg2png.mjs"), svg_path, args.out,
-             args.zoom],
-            check=True,
-        )
-    finally:
-        os.unlink(svg_path)
+    _rasterize(svg, args.out, args.zoom)
     return 0
+
+
+def _rasterize(svg, output, zoom):
+    with tempfile.TemporaryDirectory(prefix="picker-snapshot-") as directory:
+        svg_path = os.path.join(directory, "capture.svg")
+        with open(svg_path, "w", encoding="utf-8") as fh:
+            fh.write(svg)
+        subprocess.run(
+            ["node", os.path.join(_HERE, "svg2png.mjs"), svg_path, output, zoom],
+            check=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
 
 
 if __name__ == "__main__":

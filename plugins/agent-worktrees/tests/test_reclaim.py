@@ -176,6 +176,42 @@ def _mk_session(tmp_path, sid, cwd, pids):
 
 
 class TestResolveBoundCopilots:
+    def test_exact_registry_never_discovers_sibling_sessions(self, monkeypatch, tmp_path):
+        _mk_session(tmp_path, "registered", "/home/user", [7])
+        _mk_session(tmp_path, "unrelated", "/w/other", [8])
+        self._patch(
+            monkeypatch, tmp_path, alive={7, 8}, copilots={7, 8},
+            wt_map={}, table={7: {"ppid": 0, "name": "copilot"}},
+        )
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError("exact registered session lookup entered fleet discovery")
+
+        monkeypatch.setattr(type(tmp_path), "iterdir", forbidden)
+        monkeypatch.setattr(reclaim, "_resolve_worktree_id_for_cwd", forbidden)
+        monkeypatch.setattr(reclaim.tracking, "find_worktree_id_by_session", forbidden)
+        rows = reclaim.resolve_bound_copilots(
+            worktree_id="wtA", session_ids=["registered"],
+        )
+        assert [(row["session_id"], row["worktree_id"], row["homing"]) for row in rows] == [
+            ("registered", "wtA", "bare"),
+        ]
+
+    def test_empty_registry_skips_session_and_process_discovery(self, monkeypatch, tmp_path):
+        self._patch(monkeypatch, tmp_path, alive=set(), copilots=set(), wt_map={}, table={})
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError("empty registry attempted discovery")
+
+        monkeypatch.setattr(type(tmp_path), "iterdir", forbidden)
+        monkeypatch.setattr(reclaim.process_table_cache, "cached", forbidden)
+        assert reclaim.resolve_bound_copilots(worktree_id="wtA", session_ids=[]) == []
+
+    def test_exact_registry_rejects_path_escape(self, monkeypatch, tmp_path):
+        self._patch(monkeypatch, tmp_path, alive=set(), copilots=set(), wt_map={}, table={})
+        with pytest.raises(ValueError, match="Invalid registered session"):
+            reclaim.resolve_bound_copilots(worktree_id="wtA", session_ids=["../other"])
+
     def _patch(self, monkeypatch, tmp_path, *, alive, copilots, wt_map, table):
         monkeypatch.setattr(reclaim.sessions, "_session_state_dir", lambda: tmp_path)
         monkeypatch.setattr(reclaim.sessions, "_is_process_alive", lambda p: p in alive)
@@ -935,6 +971,24 @@ class TestEnsureSessionCopilotReaped:
 
 
 class TestIdentityBoundTermination:
+    @pytest.mark.parametrize("timeout", [0.0, 5.0])
+    def test_requested_exit_wait_uses_shared_native_handle(self, monkeypatch, timeout):
+        from zdd import diagnostics
+
+        calls = []
+
+        def native(pid, start, *, exit_timeout):
+            calls.append((pid, start, exit_timeout))
+            return {"killed": True, "identity_verified": True, "exit_confirmed": True}
+
+        monkeypatch.setattr(diagnostics, "terminate_pid_if_identity", native)
+        monkeypatch.setattr(
+            procs, "_terminate_posix_if_identity",
+            lambda *_: pytest.fail("legacy signal-only termination used for native exit wait"),
+        )
+        result = procs.terminate_pid_if_identity(202, "2020", exit_timeout=timeout)
+        assert calls == [(202, "2020", timeout)] and result["exit_confirmed"] is True
+
     def test_windows_uses_same_verified_handle_for_termination(
         self, monkeypatch
     ):

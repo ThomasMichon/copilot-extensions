@@ -17,6 +17,7 @@ class PickerScreenPivotsMixin:
         ``scan=False`` installs built-ins only (no plugin-dir I/O) so first
         paint is not blocked on the registry.
         """
+        selected_key = self._pivot_descriptor_key()
         if not scan:
             registered, descriptors, wt_actions = [], [
                 {"label": b, "kind": b.lower(), "pivot": None} for b in BUILTIN_PIVOTS
@@ -50,11 +51,13 @@ class PickerScreenPivotsMixin:
         # Tag each pivot with its placement (left cycle / config menu / hidden
         # anchor) so nav machinery can partition them without disturbing the
         # ``order_pivots`` weave that registered ``after`` hints rely on (#1426).
-        for d in self.pivots:
-            d["placement"] = PIVOT_PLACEMENT.get(d["kind"], "left")
-        self.htabs = [d["label"] for d in descriptors]
+        self._install_config_descriptors()
+        self.htabs = [d["label"] for d in self.pivots]
+        self._restore_pivot_descriptor(selected_key)
         if self.htab >= len(self.pivots):
             self.htab = 0
+        if self._kind() == "config_section" and getattr(self, "_nf_mounted", False):
+            self.call_after_refresh(self._load_current_config_section)
     @staticmethod
     def _scan_pivot_payload():
         """Filesystem pivot scan with no widget mutation (safe off the UI thread)."""
@@ -72,6 +75,7 @@ class PickerScreenPivotsMixin:
         except Exception:
             return None
     def _install_pivot_payload(self, payload):
+        selected_key = self._pivot_descriptor_key()
         if payload is None:
             self._load_pivots(scan=False)
             return
@@ -80,19 +84,65 @@ class PickerScreenPivotsMixin:
         self.pivots = descriptors
         self.wt_actions = wt_actions
         self.config_sections = config_sections
-        for d in self.pivots:
-            d["placement"] = PIVOT_PLACEMENT.get(d["kind"], "left")
-        self.htabs = [d["label"] for d in descriptors]
+        self._install_config_descriptors()
+        self.htabs = [d["label"] for d in self.pivots]
+        self._restore_pivot_descriptor(selected_key)
         if self.htab >= len(self.pivots):
             self.htab = 0
+        if self._kind() == "config_section" and getattr(self, "_nf_mounted", False):
+            self.call_after_refresh(self._load_current_config_section)
+    def _install_config_descriptors(self):
+        self._config_section_states = {}
+        for descriptor in self.pivots:
+            reg = descriptor.get("pivot")
+            descriptor["placement"] = (
+                reg.placement if reg is not None
+                else PIVOT_PLACEMENT.get(descriptor["kind"], "left")
+            )
+        for section in self.config_sections:
+            self.pivots.append({
+                "label": section.label, "kind": "config_section", "pivot": None,
+                "placement": "config", "section": section,
+            })
+    def _pivot_descriptor_key(self, index=None):
+        descriptors = getattr(self, "pivots", ())
+        index = getattr(self, "htab", 0) if index is None else index
+        if not 0 <= index < len(descriptors):
+            return None
+        descriptor = descriptors[index]
+        reg = descriptor.get("pivot")
+        section = descriptor.get("section")
+        return (
+            descriptor["kind"],
+            reg.name if reg is not None else (
+                (section.source, section.key) if section else descriptor["label"]
+            ),
+        )
+    def _restore_pivot_descriptor(self, key):
+        if key is None:
+            return
+        match = next(
+            (index for index in range(len(self.pivots))
+             if self._pivot_descriptor_key(index) == key), None,
+        )
+        if match is not None:
+            self.htab = match
+        else:
+            self.htab = next(
+                (index for index, descriptor in enumerate(self.pivots)
+                 if descriptor["kind"] == "profiles"), 0,
+            )
+            self.debug = f"Configuration/navigation target unavailable: {key[1]}"
     def _left_pivots(self):
         """Indices of pivots on the left cycle (◀▶ / [ ])."""
         return [i for i, d in enumerate(self.pivots)
                 if d.get("placement", "left") == "left"]
     def _config_pivots(self):
         """Indices of pivots hosted under the ⚙ Configuration menu (#1426)."""
-        return [i for i, d in enumerate(self.pivots)
-                if d.get("placement") == "config"]
+        return sorted(
+            (i for i, d in enumerate(self.pivots) if d.get("placement") == "config"),
+            key=lambda index: self.pivots[index]["kind"] != "profiles",
+        )
     def _kind(self, idx=None):
         """The current pivot's kind: 'worktrees' | 'maintenance' | 'profiles' |
         'registered'. Built-in dispatch keys off this, never a magic index."""

@@ -104,6 +104,9 @@ def test_conclude_disposable_worker_requests_exact_managed_removal(monkeypatch):
 
 def test_conclude_dispatch_attempt_requests_exact_managed_removal(monkeypatch):
     calls = []
+    monkeypatch.setattr(embody, "resolve_worktree", lambda *_a, **_k: {
+        "project": "widgets", "path": "/fixture/wt-review",
+    })
     monkeypatch.setattr(
         embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
     )
@@ -118,10 +121,13 @@ def test_conclude_dispatch_attempt_requests_exact_managed_removal(monkeypatch):
         "wt-review",
         "session-review",
         "dispatch-task:task-1:1",
+        project="widgets", worktree_path="/fixture/wt-review",
     )
 
     assert calls[0] == [
         "/usr/bin/agent-worktrees",
+        "--project",
+        "widgets",
         "conclude-disposable",
         "--worktree",
         "wt-review",
@@ -447,7 +453,7 @@ def test_create_worktree_returns_id_and_path(monkeypatch):
         captured["cmd"] = cmd
         return types.SimpleNamespace(
             returncode=0,
-            stdout='{"worktree": {"id": "wt-new", "path": "/tmp/wt-new"}}',
+            stdout='{"worktree": {"id": "wt-new", "path": "/tmp/wt-new", "repo": "widgets"}}',
             stderr="",
         )
 
@@ -466,7 +472,7 @@ def test_create_worktree_returns_id_and_path(monkeypatch):
         supervisor="supervisor-1",
     )
 
-    assert result == {"session": None, "worktree": "wt-new", "path": "/tmp/wt-new"}
+    assert result == {"session": None, "worktree": "wt-new", "path": "/tmp/wt-new", "project": "widgets"}
     assert captured["cmd"] == [
         "/usr/bin/agent-worktrees",
         "--project",
@@ -521,7 +527,8 @@ def test_create_worktree_binds_headless_agent_profile(monkeypatch):
     assert captured["cmd"][-2:] == ["--agent", "task-worker"]
 
 
-def test_prepare_reusable_worktree_replaces_confirmed_missing(monkeypatch):
+def test_prepare_reusable_worktree_preserves_confirmed_missing(monkeypatch):
+    from agent_dispatch.spawn_factories import SpawnPreparationRetained
     monkeypatch.setattr(
         embody,
         "resolve_worktree",
@@ -538,30 +545,21 @@ def test_prepare_reusable_worktree_replaces_confirmed_missing(monkeypatch):
         },
     )
 
-    prepared = embody.prepare_reusable_worktree(
-        {"id": "task-1", "repo": "example.com/acme/widgets"},
-        {
-            "key": "dispatch-task:task-1:1",
-            "attempt": 1,
-            "worktree": "wt-missing",
-        },
-        interface="acp",
-        driver="agent-dispatch",
-        supervisor="supervisor-1",
-    )
-
-    assert prepared == {
-        "worktree": "wt-fresh",
-        "path": "/tmp/wt-fresh",
-        "created": True,
-        "replaced": True,
-        "ownership": "created",
-    }
+    with pytest.raises(SpawnPreparationRetained, match="retained for repair"):
+        embody.prepare_reusable_worktree(
+            {"id": "task-1", "repo": "example.com/acme/widgets"},
+            {
+                "key": "dispatch-task:task-1:1", "attempt": 1, "worktree": "wt-missing",
+                "allocation_project": "widgets", "worktree_path": "/fixture/wt-missing",
+            },
+            interface="acp", driver="agent-dispatch", supervisor="supervisor-1",
+        )
 
 
 def test_prepare_reusable_worktree_holds_on_indeterminate_resolution(
     monkeypatch,
 ):
+    from agent_dispatch.spawn_factories import SpawnPreparationRetained
     created = []
     monkeypatch.setattr(
         embody,
@@ -576,13 +574,14 @@ def test_prepare_reusable_worktree_holds_on_indeterminate_resolution(
         lambda **_kwargs: created.append(True),
     )
 
-    with pytest.raises(embody.EmbodyUnavailable, match="registry unavailable"):
+    with pytest.raises(SpawnPreparationRetained, match="registry unavailable"):
         embody.prepare_reusable_worktree(
             {"id": "task-1", "repo": "example.com/acme/widgets"},
             {
                 "key": "dispatch-task:task-1:1",
                 "attempt": 1,
                 "worktree": "wt-unknown",
+                "allocation_project": "widgets", "worktree_path": "/fixture/wt-unknown",
             },
             interface="cli",
             driver="agent-dispatch",
@@ -599,7 +598,7 @@ def test_resolve_worktree_bypasses_display_cache(monkeypatch):
         captured["cmd"] = cmd
         return types.SimpleNamespace(
             returncode=0,
-            stdout='{"worktrees":[{"id":"wt-review","path":"/tmp/wt-review"}]}',
+            stdout='{"worktrees":[{"id":"wt-review","path":"/tmp/wt-review","repo":"widgets"}]}',
             stderr="",
         )
 
@@ -615,6 +614,7 @@ def test_resolve_worktree_bypasses_display_cache(monkeypatch):
     assert resolved == {
         "worktree": "wt-review",
         "path": "/tmp/wt-review",
+        "project": "widgets",
     }
     assert captured["cmd"] == [
         "/usr/bin/agent-worktrees",
@@ -677,6 +677,7 @@ def test_resolve_worktree_accepts_own_dispatch_attempt(monkeypatch):
                         {
                             "id": "wt-mine",
                             "path": "/tmp/wt-mine",
+                            "repo": "widgets",
                             "dispatch_attempt": {"task_id": "task-1"},
                         }
                     ]
@@ -688,7 +689,7 @@ def test_resolve_worktree_accepts_own_dispatch_attempt(monkeypatch):
 
     resolved = embody.resolve_worktree("wt-mine", project="widgets", task_id="task-1")
 
-    assert resolved == {"worktree": "wt-mine", "path": "/tmp/wt-mine"}
+    assert resolved == {"worktree": "wt-mine", "path": "/tmp/wt-mine", "project": "widgets"}
 
 
 def test_resolve_worktree_rejects_worktree_owned_by_different_task(monkeypatch):
@@ -721,15 +722,11 @@ def test_resolve_worktree_rejects_worktree_owned_by_different_task(monkeypatch):
         embody.resolve_worktree("wt-shared", project="widgets", task_id="task-1")
 
 
-def test_prepare_reusable_worktree_replaces_worktree_owned_by_different_task(
+def test_prepare_reusable_worktree_preserves_worktree_owned_by_different_task(
     monkeypatch,
 ):
-    """Live incident: an exclusive lane's carried worktree/session had, in the
-    meantime, become a *different* task's own worktree (its tracking record's
-    ``dispatch_attempt.task_id`` no longer matched) -- every spawn attempt kept
-    retrying that foreign, unresolvable session identically instead of ever
-    recovering. This must be treated exactly like a positively-missing
-    worktree: fall back to creating a fresh one."""
+    """A conflicting owner is not authority to replace the allocated workspace."""
+    from agent_dispatch.spawn_factories import SpawnPreparationRetained
     monkeypatch.setattr(
         embody,
         "resolve_worktree",
@@ -745,25 +742,20 @@ def test_prepare_reusable_worktree_replaces_worktree_owned_by_different_task(
         lambda **_kwargs: {"worktree": "wt-fresh", "path": "/tmp/wt-fresh"},
     )
 
-    prepared = embody.prepare_reusable_worktree(
-        {"id": "task-1", "repo": "example.com/acme/widgets"},
-        {
-            "key": "dispatch-task:task-1:2",
-            "attempt": 2,
-            "worktree": "wt-shared",
-            "session_handle": "local-body:session-belongs-to-other-task",
-        },
-        interface="acp",
-        driver="agent-dispatch",
-        supervisor="supervisor-1",
-    )
-
-    assert prepared["worktree"] == "wt-fresh"
-    assert prepared["replaced"] is True
-    assert prepared["ownership"] == "created"
+    with pytest.raises(SpawnPreparationRetained, match="retained for repair"):
+        embody.prepare_reusable_worktree(
+            {"id": "task-1", "repo": "example.com/acme/widgets"},
+            {
+                "key": "dispatch-task:task-1:2", "attempt": 2, "worktree": "wt-shared",
+                "session_handle": "local-body:session-belongs-to-other-task",
+                "allocation_project": "widgets", "worktree_path": "/fixture/wt-shared",
+            },
+            interface="acp", driver="agent-dispatch", supervisor="supervisor-1",
+        )
 
 
-def test_prepare_reusable_worktree_replaces_finalized_checkout(monkeypatch):
+def test_prepare_reusable_worktree_preserves_finalized_checkout(monkeypatch):
+    from agent_dispatch.spawn_factories import SpawnPreparationRetained
     monkeypatch.setattr(
         embody,
         "resolve_worktree",
@@ -780,22 +772,16 @@ def test_prepare_reusable_worktree_replaces_finalized_checkout(monkeypatch):
         },
     )
 
-    prepared = embody.prepare_reusable_worktree(
-        {"id": "task-1", "repo": "example.com/acme/widgets"},
-        {
-            "key": "dispatch-task:task-1:2",
-            "attempt": 2,
-            "worktree": "wt-finalized",
-            "session_handle": "local-body:session-unknown",
-        },
-        interface="acp",
-        driver="agent-dispatch",
-        supervisor="supervisor-1",
-    )
-
-    assert prepared["worktree"] == "wt-fresh"
-    assert prepared["replaced"] is True
-    assert prepared["ownership"] == "created"
+    with pytest.raises(SpawnPreparationRetained, match="retained for repair"):
+        embody.prepare_reusable_worktree(
+            {"id": "task-1", "repo": "example.com/acme/widgets"},
+            {
+                "key": "dispatch-task:task-1:2", "attempt": 2, "worktree": "wt-finalized",
+                "session_handle": "local-body:session-unknown",
+                "allocation_project": "widgets", "worktree_path": "/fixture/wt-finalized",
+            },
+            interface="acp", driver="agent-dispatch", supervisor="supervisor-1",
+        )
 
 
 def test_spawn_embodied_worker_passes_verify_timeout(monkeypatch):
@@ -1213,6 +1199,12 @@ def test_conclude_dispatch_attempt_scrubs_env(monkeypatch):
     )
     monkeypatch.setattr(embody, "agent_worktrees_environment", lambda: sentinel)
     monkeypatch.setattr(embody.subprocess, "run", fake_run)
+    monkeypatch.setattr(embody, "resolve_worktree", lambda *_a, **_k: {
+        "project": "widgets", "path": "/fixture/wt-1",
+    })
 
-    embody.conclude_dispatch_attempt("wt-1", "session-1", "dispatch-task:task-1:1")
+    embody.conclude_dispatch_attempt(
+        "wt-1", "session-1", "dispatch-task:task-1:1",
+        project="widgets", worktree_path="/fixture/wt-1",
+    )
     assert captured["env"] is sentinel

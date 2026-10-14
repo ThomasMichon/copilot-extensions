@@ -181,7 +181,11 @@ __all__ = [
 ]
 
 
+from .engine_configuration import PickerConfigurationMixin
+
+
 class PickerScreen(
+    PickerConfigurationMixin,
     PickerScreenPivotsMixin,
     PickerScreenLoadingMixin,
     PickerScreenRuntimeMixin,

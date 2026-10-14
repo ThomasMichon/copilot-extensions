@@ -169,6 +169,8 @@ def add_parsers(sub) -> None:
         "(identity-bound duplicate/stale generation reap). Default: report only.",
     )
     sp.add_argument("--json", action="store_true", help="Emit the health report as JSON.")
+    from .tracking_yaml_repair import add_doctor_arguments
+    add_doctor_arguments(sp)
     sp.add_argument(
         "--projection-budget",
         type=int,
@@ -402,6 +404,9 @@ def cmd_backfill_sessions(args) -> int:
 
 def cmd_doctor(args) -> int:
     """Diagnose (and with ``--fix``, repair) worktree/session health for this project."""
+    if getattr(args, "repair_record", None) is not None or getattr(args, "bound_agent_end_field", None):
+        from .tracking_yaml_repair import targeted_doctor
+        return targeted_doctor(args)
     from . import health
 
     apply = getattr(args, "fix", False)

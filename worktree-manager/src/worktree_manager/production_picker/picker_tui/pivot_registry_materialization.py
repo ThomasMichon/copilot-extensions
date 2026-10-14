@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -21,7 +22,43 @@ from .pivot_manifest import (
     _FILE_ATTRIBUTE_REPARSE_POINT,
     _MIGRATABLE_SCHEMA_VERSIONS,
     _read_json,
+    _KNOWN_LEGACY_PIVOTS,
 )
+
+# Exact canonical schema-v1 Tasks template before category-specific presentation.
+# Recognition is scoped to the existing canonical provider, never filename alone.
+_KNOWN_LEGACY_TEMPLATE_HASHES = {
+    "agent-dispatch.json": frozenset(
+        {"ef0c01ef40c70500ec4ce4910abfea0927cb37ccdc6f69b8fec8f7ac18d527ef"}
+    ),
+}
+
+
+def _known_legacy_owned(
+    existing: object,
+    *,
+    source: str,
+    template_name: str,
+    current_template: Mapping[str, object] | None,
+) -> bool:
+    if (
+        current_template is None
+        or not isinstance(existing, dict)
+        or type(existing.get("schema_version")) is not int
+        or existing.get("schema_version") != 1
+        or _KNOWN_LEGACY_PIVOTS.get(template_name) != source
+    ):
+        return False
+    fingerprint = hashlib.sha256(
+        json.dumps(existing, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    current_fingerprint = hashlib.sha256(
+        json.dumps(dict(current_template), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return (
+        fingerprint == current_fingerprint
+        or fingerprint in _KNOWN_LEGACY_TEMPLATE_HASHES.get(template_name, ())
+    )
 
 class TargetUnusableError(ValueError):
     """A manifest command exists but cannot be executed safely."""
@@ -313,9 +350,8 @@ def _owned_pointer_identity(existing: object) -> tuple[str, str] | None:
     materializer to refresh in place. A schema version outside that set --
     e.g. one a *newer* agent-worktrees introduced that this build doesn't
     understand yet -- is deliberately left untouched rather than silently
-    downgraded. This is the only thing that licenses overwriting an existing
-    file: refreshing our own prior, recognized artifact, never an operator's,
-    a different plugin's, or an unrecognized future one.
+    downgraded. Exact known schema-v1 recognition is a separate, provider-scoped migration
+    check in the publisher. Operator, foreign and future artifacts remain untouched.
     """
     if (
         not isinstance(existing, dict)
@@ -328,7 +364,8 @@ def _owned_pointer_identity(existing: object) -> tuple[str, str] | None:
 
 
 def _publish_managed_pointer(
-    target: Path, content: str, *, source: str, template_name: str
+    target: Path, content: str, *, source: str, template_name: str,
+    legacy_template: Mapping[str, object] | None = None,
 ) -> bool:
     """Create ``target``, or refresh it in place if we already own it.
 
@@ -337,7 +374,8 @@ def _publish_managed_pointer(
     ``target`` already exists, this only overwrites it after confirming --
     via :func:`_owned_pointer_identity` -- that the existing content is
     itself a materializer-owned pointer for this exact ``(source,
-    template_name)`` identity; an operator-authored file, or one belonging to
+    template_name)`` identity, or an exact recognized canonical legacy
+    template for that provider; an operator-authored file, or one belonging to
     a different plugin/template, is never touched. Returns whether a write
     actually happened -- ``False`` both when refused and when the file
     already held this exact content (idempotent no-op), so a caller can use
@@ -350,8 +388,11 @@ def _publish_managed_pointer(
         """``None`` => already correct (no-op); ``True`` => ours, safe to
         refresh; ``False`` => not ours, or unreadable -- never touch it."""
         try:
+            info = target.lstat()
+            if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or _is_reparse(info):
+                return False
             existing_raw = target.read_text(encoding="utf-8")
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             return False
         if existing_raw == content:
             return None
@@ -359,7 +400,13 @@ def _publish_managed_pointer(
             existing = json.loads(existing_raw)
         except (UnicodeDecodeError, json.JSONDecodeError):
             return False
-        return _owned_pointer_identity(existing) == (source, template_name)
+        return (
+            _owned_pointer_identity(existing) == (source, template_name)
+            or _known_legacy_owned(
+                existing, source=source, template_name=template_name,
+                current_template=legacy_template,
+            )
+        )
 
     if _owned_and_stale() is not True:
         return False
@@ -462,10 +509,9 @@ def _materialize_active_pivots(
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             if _publish_managed_pointer(
-                target, content, source=source, template_name=name
+                target, content, source=source, template_name=name, legacy_template=template,
             ):
                 changed.append(target.name)
         except OSError:
             continue
     return changed
-

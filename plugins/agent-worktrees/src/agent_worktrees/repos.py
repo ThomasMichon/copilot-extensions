@@ -38,7 +38,10 @@ from pathlib import Path
 
 import yaml
 
+from agent_procutil import no_window_kwargs
+
 from . import bare_anchor_sync, git_ops, output, registry_paths
+from .repos_registry_reader import RepositoryResolutionError, read_registry as _read_registry
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -187,72 +190,9 @@ def _repos_yaml_path() -> Path:
 # Read / write
 # ---------------------------------------------------------------------------
 
-def read_registry() -> ReposRegistry:
+def read_registry(*, strict: bool = False) -> ReposRegistry:
     """Load repos.yaml, returning an empty registry if missing."""
-    path = _repos_yaml_path()
-    if not path.exists():
-        return ReposRegistry()
-
-    try:
-        from . import config_migrations
-
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return ReposRegistry()
-
-        # Lazy schema migration (in memory, never persists / never raises).
-        data = config_migrations.migrate_loaded(data, config_migrations.SCHEMA_REPOS)
-
-        srcroot = data.get("srcroot", {})
-        if not isinstance(srcroot, dict):
-            srcroot = {}
-
-        raw_map = data.get("account_map", {})
-        account_map: dict[str, str] = {}
-        if isinstance(raw_map, dict):
-            for owner, login in raw_map.items():
-                if owner and login:
-                    account_map[str(owner)] = str(login)
-
-        repos: dict[str, RepoEntry] = {}
-        raw_repos = data.get("repos", {})
-        if isinstance(raw_repos, dict):
-            for name, entry in raw_repos.items():
-                if not isinstance(entry, dict):
-                    continue
-                paths = {}
-                for plat in ("windows", "wsl", "linux"):
-                    if plat in entry:
-                        paths[plat] = str(entry[plat])
-                raw_tags = entry.get("tags", [])
-                tags = [str(t) for t in raw_tags] if isinstance(raw_tags, list) else []
-                # Prefer the new "class" field; fall back to legacy "type".
-                raw_class = entry.get("class", entry.get("type"))
-                norm_class = normalize_class(raw_class)
-                # Agent exposure defaults ON for worktree/singleton, OFF for
-                # reference; an explicit `agent:` always wins.
-                raw_agent = entry.get("agent")
-                agent = (
-                    bool(raw_agent) if raw_agent is not None
-                    else norm_class != "reference"
-                )
-                repos[name] = RepoEntry(
-                    name=name,
-                    repo_class=norm_class,
-                    remote=entry.get("remote", ""),
-                    default_branch=entry.get("default_branch", ""),
-                    tags=tags,
-                    contributing=entry.get("contributing", ""),
-                    account=str(entry.get("account", "") or ""),
-                    copilot_account=str(entry.get("copilot_account", "") or ""),
-                    agent=agent,
-                    visibility=normalize_visibility(entry.get("visibility")),
-                    paths=paths,
-                )
-
-        return ReposRegistry(srcroot=srcroot, repos=repos, account_map=account_map)
-    except Exception:
-        return ReposRegistry()
+    return _read_registry(_repos_yaml_path(), strict=strict)
 
 
 def write_registry(registry: ReposRegistry) -> None:
@@ -363,6 +303,40 @@ def find_repo(name: str) -> RepoEntry | None:
     """Find a repo by name."""
     registry = read_registry()
     return registry.repos.get(name)
+
+
+def resolve_registered_repo(name: str) -> tuple[RepoEntry, Path]:
+    """Resolve only the current platform's registered root; never discover or clone."""
+    registry = read_registry(strict=True)
+    entry = registry.repos.get(name)
+    if entry is None:
+        raise RepositoryResolutionError(
+            f"repository {name!r} is not registered; use repos add or repos clone "
+            "through the repository owner's acquisition/adoption flow"
+        )
+    raw = entry.local_path()
+    if not raw:
+        raise RepositoryResolutionError(
+            f"repository {name!r} has no registered local root; use its standard "
+            "repos clone/adoption flow before retrying"
+        )
+    root = Path(raw)
+    if not root.is_absolute():
+        raise RepositoryResolutionError(
+            f"repository {name!r} has a non-absolute registered local root"
+        )
+    try:
+        root = root.resolve(strict=True)
+        if not root.is_dir():
+            raise RepositoryResolutionError(
+                f"repository {name!r} registered local root is not a directory"
+            )
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise RepositoryResolutionError(
+            f"repository {name!r} registered local root is unavailable: {exc}; "
+            "use its standard repos clone/adoption flow, not fallback discovery"
+        ) from exc
+    return entry, root
 
 
 def inrepo_declared_default_branch(path: str) -> str:
@@ -998,12 +972,12 @@ def clone_repo(
         try:
             current = subprocess.run(
                 ["git", "-C", str(target_path), "branch", "--show-current"],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True, timeout=30, **no_window_kwargs(),
             ).stdout.strip()
             if current != declared_branch:
                 checkout = subprocess.run(
                     ["git", "-C", str(target_path), "checkout", declared_branch],
-                    capture_output=True, text=True, timeout=30,
+                    capture_output=True, text=True, timeout=30, **no_window_kwargs(),
                 )
                 if checkout.returncode == 0:
                     output.ok(f"Checked out declared default branch '{declared_branch}'")
@@ -1321,6 +1295,7 @@ def _git(path: str, *args: str, timeout: int = 60) -> subprocess.CompletedProces
         capture_output=True,
         text=True,
         timeout=timeout,
+        **no_window_kwargs(),
     )
 
 

@@ -155,9 +155,14 @@ def _stateless_config(harness_anchor, *, knowledge_repo="knowledge", stateless=T
 
 def _bind(monkeypatch, harness, knowledge, *, stateless=True):
     from agent_worktrees import state_root as sr
+
+    def load_without_pr_discovery(*, include_control_plane_related_pr):
+        assert include_control_plane_related_pr is False
+        return _stateless_config(harness, stateless=stateless)
+
     monkeypatch.setattr(
         cfg, "load_config",
-        lambda: _stateless_config(harness, stateless=stateless))
+        load_without_pr_discovery)
     monkeypatch.setattr(
         sr, "_checkout_path",
         lambda name: str(knowledge) if name == "knowledge" else None)

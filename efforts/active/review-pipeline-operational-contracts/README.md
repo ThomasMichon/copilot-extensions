@@ -1,0 +1,143 @@
+---
+visions:
+  - visions/plugins/agent-bridge
+  - visions/plugins/agent-dispatch
+---
+
+# Runtime Operational Contracts
+
+- **Slug:** `review-pipeline-operational-contracts`
+- **Repo:** copilot-extensions
+- **Branch(es):** serial per-slice PRs against dev
+- **Created:** 2026-10-12
+- **Status:** Draft
+- **Vision:** Existing bridge lifecycle and dispatch authority/readiness intent
+- **Umbrella issue:** [#6274](https://github.com/ThomasMichon/copilot-extensions/issues/6274)
+- **Sub-issues:** [#6266](https://github.com/ThomasMichon/copilot-extensions/issues/6266)
+
+## Guiding Intent
+
+An installer must distinguish installing a runtime from activating its serving
+generation. Operator readiness must reveal unavailable authority without
+escalation or state effects. Windows process fixtures must enforce the actual
+window, focus and ownership contract rather than hide a regression.
+
+This closes existing lifecycle and authority intent. It does not introduce
+consumer-specific review policy or a new background monitor.
+
+## Participants
+
+| Participant | Role | Reached via |
+|-------------|------|-------------|
+| Contracts coordinator | Own reviewed plan, integration and completion | This isolated worktree |
+| Evidence reviewers | Bounded read-only source tracks and plan critique | Coordinator-mediated reports |
+
+## Coordination
+
+Serial reviewable slices preserve existing owner boundaries: bridge installers,
+unified updater result propagation, dispatch authority and Windows status-monitor
+process tests. Before edits, claim relevant issues and reconcile active overlap,
+including #6266 and existing Windows launch efforts. No participant edits the
+anchor, deployed payload, another participant's worktree or runtime state.
+
+## Request
+
+**Public-safe summary:** build an effort and necessary design changes, then
+implement truthful activation results, safe explicit control-authority
+readiness and the tracked Windows terminal-host regression. Consumer-specific
+CLI/report policy is not part of this repository.
+
+## Context
+
+Source inspection found bridge installers can reach a completion summary after
+cutover refusal/rollback. The unified updater already has installer exit-code
+boundaries; success must not depend on stdout wording or installed-slot markers.
+
+Control-only calls correctly fail with absent/wrong client authority, but there
+is no explicit, credential-safe client proof before a requested mutation.
+Existing ordinary worker credentials must not gain control privileges.
+
+#6266 reports seven terminal-host descendants where the fixture permits one.
+The production spawn already uses the shared windowless helper; source alone
+does not distinguish an effective launch defect from an observation assumption.
+Diagnose the actual boundary before changing it.
+
+## Plan
+
+The mechanism/test details below are **agent-recommended**, not an expansion of
+the operator's requested outcomes. [Design contract](design.md) pins interfaces
+and negative controls before implementation.
+
+### Phase 0 - Reviewed proposal
+- [ ] Land this effort and contract through normal review before implementation.
+- [ ] Reconcile relevant existing lifecycle/auth/process patterns and active
+      issue ownership. Keep every publication self-contained and neutral.
+
+### Phase 1 - Truthful serving activation
+- [ ] Preserve existing cutover result vocabulary and process exit boundaries;
+      verify actual serving generation/version/readiness before completed rollout.
+- [ ] Report installed-but-not-activated as explicit partial/failure, including
+      rollback; propagate it through the parent update result.
+- [ ] Preserve routine non-forcing cutover, active-turn ownership, generation
+      fences and pre-commit rollback/post-commit forward semantics on both shells.
+
+### Phase 2 - Read-only control readiness
+- [ ] Add explicit `agent-dispatch control-readiness` with bounded/redacted
+      configuration source/presence and authenticated authority proof.
+- [ ] Add a dedicated read-only control-guarded probe rather than test by
+      transition; preserve ordinary bearer and absent server-authority refusal.
+- [ ] No service-env discovery, automatic credential copying, configuration
+      mutation, elevated fallback or auth material in output/argv.
+
+### Phase 3 - Windows terminal-host boundary
+- [ ] Reproduce #6266 through the existing bounded runner and owned fixtures;
+      compare effective launch flags/process identity with census assumptions.
+- [ ] Fix only the proven cause while retaining visible-window/focus,
+      single-hidden-tree and containment/lifetime assertions.
+- [ ] Missing native prerequisites require a recorded Blocked state/evidence on
+      #6266, not a weakened assertion, retry loop or completion claim.
+
+### Phase 4 - Contract adoption
+- [ ] Update owning patterns/architecture/skills and portable negative examples.
+- [ ] Add mandatory changefiles, run bounded focused regressions and appropriate
+      contract/install guards; audit final public artifacts and required checks.
+- [ ] Land each implementation through review, prove release promotion, and
+      record authorized rollout responsibility separately from merge.
+- [ ] Resolve every Plan/Validation Plan item before effort completion/archive.
+
+## Validation Plan
+
+- [ ] Both installer shells: busy/rollback/old serving version or failed
+      readiness cannot report completed activation; successful cutover proves
+      expected version/protocol and parent result propagation.
+- [ ] No routine force/cancel, stale installer promotion, or active-session
+      interruption introduced by rollback or result handling.
+- [ ] Control readiness covers absent/wrong/worker credentials, missing server
+      authority, command nonzero/empty/timeout and authorized direct/command
+      sources, with no queue/config/generation/receipt effects or secrets.
+- [ ] #6266 reproduction/fix preserves the exact native process-window-focus
+      contract and cleans only owned descendants under bounded containment.
+- [ ] Windows and POSIX focused tests, documentation-impact review, relevant
+      install/contract guards and final provider reviews/checks pass.
+- [ ] Public content contains no adopter-private identifiers, paths or rationale.
+      Activation/rollout claims name verified evidence, not installed markers.
+
+## Proposal
+
+The [operational contract proposal](design.md) defines the activation,
+authority-readiness and Windows process boundaries for review before
+implementation.
+
+## Journal
+
+### 2026-10-12 - Proposal
+
+- #6274 claimed the generic campaign; reused #6266 rather than another tracker.
+- Four independent evidence reports and one plan critique informed owner
+  boundaries. Truthful activation precedes ergonomics; no implementation yet.
+
+## See Also
+
+- [Design contract](design.md)
+- [Graceful cutover pattern](../../../docs/patterns/graceful-daemon-cutover.md)
+- [Windows launch pattern](../../../docs/patterns/windows-background-process-launch.md)

@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from ssh_manager import (
     CarrierBackpressure,
     CarrierRemoteError,
@@ -22,6 +22,7 @@ from ..remote_operations import (
     RemoteOperationService,
     validate_caller_id,
 )
+from ..live_peer_address import peer_operation_timeout
 
 router = APIRouter(prefix="/api/v1/remote", tags=["remote"])
 
@@ -73,6 +74,7 @@ class RemoteSessionEndRequest(BaseModel):
 
 
 class RemoteLiveMessageRequest(BaseModel):
+    qualified_peer: bool = False
     sender: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=1_048_576)
     kind: str = Field(default="prompt")
@@ -84,7 +86,17 @@ class RemoteLiveMessageRequest(BaseModel):
         default=None, min_length=1, max_length=256
     )
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=256)
-    timeout: float = Field(default=20.0, ge=1.0, le=120.0)
+    timeout: float = Field(default=20.0, ge=1.0, le=615.0)
+    reply_to: str | None = Field(default=None, min_length=1, max_length=256)
+    wait: bool = False
+    wait_timeout: float = Field(default=120.0, ge=1.0, le=600.0)
+
+    @model_validator(mode="after")
+    def cover_reply_wait(self) -> RemoteLiveMessageRequest:
+        self.timeout = peer_operation_timeout(
+            self.timeout, wait=self.wait, wait_timeout=self.wait_timeout,
+        )
+        return self
 
 
 def _service(request: Request) -> RemoteOperationService:
@@ -184,12 +196,14 @@ async def remote_session_status(
         _raise(exc)
 
 
-@router.get("/{host}/live-sessions/{session_id}")
+@router.get("/{host}/live-sessions/{session_id:path}")
 async def remote_live_session(
-    host: str, session_id: str, request: Request
+    host: str, session_id: str, request: Request, qualified_peer: bool = False,
 ) -> dict[str, Any]:
     try:
-        return await _service(request).resolve_live_session(host, session_id)
+        return await _service(request).resolve_live_session(
+            host, session_id, **({"qualified_peer": True} if qualified_peer else {}),
+        )
     except RemoteBridgeError as exc:
         _raise(exc)
 
@@ -251,7 +265,7 @@ async def remote_end_session(
         _raise(exc)
 
 
-@router.post("/{host}/live-sessions/{target}/messages")
+@router.post("/{host}/live-sessions/{target:path}/messages")
 async def remote_send_live_message(
     host: str,
     target: str,
@@ -269,6 +283,10 @@ async def remote_send_live_message(
             expected_session_id=body.expected_session_id,
             idempotency_key=body.idempotency_key,
             timeout=body.timeout,
+            reply_to=body.reply_to,
+            wait=body.wait,
+            wait_timeout=body.wait_timeout,
+            **({"qualified_peer": True} if body.qualified_peer else {}),
         )
     except RemoteBridgeError as exc:
         _raise(exc)

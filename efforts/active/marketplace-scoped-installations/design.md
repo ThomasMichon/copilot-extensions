@@ -14,7 +14,9 @@ create, validate, expose, or depend on these installation cells.
 Namespaced mode is explicit opt-in and default-off. While this effort is active,
 all namespaced installation and lifecycle execution occurs only in disposable
 clean-room environments. Persistent development and production machines remain
-in legacy mode and may inspect the model only through read-only diagnostics.
+in legacy mode. Their inspection follows the canonical
+[Phase 8 diagnostic prerequisite](installation-mode-governance.md#phase-8-diagnostic-prerequisite),
+including the interim restriction and acceptance evidence.
 
 ## Decisions
 
@@ -24,8 +26,11 @@ in legacy mode and may inspect the model only through read-only diagnostics.
    version alone never select mutable state or a running service.
 3. **Generic plugin shims are payload-local.** Skills, hooks, agents, services,
    and peers invoke the shim belonging to the payload that supplied them.
-4. **Global command space is project-owned.** `~/.local/bin` retains project
-   entry points only. Each wrapper records and pins its owning installation.
+4. **Global command space is ownership-qualified.** Activated marketplace-cell
+   installations reserve `~/.local/bin` for attributable project entry points;
+   non-cell hosts retain their supported user-global plugin commands. Consumers
+   use the selected installation's exact callable command rather than ambient
+   name precedence. Cell and project wrappers pin their owning installation.
 5. **Committed repo policy is source-neutral.** Marketplace cells isolate
    machine-local runtime and adoption state; they do not duplicate ordinary
    committed project configuration.
@@ -83,6 +88,28 @@ The normalized marketplace source is the identity input. The transient Copilot
 cache path is evidence of provenance, not by itself the portable identity.
 
 ## Invocation chain
+
+### Selection terms
+
+These are the effort's target invocation terms, not a claim that the
+extended discovery contract is already implemented:
+
+- **Source-qualified:** the selected command is bound to the normalized
+  marketplace source identity and plugin identity, plus the selected
+  installation identity. A display name, plugin name/version, ambient `PATH`,
+  or plugin-name-only pointer cannot establish that binding.
+- **Exact command `argv`:** the selected installation's command catalog supplies
+  the complete executable/launcher path and any fixed arguments as an argument
+  vector, together with its shell convention and availability. Consumers retain
+  that vector and append request arguments; they do not derive an executable
+  from `runtimeRoot` or rebuild the path from a marketplace name.
+- **Stable launcher:** an out-of-session entry point whose owning lifecycle
+  publishes its explicit source, plugin, and installation binding independently
+  of any session catalog. That binding persists across sessions and is validated
+  when resolving the current callable command; payload replacement must preserve
+  ownership, not a stale payload path. Missing, stale, or foreign ownership
+  refuses invocation rather than selecting another installation. This uses
+  existing lifecycle launchers, not a new global registry or daemon.
 
 ```text
 loaded skill / hook / injected command catalog
@@ -266,7 +293,8 @@ still control the machine-global daemon.
   publication, and verification.
 - If new and legacy state both exist, diagnostics report both and never merge
   registries silently.
-- Legacy services and global shims are retired only after ownership is proven,
+- Legacy services and global shims are retired only for activated marketplace-cell
+  installations after ownership is proven,
   the new cell is healthy, and rollback metadata exists.
 - Uninstall removes only artifacts carrying the uninstalling cell's ownership
   receipt.

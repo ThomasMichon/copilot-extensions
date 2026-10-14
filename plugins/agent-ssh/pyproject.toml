@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-ssh"
-version = "0.1.50-dev1"
+version = "0.1.51-dev1"
 description = "SSH profile emitter, verifier, and transport-provider contract for the agent fabric"
 readme = "README.md"
 license = "MIT"
@@ -21,9 +21,11 @@ dependencies = [
     "agent-dropin-registry",
     "agent-remote-login-shell",
     "agent-fleet-contracts",
+    "agent-machine-transport",
 ]
 
 [tool.uv.sources]
+agent-machine-transport = { path = "libs/machine-transport" }
 agent-fleet-contracts = { path = "libs/fleet-contracts" }
 # Shared Windows-headless / detached process-spawn kwargs. This is a
 # `uv`-editable canonical reference (vendor-pointer-generalization effort,

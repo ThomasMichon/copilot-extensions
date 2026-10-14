@@ -366,7 +366,12 @@ else
             *[!0-9]*|"") _live=0 ;;
             *) if kill -0 "\$_owner" 2>/dev/null; then _live=1; else _live=0; fi ;;
         esac
-        if [[ "\$_live" == 0 && "\$(readlink "\$_lock_link" 2>/dev/null || true)" == "\$_owner" ]]; then
+        if [[ -z "\$_owner" ]]; then
+            # An empty owner means the link vanished after the failed ln -s
+            # (or is not a symlink): never unlink then -- a live lock could be
+            # created between the read and the unlink. Just retry.
+            sleep 0.1
+        elif [[ "\$_live" == 0 && "\$(readlink "\$_lock_link" 2>/dev/null || true)" == "\$_owner" ]]; then
             rm -f "\$_lock_link"
         else
             sleep 1

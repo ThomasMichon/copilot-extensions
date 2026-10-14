@@ -120,6 +120,7 @@ class DispatchTools:
         done_criteria: str | None = None,
         not_before: float = 0.0,
         proposed: bool = False,
+        category: str = "work",
     ) -> dict:
         """Enqueue a task (``proposed=True`` for an unclaimable draft).
 
@@ -148,6 +149,7 @@ class DispatchTools:
                 return c.create(
                     title,
                     repo=lane,
+                    category=category,
                     prompt=prompt,
                     proposed=proposed,
                     payload_inline=payload,
@@ -238,18 +240,20 @@ class DispatchTools:
 
     # -- browse --------------------------------------------------------------
 
-    def find(self, query: str, limit: int = 50, repo: str | None = None) -> list[dict]:
+    def find(self, query: str, limit: int = 50, repo: str | None = None,
+             category: str | None = None) -> list[dict]:
         """Substring-search task titles/prompts in the lane -- a quick dedup probe."""
         with self._client_factory() as c:
-            return c.find(query, repo=self._scope_repo(repo), limit=limit)
+            return c.find(query, repo=self._scope_repo(repo), limit=limit, category=category)
 
-    def sweep(self, limit: int = 500, repo: str | None = None) -> list[dict]:
+    def sweep(self, limit: int = 500, repo: str | None = None,
+              category: str | None = None) -> list[dict]:
         """The dedup corpus for the lane: every non-abandoned task, newest first.
 
         Read this before ``create`` to verify the work doesn't already exist.
         """
         with self._client_factory() as c:
-            return c.sweep(repo=self._scope_repo(repo), limit=limit)
+            return c.sweep(repo=self._scope_repo(repo), limit=limit, category=category)
 
     # -- recipes -------------------------------------------------------------
 
@@ -389,6 +393,7 @@ class DispatchTools:
         label: str | None = None,
         limit: int = 200,
         repo: str | None = None,
+        category: str | None = None,
     ) -> list[dict]:
         """List tasks in the lane, optionally filtered by status/machine/repo/label."""
         with self._client_factory() as c:
@@ -398,6 +403,7 @@ class DispatchTools:
                 target_machine=target_machine,
                 target_repo=target_repo,
                 label=label,
+                category=category,
                 limit=limit,
             )
 

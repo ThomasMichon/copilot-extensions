@@ -2312,7 +2312,7 @@ def test_launch_in_new_window_does_not_leak_stdout_into_the_live_tui(
     asyncio.run(run())
 
 
-def test_resume_prompt_offered_only_for_local_cold_resume_rows():
+def test_resume_prompt_offered_for_local_and_remote_cold_resume_rows():
     """Live and sessionless Open never offer a Resume prompt."""
     from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
         PickerScreenWorktreeActionsMixin as M,
@@ -2338,7 +2338,7 @@ def test_resume_prompt_offered_only_for_local_cold_resume_rows():
     acts = M._session_action_verbs(local_resumable)
     assert "Resume" in acts
     assert "Resume prompt…" in acts
-    assert "Resume prompt…" not in M._session_action_verbs(
+    assert "Resume prompt…" in M._session_action_verbs(
         dict(local_resumable, is_local=False))
     assert "Resume prompt…" not in M._session_action_verbs(
         dict(local_resumable, sessionless=True))
@@ -2632,6 +2632,7 @@ def test_task_action_ctx_includes_provider_from_list_cmd():
     inst._pivot_machine_id = lambda: "host"
     reg = types.SimpleNamespace(
         id_field="id", title_field="title", worktree_field="worktree",
+        placement="left",
         list_cmd=("agent-codespaces", "pool", "--picker-json"),
     )
     rec = {"id": "my-codespace", "title": "my task", "worktree": "3bac"}
@@ -2721,8 +2722,7 @@ def test_profiles_hosted_under_configuration():
 
 
 def test_configuration_menu_opens_profiles():
-    """Enter on the Configuration entry opens its menu; choosing Profiles
-    switches to that pivot and focuses its body (#1426)."""
+    """Configuration immediately enters Profiles with a horizontal section band."""
     src = _profiles_source()
 
     async def run():
@@ -2732,10 +2732,13 @@ def test_configuration_menu_opens_profiles():
             await pilot.pause()
             assert scr._kind() == "worktrees"
             scr.sel = ("CFG", 0)
-            scr._activate()                 # opens the Configuration ModalScreen
+            scr._activate()
             await pilot.pause()
-            assert _cfg_menu_open(scr)
-            await pilot.press("enter")      # selects Profiles (only item)
+            assert not _cfg_menu_open(scr)
+            assert scr._kind() == "profiles"
+            assert scr.sel == ("M", 0)
+            assert "Sections" in scr.tab_bar(118, True).plain
+            await pilot.press("enter")
             await pilot.pause()
             assert not _cfg_menu_open(scr)
             assert scr._kind() == "profiles"
@@ -2950,37 +2953,9 @@ def test_maint_menu_no_actionable_selection_does_not_open():
     asyncio.run(run())
 
 
-def test_index_menus_use_native_optionlist():
-    """#88 NF1: the two simple index-menu modals (⚙ Configuration + Maintenance
-    actions) navigate via a native Textual ``OptionList`` -- the framework owns
-    focus + up/down + Enter -- not the former hand-rolled ``idx``/``on_key`` over
-    a static ``Panel``. Assert each modal composes a focused ``OptionList`` whose
-    options mirror the menu items, and that selecting through the real pipeline
-    still returns the chosen index."""
+def test_maintenance_menu_uses_native_optionlist():
+    """Maintenance actions retain native OptionList navigation and palette."""
     from textual.widgets import OptionList
-
-    # CfgMenuScreen: options mirror the item labels; the list is focused.
-    async def run_cfg():
-        app = PickerApp(_fixture_source(), live=False)
-        async with app.run_test(size=(118, 40)) as pilot:
-            scr = app.query_one(PickerScreen)
-            await pilot.pause()
-            scr.sel = ("CFG", 0)
-            scr._activate()
-            await pilot.pause()
-            menu = _cfg_menu(scr)
-            assert menu is not None
-            ol = menu.query_one(OptionList)
-            assert ol.has_focus
-            assert ol.option_count == len(menu._items)
-            # Palette consistency (regression guard for the "dark blue modal"):
-            # the native list adopts the picker's $surface base, not Textual's
-            # bluer default $panel -- so it matches the main screen behind it.
-            assert ol.styles.background == app.screen_stack[0].styles.background
-            # Enter selects the highlighted option through the native widget.
-            await pilot.press("enter")
-            await pilot.pause()
-            assert not _cfg_menu_open(scr)
 
     # MaintMenuScreen: options mirror the actions; description pane present.
     async def run_maint():
@@ -3001,7 +2976,6 @@ def test_index_menus_use_native_optionlist():
             assert ol.option_count == len(menu._actions)
             assert ol.styles.background == app.screen_stack[0].styles.background
 
-    asyncio.run(run_cfg())
     asyncio.run(run_maint())
 
 
@@ -4969,9 +4943,7 @@ def test_new_worktree_modifiers_can_be_combined():
 
 
 def test_remote_new_worktree_options_hide_ahp():
-    """A remote target never composes the prompt field at all (its typed
-    text could never deliver -- the engine's resolve CLI rejects --seed
-    alongside --machine), not just drops it after the fact."""
+    """Remote prompts share the composer; AHP remains same-machine only."""
     src = _fixture_source()
 
     async def run():
@@ -4985,7 +4957,7 @@ def test_remote_new_worktree_options_hide_ahp():
             assert dlg is not None
             labels = [o["label"] for o in dlg._dlg["opts"]]
             assert "AHP" not in labels
-            assert dlg._show_prompt is False
+            assert dlg._show_prompt is True
 
     asyncio.run(run())
 
@@ -5028,13 +5000,8 @@ def test_new_worktree_anchor_option_shows_selected_state():
     asyncio.run(run())
 
 
-def test_new_worktree_remote_target_skips_seed_prompt(monkeypatch):
-    """A remote-machine target resolves via `--machine`, which the engine's
-    own resolve CLI also rejects alongside `--seed`. The prompt field is
-    never even composed for a remote target -- same class of gap as
-    Anchor/Bare/No Mux, closed earlier instead (at dialog-build time, not
-    confirm time) since remote-ness is already known before the dialog
-    opens."""
+def test_new_worktree_remote_target_carries_seed_prompt(monkeypatch):
+    """Confirmed remote text reaches target-owned launch admission."""
     from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
     monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
     src = _fixture_source()
@@ -5050,13 +5017,16 @@ def test_new_worktree_remote_target_skips_seed_prompt(monkeypatch):
             assert dlg is not None
             from worktree_manager.production_picker.picker_tui.engine import FocusGroup
             assert dlg.query_one("#scope-buttons", FocusGroup).has_focus
-            assert dlg._show_prompt is False
-            await pilot.press("enter")          # confirm Create, no options
+            assert dlg._show_prompt is True
+            await pilot.press("tab")
+            await pilot.press(*list("remote task"))
+            await pilot.press("enter")
+            await pilot.press("enter")
             await pilot.pause()
         assert app.result is not None
         assert app.result["action"] == "new"
         assert app.result["machine"] == "remote-host"
-        assert app.result["options"]["seed_prompt"] == ""
+        assert app.result["options"]["seed_prompt"] == "remote task"
 
     asyncio.run(run())
 
@@ -7518,7 +7488,7 @@ def test_live_column_repaints_when_async_mux_reconcile_lands():
             assert len(recs) == 1
             assert recs[0]["sess"] == "PROC"
             nl = scr.query_one("#nf-body-data")
-            idx, _rec, _li = nl._l_rows[recs[0]["selection_id"]]
+            idx, _rec, _li, _alt = nl._l_rows[recs[0]["selection_id"]]
             assert "PROC" in str(nl.get_option_at_index(idx).prompt)
 
             # The async Group C reconcile lands: mux_attached flips true, with
@@ -7531,7 +7501,7 @@ def test_live_column_repaints_when_async_mux_reconcile_lands():
 
             recs = scr.list_records()
             assert recs[0]["sess"] == "MUX(1)"
-            idx, _rec, _li = nl._l_rows[recs[0]["selection_id"]]
+            idx, _rec, _li, _alt = nl._l_rows[recs[0]["selection_id"]]
             assert "MUX(1)" in str(nl.get_option_at_index(idx).prompt)
             assert "PROC" not in str(nl.get_option_at_index(idx).prompt)
 
@@ -10647,36 +10617,29 @@ def test_contributed_config_section_in_cfgmenu_and_runs(tmp_path, monkeypatch):
             await pilot.pause()
             assert scr.config_sections, "config sections discovered"
 
-            # Open the Configuration ModalScreen from its top-row stop.
             scr.sel = ("CFG", 0)
             scr._activate()
             await pilot.pause()
-            menu = _cfg_menu(scr)
-            assert menu is not None
-            labels = [it["label"] for it in menu._items]
-            # Built-in Profiles first, contributed sections after it.
+            assert not _cfg_menu_open(scr)
+            labels = [scr.htabs[index] for index in scr._config_pivots()]
             assert labels[0] == "Profiles"
             assert labels[1:] == ["SSH", "MCP"]
 
-            # Enter on a contributed section runs it (never switches pivot) with
-            # a substituted global context; the menu closes. Navigate to SSH
-            # (index 1) through the real pipeline, then select it.
-            for _ in range(labels.index("SSH")):
-                await pilot.press("down")
-            await pilot.press("enter")
+            await pilot.press("right")
             await pilot.pause()
-            assert not _cfg_menu_open(scr)
-            assert scr._kind() == "worktrees"          # Profiles NOT selected
+            assert scr._kind() == "config_section"
+            assert not captured             # browsing a one-shot section is inert
+            scr._activate_config_section()
+            for _ in range(50):
+                await pilot.pause()
+                if captured:
+                    break
             assert captured["label"] == "SSH"
             assert captured["source"] == "net"
             assert "machine" in captured["ctx"]
 
-            # Selecting Profiles still switches to that pivot (built-in intact).
-            scr.sel = ("CFG", 0)
-            scr._activate()
-            await pilot.pause()
-            assert _cfg_menu_open(scr)
-            await pilot.press("enter")                  # Profiles (idx 0)
+            scr.sel = ("M", 0)
+            await pilot.press("left")
             await pilot.pause()
             assert not _cfg_menu_open(scr)
             assert scr._kind() == "profiles"
@@ -10719,12 +10682,10 @@ def test_contributed_config_section_confirm_gate(tmp_path, monkeypatch):
             scr.sel = ("CFG", 0)
             scr._activate()
             await pilot.pause()
-            menu = _cfg_menu(scr)
-            assert menu is not None
-            labels = [it["label"] for it in menu._items]
-            for _ in range(labels.index("SSH")):
-                await pilot.press("down")
-            await pilot.press("enter")
+            while scr.htabs[scr.htab] != "SSH":
+                scr._rotate_machine(1)
+                await pilot.pause()
+            scr._activate_config_section()
             await _wait_for_confirm_screen(app, pilot)
             # confirm:true -- SSH must NOT have run yet; the cfg menu is gone,
             # replaced by the confirm gate.
@@ -10740,14 +10701,8 @@ def test_contributed_config_section_confirm_gate(tmp_path, monkeypatch):
             assert not isinstance(app.screen, ActionConfirmScreen)
             assert ran == []
 
-            # Re-open and this time confirm -- it runs.
-            scr.sel = ("CFG", 0)
-            scr._activate()
-            await pilot.pause()
-            menu = _cfg_menu(scr)
-            for _ in range(labels.index("SSH")):
-                await pilot.press("down")
-            await pilot.press("enter")
+            # This time confirm the section's explicit action.
+            scr._activate_config_section()
             await _wait_for_confirm_screen(app, pilot)
             assert isinstance(app.screen, ActionConfirmScreen)
             await pilot.press("left")        # Cancel -> Confirm
@@ -11505,8 +11460,8 @@ def test_native_data_content_repaint_patches_one_row_without_a_full_rebuild():
                 assert not rebuild_calls, (
                     "a content-only sess change triggered a full _rebuild() "
                     "-- the content-repaint fast path should have handled it")
-                assert patch_calls == [idx2_before], (
-                    f"expected exactly one patch at index {idx2_before}, "
+                assert patch_calls == [idx2_before, idx2_before + 1], (
+                    f"expected title/detail patches at index {idx2_before}, "
                     f"got {patch_calls}")
                 idx2 = nl._l_rows[rid2][0]
                 option = nl.get_option_at_index(idx2)

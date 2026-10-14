@@ -1,0 +1,703 @@
+"""Remote requests reuse target seed authority and stable creation identity."""
+
+import base64
+import json
+import shutil
+import subprocess
+import sys
+from types import SimpleNamespace
+
+import pytest
+
+from agent_worktrees import launch_request as request, launch_seed_state, tracking, tracking_write
+from agent_worktrees import remote_seed_launch
+
+
+def _intent(kind="resume", text="line one\n'\";$() \u2603"):
+    return dict(version=1, request_id="a" * 32, kind=kind,
+                worktree_id="wt-a" if kind == "resume" else None, text=text, no_mux=False)
+
+
+@pytest.fixture
+def admission_config(tmp_path, monkeypatch):
+    monkeypatch.setattr(request.cfg, "tracking_dir", lambda: tmp_path)
+    monkeypatch.setattr(request.cfg, "detect_platform", lambda: "windows")
+    for project in ("demo", "demo-repo"):
+        directory = request.cfg.project_dir(project)
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "config.yaml").write_text(json.dumps({
+            "repo_name": project, "machine": "test",
+            "repos": {project: {"anchor": str(tmp_path), "default_branch": "dev"}},
+        }), encoding="utf-8")
+    return SimpleNamespace(machine="test", default_repo=SimpleNamespace(worktree_root=tmp_path / "trees"))
+
+
+@pytest.fixture
+def authority(admission_config, monkeypatch):
+    server = tracking_write.start_server(tracking_write.compute)
+    server.start()
+    endpoint = tracking_write.rendezvous_fields(server)
+    monkeypatch.setattr(
+        launch_seed_state, "_dispatch",
+        lambda verb, args, **kwargs: tracking_write.dispatch(
+            verb, args, read_lock_data=lambda: endpoint, ensure_monitor=None, boot_wait_s=0,
+            **kwargs,
+        ),
+    )
+    try:
+        yield admission_config
+    finally:
+        server.close()
+
+
+def test_resume_admitted_once_via_real_daemon_then_finished_never_replays(tmp_path, authority):
+    record = tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
+                                       "demo", "test", "windows", tmp_path)
+    intent = _intent()
+    first = request.execute(authority, intent)
+    second = request.execute(authority, intent)
+    assert first == second
+    seed = launch_seed_state.peek(record.yaml_path)
+    assert seed.text == intent["text"] and seed.seed_id == intent["request_id"]
+    assert request.inspect(intent["request_id"])["ready"]
+    taken = launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
+    assert launch_seed_state.finish(record.yaml_path, taken)["finished"]
+    with pytest.raises(ValueError, match="completed"):
+        request.execute(authority, intent)
+    assert launch_seed_state.peek(record.yaml_path) is None
+    assert request.inspect(intent["request_id"])["state"] == "completed-or-superseded"
+
+
+@pytest.mark.parametrize("kind,field,value", [
+    ("resume", "worktree_id", "wt-b"),
+    ("resume", "kind", "new"),
+    ("new", "kind", "resume"),
+])
+@pytest.mark.parametrize("during_reload", [False, True])
+def test_safe_but_mismatched_receipt_never_redirects_replay(
+    tmp_path, admission_config, monkeypatch, kind, field, value, during_reload,
+):
+    import hashlib
+
+    intent = _intent(kind)
+    record = tracking.create_new_record("wt-b", "worktree/wt-b", str(tmp_path / "tree"),
+                                       "demo", "test", "windows", tmp_path)
+    args = {
+        "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
+        "fingerprint": hashlib.sha256(
+            json.dumps(intent, sort_keys=True, ensure_ascii=False).encode("utf-8"),
+        ).hexdigest(),
+        "kind": kind, "worktree_id": intent["worktree_id"] or "test-win-20261013-010000-" + "a" * 32,
+        "timestamp": "20261013-010000",
+    }
+    receipt = request._apply_admit(args)
+    receipt[field] = value
+    path = request._admission_path(tmp_path, intent["request_id"])
+
+    def damage():
+        path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    if during_reload:
+        def dispatch(verb, values):
+            assert verb == "launch_request_admit"
+            result = tracking_write.compute(tracking_write.KIND, {"verb": verb, "args": values})
+            assert "error" not in result
+            damage()
+            return result
+
+        monkeypatch.setattr(request, "_dispatch", dispatch)
+        with pytest.raises(ValueError, match="different intent"):
+            request.execute(admission_config, intent)
+    else:
+        damage()
+        result = tracking_write.compute(
+            tracking_write.KIND, {"verb": "launch_request_admit", "args": args},
+        )
+        assert "different intent" in result["error"]
+    assert launch_seed_state.peek(record.yaml_path) is None
+    assert path.read_text(encoding="utf-8") == json.dumps(receipt)
+
+
+def test_resume_new_intent_can_replace_old_but_old_request_cannot_restore_it(tmp_path, authority):
+    record = tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
+                                       "demo", "test", "windows", tmp_path)
+    first = _intent()
+    request.execute(authority, first)
+    replacement = {**first, "request_id": "b" * 32, "text": "replacement"}
+    request.execute(authority, replacement)
+    with pytest.raises(ValueError, match="superseded"):
+        request.execute(authority, first)
+    assert launch_seed_state.peek(record.yaml_path).text == "replacement"
+
+
+def test_new_response_loss_reuses_allocated_worktree_not_new_creation(tmp_path, authority, monkeypatch):
+    from agent_worktrees import worktree_creation
+
+    created = []
+    def create(config, **kwargs):
+        timestamp, suffix = kwargs["allocation"]
+        wid = f"test-win-{timestamp}-{suffix}"
+        created.append(wid)
+        record = tracking.create_new_record(wid, f"worktree/{wid}", str(tmp_path / "tree"),
+                                           "demo", "test", "windows", tmp_path)
+        launch_seed_state.stage(record.yaml_path, kind="new", text=kwargs["pending_seed"],
+                                seed_id=kwargs["pending_seed_id"])
+        return {"worktree": {"id": wid}}
+    monkeypatch.setattr(worktree_creation, "_create_worktree_core", create)
+    first = request.execute(authority, _intent("new"))
+    receipt = request.execute(authority, _intent("new"))
+    assert first == receipt
+    assert created == [receipt["worktree_id"]]
+    assert launch_seed_state.peek(tmp_path / f"{created[0]}.yaml").kind == "new"
+
+
+def test_new_admission_uses_real_creation_core_with_fixed_allocation(tmp_path, authority, monkeypatch):
+    from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
+
+    config = _create_config(tmp_path)
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    first = request.execute(config, _intent("new"))
+    second = request.execute(config, _intent("new"))
+    assert first == second
+    records = tracking.list_records(tmp_path)
+    assert len(records) == 1
+    assert records[0].worktree_id.endswith("a" * 32)
+    seed = launch_seed_state.peek(records[0].yaml_path)
+    assert seed.seed_id == "a" * 32 and seed.kind == "new"
+    launch_seed_state.remove(records[0].yaml_path, remove_record=True)
+    with pytest.raises(ValueError, match="instead of recreating"):
+        request.execute(config, _intent("new"))
+
+
+def test_unaccepted_new_cannot_recreate_removed_worktree(tmp_path, authority, monkeypatch):
+    from agent_worktrees import worktree_creation
+
+    def interrupted(config, **kwargs):
+        raise OSError("interrupted before record publication")
+    monkeypatch.setattr(worktree_creation, "_create_worktree_core", interrupted)
+    with pytest.raises(OSError):
+        request.execute(authority, _intent("new"))
+    with pytest.raises(ValueError, match="instead of recreating"):
+        request.execute(authority, _intent("new"))
+
+
+@pytest.mark.parametrize("changed", ["machine", "platform"])
+def test_new_recovery_never_creates_a_different_persisted_allocation(
+    tmp_path, authority, monkeypatch, changed,
+):
+    from agent_worktrees import worktree_creation
+
+    dispatch = request._dispatch
+
+    def lose_response(verb, args):
+        result = dispatch(verb, args)
+        if verb == "launch_request_admit":
+            raise OSError("admission response lost before creation")
+        return result
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("changed allocation reached creation side effects")
+
+    monkeypatch.setattr(request, "_dispatch", lose_response)
+    monkeypatch.setattr(worktree_creation, "_create_worktree_core", forbidden)
+    intent = _intent("new")
+    with pytest.raises(OSError, match="response lost"):
+        request.execute(authority, intent)
+    admission = request._admission_path(tmp_path, intent["request_id"])
+    before = admission.read_bytes()
+    monkeypatch.setattr(request, "_dispatch", dispatch)
+    if changed == "machine":
+        authority.machine = "renamed"
+    else:
+        monkeypatch.setattr(request.cfg, "detect_platform", lambda: "wsl")
+    with pytest.raises(ValueError, match="Stored New allocation"):
+        request.execute(authority, intent)
+    assert admission.read_bytes() == before
+    assert not json.loads(before).get("creation_started")
+    assert not tracking.list_records(tmp_path)
+    assert not authority.default_repo.worktree_root.exists()
+
+
+@pytest.mark.parametrize("finished", [False, True])
+def test_interrupted_replacement_seed_revision_fences_old_admission(tmp_path, authority, finished):
+    record = tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
+                                       "demo", "test", "windows", tmp_path)
+    intent = _intent()
+    fingerprint = __import__("hashlib").sha256(
+        json.dumps(intent, sort_keys=True, ensure_ascii=False).encode()
+    ).hexdigest()
+    request._dispatch("launch_request_admit", {
+        "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
+        "fingerprint": fingerprint, "kind": "resume", "worktree_id": "wt-a",
+        "timestamp": "20261010-120000",
+    })
+    launch_seed_state._write(record.yaml_path, launch_seed_state.LaunchSeed(
+        "b" * 32, "resume", "replacement", 1,
+    ))
+    if finished:
+        tracking._atomic_write(launch_seed_state.state_path(record.yaml_path), json.dumps({
+            "version": 1, "finished": True, "seed_id": "b" * 32, "revision": 2,
+        }))
+    with pytest.raises(ValueError, match="changed after admission"):
+        request.execute(authority, intent)
+    if finished:
+        assert launch_seed_state.peek(record.yaml_path) is None
+    else:
+        assert launch_seed_state.peek(record.yaml_path).text == "replacement"
+
+
+def test_decode_round_trip_preserves_shell_metacharacters():
+    intent = _intent()
+    encoded = base64.b64encode(json.dumps(intent, ensure_ascii=False).encode()).decode()
+    assert request.decode(encoded) == intent
+    with pytest.raises(ValueError):
+        request.decode(encoded + "!")
+
+
+@pytest.mark.parametrize("encoding", ["utf-16", "utf-32"])
+def test_non_utf8_envelope_is_rejected_before_admission(encoding):
+    encoded = base64.b64encode(json.dumps(_intent()).encode(encoding)).decode()
+    with pytest.raises(UnicodeDecodeError):
+        request.decode(encoded)
+
+
+def test_invalid_utf8_returns_structured_cli_error():
+    import argparse
+    from agent_worktrees import output, resolve_cli
+
+    parsers = argparse.ArgumentParser().add_subparsers()
+    resolve_cli.add_parsers(parsers)
+    encoded = base64.b64encode(b"\xff" + json.dumps(_intent()).encode()).decode()
+    args = parsers.choices["resolve"].parse_args(["--json", "--launch-request-b64", encoded])
+    with output.capture_json_output() as captured:
+        assert resolve_cli.cmd_resolve(args) == 3
+    assert "Launch request <invalid> failed" in json.loads(captured.getvalue())["error"]
+
+
+def test_changed_request_cannot_reuse_an_admitted_identity(tmp_path, authority):
+    tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
+                               "demo", "test", "windows", tmp_path)
+    intent = _intent()
+    request.execute(authority, intent)
+    with pytest.raises(ValueError, match="different intent"):
+        request.execute(authority, {**intent, "text": "changed"})
+
+
+@pytest.mark.parametrize("kind", ["new", "resume"])
+@pytest.mark.parametrize("handoff", [False, True])
+def test_status_recovers_committed_seed_before_acceptance_receipt(
+    tmp_path, authority, monkeypatch, kind, handoff,
+):
+    from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
+
+    config = _create_config(tmp_path)
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    if kind == "resume":
+        tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
+                                   config.repo_name, "test", "windows", tmp_path)
+    intent = _intent(kind)
+    admission = request._admission_path(tmp_path, intent["request_id"])
+    write = tracking._atomic_write
+
+    def interrupt_acceptance(path, text):
+        if path == admission and json.loads(text).get("accepted"):
+            raise OSError("interrupted after durable seed staging")
+        return write(path, text)
+
+    monkeypatch.setattr(tracking, "_atomic_write", interrupt_acceptance)
+    with pytest.raises(ValueError, match="after durable seed staging"):
+        request.execute(config, intent)
+    receipt_before = admission.read_bytes()
+    receipt = json.loads(receipt_before)
+    assert not receipt.get("accepted")
+    if kind == "new":
+        assert receipt["creation_complete"]
+    record = tmp_path / f"{receipt['worktree_id']}.yaml"
+    seed = launch_seed_state.peek(record)
+    assert seed.seed_id == intent["request_id"] and seed.kind == kind
+    if handoff:
+        launch_seed_state.take(record, seed_id=seed.seed_id)
+    status = request.inspect(intent["request_id"])
+    assert status["state"] == ("handoff-unconfirmed" if handoff else "staged")
+    assert status["ready"] is not handoff
+    assert admission.read_bytes() == receipt_before
+    assert len(tracking.list_records(tmp_path)) == 1
+
+
+def test_status_never_exposes_incomplete_new_creation_as_ready(tmp_path, authority):
+    record = tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
+                                       "demo", "test", "windows", tmp_path)
+    intent = _intent("new")
+    request._dispatch("launch_request_admit", {
+        "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
+        "fingerprint": "f" * 64, "kind": "new", "worktree_id": "wt-a",
+        "timestamp": "20261010-120000",
+    })
+    launch_seed_state.stage(record.yaml_path, kind="new", text=intent["text"],
+                            seed_id=intent["request_id"])
+    status = request.inspect(intent["request_id"])
+    assert not status["ready"] and status["state"] == "creation-incomplete"
+
+
+def test_status_unstaged_resume_is_admission_incomplete(tmp_path, authority):
+    intent = _intent()
+    request._dispatch("launch_request_admit", {
+        "tracking_dir": str(tmp_path), "request_id": intent["request_id"],
+        "fingerprint": "f" * 64, "kind": "resume", "worktree_id": "wt-a",
+        "timestamp": "20261010-120000",
+    })
+    status = request.inspect(intent["request_id"])
+    assert not status["ready"] and status["state"] == "admission-incomplete"
+
+
+@pytest.mark.parametrize("verb", [
+    "launch_request_admit", "launch_request_stage",
+    "launch_request_creation_start", "launch_request_creation_finish",
+])
+@pytest.mark.parametrize("corruption", [
+    "null", "[]", "{}", "missing-field", "bad-fingerprint",
+    "bad-flags", "bad-worktree",
+])
+def test_corrupt_admission_is_structured_for_every_registered_handler(
+    tmp_path, admission_config, verb, corruption,
+):
+    record = tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
+                                       "demo", "test", "windows", tmp_path)
+    args = {
+        "tracking_dir": str(tmp_path), "request_id": "a" * 32,
+        "fingerprint": "f" * 64, "kind": "resume", "worktree_id": "wt-a",
+        "timestamp": "20261010-120000", "text": "task",
+    }
+    tracking_write.compute(tracking_write.KIND, {"verb": "launch_request_admit", "args": args})
+    admission = request._admission_path(tmp_path, args["request_id"])
+    original = admission.read_text(encoding="utf-8")
+    if corruption in ("null", "[]", "{}"):
+        damaged = corruption
+    else:
+        receipt = json.loads(original)
+        if corruption == "missing-field":
+            del receipt["prior_revision"]
+        elif corruption == "bad-fingerprint":
+            receipt["fingerprint"] = None
+        elif corruption == "bad-flags":
+            receipt["accepted"] = "yes"
+        else:
+            receipt["worktree_id"] = "../outside"
+        damaged = json.dumps(receipt)
+    admission.write_text(damaged, encoding="utf-8")
+    error = tracking_write.compute(tracking_write.KIND, {"verb": verb, "args": args})
+    assert "Invalid stored launch admission" in error["error"]
+    with pytest.raises(ValueError, match="Invalid stored launch admission"):
+        request.inspect(args["request_id"])
+    assert launch_seed_state.peek(record.yaml_path) is None
+    admission.write_text(original, encoding="utf-8")
+    recovered = tracking_write.compute(
+        tracking_write.KIND,
+        {"verb": "launch_request_admit", "args": {**args, "timestamp": "20261010-120001"}},
+    )
+    assert recovered["seed_id"] == args["request_id"]
+    assert recovered["timestamp"] == "20261010-120000"
+    assert request.inspect(args["request_id"])["state"] == "admission-incomplete"
+
+
+def test_corrupt_admission_returns_over_real_wire_and_daemon_remains_usable(tmp_path, authority):
+    args = {
+        "tracking_dir": str(tmp_path), "request_id": "a" * 32,
+        "fingerprint": "f" * 64, "kind": "resume", "worktree_id": "wt-a",
+        "timestamp": "20261010-120000", "text": "task",
+    }
+    request._dispatch("launch_request_admit", args)
+    request._admission_path(tmp_path, args["request_id"]).write_text("null", encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid stored launch admission"):
+        request._dispatch("launch_request_stage", args)
+    tracking_write.register_verb(
+        "test_launch_request_health", lambda args: {"healthy": True}, version=2,
+    )
+    assert request._dispatch("test_launch_request_health", {}) == {"healthy": True}
+
+
+def test_structured_cli_uses_no_selector_and_returns_no_seed_text(tmp_path, authority, monkeypatch, capsys):
+    import argparse
+    from agent_worktrees import resolve_cli
+
+    tracking.create_new_record("wt-a", "worktree/wt-a", str(tmp_path / "tree"),
+                               "demo", "test", "windows", tmp_path)
+    load_config = request.cfg.load_config
+    monkeypatch.setattr(
+        request.cfg, "load_config",
+        lambda *a, **k: load_config(*a, **k) if k.get("project") else authority,
+    )
+    parsers = argparse.ArgumentParser().add_subparsers(dest="command")
+    resolve_cli.add_parsers(parsers)
+    encoded = base64.b64encode(json.dumps(_intent()).encode()).decode()
+    args = parsers.choices["resolve"].parse_args(["--json", "--launch-request-b64", encoded])
+    assert resolve_cli.cmd_resolve(args) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["seed_id"] == _intent()["request_id"]
+    assert "text" not in receipt
+
+
+@pytest.mark.parametrize("shell", ["bash", "pwsh"])
+def test_remote_admission_sends_text_only_in_encoded_request(shell, monkeypatch):
+    monkeypatch.setattr(remote_seed_launch.cfg, "project_name", lambda: "demo")
+    seen = []
+    def run(argv, **kwargs):
+        seen.append(argv)
+        command = argv[-1]
+        if shell == "pwsh":
+            command = base64.b64decode(command.split()[-1]).decode("utf-16le")
+            encoded = command.split("'")[-2]
+        else:
+            import shlex
+            inner = shlex.split(command)[-1]
+            encoded = shlex.split(inner)[-1]
+        intent = request.decode(encoded)
+        return SimpleNamespace(returncode=0, stdout=json.dumps({
+            "version": 1, "request_id": intent["request_id"], "seed_id": intent["request_id"],
+            "worktree_id": "wt-a", "seed_kind": "resume",
+        }))
+    monkeypatch.setattr(remote_seed_launch.subprocess, "run", run)
+    text = _intent()["text"]
+    plan = remote_seed_launch.prepare(None, "target", shell, ["--worktree-id", "wt-a"], text)
+    assert text not in seen[0][-1]
+    assert text not in plan["remote_command"]
+    assert plan["seed_pending"] and plan["seed_kind"] == "resume"
+
+
+def test_real_powershell_transport_preserves_encoded_intent(tmp_path):
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+    intent = _intent()
+    intent["text"] += "x" * (
+        request.MAX_REQUEST_BYTES - len(json.dumps(intent, ensure_ascii=False).encode())
+    )
+    encoded = base64.b64encode(json.dumps(intent, ensure_ascii=False).encode()).decode()
+    # Reconfigure stdout to UTF-8: a piped child otherwise encodes with the
+    # platform's preferred encoding (cp1252 on many Windows hosts), which
+    # cannot represent the intent's non-ASCII text.
+    script = (
+        "import base64,json,sys;"
+        "sys.stdout.reconfigure(encoding='utf-8');"
+        "print(json.dumps(json.loads(base64.b64decode(sys.argv[1])),ensure_ascii=False))"
+    )
+    command = remote_seed_launch.shell_command("pwsh", [sys.executable, "-c", script, encoded])
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-EncodedCommand", command.split()[-1]],
+        capture_output=True, text=True, encoding="utf-8", timeout=20,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}),
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == intent
+
+
+def test_real_posix_transport_preserves_encoded_intent():
+    if sys.platform == "win32":
+        pytest.skip("Native POSIX shell invocation is validated in the SSH lane")
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("Bash is unavailable")
+    intent = _intent()
+    intent["text"] += "x" * (
+        request.MAX_REQUEST_BYTES - len(json.dumps(intent, ensure_ascii=False).encode())
+    )
+    encoded = base64.b64encode(json.dumps(intent, ensure_ascii=False).encode()).decode()
+    script = (
+        "import base64,json,sys;"
+        "print(json.dumps(json.loads(base64.b64decode(sys.argv[1])),ensure_ascii=False))"
+    )
+    command = remote_seed_launch.shell_command("bash", [sys.executable, "-c", script, encoded])
+    result = subprocess.run(["bash", "-c", command], capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == intent
+
+
+def test_remote_old_engine_refuses_without_interactive_fallback(monkeypatch):
+    monkeypatch.setattr(remote_seed_launch.cfg, "project_name", lambda: "demo")
+    commands = []
+    def refused(argv, **kwargs):
+        commands.append(argv)
+        return SimpleNamespace(returncode=2, stdout="", stderr="unrecognized arguments: --launch-request-b64")
+    monkeypatch.setattr(remote_seed_launch.subprocess, "run", refused)
+    with pytest.raises(RuntimeError, match="unrecognized arguments"):
+        remote_seed_launch.prepare(None, "target", "bash", ["--new"], "task")
+    assert len(commands) == 1
+
+
+def test_remote_error_envelope_wins_over_creation_progress(monkeypatch):
+    monkeypatch.setattr(remote_seed_launch.cfg, "project_name", lambda: "demo")
+    monkeypatch.setattr(remote_seed_launch.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=3, stdout=json.dumps({"error": "seed storage failed"}),
+        stderr="Creating worktree...",
+    ))
+    with pytest.raises(RuntimeError, match="seed storage failed"):
+        remote_seed_launch.prepare(None, "target", "bash", ["--new"], "task")
+
+
+@pytest.mark.parametrize("shell", ["fish", "ksh", "unknown"])
+def test_unsupported_shell_is_rejected_before_remote_admission(shell):
+    with pytest.raises(ValueError, match="supported explicit shell"):
+        remote_seed_launch.shell_command(shell, ["demo", "resolve"])
+
+
+@pytest.mark.parametrize("selector", [["--new"], ["--base"], ["--worktree-id", "wt-a"],
+                                      ["--codename", "one-two"]])
+def test_structured_request_rejects_ordinary_selector_before_mutation(selector):
+    import argparse
+    from agent_worktrees import output, resolve_cli
+
+    parsers = argparse.ArgumentParser().add_subparsers()
+    resolve_cli.add_parsers(parsers)
+    encoded = base64.b64encode(json.dumps(_intent()).encode()).decode()
+    args = parsers.choices["resolve"].parse_args(
+        ["--json", "--launch-request-b64", encoded, *selector],
+    )
+    with output.capture_json_output() as captured:
+        assert resolve_cli.cmd_resolve(args) == 3
+    assert "Structured launch requests require" in json.loads(captured.getvalue())["error"]
+
+
+@pytest.mark.parametrize("mode", ["admission", "status"])
+@pytest.mark.parametrize("modifier", [
+    ["--bridge"], ["--profile", "demo"], ["--parent-session", "session"],
+    ["--caller-worktree", "wt-caller"], ["--owner-ref", "host/demo/wt-caller"],
+    ["--environment", "Linux"], ["--target-no-mux"], ["--stage-launch-seed"],
+    ["--defer-new-seed"], ["--no-mux"], ["--no-fast-forward"], ["--no-resume"],
+    ["--recovery"], ["--seed", "task"], ["--seed-id", "intent"],
+    ["--machine", "target"], ["--dry-run"], ["--auto"], ["--bare-resume"],
+    ["--restore"], ["copilot-positional-argument"],
+    ["--profile", ""], ["--seed", ""], ["--owner-ref", ""],
+])
+def test_structured_request_rejects_all_nonprotocol_modifiers(
+    mode, modifier, monkeypatch,
+):
+    import argparse
+    from agent_worktrees import output, resolve_cli
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("nonprotocol modifier reached admission or status")
+
+    monkeypatch.setattr(request, "execute", forbidden)
+    monkeypatch.setattr(request, "inspect", forbidden)
+    parsers = argparse.ArgumentParser().add_subparsers(dest="command")
+    resolve_cli.add_parsers(parsers)
+    encoded = base64.b64encode(json.dumps(_intent("new")).encode()).decode()
+    protocol = (
+        ["--launch-request-b64", encoded] if mode == "admission"
+        else ["--launch-request-status", "a" * 32]
+    )
+    args = parsers.choices["resolve"].parse_args(["--json", *protocol, *modifier])
+    with output.capture_json_output() as captured:
+        assert resolve_cli.cmd_resolve(args) == 3
+    assert "Structured launch requests require" in json.loads(captured.getvalue())["error"]
+
+
+@pytest.mark.parametrize("selector", [[], ["--new"]])
+@pytest.mark.parametrize("protocol", [
+    ["--launch-request-b64", ""],
+    ["--launch-request-status", ""],
+    ["--launch-request-b64", "", "--launch-request-status", ""],
+    ["--launch-request-b64", "valid", "--launch-request-status", ""],
+    ["--launch-request-b64", "", "--launch-request-status", "a" * 32],
+])
+def test_empty_protocol_options_never_fall_through_to_ordinary_resolve(
+    selector, protocol, monkeypatch,
+):
+    import argparse
+    from agent_worktrees import output, resolve_cli
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("malformed protocol reached ordinary resolve or target state")
+
+    monkeypatch.setattr(resolve_cli.ResolveCommandState, "from_args", forbidden)
+    monkeypatch.setattr(request, "execute", forbidden)
+    monkeypatch.setattr(request, "inspect", forbidden)
+    parsers = argparse.ArgumentParser().add_subparsers()
+    resolve_cli.add_parsers(parsers)
+    encoded = base64.b64encode(json.dumps(_intent("new")).encode()).decode()
+    protocol = [encoded if value == "valid" else value for value in protocol]
+    args = parsers.choices["resolve"].parse_args(["--json", *selector, *protocol])
+    with output.capture_json_output() as captured:
+        assert resolve_cli.cmd_resolve(args) == 3
+    assert "Launch request <invalid> failed" in json.loads(captured.getvalue())["error"]
+
+
+def test_malformed_base64_returns_structured_cli_error():
+    import argparse
+    from agent_worktrees import output, resolve_cli
+
+    parsers = argparse.ArgumentParser().add_subparsers()
+    resolve_cli.add_parsers(parsers)
+    args = parsers.choices["resolve"].parse_args(["--json", "--launch-request-b64", "!invalid!"])
+    with output.capture_json_output() as captured:
+        assert resolve_cli.cmd_resolve(args) == 3
+    assert "Launch request <invalid> failed" in json.loads(captured.getvalue())["error"]
+
+
+@pytest.mark.parametrize("selectors", [[], ["--codename", "one-two"], ["--worktree-id"],
+                                       ["--new", "--worktree-id", "wt-a"]])
+def test_remote_selector_refuses_before_admission(selectors):
+    with pytest.raises(ValueError, match="exactly one"):
+        remote_seed_launch.prepare(None, "target", "bash", selectors, "task")
+
+
+@pytest.mark.parametrize("kind", ["new", "resume"])
+@pytest.mark.parametrize("shell", ["bash", "powershell.exe"])
+@pytest.mark.parametrize("extra", [0, 1])
+def test_envelope_boundary_fits_both_shells_before_admission(kind, shell, extra, monkeypatch):
+    monkeypatch.setattr(remote_seed_launch.cfg, "project_name", lambda: "p" * 64)
+    monkeypatch.setattr(remote_seed_launch.uuid, "uuid4", lambda: SimpleNamespace(hex="a" * 32))
+    intent = {**_intent(kind, ""), "no_mux": True}
+    intent["text"] = "x" * (
+        request.MAX_REQUEST_BYTES - len(json.dumps(intent, ensure_ascii=False).encode()) + extra
+    )
+    encoded = base64.b64encode(json.dumps(intent, ensure_ascii=False).encode()).decode()
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        assert len(argv[-1]) <= remote_seed_launch.MAX_REMOTE_COMMAND_CHARS
+        return SimpleNamespace(returncode=0, stdout=json.dumps({
+            "version": 1, "request_id": intent["request_id"], "seed_id": intent["request_id"],
+            "worktree_id": intent["worktree_id"] or "wt-new", "seed_kind": kind,
+        }))
+
+    monkeypatch.setattr(remote_seed_launch.subprocess, "run", run)
+    args = ["--new"] if kind == "new" else ["--worktree-id", "wt-a"]
+    if extra:
+        with pytest.raises(ValueError, match="transport limit"):
+            request.decode(encoded)
+        with pytest.raises(ValueError, match="transport limit"):
+            remote_seed_launch.prepare(None, "target", shell, [*args, "--no-mux"], intent["text"])
+        assert not calls
+    else:
+        assert request.decode(encoded) == intent
+        plan = remote_seed_launch.prepare(None, "target", shell, [*args, "--no-mux"], intent["text"])
+        assert len(calls) == 1
+        assert plan["seed_kind"] == kind
+
+
+@pytest.mark.parametrize("kind", ["new", "resume"])
+@pytest.mark.parametrize("receipt", [
+    "not-json", "null", "[]", "{}", '{"request_id": "wrong"}',
+    json.dumps(dict(version=1, request_id="a" * 32, seed_id="a" * 32,
+                    seed_kind="resume", worktree_id="another-worktree")),
+])
+def test_uncertain_receipt_requires_same_request_recovery(kind, receipt, monkeypatch):
+    monkeypatch.setattr(remote_seed_launch.cfg, "project_name", lambda: "demo")
+    monkeypatch.setattr(remote_seed_launch.uuid, "uuid4", lambda: SimpleNamespace(hex="a" * 32))
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout=receipt)
+
+    monkeypatch.setattr(remote_seed_launch.subprocess, "run", run)
+    args = ["--new"] if kind == "new" else ["--worktree-id", "wt-a"]
+    with pytest.raises(RuntimeError) as exc:
+        remote_seed_launch.prepare(None, "target", "bash", args, "task")
+    message = str(exc.value)
+    assert "unconfirmed on target" in message
+    assert f"Do not resubmit this {kind} prompt" in message
+    assert f"demo resolve --json --launch-request-status {'a' * 32} on the target" in message
+    assert len(calls) == 1

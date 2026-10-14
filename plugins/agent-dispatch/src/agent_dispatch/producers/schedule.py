@@ -37,6 +37,7 @@ Spec shape (JSON)::
         },
         {
           "id": "agent-index-maintenance",
+          "category": "maintenance",
           "title": "Run the agent-index maintenance tick",
           "repo": "github.com/example/harness",
           "interval_seconds": 1800,
@@ -158,6 +159,7 @@ def _create_kwargs(schedule: dict[str, Any], repo: str, occ: float) -> dict[str,
     """The ``DispatchClient.create`` kwargs for one occurrence of a schedule."""
     return {
         "repo": repo,
+        **({"category": schedule["category"]} if "category" in schedule else {}),
         "prompt": schedule.get("prompt", ""),
         "payload_ref": schedule.get("payload_ref"),
         "payload_inline": schedule.get("payload_inline"),

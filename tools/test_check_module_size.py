@@ -10,6 +10,7 @@ Run:  python -m pytest tools/test_check_module_size.py
 from __future__ import annotations
 
 import json
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +18,23 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent / "check-module-size.py"
+
+
+def test_repository_probe_timeout_is_a_controlled_failure(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--repository", str(tmp_path)])
+
+    def hung_git(command, **kwargs):
+        assert command == ["git", "rev-parse", "--show-toplevel"]
+        assert kwargs["timeout"] == 15
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(subprocess, "run", hung_git)
+    with pytest.raises(SystemExit) as error:
+        runpy.run_path(str(SCRIPT), run_name="__main__")
+    assert error.value.code == 1
+    stderr = capsys.readouterr().err
+    assert "[FAIL] module size: Git timed out after 15 seconds" in stderr
+    assert "Traceback" not in stderr
 
 
 def test_module_size_stays_in_ci_not_publication_hook():
@@ -78,6 +96,176 @@ def test_a_small_file_passes(repo: Path):
 
     result = _run(repo)
 
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[OK]" in result.stdout
+
+
+def test_trusted_tooling_can_refresh_a_poisoned_target_checkout(repo: Path):
+    _write_lines(repo, "src/large.py", 1200)
+    _write_baseline(repo, {"src/large.py": 1100})
+    (repo / "tools" / SCRIPT.name).write_text(
+        "raise RuntimeError('candidate tooling executed')\n", encoding="utf-8",
+    )
+    (repo / "json.py").write_text(
+        "raise RuntimeError('candidate import executed')\n", encoding="utf-8",
+    )
+    _commit_all(repo)
+    result = subprocess.run(
+        [sys.executable, "-I", str(SCRIPT), "--repository", str(repo),
+         "--refresh-baseline", "--widen-only"],
+        cwd=repo, capture_output=True, text=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads((repo / "tools/module-size-baseline.json").read_text()) == {
+        "src/large.py": 1200,
+    }
+
+
+def test_trusted_target_refresh_still_rejects_new_offenders(repo: Path):
+    _write_lines(repo, "src/new.py", 1200)
+    _write_baseline(repo, {})
+    _commit_all(repo)
+    for extra in [
+        ("--refresh-baseline", "--allow-widen"),
+        ("--refresh-baseline", "--widen-only"),
+        (),
+    ]:
+        result = subprocess.run(
+            [sys.executable, "-I", str(SCRIPT), "--repository", str(repo), *extra],
+            cwd=repo.parent, capture_output=True, text=True, timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert result.returncode == (0 if extra else 1), result.stdout + result.stderr
+    assert json.loads((repo / "tools/module-size-baseline.json").read_text()) == {}
+
+
+def test_widen_only_tolerates_a_stale_high_ceiling_after_dev_shrinks(repo: Path):
+    _write_lines(repo, "src/legacy.py", 1200)
+    _write_baseline(repo, {"src/legacy.py": 1100})
+    _commit_all(repo)
+    _git(repo, "branch", "dev")
+    _git(repo, "checkout", "-qb", "automation/module-size-baseline-widen-dev")
+    assert _run(repo, "--refresh-baseline", "--widen-only").returncode == 0
+    _commit_all(repo)
+    _git(repo, "checkout", "-q", "dev")
+    _write_lines(repo, "src/legacy.py", 1100)
+    _commit_all(repo)
+    _git(repo, "merge", "-q", "--no-edit", "automation/module-size-baseline-widen-dev")
+    baseline = repo / "tools/module-size-baseline.json"
+    assert _run(repo).returncode == 0
+    assert _run(repo, "--refresh-baseline", "--widen-only").returncode == 0
+    assert json.loads(baseline.read_text()) == {"src/legacy.py": 1200}
+    assert _run(repo, "--refresh-baseline", "--allow-widen").returncode == 0
+    assert json.loads(baseline.read_text()) == {"src/legacy.py": 1100}
+
+
+def test_widen_only_never_lowers_or_removes_existing_entries(repo: Path):
+    for path, count in [
+        ("src/grown.py", 1300), ("src/shrunk.py", 1100), ("src/graduated.py", 900),
+    ]:
+        _write_lines(repo, path, count)
+    _write_baseline(repo, {
+        "src/grown.py": 1200, "src/shrunk.py": 1200, "src/graduated.py": 1200,
+    })
+    _commit_all(repo)
+    result = _run(repo, "--refresh-baseline", "--widen-only")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads((repo / "tools/module-size-baseline.json").read_text()) == {
+        "src/grown.py": 1300, "src/shrunk.py": 1200, "src/graduated.py": 1200,
+    }
+
+
+def test_widen_only_cannot_introduce_a_low_ceiling_after_dev_grows(repo: Path):
+    _write_lines(repo, "src/legacy.py", 1100)
+    _write_lines(repo, "src/other.py", 1300)
+    _write_baseline(repo, {"src/legacy.py": 1500, "src/other.py": 1200})
+    _commit_all(repo)
+    _git(repo, "branch", "dev")
+    _git(repo, "checkout", "-qb", "automation/module-size-baseline-widen-dev")
+    assert _run(repo, "--refresh-baseline", "--widen-only").returncode == 0
+    _commit_all(repo)
+    _git(repo, "checkout", "-q", "dev")
+    _write_lines(repo, "src/legacy.py", 1400)
+    _commit_all(repo)
+    _git(repo, "merge", "-q", "--no-edit", "automation/module-size-baseline-widen-dev")
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads((repo / "tools/module-size-baseline.json").read_text()) == {
+        "src/legacy.py": 1500, "src/other.py": 1300,
+    }
+
+
+@pytest.mark.parametrize("args", [
+    ("--widen-only",),
+    ("--refresh-baseline", "--widen-only", "--allow-widen"),
+])
+def test_widen_only_requires_an_unambiguous_refresh_mode(repo: Path, args):
+    result = _run(repo, *args)
+    assert result.returncode == 2
+    assert "--widen-only" in result.stderr
+
+
+def test_nonfile_target_baseline_is_a_controlled_cli_failure(repo: Path):
+    (repo / "tools/module-size-baseline.json").mkdir()
+    _commit_all(repo)
+    result = _run(repo, "--repository", str(repo))
+    assert result.returncode == 2
+    assert "baseline must be a regular path" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_invalid_baseline_is_a_controlled_cli_failure(repo: Path):
+    (repo / "tools/module-size-baseline.json").write_text("{invalid\n", encoding="utf-8")
+    _commit_all(repo)
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "[FAIL] module size:" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_missing_target_checkout_is_a_usage_error(repo: Path):
+    result = _run(repo, "--repository", str(repo / "missing"))
+    assert result.returncode == 2
+    assert "--repository must name a checkout directory" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize("inside_checkout", [False, True])
+def test_target_must_be_a_git_checkout_root(repo: Path, inside_checkout):
+    target = (repo if inside_checkout else repo.parent) / "not-a-checkout-root"
+    target.mkdir()
+    result = _run(repo, "--repository", str(target))
+    assert result.returncode == 2
+    assert "--repository must name a Git checkout root" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_git_failure_is_a_controlled_cli_failure(repo: Path):
+    _write_lines(repo, "src/small.py", 50)
+    _commit_all(repo)
+    result = _run(repo, "--changed-since", "missing-ref")
+    assert result.returncode == 1
+    assert "[FAIL] module size:" in result.stderr
+    assert "missing-ref" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_unicode_target_root_uses_git_utf8_output(repo: Path):
+    _write_lines(repo, "src/small.py", 50)
+    _commit_all(repo)
+    target = repo.parent / "target-\u00e9"
+    _git(repo, "clone", "-q", str(repo), str(target))
+    driver = (
+        "import locale,runpy,sys; locale.getencoding=lambda:'cp1252'; "
+        "sys.argv=sys.argv[1:]; runpy.run_path(sys.argv[0],run_name='__main__')"
+    )
+    result = subprocess.run(
+        [sys.executable, "-X", "utf8=0", "-I", "-c", driver,
+         str(SCRIPT), "--repository", str(target)],
+        capture_output=True, text=True, encoding="utf-8", timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "[OK]" in result.stdout
 

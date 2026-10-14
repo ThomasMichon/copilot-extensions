@@ -896,7 +896,7 @@ class TestConcludeAndLinkCommands:
                 anchor=str(tracking_dir), worktree_root=str(tracking_dir / "trees"),
             )},
         )
-        monkeypatch.setattr(cfg, "load_project_config", lambda name: config)
+        monkeypatch.setattr(cfg, "load_project_config", lambda name, **kwargs: config)
         captured: dict = {}
         monkeypatch.setattr(session_tracking_cli, "_all_tracking_dirs", lambda: [tracking_dir])
         monkeypatch.setattr(output, "_json_output", lambda data: captured.update(data))

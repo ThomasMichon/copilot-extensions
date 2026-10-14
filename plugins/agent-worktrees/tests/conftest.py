@@ -10,6 +10,26 @@ import pytest
 from agent_worktrees import tracking
 
 
+@pytest.fixture(scope="session")
+def native_bash():
+    from native_shell_support import ShellUnavailable, resolve_native_bash
+
+    try:
+        return resolve_native_bash()
+    except ShellUnavailable as exc:
+        pytest.skip(str(exc))
+
+
+@pytest.fixture(scope="session")
+def native_powershell():
+    from native_shell_support import ShellUnavailable, resolve_native_powershell
+
+    try:
+        return resolve_native_powershell()
+    except ShellUnavailable as exc:
+        pytest.skip(str(exc))
+
+
 @pytest.fixture(autouse=True)
 def _isolate_identity_key(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_WORKTREES_IDENTITY_KEY", str(tmp_path / "absent-identity.key"))

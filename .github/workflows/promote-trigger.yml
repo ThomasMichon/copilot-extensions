@@ -1,10 +1,11 @@
 name: Promote trigger (dev-advancement filter)
 
-# One trusted CI-completion invocation hosts two independent jobs. The dev
+# One trusted CI-completion invocation hosts independent jobs. The dev
 # ancestry filter must remain outside validate-and-promote's concurrency group:
 # irrelevant PR completions must not evict real dev advancements. Do not infer
 # ancestry from workflow_run.head_branch or dispatch mutable workflow code.
-# The scanner reads PR objects as inert data; neither job depends on the other.
+# The scanner reads PR objects as inert data. Baseline maintenance updates dev
+# only, using trusted default-branch tooling; no job depends on another.
 
 # GitHub's documented fork-safe pattern for privileged PR follow-up is:
 #   (1) run untrusted build/test work under `pull_request`, then
@@ -55,6 +56,97 @@ permissions:
   contents: read
 
 jobs:
+  refresh-module-baseline:
+    name: refresh committed dev module baseline
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'dev' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      (github.event.workflow_run.conclusion == 'success' ||
+       github.event.workflow_run.conclusion == 'failure')
+    environment: main-promotion
+    permissions:
+      contents: read
+      pull-requests: read
+    concurrency:
+      group: module-size-baseline-widen-dev
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out trusted workflow tooling without credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: trusted
+          persist-credentials: false
+      - name: Check out committed dev input as data without credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Refresh and validate using only trusted tooling
+        run: |
+          python -I trusted/tools/check-module-size.py --repository candidate --refresh-baseline --widen-only
+          python -I trusted/tools/check-module-size.py --repository candidate
+      - id: baseline
+        name: Fence stale dev inputs and restrict the publication diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          INPUT_SHA: ${{ github.event.workflow_run.head_sha }}
+          GIT_CONFIG_NOSYSTEM: "1"
+          GIT_CONFIG_GLOBAL: /dev/null
+        run: |
+          live_sha="$(gh api "repos/$REPO/git/ref/heads/dev" --jq '.object.sha')"
+          if [[ ! "$live_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Current dev identity is unavailable or invalid."
+            exit 1
+          fi
+          if [ "$live_sha" != "$INPUT_SHA" ]; then
+            echo "::notice::dev advanced; its latest CI completion owns baseline maintenance."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git --no-pager -C candidate diff --no-ext-diff --no-textconv --name-only)"
+          if [ -z "$changed" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          elif [ "$changed" = "tools/module-size-baseline.json" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Baseline maintenance changed unexpected paths."
+            exit 1
+          fi
+      - name: Open a baseline-only PR against dev
+        if: steps.baseline.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+          path: candidate
+          base: dev
+          branch: automation/module-size-baseline-widen-dev
+          add-paths: tools/module-size-baseline.json
+          delete-branch: true
+          commit-message: "tools: refresh committed dev module-size baseline (automated)"
+          title: "tools: refresh committed dev module-size baseline (automated)"
+          body: |
+            Mechanical baseline-only refresh of committed dev, using trusted
+            default-branch tooling. Existing ceilings may widen to current
+            sizes; shrinking/graduated entries are never lowered or removed.
+            New offenders are never automatically grandfathered. Tightening
+            remains a deliberate manual refresh, not automated maintenance.
+
+            This targets dev and requires ordinary current-head CI and review.
+            It never advances generated main or rebases a promotion candidate.
+
+            ## Documentation impact
+            None: baseline data only; no documented behavior changes.
+
   filter-and-dispatch:
     name: filter (dev-ancestry) and dispatch
     if: >-
@@ -100,307 +192,46 @@ jobs:
     timeout-minutes: 10
     steps:
       - id: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         continue-on-error: true
         with:
+          ref: ${{ github.workflow_sha }}
           fetch-depth: 1
 
-      - id: setup-python
-        uses: actions/setup-python@v5
+      - id: guard
+        if: steps.checkout.outcome == 'success'
+        uses: ./.github/actions/identifier-leak-guard
         continue-on-error: true
         with:
-          python-version: "3.12"
+          pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
+          head-sha: ${{ github.event.workflow_run.head_sha }}
+          facility-identifiers: ${{ secrets.FORBIDDEN_IDS_FACILITY }}
+          work-identifiers: ${{ secrets.FORBIDDEN_IDS_WORK }}
 
-      - id: pr
-        name: Resolve PR metadata
-        continue-on-error: true
+      # A local action cannot report a checkout or action-loading failure.
+      - name: Report unavailable trusted scanner
+        if: always() && (steps.checkout.outcome != 'success' || steps.guard.outcome != 'success')
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
-          EVENT_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          base_ref=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.base.ref')
-          current_head_sha=$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.head.sha')
-          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "base_ref=$base_ref" >> "$GITHUB_OUTPUT"
-          echo "head_sha=$current_head_sha" >> "$GITHUB_OUTPUT"
-          if [ "$current_head_sha" != "$EVENT_HEAD_SHA" ]; then
-            echo "::notice::PR #$PR_NUMBER moved on to $current_head_sha after CI run ${{ github.event.workflow_run.id }} for $EVENT_HEAD_SHA; skipping stale reporting."
-            echo "stale=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "stale=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - id: fetch-pr-data
-        name: Fetch PR head as inert data only
-        continue-on-error: true
-        if: steps.pr.outputs.stale != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
-          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
-        run: |
-          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" \
-            --jq '.[] | select(.status != "removed") | .filename' \
-            > identifier-guard-paths.txt
-          git fetch --no-tags --depth=1 origin \
-            "$HEAD_SHA:refs/remotes/origin/pr-head/$PR_NUMBER"
-
-      - id: init-files
-        name: Initialize report files
-        continue-on-error: true
-        if: steps.pr.outputs.stale != 'true'
-        run: |
-          printf '[]\n' > identifier-guard-findings.json
-          printf '[]\n' > identifier-guard-details.json
-
-      - id: denylist
-        name: Load trusted denylist
-        continue-on-error: true
-        if: steps.pr.outputs.stale != 'true'
-        env:
-          RAW_FACILITY: ${{ secrets.FORBIDDEN_IDS_FACILITY }}
-          RAW_WORK: ${{ secrets.FORBIDDEN_IDS_WORK }}
-        run: |
-          joined=""
-          if [ -n "$RAW_FACILITY" ]; then
-            joined="$RAW_FACILITY"
-          fi
-          if [ -n "$RAW_WORK" ]; then
-            if [ -n "$joined" ]; then
-              joined="${joined}"$'\n'
-            fi
-            joined="${joined}${RAW_WORK}"
-          fi
-          {
-            echo "COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI<<__CI_IDS__"
-            printf '%s\n' "$joined"
-            echo "__CI_IDS__"
-          } >> "$GITHUB_ENV"
-          if [ -n "$joined" ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - id: scan
-        name: Run trusted scanner
-        continue-on-error: true
-        if: steps.pr.outputs.stale != 'true'
-        run: >-
-          python tools/check-no-internal-identifiers.py
-          --ci
-          --paths-file identifier-guard-paths.txt
-          --git-ref refs/remotes/origin/pr-head/${{ steps.pr.outputs.pr_number }}
-          --json-out identifier-guard-findings.json
-          --trusted-details-json-out identifier-guard-details.json
-
-      - name: Publish Check Run and PR feedback
-        if: always()
-        uses: actions/github-script@v7
-        env:
-          CHECK_NAME: identifier leak guard
-          PR_NUMBER: ${{ steps.pr.outputs.pr_number || github.event.workflow_run.pull_requests[0].number }}
-          PR_HEAD_SHA: ${{ steps.pr.outputs.head_sha || github.event.workflow_run.head_sha }}
-          FINDINGS_PATH: identifier-guard-findings.json
-          DETAILS_PATH: identifier-guard-details.json
-          PATHS_PATH: identifier-guard-paths.txt
-          STALE: ${{ steps.pr.outputs.stale }}
-          DENYLIST_CONFIGURED: ${{ steps.denylist.outputs.configured }}
+          PR_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           CHECKOUT_OUTCOME: ${{ steps.checkout.outcome }}
-          SETUP_PYTHON_OUTCOME: ${{ steps.setup-python.outcome }}
-          PR_OUTCOME: ${{ steps.pr.outcome }}
-          INIT_FILES_OUTCOME: ${{ steps.init-files.outcome }}
-          FETCH_PR_DATA_OUTCOME: ${{ steps.fetch-pr-data.outcome }}
-          DENYLIST_OUTCOME: ${{ steps.denylist.outcome }}
-          SCAN_OUTCOME: ${{ steps.scan.outcome }}
+          GUARD_OUTCOME: ${{ steps.guard.outcome }}
         with:
           script: |
-            const fs = require("fs");
-
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const checkName = process.env.CHECK_NAME;
-            const prNumber = Number(process.env.PR_NUMBER);
-            const headSha = process.env.PR_HEAD_SHA;
-            const stale = process.env.STALE === "true";
-            const configured = process.env.DENYLIST_CONFIGURED === "true";
-            const scanOutcome = process.env.SCAN_OUTCOME || "skipped";
-            const readJson = (path) => {
-              if (!fs.existsSync(path)) {
-                return [];
-              }
-              return JSON.parse(fs.readFileSync(path, "utf8"));
-            };
-            const findings = readJson(process.env.FINDINGS_PATH);
-            const details = readJson(process.env.DETAILS_PATH);
-            const scannedPaths = fs.existsSync(process.env.PATHS_PATH)
-              ? fs
-                  .readFileSync(process.env.PATHS_PATH, "utf8")
-                  .split(/\r?\n/)
-                  .filter((line) => line.length > 0)
-              : [];
-
-            if (stale) {
-              core.notice(`Skipping stale reporting for PR #${prNumber}.`);
+            const {data: pr} = await github.rest.pulls.get({
+              ...context.repo, pull_number: Number(process.env.PR_NUMBER),
+            });
+            if (pr.head.sha !== process.env.PR_HEAD_SHA) {
+              core.notice("PR head moved on; skipping stale infrastructure reporting.");
               return;
             }
-
-            let conclusion = "success";
-            let title = "Identifier leak guard passed";
-            let summary = `Scanned ${scannedPaths.length} changed file(s) on PR head ${headSha}.`;
-            let text = "";
-            const failingSteps = [
-              ["trusted checkout", process.env.CHECKOUT_OUTCOME],
-              ["python setup", process.env.SETUP_PYTHON_OUTCOME],
-              ["PR metadata resolution", process.env.PR_OUTCOME],
-              ["report-file initialization", process.env.INIT_FILES_OUTCOME],
-              ["PR data fetch", process.env.FETCH_PR_DATA_OUTCOME],
-              ["denylist load", process.env.DENYLIST_OUTCOME],
-            ]
-              .filter(([, outcome]) => outcome && outcome !== "success" && outcome !== "skipped")
-              .map(([label]) => label);
-
-            if (!configured) {
-              // Phase 4 (efforts/active/ci-identifier-leak-guard) provisions
-              // FORBIDDEN_IDS_FACILITY / FORBIDDEN_IDS_WORK as an
-              // operator-only step and hasn't landed yet. Report this as
-              // `neutral` (non-blocking) rather than `failure` while the
-              // feature is still in development, so PRs aren't gated on an
-              // enforcement layer that isn't provisioned yet. Once the
-              // secrets exist, `configured` is true and this branch never
-              // fires again -- real scan failures below still fail closed.
-              conclusion = "neutral";
-              title = "Identifier leak guard not yet configured (in development)";
-              summary =
-                "FORBIDDEN_IDS_FACILITY / FORBIDDEN_IDS_WORK repository secrets are not configured yet (Phase 4 of ci-identifier-leak-guard is pending), so this check is reported neutral instead of blocking PRs.";
-            } else if (details.length > 0) {
-              conclusion = "failure";
-              title = `${details.length} forbidden identifier(s) found`;
-              summary =
-                "Trusted scan found forbidden identifiers in the PR head's changed file contents.";
-              // Check Run `output.text` has a documented 65535-character cap.
-              // Include every finding that fits under a safe budget (rather
-              // than an arbitrary item count) so this stays the complete,
-              // sole relied-upon delivery channel -- the PR comment above is
-              // best-effort only and may not post at all.
-              const MAX_TEXT_CHARS = 60000;
-              const allLines = details.map((item) => {
-                const reason = item.reason ? ` — ${item.reason}` : "";
-                return `- ${item.file}:${item.line}:${item.col} — \`${item.identifier}\`${reason}`;
-              });
-              const rendered = [];
-              let used = 0;
-              let shown = 0;
-              for (const line of allLines) {
-                const cost = line.length + 1;
-                if (used + cost > MAX_TEXT_CHARS) {
-                  break;
-                }
-                rendered.push(line);
-                used += cost;
-                shown += 1;
-              }
-              if (shown < details.length) {
-                rendered.push(`- ...and ${details.length - shown} more.`);
-              }
-              text = rendered.join("\n");
-            } else if (failingSteps.length > 0 || scanOutcome !== "success") {
-              conclusion = "failure";
-              title = "Identifier leak guard errored";
-              summary =
-                "The trusted scan step failed before it could produce findings. Inspect this workflow run's logs.";
-              const detailsList = [
-                ...failingSteps,
-                ...(scanOutcome !== "success" ? ["trusted scanner"] : []),
-              ];
-              text = `Failing step(s): ${detailsList.join(", ")}.`;
-            } else {
-              text = findings.length
-                ? `Redacted findings artifact contains ${findings.length} hashed entr${findings.length === 1 ? "y" : "ies"}.`
-                : "No forbidden identifiers were found.";
-            }
-
             await github.rest.checks.create({
-              owner,
-              repo,
-              name: checkName,
-              head_sha: headSha,
-              status: "completed",
-              conclusion,
+              ...context.repo, name: "identifier leak guard",
+              head_sha: process.env.PR_HEAD_SHA, status: "completed", conclusion: "failure",
               output: {
-                title,
-                summary,
-                text,
+                title: "Identifier leak guard unavailable",
+                summary: "Trusted checkout or scanner action failed; no scan result is available.",
+                text: `Checkout: ${process.env.CHECKOUT_OUTCOME}; action: ${process.env.GUARD_OUTCOME}.`,
               },
             });
-
-            if (conclusion !== "failure" || details.length === 0) {
-              return;
-            }
-
-            const marker = `<!-- identifier-leak-guard:${headSha} -->`;
-            const lines = details.map((item) => {
-              const reason = item.reason ? ` — ${item.reason}` : "";
-              return `- \`${item.file}:${item.line}:${item.col}\` — \`${item.identifier}\`${reason}`;
-            });
-            const body = [
-              marker,
-              "Identifier leak guard found forbidden identifiers in this PR head:",
-              "",
-              ...lines,
-              "",
-              "Please replace each matched value with a generic/public-safe equivalent.",
-            ].join("\n");
-
-            // Best-effort only: a workflow_run-triggered GITHUB_TOKEN cannot
-            // reliably post/update Issues-API comments even with `issues:
-            // write` declared above -- GitHub applies an additional
-            // anti-privilege-escalation restriction to workflow_run tokens
-            // specifically for the Issues/PR-comment surface, distinct from
-            // the Checks API (`checks.create` above is not subject to it).
-            // The Check Run's own `output.text` (set above, already emitted
-            // unconditionally) already carries the full match/reason/file/
-            // line/col detail via the Checks API rather than a masked log
-            // line, which is the actual design requirement -- so a failure
-            // here never leaves findings undiscoverable, only less
-            // prominently surfaced. Never let this best-effort duplicate
-            // channel turn a correctly-reported `failure` Check Run into an
-            // unhandled workflow error.
-            try {
-              const comments = await github.paginate(github.rest.issues.listComments, {
-                owner,
-                repo,
-                issue_number: prNumber,
-                per_page: 100,
-              });
-              const existing = comments.find(
-                (comment) =>
-                  comment.user?.login === "github-actions[bot]" &&
-                  typeof comment.body === "string" &&
-                  comment.body.includes(marker),
-              );
-
-              if (existing) {
-                await github.rest.issues.updateComment({
-                  owner,
-                  repo,
-                  comment_id: existing.id,
-                  body,
-                });
-              } else {
-                await github.rest.issues.createComment({
-                  owner,
-                  repo,
-                  issue_number: prNumber,
-                  body,
-                });
-              }
-            } catch (error) {
-              core.warning(
-                `identifier-leak-guard: could not post PR feedback comment (${error.message}). ` +
-                  "The Check Run's own output already carries the full finding detail.",
-              );
-            }

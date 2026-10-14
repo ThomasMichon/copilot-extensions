@@ -1,12 +1,12 @@
 # agent-dispatch Tasks-pane UX — Vision
 
-- **Subject:** The Worktree Manager's **Tasks** pivot as a first-class,
-  disciplined operator surface for the agent-dispatch task/worktree lifecycle
+- **Subject:** The Worktree Manager's **Tasks and Maintenance** pivots as
+  first-class, disciplined operator surfaces for the agent-dispatch task/worktree lifecycle
   — on par with the Worktrees pane's table discipline, not a plain badge list.
 - **Scope:** leaf (a child of the
   [agent-dispatch](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-10-08
+- **Last revised:** 2026-10-13
 - **Reality docs:** `worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py`
   (`TasksView`, `WorktreesView`, `_TASK_PHASE_PALETTE`) ·
   `worktree-manager/src/worktree_manager/production_picker/picker_tui/pivots.py`
@@ -52,6 +52,26 @@ beyond this pane and the coordinator/supervisor agent-dispatch already ships
 with — the manual path is native, not an add-on.
 
 ## Concepts & Components
+
+### Work and Maintenance — independent, full-fidelity contributions
+
+The primary **Tasks** contribution explicitly requests ordinary **work**.
+An independent **Maintenance** contribution requests maintenance tasks, so
+recurring upkeep does not crowd out ordinary work while remaining visible on
+its own terms. Neither contribution requires the other to be selected, and
+both use the parent vision's durable category rather than inferring purpose
+from execution kind, routing labels, source, or scheduling.
+
+Both surfaces retain the same task-inspection discipline: failures, results,
+progress, logs, statistics, prominent artifacts, and session/worktree
+associations remain reachable, including historical attachment lineage.
+Separation is presentation, not deletion or a lesser audit tier.
+
+Category selection happens **at retrieval, before limits or pagination**, on
+local and delegated remote paths alike; filtering a bounded mixed-category
+batch only after fetching it cannot satisfy either contribution's contract.
+An unsupported peer is shown as incompatible, not as an apparently empty or
+correctly filtered view.
 
 ### The phase palette — one colour vocabulary, two lifecycles
 

@@ -201,6 +201,172 @@ def _prelude(ext: str) -> str:
     )
 
 
+@pytest.fixture
+def launch_runtime(tmp_path):
+    slot = tmp_path / "runtime" / "versions" / "1.2.3"
+    env = _env(tmp_path)
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", "--copies", str(slot)],
+        env=env, capture_output=True, check=True, timeout=30,
+        creationflags=flags,
+    )
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    assert python.resolve().is_relative_to(slot)
+    site = subprocess.check_output(
+        [str(python), "-I", "-c", "import site; print(site.getsitepackages()[0])"],
+        env=env, text=True, timeout=10, creationflags=flags,
+    ).strip()
+    package = Path(site) / "agent_codespaces"
+    package.mkdir()
+    return slot, python, package, env
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.parametrize(
+    "ext",
+    [
+        pytest.param("sh", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX harness")),
+        pytest.param("ps1", marks=pytest.mark.skipif(PWSH is None, reason="pwsh unavailable")),
+    ],
+)
+@pytest.mark.parametrize(
+    "state", ["healthy", "namespace", "broken-entrypoint", "shadowed", "invalid-interpreter"],
+)
+def test_codespaces_activation_requires_installed_module_launch(
+    tmp_path, launch_runtime, ext, state,
+):
+    slot, python, package, env = launch_runtime
+    if state != "namespace":
+        (package / "__init__.py").write_text("", encoding="utf-8")
+    if state == "healthy":
+        (package / "__main__.py").write_text(
+            "import argparse\nargparse.ArgumentParser().parse_args()\n",
+            encoding="utf-8",
+        )
+    elif state == "broken-entrypoint":
+        (package / "__main__.py").write_text(
+            "import missing_codespaces_runtime_dependency\n", encoding="utf-8",
+        )
+    elif state == "shadowed":
+        shadow = tmp_path / "agent_codespaces"
+        shadow.mkdir()
+        (shadow / "__init__.py").write_text("", encoding="utf-8")
+        (shadow / "__main__.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
+        env["PYTHONPATH"] = str(tmp_path)
+    elif state == "invalid-interpreter":
+        python.write_text("not an interpreter\n", encoding="utf-8")
+
+    if state == "namespace":
+        imported = subprocess.run(
+            [str(python), "-I", "-c", "import agent_codespaces"],
+            env=env, capture_output=True, timeout=10, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert imported.returncode == 0
+    root = slot.parents[1]
+    marker = slot / ".install-complete.json"
+    marker.write_text('{"version":"1.2.3","completed_at":"2026-10-01"}', encoding="utf-8")
+    selector = root / "current-version"
+    selector.write_text("previous", encoding="utf-8")
+    before = marker.read_bytes(), selector.read_bytes()
+    published = tmp_path / "published"
+    if ext == "sh":
+        script = (
+            _prelude(ext)
+            + _function(ext, "_codespaces_runtime_healthy")
+            + _function(ext, "_versioned_activate")
+            + f"""
+VERSIONED_RUNTIME=1
+SRC_VERSION='1.2.3'
+VENV_DIR='{slot}'
+INSTALL_DIR='{root}'
+SCRIPT_DIR='{PLUGIN / "scripts"}'
+_versioned_mark_complete() {{ printf 'published' > '{published}'; return 1; }}
+_versioned_activate
+"""
+        )
+    else:
+        script = (
+            _prelude(ext)
+            + _function(ext, "Test-CodespacesRuntime")
+            + _function(ext, "Invoke-VersionedActivate")
+            + f"""
+$VersionedRuntime=$true
+$global:LASTEXITCODE=0
+$SrcVersion='1.2.3'
+$VenvPython='{python}'
+$LinkPython=$VenvPython
+function Invoke-VersionedMarkComplete {{
+    [IO.File]::WriteAllText('{published}', 'published')
+    return $false
+}}
+if (-not (Invoke-VersionedActivate)) {{ exit 1 }}
+"""
+        )
+    result = _run(ext, script, tmp_path, env)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert published.exists() == (state == "healthy"), result.stdout + result.stderr
+    assert (marker.read_bytes(), selector.read_bytes()) == before
+    if state not in ("healthy", "invalid-interpreter"):
+        assert "module launch health gate" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "ext",
+    [
+        pytest.param("sh", marks=pytest.mark.skipif(os.name == "nt", reason="POSIX harness")),
+        pytest.param("ps1", marks=pytest.mark.skipif(PWSH is None, reason="pwsh unavailable")),
+    ],
+)
+def test_codespaces_completed_namespace_refuses_before_construction(
+    tmp_path, launch_runtime, ext,
+):
+    slot, python, package, env = launch_runtime
+    marker = slot / ".install-complete.json"
+    marker.write_text('{"version":"1.2.3","completed_at":"2026-10-01"}', encoding="utf-8")
+    sentinel = package / "remaining-module.py"
+    sentinel.write_text("unchanged\n", encoding="utf-8")
+    before = marker.read_bytes(), sentinel.read_bytes()
+    forbidden = tmp_path / "construction"
+    if ext == "sh":
+        script = (
+            _prelude(ext)
+            + _function(ext, "_codespaces_runtime_healthy")
+            + _function(ext, "deploy_venv")
+            + f"""
+SRC_VERSION='1.2.3'
+VENV_DIR='{slot}'
+VENV_PYTHON='{python}'
+FORCE=true
+_assert_uv() {{ printf 'uv' > '{forbidden}'; return 1; }}
+deploy_venv
+"""
+        )
+    else:
+        script = (
+            _prelude(ext)
+            + _function(ext, "Test-CodespacesRuntime")
+            + _function(ext, "Deploy-Venv")
+            + f"""
+$SrcVersion='1.2.3'
+$VenvDir='{slot}'
+$VenvPython='{python}'
+$Force=$true
+function Assert-Uv {{
+    [IO.File]::WriteAllText('{forbidden}', 'uv')
+    throw 'construction must not start'
+}}
+if (-not (Deploy-Venv)) {{ exit 1 }}
+"""
+        )
+    result = _run(ext, script, tmp_path, env)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "Refusing an in-place rebuild" in result.stdout + result.stderr
+    assert not forbidden.exists()
+    assert (marker.read_bytes(), sentinel.read_bytes()) == before
+
+
 @pytest.mark.parametrize("ext", ["sh", "ps1"])
 @pytest.mark.parametrize("mode", ["sre", "missing-cfg", "corrupt", "fallback", "fatal"])
 def test_codespaces_deploy_venv_uses_shared_retry_and_fallback(tmp_path, ext, mode):

@@ -7,6 +7,39 @@ container venues.
 
 Supports **Windows** and **Linux/WSL** (macOS planned).
 
+Internal owner-driven deployment and service restart accept optional
+`conditional`/`routing_dir` keyword arguments using the shared
+[conditional cutover contract](../../libs/zdd/README.md#conditional-owner-operation-partial-lifecycle-support).
+This bypasses caller configuration, legacy recovery and force-reaping, and
+refuses legacy daemons without an authoritative effective-config snapshot.
+Production capture/attestation is not yet wired; ordinary explicit cutover is
+unchanged. Anonymous health and authenticated control remain distinct contracts.
+
+Windows and WSL on one physical host are independent logical machines.
+The shared machine owner projects a legacy Windows/WSL roster into `host`
+and `host-wsl`, preserving their exact SSH profiles and physical association.
+Bridge applies its missing SSH-alias default only after projection, using each
+logical entry's own key. Explicit aliases (including an empty alias) are retained.
+The bridge's topology loader consumes that projection; its raw parser retains
+legacy parsing compatibility. Known-platform local detection selects a
+projected legacy sibling, while explicitly declared execution spaces still
+require their canonical `local_execution_space` selection. Physical grouping
+is not transport, session or ownership identity.
+The live-session extension obtains the machine key from Agent Worktrees.
+A failed owner lookup remains incomplete and is retried with bounded backoff;
+it never freezes a physical hostname as a guessed logical machine.
+An incomplete lookup explicitly clears the registration's prior targeting
+metadata atomically. Ordinary id-only heartbeats still retain metadata;
+`clear_targeting_metadata: true` opts into session-only addressing until the
+complete logical machine/project/worktree tuple is available again.
+Exact registered session IDs retain lookup precedence, including legacy IDs
+beginning with `live:`. Only a handle without an exact registered match is
+interpreted as a qualified peer address; the prefix does not rename or reserve
+previously accepted session IDs.
+Explicit HTTP/client `qualified_peer: true` opts into tuple-only resolution
+and the new protocol; qualified CLI forwarding supplies it. Prefix text alone
+never upgrades a legacy exact-ID request to a newer carrier operation.
+
 [Session preference authority](docs/session-preferences.md) documents optional
 execution-user defaults, the unchanged caller-settings default, and the
 execution/ACP capability limits.
@@ -84,6 +117,62 @@ command target of a manifest withdraws that dynamic namespace without a daemon
 restart. Bad entries warn but do not block valid peers. `agent-bridge doctor`
 lists every provider finding with the exact entry, target, and cleanup or
 re-registration remedy.
+
+### Namespace reader observations
+
+Only CLI `namespace-list` reads use optional procutil CPU metrics. Agent Bridge
+opts into the metrics backend; other procutil consumers remain stdlib-only.
+Each native read captures its owned PID and creation identity before waiting or
+reaping. Sampling is provider-local, off-loop, at most once per second, with a
+100ms best-effort join. A pending native sample prevents overlapping sampling
+on later reads, independently of command completion or caller cancellation.
+The roster cache retains those exact futures across provider replacement and
+bounded shutdown.
+
+The existing configured telemetry sink receives `reader_cpu_observation`
+events: plugin, `namespace-list` role, bounded namespace key, root PID/creation
+time, native wall duration, `observed_cpu_seconds`, `coverage`, `truncated` and
+bounded PID/reason `issues`. No arguments, output or paths are emitted.
+CPU values are observed lower bounds, not exhaustive tree totals. Unavailable,
+failed or rate-limited measurements retain an earlier valid lower bound when
+one exists; otherwise they remain `null`. Uncertainty is always explicit.
+Wall duration remains `null` until the native command finishes; a cancelled
+asyncio task does not establish thread/process completion.
+Each event's `sample` is the bounded current native accounting record;
+`observation_sample` identifies the successful sample that supplied the CPU
+lower bound, which may precede a failed or pending attempt. The separate
+`reader_cpu_sample_completed` event exports final accounting even after the
+command or its waiter ends. It includes only the same role/namespace/root
+identity and sample record, never backend exception text. Collector wall and
+thread CPU costs remain separate from command wall duration and tree CPU.
+Deduplicate accounting by `(instance, sequence)`, including cached reuse or a
+record repeated in both event types. See
+[`agent-procutil` accounting](../../libs/agent-procutil/README.md#optional-owned-process-cpu-observations)
+for clock uncertainty and the pending/completion contract.
+
+Both event types also carry an immutable `collector` snapshot for the
+`(plugin, role, namespace)` measurement key. Its anonymous `epoch` lasts for
+one provider observation scope; replacing/recreating that scope starts a
+distinct epoch, while old native callbacks continue updating only their old
+epoch. Epochs are not owner-session identities or slot-release authority.
+`completed`, `succeeded` and `failed` count actual finished sampling attempts,
+not cached reuse, command completion or cancelled waits. Completion callbacks
+retain a bounded per-sampler cursor; the ledger retains no sampler/event history.
+`wall_seconds` and `thread_cpu_seconds` are independent collector-cost lower
+bounds. Their `wall_known`/`wall_unknown` and
+`thread_cpu_known`/`thread_cpu_unknown` counts distinguish known zero from
+missing cost; a total with no known contribution is `null`.
+Failed attempts may contribute known cost. These totals never include command
+wall time or process-tree CPU and must not be summed again across snapshots.
+Unknown contributions and bounded `issues` make incompleteness explicit.
+Sequence gaps/invalid provenance report lost continuity; count overflow freezes
+the bounded counters without wrapping, and cost overflow preserves the previous
+lower bound with an unknown contribution. None silently starts a fresh epoch.
+
+Measurement failure does not discard valid enumeration. Resolve, ensure-ready
+and target-repo calls are not instrumented. No CPU admission policy, process
+registry or new termination behavior is implied; existing execution deadlines
+and fallback/completeness semantics remain unchanged.
 
 ## Streaming & the delivery cursor
 
@@ -424,6 +513,27 @@ for wedged dispatches, resume issues, relay/auth failures, and repair drills.
 | `agent-bridge` | CLI control plane -- send/create/read/wait, sessions, live sessions, service/config |
 | `agent-bridge-troubleshooting` | Diagnose and recover stuck dispatches, resume hangs, relay/auth failures, and split-brain |
 | `agent-worktrees:copilot-extensions-setup` | Marketplace/runtime setup when a host needs guided installation |
+
+Ordinary `create <target> --charter <profile> --json` without a prompt returns
+the bridge `session_id`, connection/worktree identity, native conversation ID,
+and observed `ready`/`status`. An idle, zero-turn creation reports
+`ready: true` and `status: awaiting_first_prompt`; creation itself sends no
+model prompt. Consumers must persist this identity before using ordinary
+`send` for the first assigned task. A false readiness result is not permission
+to send or to create a replacement.
+
+`send <session-id> --expected-native-session-id <uuid>` (HTTP protocol 33)
+admits an immediate ordinary prompt only when that exact native conversation
+is still idle with a running client. Identity and liveness are checked under
+the turn-admission lock. It never resumes, recreates, queues, or hands off;
+`--force` and `--queue` are incompatible. Resume a stopped conversation
+explicitly with `resume --strict`, then use the same guarded send. Older
+daemons refuse rather than silently ignore the fence: the conditional
+`/sessions/{id}/turns/native-bound` route is absent there, including after a
+daemon downgrade between capability check and POST. It shares ordinary turn
+admission, not acquisition or reviewer-specific transport. The successful result
+carries the native UUID that admitted the turn; admission does not prove the
+model completed it.
 
 ## Platforms
 

@@ -37,7 +37,7 @@ def _make_tree(tmp_path, *, zero_downtime: bool, unix: bool = False):
     if unix:
         marker = "\n# --zero-downtime\n" if zero_downtime else "\n"
         (mod_dir / "scripts" / "install.sh").write_text("#!/usr/bin/env bash" + marker)
-    pj: dict = {"name": "agent-bridge"}
+    pj: dict = {"name": "agent-bridge", "runtimeScope": "universal"}
     if zero_downtime:
         pj["zeroDowntimeUpdate"] = True
     (mod_dir / "plugin.json").write_text(json.dumps(pj))
@@ -95,7 +95,7 @@ def test_non_windows_uses_posix_flag(tmp_path, recorded):
 def test_non_windows_skips_flag_without_installer_support(tmp_path, recorded):
     plugin_dir = _make_tree(tmp_path, zero_downtime=False, unix=True)
     mod_dir = plugin_dir.parent / "agent-bridge"
-    (mod_dir / "plugin.json").write_text(json.dumps({"name": "agent-bridge", "zeroDowntimeUpdate": True}))
+    (mod_dir / "plugin.json").write_text(json.dumps({"name": "agent-bridge", "runtimeScope": "universal", "zeroDowntimeUpdate": True}))
     m._update_modules(plugin_dir, "linux", None, force=True)
     argv = _installer_update_argv(recorded)
     assert argv is not None
@@ -193,3 +193,24 @@ def test_required_module_failure_returns_false(tmp_path, monkeypatch):
         )
         is False
     )
+
+
+@pytest.mark.parametrize("scope", [None, "bogus", 7])
+def test_module_without_a_valid_scope_fails_closed(tmp_path, recorded, scope):
+    """A missing or malformed module runtimeScope must not bypass the machine
+    gate on its way to the installer."""
+    plugin_dir = _make_tree(tmp_path, zero_downtime=False)
+    pj = {"name": "agent-bridge"}
+    if scope is not None:
+        pj["runtimeScope"] = scope
+    (plugin_dir.parent / "agent-bridge" / "plugin.json").write_text(json.dumps(pj))
+    assert m._update_modules(plugin_dir, "windows", None, force=True) is False
+    assert _installer_update_argv(recorded) is None
+
+
+def test_payload_only_module_is_skipped(tmp_path, recorded):
+    plugin_dir = _make_tree(tmp_path, zero_downtime=False)
+    (plugin_dir.parent / "agent-bridge" / "plugin.json").write_text(
+        json.dumps({"name": "agent-bridge", "runtimeScope": "none"}))
+    assert m._update_modules(plugin_dir, "windows", None, force=True) is True
+    assert _installer_update_argv(recorded) is None

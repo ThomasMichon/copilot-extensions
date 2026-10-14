@@ -9,10 +9,12 @@ for it. Review this plan before implementing the new protocol and consumer path.
 
 With a live resident status-monitor, the Worktree Manager renders the engine's
 daemon-owned Worktrees projection. Neither the Manager nor its short-lived
-engine CLI computes a competing git/liveness answer. Direct computation is
-allowed only when daemon launch genuinely fails; a request timeout, malformed
-reply, incomplete endpoint publication, or unsupported live-daemon capability
-is not that failure.
+engine CLI computes a competing git/liveness answer. Every ordinary per-row
+status read is O(state-schema), including when daemon launch or recovery
+genuinely fails. Such failure permits only a bounded advisory projection read
+or explicit unavailable/unready state, never direct computation. Request
+timeout, malformed reply, incomplete publication and capability skew retain
+the same boundary.
 
 Initial rows and subsequent incremental updates come from one coherent
 projection generation. With unchanged underlying facts, alternating refresh
@@ -24,7 +26,10 @@ that these requirements are already satisfied.
 
 The vision's daemon-unreachable resilience path remains available: read
 last-known durable state/projection without fresh git or liveness reductions,
-and label it explicitly degraded/advisory, never daemon-current. A live but slow
+and label it explicitly degraded/advisory, never daemon-current. That projection
+is independently addressable and schema-bounded: loading a growing tracking
+record or traversing a journal, ledger, handoff sequence or graph is not an
+advisory read. A live but slow
 daemon may therefore leave last-good rows visible without licensing a competing
 computation. If no usable durable value exists, report that absence explicitly
 rather than fabricating state or an empty successful roster.
@@ -32,8 +37,17 @@ rather than fabricating state or an empty successful roster.
 Launch success means a usable daemon, not merely obtaining a PID. If a daemon
 crashes after a successful start, re-resolve and attempt bounded recovery.
 Confirmed inability to restore a usable daemon is a genuine launch/recovery
-failure; only then may the engine run the explicitly degraded direct-compute
-path. A live process with a timed-out or malformed response is not equivalent.
+failure, but does not license direct computation inside the status read.
+Existing bounded durable values remain advisory; missing values stay explicitly
+unavailable/unready. Owner-led refresh, migration and explicitly requested
+workflow repair are separate operations. A live process with a timed-out or
+malformed response is not equivalent to confirmed recovery failure.
+
+The [coupled read contract](../per-worktree-activity-state/schema-bounded-read-contract.md)
+also requires pushed claims-derived state, direct current handoff-head
+selection, and active-root claims-closure monitoring. A full listing inherently
+returns many rows; its per-row reads remain O(state-schema), not hidden
+per-row reconstruction of fleet or historical evidence.
 
 ## Verified seams and gaps
 
@@ -66,7 +80,8 @@ alone reproduces the operator's actual live oscillation cadence.
 ### 6d.1 — Resident projection and explicit availability policy
 
 - [ ] Define one project/filter-scoped resident list projection, including the
-      row state and every git/session/mux/Group C observation used to choose it.
+      schema-bounded row state and fact provenance, not raw growing
+      git/session/mux/claims/history collections.
       Reuse `worktree_git_facts` and existing engine helpers; hoist their work
       into a daemon-owned component rather than copying reductions into a new
       caller helper.
@@ -74,23 +89,30 @@ alone reproduces the operator's actual live oscillation cadence.
       with attributable endpoint discovery and owner-scoped authentication.
       Preserve project/platform/status/per-row request semantics, including
       exact versus ambiguous suffix resolution and deletion of removed rows.
+      Ordinary point reads must not resolve identity by enumerating the fleet.
 - [ ] Distinguish confirmed launch failure from a live but unavailable,
-      upgrading, slow, or incompatible daemon. Only the former enables the
-      documented direct-compute degrade. The latter preserves last-good rows
-      with explicit stale/error provenance or reports an actionable error;
-      never return a success-shaped fabricated empty roster.
+      upgrading, slow, or incompatible daemon. Neither enables direct
+      computation in an ordinary read. Preserve bounded last-good rows with
+      explicit stale/error provenance or report actionable unavailable/unready
+      state; never return a success-shaped fabricated empty roster.
 - [ ] Preserve the vision's advisory durable-read resilience when no daemon
       is reachable, independently of fresh computation. Test post-start crash
       and failed bounded recovery, stale advisory reads, and missing durable
-      data; none may silently become a coequal fresh result.
+      data; none may silently become a coequal fresh result or trigger
+      reconstruction from a growing record or history.
 - [ ] Route classified, cache-only, fresh, per-row refresh, and streaming
       Worktrees reads through the same authority when the daemon is alive.
       Retire the peer filesystem-cache/record-hint reductions on that path.
       Persistence/warm restore must not become a second live authority.
 - [ ] Add contract tests that make caller git/session/mux reductions fail if
-      invoked with a live daemon, including timeout, malformed result,
-      missing endpoint, valid concurrent roster change, and capability skew.
-      Separately prove the allowed launch-failure degrade.
+      invoked by an ordinary read, with or without a live daemon, including
+      timeout, malformed result, missing endpoint, valid concurrent roster
+      change, capability skew and confirmed launch/recovery failure. Separately
+      prove bounded advisory reads and explicit unavailable/unready responses.
+- [ ] Apply the coupled cardinality/access-budget tests: fixed-schema point
+      reads remain independent of growing records, journals, ledgers, lists,
+      handoff sequences and claims graphs across cold, warm, restart and
+      advisory paths. A small returned row is not sufficient evidence.
 
 This slice can land independently, but it does not close 6d without the held
 feed and real consumer stability checks below.
@@ -151,8 +173,9 @@ feed and real consumer stability checks below.
 ## Vision and pattern reconciliation
 
 This realizes the existing agent-worktrees authoritative-daemon intent and the
-Manager's engine-only, live-not-snapshot boundary; it does not change those
-visions. Implementation must retain owner-scoped discovery, one resident
+Manager's engine-only, live-not-snapshot boundary, with the operator's
+schema-bounded read clarification applied to every availability branch.
+Implementation must retain owner-scoped discovery, one resident
 process, per-fact freshness, background-only UI I/O, and installer-owned graceful
 cutover. A held feed adds an admitted work unit: its cancellation/reconnect
 boundary must be included in drain/adoption tests, not treated as a later fix.
