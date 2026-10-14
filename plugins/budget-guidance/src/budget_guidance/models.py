@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, DecimalException
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,12 @@ READING_FIELDS = (
 
 class ModelError(ValueError):
     """Raised when declarative budget data violates its schema."""
+
+
+def default_config_path() -> Path:
+    """Resolve the operator-owned default shared by status and startup."""
+    configured = os.environ.get("BUDGET_GUIDANCE_CONFIG")
+    return Path(configured).expanduser() if configured else Path.home() / ".budget-guidance" / "config.json"
 
 
 def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -183,6 +190,26 @@ class BudgetConfig:
     adapters: tuple[StaticAdapter | ExternalCommandAdapter, ...]
 
 
+def unauthorized_adapter(adapter: ExternalCommandAdapter, at: datetime) -> StaticAdapter:
+    """Resolve an inert external reference without granting execution authority."""
+    return StaticAdapter(
+        adapter.adapter_id, adapter.authority,
+        BudgetReading(
+            source=adapter.source, captured_at=at, freshness_seconds=0,
+            availability="unavailable", error="reader is not authorized for this invocation",
+        ),
+    )
+
+
+def without_reader_grants(config: BudgetConfig, at: datetime) -> BudgetConfig:
+    """Prepare pure resolution for a caller that cannot authorize readers."""
+    return BudgetConfig(tuple(
+        unauthorized_adapter(adapter, at)
+        if isinstance(adapter, ExternalCommandAdapter) else adapter
+        for adapter in config.adapters
+    ))
+
+
 def _parse_rate(value: Any, index: int, label: str) -> TrailingRate:
     rate_label = f"{label}.trailing_rates[{index}]"
     if not isinstance(value, dict):
@@ -215,7 +242,7 @@ def parse_reading(value: Any, label: str = "reading") -> BudgetReading:
     _versioned(value, READING_SCHEMA, label)
 
     availability = value["availability"]
-    if availability not in {"available", "unavailable", "error"}:
+    if not isinstance(availability, str) or availability not in {"available", "unavailable", "error"}:
         raise ModelError(f"{label}.availability must be available, unavailable, or error")
     error = value.get("error")
     if error is not None:

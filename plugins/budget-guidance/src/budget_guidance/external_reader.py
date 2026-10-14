@@ -21,7 +21,7 @@ from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 
 from .models import (
     BudgetConfig, BudgetReading, ExternalCommandAdapter, ModelError, StaticAdapter,
-    _strict_object, parse_reading,
+    _strict_object, parse_reading, unauthorized_adapter,
 )
 
 
@@ -226,33 +226,31 @@ def _run(reader: CommandReader) -> bytes:
 
 
 def _acquire(adapter: ExternalCommandAdapter, reader: CommandReader | None) -> StaticAdapter:
+    if reader is None:
+        return unauthorized_adapter(adapter, datetime.now(timezone.utc))
     error: str | None = None
     availability = "error"
-    if reader is None:
-        availability = "unavailable"
-        error = "reader is not authorized for this invocation"
-    else:
+    try:
+        raw = _run(reader)
+        acquired_at = datetime.now(timezone.utc)
         try:
-            raw = _run(reader)
-            acquired_at = datetime.now(timezone.utc)
-            try:
-                value = json.loads(
-                    raw.decode("utf-8"), parse_float=Decimal, parse_int=Decimal,
-                    object_pairs_hook=_strict_object,
-                )
-                reading = parse_reading(value)
-            except (ValueError, UnicodeDecodeError, TypeError, RecursionError, DecimalException):
-                raise ReaderFailure("reader returned an invalid budget reading") from None
-            if reading.source != adapter.source:
-                raise ReaderFailure("reader source does not match configured source")
-            if reading.captured_at > acquired_at:
-                raise ReaderFailure("reader capture time is in the future")
-            # Reader error text may contain credentials; retain state, not opaque text.
-            if reading.error is not None:
-                reading = replace(reading, error="reader reported an acquisition error")
-            return StaticAdapter(adapter.adapter_id, adapter.authority, reading, acquired_at)
-        except ReaderFailure as exc:
-            error = str(exc)
+            value = json.loads(
+                raw.decode("utf-8"), parse_float=Decimal, parse_int=Decimal,
+                object_pairs_hook=_strict_object,
+            )
+            reading = parse_reading(value)
+        except (ValueError, UnicodeDecodeError, TypeError, RecursionError, DecimalException):
+            raise ReaderFailure("reader returned an invalid budget reading") from None
+        if reading.source != adapter.source:
+            raise ReaderFailure("reader source does not match configured source")
+        if reading.captured_at > acquired_at:
+            raise ReaderFailure("reader capture time is in the future")
+        # Reader error text may contain credentials; retain state, not opaque text.
+        if reading.error is not None:
+            reading = replace(reading, error="reader reported an acquisition error")
+        return StaticAdapter(adapter.adapter_id, adapter.authority, reading, acquired_at)
+    except ReaderFailure as exc:
+        error = str(exc)
     return StaticAdapter(
         adapter.adapter_id, adapter.authority,
         BudgetReading(

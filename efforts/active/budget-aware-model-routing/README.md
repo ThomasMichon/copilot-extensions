@@ -141,9 +141,9 @@ timestamp is not proof that the provider metadata was refreshed.
   repository's runtime-plugin and configuration patterns.
 - [x] Expose one machine-readable status result for hooks, dashboards, scripts,
   and routing consumers.
-- [ ] Contribute a concise, attributable session-start cue through the
+- [x] Contribute a concise, attributable session-start cue through the
   checked-in pointer plus exact-session guidance-file pattern.
-- [ ] Keep injected output inside a declared byte/token budget and avoid loading
+- [x] Keep injected output inside a declared byte/token budget and avoid loading
   the detailed adapter/config reference into every session.
 - [x] Preserve source, capture time, freshness, projection, and error status in
   both human and machine-readable output.
@@ -204,6 +204,10 @@ timestamp is not proof that the provider metadata was refreshed.
   windowless parent, two console-descendant cycles, no visible windows/focus or
   Default Terminal acquisitions, and complete timeout cleanup; batch/stream
   grant refusals run in the same native lane.
+- [x] Deferred to `ThomasMichon/copilot-extensions#6644`: complete native Windows
+  session-cue acceptance and diagnose the subsequent reader-mode deadline
+  failure. The earlier external-reader receipt remains source-specific; the
+  new hook is not claimed desktop-verified.
 - [ ] The quota skill/helper identifies the requesting session's account rather
   than silently reading a fresh runtime's global default.
 - [x] Acquisition time and provider-observation freshness are distinct; cached
@@ -217,15 +221,16 @@ timestamp is not proof that the provider metadata was refreshed.
 - [x] Manual/static configuration works with no network or external service.
 - [ ] Provider and external adapters retain source, capture time, freshness, and
   explicit availability/error status.
+  External-command coverage landed in #6450; provider acquisition remains open.
 - [ ] Missing, stale, unauthorized, empty, or contradictory readings are never
   represented as zero consumption or full remaining allowance.
 - [x] Arithmetic handles partial days, reset boundaries, overspend, and zero
   remaining time deterministically.
 - [x] Field-level precedence composes partial sources without allowing a lower
   authority to overwrite a higher-authority field silently.
-- [ ] Machine-readable status and injected guidance derive from the same
+- [x] Machine-readable status and injected guidance derive from the same
   resolved posture.
-- [ ] Context output stays within its declared budget and carries stable owner
+- [x] Context output stays within its declared budget and carries stable owner
   attribution.
 - [ ] Budget posture cannot qualify an unproven model, clear a hold, arm a
   trial, or override an explicit operator choice.
@@ -259,6 +264,85 @@ resilience. It does not become a historical billing ledger, model benchmark,
 promotion authority, task queue, or dashboard.
 
 ## Journal
+
+### 2026-10-13 - Windows acceptance transferred to a tracked objective
+
+- At the operator's direction, transferred the new session-cue desktop proof
+  and unresolved reader-mode deadline failure to
+  [#6644](https://github.com/ThomasMichon/copilot-extensions/issues/6644).
+  Continue the portable session-delivery slice through normal review and CI;
+  deferral does not credit a native pass or relax its acceptance assertions.
+- The bounded native run reported seven passes and two failures with verified
+  supervisor cleanup. Reader acquisitions reached the unchanged deadline with
+  no established cause. The cue collector incorrectly read configuration as
+  process evidence; it now reads only the two literal process-record files.
+- Resolved virtual-environment launchers to the direct base console interpreter
+  and added direct writer-parent checks, so outer Job cleanup cannot hide a
+  redirector child. Forwarding-only test timing output survives failed-run
+  cleanup without changing production reader limits.
+- The exact-source follow-up could not reach the former interactive validation
+  session. No replacement session, service repair, snapshot patch, or
+  pass-chasing retry was performed. Native proof remains owned by #6644.
+- Linux implementation and source guards remain verified. Current-head review,
+  provider/account proof, routing, release, and authorized rollout remain open.
+  The effort stays Active.
+
+### 2026-10-13 - Bounded exact-session posture delivery
+
+- Implemented Phase 3's launch-time cue through an output-free writer and two
+  reviewed projection declarations: a minimal file pointer and a separate static
+  advisory boundary. The owning payload loads its pure posture source without
+  provisioning a runtime, refreshing a provider, or granting any reader.
+- Reused status configuration and posture resolution, including attributable
+  sources, capture times, freshness, contradictions, and explicit failures.
+  Configuration reads are regular-file-only and bounded; opaque adapter errors
+  and detailed arrays stay out of the computed cue.
+- Bounded the entire UTF-8 cue to 4096 bytes and the suite's 1024-token heuristic.
+  Oversize evidence becomes explicit unavailable data with all values withheld.
+  Fresh and resumed writes atomically replace only the requesting session's
+  file and refuse directory symlinks/reparse points.
+- Independent design critique found no blocking flaws. It prompted an internal
+  five-second POSIX process deadline in addition to the outer hook bound, plus
+  explicit native-fixture provenance. The PowerShell writer already suppresses
+  console creation, drains both output streams concurrently, and has its own
+  bounded timeout/cleanup path.
+- Added an opt-in native session-cue mode to the existing Windows desktop
+  witness. It retains the external-reader lane's limits/assertions and adds two
+  cue cycles plus production-wrapper timeout cleanup. Exact-source native
+  acceptance for the new launch path is deferred to #6644; earlier
+  external-reader evidence is not used as proof of this hook.
+- Publication, provider/account proof, routing, release, and authorized rollout
+  remain open. The effort stays Active.
+
+### 2026-10-13 - External-reader contract merged
+
+- PR #6450 merged as `35738f6e095776c824789c37929a8680688688df` after
+  exact-head Copilot approval with zero open findings and both required checks
+  passing. The earlier merge attempt correctly refused the still-pending PR
+  gate; no readiness bypass was used.
+- Closed the external-command implementation and publication boundary, with
+  invocation-owned grants, bounded output/deadlines, explicit failures, and
+  retained source/capture attribution. Unrepresentable Decimal JSON is
+  contained at external and file-input parsing boundaries.
+- Added runtime-only acquisition provenance so direct library and CLI
+  evaluations reject captures later than their evaluation instant. Default CLI
+  evaluation is sampled after acquisition; explicit historical evaluation
+  remains authoritative and manual/static semantics are unchanged.
+- POSIX cleanup now uses an isolated supervisor outside an atomically spawned
+  reader group, retaining the reader root with non-reaping `waitid(WNOWAIT)`.
+  Explicit control requires group teardown, root reap, a private cleanup
+  acknowledgment, and successful host completion. Neither a pipe close nor
+  ordinary zero exit alone proves cleanup.
+- The bounded full Linux suite passed 270 cases with seven platform/opt-in
+  skips; the fast lane passed 19 cases with four skips. The real installer
+  fallback matrix is outside the guard lane. Native Windows launch/Job evidence
+  remains credited to the exact recorded source; the subsequent parsing and
+  POSIX changes did not alter that launch path or its native witness.
+- The effort remains Active. Provider/account identity, native macOS lifecycle
+  evidence, routing, release, and authorized rollout remain open.
+- Next: Phase 3's bounded session-start posture cue and exact-session delivery.
+  Reuse the same pure posture without granting hooks executable authority,
+  introducing a cross-plugin aggregator, or loading detailed references.
 
 ### 2026-10-13 - External-reader native acceptance and safe group ownership
 

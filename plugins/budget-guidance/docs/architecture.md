@@ -1,6 +1,6 @@
 # budget-guidance architecture
 
-The plugin is an independently installable runtime CLI with four first-slice
+The plugin is an independently installable runtime CLI with shared posture
 layers:
 
 1. `models.py` parses strict, versioned, inert configuration and reading data.
@@ -10,6 +10,10 @@ layers:
    projection, and warning-band calculations.
 4. `posture.py` builds the single machine-readable posture used by `cli.py` for
    both JSON and human output.
+5. `session_guidance.py` projects that posture into a bounded launch-time data
+   cue and atomically writes it to the requesting session's instruction folder.
+   Its [delivery contract](session-guidance.md) owns the pointer, freshness,
+   redaction, byte budget, and hook behavior.
 
 The static adapter is intentionally complete enough for offline operation and
 partial enough to exercise multi-source composition. It performs no I/O beyond
@@ -35,7 +39,10 @@ paths pass its local source explicitly rather than resolving an index package.
 Both package build roots clear setuptools `build/` and root/src `*.egg-info`
 artifacts before and after every uv or pip attempt, including the fallback, so
 partial build residue cannot shadow current source.
-The bootstrap hook is declared output-free and emits only `{}`. Command-catalog
+The bootstrap and exact-session writer hooks are declared output-free and emit
+only `{}`. The writer reads inert configuration without reader grants or
+provider refresh and loads the owning payload's pure source, not a stale runtime.
+Command-catalog
 rendering remains a plugin-owned emitter for explicit use and a future native
 host-composition seam; no custom cross-plugin authority invokes it.
 
