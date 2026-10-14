@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from . import config as cfg
 from . import installer as inst
 from . import output, reclaim, sessions, tracking
@@ -188,6 +190,7 @@ def cmd_dev(args) -> int:
         result = subprocess.run(
             ["pwsh", "-NoProfile", "-File", str(script), dev_action],
             cwd=str(repo_dir),
+            **no_window_kwargs(),
         )
         return result.returncode
 
@@ -843,6 +846,7 @@ def cmd_register_project_entry(args) -> int:
                     capture_output=True,
                     text=True,
                     timeout=5,
+                    **no_window_kwargs(),
                 )
                 if result.returncode == 0:
                     remote = result.stdout.strip()

@@ -198,7 +198,10 @@ def test_creation_never_repairs_resume_or_handed_off_new(creation, capsys, hando
     assert launch_seed_state.state_path(creation.record.yaml_path).read_bytes() == before
 
 
-def test_creation_restores_native_pair_permissions_and_is_idempotent(native_creation, capsys):
+@pytest.mark.parametrize("repeat", ["idempotent", "companion_permissions"])
+def test_creation_restores_native_pair_permissions_and_is_idempotent(
+    native_creation, capsys, repeat,
+):
     creation = native_creation
     path = creation.record.yaml_path
     seed_before = launch_seed_state.state_path(path).read_bytes()
@@ -215,18 +218,18 @@ def test_creation_restores_native_pair_permissions_and_is_idempotent(native_crea
     }
     assert launch_seed_state.state_path(path).read_bytes() == seed_before
     before_records = sorted(creation.projects["knowledge"].joinpath("worktrees").glob("*.yaml"))
+    if repeat == "companion_permissions":
+        permission_path = permissions._permissions_path()
+        saved = json.loads(permission_path.read_text())
+        saved["locations"].pop(str(knowledge_path))
+        permission_path.write_text(json.dumps(saved))
+        code, report = _run(creation, capsys)
+        assert code == 0 and report["checks"]["companion_permissions"] is False
     code, second = _run(creation, capsys, fix=True)
-    assert code == 0 and second["prepared"] and not second["repaired"]
+    assert code == 0 and second["prepared"]
+    assert second["repaired"] == (repeat == "companion_permissions")
+    assert second["checks"]["companion_permissions"]
     assert sorted(creation.projects["knowledge"].joinpath("worktrees").glob("*.yaml")) == before_records
-    assert launch_seed_state.state_path(path).read_bytes() == seed_before
-    permission_path = permissions._permissions_path()
-    saved = json.loads(permission_path.read_text())
-    saved["locations"].pop(str(knowledge_path))
-    permission_path.write_text(json.dumps(saved))
-    code, report = _run(creation, capsys)
-    assert code == 0 and report["checks"]["companion_permissions"] is False
-    code, report = _run(creation, capsys, fix=True)
-    assert code == 0 and report["repaired"] and report["checks"]["companion_permissions"]
     assert launch_seed_state.state_path(path).read_bytes() == seed_before
 
 
@@ -291,6 +294,24 @@ def test_doctor_parser_routes_creation_only(creation, monkeypatch, capsys):
     with repair.output.capture_json_output() as buffer:
         assert maintenance_cli.cmd_doctor(args) == 0
     assert json.loads(buffer.getvalue())["scope"] == "creation"
+
+
+@pytest.mark.guard
+def test_maintenance_dev_uses_shared_headless_spawn(tmp_path, monkeypatch):
+    script = tmp_path / "tools" / "dev" / "setup.ps1"
+    script.parent.mkdir(parents=True)
+    script.touch()
+    monkeypatch.setattr(maintenance_cli.worktree_identity, "_find_repo_dir", lambda: tmp_path)
+    monkeypatch.setattr(maintenance_cli.sys, "platform", "win32")
+    monkeypatch.setattr(maintenance_cli, "no_window_kwargs", lambda: {"creationflags": 123})
+
+    def run(command, **kwargs):
+        assert command == ["pwsh", "-NoProfile", "-File", str(script), "status"]
+        assert kwargs == {"cwd": str(tmp_path), "creationflags": 123}
+        return SimpleNamespace(returncode=7)
+
+    monkeypatch.setattr(maintenance_cli.subprocess, "run", run)
+    assert maintenance_cli.cmd_dev(SimpleNamespace(dev_action="status")) == 7
 
 
 @pytest.mark.guard
