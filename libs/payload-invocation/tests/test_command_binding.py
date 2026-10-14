@@ -366,8 +366,8 @@ class _PowerShellHost:
             "    $global:LASTEXITCODE=0\n"
             "    $code=0; $errors=@(); $output=@()\n"
             "    try {\n"
-            "        $records=@(& $request.path @arguments *>&1)\n"
-            "        $code=$LASTEXITCODE\n"
+            "        $records=& $request.path @arguments *>&1\n"
+            "        if (-not $?) { $code=$LASTEXITCODE; if (-not $code) { $code=1 } }\n"
             "        foreach ($record in $records) {\n"
             "            if ($record -is [System.Management.Automation.ErrorRecord]) {\n"
             "                $errors+=($record|Out-String)\n"
@@ -462,6 +462,30 @@ def powershell_host():
     yield start
     for host in hosts:
         host.close()
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")
+@pytest.mark.parametrize("result", ["ignored-native-failure", "exit", "throw"])
+def test_command_binding_initialized_host_preserves_script_outcome(
+    binding_fixture: dict, result: str, powershell_host,
+) -> None:
+    environment = _catalog_environment(binding_fixture)
+    environment["TEST_PYTHON"] = sys.executable
+    script = binding_fixture["home"] / "host-outcome.ps1"
+    script.write_text({
+        "ignored-native-failure": (
+            "& $env:TEST_PYTHON -c 'raise SystemExit(7)'\nWrite-Output 'complete'\n"
+        ),
+        "exit": "Write-Output 'complete'\nexit 7\n",
+        "throw": "throw 'fixture-script-error'\n",
+    }[result], encoding="utf-8")
+    host = powershell_host(binding_fixture, environment)
+    completed = host.run([POWERSHELL, "-File", str(script)])
+    assert completed.returncode == {"ignored-native-failure": 0, "exit": 7, "throw": 1}[result]
+    if result == "throw":
+        assert "fixture-script-error" in completed.stderr
+    else:
+        assert completed.stdout == "complete"
 
 
 @pytest.mark.parametrize("shell", [

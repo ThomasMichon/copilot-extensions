@@ -519,6 +519,17 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   including local PowerShell. This is not native Windows PowerShell 5.1 proof;
   current-head native CI, review, and aggregate/lockdown gates remain required.
   Phase 8, release, installed-copy proof, and the overall effort remain open.
+- Subsequent native run [38502677186](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38502677186),
+  job [115653027017](https://github.com/ThomasMichon/copilot-extensions/actions/runs/38502677186/job/115653027017),
+  executed the initialized-host diagnostic and launcher cases successfully.
+  Its one remaining failure (216 passed, nine skipped) was the contextual
+  writer fixture reporting an ignored fingerprint probe's residual native
+  exit code as the script's outcome. The Linux foundation job exposed the
+  same fixture discrepancy with an unavailable runtime import.
+  The host now preserves script success versus explicit exit or exception;
+  three regression cases cover those distinct outcomes. This correction
+  changes no production writer or admission rule. Fresh full native evidence
+  and required checks are still needed on the corrected head.
 
 ### 2026-10-13 — Native host controls and source-footprint review follow-up
 
