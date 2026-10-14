@@ -1,0 +1,9 @@
+{
+  "comment": "Fix a Windows test failure where a piped child printed non-ASCII intent text with the cp1252 default encoding",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

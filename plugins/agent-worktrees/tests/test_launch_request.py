@@ -473,8 +473,12 @@ def test_real_powershell_transport_preserves_encoded_intent(tmp_path):
         request.MAX_REQUEST_BYTES - len(json.dumps(intent, ensure_ascii=False).encode())
     )
     encoded = base64.b64encode(json.dumps(intent, ensure_ascii=False).encode()).decode()
+    # Reconfigure stdout to UTF-8: a piped child otherwise encodes with the
+    # platform's preferred encoding (cp1252 on many Windows hosts), which
+    # cannot represent the intent's non-ASCII text.
     script = (
         "import base64,json,sys;"
+        "sys.stdout.reconfigure(encoding='utf-8');"
         "print(json.dumps(json.loads(base64.b64decode(sys.argv[1])),ensure_ascii=False))"
     )
     command = remote_seed_launch.shell_command("pwsh", [sys.executable, "-c", script, encoded])
