@@ -613,11 +613,11 @@ def _tree_excluding_state(tree_sha: str, *, repo: Path) -> str:
             check=True, capture_output=True,
         )
         subprocess.run(
-            ["git", "rm", "--cached", "-q", "--ignore-unmatch", PIPELINE_STATE_PATH],
+            ["git", "rm", "--cached", "-f", "-q", "--ignore-unmatch", PIPELINE_STATE_PATH],
             cwd=str(repo), env=env, check=True, capture_output=True,
         )
         subprocess.run(
-            ["git", "rm", "--cached", "-q", "-r", "--ignore-unmatch",
+            ["git", "rm", "--cached", "-f", "-q", "-r", "--ignore-unmatch",
              COVERAGE_BASELINES_DIR],
             cwd=str(repo), env=env, check=True, capture_output=True,
         )

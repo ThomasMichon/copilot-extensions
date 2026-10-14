@@ -178,6 +178,10 @@ publishes nothing.
 
 Only after the exact candidate PR really merges does publication recheck its
 actual parent/content tree and project set and revalidate archive contents.
+Content-tree filtering removes only release state and coverage pointers from a
+throwaway index loaded from the supplied candidate tree. Its index-only removal
+does not require those entries to match the publisher's older trusted checkout;
+the real index, working files and candidate payload remain unchanged.
 Assets live under the deterministic
 `<plugin>-v<version>` GitHub Release tag. Each ZIP filename includes the
 manifest's content-addressed `artifact_id`, permitting independently attested
