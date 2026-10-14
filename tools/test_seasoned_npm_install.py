@@ -148,10 +148,16 @@ def test_default_registry_mapping_is_explicit_not_an_arbitrary_source_escape():
         installer.audit_lock(project, query, now=NOW, replace_default_registry=True)
 
 
-@pytest.mark.parametrize("timestamp", ["2020-01-01T00:00:00Z", "2099-01-01T00:00:00Z", None])
-@pytest.mark.parametrize("generic_project,legacy_metadata", [(False, False), (True, False), (True, True)])
+@pytest.mark.parametrize("timestamp,generic_project,legacy_metadata,mutation", [
+    (timestamp, generic, legacy, None)
+    for timestamp in ["2020-01-01T00:00:00Z", "2099-01-01T00:00:00Z", None]
+    for generic, legacy in [(False, False), (True, False), (True, True)]
+] + [
+    ("2020-01-01T00:00:00Z", False, False, mutation)
+    for mutation in ["package-lock.json", "package.json", ".npmrc", "install", "health", "publish"]
+])
 def test_real_npm_admission_before_locked_install(
-    tmp_path, monkeypatch, capsys, timestamp, generic_project, legacy_metadata,
+    tmp_path, monkeypatch, capsys, timestamp, generic_project, legacy_metadata, mutation,
 ):
     import base64
     import hashlib
@@ -159,13 +165,15 @@ def test_real_npm_admission_before_locked_install(
     import json
     import tarfile
     import threading
+    import time
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     try:
         installer.npm_command()
     except installer.AdmissionError:
         pytest.skip("native npm unavailable")
-    artifacts, releases, downloads = {}, {}, []
+    artifacts, releases, downloads, requests = {}, {}, [], []
+    started = time.monotonic()
     names = ["@resvg/resvg-js", "fixture-transitive"]
     for name in names:
         package = {"name": name, "version": "1.0.0", "main": "index.js"}
@@ -189,6 +197,7 @@ def test_real_npm_admission_before_locked_install(
 
         def do_GET(self):
             from urllib.parse import unquote
+            requests.append((round(time.monotonic() - started, 2), self.path))
             name = unquote(self.path).lstrip("/")
             if name in releases:
                 body = json.dumps({
@@ -236,34 +245,93 @@ def test_real_npm_admission_before_locked_install(
     global_config = tmp_path / "global.npmrc"
     global_config.touch()
     monkeypatch.setattr(installer, "__file__", str(tmp_path / "install.py"))
-    monkeypatch.setenv("npm_config_registry", url)
+    monkeypatch.delenv("npm_config_registry", raising=False)
+    (tmp_path / ".npmrc").write_text(
+        "registry=" + url + "\naudit=false\nfund=false\nupdate-notifier=false\n", encoding="utf-8",
+    )
     monkeypatch.setenv("npm_config_userconfig", str(empty_config))
     monkeypatch.setenv("npm_config_globalconfig", str(global_config))
     monkeypatch.setenv("npm_config_cache", str(tmp_path / "cache"))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    previous = tmp_path / "node_modules" / "retained"
+    previous.mkdir(parents=True)
+    (previous / "healthy").write_text("previous dependency closure", encoding="utf-8")
+    call = installer.subprocess.call
+    rename = Path.rename
+    snapshots = []
+
+    def install_call(command, **kwargs):
+        snapshot = Path(kwargs["cwd"])
+        snapshots.append(snapshot)
+        assert snapshot != tmp_path
+        if "ci" in command:
+            if mutation in {"package-lock.json", "package.json", ".npmrc"}:
+                target = tmp_path / mutation
+                if mutation == ".npmrc":
+                    target.write_text("registry=http://127.0.0.1:1/\n", encoding="utf-8")
+                else:
+                    replaced = json.loads(target.read_text(encoding="utf-8"))
+                    if mutation == "package-lock.json":
+                        replaced["packages"]["node_modules/" + names[0]]["version"] = "2.0.0"
+                    else:
+                        replaced["dependencies"][names[0]] = "2.0.0"
+                    target.write_text(json.dumps(replaced), encoding="utf-8")
+            assert (snapshot / "package-lock.json").read_text(encoding="utf-8") == original
+            assert json.loads((snapshot / "package.json").read_text(encoding="utf-8")) == packages[""]
+            result = call(command, **kwargs)
+            return 29 if mutation == "install" and result == 0 else result
+        if mutation == "health":
+            command = [*command, "missing-selected-module"]
+        return call(command, **kwargs)
+
+    def publish(source, destination):
+        if mutation == "publish" and source.name == "node_modules" and source.parent in snapshots:
+            raise OSError("publication denied")
+        return rename(source, destination)
+
+    if not generic_project:
+        monkeypatch.setattr(installer.subprocess, "call", install_call)
+        monkeypatch.setattr(Path, "rename", publish)
     try:
         arguments = (["--directory", str(tmp_path), "--health-module", names[0],
                       "--health-module", names[1]] if generic_project else [])
         if generic_project:
-            completed = subprocess.run(
-                [sys._base_executable, str(PATH), *arguments],
-                capture_output=True, text=True, timeout=45, creationflags=installer.HEADLESS,
-            )
+            try:
+                completed = subprocess.run(
+                    [sys._base_executable, str(PATH), *arguments],
+                    capture_output=True, text=True, timeout=45, creationflags=installer.HEADLESS,
+                )
+            except subprocess.TimeoutExpired as exc:
+                pytest.fail(f"{exc}; registry requests: {requests}")
             result, error = completed.returncode, completed.stderr
         else:
             result = installer.main(arguments)
             error = capsys.readouterr().err
-        if timestamp == "2020-01-01T00:00:00Z":
-            assert result == 0
-            assert set(downloads) == set(artifacts)
+        if timestamp == "2020-01-01T00:00:00Z" and mutation is None:
+            assert result == 0, error
+            assert set(downloads) == set(artifacts), error
             assert (tmp_path / "node_modules" / "@resvg" / "resvg-js" / "package.json").is_file()
+            assert not previous.exists()
+        elif mutation is not None:
+            assert result != 0
+            assert set(downloads) == set(artifacts), error
+            assert (previous / "healthy").read_text(encoding="utf-8") == "previous dependency closure"
+            assert not (tmp_path / "node_modules" / "@resvg").exists()
+            if mutation in {"package-lock.json", "package.json", ".npmrc"}:
+                assert "changed during installation" in error
+            elif mutation == "health":
+                assert "selected dependency health check failed" in error
+            elif mutation == "publish":
+                assert "publication denied" in error
         else:
             assert result != 0
             assert "unseasoned release timestamp" in error
             assert downloads == []
-            assert not (tmp_path / "node_modules").exists()
-        assert (tmp_path / "package-lock.json").read_text(encoding="utf-8") == original
+            assert (previous / "healthy").is_file()
+        if mutation != "package-lock.json":
+            assert (tmp_path / "package-lock.json").read_text(encoding="utf-8") == original
+        assert all(not path.exists() for path in snapshots)
     finally:
         server.shutdown()
         server.server_close()

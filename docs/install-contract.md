@@ -2198,6 +2198,11 @@ versions. Installation disables dependency lifecycle scripts and must import
 the explicitly selected health modules successfully. No-argument use installs
 and checks the rasterizer; other projects supply `--directory` and repeat
 `--health-module` for their selected consumers.
+Installation consumes retained manifest and lock bytes in a private, same-volume
+snapshot with the project's npm configuration. Only its health-checked
+`node_modules` is published; admission, install, health or publication failure
+preserves the prior dependency tree. A concurrent manifest, lock or configuration
+change refuses publication rather than installing an unaudited closure.
 
 ### Shared engine delivery
 

@@ -53,6 +53,9 @@ An explicit project requires explicit health modules; success means each
 module imported after the complete locked closure passed age and strong SRI
 admission. Missing or SHA-1-only registry integrity is bound to the lock's
 strong digest through npm's script-disabled tarball verification.
+The installer runs npm against a private snapshot of the admitted manifests
+and local npm configuration, then publishes only health-checked dependencies.
+Failures or concurrent input changes preserve an existing dependency tree.
 
 Then, end-to-end (needs a Python env with `textual` / `rich` / `pyyaml`):
 

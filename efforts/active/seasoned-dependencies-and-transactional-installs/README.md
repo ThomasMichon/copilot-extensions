@@ -441,3 +441,21 @@ This is a proposal, not a claim that those mechanisms are already deployed.
   timeout remains under investigation; expose its real subprocess output
   under the unchanged item deadline. No implementation merge, release or
   runtime rollout is complete.
+- The corrected native run passed every test step, including Worktrees
+  first-use, stock macOS construction and the Linux snapshot contracts.
+  The provider nevertheless marked the Windows runner job cancelled after
+  all its steps succeeded; the required aggregate correctly refused that
+  result. A fresh required run remains necessary, not a bypass.
+- Fresh review resolved the companion-byte and paired-generation races, but
+  identified a separate npm lockfile admission/install race. All npm metadata
+  and installation now consume a private snapshot of retained package, lock
+  and local configuration bytes. Only its health-checked dependency tree is
+  published, with rollback if publication fails. Concurrent input changes
+  refuse publication and preserve the previous tree.
+- Real controlled-registry validation passed all 35 npm cases, including
+  replacements immediately before native `npm ci`, installation failure
+  after writes, failed selected-module health and failed publication.
+  Source/workflow contracts passed 82 cases. The fixture disables unrelated
+  npm update-notifier requests rather than raising its 45-second child limit.
+  This fresh isolated npm lane is clean-room/local integration evidence;
+  native provider CI, fresh review and deployed rollout remain open.

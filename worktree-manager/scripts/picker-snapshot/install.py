@@ -175,42 +175,70 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args([] if argv is None else argv)
     project = args.directory.resolve() if args.directory else Path(__file__).resolve().parent
     modules = args.health_module or (["@resvg/resvg-js"] if args.directory is None else [])
-    lock_path = project / "package-lock.json"
     try:
         if not modules or any(
             not re.fullmatch(r"(?:@[a-z0-9._-]+/)?[a-z0-9._-]+", name) for name in modules
         ):
             raise AdmissionError("selected dependency health modules are required")
         command = npm_command()
-        replacement = subprocess.run(
-            [*command, "config", "get", "replace-registry-host"], cwd=project,
-            capture_output=True, text=True, timeout=15, check=True, creationflags=HEADLESS,
-        ).stdout.strip()
-        original = lock_path.read_bytes()
-        lock = json.loads(original)
-        count = audit_lock(
-            lock, lambda name, version: read_metadata(command, project, name, version),
-            replace_default_registry=replacement == "npmjs",
-        )
-        if lock_path.read_bytes() != original:
-            raise AdmissionError("package lock changed during admission")
-        print(f"Admitted {count} locked dependencies released at least seven days ago.")
-        # Prebuilt optional artifacts and JavaScript modules need no lifecycle
-        # scripts. No resolver fallback is permitted.
-        result = subprocess.call(
-            [*command, "ci", "--ignore-scripts", "--include=optional", "--strict-peer-deps"],
-            cwd=project, creationflags=HEADLESS,
-        )
-        if result != 0:
-            return result
-        node = command[0]
-        result = subprocess.call(
-            [node, "--input-type=module", "-e",
-             "for (const name of process.argv.slice(1)) await import(name);", *modules],
-            cwd=project, creationflags=HEADLESS,
-        )
-        if result != 0:
-            raise AdmissionError("selected dependency health check failed")
+        originals = {
+            name: (project / name).read_bytes()
+            for name in ("package.json", "package-lock.json")
+        }
+        config_path = project / ".npmrc"
+        config = config_path.read_bytes() if config_path.exists() else None
+        with tempfile.TemporaryDirectory(
+            prefix="seasoned-npm-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S-"),
+            dir=project.parent,
+        ) as temporary:
+            snapshot = Path(temporary)
+            for name, body in originals.items():
+                (snapshot / name).write_bytes(body)
+            if config is not None:
+                (snapshot / ".npmrc").write_bytes(config)
+            replacement = subprocess.run(
+                [*command, "config", "get", "replace-registry-host"], cwd=snapshot,
+                capture_output=True, text=True, timeout=15, check=True, creationflags=HEADLESS,
+            ).stdout.strip()
+            count = audit_lock(
+                json.loads(originals["package-lock.json"]),
+                lambda name, version: read_metadata(command, snapshot, name, version),
+                replace_default_registry=replacement == "npmjs",
+            )
+            print(f"Admitted {count} locked dependencies released at least seven days ago.")
+            # npm consumes only the retained, admitted manifests, never the
+            # concurrently writable project. Lifecycle scripts remain disabled.
+            result = subprocess.call(
+                [*command, "ci", "--ignore-scripts", "--include=optional", "--strict-peer-deps"],
+                cwd=snapshot, creationflags=HEADLESS,
+            )
+            if result != 0:
+                return result
+            result = subprocess.call(
+                [command[0], "--input-type=module", "-e",
+                 "for (const name of process.argv.slice(1)) await import(name);", *modules],
+                cwd=snapshot, creationflags=HEADLESS,
+            )
+            if result != 0:
+                raise AdmissionError("selected dependency health check failed")
+            if any(
+                (root / name).read_bytes() != body
+                for root in (project, snapshot) for name, body in originals.items()
+            ) or any(
+                (path.read_bytes() if path.exists() else None) != config
+                for path in (config_path, snapshot / ".npmrc")
+            ):
+                raise AdmissionError("package manifest, lock or configuration changed during installation")
+            installed = project / "node_modules"
+            retained = snapshot / "previous-node-modules"
+            if installed.exists():
+                installed.rename(retained)
+            try:
+                (snapshot / "node_modules").rename(installed)
+            except OSError:
+                if retained.exists():
+                    retained.rename(installed)
+                raise
         return 0
     except (AdmissionError, OSError, ValueError, subprocess.SubprocessError) as exc:
         print(f"dependency-seasoning: {exc}", file=sys.stderr)
