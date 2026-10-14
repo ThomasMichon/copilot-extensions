@@ -529,27 +529,37 @@ _SH_HARNESS = """set -euo pipefail
 _fail() {{ :; }}; err() {{ :; }}; warn() {{ :; }}; ok() {{ :; }}; info() {{ :; }}
 _warn() {{ :; }}; _ok() {{ :; }}; _info() {{ :; }}
 _bootstrap_python() {{ echo "$STUB_PY"; }}
-_payload_hash() {{ echo deadbeef; }}
+_payload_hash() {{ [[ -z "${{STUB_HASH_FAIL:-}}" ]] || return 1; echo deadbeef; }}
 {helper}
 if _versioned_mark_complete >/dev/null; then echo RC=0; else echo "RC=$?"; fi
 """
 
 
-@pytest.mark.parametrize("writer_rc", [0, 3])
-def test_every_shipped_shell_helper_reports_its_writer_status(tmp_path, writer_rc) -> None:
+@pytest.mark.parametrize(("writer_rc", "hash_fails"), [(0, False), (3, False), (0, True)],
+                         ids=["writer-ok", "writer-fails", "payload-hash-fails"])
+def test_every_shipped_shell_helper_reports_its_writer_status(
+    tmp_path, writer_rc, hash_fails
+) -> None:
     """Run each shipped ``_versioned_mark_complete`` against a stub writer.
 
     A writer exit must fail the helper and a clean write must pass it. Only
     the globals the installer itself assigns are defined, so a helper reading
     a variable its script never sets fails under ``set -u`` instead of passing.
+    A helper that computes the payload hash must fail, without running the
+    writer, when that computation fails: called from a condition (as every
+    call site does) bash's ``errexit`` is off inside it.
     """
     bash = _working_bash()
     if bash is None:
         pytest.skip("no working bash")
     stub = tmp_path / "stub-python"
-    stub.write_text('#!/usr/bin/env bash\nexit "${STUB_RC:-0}"\n', encoding="utf-8", newline="\n")
+    stub.write_text(
+        '#!/usr/bin/env bash\ntouch "$STUB_MARK"\nexit "${STUB_RC:-0}"\n', encoding="utf-8", newline="\n"
+    )
     stub.chmod(0o755)
     env = {**os.environ, "STUB_PY": stub.as_posix(), "STUB_RC": str(writer_rc)}
+    if hash_fails:
+        env["STUB_HASH_FAIL"] = "1"
     values = {"VERSIONED_RUNTIME": "1", "SRC_VERSION": "1.2.3", "PAYLOAD_HASH": "deadbeef"}
     failures = []
     helpers = []
@@ -559,6 +569,9 @@ def test_every_shipped_shell_helper_reports_its_writer_status(tmp_path, writer_r
         if helper is None:
             continue
         helpers.append(path)
+        computes_hash = "_payload_hash" in helper.group(0)
+        mark = tmp_path / f"{path.parent.parent.name}-{path.stem}.ran"
+        env["STUB_MARK"] = mark.as_posix()
         assigned = sorted(
             name for name in set(_SH_GLOBAL_REF.findall(helper.group(0)))
             if re.search(rf"^\s*(?:export\s+|readonly\s+)?{name}=", text, re.M)
@@ -574,7 +587,10 @@ def test_every_shipped_shell_helper_reports_its_writer_status(tmp_path, writer_r
             [bash, "-c", script], capture_output=True, text=True, env=env, timeout=60,
         )
         status = result.stdout.strip().rpartition("RC=")[2]
-        if (status == "0") != (writer_rc == 0):
+        should_fail = writer_rc != 0 or (hash_fails and computes_hash)
+        if hash_fails and computes_hash and mark.exists():
+            failures.append(f"{path.relative_to(REPO).as_posix()}: wrote a marker without a payload hash")
+        if (status == "0") == should_fail:
             failures.append(f"{path.relative_to(REPO).as_posix()}: RC={status} {result.stderr.strip()}")
     assert len(helpers) >= 10
     assert failures == []

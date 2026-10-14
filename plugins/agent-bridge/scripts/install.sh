@@ -801,7 +801,10 @@ _versioned_mark_complete() {
     # first confirm the sources still hash to it
     # (_payload_unchanged_since_admission).
     local ph
-    ph="$(_payload_hash)"
+    if ! ph="$(_payload_hash)"; then
+        _fail "Runtime input fingerprint unavailable -- not publishing versions/$SRC_VERSION"
+        return 1
+    fi
     local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
     if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
     # A refused publication (e.g. conflicting completion evidence for this

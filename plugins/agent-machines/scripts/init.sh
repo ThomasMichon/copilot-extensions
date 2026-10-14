@@ -1404,7 +1404,10 @@ _versioned_mark_complete() {
         return 1
     }
     local ph
-    ph="$(_payload_hash)"
+    if ! ph="$(_payload_hash)"; then
+        _fail "Runtime input fingerprint unavailable -- not publishing versions/$SRC_VERSION"
+        return 1
+    fi
     local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION" --payload-hash "$ph")
     "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'
 }
