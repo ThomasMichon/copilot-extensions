@@ -396,6 +396,7 @@ def test_portable_unicode_and_internal_space_destinations_are_not_filtered(copy_
     template, _ = provider(root, home)
     declaration = template.parents[1] / "instruction-projections.json"
     data = json.loads(declaration.read_text())
+    data["projections"][0]["id"] = "con"
     data["projections"][0]["destination"] = ".github/instructions/demo/caf\u00e9 notes/body name.instructions.md"
     write_json(declaration, data)
     result = lcr.refresh_local_cache(root)
@@ -417,12 +418,94 @@ def test_user_directory_marketplace_is_relative_to_copilot_settings(copy_workspa
     write_json(root / ".github" / "copilot" / "settings.json", {})
     write_json(home / ".copilot" / "settings.json", {
         "enabledPlugins": {"demo@alias": True},
-        "extraKnownMarketplaces": {"alias": {"source": {"source": "directory", "path": "./marketplace"}}},
+        "extraKnownMarketplaces": {"alias": {"source": {
+            "source": "directory", "path": "./marketplace", "manifestName": "catalog-name",
+        }}},
     })
     result = lcr.refresh_local_cache(root)
     assert result.status == "ready", result.diagnostic
     output = root / static.NAMESPACE / "alias" / "demo" / "fallback.local.instructions.md"
     assert output.read_bytes() == template.read_bytes()
+
+
+@pytest.mark.parametrize("value", [True, {"enabled": True}, None])
+def test_builtin_plugin_settings_are_outside_marketplace_projection(copy_workspace, value):
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    write_json(root / ".github" / "copilot" / "settings.json", {
+        "enabledPlugins": {"builtin": value, "demo@market": True},
+    })
+    assert lcr.refresh_local_cache(root).status == "ready"
+    assert output.read_bytes() == template.read_bytes()
+
+
+@pytest.mark.parametrize("identity", ["demo@@market", "demo@", "@market", "demo@market/path", "demo@ ", " @market"])
+def test_malformed_marketplace_identity_blocks_publication(copy_workspace, identity):
+    root, home = copy_workspace
+    _, output = provider(root, home)
+    write_json(root / ".github" / "copilot" / "settings.json", {"enabledPlugins": {identity: True}})
+    assert lcr.refresh_local_cache(root).status == "failed"
+    assert not output.exists()
+
+
+def test_directory_catalog_identity_requires_explicit_mapping(copy_workspace):
+    root, home = copy_workspace
+    template, _ = provider(root, home)
+    import shutil
+
+    catalog = root / ".ai"
+    shutil.copytree(template.parents[1], catalog / "demo")
+    write_json(catalog / "marketplace.json", {
+        "name": "different", "plugins": [{"name": "demo", "source": "./demo"}],
+    })
+    write_json(root / ".github" / "copilot" / "settings.json", {
+        "enabledPlugins": {"demo@alias": True},
+        "extraKnownMarketplaces": {"alias": {"source": {"source": "directory", "path": "./.ai"}}},
+    })
+    assert lcr.refresh_local_cache(root).status == "failed"
+    assert not (root / static.NAMESPACE).exists()
+
+
+@pytest.mark.parametrize("node", ["root", "manifest"])
+def test_installed_reparse_objects_rejected_by_shared_root_resolver(copy_workspace, monkeypatch, node):
+    import stat
+
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    assert lcr.refresh_local_cache(root).status == "ready"
+    previous = output.read_bytes()
+    target = template.parents[1] if node == "root" else template.parents[1] / "plugin.json"
+    original = Path.lstat
+
+    def lstat(path, *args, **kwargs):
+        if path == target:
+            return SimpleNamespace(
+                st_mode=stat.S_IFDIR if node == "root" else stat.S_IFREG,
+                st_file_attributes=0x400, st_reparse_tag=1,
+            )
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    assert lcr.refresh_local_cache(root).status == "failed"
+    assert output.read_bytes() == previous
+
+
+@pytest.mark.guard
+def test_git_preflights_reuse_case_insensitive_repository_environment_isolation(tmp_path, monkeypatch):
+    from agent_worktrees import push_timeout
+
+    captured = []
+    monkeypatch.setattr(static.os, "environ", {
+        "git_dir": "foreign", "Git_Index_File": "foreign-index", "PATH": "preserved",
+    })
+    monkeypatch.setattr(
+        push_timeout, "run_bounded",
+        lambda argv, **kwargs: captured.append(kwargs["env"]) or subprocess.CompletedProcess(argv, 0, b"", b""),
+    )
+    static._git(tmp_path, "ls-files")
+    assert not any(key.upper() in ("GIT_DIR", "GIT_INDEX_FILE") for key in captured[0])
+    assert captured[0]["PATH"] == "preserved"
+    assert captured[0]["GIT_TERMINAL_PROMPT"] == "0"
 
 
 def test_each_git_operation_uses_only_remaining_explicit_budget(tmp_path, monkeypatch):

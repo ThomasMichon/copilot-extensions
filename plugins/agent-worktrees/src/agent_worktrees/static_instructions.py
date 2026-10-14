@@ -11,8 +11,11 @@ import tempfile
 import time
 
 from plugin_resolve import (
-    PLUGIN_MANIFEST_RELS, SETTINGS_RELS, load_marketplace, plugin_dir, split_source,
+    RepoPluginSettings, SETTINGS_RELS, load_marketplace, marketplace_manifest_name,
+    plugin_dir, split_source,
 )
+from plugin_activation import validate_identity
+from plugin_activation._installed_root import _installed_root
 
 NAMESPACE = ".github/instructions/agent-worktrees-generated"
 _RESERVED_NAMES = {
@@ -79,6 +82,10 @@ def _settings(root: Path, home: Path, *, deadline: float | None = None) -> tuple
             if not isinstance(values, dict):
                 raise ValueError(f"invalid {key}: {path}")
             for name, value in values.items():
+                if key == "enabledPlugins":
+                    if "@" not in name:
+                        continue
+                    validate_identity(name)
                 if not isinstance(value, expected):
                     raise ValueError(f"invalid {key} entry {name}: {path}")
                 destination[name] = (value, base) if key == "extraKnownMarketplaces" else value
@@ -89,8 +96,7 @@ def _plugin(identity: str, markets: dict, home: Path, *, deadline: float | None 
     _remaining(deadline)
     name, market = split_source(identity)
     _component(name)
-    if market:
-        _component(market)
+    _component(market)
     definition, base = markets.get(market, ({}, home))
     source = definition.get("source", {})
     if not isinstance(source, dict):
@@ -120,22 +126,21 @@ def _plugin(identity: str, markets: dict, home: Path, *, deadline: float | None 
                 path = base / path
         catalog = load_marketplace(path)
         _remaining(deadline)
-        if kind == "agent-worktrees-repo" and catalog is not None and catalog.name != market:
-            raise ValueError(f"registered marketplace identity mismatch: {market}")
+        expected_name = (
+            market if kind == "agent-worktrees-repo"
+            else marketplace_manifest_name(market, RepoPluginSettings(marketplaces={market: definition}))
+        )
+        if catalog is not None and catalog.name != expected_name:
+            raise ValueError(f"marketplace identity mismatch: {market}")
         resolved = plugin_dir(catalog, name) if catalog is not None else None
         if resolved is None:
             raise ValueError(f"cannot resolve enabled directory plugin: {identity}")
         return resolved
-    path = home / ".copilot" / "installed-plugins"
-    path = path / market / name if market else path / name
-    for rel in PLUGIN_MANIFEST_RELS:
-        _remaining(deadline)
-        manifest = path.joinpath(*rel)
-        if manifest.exists():
-            if _object(manifest).get("name") != name:
-                raise ValueError(f"installed plugin identity mismatch: {identity}")
-            return path
-    raise ValueError(f"enabled plugin payload missing: {identity}")
+    candidate = _installed_root(home / ".copilot", identity)
+    if candidate.root is None:
+        detail = "; ".join(finding.detail or finding.reason for finding in candidate.findings)
+        raise ValueError(f"enabled plugin payload unavailable: {identity}: {detail or 'missing payload'}")
+    return candidate.root
 
 
 def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> dict[str, bytes]:
@@ -162,7 +167,9 @@ def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> dict[
                 raise ValueError(f"invalid instruction declaration: {declaration}")
             if entry.get("customizationKind", "instructions") != "instructions":
                 continue
-            source_id = _component(entry.get("id"))
+            source_id = entry.get("id")
+            if not isinstance(source_id, str) or not source_id:
+                raise ValueError(f"missing instruction identity: {identity}")
             template = entry.get("template")
             if not isinstance(template, str):
                 raise ValueError(f"missing instruction template: {identity}/{source_id}")
@@ -181,7 +188,7 @@ def _snapshot(root: Path, home: Path, *, deadline: float | None = None) -> dict[
             for part in parts:
                 _component(part)
             local = "/".join(parts)[:-len(".instructions.md")] + ".local.instructions.md"
-            relative = f"{market or '_direct'}/{local}"
+            relative = f"{market}/{local}"
             key = relative.casefold()
             if any(key == previous or key.startswith(previous + "/") or previous.startswith(key + "/") for previous in folded):
                 raise ValueError(f"colliding instruction destination: {relative}")
@@ -195,11 +202,12 @@ def _git(
     root: Path, *args: str, input: bytes | None = None, deadline: float | None = None,
 ) -> bytes:
     from .push_timeout import run_bounded
+    from .git_ops import repository_identity_env
 
     result = run_bounded(
         ["git", "-C", str(root), *args], cwd=None, input=input, binary=True,
         timeout=_remaining(deadline, 15.0),
-        env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
+        env=repository_identity_env(),
     )
     if result.returncode:
         detail = result.stderr.decode("utf-8", errors="replace").strip()

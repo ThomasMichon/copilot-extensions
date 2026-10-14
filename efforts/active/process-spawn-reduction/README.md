@@ -375,6 +375,19 @@ single-final-batch contract.
   backup refusal, unchanged prior output, successful repair and eventual fresh
   output. Final focused source/native selection: 223 passed / 1 unavailable-
   symlink skip in 85.03s, unchanged budgets; lint passes.
+- Follow-up resolution review now reuses the host's existing installed-root
+  helper for non-reparse roots/manifests and exact payload containment, and
+  canonical Git repository-identity environment isolation rather than duplicating
+  those safeguards. Built-in unqualified plugin settings are ignored before
+  value validation; qualified identities retain their canonical validation.
+  Local catalog aliases use the existing explicit `source.manifestName` mapping.
+  Declaration IDs are no longer incorrectly treated as destination filenames.
+  These resolve the source set and protect filesystem identity; no instruction
+  content or source-quality admission policy was added.
+- Expanded actual filesystem/native/ownership selection: 400 passed / 1
+  unavailable-symlink skip in 178.02s under unchanged budgets, including reparse
+  object simulation, relative alias mapping, built-in settings and mixed-case
+  Git context isolation. Source review and normal installed rollout still remain.
 
 ### 2026-10-14 - Declarations decide static publication
 

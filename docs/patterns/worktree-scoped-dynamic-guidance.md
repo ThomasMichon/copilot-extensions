@@ -124,7 +124,10 @@ followed by the declaration's path relative to `.github/instructions/` with
 the `.local.instructions.md` suffix. The publisher adds that namespace to
 Git's local `info/exclude`; it never edits the consumer's tracked ignore files.
 It resolves user, repository and local activation settings in process and uses
-the existing vendored `plugin_resolve` marketplace/path helpers. Missing enabled
+the existing vendored `plugin_resolve` marketplace/path helpers and host
+installed-root resolver. Built-in unqualified plugin settings are outside this
+marketplace projection surface. Local catalog identity uses the existing
+`source.manifestName` mapping when a registration name differs. Missing enabled
 payloads, invalid declarations and inconclusive index checks report failure
 before publication instead of treating incomplete discovery as an empty set.
 
