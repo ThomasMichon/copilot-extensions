@@ -620,3 +620,27 @@ hiding the problem or silently dropping text.
   guard; production creation, authority and deferred admission remain unchanged.
   This fixture-only repair does not exercise a new install or external venue;
   normal full release and delivered Picker evidence remain separate gates.
+- **2026-10-14** -- Create-plan fixture repair #6763 merged as
+  `95d9d6b92208fa79f49fc424cface20602deab57` after its exact head received
+  Approved with zero findings and all required CI, workflow and attribution
+  gates succeeded. All four affected module cases and the selected fast guard
+  pass under the unchanged containment budgets. Resume normal containing
+  release stewardship; the separate artifact-ordering PR #6697 remains with
+  its active author and review. Neither fixture merge nor a source promotion
+  proves immutable asset publication, installed source identity or the still
+  outstanding delivered Picker New/cold Resume conversation contract.
+- **2026-10-14** -- Containing full run `38645036098` pins
+  `5d08c74d7185dcaf3b3f5c61af97c997576e427f` and passes the repaired
+  create-plan fixture, but exposes #6769: Git index discovery can consult a
+  FIFO `info/exclude` before the instruction publisher validates that input.
+  Strengthened the existing portable refusal test and reproduced its ordering
+  failure before the fix. Validate the Git-resolved exclude path before index
+  queries, retaining the original fresh read immediately before appending the
+  rule. No timeout, assertion or authority boundary is weakened.
+  The complete copy module passes 90 Windows cases with five native POSIX
+  skips and all 95 cases on native POSIX, including real FIFOs with no writer
+  and a fresh-exclude regression preserving independent ignore-rule changes.
+  The latter uses current-source dependencies after an older test cache proved
+  incompatible; no installed payload or source candidate was modified. Promote
+  the portable refusal cases and native FIFO cases to fast guards. Normal
+  review, containing publication and delivered Picker proof remain open.

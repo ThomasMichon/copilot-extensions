@@ -198,6 +198,7 @@ def test_invalid_declaration_version_preserves_previous_output(copy_workspace, v
     assert output.read_bytes() == previous
 
 
+@pytest.mark.guard
 @pytest.mark.parametrize("kind", ["settings", "declaration", "template", "exclude", "output"])
 def test_nonregular_input_is_rejected_before_open(copy_workspace, monkeypatch, kind):
     root, home = copy_workspace
@@ -223,14 +224,23 @@ def test_nonregular_input_is_rejected_before_open(copy_workspace, monkeypatch, k
         assert path != target, "opened a nonregular input"
         return original_read(path)
 
+    original_git = static._git
+
+    def git(path, *args, **kwargs):
+        if kind == "exclude" and args[0] in ("ls-files", "diff", "check-ignore"):
+            pytest.fail("Git consulted ignore rules before rejecting a nonregular exclude")
+        return original_git(path, *args, **kwargs)
+
     monkeypatch.setattr(Path, "stat", file_stat)
     monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    monkeypatch.setattr(static, "_git", git)
     result = lcr.refresh_local_cache(root)
     assert result.status == "failed"
     assert "not a regular file" in result.detail
     assert original_read(output) == original_read(template)
 
 
+@pytest.mark.guard
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="native POSIX FIFO unavailable")
 @pytest.mark.parametrize("kind", ["settings", "declaration", "template", "exclude"])
 def test_fifo_input_fails_without_waiting_for_a_writer(copy_workspace, kind):
@@ -250,6 +260,27 @@ def test_fifo_input_fails_without_waiting_for_a_writer(copy_workspace, kind):
     assert result.status == "failed"
     assert "not a regular file" in result.detail
     assert output.read_bytes() == previous
+
+
+@pytest.mark.guard
+def test_exclude_is_reread_after_index_queries(copy_workspace, monkeypatch):
+    root, home = copy_workspace
+    template, output = provider(root, home)
+    assert lcr.refresh_local_cache(root).status == "ready"
+    exclude = root / ".git" / "info" / "exclude"
+    original_git = static._git
+
+    def git(path, *args, **kwargs):
+        if args[0] == "ls-files":
+            exclude.write_text("/independent-rule/\n", encoding="utf-8")
+        return original_git(path, *args, **kwargs)
+
+    monkeypatch.setattr(static, "_git", git)
+    assert lcr.refresh_local_cache(root).status == "ready"
+    assert exclude.read_text(encoding="utf-8").splitlines() == [
+        "/independent-rule/", "", f"/{static.NAMESPACE}/",
+    ]
+    assert output.read_bytes() == template.read_bytes()
 
 
 @pytest.mark.parametrize(

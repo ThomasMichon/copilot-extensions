@@ -320,6 +320,12 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
                         existing_directories.add(path)
         stale = existing - desired.keys()
         removable_files = {output / relative for relative in stale}
+        exclude = Path(os.fsdecode(_git(root, "rev-parse", "--git-path", "info/exclude", deadline=deadline)).strip())
+        if not exclude.is_absolute():
+            exclude = root / exclude
+        # Git's index queries may read ignore rules before our later append.
+        if exclude.exists():
+            _read_regular_bytes(exclude)
         # Include staged removals, even when Git could classify one as a rename.
         tracked = (
             _git(root, "ls-files", "-z", "--", ":(icase).github", deadline=deadline)
@@ -337,9 +343,6 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> tuple[i
                 raise ValueError(f"instruction destination is not a regular file: {path}")
         if desired != _snapshot(root, home, deadline=deadline):
             raise ValueError("instruction sources changed during preparation; retry publication")
-        exclude = Path(os.fsdecode(_git(root, "rev-parse", "--git-path", "info/exclude", deadline=deadline)).strip())
-        if not exclude.is_absolute():
-            exclude = root / exclude
         rule = f"/{NAMESPACE}/"
         previous = _read_regular_bytes(exclude).decode("utf-8") if exclude.exists() else ""
         if rule not in previous.splitlines():
