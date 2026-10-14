@@ -1,0 +1,9 @@
+{
+  "comment": "Reconcile a retained sessionless allocation during ordinary same-key replay instead of requiring a separate recovery ceremony.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
